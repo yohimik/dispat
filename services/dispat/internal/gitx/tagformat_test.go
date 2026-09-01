@@ -224,3 +224,42 @@ func TestTagFormatRefusesAliasOnlyPlaceholders(t *testing.T) {
 		assert.Contains(t, err.Error(), "only available in aliasTags")
 	}
 }
+
+// TestAliasFormatMatchesTheNamesItWrites: telling an alias apart from a
+// release tag nobody can parse is what makes the single-repository "v1"
+// convention safe, and the two look identical from the tagFormat's side.
+//
+// The test is on both answers. A name the alias could have written is one, and
+// a name it could not is not, however close it looks: that second half is what
+// keeps a malformed release tag inside the listing, where the initials
+// fallback still sees it.
+func TestAliasFormatMatchesTheNamesItWrites(t *testing.T) {
+	for name, tc := range map[string]struct {
+		format AliasFormat
+		pkg    string
+		tag    string
+		want   bool
+	}{
+		"the name it wrote":                     {format: "v{major}", pkg: "core", tag: "v1", want: true},
+		"a later major":                         {format: "v{major}", pkg: "core", tag: "v27", want: true},
+		"a release tag of the same line":        {format: "v{major}", pkg: "core", tag: "v1.4.2"},
+		"a release tag somebody mistyped":       {format: "v{major}", pkg: "core", tag: "v1.0.0.0"},
+		"another prefix entirely":               {format: "v{major}", pkg: "core", tag: "core@1.4.2"},
+		"the bare prefix with nothing after it": {format: "v{major}", pkg: "core", tag: "v"},
+		"a package-qualified alias":             {format: "{name}-v{major}", pkg: "core", tag: "core-v1", want: true},
+		"the same alias of another package":     {format: "{name}-v{major}", pkg: "core", tag: "utils-v1"},
+		"a suffix the format writes":            {format: "v{major}-latest", pkg: "core", tag: "v1-latest", want: true},
+		"the suffix missing":                    {format: "v{major}-latest", pkg: "core", tag: "v1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.format.Matches(tc.pkg, tc.tag))
+		})
+	}
+}
+
+// TestAliasFormatMatchesNothingWithoutAPlaceholder: a format that writes a
+// constant has no shape to recognise, only a name. The alias validation
+// refuses those, so this is the guard rather than a case with behaviour.
+func TestAliasFormatMatchesNothingWithoutAPlaceholder(t *testing.T) {
+	assert.False(t, AliasFormat("latest").Matches("core", "latest"))
+}

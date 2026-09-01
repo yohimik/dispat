@@ -1772,20 +1772,21 @@ var aliasSamples = []ccme.Version{
 // be read back as a release tag, or where two packages would fight over one
 // alias name.
 //
-// This is the rule the whole feature rests on. An alias is written on every
-// release and never parsed, so nothing keeps it out of a package's history
-// except its name not matching any package's tagFormat. If one did match, the
-// baseline query would pick it up, and a moving alias — always the newest tag
-// by creation date — would be picked *first*:
+// The rule is about what a name can be read back as, not about what it looks
+// like. An alias is written on every release and never parsed, and a moving
+// one is always the newest tag by creation date, so a name that does parse as
+// a release of some package would quietly become that package's released
+// version: a bare "v1.4.2" beside a "v{version}" tagFormat is that case, and
+// it stays refused.
 //
-//   - a bare "v1" does not parse as a version, and an unparseable newest tag
-//     makes the whole baseline unreadable, so the package would look unreleased
-//     on its very next run;
-//   - a bare "v1.4.2" does parse, and would quietly become some package's
-//     released version.
+// A name that merely has the shape is fine. "v1" beside "v{version}" carries
+// the prefix and nothing a version can be read out of, which is precisely the
+// single-repository convention GitHub composites are published under, so it is
+// legal: the tag reading path recognises such a name as the package's own
+// alias and leaves it out of the listing (see plan.WithoutAliasTags).
 //
-// Both are silent until a release goes wrong, which is why this is a load-time
-// refusal rather than a warning.
+// The refusal is at load time rather than a warning because what it prevents
+// is silent until a release has already gone wrong.
 func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 	type rendered struct {
 		tag   string
@@ -1804,11 +1805,13 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 	}
 	// Against every package's release format, not just the alias owner's: a
 	// tag is read back per package, so an alias of A that reads as a tag of B
-	// corrupts B.
+	// corrupts B. Readable is ParseVersion rather than Matches: a name that
+	// only has the shape carries no version and is skipped when the tags are
+	// read, which is what makes the "v1" convention legal.
 	for _, a := range all {
 		for _, p := range pkgs {
 			format := gitx.TagFormat(p.Space.TagFormat).WithDefault()
-			if !format.Matches(p.Name, a.tag) {
+			if _, readable := format.ParseVersion(p.Name, a.tag); !readable {
 				continue
 			}
 			return fmt.Errorf(

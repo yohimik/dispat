@@ -1705,7 +1705,7 @@ func (cp *computation) loadTagsAndWindows() error {
 		if err != nil {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)
 		}
-		tags = cp.withoutIgnoredTags(tags)
+		tags = cp.withoutIgnoredTags(WithoutAliasTags(tags, p, cp.log))
 		// Kept for the graduation's dependencies record: reconstructing what a
 		// consumer's last stable release shipped against is a question about
 		// the provider's tags, and the planner holds no other state between
@@ -2674,6 +2674,53 @@ func (cp *computation) versionAt(pkg, commit string) (ccme.Version, bool) {
 		}
 	}
 	return ccme.Version{}, false
+}
+
+// WithoutAliasTags drops a package's own moving aliases from its tag listing.
+//
+// An alias is written on every release, under a name of its own, and is never
+// a release: "v1" from a "v{major}" alias beside a "v{version}" tagFormat has
+// the tagFormat's shape, becomes the newest tag by creation date the moment it
+// is written, and carries nothing a version can be read out of. Left in, it
+// would be selected as the baseline and the package would look unreleased from
+// that release onwards, which is the single-repository convention GitHub
+// composites are published under failing on its second run.
+//
+// Only names that carry no version are dropped, and only when one of the
+// package's own alias formats could have written them. A tag whose version
+// does parse is a release whatever its shape, and one that parses no better
+// but has no alias shape is a malformed release tag: that is the case the
+// initials fallback is for, and it still stops the baseline being read from an
+// older tag.
+//
+// Every reader of a baseline goes through this, which is what stops the two
+// answers drifting: the planner here, and the compute command's manifest
+// baselines.
+func WithoutAliasTags(tags gitx.Tags, p *model.Package, log zerolog.Logger) gitx.Tags {
+	if p == nil || p.Space == nil || len(p.Space.AliasTags) == 0 {
+		return tags
+	}
+	kept := tags[:0:0]
+	for _, t := range tags {
+		if t.Parsed || !aliasShaped(p, t.Name) {
+			kept = append(kept, t)
+			continue
+		}
+		log.Debug().Str("package", p.Name).Str("tag", t.Name).
+			Msg("tag is one of the package's moving aliases, not a release")
+	}
+	return kept
+}
+
+// aliasShaped reports whether any of the package's alias formats could have
+// written this name.
+func aliasShaped(p *model.Package, tag string) bool {
+	for _, a := range p.Space.AliasTags {
+		if gitx.AliasFormat(a.Format).Matches(p.Name, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // withoutIgnoredTags drops the masked tag names from a package's tag listing

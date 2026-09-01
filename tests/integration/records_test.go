@@ -1032,6 +1032,66 @@ func TestRecordsAliasTags(t *testing.T) {
 	assert.Contains(t, status.Stdout, `"version":"0.2.0"`, "status:\n%s", status.Stdout)
 }
 
+// TestRecordsAliasBesideABareVersionTag: the single-repository convention,
+// which is how a GitHub composite is published and consumed. One package,
+// releases tagged "v1.4.2", and the "v1" a caller pins.
+//
+// The alias shares the release format's prefix, so it lands in the same tag
+// listing the baseline is read from, and it is the newest tag by creation date
+// the moment a release writes it. What has to hold is that the run after a
+// release still finds the release: the alias carries no version and is not one
+// of the package's own releases, whatever its name looks like.
+func TestRecordsAliasBesideABareVersionTag(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Spaces["libs"] = models.SpaceConfig{
+		Path:      models.PathList{"packages"},
+		Flow:      buildPublish(),
+		TagFormat: "v{version}",
+		AliasTags: []models.AliasTagConfig{
+			{Format: "v{major}", Moving: true, Channels: []string{"stable"}},
+		},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.AddBareRemote()
+
+	// It loads at all, which is where this configuration used to stop.
+	r.Commit("feat(core): first release")
+	status := r.StatusOK()
+	assert.Contains(t, status.Stdout, `"version":"0.0.0 -> 0.1.0"`, "status:\n%s", status.Stdout)
+
+	r.ReleaseOK()
+	require.True(t, r.HasTag("v0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("v0"), "the moving alias, tags: %v", r.TagList())
+	assert.Equal(t, r.Git("rev-list", "-n1", "v0.1.0"), r.Git("rev-list", "-n1", "v0"),
+		"the alias points at the release it names")
+
+	// The regression that matters. "v0" is now the newest tag by creation date
+	// and matches "v{version}"'s shape, and the baseline has to be read past
+	// it rather than off it.
+	status = r.StatusOK()
+	assert.Contains(t, status.Stdout, `"version":"0.1.0"`, "status:\n%s", status.Stdout)
+	assert.NotContains(t, status.Stdout, "0.0.0 ->", "the package is released, not new")
+	// An alias that sorts above every release, which is what a re-pointed one
+	// does, is TestPlanReadsPastAPackagesOwnMovingAlias's claim: git's tie
+	// break decides the ordering here and cannot be asserted on.
+
+	// And it keeps working across a major, where the alias name changes.
+	r.CommitEmpty("feat(core)!: a breaking second release")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("v1.0.0"), "tags: %v", r.TagList())
+	require.True(t, r.HasTag("v1"), "tags: %v", r.TagList())
+	assert.Equal(t, r.Git("rev-list", "-n1", "v1.0.0"), r.Git("rev-list", "-n1", "v1"))
+	assert.Equal(t, r.Git("rev-list", "-n1", "v0.1.0"), r.Git("rev-list", "-n1", "v0"),
+		"a moving alias moves inside its own major and nowhere else")
+	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/v1")
+
+	status = r.StatusOK()
+	assert.Contains(t, status.Stdout, `"version":"1.0.0"`, "status:\n%s", status.Stdout)
+}
+
 // --- The GitHub recorder driven through real channel transitions and a
 // build's exported attachments. These sit with the other release records
 // because they are the same artefact story: what a run leaves behind.

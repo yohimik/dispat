@@ -221,7 +221,10 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 				errs[i] = err
 				return
 			}
-			stable, ok := tags.StableBaseline()
+			// The package's own moving aliases are not releases, and reading
+			// one as the newest tag would report a released package as having
+			// no version to seed from.
+			stable, ok := plan.WithoutAliasTags(tags, c.pkg, a.log).StableBaseline()
 			switch {
 			case !ok:
 				reasons[i] = "no release tag yet"

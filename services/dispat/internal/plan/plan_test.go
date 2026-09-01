@@ -2161,3 +2161,94 @@ func TestTraceNarratesTheDerivation(t *testing.T) {
 	assert.Contains(t, out, "plan: channel resolved")
 	assert.Contains(t, out, "plan: package resolved")
 }
+
+// TestWithoutAliasTagsKeepsOnlyWhatCouldBeARelease: the listing a package's
+// own moving alias appears in, which is every listing from the first release
+// that wrote one.
+//
+// The alias has the release format's shape and no version in it, and it is the
+// newest tag by creation date, so leaving it in makes it the baseline and the
+// package looks unreleased for good. Dropping every unparseable name instead
+// would take the malformed release tag with it, and that one has to stay: the
+// initials fallback measures the window from it so already released commits
+// are not counted a second time.
+func TestWithoutAliasTagsKeepsOnlyWhatCouldBeARelease(t *testing.T) {
+	pkg := &model.Package{Name: "crier", Space: &model.Space{
+		Name: "root", TagFormat: "v{version}",
+		AliasTags: []model.AliasTag{{Format: "v{major}", Moving: true, Force: true, Channels: []string{"stable"}}},
+	}}
+	// Newest first by creation date, which is the order a listing arrives in.
+	tags := gitx.Tags{
+		{Name: "v1"},       // the alias, rewritten by the last release
+		{Name: "v1.0.0.0"}, // a release tag somebody mistyped
+		{Name: "v1.1.0", Version: ccme.Version{Major: 1, Minor: 1}, Parsed: true},
+		{Name: "v1.0.0", Version: ccme.Version{Major: 1}, Parsed: true},
+	}
+
+	kept := WithoutAliasTags(tags, pkg, zerolog.Nop())
+	names := make([]string, 0, len(kept))
+	for _, t := range kept {
+		names = append(names, t.Name)
+	}
+	assert.Equal(t, []string{"v1.0.0.0", "v1.1.0", "v1.0.0"}, names,
+		"the alias goes, the malformed release tag stays")
+
+	baseline, ok := kept.Baseline()
+	require.True(t, ok)
+	assert.False(t, baseline.Parsed, "the malformed tag is still what an unreadable baseline looks like")
+
+	// And with it out of the way, the release tags read as they always did.
+	only := WithoutAliasTags(gitx.Tags{tags[0], tags[2], tags[3]}, pkg, zerolog.Nop())
+	baseline, ok = only.Baseline()
+	require.True(t, ok)
+	assert.Equal(t, "v1.1.0", baseline.Name)
+	assert.Equal(t, "1.1.0", baseline.Version.String())
+
+	// A package declaring no alias is left exactly as it was, which is what
+	// keeps the filter from having an opinion about anybody else's tags.
+	plain := &model.Package{Name: "crier", Space: &model.Space{Name: "root", TagFormat: "v{version}"}}
+	assert.Len(t, WithoutAliasTags(tags, plain, zerolog.Nop()), len(tags))
+	assert.Len(t, WithoutAliasTags(tags, nil, zerolog.Nop()), len(tags))
+}
+
+// aliasGit serves one package's tag listing verbatim, newest first, which is
+// what the moving alias makes possible to describe: a name the format matches
+// sitting above every release.
+type aliasGit struct {
+	*fakeGit
+	list gitx.Tags
+}
+
+func (g *aliasGit) Tags(context.Context, string, gitx.TagFormat) (gitx.Tags, error) {
+	return g.list, nil
+}
+
+// TestPlanReadsPastAPackagesOwnMovingAlias: the single-repository convention
+// through the planner. Tags are "v1.4.2" and the alias is "v1", so the alias
+// matches the release format and is the newest tag by creation date the moment
+// a release writes it. Read as the baseline it carries no version, and the
+// package looks unreleased from its first release onwards.
+func TestPlanReadsPastAPackagesOwnMovingAlias(t *testing.T) {
+	git := &aliasGit{fakeGit: newFakeGit(
+		commit{sha: "c1", message: "feat(core): first"},
+		commit{sha: "c2", message: "feat(core): second"},
+	)}
+	git.tags["v0.1.0"] = "c1"
+	git.list = gitx.Tags{
+		{Name: "v0", Commit: "c1"}, // the alias, newest and unparseable
+		{Name: "v0.1.0", Commit: "c1", Version: v(0, 1, 0), Parsed: true},
+	}
+
+	pkg := &model.Package{Name: "core", Dir: "/r/core", Space: &model.Space{
+		Name: "root", TagFormat: "v{version}",
+		AliasTags: []model.AliasTag{{Format: "v{major}", Moving: true, Force: true}},
+	}}
+	p, err := Compute(context.Background(), git, Options{Packages: []*model.Package{pkg}, Root: "/r"})
+	require.NoError(t, err)
+
+	rel := p.Releases["core"]
+	require.NotNil(t, rel)
+	assert.True(t, rel.Tagged, "the release the alias points at is still the baseline")
+	assertVersion(t, v(0, 1, 0), rel.Current)
+	assertVersion(t, v(0, 2, 0), rel.Next, "and the window is the one commit since it")
+}

@@ -2451,13 +2451,18 @@ func TestAliasTagsMovingCannotOptOutOfForce(t *testing.T) {
 
 // TestAliasTagsMustNotBeReadableAsReleaseTags is the refusal the whole feature
 // rests on. An alias is only ever written, so the one thing keeping it out of a
-// package's history is its name not matching any package's tagFormat.
+// package's history is that nothing can read it back as a version.
+//
+// Readable, not merely shaped alike. "v1" beside a "v{version}" tagFormat
+// shares the prefix and carries no version, which is exactly the convention a
+// single-repository GitHub composite is published under, and it is legal: see
+// TestAliasTagsMayShareTheReleaseFormatsShape.
 func TestAliasTagsMustNotBeReadableAsReleaseTags(t *testing.T) {
 	t.Run("against its own package's format", func(t *testing.T) {
 		cfg := validConfig()
 		withLibs(&cfg, func(s *SpaceConfig) {
 			s.TagFormat = "v{version}"
-			s.AliasTags = []AliasTagConfig{{Format: "v{major}", Moving: true}}
+			s.AliasTags = []AliasTagConfig{{Format: "v{version}", Moving: true}}
 		})
 		root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -2495,6 +2500,33 @@ func TestAliasTagsMustNotBeReadableAsReleaseTags(t *testing.T) {
 		_, _, _, err = DiscoverPackages(loaded, root)
 		assert.NoError(t, err, "this is the shape the feature exists for")
 	})
+}
+
+// TestAliasTagsMayShareTheReleaseFormatsShape: the single-repository
+// convention, which is the whole reason moving aliases exist. One package,
+// releases tagged "v1.4.2", and the "v1" a GitHub composite is consumed
+// through. The alias shares the release format's prefix, and it is legal
+// because "v1" carries nothing a version can be read out of: the planner
+// recognises it as the package's own alias and leaves it out of the baseline.
+func TestAliasTagsMayShareTheReleaseFormatsShape(t *testing.T) {
+	for name, alias := range map[string]string{
+		"the major alone":    "v{major}",
+		"major and minor":    "v{major}.{minor}",
+		"the name beside it": "{name}-v{major}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			withLibs(&cfg, func(s *SpaceConfig) {
+				s.TagFormat = "v{version}"
+				s.AliasTags = []AliasTagConfig{{Format: alias, Moving: true, Channels: []string{"stable"}}}
+			})
+			root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
+			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.NoError(t, err)
+			_, _, _, err = DiscoverPackages(loaded, root)
+			assert.NoError(t, err, "an alias no version can be read out of is write-only already")
+		})
+	}
 }
 
 // TestAliasTagsTwoPackagesOneName: a fixed group whose members all declare

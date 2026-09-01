@@ -96,25 +96,36 @@ specific channel and ignores case. You also use this field to configure
 dispat finds a package's history by listing the tags its `tagFormat` matches. It writes aliases but never reads them,
 so they take no part in that history.
 
-This distinction is load-bearing, and dispat enforces it. If dispat could read an alias back as a release tag, the next
-run would find it while looking for the package's baseline. A moving alias is always the newest tag by creation date,
-so dispat would find it *first*:
+This distinction is load-bearing, and dispat enforces it. A moving alias is always the newest tag by creation date, so
+if dispat could read one back as a release tag it would find it first while looking for the package's baseline, and a
+bare `v1.4.2` beside a `v{version}` release format would quietly become that package's released version.
 
-- A bare `v1` does not parse as a version. An unreadable newest tag makes the whole baseline unreadable, so the package
-  looks like it never released.
-- A bare `v1.4.2` does parse. It quietly becomes some package's released version.
-
-dispat refuses the configuration at load if any package's alias matches any package's `tagFormat`:
+dispat refuses the configuration at load if any package's alias reads back as a release tag of any package:
 
 ```
 config: package "dispat": alias tag "v1.4.2" would be read back as a release tag of package "cli"
 (tagFormat "v{version}"); an alias must never be readable as a release tag, or it becomes that package's history
 ```
 
+Reads back, not looks alike. A name that carries no version is never a release of anything, so it is legal even when
+it shares the release format's prefix. This is what lets a single-package repository releasing as `v1.4.2` publish the
+`v1` a GitHub composite is consumed through:
+
+```json
+{
+  "tagFormat": "v{version}",
+  "aliasTags": [{ "format": "v{major}", "moving": true, "channels": ["stable"] }]
+}
+```
+
+dispat recognises `v1` as that package's own alias when it lists its tags and leaves it out of the history. A tag that
+matches the format and carries no version but is no alias of the package, such as a mistyped `v1.0.0.0`, stays in and
+is still what the [`initials`](./versions.md#initials) fallback is for.
+
 The same check refuses two packages that write the same alias name. A shared-version group would trigger this if every
 member declared `v{major}`.
 
-If your packages tag as `{name}@{version}` and you want bare aliases, give the aliases their own prefix
+If two packages tag as `{name}@{version}` and both want bare aliases, give the aliases their own prefix
 (`action-v{major}`). Alternatively, give the packages a path-prefixed `tagFormat`.
 
 ## Failures

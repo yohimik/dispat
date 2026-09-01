@@ -240,10 +240,14 @@ func (f TagFormat) ParseVersion(pkg, tag string) (ccme.Version, bool) {
 	return tpl.parseVersion(pkg, tag)
 }
 
-// Matches reports whether a tag belongs to a package under this format. A tag
-// can match the shape and still carry an unparseable version, which is the
-// case the initials fallback exists for — so this is deliberately the loose
-// literal check and not ParseVersion.
+// Matches reports whether a tag belongs to a package under this format: the
+// literal prefix and suffix check, and deliberately not ParseVersion.
+//
+// A tag can match the shape and still carry an unparseable version, which is
+// the case the initials fallback exists for. It is also what a moving alias
+// looks like: "v1" beside a "v{version}" tagFormat has the shape and no
+// version in it. Telling those two apart is AliasFormat.Matches's job, not
+// this one's.
 func (f TagFormat) Matches(pkg, tag string) bool {
 	prefix, suffix, ok := f.split(pkg)
 	if !ok {
@@ -299,6 +303,18 @@ func (f AliasFormat) Validate() error {
 // Render builds the alias name for a package version.
 func (f AliasFormat) Render(pkg string, v ccme.Version) string {
 	return compileTagFormat(string(f)).render(pkg, v)
+}
+
+// Matches reports whether a name is one this alias format could have written
+// for a package: its literal text in place, and a number where it writes one.
+//
+// It exists so that a reader of a tag listing can tell an alias apart from a
+// release that nobody can parse. The two look identical otherwise, and they
+// call for opposite answers: an alias is not a release and belongs out of the
+// listing, while a release tag carrying an unreadable version is exactly what
+// the initials fallback is for and has to stay in.
+func (f AliasFormat) Matches(pkg, tag string) bool {
+	return compileTagFormat(string(f)).matchesAlias(pkg, tag)
 }
 
 // Commit is one commit of a pending window.

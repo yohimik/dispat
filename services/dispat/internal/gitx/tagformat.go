@@ -409,6 +409,27 @@ func (t *tagTemplate) split(pkg string) (prefix, suffix string, ok bool) {
 	return lit(segs[:vIdx]), lit(literalTail(segs[vIdx+1:])), true
 }
 
+// matchesAlias reports whether a name is one this alias format could have
+// written for a package.
+//
+// It is the same backtracking walk parseVersion makes, with the accept test
+// removed: an alias is never read back into a version, so what is asked here
+// is only whether the literals line up and the placeholders captured
+// something they are allowed to capture. That is precise enough to tell an
+// alias apart from a release tag nobody can parse, which is the one question
+// it exists for: "v1" is a name "v{major}" writes, and "v1.0.0.0" is not,
+// because a major is digits and stops at the dot.
+func (t *tagTemplate) matchesAlias(pkg, tag string) bool {
+	if t.count(segVersion)+t.count(segMajor)+t.count(segMinor)+t.count(segPatch) == 0 {
+		// A format that writes a constant has no shape to recognise, only a
+		// name. validateAlias refuses those, so this is the guard rather than
+		// a case with behaviour.
+		return false
+	}
+	m := &segMatcher{pkg: pkg, core: true, caps: map[segKind]string{}, accept: func() bool { return true }}
+	return m.match(t.segs, tag)
+}
+
 // literalTail returns the trailing run of literal segments, so that a suffix is
 // read back-to-front and stops at the first placeholder.
 func literalTail(segs []segment) []segment {
@@ -559,6 +580,13 @@ func classOf(k segKind, core bool) func(byte) bool {
 		return isIdentByte
 	case segCounter:
 		return func(c byte) bool { return isIdentByte(c) || c == '.' }
+	case segMajor, segMinor, segPatch:
+		// One number and no separator. These appear only in alias formats,
+		// which validate refuses to let a tagFormat use, and the whole reason
+		// to recognise one is that "v1" is an alias and "v1.0.0.0" is a
+		// release tag somebody mistyped: a class that swallowed the dots
+		// could not tell them apart.
+		return isDigitByte
 	default: // segVersion
 		if core {
 			return func(c byte) bool { return isDigitByte(c) || c == '.' }

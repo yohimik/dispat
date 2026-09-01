@@ -78,7 +78,9 @@ This is a map of package name to a `MAJOR.MINOR.PATCH` version that dispat valid
 - The package has no matching tag at all. This happens on a first release.
 - The newest matching tag by creation date exists, but its version cannot be parsed as semver. A stray `core@0.0.1.0`
   is a common example. dispat deliberately does *not* use older parseable tags here, and still scans commits from the
-  unparseable tag rather than the whole history.
+  unparseable tag rather than the whole history. The package's own
+  [alias tags](./alias-tags.md#aliases-are-never-read-back) are the exception: dispat recognises them and leaves them
+  out of the listing, so a moving `v1` never puts a released package here.
 
 Take `"initials": {"core": "1.0.0"}` with an unparseable newest tag. If one `fix(core)` commit exists since that tag,
 dispat releases `core@1.0.1`. Packages without an entry fall back to `0.0.0` as usual.
