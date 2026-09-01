@@ -73,9 +73,16 @@ if (-not $Version) {
     # Three pages mirrors the walk internal/selfupdate makes: one release run
     # cuts a release per package, so the newest stable of this one can sit past
     # the first page. An empty page is the end of the listing.
+    #
+    # The ForEach-Object is load-bearing: PowerShell 7.6 changed
+    # Invoke-RestMethod to hand a JSON array over as one Object[] instead of
+    # enumerating it, and a page kept whole turns the tag filter below into
+    # member enumeration over every tag on the page — where a tag from another
+    # package, shorter than this prefix, makes Substring throw. Re-emitting
+    # through a script block enumerates on every PowerShell version.
     $releases = @()
     for ($page = 1; $page -le 3; $page++) {
-        $batch = @(Invoke-RestMethod -Uri "$ApiUrl/repos/$Owner/$Repo/releases?per_page=100&page=$page" -Headers $headers)
+        $batch = @(Invoke-RestMethod -Uri "$ApiUrl/repos/$Owner/$Repo/releases?per_page=100&page=$page" -Headers $headers | ForEach-Object { $_ })
         if ($batch.Count -eq 0) { break }
         $releases += $batch
     }
