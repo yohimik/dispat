@@ -66,6 +66,10 @@ type toolRepo struct {
 	digests bool
 	// tagPrefix is what the fake's tags carry before their version.
 	tagPrefix string
+	// token, when set, makes the repository private: the listing and the
+	// asset's API endpoint answer only to that bearer credential, and the
+	// public download URL answers with a sign-in page as github.com does.
+	token string
 	// hits records the paths the fake answered, in order, which is how a test
 	// proves a repeated invocation paid for no transfer.
 	hits []string
@@ -124,6 +128,14 @@ func (r *toolRepo) tagsAs(prefix string) {
 	r.tagPrefix = prefix
 }
 
+// requireToken makes the repository private, which is what a released tool
+// nobody outside a company may download looks like.
+func (r *toolRepo) requireToken(token string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.token = token
+}
+
 // platform is how the fixture spells this machine in an asset name, which is
 // what --asset renders {os} and {arch} into.
 func platform() string { return runtime.GOOS + "-" + runtime.GOARCH }
@@ -139,9 +151,14 @@ func (r *toolRepo) serve(t *testing.T) {
 		sum := sha256.Sum256(body)
 		assets := make([]map[string]any, 0, len(r.assets[version]))
 		for _, name := range r.assets[version] {
+			// Both addresses, because every asset a real listing describes
+			// carries both: the public browser URL and the asset's own REST
+			// endpoint, which is the one that answers when a credential is
+			// what makes the repository readable.
 			asset := map[string]any{
 				"name": name, "size": len(body),
 				"browser_download_url": base + "/dl/" + version,
+				"url":                  base + "/assets/" + version,
 			}
 			if r.digests {
 				asset["digest"] = "sha256:" + hex.EncodeToString(sum[:])
@@ -159,14 +176,46 @@ func (r *toolRepo) serve(t *testing.T) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.hits = append(r.hits, req.URL.Path)
+		authed := r.token == "" || req.Header.Get("Authorization") == "Bearer "+r.token
 		if version, ok := strings.CutPrefix(req.URL.Path, "/dl/"); ok {
 			body, known := r.bodies[version]
 			if !known {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
+			if r.token != "" {
+				// What github.com serves at the public URL of a private
+				// repository: a page, under a 200, that is not the asset.
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprint(w, privatePage)
+				return
+			}
 			w.Header().Set("Content-Length", fmt.Sprint(len(body)))
 			_, _ = w.Write(body)
+			return
+		}
+		if version, ok := strings.CutPrefix(req.URL.Path, "/assets/"); ok {
+			body, known := r.bodies[version]
+			if !known || !authed {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Not Found"}`)
+				return
+			}
+			if req.Header.Get("Accept") != "application/octet-stream" {
+				// Asking this endpoint for anything else answers with the
+				// asset's metadata rather than with the file.
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"name":"metadata, not the asset"}`)
+				return
+			}
+			w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+			_, _ = w.Write(body)
+			return
+		}
+		if !authed {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"message":"Not Found"}`)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -206,6 +255,22 @@ func (r *toolRepo) install(args ...string) harness.RunResult {
 	r.T.Helper()
 	return r.Command(append([]string{"install", "https://github.com/acme/tool",
 		"--api-url", r.api, "--bin-dir", r.bin, "--asset", "tool-{os}-{arch}"}, args...)...)
+}
+
+// installWithToken is install with a credential in the environment and
+// --token-env naming the variable it is in.
+//
+// Naming it is what a private repository behind an endpoint of its own takes:
+// the conventional GITHUB_TOKEN is dropped whenever the endpoint was not
+// itself set on purpose, so that a repository URL cannot make dispat hand
+// somebody's github.com credential to a host they never named. See
+// TestInstallKeepsTheTokenAwayFromAnotherHost.
+func (r *toolRepo) installWithToken(token string, args ...string) harness.RunResult {
+	r.T.Helper()
+	return r.CommandEnv([]string{"DISPAT_TOKEN=" + token},
+		append([]string{"install", "https://github.com/acme/tool",
+			"--api-url", r.api, "--bin-dir", r.bin, "--asset", "tool-{os}-{arch}",
+			"--token-env", "DISPAT_TOKEN"}, args...)...)
 }
 
 // bare runs the command with nothing but the API and the folder, for the
@@ -710,6 +775,68 @@ func TestInstallKeepsTheTokenAwayFromAnotherHost(t *testing.T) {
 	assert.Equal(t, "Bearer the-other", seen[1], "and a named one is sent")
 }
 
+// TestInstallFromAPrivateRepository: the whole private path over the process
+// boundary. The fake publishes its releases only to a bearer credential and
+// answers the public download URL with a sign-in page, exactly as github.com
+// does, so the tool landing on PATH and running is proof that both the listing
+// and the asset were fetched with the token.
+func TestInstallFromAPrivateRepository(t *testing.T) {
+	requireShell(t)
+	r := newToolRepo(t)
+	r.requireToken("sesame")
+
+	// Nothing is readable without the credential, and the refusal is about
+	// the listing rather than about the download.
+	res := r.install("--check")
+	assert.NotEqual(t, 0, res.Code)
+	assert.Contains(t, res.Stderr+res.Stdout, "404")
+	assert.Zero(t, countDownloads(r.requests()), "a listing nobody could read fetches nothing")
+
+	res = r.installWithToken("sesame")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "installed tool "+toolNew+" at "+r.installed())
+	assert.Equal(t, toolNew, r.version(r.installed()), "the file on PATH is the release")
+	assert.Equal(t, 1, countAssetAPI(r.requests()), "the asset came from its API endpoint")
+	assert.Zero(t, countDownloads(r.requests()),
+		"and the public URL, which would have served a page, was never asked")
+}
+
+// TestInstallFromAPrivateRepositoryNeedsTheTokenNamed: the conventional
+// GITHUB_TOKEN is not sent to an endpoint that came from an argument, so a
+// private repository behind one is unreachable until --token-env says which
+// variable to use. The run says so at debug level rather than leaving the
+// reader with an unexplained refusal.
+func TestInstallFromAPrivateRepositoryNeedsTheTokenNamed(t *testing.T) {
+	r := newToolRepo(t)
+	r.requireToken("sesame")
+
+	res := r.CommandEnv([]string{"GITHUB_TOKEN=sesame"}, "install", "https://github.com/acme/tool",
+		"--api-url", r.api, "--bin-dir", r.bin, "--asset", "tool-{os}-{arch}",
+		"--check", "--log-level", "debug")
+	assert.NotEqual(t, 0, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "--token-env",
+		"the run names the flag that would have sent it")
+
+	res = r.installWithToken("sesame", "--check")
+	assert.Equal(t, 1, res.Code, "with the token named there is something to install")
+}
+
+// TestInstallWithoutATokenStaysOnThePublicURL: the fence around the change.
+// Every release the fake publishes names an asset endpoint, as every real one
+// does, and a public repository still downloads from the browser URL and sends
+// no credentials anywhere.
+func TestInstallWithoutATokenStaysOnThePublicURL(t *testing.T) {
+	requireShell(t)
+	r := newToolRepo(t)
+
+	res := r.install()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, toolNew, r.version(r.installed()))
+	assert.Equal(t, 1, countDownloads(r.requests()))
+	assert.Zero(t, countAssetAPI(r.requests()),
+		"no token, no reason to touch the endpoint that wants one")
+}
+
 // TestInstallEventsReachTheJSONStream: the report is for a person and the
 // event is for the stream CI already ingests. A job that provisions a runner
 // can record what it installed without scraping stdout.
@@ -882,15 +1009,26 @@ func TestInstallCommandWordKeepsItsScript(t *testing.T) {
 
 // countDownloads is how many of the fake's answers were the asset itself,
 // which is what proves a repeated invocation paid for no transfer.
-func countDownloads(paths []string) int {
+func countDownloads(paths []string) int { return countPrefix(paths, "/dl/") }
+
+// countAssetAPI is how many answers came from the asset's REST endpoint, the
+// address a credential unlocks. Together with countDownloads it says which of
+// the two addresses a run chose.
+func countAssetAPI(paths []string) int { return countPrefix(paths, "/assets/") }
+
+func countPrefix(paths []string, prefix string) int {
 	var n int
 	for _, path := range paths {
-		if strings.HasPrefix(path, "/dl/") {
+		if strings.HasPrefix(path, prefix) {
 			n++
 		}
 	}
 	return n
 }
+
+// privatePage stands in for the sign-in page github.com serves at the public
+// download URL of a private repository's asset: a 200 that is not the file.
+const privatePage = "<!DOCTYPE html><html><body>Sign in to GitHub</body></html>"
 
 // requireShell skips where /bin/sh is not what a downloaded "tool" runs
 // through. The scenarios prove which binary landed by running it, and on

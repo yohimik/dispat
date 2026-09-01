@@ -62,8 +62,20 @@ type suRepo struct {
 	// hits records the paths the fake answered, in order, which is how a test
 	// proves the notes were read before the binary was fetched. The handler
 	// runs on the server's goroutines, so the lock is not decoration.
-	mu   sync.Mutex
-	hits []string
+	mu sync.Mutex
+	// token, when set, makes the repository private: the listing and the
+	// asset's API endpoint answer only to that bearer credential, and the
+	// public download URL answers with a sign-in page as github.com does.
+	token string
+	hits  []string
+}
+
+// requireToken makes the repository private, which is what a dispat fork a
+// company releases only to itself looks like.
+func (r *suRepo) requireToken(token string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.token = token
 }
 
 // requests is the paths the fake has answered so far.
@@ -145,9 +157,14 @@ func (r *suRepo) serveOn(t *testing.T, versions map[string]string, secure bool) 
 			"tag_name": e.tag, "draft": false, "prerelease": e.prerelease,
 			"body":     r.body,
 			"html_url": base + "/o/r/releases/tag/" + strings.ReplaceAll(e.tag, "/", "%2F"),
+			// Both addresses, because every asset a real listing describes
+			// carries both: the public browser URL and the asset's own REST
+			// endpoint, which is the one that answers when a credential is
+			// what makes the repository readable.
 			"assets": []map[string]any{{
 				"name": e.assetName, "size": len(r.assets[e.version]),
 				"browser_download_url": base + "/dl/" + e.version,
+				"url":                  base + "/assets/" + e.version,
 				"digest":               "sha256:" + hex.EncodeToString(sum[:]),
 			}},
 		}
@@ -155,15 +172,48 @@ func (r *suRepo) serveOn(t *testing.T, versions map[string]string, secure bool) 
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
 		r.hits = append(r.hits, req.URL.Path)
+		token := r.token
 		r.mu.Unlock()
+		authed := token == "" || req.Header.Get("Authorization") == "Bearer "+token
 		if version, ok := strings.CutPrefix(req.URL.Path, "/dl/"); ok {
 			data, known := r.assets[version]
 			if !known {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
+			if token != "" {
+				// What github.com serves at the public URL of a private
+				// repository: a page, under a 200, that is not the asset.
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprint(w, privatePage)
+				return
+			}
 			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 			_, _ = w.Write(data)
+			return
+		}
+		if version, ok := strings.CutPrefix(req.URL.Path, "/assets/"); ok {
+			data, known := r.assets[version]
+			if !known || !authed {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Not Found"}`)
+				return
+			}
+			if req.Header.Get("Accept") != "application/octet-stream" {
+				// Asking this endpoint for anything else answers with the
+				// asset's metadata rather than with the file.
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"name":"metadata, not the asset"}`)
+				return
+			}
+			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+			_, _ = w.Write(data)
+			return
+		}
+		if !authed {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"message":"Not Found"}`)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -343,6 +393,72 @@ func TestSelfUpdateReplacesTheRunningBinary(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, suNew, r.version(r.exe))
 	assert.Equal(t, suNew, r.version(r.backup))
+}
+
+// updateEnv is update with extra environment pairs, which is how a scenario
+// puts a credential in front of the run.
+func (r *suRepo) updateEnv(env []string, args ...string) harness.RunResult {
+	r.T.Helper()
+	full := append([]string{"self-update", "--api-url", r.api, "--owner", "o", "--repo", "r"}, args...)
+	return r.CommandBinEnv(r.exe, env, full...)
+}
+
+// TestSelfUpdateFromAPrivateRepository: a dispat fork a company releases only
+// to itself, over the process boundary. The fake publishes nothing without the
+// credential and answers the public download URL with a sign-in page, so a
+// binary that has actually been replaced is proof that the token reached both
+// the listing and the asset. The endpoint here was named with --api-url, so
+// the conventional GITHUB_TOKEN is what authenticates it.
+func TestSelfUpdateFromAPrivateRepository(t *testing.T) {
+	r := newSURepo(t)
+	r.requireToken("sesame")
+
+	// Nothing is readable without it, and nothing was downloaded trying.
+	res := r.update("--check")
+	assert.NotEqual(t, 0, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "404")
+	assert.Zero(t, countDownloads(r.requests()))
+	assert.Zero(t, countAssetAPI(r.requests()))
+
+	res = r.updateEnv([]string{"GITHUB_TOKEN=sesame"})
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "installed dispat "+suNew)
+	assert.Equal(t, suNew, r.version(r.exe), "the path now runs the new binary")
+	assert.Equal(t, suOld, r.version(r.backup), "and the old one is beside it")
+	assert.Equal(t, 1, countAssetAPI(r.requests()), "the asset came from its API endpoint")
+	assert.Zero(t, countDownloads(r.requests()),
+		"and the public URL, which would have served a page, was never asked")
+}
+
+// TestSelfUpdateFromAPrivateRepositoryWithANamedToken: --token-env is how a
+// credential that is not in GITHUB_TOKEN reaches the release host, and it has
+// to unlock the download as well as the listing.
+func TestSelfUpdateFromAPrivateRepositoryWithANamedToken(t *testing.T) {
+	r := newSURepo(t)
+	r.requireToken("sesame")
+
+	// The conventional variable is not consulted once another one is named,
+	// so a wrong value in it changes nothing.
+	env := []string{"GITHUB_TOKEN=wrong", "DISPAT_TOKEN=sesame"}
+	res := r.updateEnv(env, "--token-env", "DISPAT_TOKEN")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, suNew, r.version(r.exe))
+	assert.Equal(t, 1, countAssetAPI(r.requests()))
+	assert.Zero(t, countDownloads(r.requests()))
+}
+
+// TestSelfUpdateWithoutATokenStaysOnThePublicURL: the fence around the change.
+// Every release the fake publishes names an asset endpoint, as every real one
+// does, and a public repository still downloads from the browser URL.
+func TestSelfUpdateWithoutATokenStaysOnThePublicURL(t *testing.T) {
+	r := newSURepo(t)
+
+	res := r.update()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, suNew, r.version(r.exe))
+	assert.Equal(t, 1, countDownloads(r.requests()))
+	assert.Zero(t, countAssetAPI(r.requests()),
+		"no token, no reason to touch the endpoint that wants one")
 }
 
 // TestSelfUpdateRollsBackAndBackAgain: the backup is only useful if it can be
