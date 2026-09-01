@@ -8,7 +8,7 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Forty-five goals across forty-nine test files, one file each except goal 21, which the three shell helpers split
+Forty-eight goals across fifty-two test files, one file each except goal 21, which the three shell helpers split
 between `if_test.go`, `if_changed_test.go`, `for_test.go`, `for_changed_test.go` and `exec_test.go`. They are grouped
 by what they are about rather than by the order they were written in, so you land in one place when looking for how a
 plan gets computed or which command does what.
@@ -138,6 +138,17 @@ plan gets computed or which command does what.
     see one, and the re-run skip every other release relies on has to come from the release listing instead. The fake
     keeps drafts apart from published releases for exactly that reason, which is what makes the skip, and the flip
     that abandons a stale draft rather than searching for it, claims about behaviour rather than about the fixture.
+47. **Adopting existing changelogs** (`adopting_test.go`): dispat arriving in a repository that already has a history
+    and already has changelogs. The guarantee is one sentence: dispat never rewrites content it did not write, and
+    never moves it. Front matter, a foreign title, a badge row, CRLF endings and a byte-order mark all survive a
+    release, the new entry lands above the entries that predate it, a never-released package's first window is the
+    whole history unless a baseline tag cuts it, and a hand-written heading colliding with the tag is a reported skip
+    rather than a rewrite.
+48. **The shape of a record entry** (`recordformat_test.go`): the bytes inside the records goal 16 leaves behind:
+    dependency and commit links (templated, or `auto` off the package's own forge coordinates), custom and reordered
+    sections carrying their own bump claims, the "no changes" sentence, commit bodies staying in their bullet, the
+    spacing of the seam between entries, and the proof that a workspace configuring none of it gets the exact file it
+    always got. Every scenario asserts the changelog file and the GitHub body from one configuration.
 17. **The `init` and `preview` commands** (`commands_test.go`): the starter config the very next `status` can load, the
     pending release notes on stdout, and the CLI surface itself (per-command `--help`, the platform in `--version`).
 18. **The `dispat run` command** (`run_test.go`): a script executed inside changed packages over the dependency graph
@@ -337,6 +348,8 @@ tests/integration/
 
   the commands
   records_test.go           goal 16
+  adopting_test.go          goal 47
+  recordformat_test.go      goal 48
   draft_test.go             goal 46
   commands_test.go          goal 17
   run_test.go               goal 18
@@ -541,6 +554,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | Test | Claim proven |
 |------|--------------|
 | `TestConfigUnknownKeyIsRejected`                       | Misspelled top-level keys cause dispat to exit 1 immediately instead of ignoring unknown fields. |
+| `TestConfigUnknownKeyInsideASpaceIsRejected`           | The same refusal one level down: a mistyped key inside a space fails the load with the key named, wherever in the file it sits, instead of a space that quietly keeps the defaults. |
 | `TestConfigFileFallbackResolution`                     | Without `--config`, dispat loads the first file found among `dispat.json`, `dispat.yaml`, `dispat.yml`, and `dispat.toml`. If none exist, it exits 1 and lists the attempted file names. |
 | `TestConfigResolutionAscendsToTheMonorepoRoot`         | Without `--config`, configuration lookup searches parent directories starting from `--root`. Running from `packages/core` tags and updates changelogs identically to running from the repository root, while passing `--config` disables directory ascent. |
 | `TestConfigGitRepositoryGuard`                         | Running `status` outside a git repository exits with a descriptive error before executing commands, and `init` rejects `--root` paths that are not repository roots. |
@@ -652,6 +666,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRecordsChangelogDisabled`                                    | `changelog.enabled=false` switches the file recorder off without touching anything else: the release still publishes and tags, no changelog appears.                                                                                                                                                                                                           |
 | `TestRecordsCommitModeGithubFinalize`                             | GitHub in commit mode: releases created in the finalize phase, the body documenting the exact commit and tag, the recorder opt-in per package (no export, no release), a `PACKAGE_<KEY>` export overriding commit and `target_commitish`, and `commit.messageFormat` rendering `{packages}`/`{tags}` for the releases the commit itself records (an exported-commit package is its own commit's claim).                                                          |
 | `TestRecordsCatchUpGithubBodySpansTheProvidersMovement`           | A catch-up's GitHub release body spans the provider's movement from this package's previous release — never the provider's collapsed before-and-after ("0.1.1 -> 0.1.1").                                              |
+| `TestRecordsCatchUpSpansEveryProviderOfAMultiScopeUnit`           | One commit written across two providers and published for them alone: the consumer's catch-up entry spans both movements, because the plan attributes the unit's whole source set to every provider it names (§9.2) rather than only the package the traversal arrived from.                                    |
 | `TestRecordsGitHubAllPackages`                                    | `github.allPackages` gives every published package a release without exporting `DISPAT_EXPORT_GITHUB`, leaving the export to add assets only; the default keeps the export as the per-package opt-in.                                                                                                                                                          |
 | `TestRecordsChannelsHoldPrereleasesBack`                          | `changelog.channels` / `github.channels` naming the stable line alone leave a beta tagged and published but unrecorded, while the graduation to stable writes the one entry and the one release covering the window; a per-package override naming the stable line and every prerelease opts back in. |
 | `TestRecordsGitHubReleaseExistsIsASkip`                           | A release the repository already carries is a W224 skip rather than the API's 422, so a repeated `dispat github` and the release that follows both converge instead of failing.                                                                                                 |
@@ -682,6 +697,45 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestDraftReleasesWaitForAHumanToPublish` | `github.draft` creates the release as a draft, and every later pass over it skips (W224) instead of leaving a second draft: the by-tag lookup cannot see a draft, so the skip is the release listing's answer, end to end through the binary. |
 | `TestDraftFlagHoldsBackAndTheFlipAbandonsTheDraft` | `--draft` drafts a release the configuration would have published; turning drafting off again creates the published release beside the stale draft rather than searching for it, which is what keeps the calls of everybody who does not draft exactly as they were. |
 | `TestDraftFlagPublishesOverAConfiguredDraft` | `--draft=false` publishes over `github.draft`, and the release it created is what the run's own drafting recorder finds through the ordinary by-tag lookup. |
+
+### Goal 47: adopting existing changelogs (`adopting_test.go`)
+
+The migration guarantee in one sentence: dispat never rewrites content it did not write, and never moves it. Every
+scenario seeds a changelog that predates dispat and releases over it, because the shapes here are the ones an operator
+meets on day one and nowhere afterwards.
+
+| Test | Claim proven |
+|------|--------------|
+| `TestRecordsAdoptedChangelogsKeepTheirContent` | Every shape an existing changelog turns out to have (dispat's own title, a foreign title, front matter, a badge row, CRLF endings with a byte-order mark), seeded one package each and released in one run: the file's head survives byte for byte, the new entry lands above the entries that predate it rather than above the file, no second title grows, the old content is never re-terminated, and the mark stays at the head exactly once. |
+| `TestRecordsAdoptionConverges` | The second release over an adopted file goes where the first one did, between the preamble and the entries, and a quiet run rewrites nothing: adoption is a guarantee rather than a migration that only works once. |
+| `TestRecordsStandaloneChangelogPreservesThePreamble` | `dispat changelog` is the same writer through a different door: the step command adopts the file exactly as the release recorder does, and the release that follows finds the entry and skips it (W226) rather than each door writing one. |
+| `TestRecordsFirstReleaseCoversTheWholeHistory` | The first release of a never-released package has no baseline, so its window is the whole history and its entry documents every conventional commit in it (a type that bumps nothing reaches no section); a baseline tag under the configured tagFormat is what cuts the first window down. |
+| `TestRecordsHandWrittenHeadingCollidesWithTheTag` | A heading somebody wrote by hand for the version this release happens to be is read as an entry that already exists: the release goes through and tags, the file is left alone, the skip is reported under W226 rather than silently, and the next release records normally. |
+| `TestRecordsAdoptedChangelogKeepsItsMode` | The rewrite replaces the whole file, so a changelog checked in with permissions of its own keeps them, which matters most on the file dispat did not create. |
+
+### Goal 48: the shape of a record entry (`recordformat_test.go`)
+
+Goal 16 is about the artefacts a run leaves behind; this goal is about the bytes inside them. Every feature here
+renders into two destinations from one configuration, so each scenario asserts on the changelog file and on the body
+the fake GitHub API was handed: a feature that reaches only one of them is a bug the changelog alone would never show.
+
+| Test | Claim proven |
+|------|--------------|
+| `TestRecordsDependencyLinksInBothDestinations` | A `dependencyLink` template turns the dependencies section's bare provider names into links to the provider's own release, in the changelog file and in the GitHub body from one configured value; the linked line replaces the plain one rather than joining it, and the movement it states is unchanged. |
+| `TestRecordsAutoDependencyLinksDeriveTheForgeURL` | `auto` needs no template: it hangs the provider's tag off the package's own github owner and repo, which the changelog borrows because a file has none of its own, even while the recorder itself stays off. |
+| `TestRecordsAutoLinksDeclineOutsideGitHubCom` | The documented degradation: outside github.com the web URL cannot be derived from the API URL, so every `auto` line renders plain in both destinations rather than publishing a permanent link that leads nowhere, the commit reference still renders unlinked, and the fallback is logged rather than left as a silently plain line. |
+| `TestRecordsAutoLinksReadTheRepositoryFromTheEnvironment` | `auto` resolves the repository through `$GITHUB_REPOSITORY` when the config states no owner and repo, so the ordinary CI setup gets links without writing coordinates into its config. |
+| `TestRecordsCommitRefsLinkTheForgeCommit` | With references on, every entry line carries the commit behind it, abbreviated to the seven characters git abbreviates to and placed after the description: linked through the configured template where one is set, and still stated plain under a policy without a link. |
+| `TestRecordsCommitRefsAutoLinksTheRepository` | `commitRefs` takes `auto` too, building the commit URL from the same coordinates the dependency links use, so a workspace states the repository once. |
+| `TestRecordsCustomNoChangesText` | An entry with nothing to group carries the configured sentence instead of the built-in one, interpolated against the release's own variables and identical in both destinations. |
+| `TestRecordsNoChangesTextThatExpandsToNothingFallsBack` | A configured sentence naming a variable nothing defines expands to nothing, and falls back to the built-in that names the cause, because an entry must never publish as a header alone. |
+| `TestRecordsCustomTypeSectionsOrdered` | The whole sections feature in one run: a custom section claims a commit type dispat has never heard of and declares the bump that makes it releasable at all, the list reorders two built-ins, and the built-ins it never names are appended after it rather than dropped. |
+| `TestRecordsBreakingWinsOverACustomClaim` | A claimed type that is also a breaking change renders under Breaking Changes rather than hiding in the custom section, because a reader scans an entry for what breaks them. |
+| `TestRecordsSectionBumpIsRefusedInAFolderConfig` | A section's `bump` in a folder's own config file would render without ever becoming releasable, because the commit parser is built once from the root file; discovery refuses it, naming the section and where the declaration belongs. |
+| `TestRecordsBodyParagraphsStayInTheirBullet` | A commit body is indented two spaces so both paragraphs stay part of the bullet above them in every markdown renderer, and the blank line between them carries no trailing space. |
+| `TestRecordsEntrySpacingDefaultAndConfigured` | The seam between entries is exactly the configured number of blank lines whatever the entry above ends with (two by default, `entrySpacing: 1` narrows it), the same seam heads content that predates dispat, and a GitHub body carries no seam at all: the spacing belongs to the file. |
+| `TestRecordsEntrySpacingOutsideItsBoundsIsAConfigError` | A value outside the bounds fails the load (exit 1, "entrySpacing must be between 1 and 10") before anything is recorded. |
+| `TestRecordsDefaultsAreUnchangedByTheNewOptions` | The byte-compatibility guarantee: a workspace configuring none of these options gets the whole file it always got, asserted byte for byte, so the release that ships them changes nobody's changelog. |
 
 ### Goal 17: the `init` and `preview` commands (`commands_test.go`)
 
@@ -867,6 +921,7 @@ binary-swapping flow on disk rather than mocking the filesystem.
 | `TestSelfUpdatePrintsWhatChanged` | An update answers the question it raises. The change sections of the release body reach the terminal, the install commands and footer links the same body carries do not, and the changelog is linked at the tag that was installed so the link keeps saying what it said today. |
 | `TestSelfUpdateCheckShowsWhatWouldArrive` | `--check` shows the notes it would install while still installing nothing and still exiting 1, which is what makes it the invocation you run while deciding rather than a bare version comparison. |
 | `TestSelfUpdateNotesNeverBlockTheUpdate` | An empty body, a body that is only a footer, markup dispat reads nothing in, and a body far past the parser's cap all end with the new binary in place and the link left to carry the answer. The notes are a courtesy; the binary is the point. |
+| `TestSelfUpdateReadsNotesFromTheCurrentRenderer` | The notes parser is fed a body this build's own renderer produced rather than a fixture written by hand: the sections and the indented commit bodies reach the terminal, and the cut still lands on the footer's rule, so an indented body does not carry the release details and the links out with it. |
 | `TestSelfUpdateReadsTheNotesBeforeTheDownload` | The fake records the order it was asked, proving the notes ride off the response that chose the release rather than a second call afterwards, and that the binary is fetched exactly once. |
 | `TestSelfUpdateNotesReachTheJSONStream` | Under `--log-format json` every line is an event and the `update installed` event carries the notes and the changelog as fields, so a job that updates dispat can post what changed without scraping stdout. |
 | `TestSelfUpdateFromAPrivateRepository` | A fork released only inside a company: the fake publishes nothing without the credential and answers the public download URL with a sign-in page, so a binary that has actually been replaced proves `GITHUB_TOKEN` reached both the listing and the asset's API endpoint, and the public URL was never asked. |
@@ -1168,6 +1223,7 @@ script-only members, and per-member tag spellings.
 | `TestStepsCatchUpEntrySpansTheProvidersMovement` | The step commands recompute the plan, and the catch-up entry they write spans the provider's movement from the consumer's last release; the same span reaches scripts as `DISPAT_UPDATED_*_OLD_VERSION`.  |
 | `TestStepsDuplicatedCollapseIntoSkips` | A flow listing the record steps twice produces one record set: the second pass is W226/W223 skips, one changelog entry, one tag.                                                                                     |
 | `TestStepsWiredRecordTheRunsDependencies` | A wired record's dependencies section states the run's provider movements. The consumer's changelog step replans after the provider's tag landed and after their shared fixed group would read that tag as a floor; the masked replan reproduces the run (no W228), and the entry names the movement the run actually made, not a version it never released. |
+| `TestStepsAlignedRecordsKeepTheirDependencyLinks` | An aligned record links its dependency lines exactly as the record the run would have written itself: a provider tag the run never planned appears mid-run, the replan drops the provider as already released (W228), and the alignment picks the movement and the provider's tag up from `DISPAT_UPDATED_<KEY>_TAG`, so the `auto` link names the run's own tag rather than rendering plain or appending an empty one. |
 | `TestStepsGithubBeforeCommitWarns`  | A github step ordered before the commit step is the W229 smell, said before anything is created; one release is created at the run's tag, and the correctly placed second github step finds it and skips (W224).       |
 
 ### Goal 38: the longitudinal fence (`longitudinal_test.go`)
@@ -1227,6 +1283,8 @@ monorepo containing a project for each engine alongside their generated folders.
 | `TestEnginesUnrealVersionlessPluginsAreSkipped`  | The Missing/Skipped split over the process boundary: a plugin the descriptor lists is skipped and passes `--strict`, one it does not list is missing and fails it.                                              |
 | `TestEnginesGracefulOnPartialProjects`           | The states a healthy engine repository is routinely in are not errors and write nothing: a Godot project that never set `config/version` does not gain one, and a build stamp against a manifest that declares no counter warns and leaves the file alone. |
 | `TestEnginesAutoVersionWritesTheEngineVersion`   | The point of the feature. A release run computes a version from the commits and writes it into `project.godot` with no `replace` rule configured, and everything else in the file survives.                      |
+| `TestEnginesAutoVersionWritesAPathQualifiedManifest` | The same write for the formats whose folder the engine, not the author, decided: Unity's `ProjectSettings/` file and Unreal's `Config/DefaultGame.ini` take the computed version under `manifests: all`, and the build counter beside the version stays where it was. |
+| `TestEnginesAutoVersionLeavesANestedCopyAlone`   | A path-qualified manifest is the package's own where its format says it lives and nowhere else: a sample project bundled inside the package keeps the version its author gave it while the package's own settings move.   |
 | `TestEnginesEventsNameTheFormat`                 | Five ecosystems now cover twelve formats, so the machine contract carries the format beside the ecosystem: the project file and the export presets are told apart.                                              |
 | `TestEnginesUnityRangesArePinned`                | Unity's package manager resolves an exact version and nothing else, so a range write pins rather than writing a caret the project could not open, and a folder range beside it is untouched.                     |
 | `TestEnginesScannerStrictGatesBrokenEngineManifests` | The partial-result contract reaching the exit code for the engine formats too: a broken `Packages/manifest.json` is reported while the healthy manifests are still listed, and `--strict` refuses the same repository. |
