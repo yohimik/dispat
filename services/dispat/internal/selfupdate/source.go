@@ -56,8 +56,11 @@ type Source struct {
 	// Command is the command word this source's failures name. Empty is
 	// "selfupdate"; see commandOr.
 	Command string
-	// Token authenticates the API calls, which only raises the rate limit:
-	// the releases of a public repository are readable without one.
+	// Token authenticates the API calls. A public repository needs none: its
+	// releases are readable without one, and a token there only raises the
+	// rate limit. A private repository needs one for everything, both to read
+	// the listing and, through Installer.Token, to download the asset from
+	// its API endpoint.
 	Token  string
 	Client *http.Client // default: a 30s-timeout client
 	// Log carries the reasons a release was passed over. The zero value

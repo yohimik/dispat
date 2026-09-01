@@ -64,7 +64,8 @@ type Installer struct {
 	// "selfupdate"; see commandOr.
 	Command string
 	// Token, when set, sends the download to Asset.APIURL with the same
-	// bearer credential Source uses for the listing. See download.
+	// bearer credential Source uses for the listing, which is what a private
+	// repository's asset needs. See download.
 	Token string
 	Log   zerolog.Logger
 }
@@ -177,10 +178,15 @@ func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err er
 // Without a token the request goes to the public download URL and carries no
 // Authorization header: that URL redirects to object storage, and a public
 // asset needs no credentials. With a token it goes to the asset's API
-// endpoint asking for application/octet-stream — the address that answers
-// when the repository is not public — and the redirect to object storage is
-// safe because Go strips the Authorization header when a redirect changes
-// hosts.
+// endpoint asking for application/octet-stream, which is the address that
+// answers when the repository is not public. The redirect from there to
+// object storage is safe because Go strips the Authorization header when a
+// redirect changes hosts.
+//
+// A listing that named no API endpoint leaves the public URL as the only
+// address there is, so a token alone does not move the download: an older
+// GitHub Enterprise release sends no per-asset "url" field, and its public
+// URL is what serves the bytes.
 func (i *Installer) download(ctx context.Context, a Asset, f *os.File) error {
 	url := a.URL
 	authed := i.Token != "" && a.APIURL != ""
@@ -195,6 +201,10 @@ func (i *Installer) download(ctx context.Context, a Asset, f *os.File) error {
 		req.Header.Set("Accept", "application/octet-stream")
 		req.Header.Set("Authorization", "Bearer "+i.Token)
 	}
+	// The token itself is never logged; only the address it was sent to and
+	// the fact that it was sent.
+	i.Log.Debug().Str("asset", a.Name).Str("url", url).Bool("authenticated", authed).
+		Msg(i.what() + ": downloading the release asset")
 	resp, err := i.client().Do(req)
 	if err != nil {
 		return fmt.Errorf("%s: downloading %s: %w", i.what(), a.Name, err)

@@ -136,8 +136,9 @@ func updateSource(o *options, fs *pflag.FlagSet) selfupdate.Source {
 	if fs.Changed("token-env") {
 		src.Token = os.Getenv(*o.ghTokenEnv)
 	} else {
-		// The token is optional and only raises the rate limit, so the
-		// conventional variable is worth trying when nothing named one.
+		// The token is optional for a public repository, where it only raises
+		// the rate limit, and required for a private one, so the conventional
+		// variable is worth trying when nothing named one.
 		src.Token = os.Getenv("GITHUB_TOKEN")
 	}
 	return src
