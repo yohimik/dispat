@@ -50,8 +50,10 @@ Options:
                    otherwise $HOME/.local/bin.
   --os <os>        linux, darwin or windows. Default: this machine's.
   --arch <arch>    amd64 or arm64. Default: this machine's.
-  --token <token>  Token for the releases API. Only raises the rate limit; the
-                   releases themselves are public. Default: $GITHUB_TOKEN.
+  --token <token>  Token for the releases API. A public repository needs none,
+                   where it only raises the rate limit; a private one needs it
+                   both to read the releases and to download the binary.
+                   Default: $GITHUB_TOKEN.
   --help           This text.
 
 Environment: DISPAT_VERSION, DISPAT_BIN_DIR and GITHUB_TOKEN are read as the
@@ -112,8 +114,9 @@ get() {
 	esac
 }
 
-# download writes a URL to a file. Separate from get because a binary must never
-# go through a command substitution, which would eat its trailing newlines.
+# download writes a URL to a file, with no headers of any kind. Separate from
+# get because a binary must never go through a command substitution, which
+# would eat its trailing newlines.
 download() {
 	case "$DOWNLOADER" in
 	curl) curl -fsSL -o "$2" "$1" ;;
@@ -121,7 +124,55 @@ download() {
 	esac
 }
 
-# json_fields puts one JSON field per line, so the two things this script reads
+# download_asset writes the release asset to the file named by $1.
+#
+# Without a token, or against a listing that named no asset endpoint, this is
+# the public download URL fetched with no headers, exactly as before. With one
+# the bytes come from the asset's own API endpoint, which is the only address
+# that serves a private repository's asset: the public URL answers with a
+# sign-in page instead.
+#
+# The credential must never reach the storage host that endpoint redirects to.
+# curl arranges that itself: since 7.58 it drops Authorization on a redirect
+# that changes host and keeps it on one that does not, which is what a GitHub
+# Enterprise install redirecting to itself needs. wget forwards every --header
+# across every redirect, so it is given none to follow: the endpoint is asked
+# with --max-redirect=0, and the Location it answers with is then fetched on
+# its own, with no headers at all. An endpoint that answers with the bytes
+# rather than a redirect, which is what an Enterprise install serving them
+# itself does, has already written the file.
+download_asset() {
+	if [ -z "$TOKEN" ] || [ -z "$ASSET_API_URL" ]; then
+		download "${DOWNLOAD_URL}/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}" "$1"
+		return
+	fi
+	case "$DOWNLOADER" in
+	curl)
+		curl -fsSL -H "Accept: application/octet-stream" \
+			-H "Authorization: Bearer $TOKEN" -o "$1" "$ASSET_API_URL"
+		;;
+	wget)
+		# busybox's wget has neither option and follows redirects carrying
+		# whatever headers it was given, so there is no way to send the
+		# credential through it safely. Refusing says so instead of leaking it.
+		if ! wget --help 2>&1 | grep -q -- '--max-redirect'; then
+			die "this wget cannot be stopped at a redirect, so a token sent through it would reach the storage host. Install curl, or download ${ASSET} yourself."
+		fi
+		RESPONSE=$(wget -O "$1" --max-redirect=0 --server-response \
+			--header="Accept: application/octet-stream" \
+			--header="Authorization: Bearer $TOKEN" "$ASSET_API_URL" 2>&1 || true)
+		LOCATION=$(printf '%s\n' "$RESPONSE" |
+			sed -n 's|^[ 	]*Location:[ 	]*\([^ 	]*\).*$|\1|p' | tail -n 1)
+		if [ -n "$LOCATION" ]; then
+			download "$LOCATION" "$1"
+		else
+			[ -s "$1" ] || die "the asset endpoint did not serve ${ASSET}; check the token"
+		fi
+		;;
+	esac
+}
+
+# json_fields puts one JSON field per line, so the few things this script reads
 # out of the API can be matched with an anchored pattern instead of a parser.
 # The API pretty-prints, which would make the newlines enough on their own;
 # splitting on the structural characters as well means a compact body (a proxy,
@@ -203,7 +254,7 @@ esac
 
 TAG="${TAG_PREFIX}${VERSION}"
 
-# --- the digest ---------------------------------------------------------------
+# --- the digest and the asset's endpoint ---------------------------------------
 
 # GitHub reports a "digest" per asset, which is what internal/selfupdate checks
 # too. Fetching the release by tag also turns "no such version" into a clean
@@ -220,6 +271,20 @@ DIGEST=$(
 			sub(/^"digest":"sha256:/, ""); sub(/".*$/, ""); print; exit
 		}
 		/^"name":"/ { found = 0 }
+	'
+)
+
+# The asset's own REST endpoint, which is the address that serves the bytes to
+# an authenticated request. Here the walk runs the other way round: "url"
+# precedes "name" inside an asset, so the last one seen when the name matches
+# is the one that belongs to it. Every other key ending in _url is a different
+# field and the pattern is anchored against them; the "url" of the release
+# itself, and of whoever uploaded the asset, are both overwritten by the
+# asset's own before its name is reached.
+ASSET_API_URL=$(
+	printf '%s' "$RELEASE" | json_fields | awk -v want="\"name\":\"${ASSET}\"" '
+		/^"url":"/ { last = $0; sub(/^"url":"/, "", last); sub(/".*$/, "", last) }
+		$0 == want { print last; exit }
 	'
 )
 
@@ -246,8 +311,12 @@ fi
 TMP="${TARGET}.download.$$"
 trap 'rm -f "$TMP"' EXIT INT TERM
 
-log "downloading ${ASSET} ${VERSION}..."
-download "${DOWNLOAD_URL}/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}" "$TMP" ||
+if [ -n "$TOKEN" ] && [ -n "$ASSET_API_URL" ]; then
+	log "downloading ${ASSET} ${VERSION} from the release API..."
+else
+	log "downloading ${ASSET} ${VERSION}..."
+fi
+download_asset "$TMP" ||
 	die "download failed: ${ASSET} is not attached to ${TAG}"
 
 if [ -z "$DIGEST" ]; then
@@ -279,7 +348,7 @@ fi
 # one-off export and the line that makes it permanent, aimed at the profile
 # the user's shell actually reads. A directory already on PATH can still lose
 # to an older dispat installed somewhere earlier, which looks exactly like
-# the new version failing to install — so that shadowing is said out loud.
+# the new version failing to install, so that shadowing is said out loud.
 case "${SHELL:-}" in
 */zsh) PROFILE="\$HOME/.zshrc" ;;
 */bash) PROFILE="\$HOME/.bashrc" ;;

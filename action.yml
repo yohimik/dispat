@@ -25,9 +25,10 @@ inputs:
     default: ''
   github-token:
     description: >-
-      Token for the releases API. It only raises the rate limit — dispat's
-      releases are public — but a shared CI egress address reaches the
-      unauthenticated limit easily.
+      Token for the releases API. dispat's own releases are public, where it
+      only raises a rate limit that a shared CI egress address reaches easily.
+      A fork released from a private repository needs it for everything: the
+      listing, and the download of the binary itself.
     required: false
     default: ${{ github.token }}
 

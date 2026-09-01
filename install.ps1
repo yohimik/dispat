@@ -4,8 +4,8 @@ Install the dispat CLI from its GitHub release.
 
 .DESCRIPTION
 The Windows half of install.sh, kept deliberately parallel to it: same options,
-same tag filter, same digest check, same output contract — the resolved version
-on stdout, everything written for a human on the information stream.
+same tag filter, same digest check, same output contract, which is the resolved
+version on stdout and everything written for a human on the information stream.
 
     irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 
@@ -25,8 +25,9 @@ Where to install. Defaults to $env:LOCALAPPDATA\dispat\bin.
 amd64 or arm64. Defaults to this machine's.
 
 .PARAMETER Token
-Token for the releases API. Only raises the rate limit; the releases themselves
-are public. Defaults to $env:GITHUB_TOKEN.
+Token for the releases API. A public repository needs none, where it only
+raises the rate limit; a private one needs it both to read the releases and to
+download the binary. Defaults to $env:GITHUB_TOKEN.
 #>
 [CmdletBinding()]
 param(
@@ -77,7 +78,7 @@ if (-not $Version) {
     # The ForEach-Object is load-bearing: PowerShell 7.6 changed
     # Invoke-RestMethod to hand a JSON array over as one Object[] instead of
     # enumerating it, and a page kept whole turns the tag filter below into
-    # member enumeration over every tag on the page — where a tag from another
+    # member enumeration over every tag on the page, where a tag from another
     # package, shorter than this prefix, makes Substring throw. Re-emitting
     # through a script block enumerates on every PowerShell version.
     $releases = @()
@@ -111,8 +112,8 @@ try {
     throw "no release for $tag. Check the version, or the releases page."
 }
 # Guarded rather than dotted into directly: under Set-StrictMode a response that
-# is not the release object — a proxy's error document, an Enterprise instance
-# answering differently — would otherwise fail with "the property 'assets'
+# is not the release object (a proxy's error document, an Enterprise instance
+# answering differently) would otherwise fail with "the property 'assets'
 # cannot be found", which says nothing about what actually went wrong.
 if (-not ($release.PSObject.Properties.Name -contains 'assets')) {
     throw "the API did not answer with a release for $tag."
@@ -120,6 +121,64 @@ if (-not ($release.PSObject.Properties.Name -contains 'assets')) {
 $assetInfo = $release.assets | Where-Object { $_.name -eq $asset } | Select-Object -First 1
 if (-not $assetInfo) {
     throw "$asset is not attached to $tag. It carries: $(($release.assets.name) -join ', ')"
+}
+# The asset's own REST endpoint, which is the address that serves the bytes to
+# an authenticated request. Older GitHub Enterprise versions send no such field,
+# and the public URL is then all there is.
+$assetApiUrl = if ($assetInfo.PSObject.Properties.Name -contains 'url') { $assetInfo.url } else { '' }
+
+# Get-RedirectLocation reads the address a refused redirect pointed at, out of
+# whichever response object the PowerShell in use attached to the error.
+# Windows PowerShell 5.1 raises a WebException carrying an HttpWebResponse,
+# whose Location is a header string; PowerShell 7 raises an
+# HttpResponseException carrying an HttpResponseMessage, whose Location is a
+# Uri. Anything else answers with nothing, and the caller reports the failure
+# it was handed rather than inventing one.
+function Get-RedirectLocation($err) {
+    $response = $null
+    try { $response = $err.Exception.Response } catch { return '' }
+    if (-not $response) { return '' }
+    try {
+        if ($response.Headers.Location) { return $response.Headers.Location.AbsoluteUri }
+    } catch { }
+    try {
+        $value = $response.Headers['Location']
+        if ($value) { return $value }
+    } catch { }
+    return ''
+}
+
+# Save-Asset writes the release asset to the given path.
+#
+# Without a token, or against a release that named no asset endpoint, this is
+# the public download URL with no headers, exactly as install.sh does it and
+# exactly as this script always did: the asset is public, and the redirect to
+# the storage host rejects the API's Authorization header on Windows
+# PowerShell 5.1, which forwards it across redirects.
+#
+# With a token the bytes come from the asset's own API endpoint, which is the
+# only address that serves a private repository's asset. Because 5.1 would
+# forward the credential to the storage host, the redirect is not followed at
+# all: the endpoint is asked with -MaximumRedirection 0, and the address it
+# answers with is then fetched on its own with no headers. An endpoint that
+# answers with the bytes rather than a redirect, which is what an Enterprise
+# install serving them itself does, has already written the file.
+function Save-Asset($destination) {
+    if (-not $Token -or -not $assetApiUrl) {
+        Invoke-WebRequest -Uri "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset" -OutFile $destination
+        return
+    }
+    $assetHeaders = @{ Accept = 'application/octet-stream'; Authorization = "Bearer $Token" }
+    $location = ''
+    try {
+        Invoke-WebRequest -Uri $assetApiUrl -Headers $assetHeaders -MaximumRedirection 0 -OutFile $destination
+    } catch {
+        $location = Get-RedirectLocation $_
+        if (-not $location) { throw }
+    }
+    if ($location) {
+        Invoke-WebRequest -Uri $location -OutFile $destination
+    }
 }
 
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'dispat\bin' }
@@ -130,12 +189,13 @@ $target = Join-Path $BinDir 'dispat.exe'
 # half-downloaded binary never appears on PATH.
 $tmp = "$target.download"
 
-Write-Information "downloading $asset $Version..." -InformationAction Continue
+if ($Token -and $assetApiUrl) {
+    Write-Information "downloading $asset $Version from the release API..." -InformationAction Continue
+} else {
+    Write-Information "downloading $asset $Version..." -InformationAction Continue
+}
 try {
-    # No headers on the download itself, like install.sh: the asset is public,
-    # and the redirect to the storage host rejects the API's Authorization
-    # header on Windows PowerShell 5.1, which forwards it across redirects.
-    Invoke-WebRequest -Uri "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset" -OutFile $tmp
+    Save-Asset $tmp
 
     # GitHub reports a "digest" per asset, which is what internal/selfupdate
     # checks too. Older GitHub Enterprise versions do not send one.
