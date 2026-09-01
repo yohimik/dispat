@@ -38,6 +38,11 @@ Here is what happens to your binary during an update:
    directly from this response before fetching any files.
 2. **It downloads the binary for your platform.** It pulls the matching binary
    from six platform builds across Linux, macOS, and Windows on Intel and ARM.
+   Without a token it uses the public download URL and sends no credentials.
+   With one it uses the asset's own API endpoint and sends the token there,
+   which is what a private release repository requires. The endpoint redirects
+   to object storage, and the credential is dropped on the way, because that is
+   a different host.
 3. **It checks what arrived.** It verifies that the file size matches the
    release metadata and validates the checksum against the published GitHub
    hash. dispat rejects any download that was altered or cut short.
@@ -299,7 +304,10 @@ platform binaries for that release.
 **"hashes to ..."** means the downloaded payload failed checksum verification
 against the published release hash. Your existing binary remains untouched.
 Retry the download; repeated failures point to a proxy or network middlebox
-altering files.
+altering files. Against a private release repository reached without a token,
+this is what a sign-in page looks like: the public download URL answers with
+one under a `200`. Supply the token and the download moves to the asset's API
+endpoint, which serves the file.
 
 ## Exit codes
 
@@ -321,7 +329,7 @@ permission errors, or unsupported build types.
 | `--prerelease`        | Consider prereleases as well as stable releases.                                                                |
 | `--release <version>` | Install exactly this version. A leading `v` is fine.                                                            |
 | `--rollback`          | Restore the kept binary and download nothing. Combines with `--check`; refuses the flags that select a release.  |
-| `--owner`, `--repo`, `--api-url`, `--token-env` | Point the command at a different repository or a GitHub Enterprise endpoint. A token only raises the API rate limit. |
+| `--owner`, `--repo`, `--api-url`, `--token-env` | Point the command at a different repository or a GitHub Enterprise endpoint. A public repository needs no token; a private one needs it to list the releases and to download the binary. |
 
 `self-update` operates directly on the binary itself. You can run it anywhere
 without a configuration file or Git repository.

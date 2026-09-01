@@ -32,7 +32,7 @@ with `setup-go` and `setup-node`. This lets you pass your own flags, environment
 |---|---|---|
 | `version` | the latest stable release | Version or tag to install: `1.2.3`, `v1.2.3` or `services/dispat/v1.2.3`. |
 | `bin-dir` | `$HOME/.dispat/bin` | Where to install. The action adds it to `PATH` either way. |
-| `github-token` | `${{ github.token }}` | Only raises the API rate limit; dispat's releases are public. |
+| `github-token` | `${{ github.token }}` | dispat's own releases are public, where this only raises the API rate limit. A fork released from a private repository needs it to list the releases and to download the binary. |
 
 Pin a version to make a release reproducible a year from now:
 
@@ -241,7 +241,7 @@ only `curl` or `wget`, with no package manager or Go toolchain needed.
 | `--version` | latest stable | `1.2.3`, `v1.2.3` or `services/dispat/v1.2.3`. |
 | `--bin-dir` | `/usr/local/bin`, else `$HOME/.local/bin` | Where to install. |
 | `--os`, `--arch` | this machine's | Override the platform, for building an image for another one. |
-| `--token` | `$GITHUB_TOKEN` | Raises the API rate limit. |
+| `--token` | `$GITHUB_TOKEN` | Raises the API rate limit for a public repository, and is what reads the releases and downloads the binary from a private one. |
 
 The script prints the resolved version to stdout and everything else to stderr. Capture the version in your own script:
 
@@ -281,6 +281,18 @@ installs it onto a folder on `PATH`, so a setup step needs no package manager an
 
 Pin the version with `--release` for a reproducible job, and put `--check` in front of it on a cached runner: it exits
 `1` only when the destination does not already hold that exact file, so a warm cache costs no transfer.
+
+A private repository works too, with a token that may read its contents. dispat uses the same credential for the
+releases listing and for the download, taking the asset from its API endpoint rather than from the public URL. On
+GitHub Enterprise, name the variable with `--token-env`: the endpoint there is derived from the repository you typed
+rather than set by a flag, so `GITHUB_TOKEN` alone is deliberately not sent to it.
+
+```yaml
+- name: Install a tool from a private repository
+  env:
+    GITHUB_TOKEN: ${{ secrets.TOOLS_READ_TOKEN }}
+  run: dispat install acme/internal-tool --asset 'tool-{os}-{arch}'
+```
 
 ## Somewhere other than GitHub Actions
 

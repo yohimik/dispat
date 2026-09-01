@@ -35,6 +35,33 @@ dispat sends the conventional `GITHUB_TOKEN` only to `github.com`, because the h
 than from a flag you set deliberately. To authenticate against another endpoint, name the variable yourself with
 `--token-env`.
 
+## A private repository
+
+A private repository needs a token for everything: to read the releases, and to download the asset. dispat uses the
+same credential for both. When a token is present, the download goes to the asset's own API endpoint rather than to
+the public browser URL, because that endpoint is the only address that serves a private repository's file.
+
+```sh
+GITHUB_TOKEN=... dispat install acme/tool --asset 'tool-{os}-{arch}'
+```
+
+The token needs read access to the repository's contents. Give it no more than that: a token scoped to one private
+repository is enough to install from it.
+
+Without a token, a private repository's public download URL answers with a sign-in page under a `200`, which dispat
+reports as a size or checksum mismatch rather than as a refusal. If an install fails that way against a repository you
+know exists, the missing token is the likely reason.
+
+The credential never leaves the API host. That endpoint redirects to object storage, and the redirect is followed
+without the `Authorization` header, because the storage host is a different host and has no business seeing it.
+
+For a GitHub Enterprise install, name the variable explicitly. The endpoint there is derived from the repository you
+typed rather than set by a flag, so `GITHUB_TOKEN` alone is deliberately not sent to it:
+
+```sh
+DISPAT_TOKEN=... dispat install https://ghe.example.com/acme/tool --token-env DISPAT_TOKEN
+```
+
 ## Choosing the file
 
 Most releases attach more than one file, and installing the wrong one globally is worse than typing its name. Use
@@ -214,4 +241,5 @@ that choose something to download, but it combines with `--check`.
 ### `--api-url`, `--token-env`
 
 The default is derived. Point dispat at another API endpoint, and name the variable a token is read from.
-`GITHUB_TOKEN` is sent to `github.com` alone.
+`GITHUB_TOKEN` is sent to `github.com` alone. The token reads the releases and, for a private repository, downloads
+the asset as well. See [A private repository](#a-private-repository).

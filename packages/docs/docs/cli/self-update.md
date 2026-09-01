@@ -75,4 +75,6 @@ alongside release selection flags, but it combines with `--check`.
 ### `--owner`, `--repo`, `--api-url`, `--token-env`
 
 The default comes from config. `self-update`: point dispat at another repository or a GitHub Enterprise endpoint
-instead of its own releases.
+instead of its own releases. A private one works too: the token authenticates the releases listing and the download
+of the binary alike, so a fork released only inside a company updates itself the same way. `--token-env` names the
+variable the token is read from, and `GITHUB_TOKEN` is the default.
