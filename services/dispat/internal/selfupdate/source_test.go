@@ -15,12 +15,14 @@ import (
 )
 
 // releaseJSON is one release as the API returns it, with an asset for every
-// platform a test might ask for.
+// platform a test might ask for. Every asset carries "url" as well as
+// "browser_download_url", because a real listing always sends both.
 func releaseJSON(tag string, prerelease, draft bool, assetNames ...string) map[string]any {
 	assets := make([]map[string]any, 0, len(assetNames))
 	for _, name := range assetNames {
 		assets = append(assets, map[string]any{
 			"name": name, "browser_download_url": "http://example.invalid/" + name,
+			"url":  "http://example.invalid/api/assets/" + name,
 			"size": 10, "digest": "sha256:abc",
 		})
 	}
@@ -250,6 +252,39 @@ func TestReleaseAssetSelection(t *testing.T) {
 		rel.AssetNames(), "the refusal can name what is there")
 }
 
+// TestAssetsCarryTheAPIEndpoint: an asset's "url" is the endpoint that serves
+// its bytes to an authenticated request, and it has to survive the decode for
+// a private repository to be installable at all. A listing that sends no
+// "url", which is what an older GitHub Enterprise does, leaves it empty rather
+// than inventing an address.
+func TestAssetsCarryTheAPIEndpoint(t *testing.T) {
+	s := listing(t, releaseJSON("services/dispat/v1.0.0", false, false, "dispat-linux-amd64"))
+
+	rel, err := s.Latest(context.Background())
+	require.NoError(t, err)
+	require.Len(t, rel.Assets, 1)
+	assert.Equal(t, "http://example.invalid/api/assets/dispat-linux-amd64", rel.Assets[0].APIURL)
+	assert.Equal(t, "http://example.invalid/dispat-linux-amd64", rel.Assets[0].URL,
+		"the public URL is still read, and the two are different addresses")
+
+	byTag, err := s.At(context.Background(), "1.0.0")
+	require.NoError(t, err)
+	require.Len(t, byTag.Assets, 1)
+	assert.Equal(t, rel.Assets[0].APIURL, byTag.Assets[0].APIURL,
+		"both lookups convert through the same place, so neither can drift")
+
+	bare := releaseJSON("services/dispat/v1.0.0", false, false)
+	bare["assets"] = []map[string]any{{
+		"name": "dispat-linux-amd64", "browser_download_url": "http://example.invalid/dispat-linux-amd64",
+		"size": 10,
+	}}
+	older := listing(t, bare)
+	rel, err = older.Latest(context.Background())
+	require.NoError(t, err)
+	require.Len(t, rel.Assets, 1)
+	assert.Empty(t, rel.Assets[0].APIURL, "a listing without a url field reports no endpoint")
+}
+
 // TestSourceDefaultsToDispatsOwnRepository: an unconfigured source points at
 // the repository dispat is released from, because that is the only repository
 // that has dispat binaries in it.
@@ -269,8 +304,8 @@ func TestSourceDefaultsToDispatsOwnRepository(t *testing.T) {
 }
 
 // TestSourceSendsTheTokenOnlyWhenItHasOne: the releases of a public
-// repository need no credentials, and a token is only ever there to raise the
-// rate limit.
+// repository need no credentials, so the header appears only once there is a
+// token to put in it.
 func TestSourceSendsTheTokenOnlyWhenItHasOne(t *testing.T) {
 	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

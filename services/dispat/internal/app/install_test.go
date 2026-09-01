@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,36 +32,95 @@ import (
 // scenario can put whichever files it is about in front of the command.
 func toolReleases(t *testing.T, tag string, assets ...string) selfupdate.Source {
 	t.Helper()
-	list := []map[string]any{{"tag_name": tag, "draft": false, "prerelease": false,
-		"assets": assetList(assets)}}
+	src, _ := toolRepo(t, "", tag, assets...)
+	return src
+}
+
+// routes counts which of a release's two download addresses the command asked
+// for, which is the whole of what the token is supposed to decide.
+type routes struct{ public, api int }
+
+// toolRepo is a repository the install command can be pointed at, with the
+// listing and both download addresses a real release has: the public browser
+// URL and the asset's own API endpoint.
+//
+// An empty token is a public repository, where everything answers to everyone.
+// A token makes it private, and then the fixture behaves the way GitHub does:
+// the listing and the API endpoint both demand that credential, and the public
+// URL answers 200 with the sign-in page rather than with the binary, which is
+// what makes an unauthenticated download fail on its checksum instead of on
+// its status.
+func toolRepo(t *testing.T, token, tag string, assets ...string) (selfupdate.Source, *routes) {
+	t.Helper()
+	var base string
+	seen := &routes{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if want, ok := afterTags(req.URL.Path); ok {
-			if want == tag {
-				_ = json.NewEncoder(w).Encode(list[0])
+		authed := token == "" || req.Header.Get("Authorization") == "Bearer "+token
+		switch {
+		case strings.HasPrefix(req.URL.Path, "/download/"):
+			seen.public++
+			if token != "" {
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprint(w, signInPage)
 				return
 			}
-			w.WriteHeader(http.StatusNotFound)
-			return
+			fmt.Fprint(w, toolBody)
+		case strings.HasPrefix(req.URL.Path, "/assets/"):
+			seen.api++
+			if !authed {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Not Found"}`)
+				return
+			}
+			assert.Equal(t, "application/octet-stream", req.Header.Get("Accept"),
+				"the API endpoint serves the bytes only when they are what was asked for")
+			fmt.Fprint(w, toolBody)
+		default:
+			if !authed {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Not Found"}`)
+				return
+			}
+			list := []map[string]any{{"tag_name": tag, "draft": false, "prerelease": false,
+				"assets": assetList(base, assets)}}
+			w.Header().Set("Content-Type", "application/json")
+			if want, ok := afterTags(req.URL.Path); ok {
+				if want == tag {
+					_ = json.NewEncoder(w).Encode(list[0])
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(list)
 		}
-		_ = json.NewEncoder(w).Encode(list)
 	}))
 	t.Cleanup(srv.Close)
+	base = srv.URL
 	return selfupdate.Source{APIURL: srv.URL, Owner: "acme", Repo: "tool",
-		TagPrefix: "v", Command: install.Command}
+		TagPrefix: "v", Command: install.Command, Token: token}, seen
 }
+
+// signInPage stands in for what github.com serves at the public download URL
+// of a private repository: a page, with a 200 on it, that is not the asset.
+const signInPage = "<!DOCTYPE html><html><body>Sign in to GitHub</body></html>"
 
 // toolBody is what the fixture's releases publish, so a destination holding it
 // really is the file the release describes and "already installed" is a fact
 // about the bytes rather than about the fixture.
 const toolBody = "the released tool"
 
-func assetList(names []string) []map[string]any {
+// assetList describes the assets the way the API does, with both addresses:
+// every asset in a real listing carries "url" alongside
+// "browser_download_url", so a fixture that omits it could never show which of
+// the two the download chose.
+func assetList(base string, names []string) []map[string]any {
 	sum := sha256.Sum256([]byte(toolBody))
 	out := make([]map[string]any, 0, len(names))
 	for _, name := range names {
 		out = append(out, map[string]any{"name": name, "size": len(toolBody),
-			"browser_download_url": "http://example.invalid/x",
+			"browser_download_url": base + "/download/" + name,
+			"url":                  base + "/assets/" + name,
 			"digest":               "sha256:" + hex.EncodeToString(sum[:])})
 	}
 	return out
@@ -412,6 +472,54 @@ func TestInstallOptionsFallBackToTheRealMachine(t *testing.T) {
 	assert.Same(t, &out, opts.pipeOut(), "and with nowhere else to send it, it goes where the report does")
 }
 
+// TestInstallFromAPrivateRepositoryUsesTheAssetEndpoint: the token that read
+// the listing has to reach the download too, or the install ends with the
+// sign-in page written to disk under the tool's name. The fixture serves the
+// bytes only from the API endpoint and only to a bearer request, so a file
+// holding the release is proof of where it came from.
+func TestInstallFromAPrivateRepositoryUsesTheAssetEndpoint(t *testing.T) {
+	src, seen := toolRepo(t, "sesame", "v1.4.0", "tool-linux-amd64")
+	opts, _ := instOpts(t, src)
+
+	_, err := Install(context.Background(), *opts)
+	require.NoError(t, err)
+	assert.Equal(t, toolBody, readFile(t, filepath.Join(opts.BinDir, "tool")))
+	assert.Equal(t, 1, seen.api, "the asset came from its API endpoint")
+	assert.Zero(t, seen.public, "and the public URL was never asked")
+}
+
+// TestInstallFromAPrivateRepositoryPipesWhatItDownloaded: the pipe path builds
+// its own installer, so it needs the token carried to it separately from the
+// path that installs a binary.
+func TestInstallFromAPrivateRepositoryPipesWhatItDownloaded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the pipe command is a shell one")
+	}
+	src, seen := toolRepo(t, "sesame", "v1.4.0", "tool-linux-amd64")
+	opts, _ := instOpts(t, src)
+	opts.Pipe = "cat"
+
+	_, err := Install(context.Background(), *opts)
+	require.NoError(t, err)
+	assert.Equal(t, 1, seen.api)
+	assert.Zero(t, seen.public)
+}
+
+// TestInstallFromAPublicRepositoryStaysOnThePublicURL: the fence around the
+// change. A listing that names an API endpoint, which every real listing does,
+// still downloads from the browser URL when there is no token to authenticate
+// with.
+func TestInstallFromAPublicRepositoryStaysOnThePublicURL(t *testing.T) {
+	src, seen := toolRepo(t, "", "v1.4.0", "tool-linux-amd64")
+	opts, _ := instOpts(t, src)
+
+	_, err := Install(context.Background(), *opts)
+	require.NoError(t, err)
+	assert.Equal(t, toolBody, readFile(t, filepath.Join(opts.BinDir, "tool")))
+	assert.Equal(t, 1, seen.public)
+	assert.Zero(t, seen.api, "no token, no reason to touch the endpoint that wants one")
+}
+
 // emptyEnv is a machine with no home folder and no writable system folder,
 // which is the one case the install location cannot be guessed for.
 type emptyEnv struct{}
@@ -425,7 +533,7 @@ func (emptyEnv) GOOS() string         { return "linux" }
 func noDigestSource(t *testing.T, tag string, assets ...string) selfupdate.Source {
 	t.Helper()
 	list := []map[string]any{{"tag_name": tag, "draft": false, "prerelease": false,
-		"assets": assetList(assets)}}
+		"assets": assetList("http://example.invalid", assets)}}
 	for _, a := range list[0]["assets"].([]map[string]any) {
 		delete(a, "digest")
 	}

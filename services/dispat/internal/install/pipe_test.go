@@ -194,6 +194,15 @@ func TestNewInstallerValidatesNothing(t *testing.T) {
 	assert.Nil(t, i.Validator)
 	assert.Equal(t, "/opt/bin/tool", i.Exe)
 	assert.Equal(t, Command, i.Command, "so its failures name the command the operator typed")
+	assert.Empty(t, i.Token, "no token means the download stays unauthenticated")
+}
+
+// TestNewInstallerCarriesTheToken: the credential that read the listing is
+// what the asset endpoint of a private repository asks for, so it has to
+// reach the installer rather than stopping at the source.
+func TestNewInstallerCarriesTheToken(t *testing.T) {
+	i := NewInstaller("/opt/bin/tool", nil, "sesame", zeroLogger())
+	assert.Equal(t, "sesame", i.Token)
 }
 
 // zeroLogger is the logger every unit here passes: it writes nowhere, which is

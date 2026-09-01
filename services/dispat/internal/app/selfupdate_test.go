@@ -9,8 +9,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -25,33 +27,80 @@ import (
 // binary for every platform so asset selection never gets in the way.
 func releases(t *testing.T, tags ...string) selfupdate.Source {
 	t.Helper()
-	list := make([]map[string]any, 0, len(tags))
-	for _, tag := range tags {
-		list = append(list, map[string]any{
-			"tag_name": tag, "draft": false,
-			"prerelease": len(tag) > 0 && tag[len(tag)-1] >= '0' && strings.Contains(tag, "-rc."),
-			"assets": []map[string]any{{
-				"name": selfupdate.CurrentAssetName(), "browser_download_url": "http://example.invalid/x",
-				"size": 1, "digest": "",
-			}},
-		})
+	src, _ := releaseRepo(t, "", tags...)
+	return src
+}
+
+// releaseRepo is what releases is built on, with both download addresses a
+// real release carries and a count of which one was asked for.
+//
+// A token makes the repository private: the listing and the asset's API
+// endpoint then demand it, and the public URL answers with a sign-in page.
+//
+// Neither address ever serves an asset of the size the listing advertises, on
+// purpose. The binary a self-update would replace here is the test binary, so
+// the download has to fail after the request has been made rather than
+// succeed: what it proves is which address was asked and with what, which is
+// decided before a single byte arrives.
+func releaseRepo(t *testing.T, token string, tags ...string) (selfupdate.Source, *routes) {
+	t.Helper()
+	var base string
+	seen := &routes{}
+	list := func() []map[string]any {
+		out := make([]map[string]any, 0, len(tags))
+		for _, tag := range tags {
+			name := selfupdate.CurrentAssetName()
+			out = append(out, map[string]any{
+				"tag_name": tag, "draft": false,
+				"prerelease": len(tag) > 0 && tag[len(tag)-1] >= '0' && strings.Contains(tag, "-rc."),
+				"assets": []map[string]any{{
+					"name": name, "browser_download_url": base + "/download/" + name,
+					"url":  base + "/assets/" + name,
+					"size": 1, "digest": "",
+				}},
+			})
+		}
+		return out
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if tag, ok := afterTags(req.URL.Path); ok {
-			for _, r := range list {
-				if r["tag_name"] == tag {
-					_ = json.NewEncoder(w).Encode(r)
-					return
-				}
+		authed := token == "" || req.Header.Get("Authorization") == "Bearer "+token
+		switch {
+		case strings.HasPrefix(req.URL.Path, "/download/"):
+			seen.public++
+			fmt.Fprint(w, signInPage)
+		case strings.HasPrefix(req.URL.Path, "/assets/"):
+			seen.api++
+			if !authed {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Not Found"}`)
+				return
 			}
-			w.WriteHeader(http.StatusNotFound)
-			return
+			assert.Equal(t, "application/octet-stream", req.Header.Get("Accept"))
+			fmt.Fprint(w, "the released binary")
+		default:
+			if !authed {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"message":"Not Found"}`)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			releases := list()
+			if tag, ok := afterTags(req.URL.Path); ok {
+				for _, r := range releases {
+					if r["tag_name"] == tag {
+						_ = json.NewEncoder(w).Encode(r)
+						return
+					}
+				}
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(releases)
 		}
-		_ = json.NewEncoder(w).Encode(list)
 	}))
 	t.Cleanup(srv.Close)
-	return selfupdate.Source{APIURL: srv.URL, Owner: "o", Repo: "r"}
+	base = srv.URL
+	return selfupdate.Source{APIURL: srv.URL, Owner: "o", Repo: "r", Token: token}, seen
 }
 
 func afterTags(path string) (string, bool) {
@@ -132,6 +181,38 @@ func TestSelfUpdateRefusesToReplaceWhatItDoesNotOwn(t *testing.T) {
 	_, err = SelfUpdate(context.Background(), *o)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), selfupdate.GoInstallCommand)
+}
+
+// TestSelfUpdateFromAPrivateRepositoryUsesTheAssetEndpoint: the token the
+// source read the listing with reaches the installer, so the download goes to
+// the asset's API endpoint carrying it and the public URL, which would answer
+// with a sign-in page, is never asked. The transfer is then refused on its
+// size, which is how this fixture stops short of replacing the test binary.
+func TestSelfUpdateFromAPrivateRepositoryUsesTheAssetEndpoint(t *testing.T) {
+	src, seen := releaseRepo(t, "sesame", "services/dispat/v1.2.0")
+	o, _ := opts(t, released, src)
+	o.GOOS, o.GOARCH = runtime.GOOS, runtime.GOARCH
+
+	_, err := SelfUpdate(context.Background(), *o)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the download is incomplete",
+		"the endpoint answered with bytes, which is what the credential bought")
+	assert.Equal(t, 1, seen.api)
+	assert.Zero(t, seen.public, "a token means the public URL is never asked")
+}
+
+// TestSelfUpdateFromAPublicRepositoryStaysOnThePublicURL: the fence around the
+// change. Every real listing names an API endpoint, and without a token the
+// download still goes to the browser URL as it always did.
+func TestSelfUpdateFromAPublicRepositoryStaysOnThePublicURL(t *testing.T) {
+	src, seen := releaseRepo(t, "", "services/dispat/v1.2.0")
+	o, _ := opts(t, released, src)
+	o.GOOS, o.GOARCH = runtime.GOOS, runtime.GOARCH
+
+	_, err := SelfUpdate(context.Background(), *o)
+	require.Error(t, err)
+	assert.Equal(t, 1, seen.public)
+	assert.Zero(t, seen.api, "no token, no reason to touch the endpoint that wants one")
 }
 
 // TestSelfUpdateCheckStillWorksForAGoInstallBuild: it cannot replace the

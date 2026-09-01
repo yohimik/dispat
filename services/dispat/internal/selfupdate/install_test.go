@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -450,9 +452,9 @@ func names(entries []os.DirEntry) []string {
 }
 
 // TestInstallWithATokenDownloadsFromTheAPIEndpoint: a token moves the
-// download to the asset's API endpoint with the octet-stream Accept — the
-// address that answers for a repository the public URL will not serve — and
-// the public URL is left alone.
+// download to the asset's API endpoint with the octet-stream Accept, which is
+// the address that answers for a repository the public URL will not serve,
+// and the public URL is left alone.
 func TestInstallWithATokenDownloadsFromTheAPIEndpoint(t *testing.T) {
 	requireExec(t)
 	dir := t.TempDir()
@@ -482,7 +484,7 @@ func TestInstallWithATokenDownloadsFromTheAPIEndpoint(t *testing.T) {
 	assert.Zero(t, publicHits, "a token means the public URL is never asked")
 }
 
-// TestInstallWithoutATokenIgnoresTheAPIEndpoint: no token, no change — the
+// TestInstallWithoutATokenIgnoresTheAPIEndpoint: no token, no change. The
 // public URL serves the bytes exactly as before, unauthenticated, even when
 // the listing reported an API endpoint.
 func TestInstallWithoutATokenIgnoresTheAPIEndpoint(t *testing.T) {
@@ -498,4 +500,122 @@ func TestInstallWithoutATokenIgnoresTheAPIEndpoint(t *testing.T) {
 	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
 	_, err := i.Install(context.Background(), a)
 	require.NoError(t, err)
+}
+
+// TestInstallWithATokenAndNoAPIEndpointUsesThePublicURL: an older GitHub
+// Enterprise listing carries no per-asset "url", so there is no endpoint to
+// authenticate against. The download then goes to the public URL exactly as
+// it always did, and it carries no credentials: assetServer refuses an
+// Authorization header, which is what proves the token stayed behind.
+func TestInstallWithATokenAndNoAPIEndpointUsesThePublicURL(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	newBinary := []byte("#!/bin/sh\necho \"dispat 1.1.0 (test)\"\n")
+	a, _ := assetServer(t, newBinary)
+	require.Empty(t, a.APIURL, "the fixture stands in for a listing that named no endpoint")
+
+	i := &Installer{Exe: exe, Token: "sesame", Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), a)
+	require.NoError(t, err)
+}
+
+// TestInstallDropsTheTokenOnARedirectToAnotherHost: the API endpoint answers
+// with a redirect to object storage, and the credential must not travel with
+// it. Go decides that on the hostname alone, so the two servers here answer
+// under names of their own rather than both being loopback; without that the
+// header would be forwarded and the test would prove nothing. The bytes still
+// arrive and are still verified.
+func TestInstallDropsTheTokenOnARedirectToAnotherHost(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	newBinary := []byte("#!/bin/sh\necho \"dispat 1.1.0 (test)\"\n")
+	storageSeen := 0
+	storageAuth := "not asked"
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		storageSeen++
+		storageAuth = req.Header.Get("Authorization")
+		w.Header().Set("Content-Length", fmt.Sprint(len(newBinary)))
+		_, _ = w.Write(newBinary)
+	}))
+	t.Cleanup(storage.Close)
+	storageURL := atHost(t, storage.URL, "storage.test") + "/objects/1"
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "Bearer sesame", req.Header.Get("Authorization"),
+			"the endpoint that issues the redirect is the one the token is for")
+		http.Redirect(w, req, storageURL, http.StatusFound)
+	}))
+	t.Cleanup(api.Close)
+
+	sum := sha256.Sum256(newBinary)
+	a := Asset{
+		Name: CurrentAssetName(), URL: "http://public.test/never-asked",
+		APIURL: atHost(t, api.URL, "api.test") + "/assets/1",
+		Size:   int64(len(newBinary)), Digest: "sha256:" + hex.EncodeToString(sum[:]),
+	}
+
+	i := &Installer{Exe: exe, Token: "sesame", Client: loopbackClient(),
+		Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), a)
+	require.NoError(t, err)
+	assert.Equal(t, 1, storageSeen, "the redirect was followed")
+	assert.Empty(t, storageAuth, "object storage is another host and never sees the credential")
+}
+
+// TestInstallReportsWhatTheAPIEndpointAnswered: a token that the repository
+// does not accept, or an asset that is no longer there, comes back as a status
+// rather than as a checksum complaint about an error page.
+func TestInstallReportsWhatTheAPIEndpointAnswered(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"message":"Not Found"}`)
+	}))
+	t.Cleanup(api.Close)
+	a := Asset{Name: CurrentAssetName(), URL: "http://public.test/never-asked", APIURL: api.URL + "/assets/1"}
+
+	i := &Installer{Exe: exe, Token: "sesame"}
+	_, err := i.Install(context.Background(), a)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "404", "the refusal names the status the endpoint gave")
+	assert.Contains(t, err.Error(), a.Name)
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	assert.Equal(t, []string{"dispat"}, names(entries), "the staged download is removed")
+}
+
+// atHost rewrites a test server's URL to answer under a name of its own,
+// keeping the port. Two httptest servers are both 127.0.0.1, and Go compares
+// hostnames when it decides whether a redirect may carry the Authorization
+// header, so a cross-host redirect cannot be expressed any other way.
+func atHost(t *testing.T, server, host string) string {
+	t.Helper()
+	u, err := url.Parse(server)
+	require.NoError(t, err)
+	u.Host = net.JoinHostPort(host, u.Port())
+	return u.String()
+}
+
+// loopbackClient resolves every hostname to the loopback interface, which is
+// what makes the names atHost invents reachable.
+func loopbackClient() *http.Client {
+	var d net.Dialer
+	return &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			_, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			return d.DialContext(ctx, network, net.JoinHostPort("127.0.0.1", port))
+		},
+	}}
 }
