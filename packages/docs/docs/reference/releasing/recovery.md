@@ -63,32 +63,35 @@ after the run has started. Such a commit reaches the release at the very end, as
 packages have already published: refusing there would leave a released package with no commit, no tag and nothing on
 the remote.
 
-dispat therefore recovers rather than refuses. It pulls the branch, replays its release commit on top of what landed,
-moves the release tags onto the replayed commit, and pushes again. The run exits `0` and says what it did:
+dispat therefore recovers rather than refuses, and it does so by joining the two rather than choosing between them. It
+pulls the branch and merges what landed with its release commit, leaving that commit exactly as it was, and pushes the
+merge. The run exits `0` and says what it did:
 
 ```console
-12:04:05 WRN pulled the branch during the release to sync changes that landed while it ran; the release commit was replayed on top of them branch=main code=W242 remote=origin
+12:04:05 WRN pulled the branch during the release to sync changes that landed while it ran; the release tags point at the tree that was planned and the release commit was merged on top branch=main code=W242 remote=origin
 ```
 
-The warning is there because the release went out on a tree that is not the one the run was planned against. What was
-planned is still what was released: the commit that arrived was not in the plan, and it is not in the changelog entries
-or the version numbers this run wrote. It sits underneath the release commit, and therefore inside the window the
-release just closed, so it carries no entry of its own and will not release anything on the next run. Read the
-`W242` warning as a prompt to check whether that commit needed a release, and cut one for it if it did.
+Nothing dispat made is rewritten. The release commit keeps its identity and its tags keep naming it, so the tagged tree
+is still the one the release recorded: the changelog entries it wrote and the version rewrites it made are inside it,
+and anything resolving the tag gets what was published. Only the branch tip changes, into a merge whose first parent is
+the release commit and whose second is what arrived. The merge itself is a `chore(release)` commit, and
+[`nonPackageScopes`](../../configuration/parser.md#nonpackagescopes) exempts that scope, so it names no package.
 
-Tags are only ever pushed on the commit that was pushed. If the replay conflicts with what landed, dispat has nothing
-to decide on its own and stops:
+The commit that arrived is outside the tag's ancestry, which is where it belongs. It was not in this run's plan, it is
+not in this run's records, and the next run plans it and releases it on its own terms, with an entry of its own.
+
+The warning is there because the branch the release went out on is not the branch the run was planned against. Read it
+as a prompt to check that the merge is the history you wanted.
+
+If the merge conflicts, dispat has nothing to decide on its own and stops:
 
 ```console
 12:04:05 ERR push failed code=E224 error="commits landed on origin/main during the release and could not be merged with it: ..." remote=origin
 ```
 
-The run exits non-zero, no tag reaches the remote, the working tree is left out of the rebase dispat started, and the
+The run exits non-zero, no tag reaches the remote, the working tree is left out of the merge dispat started, and the
 [release lock](./release-lock.md) is given back as it is on every other way out. Merge the two sides yourself, then
 push the release commit and its tags.
-
-A release whose tag is pinned to a commit its own scripts exported is never replayed, because replaying rewrites that
-commit too. dispat reports the same failure and leaves the merge to you.
 
 Read [Concepts](../../concepts.md#catch-up-failed-consumers-are-never-lost) to understand the properties that make this
 safe and why dispat needs no state file. You can look up each diagnostic code in [Diagnostic codes](../plan-errors.md).

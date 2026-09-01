@@ -473,7 +473,7 @@ func mutates(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "push", "commit", "add", "checkout", "clean":
+	case "push", "commit", "add", "checkout", "clean", "merge":
 		return true
 	case "tag":
 		return len(args) > 1 && args[1] != "--list"
@@ -1035,28 +1035,36 @@ func classifyPush(err error) error {
 	return err
 }
 
-// Reapply replays the commits this clone has and the remote does not on top of
-// the remote's tip of branch: the recovery from a push refused because someone
-// landed work while the release ran.
+// MergeRemote joins the remote's tip of branch into the checked-out branch:
+// the recovery from a push refused because someone landed work while the
+// release ran.
 //
-// A rebase rather than a merge, so what comes out is the branch's history with
-// this run's commits at the end of it, which is what the release then tags and
-// pushes. On a conflict the rebase is undone before the error is returned, so
-// the working tree is left exactly as the run had it rather than mid-rebase.
+// A merge rather than a rebase, and that is the whole design. Nothing this run
+// already made is rewritten, so the release commit keeps its identity, the
+// tags this leg wrote still name the commit they were written on, and a commit
+// a package's own script exported is still the commit it exported. The only
+// thing that changes is the branch's tip.
+//
+// The merge is made from the branch, so the release commit is the first parent
+// and the commits that arrived are the second. Either order would do for the
+// planner, which reads the merge's own message and finds a scope it exempts,
+// but this order is the one a single command can make and a single command can
+// undo: on a conflict the merge is aborted and the working tree is left
+// exactly as the run had it, rather than mid-merge or on a detached HEAD.
 //
 // The fetch is deliberately --no-tags: the tags this run just created are its
 // own records, and pulling the remote's would be a second, unrelated change to
 // the refs under a run that is already recovering from one surprise.
-func (c *CLI) Reapply(ctx context.Context, remote, branch string) error {
+func (c *CLI) MergeRemote(ctx context.Context, remote, branch, message string) error {
 	if _, err := c.run(ctx, "fetch", "--no-tags", remote, branch); err != nil {
 		return err
 	}
-	if _, err := c.run(ctx, "rebase", "FETCH_HEAD"); err != nil {
+	if _, err := c.run(ctx, "merge", "--no-edit", "-m", message, "FETCH_HEAD"); err != nil {
 		// The abort's own failure is not what the caller needs to hear about:
-		// the rebase is the thing that did not work, and saying so twice would
+		// the merge is the thing that did not work, and saying so twice would
 		// bury it.
-		if _, abortErr := c.run(ctx, "rebase", "--abort"); abortErr != nil {
-			c.Log.Warn().Err(abortErr).Msg("could not abort the rebase")
+		if _, abortErr := c.run(ctx, "merge", "--abort"); abortErr != nil {
+			c.Log.Warn().Err(abortErr).Msg("could not abort the merge")
 		}
 		return err
 	}
@@ -1087,8 +1095,8 @@ type PushReport struct {
 // else pushed while this run was working, and the answer to that is to look,
 // not to overwrite their commits. Only the tag refs, which are dispat's own
 // namespace, are ever forced. A refusal of that kind comes back wrapping
-// ErrRejected, so the caller can replay its commits on the new tip with
-// Reapply and push again rather than reporting a release that never landed.
+// ErrRejected, so the caller can join what landed with MergeRemote and push
+// again rather than reporting a release that never landed.
 func (c *CLI) Push(ctx context.Context, remote string, tags []string, force bool) (PushReport, error) {
 	var report PushReport
 	if _, err := c.run(ctx, "push", remote, "HEAD"); err != nil {

@@ -1114,16 +1114,18 @@ func TestPushReportsARejectedBranchAsRecoverable(t *testing.T) {
 	assert.ErrorIs(t, err, ErrRejected, "a branch that moved is something the caller can recover from")
 	assert.Contains(t, err.Error(), "[rejected]", "and the wrapped error still says what git said")
 
-	// The recovery itself: what landed comes down, the local commit goes on
-	// top of it, and the push then succeeds.
+	// The recovery itself: what landed is joined with the local commit, which
+	// keeps the identity it had, and the push then succeeds.
+	before, err := cli.HeadSHA(ctx)
+	require.NoError(t, err)
 	branch, err := cli.CurrentBranch(ctx)
 	require.NoError(t, err)
-	require.NoError(t, cli.Reapply(ctx, "origin", branch))
-	subjects, oerr := exec.Command("git", "-C", root, "log", "--format=%s", "-3").Output()
+	require.NoError(t, cli.MergeRemote(ctx, "origin", branch, "chore(release): merge origin/"+branch))
+	parents, oerr := exec.Command("git", "-C", root, "rev-list", "--parents", "-n", "1", "HEAD").Output()
 	require.NoError(t, oerr)
-	lines := strings.Split(strings.TrimSpace(string(subjects)), "\n")
-	assert.Equal(t, "chore(release): core@0.2.0", lines[0], "the release commit is on top")
-	assert.Equal(t, "chore: landed elsewhere", lines[1], "and what landed is underneath it")
+	fields := strings.Fields(strings.TrimSpace(string(parents)))
+	require.Len(t, fields, 3, "the tip is a merge of two commits")
+	assert.Equal(t, before, fields[1], "the release commit is the first parent and was not rewritten")
 	_, err = cli.Push(ctx, "origin", nil, false)
 	assert.NoError(t, err)
 
@@ -1136,10 +1138,10 @@ func TestPushReportsARejectedBranchAsRecoverable(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrRejected)
 }
 
-// TestReapplyUndoesARebaseItCannotFinish: a conflict leaves the working tree
-// as the run had it rather than half way through a rebase somebody else then
-// has to find and abort.
-func TestReapplyUndoesARebaseItCannotFinish(t *testing.T) {
+// TestMergeRemoteUndoesAMergeItCannotFinish: a conflict leaves the working
+// tree as the run had it rather than half way through a merge somebody else
+// then has to find and abort.
+func TestMergeRemoteUndoesAMergeItCannotFinish(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
@@ -1172,9 +1174,10 @@ func TestReapplyUndoesARebaseItCannotFinish(t *testing.T) {
 
 	branch, err := cli.CurrentBranch(ctx)
 	require.NoError(t, err)
-	require.Error(t, cli.Reapply(ctx, "origin", branch), "the two sides wrote the same file")
+	require.Error(t, cli.MergeRemote(ctx, "origin", branch, "chore(release): merge"),
+		"the two sides wrote the same file")
+	assert.NoFileExists(t, filepath.Join(root, ".git", "MERGE_HEAD"))
 	assert.NoDirExists(t, filepath.Join(root, ".git", "rebase-merge"))
-	assert.NoDirExists(t, filepath.Join(root, ".git", "rebase-apply"))
 	head, err := exec.Command("git", "-C", root, "log", "--format=%s", "-1").Output()
 	require.NoError(t, err)
 	assert.Equal(t, "chore(release): core@0.2.0", strings.TrimSpace(string(head)),

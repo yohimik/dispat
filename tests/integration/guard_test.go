@@ -203,13 +203,18 @@ func TestGuardsAreUnsetByDefault(t *testing.T) {
 // while the release is running: exactly the window the behind-remote guard
 // cannot cover, because it closes before the plan exists and this happens
 // after it. The file it writes decides whether the release commit can be
-// replayed on top of what landed, since a conflict is a conflict over content.
+// merged with what landed, since a conflict is a conflict over content.
+//
+// It fires once. A scenario that releases twice is asking what the run after
+// the recovery does, and a second foreign push would answer a different
+// question; the marker sits at the repository root, which no release commit
+// stages.
 func midReleasePush(t *testing.T, bare, message, file, contents string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the mid-release push is a POSIX shell script")
 	}
-	return strings.Join([]string{
+	return "if [ ! -f ../../pushed.marker ]; then touch ../../pushed.marker && " + strings.Join([]string{
 		"d=$(mktemp -d)",
 		"git clone -q --branch " + harness.DefaultBranch + " " + shellQuote(bare) + " \"$d\"",
 		"printf '%s' " + shellQuote(contents) + " > \"$d\"/" + file,
@@ -217,26 +222,28 @@ func midReleasePush(t *testing.T, bare, message, file, contents string) string {
 		"git -C \"$d\" -c user.email=other@dispat.test -c user.name='other clone' commit -q -m " +
 			shellQuote(message),
 		"git -C \"$d\" push -q origin HEAD:refs/heads/" + harness.DefaultBranch,
-	}, " && ")
+	}, " && ") + "; fi"
 }
 
 // shellQuote wraps a value in single quotes for the script above.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// TestReleaseReappliesWhatLandedDuringTheRun: the recovery at the far end of a
+// TestReleaseMergesWhatLandedDuringTheRun: the recovery at the far end of a
 // release. The behind-remote guard closes before the plan is computed, so a
 // commit pushed while the run is working reaches the finalize push as a
 // rejection, and the run has already published: refusing there would leave a
 // released package with no commit, no tag and nothing on the remote.
 //
-// So the release takes what landed, replays its own commit on top of it, moves
-// its tags onto the replayed commit and pushes again, and says so at warning
-// level: what went out is not the tree the run was planned against.
+// So the release joins the two rather than choosing between them. Nothing it
+// made is rewritten: the release commit keeps its identity and its tag, so the
+// tagged tree still carries the changelog and the version rewrites the release
+// recorded. Only the branch tip changes, into a merge of the release commit
+// and what arrived.
 //
-// The release is still the one that was planned. The commit that arrived was
-// not in the plan and is not in the record this run wrote, which is asserted
-// here because it is the whole reason the recovery is safe.
-func TestReleaseReappliesWhatLandedDuringTheRun(t *testing.T) {
+// The commit that arrived is therefore outside the tag's ancestry, and that is
+// the property this whole shape exists for: it was not in this run's plan, it
+// is not in this run's record, and the next run releases it on its own terms.
+func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 	r := harness.New(t)
 	bare := r.AddBareRemote()
 	cfg := libsConfig(midReleasePush(t, bare, "feat(core): landed mid-release", "NOTES.md", "landed\n"), 1)
@@ -252,36 +259,54 @@ func TestReleaseReappliesWhatLandedDuringTheRun(t *testing.T) {
 		"the pull during the release is reported: %v", res.Events)
 	assert.Contains(t, res.Stdout, "pulled the branch during the release")
 
-	// The release landed, on top of what arrived rather than beside it.
+	// The branch tip is a merge, and the release commit is its first parent:
+	// still on the branch, still the commit it was, never rewritten.
+	parents := strings.Fields(r.Git("rev-list", "--parents", "-n", "1", "HEAD"))
+	require.Len(t, parents, 3, "the tip joins two commits; log:\n%s", r.Git("log", "--format=%h %s", "-5"))
+	release := parents[1]
+	assert.Equal(t, "chore(release): core@0.1.0",
+		strings.TrimSpace(r.Git("log", "-1", "--format=%s", release)))
+
+	// And the tag names that commit, which is what keeps the tagged tree the
+	// one the release recorded.
 	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.0")),
+		"the tag was written on the release commit and stayed there")
 	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0",
 		"the tag reached the remote on the second attempt")
-	log := r.Git("log", "--format=%s", "-3")
-	assert.Contains(t, log, "landed mid-release", "the foreign commit is in this branch's history")
-	first, _, _ := strings.Cut(log, "\n")
-	assert.Contains(t, first, "chore(release)", "and the release commit sits on top of it")
 
-	// The tag is on the commit that was actually pushed, which is what makes
-	// the record readable at all: a tag left on the replaced commit would name
-	// an object on no branch.
-	assert.Equal(t, strings.TrimSpace(r.Git("rev-parse", "HEAD")),
-		strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.0")))
+	// What arrived is on the branch too, and outside the release.
+	assert.Contains(t, r.Git("log", "--format=%s"), "landed mid-release")
+	require.Error(t, exec.Command("git", "-C", r.Root, "merge-base", "--is-ancestor",
+		parents[2], release).Run(), "the foreign commit is not inside the release's ancestry")
 
-	// The plan was computed before any of this and did not change: the commit
-	// that arrived mid-run is not in the record this release wrote.
 	changelog, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(changelog), "first")
 	assert.NotContains(t, string(changelog), "landed mid-release",
 		"a commit that arrived after the plan was computed is not in this release's record")
+
+	// The run after the recovery is the point of the shape. It sees the window
+	// the tag opens: the commit that arrived, the release commit's merge, and
+	// nothing else. The merge is a chore(release), which the release scope
+	// exempts, so the only thing in there with a package to name is the
+	// foreign feature, and it releases.
+	next := r.Release()
+	require.Equal(t, 0, next.Code, "stdout:\n%s\nstderr:\n%s", next.Stdout, next.Stderr)
+	assert.True(t, r.HasTag("core@0.2.0"), "what landed during the release is released next; tags: %v", r.TagList())
+	assert.False(t, harness.HasCode(next.Events, "W131"),
+		"neither the release commit nor the merge resolves to nothing noisily: %v", next.Events)
+	after, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(after), "landed mid-release", "and it is recorded where it belongs")
 }
 
-// TestReleaseCannotReapplyWhatConflicts: the other outcome. What landed
-// touches the same file the release commit writes, so the replay conflicts and
-// there is nothing dispat can decide on its own. It says which side of the
-// problem it is on, leaves no tag on the remote, leaves the working tree out
-// of the rebase it started, and gives the lock back on the way out.
-func TestReleaseCannotReapplyWhatConflicts(t *testing.T) {
+// TestReleaseCannotMergeWhatConflicts: the other outcome. What landed touches
+// the same file the release commit writes, so the merge conflicts and there is
+// nothing dispat can decide on its own. It says which side of the problem it
+// is on, leaves no tag on the remote, leaves the working tree out of the merge
+// it started, and gives the lock back on the way out.
+func TestReleaseCannotMergeWhatConflicts(t *testing.T) {
 	r := harness.New(t)
 	bare := r.AddBareRemote()
 	script := midReleasePush(t, bare, "docs(core): a changelog of their own",
@@ -302,7 +327,7 @@ func TestReleaseCannotReapplyWhatConflicts(t *testing.T) {
 	assert.NotContains(t, remote, "refs/tags/core@0.1.0", "a release nobody could push publishes no tag")
 	assertLockCleared(t, r, bare)
 
-	// The rebase is undone rather than left for the next person to find.
+	// The merge is undone rather than left for the next person to find.
+	assert.NoFileExists(t, r.Path(".git", "MERGE_HEAD"))
 	assert.NoDirExists(t, r.Path(".git", "rebase-merge"))
-	assert.NoDirExists(t, r.Path(".git", "rebase-apply"))
 }
