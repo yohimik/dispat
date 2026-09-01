@@ -136,6 +136,7 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 	installer := &selfupdate.Installer{
 		Client:    opts.Source.Client,
 		Validator: selfupdate.VersionValidator{Want: rel.Version.String()},
+		Token:     opts.Source.Token,
 		Log:       opts.Log,
 	}
 	backup, err := installer.Install(ctx, asset)

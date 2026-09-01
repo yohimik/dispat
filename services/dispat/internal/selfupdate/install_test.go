@@ -448,3 +448,54 @@ func names(entries []os.DirEntry) []string {
 	}
 	return out
 }
+
+// TestInstallWithATokenDownloadsFromTheAPIEndpoint: a token moves the
+// download to the asset's API endpoint with the octet-stream Accept — the
+// address that answers for a repository the public URL will not serve — and
+// the public URL is left alone.
+func TestInstallWithATokenDownloadsFromTheAPIEndpoint(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	newBinary := []byte("#!/bin/sh\necho \"dispat 1.1.0 (test)\"\n")
+	publicHits := 0
+	public := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { publicHits++ }))
+	t.Cleanup(public.Close)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "Bearer sesame", req.Header.Get("Authorization"))
+		assert.Equal(t, "application/octet-stream", req.Header.Get("Accept"))
+		w.Header().Set("Content-Length", fmt.Sprint(len(newBinary)))
+		_, _ = w.Write(newBinary)
+	}))
+	t.Cleanup(api.Close)
+	sum := sha256.Sum256(newBinary)
+	a := Asset{
+		Name: CurrentAssetName(), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1",
+		Size: int64(len(newBinary)), Digest: "sha256:" + hex.EncodeToString(sum[:]),
+	}
+
+	i := &Installer{Exe: exe, Token: "sesame", Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), a)
+	require.NoError(t, err)
+	assert.Zero(t, publicHits, "a token means the public URL is never asked")
+}
+
+// TestInstallWithoutATokenIgnoresTheAPIEndpoint: no token, no change — the
+// public URL serves the bytes exactly as before, unauthenticated, even when
+// the listing reported an API endpoint.
+func TestInstallWithoutATokenIgnoresTheAPIEndpoint(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	newBinary := []byte("#!/bin/sh\necho \"dispat 1.1.0 (test)\"\n")
+	a, _ := assetServer(t, newBinary)
+	a.APIURL = "http://127.0.0.1:1/never-asked"
+
+	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), a)
+	require.NoError(t, err)
+}

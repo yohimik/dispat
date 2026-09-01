@@ -69,7 +69,11 @@ type Source struct {
 type Asset struct {
 	Name string
 	URL  string
-	Size int64
+	// APIURL is the asset's REST endpoint, the address that serves the bytes
+	// when the request is authenticated. URL only works for public
+	// repositories.
+	APIURL string
+	Size   int64
 	// Digest is the checksum GitHub computed, "sha256:<hex>". Older GitHub
 	// Enterprise versions do not send one, and it is then empty.
 	Digest string
@@ -124,6 +128,7 @@ type apiRelease struct {
 type apiAsset struct {
 	Name   string `json:"name"`
 	URL    string `json:"browser_download_url"`
+	APIURL string `json:"url"`
 	Size   int64  `json:"size"`
 	Digest string `json:"digest"`
 }
@@ -353,7 +358,7 @@ func (s *Source) convert(raw apiRelease) (Release, bool) {
 func assets(raw []apiAsset) []Asset {
 	out := make([]Asset, 0, len(raw))
 	for _, a := range raw {
-		out = append(out, Asset{Name: a.Name, URL: a.URL, Size: a.Size, Digest: a.Digest})
+		out = append(out, Asset{Name: a.Name, URL: a.URL, APIURL: a.APIURL, Size: a.Size, Digest: a.Digest})
 	}
 	return out
 }

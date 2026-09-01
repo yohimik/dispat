@@ -52,8 +52,8 @@ type Fetcher interface {
 // at all, so insisting on either would refuse installs that are perfectly
 // correct. The size and the checksum the release published stand in its place,
 // and they check the transfer rather than the program.
-func NewInstaller(exe string, client *http.Client, log zerolog.Logger) *selfupdate.Installer {
-	return &selfupdate.Installer{Exe: exe, Client: client, Command: Command, Log: log}
+func NewInstaller(exe string, client *http.Client, token string, log zerolog.Logger) *selfupdate.Installer {
+	return &selfupdate.Installer{Exe: exe, Client: client, Command: Command, Token: token, Log: log}
 }
 
 // Stage runs fn with a verified copy of the asset in a folder of its own, and

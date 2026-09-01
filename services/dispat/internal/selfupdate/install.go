@@ -63,7 +63,10 @@ type Installer struct {
 	// Command is the command word this installer's failures name. Empty is
 	// "selfupdate"; see commandOr.
 	Command string
-	Log     zerolog.Logger
+	// Token, when set, sends the download to Asset.APIURL with the same
+	// bearer credential Source uses for the listing. See download.
+	Token string
+	Log   zerolog.Logger
 }
 
 // what names this installer in the errors it returns.
@@ -171,14 +174,26 @@ func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err er
 // download streams the asset into f, checking as it goes that what arrives is
 // the size the release advertised and hashes to the digest it published.
 //
-// The request carries no Authorization header on purpose. The download URL
-// redirects to object storage, and Go forwards headers across redirects, so an
-// authenticated request would arrive at a host that rejects it. A release
-// asset needs no credentials anyway.
+// Without a token the request goes to the public download URL and carries no
+// Authorization header: that URL redirects to object storage, and a public
+// asset needs no credentials. With a token it goes to the asset's API
+// endpoint asking for application/octet-stream — the address that answers
+// when the repository is not public — and the redirect to object storage is
+// safe because Go strips the Authorization header when a redirect changes
+// hosts.
 func (i *Installer) download(ctx context.Context, a Asset, f *os.File) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+	url := a.URL
+	authed := i.Token != "" && a.APIURL != ""
+	if authed {
+		url = a.APIURL
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("%s: %w", i.what(), err)
+	}
+	if authed {
+		req.Header.Set("Accept", "application/octet-stream")
+		req.Header.Set("Authorization", "Bearer "+i.Token)
 	}
 	resp, err := i.client().Do(req)
 	if err != nil {

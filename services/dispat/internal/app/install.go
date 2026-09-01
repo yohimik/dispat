@@ -221,7 +221,7 @@ func alreadyInstalled(opts InstallOptions, target install.Target,
 // whatever was there as its backup.
 func installAsset(ctx context.Context, opts InstallOptions, target install.Target,
 	rel selfupdate.Release, asset selfupdate.Asset) error {
-	installer := install.NewInstaller(target.Path(), opts.Source.Client, opts.Log)
+	installer := install.NewInstaller(target.Path(), opts.Source.Client, opts.Source.Token, opts.Log)
 	backup, err := installer.Install(ctx, asset)
 	if err != nil {
 		opts.Log.Error().Err(err).Msg("install failed")
@@ -250,7 +250,7 @@ func installAsset(ctx context.Context, opts InstallOptions, target install.Targe
 // it, in the install folder, and reports what the command made of it.
 func runInstallPipe(ctx context.Context, opts InstallOptions, target install.Target,
 	rel selfupdate.Release, asset selfupdate.Asset) error {
-	installer := install.NewInstaller(target.Path(), opts.Source.Client, opts.Log)
+	installer := install.NewInstaller(target.Path(), opts.Source.Client, opts.Source.Token, opts.Log)
 	pipe := install.Pipe{
 		Command: opts.Pipe, Dir: target.Dir,
 		Stdout: opts.pipeOut(), Stderr: opts.pipeOut(), Log: opts.Log,

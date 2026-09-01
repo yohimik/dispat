@@ -190,7 +190,7 @@ func TestStageReportsAFolderItCannotMake(t *testing.T) {
 // cannot run here at all, so the size and the checksum the release published
 // are what stands in its place.
 func TestNewInstallerValidatesNothing(t *testing.T) {
-	i := NewInstaller("/opt/bin/tool", nil, zeroLogger())
+	i := NewInstaller("/opt/bin/tool", nil, "", zeroLogger())
 	assert.Nil(t, i.Validator)
 	assert.Equal(t, "/opt/bin/tool", i.Exe)
 	assert.Equal(t, Command, i.Command, "so its failures name the command the operator typed")
