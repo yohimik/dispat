@@ -6,6 +6,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"runtime"
@@ -246,8 +247,17 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 	r := harness.New(t)
 	bare := r.AddBareRemote()
+	srv, bodies := githubFake(t)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
 	cfg := libsConfig(midReleasePush(t, bare, "feat(core): landed mid-release", "NOTES.md", "landed\n"), 1)
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	// A GitHub release too, because the commit its body names is the other
+	// thing the recovery has to get right.
+	cfg.Scripts["publish"] = models.Script{`echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")
@@ -285,6 +295,21 @@ func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 	assert.Contains(t, string(changelog), "first")
 	assert.NotContains(t, string(changelog), "landed mid-release",
 		"a commit that arrived after the plan was computed is not in this release's record")
+
+	// The GitHub release names the release commit. It is created after the
+	// push, when HEAD is already the merge, and the commit it means is the one
+	// the tag is on rather than whatever the branch has moved to since.
+	posted := bodies()
+	require.Len(t, posted, 1, "one release was published")
+	var created struct {
+		Body            string `json:"body"`
+		TargetCommitish string `json:"target_commitish"`
+	}
+	require.NoError(t, json.Unmarshal(posted[0], &created))
+	assert.Contains(t, created.Body, "- commit: "+release)
+	assert.Equal(t, release, created.TargetCommitish)
+	assert.NotContains(t, created.Body, strings.TrimSpace(r.Git("rev-parse", "HEAD")),
+		"the merge the branch ends on is not what the release records")
 
 	// The run after the recovery is the point of the shape. It sees the window
 	// the tag opens: the commit that arrived, the release commit's merge, and

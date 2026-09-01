@@ -182,6 +182,12 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		}
 	}
 	fin.run(ctx, "postCommit", a.cfg.Run.PostCommit)
+	// released is the commit the records name. It is HEAD, except after a
+	// recovery: the branch tip is a merge by then, and what the records mean
+	// is the release commit that became its first parent. Empty until a
+	// recovery happens, so an ordinary run reads HEAD exactly as it always
+	// did.
+	var released string
 	if a.cfg.Commit.PushEnabled() {
 		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
 		report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
@@ -189,7 +195,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			// Somebody pushed to the branch while this run was working. The
 			// release still owes its commit and tags, and the way to deliver
 			// them is to join what landed with what this run made.
-			report, err = a.mergeAndPush(ctx, fin, tags, pushTags)
+			report, released, err = a.mergeAndPush(ctx, fin, tags, pushTags)
 		}
 		a.reportPush(report, fin.remote)
 		if err != nil {
@@ -210,8 +216,12 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		// additionally pinned to the commit via target_commitish (only then
 		// does the SHA exist on the remote). Every resolved releaser gets the
 		// stamp: the dispatch routes each package to one of them.
-		if sha, err := a.git.HeadSHA(ctx); err != nil {
-			a.log.Warn().Err(err).Msg("cannot resolve HEAD, github releases will omit the commit")
+		sha, shaErr := released, error(nil)
+		if sha == "" {
+			sha, shaErr = a.git.HeadSHA(ctx)
+		}
+		if shaErr != nil {
+			a.log.Warn().Err(shaErr).Msg("cannot resolve HEAD, github releases will omit the commit")
 		} else {
 			for _, gh := range fin.gh.all {
 				gh.CommitSHA = sha
@@ -247,13 +257,18 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 // The warning is the point of the whole recovery. The branch the release went
 // out on is not the branch the run was planned against, and nobody reading
 // afterwards should have to work that out from the commit graph.
-func (a *App) mergeAndPush(ctx context.Context, fin finalizer, tags, pushTags []string) (gitx.PushReport, error) {
+//
+// It answers the release commit as well as the push report, because the caller
+// cannot read it off HEAD afterwards: HEAD is the merge by then, and the
+// records this run still has to write are about the commit underneath it.
+func (a *App) mergeAndPush(ctx context.Context, fin finalizer, tags,
+	pushTags []string) (gitx.PushReport, string, error) {
 	branch, err := a.git.CurrentBranch(ctx)
 	if err != nil {
-		return gitx.PushReport{}, err
+		return gitx.PushReport{}, "", err
 	}
 	if branch == "" {
-		return gitx.PushReport{}, fmt.Errorf(
+		return gitx.PushReport{}, "", fmt.Errorf(
 			"commits landed on %s during the release, and this is a detached HEAD with no branch to merge them into",
 			fin.remote)
 	}
@@ -261,17 +276,18 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, tags, pushTags []
 	// the release commit is only its first parent.
 	release, err := a.git.HeadSHA(ctx)
 	if err != nil {
-		return gitx.PushReport{}, err
+		return gitx.PushReport{}, "", err
 	}
 	if err := a.git.MergeRemote(ctx, fin.remote, branch, mergeMessage(fin.remote, branch, release, tags)); err != nil {
-		return gitx.PushReport{}, fmt.Errorf(
+		return gitx.PushReport{}, release, fmt.Errorf(
 			"commits landed on %s/%s during the release and could not be merged with it: %w",
 			fin.remote, branch, err)
 	}
 	a.log.Warn().Str("code", plan.CodePushMerged).Str("remote", fin.remote).Str("branch", branch).
 		Msg("pulled the branch during the release to sync changes that landed while it ran; " +
 			"the release tags point at the tree that was planned and the release commit was merged on top")
-	return a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
+	report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
+	return report, release, err
 }
 
 // mergeMessage is what the recovery's merge commit says.
