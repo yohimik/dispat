@@ -1,5 +1,30 @@
 # Changelog
 
+## services/dispat/v1.7.1 (2026-09-02)
+
+### Fixes
+
+- the tiny binaries build on the fork at 0.43.0-net.1 ([cf86355](https://github.com/yohimik/dispat/commit/cf86355d56962502c266d531d78dbe1c6004ec66)) (by yohimik, Claude Fable 5.1)
+  The two dispat-tiny-linux binaries the release attaches move to the
+  TinyGo fork's 0.43.0-net.1, net.4's content rebased on upstream 0.42.0,
+  with the checksums the release Dockerfile verifies the toolchain
+  against. The spike's base image follows upstream to 0.42.0 and its
+  verdict is re-read there: a host netdev exists now and the tcp, http
+  and dns layers pass, but crypto/tls is still the offload stub that puts
+  plaintext on the wire, so the answer stays no and the fork stays the
+  only toolchain that speaks TLS. The unit-test stage runs one package at
+  a time under a bound, and internals/tinygo.md records all of it.
+
+  The README's projects section gains crier, a single-package repository
+  released through an eighteen-candidate rc train and one graduation, and
+  the landing page reads it from there.
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## services/dispat/v1.7.0 (2026-09-02)
 
 ### Features
