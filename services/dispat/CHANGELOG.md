@@ -1,5 +1,265 @@
 # Changelog
 
+## services/dispat/v1.7.0 (2026-09-02)
+
+### Features
+
+- install from a private github repository ([d198be3](https://github.com/yohimik/dispat/commit/d198be39909b61cb183ecdc74bd5057c6614b5b1)) (by yohimik, Claude Fable 5)
+  A token now authenticates the whole install path rather than only the
+  release listing: dispat install and dispat self-update fetch a private
+  repository's assets from the asset API endpoint, install.sh, install.ps1
+  and the GitHub action do the same, and a release carrying several files
+  installs the one named after the repository without --asset.
+
+- install the conventional asset ([18460f9](https://github.com/yohimik/dispat/commit/18460f9e575d2d5ef61bbee34621fb29fde02470)) (by yohimik, Claude Fable 5)
+  A release carrying more than one file was refused unless --asset named
+  one, which made the flag mandatory for almost every real repository,
+  dispat's own included: its releases carry six binaries and a checksum
+  file.
+
+  Without --asset dispat now looks for the name most projects publish
+  under, the repository's own name and the platform, with the extension
+  selfupdate.AssetName appends on Windows. The name is matched exactly and
+  never as a glob, so a bare invocation installs what the release decided
+  rather than whichever near-miss sorted first, and a release that follows
+  no convention is refused as before, with the name that was tried added
+  to the listing so the reader knows what to answer.
+
+  The single-asset shortcut and every explicit --asset path are unchanged.
+
+- install scripts reach a private repository ([036d897](https://github.com/yohimik/dispat/commit/036d89711c420958068bd5b41749e347bc1cb053)) (by yohimik, Claude Fable 5)
+  The bootstrap scripts authenticated the releases API and then fetched
+  the binary from the public download URL with no headers, which for a
+  private repository is a sign-in page served under a 200: the install
+  failed on its checksum with nothing saying why.
+
+  Both scripts now read the asset's own REST endpoint out of the release
+  and, when a token was given, download from there with the octet-stream
+  Accept and the bearer credential. The credential must not reach the
+  object storage that endpoint redirects to, and each downloader is
+  handled on its terms: curl drops Authorization across a change of host
+  by itself, wget is stopped at the redirect and the location refetched
+  bare, and PowerShell, which forwards the header on 5.1, is stopped the
+  same way. busybox wget can do neither, so a token sent through it is
+  refused rather than leaked. Without a token nothing changes.
+
+  install.sh is now executed against a fake API, once per downloader, so
+  the endpoint choice and the credential's boundary are proven rather than
+  read; install.ps1 has no interpreter in the test image and is held to
+  the same shape by a textual cross-check.
+
+- download release assets with the listing's token ([8368390](https://github.com/yohimik/dispat/commit/836839032048b5056b00ab8bfec6f06f31622a40)) (by yohimik, Claude Fable 5)
+  A repository the listing needed a token for serves its assets only
+  through the asset API endpoint — the public download URL answers with a
+  sign-in page. When the source carries a token, install and self-update
+  now fetch the asset from its API endpoint with the same credential;
+  without one, nothing changes.
+
+### Fixes
+
+- finish a conflicted release ([5b8da48](https://github.com/yohimik/dispat/commit/5b8da4826aa2eb6c4a24d89e4bd328b9b24751f3)) (by yohimik, Claude Fable 5)
+  A recovery whose merge conflicted aborted and failed the run, which
+  leaves a release that has already published with its commit and tags
+  nowhere but the local clone. It completes instead.
+
+  This release's side wins every conflicting file, because that is the
+  tree the tag names and taking the other side would publish content the
+  release never saw; everything the arriving commits changed that did not
+  conflict is in the merge as it is on the clean path. Their side is
+  pushed to a branch of its own, release-conflicts/ followed by what the
+  leg released and a UTC timestamp, plain and never forced, so the work is
+  kept rather than dropped. Both records name the conflicting files and
+  that branch: the GitHub body through a note block, the changelog through
+  the merge commit, since the release commit is tagged and must not be
+  amended. W243 says the same thing in the log, and the run exits 0.
+
+  The tag invariant is untouched, and the republish guard and the bounded
+  retry cover this path's pushes too. E224 is now only for the recovery
+  machinery failing: the quarantine branch refused, the settled merge
+  uncommittable, or a merge that stopped for something other than content.
+
+  The e2e walk gains the two cycles this is about, and the key-features
+  walk keeps the private install; both are what the release build runs
+  against the bytes it exports.
+
+- keep a released tag from moving ([96cdb2b](https://github.com/yohimik/dispat/commit/96cdb2b720309d6ca8173252e0fa5501e1b87707)) (by yohimik, Claude Fable 5)
+  Four ways the mid-release recovery was wrong.
+
+  It re-pushed with commit.force, which defaults on, so a checkout stale
+  enough to have re-planned an already published version would force-move
+  that published tag: the push it recovers from never reached a tag ref,
+  so nothing stood between the two. The remote's tags are now read first
+  and the run stops, naming the tag. Aliases stay movable, because moving
+  them is what every release does.
+
+  It fired on "[rejected]" alone, and the simultaneous-push race prints
+  "[remote rejected]", so the phrase it was meant to recognise was
+  unreachable. The gate now matches both, and every git invocation asks
+  for the C locale so a translated checkout cannot defeat the match. The
+  sentinel also stopped leading the message: git's own words are what a
+  reader of a failed release needs first.
+
+  The merge was refused outright by a repository configured merge.ff=only,
+  and the abort that followed failed too. It is now made with --no-ff,
+  which also pins the first-parent shape the recovery documents.
+
+  It gave up if a commit landed between its own pull and its own push,
+  which is the very surprise it exists to absorb. It now goes round up to
+  three times, capturing the release commit once so the tag it names never
+  moves whichever round lands.
+
+- fall back to the public URL, and read wget's answer ([f5b4760](https://github.com/yohimik/dispat/commit/f5b4760ae4211a46863d41735a366e3ba7d8bce7)) (by yohimik, Claude Fable 5)
+  Three ways the authenticated download was wrong.
+
+  An asset endpoint that refuses ended the install. A token that reads a
+  repository's listing and not its assets is a real shape, and before the
+  endpoint existed that install simply worked, so all three downloaders
+  now try the public URL once more with no credential; the size and the
+  digest still decide what lands, and when both addresses fail the refusal
+  names the status the endpoint gave.
+
+  install.sh threw away wget's exit status, so a refusal that wrote no
+  file read as success. The status is kept and decides, except when a
+  Location came back, which is the one answer an exit code cannot
+  distinguish from a 404. The busybox probe is now the option's own exit
+  code rather than a search of help text nobody promised.
+
+  Both awk walks started at the top of the release, so a release titled
+  after its own asset made the url walk print the author's account URL.
+  They start at the assets array instead.
+
+  install.ps1 caught an exception Windows PowerShell 5.1 never raises: it
+  returns the refused redirect rather than throwing. The response is now
+  asked for and inspected, with the 7.x exception path kept beside it.
+
+- recognise every alias tag, whoever wrote it ([9248d6d](https://github.com/yohimik/dispat/commit/9248d6d54b42537116ee73a0da18f794fbde009e)) (by yohimik, Claude Fable 5)
+  Two ways a moving alias still poisoned a baseline.
+
+  The filter only knew the listing package's own aliases, but an alias
+  belongs to whoever writes it and lands in whichever listing its shape
+  matches: one package's "v1" sits in another's "v{version}" listing
+  looking exactly like a release nobody can parse, and that package's
+  baseline collapsed to its initials from the first alias onwards. The
+  filter is now built from every package's formats, compiled once.
+
+  The matcher assumed the version class was digits and dots regardless of
+  the format, so an alias spelling a plain {version} did not recognise its
+  own prerelease renders and poisoned its own package. It now reads the
+  class off the format as the release-tag matcher does, walks the reduced
+  shapes a prerelease-spelling format renders, and requires the text it
+  captured for {version} to be a version: without that, anything the class
+  allows would pass and a genuinely malformed tag would go out with it.
+
+- record the release commit ([d3299f9](https://github.com/yohimik/dispat/commit/d3299f9673ba568a68fcf7f857507a43a46a70b1)) (by yohimik, Claude Fable 5)
+  The GitHub release is created after the push, and after a mid-release
+  recovery HEAD is the merge by then, so the "commit" line in its body and
+  its target_commitish named the merge rather than the release the record
+  is about.
+
+  The recovery already reads the release commit before merging, since the
+  merge message names it. It now hands that back, and the finalize phase
+  prefers it over HEAD when stamping the releasers. A run with no recovery
+  sets nothing and reads HEAD exactly as before.
+
+- merge what landed during a release instead of rebasing ([5b74cd5](https://github.com/yohimik/dispat/commit/5b74cd5d08f60b0ad8a0bf7dda13a8a3d8aaa00e)) (by yohimik, Claude Fable 5)
+  The recovery from a push somebody pushed under replayed the release
+  commit on top of what arrived, which rewrote it: the tags had to be
+  moved onto the replacement, a release pinned to a commit its own scripts
+  made could not be recovered at all, and the commits that arrived ended
+  up inside the window the release closed, so nothing ever released them.
+
+  It now merges instead. Nothing the run made is rewritten, so the release
+  commit keeps its identity and its tags keep naming it: the tagged tree
+  still carries the changelog entries and version rewrites the release
+  recorded, which is what anything resolving the tag reads. Only the
+  branch tip changes, into a merge whose first parent is the release
+  commit and whose second is what arrived.
+
+  That leaves the arriving commits outside the tag's ancestry, which is
+  where they belong: the next run plans them and releases them with
+  records of their own. The merge commit is a chore(release), so the scope
+  nonPackageScopes exempts keeps it from naming a package, and it carries
+  the release commit and its tags in its body so the join can be audited.
+
+  The merge is made from the branch rather than onto the fetched tip.
+  Either parent order reads the same to the planner, which finds an
+  exempted scope on the merge either way, but this one is a single command
+  that a single command undoes: a conflict aborts back to exactly the tree
+  the run had, rather than mid-merge or on a detached HEAD.
+
+- read past a package's own alias ([4edbab5](https://github.com/yohimik/dispat/commit/4edbab5dca43d159b45fe05d297c1c7cb55c0804)) (by yohimik, Claude Fable 5)
+  A single-package repository releasing as "v1.4.2" could not declare the
+  "v1" a GitHub composite is consumed through: the load-time check refused
+  any alias whose name matched a package's tagFormat, and "v1" matches
+  "v{version}" on the prefix alone. The refusal existed because the
+  baseline reader would take the alias for the newest release tag and read
+  no version out of it, leaving the package looking unreleased.
+
+  Both halves now ask what a name can be read back as rather than what it
+  looks like. The check refuses an alias only when it parses as a release
+  tag, so "v1.4.2" beside "v{version}" stays refused and "v1" becomes
+  legal. The tag listing drops a name that carries no version when one of
+  the package's own alias formats could have written it, which is precise
+  enough to leave a mistyped release tag like "v1.0.0.0" in place, where
+  the initials fallback still measures the window from it.
+
+  Recognising an alias is a matcher rather than a prefix test, so {major},
+  {minor} and {patch} capture one number and stop at a separator. Both
+  readers of a baseline go through the same filter: the planner and the
+  compute command's manifest baselines.
+
+- recover a release push somebody pushed under ([91551ef](https://github.com/yohimik/dispat/commit/91551efe4b27f3d8381b57e8a55ec1d2fef8350c)) (by yohimik, Claude Fable 5)
+  The behind-remote guard closes before the plan is computed, so a commit
+  pushed while the run is working reaches the finalize push as a
+  rejection. The packages have already published by then, and the run
+  ended with the release commit and its tags nowhere but the local clone,
+  which nothing goes back for.
+
+  The push now tells a branch that moved apart from a remote nobody could
+  reach, and the first is recovered: the branch is pulled, the release
+  commit replayed on top of what landed, the tags moved onto the replayed
+  commit and the push retried. The tags therefore only ever reach the
+  remote on the commit that reached it too. W242 reports the recovery,
+  because the release went out on a tree that is not the one it was
+  planned against.
+
+  A replay that conflicts, and a release whose tag is pinned to a commit
+  its own scripts made, are both refused with an error naming that commits
+  landed during the release: the rebase is undone, no tag is pushed, and
+  the lock is given back as on every other way out.
+
+  The commit.verify guard scenario asserted the old failure and now
+  asserts the recovery: what that guard protects is the plan, not the
+  push.
+
+- say what the release token now unlocks ([a754978](https://github.com/yohimik/dispat/commit/a7549788fb95f4c76856fe3107a0b9ac8aee1fc9)) (by yohimik, Claude Fable 5)
+  The token stopped being only a rate-limit lever when the asset download
+  started using it, but the godoc on Source.Token, the comment behind the
+  GITHUB_TOKEN fallback and the download's own commentary all still said
+  so. They now say that a public repository needs no token and a private
+  one needs it for both the listing and the asset.
+
+  The download also had no record of the choice it makes. It now logs the
+  asset, the address it went to and whether the request was authenticated,
+  at debug level and never the credential itself, so a failed private
+  install can be told apart from a public one that went the usual way.
+
+- enumerate release pages on PowerShell 7.6 ([c5ebc04](https://github.com/yohimik/dispat/commit/c5ebc0436209d048797163609a642a31273183cd)) (by yohimik, Claude Fable 5)
+  Invoke-RestMethod stopped enumerating JSON arrays, so a page arrived as
+  one Object[] and the tag filter became member enumeration over every
+  tag — where a shorter tag from another package made Substring throw.
+  Seen as a hard failure in every Windows 'Set up dispat' action step.
+
+### Dependencies
+
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.7.0): 1.6.0 -> 1.7.0
+
+### Authors
+
+- yohimik
+- Claude Fable 5
+
+
 ## services/dispat/v1.6.0 (2026-08-31)
 
 ### Features
