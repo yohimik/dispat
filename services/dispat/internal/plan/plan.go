@@ -1696,6 +1696,11 @@ func (cp *computation) loadTagsAndWindows() error {
 	// whole history) share the listing instead of re-reading it.
 	commitsBySince := make(map[string][]gitx.Commit)
 
+	// Every package's aliases, compiled once: an alias of one package can land
+	// in another's listing, so the filter is the workspace's rather than the
+	// listing owner's. See AliasFilter.
+	aliases := NewAliasFilter(cp.pkgs)
+
 	for i, p := range cp.pkgs {
 		rel := &Release{Pkg: p}
 
@@ -1706,7 +1711,7 @@ func (cp *computation) loadTagsAndWindows() error {
 		if err != nil {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)
 		}
-		tags = cp.withoutIgnoredTags(WithoutAliasTags(tags, p, cp.log))
+		tags = cp.withoutIgnoredTags(aliases.Without(tags, p.Name, cp.log))
 		// Kept for the graduation's dependencies record: reconstructing what a
 		// consumer's last stable release shipped against is a question about
 		// the provider's tags, and the planner holds no other state between
@@ -2677,7 +2682,38 @@ func (cp *computation) versionAt(pkg, commit string) (ccme.Version, bool) {
 	return ccme.Version{}, false
 }
 
-// WithoutAliasTags drops a package's own moving aliases from its tag listing.
+// AliasFilter recognises every alias tag the workspace's packages write, so a
+// tag listing can be read without one of them being mistaken for a release.
+//
+// Every package's aliases, not only the listing's own. An alias is legal as
+// long as no version can be read out of it, which says nothing about whose
+// tagFormat it happens to share a shape with: A's "v1" is a perfectly legal
+// alias beside B's "v{version}" release tags, and it lands in B's listing
+// looking exactly like a release of B that nobody can parse. Filtering only
+// the listing's own aliases left B's baseline collapsing to its initials from
+// A's first release onwards.
+//
+// The formats are compiled once, when the filter is made, rather than once per
+// tag each listing holds.
+type AliasFilter struct{ matchers []gitx.AliasMatcher }
+
+// NewAliasFilter compiles the alias formats of every package in the workspace.
+// The zero AliasFilter matches nothing, which is what a workspace declaring no
+// alias needs and what a caller with no package list can safely fall back to.
+func NewAliasFilter(pkgs []*model.Package) AliasFilter {
+	var matchers []gitx.AliasMatcher
+	for _, p := range pkgs {
+		if p == nil || p.Space == nil {
+			continue
+		}
+		for _, a := range p.Space.AliasTags {
+			matchers = append(matchers, gitx.AliasFormat(a.Format).Matcher(p.Name))
+		}
+	}
+	return AliasFilter{matchers: matchers}
+}
+
+// Without drops the workspace's alias tags from one package's listing.
 //
 // An alias is written on every release, under a name of its own, and is never
 // a release: "v1" from a "v{major}" alias beside a "v{version}" tagFormat has
@@ -2687,37 +2723,35 @@ func (cp *computation) versionAt(pkg, commit string) (ccme.Version, bool) {
 // that release onwards, which is the single-repository convention GitHub
 // composites are published under failing on its second run.
 //
-// Only names that carry no version are dropped, and only when one of the
-// package's own alias formats could have written them. A tag whose version
-// does parse is a release whatever its shape, and one that parses no better
-// but has no alias shape is a malformed release tag: that is the case the
-// initials fallback is for, and it still stops the baseline being read from an
-// older tag.
+// Only names that carry no version are dropped, and only when some package's
+// alias format could have written them. A tag whose version does parse is a
+// release whatever its shape, and one that parses no better but matches no
+// alias is a malformed release tag: that is the case the initials fallback is
+// for, and it still stops the baseline being read from an older tag.
 //
 // Every reader of a baseline goes through this, which is what stops the two
-// answers drifting: the planner here, and the compute command's manifest
-// baselines.
-func WithoutAliasTags(tags gitx.Tags, p *model.Package, log zerolog.Logger) gitx.Tags {
-	if p == nil || p.Space == nil || len(p.Space.AliasTags) == 0 {
+// answers drifting: the planner, and the compute command's manifest baselines.
+func (f AliasFilter) Without(tags gitx.Tags, pkg string, log zerolog.Logger) gitx.Tags {
+	if len(f.matchers) == 0 {
 		return tags
 	}
 	kept := tags[:0:0]
 	for _, t := range tags {
-		if t.Parsed || !aliasShaped(p, t.Name) {
+		if t.Parsed || !f.matches(t.Name) {
 			kept = append(kept, t)
 			continue
 		}
-		log.Debug().Str("package", p.Name).Str("tag", t.Name).
-			Msg("tag is one of the package's moving aliases, not a release")
+		log.Debug().Str("package", pkg).Str("tag", t.Name).
+			Msg("tag is one of the workspace's moving aliases, not a release")
 	}
 	return kept
 }
 
-// aliasShaped reports whether any of the package's alias formats could have
-// written this name.
-func aliasShaped(p *model.Package, tag string) bool {
-	for _, a := range p.Space.AliasTags {
-		if gitx.AliasFormat(a.Format).Matches(p.Name, tag) {
+// matches reports whether any package's alias format could have written this
+// name.
+func (f AliasFilter) matches(tag string) bool {
+	for _, m := range f.matchers {
+		if m.Matches(tag) {
 			return true
 		}
 	}

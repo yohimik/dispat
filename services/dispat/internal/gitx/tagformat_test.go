@@ -257,6 +257,46 @@ func TestAliasFormatMatchesTheNamesItWrites(t *testing.T) {
 	}
 }
 
+// TestAliasFormatMatchesItsOwnPrereleaseRenders: an alias spelling a whole
+// {version} writes whatever version it is given, prereleases included, so it
+// has to recognise what it wrote. Reading the version class as digits and dots
+// regardless of the format made "core-v1.4.2-beta.4" unrecognisable, and the
+// alias then sat in its own package's listing as the newest thing nobody could
+// parse.
+//
+// The other half is the acceptance. Anything the class allows would otherwise
+// pass, and "core-vgarbage" would take a genuinely malformed release tag out
+// of the listing along with it.
+func TestAliasFormatMatchesItsOwnPrereleaseRenders(t *testing.T) {
+	const alias = AliasFormat("{name}-v{version}")
+	for _, v := range []ccme.Version{
+		{Major: 1, Minor: 4, Patch: 2},
+		{Major: 1, Minor: 4, Patch: 2, Prerelease: []string{"beta", "4"}},
+		{Major: 2, Prerelease: []string{"rc", "0"}},
+	} {
+		rendered := alias.Render("core", v)
+		assert.True(t, alias.Matches("core", rendered), "%s is a name this alias writes", rendered)
+	}
+
+	assert.False(t, alias.Matches("core", "core-vgarbage"),
+		"the version has to be a version, not merely bytes the class allows")
+	assert.False(t, alias.Matches("core", "core-v1.0.0.0"), "nor a release tag somebody mistyped")
+	assert.False(t, alias.Matches("core", "other-v1.4.2"), "nor another package's")
+}
+
+// TestAliasFormatMatchesAPrereleaseSpellingFormat: a format writing the
+// channel and counter itself renders a stable version with that whole section
+// dropped, exactly as a tagFormat does, so both shapes have to be recognised.
+func TestAliasFormatMatchesAPrereleaseSpellingFormat(t *testing.T) {
+	const alias = AliasFormat("v{version}-{channel}.{counter}")
+	stable := alias.Render("core", ccme.Version{Major: 1, Minor: 4, Patch: 2})
+	pre := alias.Render("core", ccme.Version{Major: 1, Minor: 4, Patch: 2, Prerelease: []string{"beta", "4"}})
+	assert.Equal(t, "v1.4.2", stable, "the stable render drops the section it cannot fill")
+	assert.True(t, alias.Matches("core", stable))
+	assert.True(t, alias.Matches("core", pre))
+	assert.False(t, alias.Matches("core", "v1.0.0.0"))
+}
+
 // TestAliasFormatMatchesNothingWithoutAPlaceholder: a format that writes a
 // constant has no shape to recognise, only a name. The alias validation
 // refuses those, so this is the guard rather than a case with behaviour.

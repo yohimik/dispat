@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -257,6 +258,34 @@ func (f TagFormat) Matches(pkg, tag string) bool {
 		strings.HasPrefix(tag, prefix) && strings.HasSuffix(tag, suffix)
 }
 
+// Reader compiles this format for one package, so that a caller asking the
+// same format about many names pays for the compile once. It is TagFormat's
+// half of the pair AliasFormat.Matcher is the other half of.
+func (f TagFormat) Reader(pkg string) VersionReader {
+	tpl, err := f.template()
+	if err != nil {
+		return VersionReader{}
+	}
+	return VersionReader{tpl: tpl, pkg: pkg}
+}
+
+// VersionReader is one tag format compiled for one package: the question "what
+// version does this package read out of that name?", asked repeatedly.
+type VersionReader struct {
+	tpl *tagTemplate
+	pkg string
+}
+
+// ParseVersion extracts the version from a tag name. See
+// TagFormat.ParseVersion. A reader built from a format that does not compile
+// reads nothing, which is what that format's own ParseVersion answers too.
+func (r VersionReader) ParseVersion(tag string) (ccme.Version, bool) {
+	if r.tpl == nil {
+		return ccme.Version{}, false
+	}
+	return r.tpl.parseVersion(r.pkg, tag)
+}
+
 // TagName renders a release tag under the default format. Callers that know a
 // package's space should use its format instead.
 //
@@ -314,7 +343,29 @@ func (f AliasFormat) Render(pkg string, v ccme.Version) string {
 // listing, while a release tag carrying an unreadable version is exactly what
 // the initials fallback is for and has to stay in.
 func (f AliasFormat) Matches(pkg, tag string) bool {
-	return compileTagFormat(string(f)).matchesAlias(pkg, tag)
+	return f.Matcher(pkg).Matches(tag)
+}
+
+// Matcher compiles this format for one package, so that a caller reading a tag
+// listing pays for the compile once rather than once per tag it looks at.
+func (f AliasFormat) Matcher(pkg string) AliasMatcher {
+	return AliasMatcher{tpl: compileTagFormat(string(f)), pkg: pkg}
+}
+
+// AliasMatcher is one alias format compiled for one package: the question
+// "could this package's alias have written that name?", asked repeatedly.
+type AliasMatcher struct {
+	tpl *tagTemplate
+	pkg string
+}
+
+// Matches reports whether the name is one this package's alias could have
+// written. See AliasFormat.Matches.
+func (m AliasMatcher) Matches(tag string) bool {
+	if m.tpl == nil {
+		return false
+	}
+	return m.tpl.matchesAlias(m.pkg, tag)
 }
 
 // Commit is one commit of a pending window.
@@ -490,6 +541,12 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 		base = append(base, "-c", "user.email="+c.Email)
 	}
 	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
+	// git speaks the operator's language unless told otherwise, and one of
+	// these answers is read rather than only shown: a push refused over a
+	// branch that moved is recognised by its wording (see classifyPush). A
+	// localised checkout would defeat that silently, so every invocation asks
+	// for the C locale.
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
@@ -1018,18 +1075,27 @@ var rejectedPhrases = []string{"non-fast-forward", "fetch first", "stale info", 
 // classifyPush turns a push failure into ErrRejected when the remote refused
 // it over a branch that moved, and leaves every other failure alone: a missing
 // credential and a moved branch call for entirely different answers, and
-// replaying commits onto a remote nobody could reach would be neither.
+// merging into a remote nobody could reach would be neither.
+//
+// The marker is "rejected]" rather than "[rejected]", because git writes
+// "[remote rejected]" when the far side refused the update itself, which is
+// what two runs pushing the same branch at the same instant produce
+// ("cannot lock ref"). Matching the opening bracket read that as an ordinary
+// failure and left the whole phrase list unreachable for it.
 func classifyPush(err error) error {
 	if err == nil {
 		return nil
 	}
 	text := err.Error()
-	if !strings.Contains(text, "[rejected]") && !strings.Contains(text, "Updates were rejected") {
+	if !strings.Contains(text, "rejected]") && !strings.Contains(text, "Updates were rejected") {
 		return err
 	}
 	for _, phrase := range rejectedPhrases {
 		if strings.Contains(text, phrase) {
-			return fmt.Errorf("%w: %v", ErrRejected, err)
+			// git's own text leads, because that is what a reader of a failed
+			// release needs first; the sentinel stays in the chain for
+			// errors.Is, which is the only thing that reads it.
+			return fmt.Errorf("%v: %w", err, ErrRejected)
 		}
 	}
 	return err
@@ -1059,7 +1125,11 @@ func (c *CLI) MergeRemote(ctx context.Context, remote, branch, message string) e
 	if _, err := c.run(ctx, "fetch", "--no-tags", remote, branch); err != nil {
 		return err
 	}
-	if _, err := c.run(ctx, "merge", "--no-edit", "-m", message, "FETCH_HEAD"); err != nil {
+	// --no-ff for two reasons: a repository configured with merge.ff=only
+	// refuses the merge outright without it, and the first-parent shape this
+	// recovery documents is only a shape when there is a merge commit to have
+	// one.
+	if _, err := c.run(ctx, "merge", "--no-ff", "--no-edit", "-m", message, "FETCH_HEAD"); err != nil {
 		// The abort's own failure is not what the caller needs to hear about:
 		// the merge is the thing that did not work, and saying so twice would
 		// bury it.

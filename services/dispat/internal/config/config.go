@@ -1808,12 +1808,22 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 	// corrupts B. Readable is ParseVersion rather than Matches: a name that
 	// only has the shape carries no version and is skipped when the tags are
 	// read, which is what makes the "v1" convention legal.
+	// One compiled format per package rather than one per package per alias
+	// sample: the formats do not change between samples, and a workspace with
+	// many packages and many aliases would otherwise recompile the same
+	// template a quadratic number of times.
+	readers := make([]gitx.VersionReader, len(pkgs))
+	formats := make([]gitx.TagFormat, len(pkgs))
+	for i, p := range pkgs {
+		formats[i] = gitx.TagFormat(p.Space.TagFormat).WithDefault()
+		readers[i] = formats[i].Reader(p.Name)
+	}
 	for _, a := range all {
-		for _, p := range pkgs {
-			format := gitx.TagFormat(p.Space.TagFormat).WithDefault()
-			if _, readable := format.ParseVersion(p.Name, a.tag); !readable {
+		for i, p := range pkgs {
+			if _, readable := readers[i].ParseVersion(a.tag); !readable {
 				continue
 			}
+			format := formats[i]
 			return fmt.Errorf(
 				"config: package %q: alias tag %q would be read back as a release tag of package %q (tagFormat %q); "+
 					"an alias must never be readable as a release tag, or it becomes that package's history",

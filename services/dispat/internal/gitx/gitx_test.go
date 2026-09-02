@@ -3,6 +3,7 @@ package gitx
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1182,4 +1183,99 @@ func TestMergeRemoteUndoesAMergeItCannotFinish(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "chore(release): core@0.2.0", strings.TrimSpace(string(head)),
 		"the run's own commit is still what HEAD names")
+}
+
+// TestClassifyPushRecognisesEverySpellingOfARefusal: the recovery only fires
+// on what this function admits, so what it admits has to be every way git
+// refuses a branch that moved.
+//
+// "[remote rejected]" is the one that used to fall through. Two runs pushing
+// the same branch at the same instant get it, with "cannot lock ref" as the
+// reason, and the opening-bracket test read that as an ordinary failure and
+// left the whole phrase list unreachable for it.
+func TestClassifyPushRecognisesEverySpellingOfARefusal(t *testing.T) {
+	for name, tc := range map[string]struct {
+		text string
+		want bool
+	}{
+		"the branch moved under us": {
+			text: "git push origin HEAD: exit status 1: To /tmp/bare\n" +
+				" ! [rejected]        HEAD -> main (fetch first)\n" +
+				"error: failed to push some refs to '/tmp/bare'\n" +
+				"hint: Updates were rejected because the remote contains work that you do not\n",
+			want: true,
+		},
+		"two runs pushing at once": {
+			text: "git push origin HEAD: exit status 1: To /tmp/bare\n" +
+				" ! [remote rejected] HEAD -> main (cannot lock ref 'refs/heads/main':" +
+				" is at 1a2b3c4 but expected 5d6e7f8)\n" +
+				"error: failed to push some refs to '/tmp/bare'\n",
+			want: true,
+		},
+		"a stale ref this clone never fetched": {
+			text: "git push origin HEAD: exit status 1:\n" +
+				" ! [rejected]        HEAD -> main (stale info)\n",
+			want: true,
+		},
+		"a hook on the far side said no": {
+			text: "git push origin HEAD: exit status 1: To /tmp/bare\n" +
+				" ! [remote rejected] HEAD -> main (pre-receive hook declined)\n",
+		},
+		"nobody could reach the remote": {
+			text: "git push origin HEAD: exit status 128: fatal: 'origin' does not appear to be a git repository",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := classifyPush(errors.New(tc.text))
+			require.Error(t, err)
+			assert.Equal(t, tc.want, errors.Is(err, ErrRejected))
+			assert.True(t, strings.HasPrefix(err.Error(), "git push origin HEAD:"),
+				"git's own words lead, whatever this made of them: %s", err)
+		})
+	}
+	assert.NoError(t, classifyPush(nil))
+}
+
+// TestMergeRemoteOverridesMergeFfOnly: a repository configured to accept only
+// fast-forward merges refuses the recovery's merge outright, and the abort
+// that follows fails too, so the run ends on a git error nobody can act on.
+// The flag on the command line is what outranks the configuration, and it is
+// also what pins the first-parent shape the recovery documents.
+func TestMergeRemoteOverridesMergeFfOnly(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+	_, err := cli.Push(ctx, "origin", nil, false)
+	require.NoError(t, err)
+	out, gerr := exec.Command("git", "-C", root, "config", "merge.ff", "only").CombinedOutput()
+	require.NoError(t, gerr, "git config: %s", out)
+
+	other := t.TempDir()
+	out, cerr := exec.Command("git", "clone", "-q", bare, other).CombinedOutput()
+	require.NoError(t, cerr, "git clone: %s", out)
+	for _, args := range [][]string{
+		{"config", "user.email", "other@example.com"},
+		{"config", "user.name", "Other"},
+		{"commit", "-qm", "chore: landed elsewhere", "--allow-empty"},
+		{"push", "-q", "origin", "HEAD"},
+	} {
+		out, gerr := exec.Command("git", append([]string{"-C", other}, args...)...).CombinedOutput()
+		require.NoError(t, gerr, "git %v: %s", args, out)
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "CHANGELOG.md"),
+		[]byte("# Changelog\n"), 0o644))
+	_, err = cli.CommitDirs(ctx, []string{filepath.Join(root, "packages", "core")}, "chore(release): core@0.2.0")
+	require.NoError(t, err)
+	before, err := cli.HeadSHA(ctx)
+	require.NoError(t, err)
+
+	branch, err := cli.CurrentBranch(ctx)
+	require.NoError(t, err)
+	require.NoError(t, cli.MergeRemote(ctx, "origin", branch, "chore(release): merge origin/"+branch))
+	parents, oerr := exec.Command("git", "-C", root, "rev-list", "--parents", "-n", "1", "HEAD").Output()
+	require.NoError(t, oerr)
+	fields := strings.Fields(strings.TrimSpace(string(parents)))
+	require.Len(t, fields, 3, "merge.ff=only did not stop the merge")
+	assert.Equal(t, before, fields[1], "and the release commit is still the first parent")
 }

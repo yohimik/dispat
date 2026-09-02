@@ -2162,9 +2162,9 @@ func TestTraceNarratesTheDerivation(t *testing.T) {
 	assert.Contains(t, out, "plan: package resolved")
 }
 
-// TestWithoutAliasTagsKeepsOnlyWhatCouldBeARelease: the listing a package's
-// own moving alias appears in, which is every listing from the first release
-// that wrote one.
+// TestAliasFilterKeepsOnlyWhatCouldBeARelease: the listing a package's own
+// moving alias appears in, which is every listing from the first release that
+// wrote one.
 //
 // The alias has the release format's shape and no version in it, and it is the
 // newest tag by creation date, so leaving it in makes it the baseline and the
@@ -2172,7 +2172,7 @@ func TestTraceNarratesTheDerivation(t *testing.T) {
 // would take the malformed release tag with it, and that one has to stay: the
 // initials fallback measures the window from it so already released commits
 // are not counted a second time.
-func TestWithoutAliasTagsKeepsOnlyWhatCouldBeARelease(t *testing.T) {
+func TestAliasFilterKeepsOnlyWhatCouldBeARelease(t *testing.T) {
 	pkg := &model.Package{Name: "crier", Space: &model.Space{
 		Name: "root", TagFormat: "v{version}",
 		AliasTags: []model.AliasTag{{Format: "v{major}", Moving: true, Force: true, Channels: []string{"stable"}}},
@@ -2185,7 +2185,8 @@ func TestWithoutAliasTagsKeepsOnlyWhatCouldBeARelease(t *testing.T) {
 		{Name: "v1.0.0", Version: ccme.Version{Major: 1}, Parsed: true},
 	}
 
-	kept := WithoutAliasTags(tags, pkg, zerolog.Nop())
+	filter := NewAliasFilter([]*model.Package{pkg})
+	kept := filter.Without(tags, pkg.Name, zerolog.Nop())
 	names := make([]string, 0, len(kept))
 	for _, t := range kept {
 		names = append(names, t.Name)
@@ -2198,17 +2199,52 @@ func TestWithoutAliasTagsKeepsOnlyWhatCouldBeARelease(t *testing.T) {
 	assert.False(t, baseline.Parsed, "the malformed tag is still what an unreadable baseline looks like")
 
 	// And with it out of the way, the release tags read as they always did.
-	only := WithoutAliasTags(gitx.Tags{tags[0], tags[2], tags[3]}, pkg, zerolog.Nop())
+	only := filter.Without(gitx.Tags{tags[0], tags[2], tags[3]}, pkg.Name, zerolog.Nop())
 	baseline, ok = only.Baseline()
 	require.True(t, ok)
 	assert.Equal(t, "v1.1.0", baseline.Name)
 	assert.Equal(t, "1.1.0", baseline.Version.String())
 
-	// A package declaring no alias is left exactly as it was, which is what
-	// keeps the filter from having an opinion about anybody else's tags.
+	// A workspace declaring no alias filters nothing, which is what keeps the
+	// filter from having an opinion about anybody else's tags.
 	plain := &model.Package{Name: "crier", Space: &model.Space{Name: "root", TagFormat: "v{version}"}}
-	assert.Len(t, WithoutAliasTags(tags, plain, zerolog.Nop()), len(tags))
-	assert.Len(t, WithoutAliasTags(tags, nil, zerolog.Nop()), len(tags))
+	assert.Len(t, NewAliasFilter([]*model.Package{plain}).Without(tags, "crier", zerolog.Nop()), len(tags))
+	assert.Len(t, AliasFilter{}.Without(tags, "crier", zerolog.Nop()), len(tags))
+	assert.Len(t, NewAliasFilter(nil).Without(tags, "crier", zerolog.Nop()), len(tags))
+}
+
+// TestAliasFilterCoversEveryPackagesAliases: an alias belongs to the package
+// that writes it and lands in whichever listing its shape matches, which need
+// not be its owner's.
+//
+// One package tags "v{version}" and another writes the bare "v{major}" a
+// consumer pins. Both are legal, and neither the configuration nor the tag
+// itself says whose it is: "v1" simply matches the first package's format and
+// parses as nothing. A filter that only knew the listing owner's aliases left
+// that package's baseline collapsing to its initials from the other's first
+// release onwards.
+func TestAliasFilterCoversEveryPackagesAliases(t *testing.T) {
+	space := &model.Space{Name: "libs", TagFormat: "v{version}"}
+	action := &model.Space{Name: "actions", TagFormat: "action-v{version}",
+		AliasTags: []model.AliasTag{{Format: "v{major}", Moving: true, Force: true}}}
+	core := &model.Package{Name: "core", Space: space}
+	act := &model.Package{Name: "act", Space: action}
+
+	tags := gitx.Tags{
+		{Name: "v1"}, // the action's alias, newest, and shaped like a release of core
+		{Name: "v1.2.0", Version: ccme.Version{Major: 1, Minor: 2}, Parsed: true},
+	}
+
+	// The listing owner declares no alias at all, so its own set is empty.
+	assert.Len(t, NewAliasFilter([]*model.Package{core}).Without(tags, "core", zerolog.Nop()), 2,
+		"nothing but core is what used to be looked at")
+
+	kept := NewAliasFilter([]*model.Package{core, act}).Without(tags, "core", zerolog.Nop())
+	require.Len(t, kept, 1)
+	baseline, ok := kept.Baseline()
+	require.True(t, ok)
+	assert.Equal(t, "v1.2.0", baseline.Name, "core is released, not new")
+	assert.True(t, baseline.Parsed)
 }
 
 // aliasGit serves one package's tag listing verbatim, newest first, which is
@@ -2223,12 +2259,12 @@ func (g *aliasGit) Tags(context.Context, string, gitx.TagFormat) (gitx.Tags, err
 	return g.list, nil
 }
 
-// TestPlanReadsPastAPackagesOwnMovingAlias: the single-repository convention
+// TestPlanReadsPastAMovingAlias: the single-repository convention
 // through the planner. Tags are "v1.4.2" and the alias is "v1", so the alias
 // matches the release format and is the newest tag by creation date the moment
 // a release writes it. Read as the baseline it carries no version, and the
 // package looks unreleased from its first release onwards.
-func TestPlanReadsPastAPackagesOwnMovingAlias(t *testing.T) {
+func TestPlanReadsPastAMovingAlias(t *testing.T) {
 	git := &aliasGit{fakeGit: newFakeGit(
 		commit{sha: "c1", message: "feat(core): first"},
 		commit{sha: "c2", message: "feat(core): second"},

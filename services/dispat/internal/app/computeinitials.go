@@ -208,6 +208,18 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 		return reasons, errs
 	}
 
+	// The workspace's alias tags, compiled once for every candidate. An alias
+	// belongs to the package that writes it and lands in whichever listing its
+	// shape matches, so this is the whole workspace's set rather than each
+	// candidate's own; a workspace that cannot be walked filters nothing,
+	// which is what this command did before aliases existed.
+	var aliases plan.AliasFilter
+	if pkgs, err := a.packages(); err != nil {
+		a.log.Debug().Err(err).Msg("cannot read the workspace's alias tags; reading every tag as a release")
+	} else {
+		aliases = plan.NewAliasFilter(pkgs)
+	}
+
 	sem := make(chan struct{}, tagConcurrency)
 	var wg sync.WaitGroup
 	for i, c := range candidates {
@@ -221,10 +233,10 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 				errs[i] = err
 				return
 			}
-			// The package's own moving aliases are not releases, and reading
-			// one as the newest tag would report a released package as having
-			// no version to seed from.
-			stable, ok := plan.WithoutAliasTags(tags, c.pkg, a.log).StableBaseline()
+			// A moving alias is not a release, and reading one as the newest
+			// tag would report a released package as having no version to
+			// seed from.
+			stable, ok := aliases.Without(tags, c.pkg.Name, a.log).StableBaseline()
 			switch {
 			case !ok:
 				reasons[i] = "no release tag yet"

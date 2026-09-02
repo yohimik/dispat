@@ -412,13 +412,16 @@ func (t *tagTemplate) split(pkg string) (prefix, suffix string, ok bool) {
 // matchesAlias reports whether a name is one this alias format could have
 // written for a package.
 //
-// It is the same backtracking walk parseVersion makes, with the accept test
-// removed: an alias is never read back into a version, so what is asked here
-// is only whether the literals line up and the placeholders captured
-// something they are allowed to capture. That is precise enough to tell an
-// alias apart from a release tag nobody can parse, which is the one question
-// it exists for: "v1" is a name "v{major}" writes, and "v1.0.0.0" is not,
-// because a major is digits and stops at the dot.
+// It is the same backtracking walk parseVersion makes, over the same reduced
+// shapes, and with the same acceptance wherever the format spells a whole
+// {version}: the text captured there has to be a version, or "core-vgarbage"
+// would pass for an alias of "core-v{version}" and take a real release tag out
+// of the listing with it.
+//
+// A format built from {major}, {minor} and {patch} has no version to parse and
+// is accepted on the byte classes alone, which is all the distinction it
+// needs: those capture one number and stop at a separator, so "v1" is a name
+// "v{major}" writes and "v1.0.0.0" is not.
 func (t *tagTemplate) matchesAlias(pkg, tag string) bool {
 	if t.count(segVersion)+t.count(segMajor)+t.count(segMinor)+t.count(segPatch) == 0 {
 		// A format that writes a constant has no shape to recognise, only a
@@ -426,8 +429,32 @@ func (t *tagTemplate) matchesAlias(pkg, tag string) bool {
 		// a case with behaviour.
 		return false
 	}
-	m := &segMatcher{pkg: pkg, core: true, caps: map[segKind]string{}, accept: func() bool { return true }}
-	return m.match(t.segs, tag)
+	// core follows the format rather than being assumed, exactly as matchShape
+	// reads it. Assuming it made the version class digits and dots, and an
+	// alias spelling a plain {version} then failed to recognise its own
+	// prerelease renders.
+	core := t.spellsPrerelease()
+	shapes := []shape{shapeFull}
+	if core {
+		// The stable render of a format spelling the prerelease drops that
+		// whole section, so the name on disk is shorter than the format is.
+		shapes = []shape{shapeFull, shapeNoCount, shapeStable}
+	}
+	spellsVersion := t.count(segVersion) > 0
+	for _, sh := range shapes {
+		m := &segMatcher{pkg: pkg, core: core, caps: map[segKind]string{}}
+		m.accept = func() bool {
+			if !spellsVersion {
+				return true
+			}
+			_, err := ccme.ParseVersion(assemble(m.caps, core))
+			return err == nil
+		}
+		if m.match(t.reduce(sh), tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // literalTail returns the trailing run of literal segments, so that a suffix is
