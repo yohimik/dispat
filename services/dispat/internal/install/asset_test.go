@@ -154,3 +154,23 @@ func TestSelectAssetReportsAPlatformTheReleaseSkipped(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "{nonsense}", "a bad pattern is reported as one, not as a missing file")
 }
+
+// TestDefaultAssetNameRendersTheDefaultPattern: the pattern is a constant
+// callers and documentation quote, and the name is what a release is searched
+// for. They are one convention, so they are computed from one place: spelling
+// the pattern out a second time is how the two would drift apart.
+func TestDefaultAssetNameRendersTheDefaultPattern(t *testing.T) {
+	want, err := Expand(DefaultAssetPattern, fields)
+	require.NoError(t, err)
+	assert.Equal(t, want, DefaultAssetName(fields))
+	assert.Equal(t, "tool-linux-amd64", DefaultAssetName(fields))
+
+	// Windows is the one thing the pattern cannot carry, because the
+	// extension is not a placeholder: it is appended exactly as
+	// selfupdate.AssetName appends it for dispat's own releases.
+	windows := fields
+	windows.OS = "windows"
+	rendered, err := Expand(DefaultAssetPattern, windows)
+	require.NoError(t, err)
+	assert.Equal(t, rendered+".exe", DefaultAssetName(windows))
+}

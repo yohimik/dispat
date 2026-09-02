@@ -86,8 +86,19 @@ const DefaultAssetPattern = "{name}-{os}-{arch}"
 // appended exactly as selfupdate.AssetName appends it, because the two are the
 // same convention seen from two sides: what dispat publishes for itself and
 // what dispat looks for in somebody else's release.
+//
+// It renders the constant rather than spelling the same thing again, so the
+// two cannot drift: the pattern is what the documentation quotes and what a
+// reader would copy into --asset to say the default out loud.
 func DefaultAssetName(f Fields) string {
-	name := f.Name + "-" + f.OS + "-" + f.Arch
+	// The pattern is a literal this package owns, and Expand only fails on a
+	// placeholder nothing defines, so this cannot be an error at runtime; a
+	// hand-edit that made it one falls back to the pattern itself, which
+	// matches no asset and is refused with the release's files listed.
+	name, err := Expand(DefaultAssetPattern, f)
+	if err != nil {
+		return DefaultAssetPattern
+	}
 	if f.OS == "windows" {
 		name += ".exe"
 	}
