@@ -47,6 +47,10 @@ type scriptFixture struct {
 	storageURL           string
 	body                 []byte
 	token                string
+	// refuseAsset makes the API endpoint answer 403 to an authenticated
+	// request, which is what a token that reads the listing and not the
+	// assets gets.
+	refuseAsset bool
 
 	mu          sync.Mutex
 	apiHits     int
@@ -108,6 +112,11 @@ func newScriptFixture(t *testing.T, token string) *scriptFixture {
 				fmt.Fprint(w, `{"message":"Not Found"}`)
 				return
 			}
+			if f.refuseAsset {
+				w.WriteHeader(http.StatusForbidden)
+				fmt.Fprint(w, `{"message":"Resource not accessible by personal access token"}`)
+				return
+			}
 			http.Redirect(w, req, f.storageURL, http.StatusFound)
 			return
 		}
@@ -136,6 +145,12 @@ func newScriptFixture(t *testing.T, token string) *scriptFixture {
 // walk that took any url rather than the asset's would be caught here, and
 // the upload_url template is left in because its braces are exactly the kind
 // of punctuation the field splitter has to survive.
+//
+// The release's own "name" is the asset's, which is what a release titled
+// after its binary looks like and is the collision both walks have to survive:
+// before them stands a "url" belonging to the release and another belonging to
+// its author, and a walk that started reading at the top would take one of
+// those for the asset's endpoint.
 func (f *scriptFixture) releaseJSON(base string) string {
 	sum := sha256.Sum256(f.body)
 	return `{
@@ -147,6 +162,7 @@ func (f *scriptFixture) releaseJSON(base string) string {
   "author": {"login": "a", "id": 1, "url": "` + base + `/users/a", "html_url": "` + base + `/a"},
   "node_id": "RE_9",
   "tag_name": "` + DefaultTagPrefix + scriptVersion + `",
+  "name": "` + CurrentAssetName() + `",
   "draft": false,
   "prerelease": false,
   "assets": [
@@ -291,6 +307,36 @@ func TestInstallScriptWithoutATokenStaysOnThePublicURL(t *testing.T) {
 	}
 }
 
+// TestInstallScriptFallsBackToThePublicURL: an endpoint that refuses is tried
+// once more on the public URL with no credential, exactly as dispat's own
+// downloader does it. A token that can read a repository's listing and not its
+// assets is a real shape, and before the endpoint existed that install simply
+// worked.
+func TestInstallScriptFallsBackToThePublicURL(t *testing.T) {
+	requireExec(t)
+	for _, downloader := range []string{"curl", "wget"} {
+		t.Run(downloader, func(t *testing.T) {
+			// A public repository's fixture, so the public URL serves the
+			// binary, with the endpoint refusing an authenticated request.
+			f := newScriptFixture(t, "")
+			f.refuseAsset = true
+
+			out, code, target := f.run(t, downloader, "--token", "sesame")
+			require.Equal(t, 0, code, "output:\n%s", out)
+			assert.Contains(t, out, "trying the public download URL")
+			assert.Contains(t, out, "checksum verified")
+			installed, err := os.ReadFile(target)
+			require.NoError(t, err)
+			assert.Equal(t, string(f.body), string(installed))
+
+			api, storage, public, _ := f.counts()
+			assert.Equal(t, 1, api, "the endpoint was asked first")
+			assert.Zero(t, storage)
+			assert.Equal(t, 1, public, "and the public URL answered after it")
+		})
+	}
+}
+
 // TestInstallScriptsAgreeOnTheAuthenticatedDownload: install.ps1 cannot be
 // executed here, because the image the Go tests run in has no PowerShell, so
 // the two scripts are compared as text instead. What has to hold on both
@@ -321,9 +367,26 @@ func TestInstallScriptsAgreeOnTheAuthenticatedDownload(t *testing.T) {
 		"Windows PowerShell forwards Authorization across redirects, so it must not follow one")
 
 	// The unauthenticated path is the one nobody may change by accident: it
-	// is what every public install runs.
-	assert.Contains(t, sh, `download "${DOWNLOAD_URL}/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}" "$1"`,
+	// is what every public install runs, and it is also what an endpoint that
+	// refuses falls back to.
+	assert.Contains(t, sh, `download "$(public_asset_url)" "$1"`,
 		"install.sh must still fetch the public URL with no headers when there is no token")
-	assert.Contains(t, ps1, `Invoke-WebRequest -Uri "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset" -OutFile $destination`,
+	assert.Contains(t, sh, `printf '%s' "${DOWNLOAD_URL}/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}"`,
+		"and that URL is the release's own download address")
+	assert.Contains(t, ps1, `Invoke-WebRequest -Uri $publicUrl -OutFile $destination`,
 		"install.ps1 must still fetch the public URL with no headers when there is no token")
+	assert.Contains(t, ps1, `$publicUrl = "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset"`,
+		"and that URL is the release's own download address")
+
+	// Both fall back to it once when the endpoint refuses, which is what
+	// keeps a token that reads the listing and not the assets installing.
+	assert.Contains(t, sh, "trying the public download URL")
+	assert.Contains(t, ps1, "trying the public download URL")
+
+	// And both stop at the redirect rather than following it with the
+	// credential still attached, each in the way its own downloader needs.
+	assert.Contains(t, ps1, "-PassThru",
+		"Windows PowerShell 5.1 returns the refused redirect rather than raising it, so it has to be asked for")
+	assert.Contains(t, sh, "wget --max-redirect=0 --version",
+		"the busybox probe is the option's own exit code, not the wording of its help text")
 }

@@ -124,6 +124,11 @@ download() {
 	esac
 }
 
+# public_asset_url is the address anybody can fetch the asset from.
+public_asset_url() {
+	printf '%s' "${DOWNLOAD_URL}/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}"
+}
+
 # download_asset writes the release asset to the file named by $1.
 #
 # Without a token, or against a listing that named no asset endpoint, this is
@@ -131,6 +136,12 @@ download() {
 # the bytes come from the asset's own API endpoint, which is the only address
 # that serves a private repository's asset: the public URL answers with a
 # sign-in page instead.
+#
+# An endpoint that refuses is tried once more on the public URL with no
+# credential, which is what dispat's own downloader does. A token that reads
+# the listing and not the assets is a real shape, and before the endpoint
+# existed that install simply worked; the digest still decides what is
+# installed either way.
 #
 # The credential must never reach the storage host that endpoint redirects to.
 # curl arranges that itself: since 7.58 it drops Authorization on a redirect
@@ -143,9 +154,19 @@ download() {
 # itself does, has already written the file.
 download_asset() {
 	if [ -z "$TOKEN" ] || [ -z "$ASSET_API_URL" ]; then
-		download "${DOWNLOAD_URL}/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}" "$1"
+		download "$(public_asset_url)" "$1"
 		return
 	fi
+	if authed_asset "$1"; then
+		return 0
+	fi
+	log "warning: the release API would not serve ${ASSET}; trying the public download URL"
+	download "$(public_asset_url)" "$1"
+}
+
+# authed_asset fetches the asset from its API endpoint with the credential, and
+# answers non-zero when that address would not serve it.
+authed_asset() {
 	case "$DOWNLOADER" in
 	curl)
 		curl -fsSL -H "Accept: application/octet-stream" \
@@ -154,19 +175,26 @@ download_asset() {
 	wget)
 		# busybox's wget has neither option and follows redirects carrying
 		# whatever headers it was given, so there is no way to send the
-		# credential through it safely. Refusing says so instead of leaking it.
-		if ! wget --help 2>&1 | grep -q -- '--max-redirect'; then
+		# credential through it safely. Refusing says so instead of leaking
+		# it. The probe is the exit code of the option itself rather than a
+		# search of the help text, which is wording nobody promised.
+		if ! wget --max-redirect=0 --version >/dev/null 2>&1; then
 			die "this wget cannot be stopped at a redirect, so a token sent through it would reach the storage host. Install curl, or download ${ASSET} yourself."
 		fi
 		RESPONSE=$(wget -O "$1" --max-redirect=0 --server-response \
 			--header="Accept: application/octet-stream" \
-			--header="Authorization: Bearer $TOKEN" "$ASSET_API_URL" 2>&1 || true)
+			--header="Authorization: Bearer $TOKEN" "$ASSET_API_URL" 2>&1)
+		RC=$?
+		# The Location header is what says a redirect happened, which is worth
+		# more than the exit code: refusing to follow one is itself an error to
+		# wget, and the status it exits with does not distinguish that from a
+		# 404. With no Location, the exit code is all there is and it decides.
 		LOCATION=$(printf '%s\n' "$RESPONSE" |
 			sed -n 's|^[ 	]*Location:[ 	]*\([^ 	]*\).*$|\1|p' | tail -n 1)
 		if [ -n "$LOCATION" ]; then
 			download "$LOCATION" "$1"
 		else
-			[ -s "$1" ] || die "the asset endpoint did not serve ${ASSET}; check the token"
+			[ "$RC" -eq 0 ] && [ -s "$1" ]
 		fi
 		;;
 	esac
@@ -262,10 +290,19 @@ TAG="${TAG_PREFIX}${VERSION}"
 RELEASE=$(get "${API_URL}/repos/${OWNER}/${REPO}/releases/tags/${TAG}" 2>/dev/null) ||
 	die "no release for ${TAG}. Check the version, or the releases page."
 
+# Both walks start at the assets array and not before it. The release object
+# carries a "name" of its own, which is its title, and a title somebody set to
+# the asset's name would otherwise match: the digest walk would find nothing
+# and the url walk would print whichever "url" came last, the release's own or
+# the author's. The key survives the field splitter as a bare `"assets":`,
+# which is what makes the gate a single anchored pattern.
+#
 # One field per line, then a two-state walk: an asset's "name" precedes its
 # "digest", and the "uploader" object between them carries neither key.
 DIGEST=$(
 	printf '%s' "$RELEASE" | json_fields | awk -v want="\"name\":\"${ASSET}\"" '
+		/^"assets":$/ { in_assets = 1; next }
+		!in_assets { next }
 		$0 == want { found = 1; next }
 		found && /^"digest":"sha256:/ {
 			sub(/^"digest":"sha256:/, ""); sub(/".*$/, ""); print; exit
@@ -278,11 +315,12 @@ DIGEST=$(
 # an authenticated request. Here the walk runs the other way round: "url"
 # precedes "name" inside an asset, so the last one seen when the name matches
 # is the one that belongs to it. Every other key ending in _url is a different
-# field and the pattern is anchored against them; the "url" of the release
-# itself, and of whoever uploaded the asset, are both overwritten by the
-# asset's own before its name is reached.
+# field and the pattern is anchored against them; the "url" of whoever uploaded
+# the asset is overwritten by the next asset's own before its name is reached.
 ASSET_API_URL=$(
 	printf '%s' "$RELEASE" | json_fields | awk -v want="\"name\":\"${ASSET}\"" '
+		/^"assets":$/ { in_assets = 1; next }
+		!in_assets { next }
 		/^"url":"/ { last = $0; sub(/^"url":"/, "", last); sub(/".*$/, "", last) }
 		$0 == want { print last; exit }
 	'

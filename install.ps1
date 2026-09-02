@@ -128,21 +128,24 @@ if (-not $assetInfo) {
 $assetApiUrl = if ($assetInfo.PSObject.Properties.Name -contains 'url') { $assetInfo.url } else { '' }
 
 # Get-RedirectLocation reads the address a refused redirect pointed at, out of
-# whichever response object the PowerShell in use attached to the error.
-# Windows PowerShell 5.1 raises a WebException carrying an HttpWebResponse,
-# whose Location is a header string; PowerShell 7 raises an
-# HttpResponseException carrying an HttpResponseMessage, whose Location is a
-# Uri. Anything else answers with nothing, and the caller reports the failure
-# it was handed rather than inventing one.
-function Get-RedirectLocation($err) {
-    $response = $null
-    try { $response = $err.Exception.Response } catch { return '' }
+# whichever object the PowerShell in use put it on.
+#
+# The two behave differently, and neither is guesswork here. PowerShell 7
+# raises an HttpResponseException carrying an HttpResponseMessage, whose
+# Location is a Uri. Windows PowerShell 5.1 raises nothing at all for a
+# redirect it was told not to follow: it returns the 3xx response, which is why
+# the caller asks for one with -PassThru and inspects it rather than waiting
+# for an error that never comes.
+#
+# Anything else answers with nothing, and the caller reports the failure it was
+# handed rather than inventing one.
+function Get-RedirectLocation($response) {
     if (-not $response) { return '' }
     try {
         if ($response.Headers.Location) { return $response.Headers.Location.AbsoluteUri }
     } catch { }
     try {
-        $value = $response.Headers['Location']
+        $value = @($response.Headers['Location'])[0]
         if ($value) { return $value }
     } catch { }
     return ''
@@ -163,22 +166,58 @@ function Get-RedirectLocation($err) {
 # answers with is then fetched on its own with no headers. An endpoint that
 # answers with the bytes rather than a redirect, which is what an Enterprise
 # install serving them itself does, has already written the file.
-function Save-Asset($destination) {
-    if (-not $Token -or -not $assetApiUrl) {
-        Invoke-WebRequest -Uri "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset" -OutFile $destination
-        return
-    }
+#
+# Both shapes are handled because both happen: 7 throws and the catch reads the
+# exception's response, 5.1 returns the 3xx and the code after the call reads
+# that. -PassThru is what makes the returned response available in the second
+# case, and -ErrorAction SilentlyContinue keeps 5.1's non-terminating grumbling
+# from ending the script before it can be looked at.
+function Save-AssetFromApi($destination) {
     $assetHeaders = @{ Accept = 'application/octet-stream'; Authorization = "Bearer $Token" }
     $location = ''
+    $response = $null
     try {
-        Invoke-WebRequest -Uri $assetApiUrl -Headers $assetHeaders -MaximumRedirection 0 -OutFile $destination
+        $response = Invoke-WebRequest -Uri $assetApiUrl -Headers $assetHeaders `
+            -MaximumRedirection 0 -OutFile $destination -PassThru -ErrorAction SilentlyContinue
     } catch {
-        $location = Get-RedirectLocation $_
+        $location = Get-RedirectLocation $_.Exception.Response
         if (-not $location) { throw }
     }
+    if (-not $location -and $response) {
+        $status = 0
+        try { $status = [int]$response.StatusCode } catch { }
+        if ($status -ge 300 -and $status -lt 400) {
+            $location = Get-RedirectLocation $response
+            if (-not $location) {
+                throw "the asset endpoint answered $status with no Location to follow"
+            }
+        }
+    }
     if ($location) {
+        # The credential stops here: object storage is another host and is
+        # asked with no headers at all.
         Invoke-WebRequest -Uri $location -OutFile $destination
     }
+}
+
+function Save-Asset($destination) {
+    $publicUrl = "$DownloadUrl/$Owner/$Repo/releases/download/$tag/$asset"
+    if (-not $Token -or -not $assetApiUrl) {
+        Invoke-WebRequest -Uri $publicUrl -OutFile $destination
+        return
+    }
+    try {
+        Save-AssetFromApi $destination
+        return
+    } catch {
+        # An endpoint that refuses is tried once more on the public URL with no
+        # credential, which is what install.sh and dispat's own downloader do.
+        # A token that reads the listing and not the assets is a real shape,
+        # and the digest still decides what is installed.
+        Write-Information "warning: the release API would not serve $asset; trying the public download URL" `
+            -InformationAction Continue
+    }
+    Invoke-WebRequest -Uri $publicUrl -OutFile $destination
 }
 
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'dispat\bin' }

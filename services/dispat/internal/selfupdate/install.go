@@ -187,12 +187,55 @@ func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err er
 // address there is, so a token alone does not move the download: an older
 // GitHub Enterprise release sends no per-asset "url" field, and its public
 // URL is what serves the bytes.
+//
+// An endpoint that refuses is tried once more on the public URL with no
+// credential. A token that reads the listing and not the assets is a real
+// shape (a fine-grained token, a proxy in front of the API), and before the
+// endpoint existed that install simply worked; refusing it now would be a
+// regression dressed as security. Nothing is trusted any harder for it: the
+// size and the digest gate the bytes either way, and if both addresses fail
+// the refusal names the status the endpoint gave, because that is the one a
+// reader has to act on.
 func (i *Installer) download(ctx context.Context, a Asset, f *os.File) error {
-	url := a.URL
 	authed := i.Token != "" && a.APIURL != ""
-	if authed {
-		url = a.APIURL
+	if !authed {
+		return i.fetch(ctx, a, f, a.URL, false)
 	}
+	err := i.fetch(ctx, a, f, a.APIURL, true)
+	if err == nil || !errors.Is(err, errBadStatus) {
+		return err
+	}
+	i.Log.Warn().Str("asset", a.Name).Err(err).
+		Msg(i.what() + ": the release API would not serve this asset; trying the public download URL")
+	// The staged file may hold whatever the endpoint answered with, so the
+	// second attempt starts from an empty one rather than appending to it.
+	if rewindErr := truncate(f); rewindErr != nil {
+		return fmt.Errorf("%s: %s: %w", i.what(), a.Name, rewindErr)
+	}
+	if second := i.fetch(ctx, a, f, a.URL, false); second != nil {
+		return fmt.Errorf("%w; the public download URL then failed too: %v", err, second)
+	}
+	return nil
+}
+
+// errBadStatus marks the one download failure worth trying another address
+// for: the server answered, and said no. A transport failure or a body that
+// did not match what the release published is not something a second URL
+// makes true.
+var errBadStatus = errors.New("unexpected status")
+
+// truncate empties the staged file so a retry writes from the beginning.
+func truncate(f *os.File) error {
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	_, err := f.Seek(0, 0)
+	return err
+}
+
+// fetch performs one download attempt into f and runs every check on what
+// arrived.
+func (i *Installer) fetch(ctx context.Context, a Asset, f *os.File, url string, authed bool) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("%s: %w", i.what(), err)
@@ -211,7 +254,7 @@ func (i *Installer) download(ctx context.Context, a Asset, f *os.File) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: downloading %s: unexpected status %s", i.what(), a.Name, resp.Status)
+		return fmt.Errorf("%s: downloading %s: %w %s", i.what(), a.Name, errBadStatus, resp.Status)
 	}
 
 	sum := sha256.New()

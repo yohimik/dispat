@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -618,4 +619,91 @@ func loopbackClient() *http.Client {
 			return d.DialContext(ctx, network, net.JoinHostPort("127.0.0.1", port))
 		},
 	}}
+}
+
+// TestInstallFallsBackToThePublicURLWhenTheEndpointRefuses: a token that reads
+// the listing and not the assets is a real shape, and before the asset
+// endpoint existed that install simply worked. The endpoint is tried first and
+// the public URL once after it, so the credential still buys a private
+// repository and nobody loses an install they used to have.
+func TestInstallFallsBackToThePublicURLWhenTheEndpointRefuses(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	newBinary := []byte("#!/bin/sh\necho \"dispat 1.1.0 (test)\"\n")
+	apiHits := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		apiHits++
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"Resource not accessible by personal access token"}`)
+	}))
+	t.Cleanup(api.Close)
+	a, _ := assetServer(t, newBinary)
+	a.APIURL = api.URL + "/assets/1"
+
+	i := &Installer{Exe: exe, Token: "sesame", Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), a)
+	require.NoError(t, err, "the public URL served what the endpoint would not")
+	assert.Equal(t, 1, apiHits, "and the endpoint was asked first, exactly once")
+}
+
+// TestInstallReportsBothAddressesWhenNeitherServes: the fallback must not bury
+// the answer that matters. A private repository whose token is wrong fails on
+// both, and the status the endpoint gave is what a reader has to act on, so it
+// leads the refusal rather than being replaced by whatever the public URL said
+// about a repository it cannot see.
+func TestInstallReportsBothAddressesWhenNeitherServes(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(api.Close)
+	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(public.Close)
+	a := Asset{Name: CurrentAssetName(), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1"}
+
+	i := &Installer{Exe: exe, Token: "sesame"}
+	_, err := i.Install(context.Background(), a)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "401", "the endpoint's status is what the reader has to act on")
+	assert.Contains(t, err.Error(), "404", "and the second attempt is named too")
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	assert.Equal(t, []string{"dispat"}, names(entries), "the staged download is removed")
+}
+
+// TestInstallDoesNotFallBackOnAVerifiedFailure: a second address makes a bad
+// status worth retrying and makes nothing else worth retrying. Bytes that do
+// not match what the release published are the same bytes wherever they came
+// from, and asking the public URL for them would only hide which address the
+// tampering was on.
+func TestInstallDoesNotFallBackOnAVerifiedFailure(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+
+	publicHits := 0
+	public := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { publicHits++ }))
+	t.Cleanup(public.Close)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "not the release")
+	}))
+	t.Cleanup(api.Close)
+	a := Asset{
+		Name: CurrentAssetName(), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1",
+		Size: 4096, Digest: "sha256:" + strings.Repeat("0", 64),
+	}
+
+	i := &Installer{Exe: exe, Token: "sesame"}
+	_, err := i.Install(context.Background(), a)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the download is incomplete")
+	assert.Zero(t, publicHits, "a 200 that did not verify is not a reason to ask somewhere else")
 }
