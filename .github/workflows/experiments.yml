@@ -1,0 +1,121 @@
+name: Experiments
+
+# The release experiments (tests/experiments): the image a release published,
+# put through the faults a unit test never reaches, beside lerna, nx and
+# changesets in the same fixture. Every cell runs the same way: build the
+# experiments image on yohimik/dispat-alpine:<version>, run one experiment
+# for one tool, keep what it recorded. The release workflow calls this one
+# after the images publish, with the version it just released; by hand it
+# takes any released version, and none means the newest.
+#
+# The cells for dispat carry expectations and fail when one does not hold;
+# the cells for the other tools are records and pass either way. The summary
+# job joins every record into one table on the run's summary page.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The released dispat version to run against
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The released dispat version to run against (empty for the newest)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  experiment:
+    name: ${{ matrix.experiment }} ${{ matrix.scenario }} ${{ matrix.tool }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every cell is its own record; one that fails says nothing about
+      # the others.
+      fail-fast: false
+      matrix:
+        experiment: [orphan, midrelease]
+        scenario: ["", clean, conflict]
+        tool: [dispat, lerna, nx, changesets]
+        # orphan has one scenario, midrelease two: the empty scenario is
+        # orphan's and the named ones are midrelease's.
+        exclude:
+          - experiment: orphan
+            scenario: clean
+          - experiment: orphan
+            scenario: conflict
+          - experiment: midrelease
+            scenario: ""
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0      # full history: the newest image tag is read from the tags
+
+      # A docker-container builder for the image build, and the runtime
+      # action to hand the ACTIONS_* cache credentials into run steps: the
+      # gha cache backend that scripts/buildx-cache.sh emits flags for
+      # authenticates with them, and the runner only gives them to actions.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
+
+      # The released dispat runs the scripts; the binary under test is the
+      # one inside the image, never this one.
+      - name: Set up dispat
+        uses: ./
+
+      # The cell is named the way run.sh takes it, and the version reaches
+      # the build through the same variable a hand run sets. Empty means
+      # the newest image tag, resolved by the build script.
+      - name: Run the cell
+        env:
+          EXPERIMENTS_DISPAT_VERSION: ${{ inputs.version }}
+          EXPERIMENT: ${{ matrix.experiment }}
+          TOOL: ${{ matrix.tool }}
+          SCENARIO: ${{ matrix.scenario }}
+        run: dispat exec experiment --for pkg:experiments --in pkg:experiments
+
+      # always(): a cell whose expectations did not hold is the record most
+      # worth keeping.
+      - name: Keep the record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: experiment-${{ matrix.experiment }}-${{ matrix.tool }}${{ matrix.scenario && '-' }}${{ matrix.scenario }}
+          path: tests/experiments/results
+          retention-days: 30
+
+  summary:
+    name: Summary
+    needs: experiment
+    # !cancelled(), because a bare condition implies success(): the table is
+    # wanted most when a cell failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up dispat
+        uses: ./
+
+      # Every cell's folder back into the one results folder the summary
+      # reads, the way a run on one machine leaves it.
+      - name: Collect the records
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: experiment-*
+          path: tests/experiments/results
+          merge-multiple: true
+
+      - name: Summarise
+        run: |
+          {
+            echo "### Release experiments"
+            echo
+            dispat exec summary --for pkg:experiments --in pkg:experiments
+          } >> "$GITHUB_STEP_SUMMARY"

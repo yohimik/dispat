@@ -124,7 +124,7 @@ spaces:
   docker:
     path: docker
 
-# The two workspace modules that are repository tooling rather than something
+# The workspace folders that are repository tooling rather than something
 # dispat ships: never versioned, never tagged, never published — but swept by
 # `dispat run vet`, `tests` and `build` like every real package, so the lint
 # and test gates need no hand-kept module list beside the sweep.
@@ -166,6 +166,39 @@ packages:
       build: >-
         docker buildx build --file ../../Dockerfile.gotest --target vet-integration
         $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
+  # The release experiments (tests/experiments): the image a release just
+  # published, put through the faults a unit test never reaches, beside
+  # lerna, nx and changesets in the same fixture. Script-only like tools:
+  # never versioned, never tagged, never published. `build` is what the
+  # build gate reaches when the folder changes; the experiments workflow
+  # runs `experiment` once per cell after the images of a release publish,
+  # and `summary` over the results it collected.
+  experiments:
+    path: tests/experiments
+    versioning: none
+    scripts:
+      # The version under test is the one the caller names, else the newest
+      # published image: an experiment runs the bytes a release shipped,
+      # never a build of the checkout, so a planned version nobody published
+      # is never a candidate, and the prerelease tags are not either.
+      build: |
+        set -eu
+        version=${EXPERIMENTS_DISPAT_VERSION:-$(git tag -l 'docker/dispat-alpine/v*' --sort=-v:refname | sed 's|.*/v||; /-/d' | head -n 1)}
+        : "${version:?no published dispat-alpine image to build the experiments on}"
+        echo "building the experiments on yohimik/dispat-alpine:$version"
+        docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
+          $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
+      # One cell, named the way run.sh takes it: EXPERIMENT and TOOL, and
+      # SCENARIO where the experiment has more than one. The results folder
+      # is the run's record and the summary's input. `exec` runs a script
+      # where the caller stands, hence `--in` on the nested build as on the
+      # workflow's own invocations.
+      experiment: |
+        set -eu
+        dispat exec build --for pkg:experiments --in pkg:experiments
+        mkdir -p results
+        docker run --rm -v "$PWD/results:/results" dispat-experiments "$EXPERIMENT" "$TOOL" ${SCENARIO:-}
+      summary: python3 summary.py results --markdown
   # The Google Cloud footprint that serves dispat.dev, released like code.
   # Only the existence and the folder live here; everything the package says
   # about itself lives in infra/dispat.yaml, beside the Terraform it

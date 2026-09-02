@@ -1,0 +1,15 @@
+# The experiment registry: anonymous publish, no uplink, nothing cached from
+# the public registry. It lives for one container and is never shared
+# between two tools' runs.
+storage: /registry/storage
+auth:
+  htpasswd:
+    file: /registry/htpasswd
+packages:
+  '**':
+    access: $all
+    publish: $all
+    unpublish: $all
+uplinks: {}
+listen: 127.0.0.1:4874
+log: { type: stdout, level: warn }

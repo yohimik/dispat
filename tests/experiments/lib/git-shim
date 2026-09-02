@@ -1,0 +1,33 @@
+#!/bin/bash
+# A git in front of git. Placed first on PATH for the duration of one tool's
+# release command, it records every git invocation the tool makes, and, once,
+# runs an injected action right before the first invocation that matches the
+# trigger. The action is how a colleague's push lands "while the release
+# runs": at a point in the tool's own sequence rather than on a timer, so the
+# interleaving is the same every time and the same for every tool.
+#
+#   SHIM_LOG      file every invocation is appended to (timestamp, cwd, args)
+#   SHIM_TRIGGER  extended regex over the space-joined arguments; the first
+#                 match fires the action. Empty: never fires.
+#   SHIM_EXCLUDE  extended regex; an invocation matching it never fires
+#   SHIM_ACTION   the shell command run once, with the real git on PATH
+#   SHIM_STATE    folder holding the fired marker
+set -u
+REAL=/usr/bin/git
+args="$*"
+if [ -n "${SHIM_LOG:-}" ]; then
+  printf '%s\t%s\t%s\n' "$(date +%s.%N)" "$PWD" "$args" >> "$SHIM_LOG"
+fi
+if [ -n "${SHIM_TRIGGER:-}" ] && [ -n "${SHIM_ACTION:-}" ] \
+   && [ ! -e "${SHIM_STATE:-/tmp/shim}/fired" ] \
+   && [[ "$args" =~ ${SHIM_TRIGGER} ]] \
+   && { [ -z "${SHIM_EXCLUDE:-}" ] || ! [[ "$args" =~ ${SHIM_EXCLUDE} ]]; }; then
+  mkdir -p "${SHIM_STATE:-/tmp/shim}"
+  : > "${SHIM_STATE:-/tmp/shim}/fired"
+  [ -n "${SHIM_LOG:-}" ] && printf '%s\t%s\tINJECT before: %s\n' "$(date +%s.%N)" "$PWD" "$args" >> "$SHIM_LOG"
+  # The action runs with the shim off PATH, so its own git calls are neither
+  # logged as the tool's nor able to fire it again.
+  PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$(dirname "$0")" | paste -sd:) \
+    bash -c "$SHIM_ACTION" >> "${SHIM_LOG:-/dev/null}" 2>&1
+fi
+exec "$REAL" "$@"

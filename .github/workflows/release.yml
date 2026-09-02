@@ -17,9 +17,10 @@ name: Release
 # Node or Terraform; what remains here is checkouts, Docker plumbing,
 # credentials and artifact transport.
 #
-# Four jobs, in order: is there anything to release, does the whole suite pass,
-# release it, then check that what was released installs. Each is a gate on the
-# next, so nothing is published by a run whose tests never ran.
+# Five jobs, in order: is there anything to release, does the whole suite pass,
+# release it, then check that what was released installs and run the release
+# experiments against the image it published. Each is a gate on the next, so
+# nothing is published by a run whose tests never ran.
 on:
   workflow_dispatch:
 
@@ -200,6 +201,8 @@ jobs:
     outputs:
       cli-released: ${{ steps.dispat.outputs.cli-released }}
       cli-version: ${{ steps.dispat.outputs.cli-version }}
+      images-released: ${{ steps.dispat.outputs.images-released }}
+      image-version: ${{ steps.dispat.outputs.image-version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -257,7 +260,9 @@ jobs:
         # with the six cross-compiled binaries its containerised build stage
         # exported. The dispat package's announce stage writes this step's
         # cli-released / cli-version outputs, and only fires when that package
-        # published; see services/dispat/dispat.yaml.
+        # published; see services/dispat/dispat.yaml. The docker space's does
+        # the same for images-released / image-version once dispat-alpine is
+        # out; see docker/dispat.yaml.
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -318,3 +323,16 @@ jobs:
             "${{ needs.release.outputs.cli-version }}" \
             "${{ steps.setup.outputs.version }}" \
             "${{ steps.setup.outputs.path }}"
+
+  experiments:
+    name: Release experiments
+    needs: release
+    # Only when the images published: the experiments take their binary out
+    # of the dispat-alpine image, so a run that released just the docs or the
+    # CLI has no new image to run against. !cancelled() for the reason the
+    # install check gives: the image's leg records itself mid-run, and a run
+    # that failed later still shipped an image worth running.
+    if: ${{ !cancelled() && needs.release.outputs.images-released == 'true' }}
+    uses: ./.github/workflows/experiments.yml
+    with:
+      version: ${{ needs.release.outputs.image-version }}
