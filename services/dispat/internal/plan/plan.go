@@ -249,6 +249,16 @@ const (
 	// the run was planned against.
 	CodePushMerged = "W242"
 
+	// CodePushConflicted marks a release whose mid-release merge could not be
+	// joined: what landed changed the same content the release did. The
+	// release still completes, because it has already published. This side of
+	// every conflicting path is what the branch keeps, the other side is
+	// pushed to a branch of its own so nothing is lost, and both records name
+	// the files and that branch. It is a warning rather than a failure and
+	// louder than W242 in what it asks for: somebody has to reconcile the two
+	// sides, and only a person can.
+	CodePushConflicted = "W243"
+
 	// --- release outcomes (§13.7a, §13.9) ---
 
 	// CodeCatchUp marks a release whose entire cause is propagation from a

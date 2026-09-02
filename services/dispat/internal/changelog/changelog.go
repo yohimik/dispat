@@ -157,6 +157,58 @@ func LogSkip(log zerolog.Logger, spec model.ChangelogSpec, rel *plan.Release) {
 		Msg("changelog entry skipped: the release's channel is not in changelog.channels")
 }
 
+// NoteEntry adds a note inside the entry a release just wrote, in the file the
+// package's own policy targets, and answers the path it changed.
+//
+// Inside the entry rather than above it, and after the header line rather than
+// before it, because the header is what every re-run recognises an existing
+// entry by (see HasEntry). A note that moved or split that line would make the
+// next run write the entry a second time.
+//
+// A package whose policy wrote no entry gets no note: there is nothing to
+// annotate, and creating a file to hold a note about a release it does not
+// record would be worse than silence. The same goes for a file that somehow
+// does not carry the entry.
+func NoteEntry(rel *plan.Release, note string) (string, bool, error) {
+	spec := rel.Pkg.Changelog
+	if !spec.Records(rel.Channel) {
+		return "", false, nil
+	}
+	w := &FileWriter{File: spec.File}
+	path := w.path(rel)
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("changelog: %w", err)
+	}
+	marker := "## " + rel.TagName() + " ("
+	bom, text := cutBOM(string(existing))
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, marker) {
+			continue
+		}
+		// A blockquote, so it reads as an aside about the entry rather than as
+		// one of the changes it lists, and so nothing that parses the sections
+		// finds a heading it did not write.
+		block := []string{"", "> " + strings.ReplaceAll(strings.TrimRight(note, "\n"), "\n", "\n> ")}
+		out := append([]string{}, lines[:i+1]...)
+		out = append(out, block...)
+		out = append(out, lines[i+1:]...)
+		mode := os.FileMode(0o644)
+		if info, statErr := os.Stat(path); statErr == nil {
+			mode = info.Mode().Perm()
+		}
+		if err := os.WriteFile(path, []byte(bom+strings.Join(out, "\n")), mode); err != nil {
+			return "", false, fmt.Errorf("changelog: %w", err)
+		}
+		return path, true, nil
+	}
+	return "", false, nil
+}
+
 // HasEntry reports whether content already carries the release entry for tag:
 // a line beginning "## <tag> (". The match is line-anchored so body text that
 // merely quotes a header does not count, and the trailing " (" keeps a tag

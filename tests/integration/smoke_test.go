@@ -13,6 +13,7 @@ package integration
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,26 @@ import (
 func smokeRepo(t *testing.T) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
+	r.WriteConfigModel(smokeConfig())
+
+	r.SeedPackage("golibs", "golib")
+	r.SeedPackage("golibs", "gocli")
+	r.SeedPackage("web", "js")
+	r.SeedPackage("images", "img")
+	r.WriteFile("golibs/golib/go.mod", "module example.com/toy/golib\n\ngo 1.22\n")
+	r.WriteFile("golibs/gocli/go.mod",
+		"module example.com/toy/gocli\n\ngo 1.22\n\nrequire example.com/toy/golib v0.0.0\n")
+	r.WriteFile("web/js/package.json", `{"name": "@toy/js", "version": "0.0.0"}`)
+	r.WriteFile("images/img/Dockerfile",
+		"FROM registry.example.com/js:0.0.0 AS assets\nCOPY --from=assets /dist /srv\n")
+	r.WriteFile("images/img/compose.yaml",
+		"services:\n  img:\n    image: registry.example.com/img:0.0.0\n  js:\n    image: registry.example.com/js:0.0.0\n")
+	return r
+}
+
+// smokeConfig is the walk's configuration, named so a later cycle can put the
+// same one back with a field changed.
+func smokeConfig() models.File {
 	cfg := harness.BaseFile(1)
 	// The build honours a per-package fail marker at the repository root, so a
 	// cycle can kill one leg of a run mid-flight (cycle 7) without a config
@@ -63,21 +84,7 @@ func smokeRepo(t *testing.T) *harness.Repo {
 		{Consumer: "gocli", Provider: "golib"},
 		{Consumer: "img", Provider: "js"},
 	}
-	r.WriteConfigModel(cfg)
-
-	r.SeedPackage("golibs", "golib")
-	r.SeedPackage("golibs", "gocli")
-	r.SeedPackage("web", "js")
-	r.SeedPackage("images", "img")
-	r.WriteFile("golibs/golib/go.mod", "module example.com/toy/golib\n\ngo 1.22\n")
-	r.WriteFile("golibs/gocli/go.mod",
-		"module example.com/toy/gocli\n\ngo 1.22\n\nrequire example.com/toy/golib v0.0.0\n")
-	r.WriteFile("web/js/package.json", `{"name": "@toy/js", "version": "0.0.0"}`)
-	r.WriteFile("images/img/Dockerfile",
-		"FROM registry.example.com/js:0.0.0 AS assets\nCOPY --from=assets /dist /srv\n")
-	r.WriteFile("images/img/compose.yaml",
-		"services:\n  img:\n    image: registry.example.com/img:0.0.0\n  js:\n    image: registry.example.com/js:0.0.0\n")
-	return r
+	return cfg
 }
 
 // graphOf indexes one run's graph lines by package.
@@ -314,4 +321,57 @@ func TestSmokeReleaseCycles(t *testing.T) {
 
 	assertConverged(t, r, map[string]string{
 		"golib": "0.1.2", "gocli": "0.1.2", "js": "0.6.0", "img": "0.6.0"})
+
+	// --- Cycle 9: a branch other people push to. ---
+	//
+	// The last shape a real workspace meets: somebody lands a commit while the
+	// release is running, after the behind-remote guard has already closed and
+	// after the packages have published. The release merges rather than
+	// refusing, keeps its tags on the commit it planned, and the run after it
+	// releases what arrived.
+	bare := r.AddBareRemote()
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	cfg := smokeConfig()
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Scripts["build"] = models.Script{
+		midReleasePush(t, bare, "feat(golib): landed mid-release", "NOTES.md", "landed\n")}
+	r.WriteConfigModel(cfg)
+	r.WriteFile("golibs/golib/pushed.txt", "p")
+	r.Commit("fix(golib): release from a branch other people push to")
+
+	res = r.Release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.HasCode(res.Events, "W242"), "the pull is reported: %v", res.Events)
+	release := releaseCommit(t, r, "chore(release): golib@0.1.3")
+	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "golib@0.1.3")),
+		"the tag names the commit the run planned, not the merge above it")
+	assert.Contains(t, firstParents(t, r), release)
+
+	res = r.ReleaseOK()
+	assert.True(t, r.HasTag("golib@0.2.0"), "what arrived releases next; tags: %v", r.TagList())
+
+	// --- Cycle 10: and what arrived changed the same content. ---
+	//
+	// The release has published by the time the conflict is known, so it
+	// completes: this side of every conflicting file is what the branch keeps,
+	// the other side is pushed to a branch of its own, and both records name
+	// the files and that branch.
+	require.NoError(t, os.Remove(r.Path("pushed.marker")))
+	cfg.Scripts["build"] = models.Script{midReleasePush(t, bare,
+		"docs(golib): a changelog of their own", "golibs/golib/CHANGELOG.md",
+		"# Changelog\n\nwritten by somebody else\n")}
+	r.WriteConfigModel(cfg)
+	r.WriteFile("golibs/golib/again.txt", "p")
+	r.Commit("fix(golib): release into a conflict")
+
+	res = r.Release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.HasCode(res.Events, "W243"), "the conflict is reported: %v", res.Events)
+	quarantine := conflictBranchOf(t, r)
+	assert.Contains(t, quarantine, "release-conflicts/golib-0.2.1-")
+	log := readFile(t, r, "golibs", "golib", "CHANGELOG.md")
+	assert.NotContains(t, log, "written by somebody else", "their side did not overwrite the release")
+	assert.NotContains(t, log, "<<<<")
+	assert.Contains(t, log, quarantine, "and the entry says where their side is kept")
+	assert.True(t, r.HasTag("golib@0.2.1"), "tags: %v", r.TagList())
 }

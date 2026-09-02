@@ -201,33 +201,6 @@ func TestSmokeKeyFeatures(t *testing.T) {
 	assert.Equal(t, 1, api.assetHits(), "the asset came from the endpoint the token unlocks")
 	assert.Zero(t, api.publicHits(), "and the public URL, which serves a page, was never asked")
 
-	// --- Act 10: a release meets a branch that moved under it. ---
-	//
-	// The behind-remote guard closes before the plan exists, so a commit
-	// pushed while the run is working reaches the finalize push as a
-	// rejection, after the packages have published. dispat merges rather than
-	// refusing, and the run after it releases what arrived.
-	bare := r.AddBareRemote()
-	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-	cfg := featuresConfig()
-	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
-	cfg.Scripts["build"] = models.Script{
-		midReleasePush(t, bare, "feat(core): landed mid-release", "NOTES.md", "landed\n")}
-	r.WriteConfigModel(cfg)
-	r.WriteFile("packages/core/pushed.txt", "p")
-	r.Commit("fix(core): release from a branch other people push to")
-
-	res = r.Release()
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "W242"), "the pull is reported: %v", res.Events)
-	release := releaseCommit(t, r, "chore(release): core@0.1.2")
-	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.2")),
-		"the tag names the commit the run planned, not the merge above it")
-	assert.Contains(t, firstParents(t, r), release)
-
-	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.2.0"), "the run after it releases what arrived; tags: %v", r.TagList())
-	assert.Contains(t, readFile(t, r, "packages", "core", "CHANGELOG.md"), "landed mid-release")
 }
 
 // The fictional tool Act 9 installs from a repository nobody may read without
@@ -256,7 +229,11 @@ func privateToolAPI(t *testing.T) *toolAPI {
 	api := &toolAPI{}
 	sum := sha256.Sum256([]byte(privateToolBody))
 	var base string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	// Unstarted, so the address every asset URL is built from is written
+	// before any handler can read it. The handlers run on the server's own
+	// goroutines, which is what makes that a race rather than an ordering
+	// detail.
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		authed := req.Header.Get("Authorization") == "Bearer "+privateToolToken
 		switch {
 		case strings.HasPrefix(req.URL.Path, "/download/"):
@@ -293,8 +270,9 @@ func privateToolAPI(t *testing.T) *toolAPI {
 			}})
 		}
 	}))
+	base = "http://" + srv.Listener.Addr().String()
+	srv.Start()
 	t.Cleanup(srv.Close)
-	base = srv.URL
-	api.url = srv.URL
+	api.url = base
 	return api
 }

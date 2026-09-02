@@ -244,30 +244,45 @@ func landAgainDuringTheRecovery(t *testing.T, bare, message string) {
 	require.NoError(t, os.WriteFile(hook, []byte(script), 0o755))
 }
 
+// foreignChange is one commit a second clone lands while the release runs.
+type foreignChange struct{ message, file, contents string }
+
 // midReleasePush is a build script that pushes a commit from a second clone
 // while the release is running: exactly the window the behind-remote guard
 // cannot cover, because it closes before the plan exists and this happens
 // after it. The file it writes decides whether the release commit can be
 // merged with what landed, since a conflict is a conflict over content.
-//
-// It fires once. A scenario that releases twice is asking what the run after
-// the recovery does, and a second foreign push would answer a different
-// question; the marker sits at the repository root, which no release commit
-// stages.
 func midReleasePush(t *testing.T, bare, message, file, contents string) string {
+	t.Helper()
+	return midReleasePushes(t, bare, foreignChange{message, file, contents})
+}
+
+// midReleasePushes is midReleasePush with more than one commit, all landed by
+// the same clone in one go.
+//
+// The whole thing fires once. A scenario that releases twice is asking what
+// the run after the recovery does, and a second round of foreign pushes would
+// answer a different question; the marker sits at the repository root, which
+// no release commit stages.
+func midReleasePushes(t *testing.T, bare string, changes ...foreignChange) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the mid-release push is a POSIX shell script")
 	}
-	return "if [ ! -f ../../pushed.marker ]; then touch ../../pushed.marker && " + strings.Join([]string{
+	steps := []string{
 		"d=$(mktemp -d)",
 		"git clone -q --branch " + harness.DefaultBranch + " " + harness.ShQuote(bare) + " \"$d\"",
-		"printf '%s' " + harness.ShQuote(contents) + " > \"$d\"/" + file,
-		"git -C \"$d\" add -A",
-		"git -C \"$d\" -c user.email=other@dispat.test -c user.name='other clone' commit -q -m " +
-			harness.ShQuote(message),
-		"git -C \"$d\" push -q origin HEAD:refs/heads/" + harness.DefaultBranch,
-	}, " && ") + "; fi"
+	}
+	for _, c := range changes {
+		steps = append(steps,
+			"printf '%s' "+harness.ShQuote(c.contents)+" > \"$d\"/"+c.file,
+			"git -C \"$d\" add -A",
+			"git -C \"$d\" -c user.email=other@dispat.test -c user.name='other clone' commit -q -m "+
+				harness.ShQuote(c.message))
+	}
+	steps = append(steps, "git -C \"$d\" push -q origin HEAD:refs/heads/"+harness.DefaultBranch)
+	return "if [ ! -f ../../pushed.marker ]; then touch ../../pushed.marker && " +
+		strings.Join(steps, " && ") + "; fi"
 }
 
 // releaseCommit resolves the run's release commit by the subject it was made
@@ -463,33 +478,97 @@ func TestReleaseRefusesToRepublishAnExistingTag(t *testing.T) {
 		"the published tag is where its own release left it")
 }
 
-// TestReleaseCannotMergeWhatConflicts: the other outcome. What landed touches
-// the same file the release commit writes, so the merge conflicts and there is
-// nothing dispat can decide on its own. It says which side of the problem it
-// is on, leaves no tag on the remote, leaves the working tree out of the merge
-// it started, and gives the lock back on the way out.
-func TestReleaseCannotMergeWhatConflicts(t *testing.T) {
+// TestReleaseSettlesAConflictAndKeepsBothSides: what landed changed the same
+// content the release did. The release has already published by then, so
+// stopping would leave its commit and tags nowhere but this clone; it
+// completes instead, and hands the conflict over rather than deciding it.
+//
+// This release's side wins every conflicting file, because that is the tree
+// the tag names. Everything of theirs that did not conflict is in the merge
+// all the same. Their side is pushed to a branch of its own so nothing is
+// lost, and both records name the files and that branch.
+func TestReleaseSettlesAConflictAndKeepsBothSides(t *testing.T) {
 	r := harness.New(t)
 	bare := r.AddBareRemote()
-	script := midReleasePush(t, bare, "docs(core): a changelog of their own",
-		"packages/core/CHANGELOG.md", "# Changelog\n\nwritten by somebody else\n")
+	srv, bodies := githubFake(t)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	// Their commit rewrites the changelog this release is about to write, and
+	// adds a file nothing here touches.
+	script := midReleasePushes(t, bare,
+		foreignChange{"docs(core): a changelog of their own", "packages/core/CHANGELOG.md",
+			"# Changelog\n\nwritten by somebody else\n"},
+		foreignChange{"fix(core): something of their own", "THEIRS.md", "theirs"})
 	cfg := libsConfig(script, 1)
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	cfg.Scripts["publish"] = models.Script{`echo "DISPAT_EXPORT_GITHUB=" >> "$DISPAT_OUTPUT"`}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), Owner: "acme", Repo: "mono",
+		APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")
 	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 
 	res := releaseLocked(r)
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout, "commits landed on origin/"+harness.DefaultBranch+" during the release")
-	assert.Contains(t, res.Stdout, "could not be merged")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.HasCode(res.Events, "W243"), "the conflict is reported: %v", res.Events)
 
-	remote := r.Git("ls-remote", "origin")
-	assert.NotContains(t, remote, "refs/tags/core@0.1.0", "a release nobody could push publishes no tag")
+	// The tag is where it always is, on the commit the run planned.
+	release := releaseCommit(t, r, "chore(release): core@0.1.0")
+	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.0")))
+	assert.Contains(t, firstParents(t, r), release)
+	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0")
+
+	// This side of the conflict is what the branch carries, with no markers in
+	// it, and everything of theirs that did not conflict is here too.
+	changelog := readFile(t, r, "packages", "core", "CHANGELOG.md")
+	assert.NotContains(t, changelog, "written by somebody else", "their side did not overwrite the release")
+	assert.NotContains(t, changelog, "<<<<", "and no conflict markers were committed")
+	assert.Contains(t, changelog, "## core@0.1.0 (", "the entry is still the one a re-run recognises")
+	assert.FileExists(t, r.Path("THEIRS.md"), "what of theirs did not conflict is in the merge")
+
+	// Their side is kept, at the tip they pushed.
+	quarantine := conflictBranchOf(t, r)
+	assert.Contains(t, quarantine, "release-conflicts/core-0.1.0-", "branch: %s", quarantine)
+	assert.Contains(t, r.Git("log", "--format=%s", "origin/"+quarantine),
+		"a changelog of their own", "the branch holds the side that was set aside")
+
+	// Both records name the files and the branch.
+	assert.Contains(t, changelog, "packages/core/CHANGELOG.md")
+	assert.Contains(t, changelog, quarantine)
+	posted := bodies()
+	require.Len(t, posted, 1)
+	var created struct {
+		Body string `json:"body"`
+	}
+	require.NoError(t, json.Unmarshal(posted[0], &created))
+	assert.Contains(t, created.Body, "packages/core/CHANGELOG.md")
+	assert.Contains(t, created.Body, quarantine)
+
 	assertLockCleared(t, r, bare)
-
-	// The merge is undone rather than left for the next person to find.
 	assert.NoFileExists(t, r.Path(".git", "MERGE_HEAD"))
-	assert.NoDirExists(t, r.Path(".git", "rebase-merge"))
+
+	// And the run after it plans normally: the merge and the release commit
+	// both name no package, and what arrived releases on its own terms.
+	next := r.Release()
+	require.Equal(t, 0, next.Code, "stdout:\n%s\nstderr:\n%s", next.Stdout, next.Stderr)
+	assert.False(t, harness.HasCode(next.Events, "W131"),
+		"the merge carries a changelog edit and still resolves to no package: %v", next.Events)
+	assert.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+}
+
+// conflictBranchOf is the quarantine branch the run pushed, read off the
+// remote rather than guessed at: its name carries a timestamp.
+func conflictBranchOf(t *testing.T, r *harness.Repo) string {
+	t.Helper()
+	r.Git("fetch", "-q", "origin")
+	for _, line := range strings.Split(r.Git("ls-remote", "--heads", "origin"), "\n") {
+		_, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if ok && strings.HasPrefix(ref, "refs/heads/release-conflicts/") {
+			return strings.TrimPrefix(ref, "refs/heads/")
+		}
+	}
+	t.Fatalf("no release-conflicts branch on the remote:\n%s", r.Git("ls-remote", "--heads", "origin"))
+	return ""
 }

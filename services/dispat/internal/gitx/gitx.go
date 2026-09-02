@@ -1101,6 +1101,19 @@ func classifyPush(err error) error {
 	return err
 }
 
+// MergeConflict is what a merge that stopped on content answers with: the
+// paths git could not join, still unmerged in the index, with the merge left
+// in progress for the caller to finish.
+//
+// It is a value rather than a failure because the caller has an answer for it.
+// A release that reaches this point has already published, and abandoning the
+// merge would leave the release commit and its tags nowhere but this clone.
+type MergeConflict struct{ Paths []string }
+
+func (c *MergeConflict) Error() string {
+	return "the merge conflicts in " + strings.Join(c.Paths, ", ")
+}
+
 // MergeRemote joins the remote's tip of branch into the checked-out branch:
 // the recovery from a push refused because someone landed work while the
 // release ran.
@@ -1115,8 +1128,12 @@ func classifyPush(err error) error {
 // and the commits that arrived are the second. Either order would do for the
 // planner, which reads the merge's own message and finds a scope it exempts,
 // but this order is the one a single command can make and a single command can
-// undo: on a conflict the merge is aborted and the working tree is left
-// exactly as the run had it, rather than mid-merge or on a detached HEAD.
+// undo.
+//
+// A merge that stops on conflicting content is left in progress and reported
+// as *MergeConflict, because that is a state the caller resolves rather than
+// an error it reports. A merge that fails for any other reason is aborted
+// here, so the working tree is left exactly as the run had it.
 //
 // The fetch is deliberately --no-tags: the tags this run just created are its
 // own records, and pulling the remote's would be a second, unrelated change to
@@ -1130,10 +1147,13 @@ func (c *CLI) MergeRemote(ctx context.Context, remote, branch, message string) e
 	// recovery documents is only a shape when there is a merge commit to have
 	// one.
 	if _, err := c.run(ctx, "merge", "--no-ff", "--no-edit", "-m", message, "FETCH_HEAD"); err != nil {
+		if paths, uErr := c.UnmergedPaths(ctx); uErr == nil && len(paths) > 0 {
+			return &MergeConflict{Paths: paths}
+		}
 		// The abort's own failure is not what the caller needs to hear about:
 		// the merge is the thing that did not work, and saying so twice would
 		// bury it.
-		if _, abortErr := c.run(ctx, "merge", "--abort"); abortErr != nil {
+		if abortErr := c.AbortMerge(ctx); abortErr != nil {
 			c.Log.Warn().Err(abortErr).Msg("could not abort the merge")
 		}
 		return err
@@ -1141,7 +1161,97 @@ func (c *CLI) MergeRemote(ctx context.Context, remote, branch, message string) e
 	return nil
 }
 
-// PushReport says what the push did about tags the remote already carried.
+// UnmergedPaths are the paths a stopped merge left unresolved in the index.
+func (c *CLI) UnmergedPaths(ctx context.Context) ([]string, error) {
+	out, err := c.run(ctx, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if p := strings.TrimSpace(line); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// AbortMerge undoes a merge in progress, leaving the working tree as it was.
+func (c *CLI) AbortMerge(ctx context.Context) error {
+	_, err := c.run(ctx, "merge", "--abort")
+	return err
+}
+
+// ResolveOurs settles every named unmerged path by taking this side of it, and
+// leaves the result staged.
+//
+// This side, always. What is on this side is the release: a tree that was
+// planned, built, published and tagged, and the tag already names it. Taking
+// anything else would publish content the release never saw, so the other
+// side is preserved somewhere it can be read instead (see the quarantine
+// branch the caller pushes).
+//
+// A path this side deleted cannot be checked out, and is removed instead;
+// every other shape of conflict, content or add/add, resolves to the file this
+// side has.
+func (c *CLI) ResolveOurs(ctx context.Context, paths []string) error {
+	for _, path := range paths {
+		if _, err := c.run(ctx, "checkout", "--ours", "--", path); err != nil {
+			if _, rmErr := c.run(ctx, "rm", "-q", "-f", "--", path); rmErr != nil {
+				return fmt.Errorf("resolving %s: %w", path, err)
+			}
+			continue
+		}
+		if _, err := c.run(ctx, "add", "--", path); err != nil {
+			return fmt.Errorf("staging %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// StageFile adds one path to the index, which is how a caller puts something
+// of its own into a merge commit before finishing it.
+func (c *CLI) StageFile(ctx context.Context, path string) error {
+	_, err := c.run(ctx, "add", "--", path)
+	return err
+}
+
+// CommitMerge finishes a merge in progress with the message it was started
+// with, whatever the caller resolved and staged in the meantime.
+func (c *CLI) CommitMerge(ctx context.Context) error {
+	_, err := c.run(ctx, "commit", "--no-edit")
+	return err
+}
+
+// PushBranchAt creates a branch on the remote at rev, and refuses to touch one
+// that is already there.
+//
+// Never forced, and deliberately so: this is where work somebody else pushed
+// is put so it stays readable, and overwriting it would lose exactly what it
+// exists to preserve. A name already taken is a failure rather than a fallback
+// name, because the naming scheme makes a collision practically impossible and
+// a surprise is worth stopping on.
+func (c *CLI) PushBranchAt(ctx context.Context, remote, rev, name string) error {
+	if err := ValidRefName(name); err != nil {
+		return fmt.Errorf("%q: %w", name, err)
+	}
+	existing, err := c.run(ctx, "ls-remote", "--heads", remote, "refs/heads/"+name)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(existing) != "" {
+		return fmt.Errorf("%s already has a branch called %s", remote, name)
+	}
+	_, err = c.run(ctx, "push", remote, rev+":refs/heads/"+name)
+	return err
+}
+
+// ValidRefName reports whether git would accept name as a ref. It is the same
+// check the alias tag formats are validated with, exposed for the callers that
+// build a ref name out of things a person configured.
+func ValidRefName(name string) error { return validRefName(name) }
+
+// PushReport says what the push did about tags the remote already carried.// PushReport says what the push did about tags the remote already carried.
 // Exactly one of the two lists is ever populated, decided by force.
 type PushReport struct {
 	// Skipped are tags left as they were, because the remote already had

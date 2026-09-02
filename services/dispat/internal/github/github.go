@@ -118,6 +118,11 @@ type Releaser struct {
 	// already exists on the remote (i.e. after a push) — GitHub rejects
 	// unknown SHAs.
 	TargetCommitish string
+	// Note, when set, is a block the release body carries after its own
+	// details and before the footer: something true about how this release
+	// reached the remote that its changes cannot say. The mid-release merge
+	// recovery writes one when it had to set a conflicting change aside.
+	Note string
 
 	// retries and retryDelay override the transient-failure retry of the
 	// read-only calls; the zero values mean defaultRetries/defaultRetryDelay.
@@ -369,8 +374,10 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		release = "### Release\n\n- commit: " + sha + "\n- tag: " + tag + "\n"
 	}
 	// The release section sits inside the body, before the footer: it belongs
-	// to the release the entry describes, and a footer is the last word.
-	body := changelog.RenderBody(rel, r.Format, look, release)
+	// to the release the entry describes, and a footer is the last word. A
+	// note about how the release reached the remote follows it, for the same
+	// reason and in the same place.
+	body := changelog.RenderBody(rel, r.Format, look, release, r.Note)
 	// The release is named after its tag unless the format says otherwise. The
 	// tag itself is never renamed: it is what the release hangs off.
 	name := tag

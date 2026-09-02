@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
+	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -292,8 +294,14 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 
 	var report gitx.PushReport
 	for attempt := 1; ; attempt++ {
-		if err := a.git.MergeRemote(ctx, fin.remote, branch,
-			mergeMessage(fin.remote, branch, release, tags)); err != nil {
+		err := a.git.MergeRemote(ctx, fin.remote, branch, mergeMessage(fin.remote, branch, release, tags))
+		var conflict *gitx.MergeConflict
+		switch {
+		case errors.As(err, &conflict):
+			if err := a.settleConflict(ctx, fin, rels, branch, conflict.Paths); err != nil {
+				return report, release, err
+			}
+		case err != nil:
 			return report, release, fmt.Errorf(
 				"commits landed on %s/%s during the release and could not be merged with it: %w",
 				fin.remote, branch, err)
@@ -311,6 +319,103 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 		a.log.Debug().Str("remote", fin.remote).Str("branch", branch).Int("attempt", attempt).
 			Msg("the branch moved again during the recovery; merging what arrived and pushing once more")
 	}
+}
+
+// settleConflict finishes a recovery merge that stopped on content, so that a
+// release which has already published still reaches the remote.
+//
+// Three things happen, and none of them may be skipped. This side of every
+// conflicting path wins, because this side is the release: a tree that was
+// planned, built, published and tagged, and the tag already names it, so
+// taking the other side would publish content the release never saw. The
+// other side is pushed to a branch of its own, so the work somebody else did
+// stays readable rather than being quietly dropped on the floor. And both
+// records say so, naming the files and that branch, because the one thing
+// worse than a conflict is a conflict nobody was told about.
+//
+// What is left is a job for a person: two versions of the same content exist,
+// one on the branch and one on the quarantine branch, and no rule dispat could
+// follow decides which of them should survive.
+//
+// The note reaches the changelog through the merge commit, never through the
+// release commit: that one is tagged, and a tag whose commit is amended is a
+// tag that names nothing. The tagged tree therefore carries the entry without
+// the note, which the documentation says out loud.
+func (a *App) settleConflict(ctx context.Context, fin finalizer, rels []*plan.Release,
+	branch string, paths []string) error {
+	quarantine := conflictBranch(rels, time.Now())
+	if err := a.git.ResolveOurs(ctx, paths); err != nil {
+		return fmt.Errorf("settling the merge of %s/%s: %w", fin.remote, branch, err)
+	}
+	// Pushed before the merge is committed, so a name that cannot be taken
+	// stops the run while the tree is still the one it can explain.
+	if err := a.git.PushBranchAt(ctx, fin.remote, "FETCH_HEAD", quarantine); err != nil {
+		return fmt.Errorf(
+			"commits landed on %s/%s during the release and conflicted with it, and the branch "+
+				"that would have kept them could not be pushed: %w", fin.remote, branch, err)
+	}
+	note := conflictNote(fin.remote, quarantine, paths)
+	for _, rel := range rels {
+		path, noted, err := changelog.NoteEntry(rel, note)
+		if err != nil {
+			return fmt.Errorf("noting the conflict in %s's changelog: %w", rel.Pkg.Name, err)
+		}
+		if !noted {
+			continue
+		}
+		if err := a.git.StageFile(ctx, path); err != nil {
+			return fmt.Errorf("staging %s: %w", path, err)
+		}
+	}
+	if err := a.git.CommitMerge(ctx); err != nil {
+		return fmt.Errorf("committing the settled merge of %s/%s: %w", fin.remote, branch, err)
+	}
+	// The GitHub releases are created after the push, so they can still carry
+	// it; the changelog could not wait, because it has to be in the tree the
+	// merge commits.
+	if fin.gh != nil {
+		for _, gh := range fin.gh.all {
+			gh.Note = "### Note\n\n" + note + "\n"
+		}
+	}
+	a.log.Warn().Str("code", plan.CodePushConflicted).Str("remote", fin.remote).Str("branch", branch).
+		Strs("paths", paths).Str("keptAt", quarantine).
+		Msg("commits landed on the branch during the release and changed the same content; " +
+			"this release's side was kept and theirs was pushed to a branch of its own to be reconciled")
+	return nil
+}
+
+// conflictNote is the sentence both records carry.
+func conflictNote(remote, quarantine string, paths []string) string {
+	return fmt.Sprintf(
+		"Commits landed on %s while this release ran and changed %s, which this release "+
+			"changed too. This release's version of those files is what was published; the other "+
+			"side is kept on the branch %s, to be reconciled.",
+		remote, strings.Join(paths, ", "), quarantine)
+}
+
+// conflictBranch names the branch the other side of a conflict is kept on:
+// what this leg released, then when, under a prefix that says what the branch
+// is for.
+//
+// Deterministic in its releases, which is what makes it readable, and unique
+// in its timestamp, which is what makes it safe. The releases are taken in the
+// leg's own order rather than sorted, so the name reads the way the release
+// itself does.
+func conflictBranch(rels []*plan.Release, now time.Time) string {
+	parts := make([]string, 0, len(rels)*2+1)
+	for _, rel := range rels {
+		parts = append(parts, rel.Pkg.Name, rel.Next.String())
+	}
+	parts = append(parts, now.UTC().Format("20060102-150405"))
+	name := "release-conflicts/" + strings.Join(parts, "-")
+	if err := gitx.ValidRefName(name); err != nil {
+		// A package named something git will not take in a ref. The timestamp
+		// alone still identifies the run, and a branch nobody can push is
+		// worse than one nobody can guess.
+		return "release-conflicts/" + now.UTC().Format("20060102-150405")
+	}
+	return name
 }
 
 // mergeAttempts bounds the recovery. Each round costs a fetch, a merge and a

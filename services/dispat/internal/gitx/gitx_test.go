@@ -1139,10 +1139,16 @@ func TestPushReportsARejectedBranchAsRecoverable(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrRejected)
 }
 
-// TestMergeRemoteUndoesAMergeItCannotFinish: a conflict leaves the working
-// tree as the run had it rather than half way through a merge somebody else
-// then has to find and abort.
-func TestMergeRemoteUndoesAMergeItCannotFinish(t *testing.T) {
+// TestMergeRemoteReportsAConflictItCannotFinish: a merge that stops on
+// content is a state the caller settles rather than a failure it reports, so
+// it comes back naming the paths and with the merge still in progress. A
+// release that reaches here has already published, and abandoning the merge
+// would leave its commit and tags nowhere but this clone.
+//
+// The other half is what settling it does: this side of every conflicting path
+// wins, the other side's non-conflicting work is still in the merge, and the
+// commit that results is a merge of both.
+func TestMergeRemoteReportsAConflictItCannotFinish(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
@@ -1152,37 +1158,70 @@ func TestMergeRemoteUndoesAMergeItCannotFinish(t *testing.T) {
 	other := t.TempDir()
 	out, cerr := exec.Command("git", "clone", "-q", bare, other).CombinedOutput()
 	require.NoError(t, cerr, "git clone: %s", out)
+	require.NoError(t, os.WriteFile(filepath.Join(other, "packages", "core", "CHANGELOG.md"),
+		[]byte("# Their changelog\n"), 0o644))
+	// Something of theirs nothing here touches, which the merge must keep.
+	require.NoError(t, os.WriteFile(filepath.Join(other, "THEIRS.md"), []byte("theirs\n"), 0o644))
 	for _, args := range [][]string{
 		{"config", "user.email", "other@example.com"},
 		{"config", "user.name", "Other"},
-	} {
-		out, gerr := exec.Command("git", append([]string{"-C", other}, args...)...).CombinedOutput()
-		require.NoError(t, gerr, "git %v: %s", args, out)
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(other, "packages", "core", "CHANGELOG.md"),
-		[]byte("# Their changelog\n"), 0o644))
-	for _, args := range [][]string{
 		{"add", "."}, {"commit", "-qm", "docs: their changelog"}, {"push", "-q", "origin", "HEAD"},
 	} {
 		out, gerr := exec.Command("git", append([]string{"-C", other}, args...)...).CombinedOutput()
 		require.NoError(t, gerr, "git %v: %s", args, out)
 	}
 
-	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "CHANGELOG.md"),
-		[]byte("# Our changelog\n"), 0o644))
+	ours := filepath.Join(root, "packages", "core", "CHANGELOG.md")
+	require.NoError(t, os.WriteFile(ours, []byte("# Our changelog\n"), 0o644))
 	_, err = cli.CommitDirs(ctx, []string{filepath.Join(root, "packages", "core")}, "chore(release): core@0.2.0")
+	require.NoError(t, err)
+	release, err := cli.HeadSHA(ctx)
 	require.NoError(t, err)
 
 	branch, err := cli.CurrentBranch(ctx)
 	require.NoError(t, err)
-	require.Error(t, cli.MergeRemote(ctx, "origin", branch, "chore(release): merge"),
-		"the two sides wrote the same file")
+	err = cli.MergeRemote(ctx, "origin", branch, "chore(release): merge origin/"+branch)
+	var conflict *MergeConflict
+	require.ErrorAs(t, err, &conflict, "a conflict is reported as one")
+	assert.Equal(t, []string{"packages/core/CHANGELOG.md"}, conflict.Paths)
+	assert.FileExists(t, filepath.Join(root, ".git", "MERGE_HEAD"),
+		"and the merge is left in progress for the caller to settle")
+
+	require.NoError(t, cli.ResolveOurs(ctx, conflict.Paths))
+	require.NoError(t, cli.CommitMerge(ctx))
+
+	body, rerr := os.ReadFile(ours)
+	require.NoError(t, rerr)
+	assert.Equal(t, "# Our changelog\n", string(body), "this side of the conflict is what the branch carries")
+	assert.NotContains(t, string(body), "<<<<", "and no conflict markers were committed")
+	assert.FileExists(t, filepath.Join(root, "THEIRS.md"),
+		"while everything of theirs that did not conflict is in the merge")
+
+	parents, oerr := exec.Command("git", "-C", root, "rev-list", "--parents", "-n", "1", "HEAD").Output()
+	require.NoError(t, oerr)
+	fields := strings.Fields(strings.TrimSpace(string(parents)))
+	require.Len(t, fields, 3, "the settled merge is still a merge")
+	assert.Equal(t, release, fields[1], "with the release commit as its first parent")
 	assert.NoFileExists(t, filepath.Join(root, ".git", "MERGE_HEAD"))
-	assert.NoDirExists(t, filepath.Join(root, ".git", "rebase-merge"))
-	head, err := exec.Command("git", "-C", root, "log", "--format=%s", "-1").Output()
+}
+
+// TestPushBranchAtRefusesANameAlreadyTaken: the branch a conflict's other side
+// is kept on exists to preserve somebody's work, so overwriting one would lose
+// exactly what it is for.
+func TestPushBranchAtRefusesANameAlreadyTaken(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	addBareRemote(t, root)
+	_, err := cli.Push(ctx, "origin", nil, false)
 	require.NoError(t, err)
-	assert.Equal(t, "chore(release): core@0.2.0", strings.TrimSpace(string(head)),
-		"the run's own commit is still what HEAD names")
+
+	require.NoError(t, cli.PushBranchAt(ctx, "origin", "HEAD", "release-conflicts/core-0.1.0-20260902-053012"))
+	err = cli.PushBranchAt(ctx, "origin", "HEAD", "release-conflicts/core-0.1.0-20260902-053012")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already has a branch")
+
+	require.Error(t, cli.PushBranchAt(ctx, "origin", "HEAD", "release-conflicts/what a name"),
+		"a name git would not take is refused before anything is pushed")
 }
 
 // TestClassifyPushRecognisesEverySpellingOfARefusal: the recovery only fires

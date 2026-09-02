@@ -98,15 +98,43 @@ The recovery would push the tag again, and [`commit.force`](../../configuration/
 it would move a published ref. Pull and run again instead: the plan then reads the tag that exists and releases the
 version after it. Moving aliases are not part of the check, because moving them is what every release does.
 
-If the merge conflicts, dispat has nothing to decide on its own and stops:
+### When what landed conflicts
+
+Sometimes the commits that arrived changed the same content the release did. The release has already published by
+then, so stopping would still leave it nowhere but the local clone. dispat completes it and hands you the conflict
+instead:
 
 ```console
-12:04:05 ERR push failed code=E224 error="commits landed on origin/main during the release and could not be merged with it: ..." remote=origin
+12:04:05 WRN commits landed on the branch during the release and changed the same content; this release's side was kept and theirs was pushed to a branch of its own to be reconciled branch=main code=W243 keptAt=release-conflicts/core-0.1.0-20260902-053012 paths=["packages/core/CHANGELOG.md"] remote=origin
 ```
 
-The run exits non-zero, no tag reaches the remote, the working tree is left out of the merge dispat started, and the
-[release lock](./release-lock.md) is given back as it is on every other way out. Merge the two sides yourself, then
-push the release commit and its tags.
+Three things happen, and the run then exits `0`:
+
+- **This release's side wins every conflicting file.** It is the tree that was planned, built, published and tagged,
+  and the tag already names it, so taking the other side would publish content the release never saw. Everything the
+  arriving commits changed that did *not* conflict is in the merge exactly as it is on the clean path.
+- **The other side is kept.** dispat pushes the foreign tip to a branch of its own, named
+  `release-conflicts/<package>-<version>...-<UTC timestamp>`: every package this leg released with its version, then
+  when it happened, so the name says what it belongs to and cannot collide. The branch is never forced, and a name
+  that somehow exists already stops the run rather than being overwritten.
+- **Both records say so.** The changelog entry and the GitHub release body carry a note naming the conflicting files
+  and that branch.
+
+The changelog note lives in the merge commit rather than in the release commit, because the release commit is tagged
+and a tag whose commit is amended names nothing. The tree the tag points at therefore carries the entry *without* the
+note; the branch carries it with one. The GitHub release body has no such constraint, since it is written after the
+push.
+
+What is left is a job for a person. Two versions of the same content exist, one on the branch and one on the
+quarantine branch, and no rule dispat could follow decides which should survive. Note also that the arriving commits
+sit outside the tag's ancestry, so the next run releases them as it would any other commit: it will release the parts
+of their work that did merge, while the conflicting hunks are still only on the quarantine branch. Reconcile the two
+sides before or after that release, whichever suits, but do not leave the branch unread.
+
+dispat stops with `E224` only when the recovery machinery itself fails: the quarantine branch cannot be pushed, the
+settled merge cannot be committed, or the merge stopped for a reason that is not conflicting content. The run then
+exits non-zero, no tag reaches the remote, the working tree is left out of the merge dispat started, and the
+[release lock](./release-lock.md) is given back as it is on every other way out.
 
 Read [Concepts](../../concepts.md#catch-up-failed-consumers-are-never-lost) to understand the properties that make this
 safe and why dispat needs no state file. You can look up each diagnostic code in [Diagnostic codes](../plan-errors.md).
