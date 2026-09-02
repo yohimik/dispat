@@ -195,7 +195,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			// Somebody pushed to the branch while this run was working. The
 			// release still owes its commit and tags, and the way to deliver
 			// them is to join what landed with what this run made.
-			report, released, err = a.mergeAndPush(ctx, fin, tags, pushTags)
+			report, released, err = a.mergeAndPush(ctx, fin, rels, tags, pushTags)
 		}
 		a.reportPush(report, fin.remote)
 		if err != nil {
@@ -254,6 +254,14 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 // They are outside the tag's ancestry, which is exactly where they belong: the
 // next run plans them and releases them on their own terms.
 //
+// The merge and the push are attempted up to mergeAttempts times, because the
+// window this recovers from is still open while it recovers: another clone can
+// land a commit between the fetch and the retry, and answering that with a
+// failed release would be the very outcome this exists to prevent. The loop is
+// here rather than at the caller because the release commit has to be read
+// once, before the first merge; afterwards HEAD is a merge and reading it
+// again would name the wrong commit.
+//
 // The warning is the point of the whole recovery. The branch the release went
 // out on is not the branch the run was planned against, and nobody reading
 // afterwards should have to work that out from the commit graph.
@@ -261,8 +269,8 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 // It answers the release commit as well as the push report, because the caller
 // cannot read it off HEAD afterwards: HEAD is the merge by then, and the
 // records this run still has to write are about the commit underneath it.
-func (a *App) mergeAndPush(ctx context.Context, fin finalizer, tags,
-	pushTags []string) (gitx.PushReport, string, error) {
+func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Release,
+	tags, pushTags []string) (gitx.PushReport, string, error) {
 	branch, err := a.git.CurrentBranch(ctx)
 	if err != nil {
 		return gitx.PushReport{}, "", err
@@ -278,16 +286,69 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, tags,
 	if err != nil {
 		return gitx.PushReport{}, "", err
 	}
-	if err := a.git.MergeRemote(ctx, fin.remote, branch, mergeMessage(fin.remote, branch, release, tags)); err != nil {
-		return gitx.PushReport{}, release, fmt.Errorf(
-			"commits landed on %s/%s during the release and could not be merged with it: %w",
-			fin.remote, branch, err)
+	if err := a.refuseRepublishing(ctx, fin.remote, rels); err != nil {
+		return gitx.PushReport{}, release, err
 	}
-	a.log.Warn().Str("code", plan.CodePushMerged).Str("remote", fin.remote).Str("branch", branch).
-		Msg("pulled the branch during the release to sync changes that landed while it ran; " +
-			"the release tags point at the tree that was planned and the release commit was merged on top")
-	report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
-	return report, release, err
+
+	var report gitx.PushReport
+	for attempt := 1; ; attempt++ {
+		if err := a.git.MergeRemote(ctx, fin.remote, branch,
+			mergeMessage(fin.remote, branch, release, tags)); err != nil {
+			return report, release, fmt.Errorf(
+				"commits landed on %s/%s during the release and could not be merged with it: %w",
+				fin.remote, branch, err)
+		}
+		a.log.Warn().Str("code", plan.CodePushMerged).Str("remote", fin.remote).Str("branch", branch).
+			Int("attempt", attempt).
+			Msg("pulled the branch during the release to sync changes that landed while it ran; " +
+				"the release tags point at the tree that was planned and the release commit was merged on top")
+		report, err = a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
+		if !errors.Is(err, gitx.ErrRejected) || attempt >= mergeAttempts {
+			return report, release, err
+		}
+		// Somebody landed another commit while this was merging the last one.
+		// Round again, on the tip that now exists.
+		a.log.Debug().Str("remote", fin.remote).Str("branch", branch).Int("attempt", attempt).
+			Msg("the branch moved again during the recovery; merging what arrived and pushing once more")
+	}
+}
+
+// mergeAttempts bounds the recovery. Each round costs a fetch, a merge and a
+// push, so a branch busy enough to lose three of them in a row is one where
+// stopping and saying so beats spinning: what fails then is the push, with the
+// release commit and its tags still local, which is the outcome the recovery
+// was already prepared to report.
+const mergeAttempts = 3
+
+// refuseRepublishing stops the recovery when the remote already carries a
+// release tag this run is about to push.
+//
+// The recovery pushes the same tags again, and commit.force defaults on, so
+// without this a checkout whose tags are stale enough to have re-planned an
+// already published version would force-move that published tag onto its own
+// commit. The push this recovers from never sent a tag at all, which is why
+// the hazard is new: the branch is refused before the tag refs are reached.
+//
+// The release tags come from the releases rather than from the commit
+// message's list, which leaves out any package that recorded itself through an
+// exported commit. Aliases are deliberately not checked: a moving alias exists
+// to be moved, and moving it is what every release does.
+func (a *App) refuseRepublishing(ctx context.Context, remote string, rels []*plan.Release) error {
+	existing, err := a.git.RemoteTags(ctx, remote)
+	if err != nil {
+		return fmt.Errorf("reading %s's tags before pushing the release again: %w", remote, err)
+	}
+	for _, rel := range rels {
+		tag := rel.TagName()
+		if existing[tag] {
+			return fmt.Errorf(
+				"commits landed on %s during the release, and %s already carries %s: "+
+					"this checkout planned a version that is already published, "+
+					"so pushing again would move a released tag. Pull and run again",
+				remote, remote, tag)
+		}
+	}
+	return nil
 }
 
 // mergeMessage is what the recovery's merge commit says.
@@ -298,10 +359,7 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, tags,
 // every folder the merge touched. The body names the release commit and the
 // tags, because a merge nobody can attribute is a merge nobody can audit.
 func mergeMessage(remote, branch, release string, tags []string) string {
-	short := release
-	if len(short) > 12 {
-		short = short[:12]
-	}
+	short := shortCommit(release)
 	return fmt.Sprintf(
 		"chore(release): merge %s/%s into the release commit\n\n"+
 			"Commits landed on %s/%s while the release ran, so the release\n"+

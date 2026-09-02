@@ -80,8 +80,23 @@ the release commit and whose second is what arrived. The merge itself is a `chor
 The commit that arrived is outside the tag's ancestry, which is where it belongs. It was not in this run's plan, it is
 not in this run's records, and the next run plans it and releases it on its own terms, with an entry of its own.
 
+The window this recovers from is still open while it recovers, so another clone can land a commit between the pull and
+the push that follows it. dispat answers that the same way, up to three rounds in all; the warning is reported once per
+round. What never moves across the rounds is the tag: it names the commit the run planned, not the merge above it.
+
 The warning is there because the branch the release went out on is not the branch the run was planned against. Read it
 as a prompt to check that the merge is the history you wanted.
+
+dispat stops before merging anything when the remote already carries a release tag this run is about to push:
+
+```console
+12:04:05 ERR push failed code=E224 error="commits landed on origin/main during the release, and origin already carries core@1.2.0: this checkout planned a version that is already published, so pushing again would move a released tag. Pull and run again" remote=origin
+```
+
+That is a checkout whose tags were stale enough for the plan to recompute a version somebody else has already released.
+The recovery would push the tag again, and [`commit.force`](../../configuration/records.md#force) is on by default, so
+it would move a published ref. Pull and run again instead: the plan then reads the tag that exists and releases the
+version after it. Moving aliases are not part of the check, because moving them is what every release does.
 
 If the merge conflicts, dispat has nothing to decide on its own and stops:
 

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -172,7 +173,7 @@ func TestGuardBehindRemoteHonoursCommitVerify(t *testing.T) {
 	// release the check exists to prevent from being planned at all.
 	//
 	// It still lands, because the push it is rejected on is recovered from
-	// (see TestReleaseReappliesWhatLandedDuringTheRun). What the guard was
+	// (see TestReleaseMergesWhatLandedDuringTheRun). What the guard was
 	// protecting is the plan, not the push, and the W242 warning is the only
 	// thing left saying the tree it went out on is not the one it was planned
 	// against.
@@ -200,6 +201,49 @@ func TestGuardsAreUnsetByDefault(t *testing.T) {
 	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
 }
 
+// landAgainDuringTheRecovery arms the bare remote to move the branch once more
+// underneath the recovery's own push.
+//
+// A pre-receive hook, because that is the only place something can happen
+// between the recovery's fetch and its push: the run's scripts are all
+// finished by the time the finalize push happens. The hook lands a commit and
+// then declines the update, writing the wording git itself uses when two runs
+// push at the same instant. A real race cannot be scheduled, and what is under
+// test is what dispat does with the answer rather than how the answer came
+// about.
+//
+// It fires on exactly one push, so the round after it succeeds.
+func landAgainDuringTheRecovery(t *testing.T, bare, message string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the hook is a POSIX shell script")
+	}
+	// The hook counts what reaches it and acts on the second. The first is the
+	// build script's own foreign push; the release's rejected push never gets
+	// here, because git refuses a non-fast-forward on the client side; so the
+	// second is the recovery's, which is the one to move the branch under.
+	counter := harness.ShQuote(filepath.Join(bare, "received.count"))
+	hook := filepath.Join(bare, "hooks", "pre-receive")
+	script := "#!/bin/sh\n" +
+		"n=$(cat " + counter + " 2>/dev/null || echo 0)\n" +
+		"n=$((n + 1))\n" +
+		"echo \"$n\" > " + counter + "\n" +
+		"[ \"$n\" -eq 2 ] || exit 0\n" +
+		// The receiving process exports its own repository into the
+		// environment, and every command below is about another one.
+		"unset GIT_DIR GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES\n" +
+		"d=$(mktemp -d)\n" +
+		"git clone -q --branch " + harness.DefaultBranch + " " + harness.ShQuote(bare) + " \"$d\" || exit 1\n" +
+		"printf 'again' > \"$d\"/AGAIN.md\n" +
+		"git -C \"$d\" add -A\n" +
+		"git -C \"$d\" -c user.email=other@dispat.test -c user.name='other clone' " +
+		"commit -q -m " + harness.ShQuote(message) + " || exit 1\n" +
+		"git -C \"$d\" push -q origin HEAD:refs/heads/" + harness.DefaultBranch + " || exit 1\n" +
+		"echo \"cannot lock ref 'refs/heads/" + harness.DefaultBranch + "': is at another commit\" >&2\n" +
+		"exit 1\n"
+	require.NoError(t, os.WriteFile(hook, []byte(script), 0o755))
+}
+
 // midReleasePush is a build script that pushes a commit from a second clone
 // while the release is running: exactly the window the behind-remote guard
 // cannot cover, because it closes before the plan exists and this happens
@@ -217,17 +261,38 @@ func midReleasePush(t *testing.T, bare, message, file, contents string) string {
 	}
 	return "if [ ! -f ../../pushed.marker ]; then touch ../../pushed.marker && " + strings.Join([]string{
 		"d=$(mktemp -d)",
-		"git clone -q --branch " + harness.DefaultBranch + " " + shellQuote(bare) + " \"$d\"",
-		"printf '%s' " + shellQuote(contents) + " > \"$d\"/" + file,
+		"git clone -q --branch " + harness.DefaultBranch + " " + harness.ShQuote(bare) + " \"$d\"",
+		"printf '%s' " + harness.ShQuote(contents) + " > \"$d\"/" + file,
 		"git -C \"$d\" add -A",
 		"git -C \"$d\" -c user.email=other@dispat.test -c user.name='other clone' commit -q -m " +
-			shellQuote(message),
+			harness.ShQuote(message),
 		"git -C \"$d\" push -q origin HEAD:refs/heads/" + harness.DefaultBranch,
 	}, " && ") + "; fi"
 }
 
-// shellQuote wraps a value in single quotes for the script above.
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+// releaseCommit resolves the run's release commit by the subject it was made
+// under, which is what a scenario knows about it. Resolving it that way rather
+// than as a parent of HEAD is what makes the assertions about it survive a
+// recovery that merged more than once.
+func releaseCommit(t *testing.T, r *harness.Repo, subject string) string {
+	t.Helper()
+	log := r.Git("log", "--format=%H %s")
+	for _, line := range strings.Split(log, "\n") {
+		sha, got, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if ok && got == subject {
+			return sha
+		}
+	}
+	t.Fatalf("no commit titled %q; log:\n%s", subject, log)
+	return ""
+}
+
+// firstParents is the tip's first-parent chain, which is the line a release
+// commit merged under has to stay on.
+func firstParents(t *testing.T, r *harness.Repo) []string {
+	t.Helper()
+	return strings.Fields(r.Git("rev-list", "--first-parent", "HEAD"))
+}
 
 // TestReleaseMergesWhatLandedDuringTheRun: the recovery at the far end of a
 // release. The behind-remote guard closes before the plan is computed, so a
@@ -269,21 +334,23 @@ func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 		"the pull during the release is reported: %v", res.Events)
 	assert.Contains(t, res.Stdout, "pulled the branch during the release")
 
-	// The branch tip is a merge, and the release commit is its first parent:
-	// still on the branch, still the commit it was, never rewritten.
-	parents := strings.Fields(r.Git("rev-list", "--parents", "-n", "1", "HEAD"))
-	require.Len(t, parents, 3, "the tip joins two commits; log:\n%s", r.Git("log", "--format=%h %s", "-5"))
-	release := parents[1]
-	assert.Equal(t, "chore(release): core@0.1.0",
-		strings.TrimSpace(r.Git("log", "-1", "--format=%s", release)))
-
-	// And the tag names that commit, which is what keeps the tagged tree the
-	// one the release recorded.
+	// The invariant, stated about the release commit itself rather than about
+	// HEAD's parent: a recovery may merge more than once, and every merge
+	// after the first has the previous merge as its first parent. What must
+	// never move is the tag.
+	release := releaseCommit(t, r, "chore(release): core@0.1.0")
 	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.0")),
 		"the tag was written on the release commit and stayed there")
 	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0",
 		"the tag reached the remote on the second attempt")
+
+	// The branch tip is a merge, and the release commit is on its first-parent
+	// chain: still on the branch, still the commit it was, never rewritten.
+	parents := strings.Fields(r.Git("rev-list", "--parents", "-n", "1", "HEAD"))
+	require.Len(t, parents, 3, "the tip joins two commits; log:\n%s", r.Git("log", "--format=%h %s", "-5"))
+	assert.Contains(t, firstParents(t, r), release,
+		"the release commit is reachable from the tip by first parents alone")
 
 	// What arrived is on the branch too, and outside the release.
 	assert.Contains(t, r.Git("log", "--format=%s"), "landed mid-release")
@@ -324,6 +391,76 @@ func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 	after, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(after), "landed mid-release", "and it is recorded where it belongs")
+}
+
+// TestReleaseMergesWhatLandedTwice: the window the recovery recovers from is
+// still open while it recovers. A commit landing between the merge and the
+// retry push is the same surprise again, and answering it with a failed
+// release would be the outcome the whole recovery exists to prevent, so the
+// merge and the push go round again.
+//
+// The invariant holds across the rounds, which is the point of the test: every
+// merge after the first has the previous merge as its first parent, and the
+// tag still names the release commit underneath them all.
+func TestReleaseMergesWhatLandedTwice(t *testing.T) {
+	r := harness.New(t)
+	bare := r.AddBareRemote()
+	cfg := libsConfig(midReleasePush(t, bare, "feat(core): landed mid-release", "NOTES.md", "landed\n"), 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	landAgainDuringTheRecovery(t, bare, "feat(core): landed during the recovery")
+
+	res := r.Release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.HasCode(res.Events, "W242"), "events: %v", res.Events)
+
+	// Two merges, and the release commit is under both of them: neither round
+	// moved the tag onto a merge, and neither rewrote it.
+	release := releaseCommit(t, r, "chore(release): core@0.1.0")
+	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.0")),
+		"the tag still names the release commit after two merges")
+	assert.Contains(t, firstParents(t, r), release,
+		"which is still on the tip's first-parent chain")
+	log := r.Git("log", "--format=%s")
+	assert.Contains(t, log, "landed during the recovery", "what arrived mid-recovery is on the branch")
+	assert.Equal(t, 2, strings.Count(log, "chore(release): merge origin/"+harness.DefaultBranch),
+		"one merge per round; log:\n%s", r.Git("log", "--format=%h %s", "-8"))
+	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0")
+}
+
+// TestReleaseRefusesToRepublishAnExistingTag: the recovery pushes this run's
+// tags again, and commit.force is on by default, so a checkout whose tags are
+// stale enough to have re-planned an already published version would
+// force-move that published tag onto its own commit. The push this recovers
+// from never reached a tag ref at all, so nothing used to stand between the
+// two; now the remote's tags are read first and the run stops.
+func TestReleaseRefusesToRepublishAnExistingTag(t *testing.T) {
+	r := harness.New(t)
+	bare := r.AddBareRemote()
+	cfg := libsConfig(midReleasePush(t, bare, "chore: landed mid-release", "NOTES.md", "landed\n"), 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+
+	// Somebody else already published this version. The tag is on the remote
+	// and this checkout has never seen it, which is exactly what makes the
+	// plan compute it again.
+	published := bareGit(t, bare, "rev-parse", harness.DefaultBranch)
+	bareGit(t, bare, "-c", "user.email=other@dispat.test", "-c", "user.name=other clone",
+		"tag", "-a", "core@0.1.0", "-m", "released elsewhere", strings.TrimSpace(published))
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "already carries core@0.1.0")
+	assert.Contains(t, res.Stdout, "Pull and run again")
+	assert.Equal(t, strings.TrimSpace(published),
+		strings.TrimSpace(bareGit(t, bare, "rev-list", "-n", "1", "core@0.1.0")),
+		"the published tag is where its own release left it")
 }
 
 // TestReleaseCannotMergeWhatConflicts: the other outcome. What landed touches

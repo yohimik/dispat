@@ -513,8 +513,16 @@ func (p *Proc) Wait() RunResult {
 	return RunResult{Code: code, Stdout: p.stdout.String(), Stderr: p.stderr.String(), Events: ParseEvents(p.stdout.String())}
 }
 
-// shQuote single-quotes s for safe interpolation into a /bin/sh -c command
+// ShQuote single-quotes s for safe interpolation into a /bin/sh -c command
 // line (the shell every script in these tests runs through by default).
-func shQuote(s string) string {
+//
+// Exported because a scenario writing its own script needs the same quoting:
+// a temporary path in a build script is the harness's own problem in exactly
+// the way it is the scenario's, and a second copy of the rule is a second
+// place for it to be wrong.
+func ShQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
+
+// shQuote is ShQuote under the name this package's own callers use.
+func shQuote(s string) string { return ShQuote(s) }

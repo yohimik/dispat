@@ -118,9 +118,11 @@ it shares the release format's prefix. This is what lets a single-package reposi
 }
 ```
 
-dispat recognises `v1` as that package's own alias when it lists its tags and leaves it out of the history. A tag that
-matches the format and carries no version but is no alias of the package, such as a mistyped `v1.0.0.0`, stays in and
-is still what the [`initials`](./versions.md#initials) fallback is for.
+dispat recognises `v1` as an alias when it lists tags and leaves it out of the history. It knows every package's alias
+formats, not only the listing owner's, because an alias belongs to whoever writes it and lands in whichever listing its
+shape matches: one package's `v1` sits in another's `v{version}` listing looking exactly like a release nobody can
+parse. A tag that matches the format and carries no version but is nobody's alias, such as a mistyped `v1.0.0.0`,
+stays in and is still what the [`initials`](./versions.md#initials) fallback is for.
 
 The same check refuses two packages that write the same alias name. A shared-version group would trigger this if every
 member declared `v{major}`.
