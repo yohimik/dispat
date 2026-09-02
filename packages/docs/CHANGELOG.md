@@ -1,5 +1,120 @@
 # Changelog
 
+## packages/docs/v1.7.0 (2026-09-02)
+
+### Features
+
+- install the conventional asset ([18460f9](https://github.com/yohimik/dispat/commit/18460f9e575d2d5ef61bbee34621fb29fde02470)) (by yohimik, Claude Fable 5)
+  A release carrying more than one file was refused unless --asset named
+  one, which made the flag mandatory for almost every real repository,
+  dispat's own included: its releases carry six binaries and a checksum
+  file.
+
+  Without --asset dispat now looks for the name most projects publish
+  under, the repository's own name and the platform, with the extension
+  selfupdate.AssetName appends on Windows. The name is matched exactly and
+  never as a glob, so a bare invocation installs what the release decided
+  rather than whichever near-miss sorted first, and a release that follows
+  no convention is refused as before, with the name that was tried added
+  to the listing so the reader knows what to answer.
+
+  The single-asset shortcut and every explicit --asset path are unchanged.
+
+### Fixes
+
+- finish a conflicted release ([5b8da48](https://github.com/yohimik/dispat/commit/5b8da4826aa2eb6c4a24d89e4bd328b9b24751f3)) (by yohimik, Claude Fable 5)
+  A recovery whose merge conflicted aborted and failed the run, which
+  leaves a release that has already published with its commit and tags
+  nowhere but the local clone. It completes instead.
+
+  This release's side wins every conflicting file, because that is the
+  tree the tag names and taking the other side would publish content the
+  release never saw; everything the arriving commits changed that did not
+  conflict is in the merge as it is on the clean path. Their side is
+  pushed to a branch of its own, release-conflicts/ followed by what the
+  leg released and a UTC timestamp, plain and never forced, so the work is
+  kept rather than dropped. Both records name the conflicting files and
+  that branch: the GitHub body through a note block, the changelog through
+  the merge commit, since the release commit is tagged and must not be
+  amended. W243 says the same thing in the log, and the run exits 0.
+
+  The tag invariant is untouched, and the republish guard and the bounded
+  retry cover this path's pushes too. E224 is now only for the recovery
+  machinery failing: the quarantine branch refused, the settled merge
+  uncommittable, or a merge that stopped for something other than content.
+
+  The e2e walk gains the two cycles this is about, and the key-features
+  walk keeps the private install; both are what the release build runs
+  against the bytes it exports.
+
+- keep a released tag from moving ([96cdb2b](https://github.com/yohimik/dispat/commit/96cdb2b720309d6ca8173252e0fa5501e1b87707)) (by yohimik, Claude Fable 5)
+  Four ways the mid-release recovery was wrong.
+
+  It re-pushed with commit.force, which defaults on, so a checkout stale
+  enough to have re-planned an already published version would force-move
+  that published tag: the push it recovers from never reached a tag ref,
+  so nothing stood between the two. The remote's tags are now read first
+  and the run stops, naming the tag. Aliases stay movable, because moving
+  them is what every release does.
+
+  It fired on "[rejected]" alone, and the simultaneous-push race prints
+  "[remote rejected]", so the phrase it was meant to recognise was
+  unreachable. The gate now matches both, and every git invocation asks
+  for the C locale so a translated checkout cannot defeat the match. The
+  sentinel also stopped leading the message: git's own words are what a
+  reader of a failed release needs first.
+
+  The merge was refused outright by a repository configured merge.ff=only,
+  and the abort that followed failed too. It is now made with --no-ff,
+  which also pins the first-parent shape the recovery documents.
+
+  It gave up if a commit landed between its own pull and its own push,
+  which is the very surprise it exists to absorb. It now goes round up to
+  three times, capturing the release commit once so the tag it names never
+  moves whichever round lands.
+
+- record the release commit ([d3299f9](https://github.com/yohimik/dispat/commit/d3299f9673ba568a68fcf7f857507a43a46a70b1)) (by yohimik, Claude Fable 5)
+  The GitHub release is created after the push, and after a mid-release
+  recovery HEAD is the merge by then, so the "commit" line in its body and
+  its target_commitish named the merge rather than the release the record
+  is about.
+
+  The recovery already reads the release commit before merging, since the
+  merge message names it. It now hands that back, and the finalize phase
+  prefers it over HEAD when stamping the releasers. A run with no recovery
+  sets nothing and reads HEAD exactly as before.
+
+- read past a package's own alias ([4edbab5](https://github.com/yohimik/dispat/commit/4edbab5dca43d159b45fe05d297c1c7cb55c0804)) (by yohimik, Claude Fable 5)
+  A single-package repository releasing as "v1.4.2" could not declare the
+  "v1" a GitHub composite is consumed through: the load-time check refused
+  any alias whose name matched a package's tagFormat, and "v1" matches
+  "v{version}" on the prefix alone. The refusal existed because the
+  baseline reader would take the alias for the newest release tag and read
+  no version out of it, leaving the package looking unreleased.
+
+  Both halves now ask what a name can be read back as rather than what it
+  looks like. The check refuses an alias only when it parses as a release
+  tag, so "v1.4.2" beside "v{version}" stays refused and "v1" becomes
+  legal. The tag listing drops a name that carries no version when one of
+  the package's own alias formats could have written it, which is precise
+  enough to leave a mistyped release tag like "v1.0.0.0" in place, where
+  the initials fallback still measures the window from it.
+
+  Recognising an alias is a matcher rather than a prefix test, so {major},
+  {minor} and {patch} capture one number and stop at a separator. Both
+  readers of a baseline go through the same filter: the planner and the
+  compute command's manifest baselines.
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.7.0): 1.6.0 -> 1.7.0
+
+### Authors
+
+- yohimik
+- Claude Fable 5
+
+
 ## packages/docs/v1.6.0 (2026-08-31)
 
 ### Dependencies

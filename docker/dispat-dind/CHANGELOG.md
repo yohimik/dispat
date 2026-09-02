@@ -1,5 +1,12 @@
 # Changelog
 
+## docker/dispat-dind/v1.7.0 (2026-09-02)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.7.0): 1.6.0 -> 1.7.0
+
+
 ## docker/dispat-dind/v1.6.0 (2026-08-31)
 
 ### Dependencies
