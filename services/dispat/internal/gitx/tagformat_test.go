@@ -303,3 +303,19 @@ func TestAliasFormatMatchesAPrereleaseSpellingFormat(t *testing.T) {
 func TestAliasFormatMatchesNothingWithoutAPlaceholder(t *testing.T) {
 	assert.False(t, AliasFormat("latest").Matches("core", "latest"))
 }
+
+// TestCompiledReadersOfAFormatThatDoesNotCompile: both compiled halves answer
+// the same thing their uncompiled forms do about a format that is not one, so
+// a caller holding a reader never has to ask whether it holds a good one.
+func TestCompiledReadersOfAFormatThatDoesNotCompile(t *testing.T) {
+	// Two {version} placeholders: readable back as nothing in particular, and
+	// refused by Validate for exactly that reason.
+	broken := TagFormat("{version}-{version}")
+	require.Error(t, broken.Validate())
+	_, ok := broken.Reader("core").ParseVersion("1.2.3-1.2.3")
+	assert.False(t, ok)
+	_, ok = broken.ParseVersion("core", "1.2.3-1.2.3")
+	assert.False(t, ok, "the compiled reader and the format agree")
+
+	assert.False(t, AliasMatcher{}.Matches("v1"), "a matcher of nothing matches nothing")
+}

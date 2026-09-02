@@ -759,3 +759,51 @@ func TestRecordSaysWhenTheFileKeepsItsOwnHead(t *testing.T) {
 	recordInto(t, "# Changelog\n\n## core@1.0.0 (2024-01-01)\n\n- old\n", own, ccme.Version{Major: 2})
 	assert.NotContains(t, wrote.String(), "keeps its own head")
 }
+
+// TestNoteEntryAnnotatesTheEntryWithoutMovingItsHeader: the note goes inside
+// the entry, after the header line, because the header is what every re-run
+// recognises an existing entry by. A note that moved or split that line would
+// make the next run write the entry a second time.
+func TestNoteEntryAnnotatesTheEntryWithoutMovingItsHeader(t *testing.T) {
+	dir := t.TempDir()
+	rel := testRelease(dir, ccme.Version{Major: 1, Minor: 2})
+	rel.Pkg.Changelog = model.ChangelogSpec{Enabled: true}
+	w := &FileWriter{Now: func() time.Time { return testDate }}
+	require.NoError(t, w.Record(context.Background(), rel))
+
+	path, noted, err := NoteEntry(rel, "Something true about how this went out.\nOn two lines.")
+	require.NoError(t, err)
+	require.True(t, noted)
+	assert.Equal(t, filepath.Join(dir, "CHANGELOG.md"), path)
+
+	body, rerr := os.ReadFile(path)
+	require.NoError(t, rerr)
+	assert.True(t, HasEntry(body, rel.TagName()), "the header a re-run looks for is untouched")
+	assert.Contains(t, string(body), "> Something true about how this went out.")
+	assert.Contains(t, string(body), "> On two lines.", "every line is quoted, so none reads as a heading")
+	header := strings.Index(string(body), "## "+rel.TagName()+" (")
+	note := strings.Index(string(body), "> Something true")
+	features := strings.Index(string(body), "### ")
+	assert.Less(t, header, note, "the note follows the header")
+	assert.Less(t, note, features, "and precedes the sections")
+
+	// Nothing to annotate is silence rather than a file invented to hold the
+	// note: a policy that records no entry, and a file with no entry in it.
+	off := testRelease(t.TempDir(), ccme.Version{Major: 1, Minor: 2})
+	off.Pkg.Changelog = model.ChangelogSpec{Enabled: false}
+	_, noted, err = NoteEntry(off, "nothing to say this about")
+	require.NoError(t, err)
+	assert.False(t, noted)
+
+	empty := testRelease(t.TempDir(), ccme.Version{Major: 1, Minor: 2})
+	empty.Pkg.Changelog = model.ChangelogSpec{Enabled: true}
+	_, noted, err = NoteEntry(empty, "nothing to say this about")
+	require.NoError(t, err)
+	assert.False(t, noted, "a changelog that does not exist is not created to hold a note")
+
+	require.NoError(t, os.WriteFile(filepath.Join(empty.Pkg.Dir, "CHANGELOG.md"),
+		[]byte("# Changelog\n\n## core@0.9.0 (2024-01-01)\n\n- older\n"), 0o644))
+	_, noted, err = NoteEntry(empty, "nothing to say this about")
+	require.NoError(t, err)
+	assert.False(t, noted, "nor is an entry this release never wrote annotated")
+}
