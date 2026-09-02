@@ -192,8 +192,15 @@ suits you better.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for more information.
+Two licenses live in this repository: the MIT License ([LICENSE](./LICENSE)) covers the project, and the CCME
+specification, [pkg/ccme/SPEC.md](./pkg/ccme/SPEC.md), is licensed under GPL-3.0-or-later
+([pkg/ccme/LICENSE-SPEC](./pkg/ccme/LICENSE-SPEC)). Which one applies to you depends on what you use:
 
-The CCME specification, [pkg/ccme/SPEC.md](./pkg/ccme/SPEC.md), is licensed under GPL-3.0-or-later, and dispat uses GPL
-licensed materials from CCME. See [pkg/ccme/LICENSE-SPEC](./pkg/ccme/LICENSE-SPEC). The parser implementing it stays
-under MIT along with the rest of the project.
+1. **The officially released program.** Using dispat as released, the binaries on the GitHub releases, the container
+   images and the GitHub action, falls fully under the MIT License. Running it, in CI or anywhere else, carries no GPL
+   obligations.
+2. **Source referencing GPL-licensed material.** Using any source that references the GPL-licensed CCME specification
+   falls under GPL-3.0-or-later.
+3. **Source without a GPL reference.** Using any source that carries no GPL reference falls under the MIT License. The
+   parser implementing the specification, meaning all Go source in [pkg/ccme](./pkg/ccme), is such source and stays
+   under MIT along with the rest of the project.
