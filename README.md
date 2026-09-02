@@ -181,6 +181,18 @@ dispat stands on the shoulders of two things:
   `go install github.com/yohimik/dispat/services/dispat@latest` working. It also attached six cross-compiled binaries
   to the CLI's GitHub release, published the four container images, and released the versioned documentation site.
   Every package received its own tag, changelog entry, and GitHub release.
+- **[crier](https://github.com/yohimik/crier)**: a single-package repository, one Go module and one binary, which
+  renders HTML templates to images and video and posts them to fourteen social platforms. It shows that dispat needs no
+  monorepo. Its first release was a breaking change on the `rc` channel, and eighteen release candidates followed in
+  two days, each with its own changelog entry and its own GitHub release flagged as a prerelease. One transition commit
+  then graduated the train to 1.0.0: the stable version is computed over the whole train rather than counted by hand,
+  and the graduation collects every candidate's notes into the one entry stable readers see. This is the train and
+  graduation flow that Kubernetes runs its own releases through, here driven by conventional commits alone. A moving
+  `v1` alias tag is scoped to the stable channel, so `uses: yohimik/crier@v1` never picks up a candidate. crier also
+  shows how a release integrates with dispat: the `announce` stage of the run renders a card from the release-notes
+  variables dispat sets and posts it from the binary the run just built, and its [release-changelog
+  example](https://github.com/yohimik/crier/tree/main/examples/release-changelog) wires the same card into any dispat
+  release as one more publish step. It installs with `dispat install yohimik/crier`.
 
 ## Community
 

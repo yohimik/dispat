@@ -39,9 +39,9 @@ ARG GO_VERSION=1.26
 # GO_VERSION, never passed as --build-arg: moving to a newer fork is bumping
 # these three values, and the same number is bumped in Dockerfile.tinygo,
 # which is where the toolchain is interrogated rather than merely used.
-ARG TINYGO_FORK_VERSION=0.42.0-net.4
-ARG TINYGO_FORK_SHA256_AMD64=793f100e5ade5c909e8fc0854d3a28b67af1a289c951213669eb289341960752
-ARG TINYGO_FORK_SHA256_ARM64=5f6d49ee57d583b740beeffd4dd3e14f2e534ffde6b573a7a7c7a0ebefcdd5e2
+ARG TINYGO_FORK_VERSION=0.43.0-net.1
+ARG TINYGO_FORK_SHA256_AMD64=391e7324844215b7d20c57133525236da160ee80463faf72b5bb3f30801ff206
+ARG TINYGO_FORK_SHA256_ARM64=46cd832d1c90076b3b5a4dd85e720034831769ccff1621d76ea92ba556c44a81
 
 FROM golang:${GO_VERSION}-alpine AS build
 

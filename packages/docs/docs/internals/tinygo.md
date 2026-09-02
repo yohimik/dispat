@@ -27,7 +27,7 @@ status and the export stage collects the logs whatever they say. They land in `c
 | `tinygo-spike-net` | The four network layers one at a time, both toolchains, plus what `-X` does to a version variable and what actually arrives on a TLS socket. |
 | `tinygo-spike-fork` | Does the [fork](#the-fork) install and report its version? |
 | `tinygo-spike-selfupdate` | Does dispat update itself over real TLS when built by the fork? |
-| `tinygo-spike-test` | Does `tinygo test` run each module's unit tests? |
+| `tinygo-spike-test` | Does `tinygo test` run each package's unit tests, one package at a time under a bound? |
 
 Buildx reaches only linux, so the darwin binaries the spike builds are never executed there. The other half runs
 natively on a Mac:
@@ -40,22 +40,49 @@ It mirrors the same stages for `darwin/arm64` and, when Rosetta answers, `darwin
 `coverage/tinygo-spike/darwin-*.log`. It extracts the container's probe programs from the Dockerfile at run time rather
 than carrying copies, so the two halves cannot drift apart.
 
-## The verdict, as of TinyGo 0.41.1
+## The verdict, as of TinyGo 0.42.0
 
-**No, and the reason is the network.** TinyGo does not use the host's `net`. It ships a port of the package over
-netdev, its network *device driver* interface, which a driver from `tinygo.org/x/drivers` installs at startup. On a
-host operating system there is no such driver, so the default netdev is a stub: DNS resolution and TLS both return
-`Netdev not set`, and `net/http` dereferences nil and aborts.
+**No, and the reason is the TLS.** TinyGo does not use the host's `net`. It ships a port of the package over netdev,
+its network *device driver* interface. Up to 0.41.1 no driver existed for a host operating system, so DNS resolution
+and TLS both returned `Netdev not set` and `net/http` dereferenced nil and aborted. 0.42.0 carries a host netdev on
+linux, and the `tcp` row of `net.log`, which resolves `api.github.com` first, and the `http` row pass where they
+crashed before. What it does not carry is a
+`crypto/tls`: the package is still the offload stub that hands the handshake to a device that is not there, and the
+stub does not fail. `tls.Dial` returns a nil error. An `https` request to `api.github.com` ends in `unexpected EOF`,
+because the server closed the connection on the plaintext it received. The `tls-reality` row, read from the far end
+of the wire, records `first-bytes=504c41 clienthello=false`: the probe's own payload, `PLAINTEXT-LEAK`, byte for byte.
+`run.log` says the same of the CLI: `self-update --check` fails with `listing releases: unexpected EOF` where the gc
+twin lists the releases.
 
-That is every release path dispat has: the GitHub API, webhooks, self-update's download, the update check. So nothing
-is built with it. The other answers were good, which is why the file is kept rather than deleted.
+That is every release path dispat has: the GitHub API, webhooks, self-update's download, the update check, all of
+them https. So nothing is built with it. A silent stub is a worse failure than 0.41.1's crash, since a program asking
+itself whether the request went well is satisfied all the way to a plaintext socket, which is why the spike holds the
+socket itself (below). The other answers were good, which is why the file is kept rather than deleted.
 
-The spike also found the linker difference the CLI's own source now records: upstream TinyGo's `-X` applies only to a
-string variable declared with no value, and silently ignores the flag for one declared with a value.
+The unit-test stage runs with the upstream toolchain, one package at a time, under three bounds that each answer a way
+the row used to report one fact instead of a matrix. `-p 2`, because `tinygo test ./...` compiles one test binary per
+core and 0.42.0 exhausts 16 GB compiling the CLI's twenty that way where 0.41.1 fitted, so the stage was killed rather
+than answered. `-tags safe`, because testify's go-spew reaches into `reflect.Value`'s unexported flag field through
+`unsafe` and panics at init when TinyGo's reflect has none, which took every package importing testify down before its
+first test; the tag selects go-spew's reflect-only path, so the answer is the tests' own. And an external `timeout` per
+package, because TinyGo's `httptest.Server.Close` waits forever for connections that are never counted and
+`-timeout` is not enforced on a hung binary; a hang records exit 124 and the next package still runs.
+
+What the matrix says at 0.42.0: `pkg/manifest`, `pkg/models`, `pkg/scanner` and `pkg/writer` pass; `pkg/ccme` fails
+its allocation budget (1632 bytes per parse where gc stays under 1500; a different allocator, not a wrong answer). Of
+the CLI's nineteen packages with tests, nine pass (`changelog`, `cond`, `filter`, `fsx`, `globx`, `graph`, `ignore`,
+`model`, `plan`); five hang in `httptest` (`app`, `cli`, `github`, `selfupdate`, `webhook`); `config` panics on a
+nil pointer; and `gitx`, `install`, `release` and `script` fail every test that spawns a process, with
+`files setting not implemented` or `directory setting not implemented`, since upstream's `os.StartProcess` honours
+neither `ProcAttr.Files` nor `ProcAttr.Dir`. The stage measures upstream only; the fork's unit-test answer is the
+black-box suite's, [below](#what-0420-net4-answered).
+
+The spike also found the linker difference the CLI's own source now records: TinyGo 0.41.1's `-X` applied only to a
+string variable declared with no value, and silently ignored the flag for one declared with a value.
 `internal/cli.Version` is therefore declared bare. A stamped version matters more than it looks: a binary reporting
 `dev` is a local build to [self-update](../reference/self-update.md), which refuses one before it reaches the network,
-so nothing below could be asked at all until this was fixed. The fork stamps both declarations, which the `ldflags` row
-records; the bare one is what both toolchains agree on.
+so nothing below could be asked at all until this was fixed. 0.42.0 stamps both declarations, as the fork always did,
+which the `ldflags` row records; the bare one is what every toolchain agrees on.
 
 ### Why a "does https work" check is not enough
 
@@ -68,17 +95,18 @@ measurement.
 
 ## The fork
 
-[`github.com/yohimik/tinygo`](https://github.com/yohimik/tinygo) closes both gaps the verdict rests on: a real
-`crypto/tls` and a netdev that speaks to the host's sockets. The spike fetches it with dispat's own
-[install command](../cli/install.md), which is also how you would install it:
+[`github.com/yohimik/tinygo`](https://github.com/yohimik/tinygo) closes the gap the verdict rests on, a real
+`crypto/tls` with a real certificate verifier, over a netdev that speaks to the host's sockets on linux and darwin
+both. The spike fetches it with dispat's own [install command](../cli/install.md), which is also how you would install
+it:
 
 ```sh
-dispat install yohimik/tinygo --prerelease --release 0.42.0-net.4 \
+dispat install yohimik/tinygo --prerelease --release 0.43.0-net.1 \
   --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
 ```
 
-The base image stays at upstream 0.41.1 and every stage up to `tinygo-spike-net` still measures it, so the verdict
-above keeps its evidence. The two fork stages are the re-asking.
+The base image is upstream 0.42.0 and every stage up to `tinygo-spike-net` measures it, so the verdict above keeps
+its evidence. The two fork stages are the re-asking.
 
 The fetch is a build-time network step, and it sits in a stage of its own so that editing a probe below it never
 re-downloads a toolchain. That cuts both ways: no target here aborts, so a *failed* fetch exits 0 like every other
@@ -97,33 +125,31 @@ so a run served from a cached failure reports upstream rather than silently pass
 The size question is what made the network worth proving, so it is measured the same way every time: the same source,
 the same four unix targets, both toolchains in one environment, and both stamped. The gc column is the release
 pipeline's exact line (`-trimpath -s -w`), the TinyGo column the line a release would replace it with (`-opt=z
--no-debug`). There are two datasets, because the two toolchain generations answer differently and only one of them can
-reach a network.
+-no-debug`). There are two datasets, because the two toolchains answer differently and only one of them speaks TLS.
 
-Upstream TinyGo 0.41.1, measured by `tinygo-spike-build` inside the spike's container, whose binaries cannot resolve a
-name or open a TLS connection:
-
-```
-target                tinygo        gc            ratio
-linux/amd64           4628472       10666146      0.434
-linux/arm64           4707712       9699490       0.485
-darwin/amd64          4787896       10863904      0.441
-darwin/arm64          4361072       9912290       0.440
-```
-
-The fork at 0.42.0-net.4, which carries a real `net`, `crypto/tls`, `crypto/x509`, process spawning and signal
-delivery, cross-built for all four targets from one macOS host, its own toolchain over go1.26.7:
+Upstream TinyGo 0.42.0, measured by `tinygo-spike-build` inside the spike's container (its image carries go1.27.0,
+which is the gc column), whose binaries open a TCP connection but send plaintext where TLS belongs:
 
 ```
 target                tinygo        gc            ratio
-linux/amd64           6475800       10686626      0.606
-linux/arm64           6107688       9699490       0.630
-darwin/amd64          6699208       10884416      0.615
-darwin/arm64          5771008       9928850       0.581
+linux/amd64           5162816       11165856      0.462
+linux/arm64           4972888       10092704      0.493
+darwin/amd64          5303376       11385936      0.466
+darwin/arm64          4650992       10368210      0.449
 ```
 
-The fork's binaries are the larger of the two TinyGo columns by about 1.5 MB, which is what a real TLS stack and a real
-certificate verifier weigh. They are still around 60% of their gc twins.
+The fork at 0.43.0-net.1, which carries a real `net`, `crypto/tls`, `crypto/x509`, process spawning and signal
+delivery, measured by the darwin script on a Mac, its own toolchain over go1.26.7:
+
+```
+target                tinygo        gc            ratio
+darwin/amd64          6872520       11027408      0.623
+darwin/arm64          5912768       10031666      0.589
+```
+
+The fork's binaries are the larger of the two TinyGo columns by 1.3 to 1.6 MB, which is what a real TLS stack and a
+real certificate verifier weigh. They are still around 60% of their gc twins. The linux pair the container builds with
+the fork is measured for the self-update matrix rather than for size, so the fork's table is the darwin one.
 
 ## The self-update matrix
 
@@ -160,6 +186,12 @@ measure the modification rather than the toolchain. Read the trusted rows agains
 control with the fork row to tell a verifier's refusal from a toolchain's failure. D and E hold either way.
 
 ## What 0.42.0-net.4 answered
+
+The fork's releases are numbered after the upstream they sit on: `X.Y.Z-net.N` is the fork's Nth release rebased on
+upstream `X.Y.Z`, and while one is published upstream has not released `X.Y.Z`. The pinned 0.43.0-net.1 is net.4's
+content rebased on upstream 0.42.0, with no change of its own, and the matrix below is what it reports at that pin:
+`fork.log` names it, `darwin-net.log` is byte for byte what net.4 wrote, and every self-update row on linux and darwin
+lands where it landed. The narrative keeps net.4's name because that is where the answers were found.
 
 The matrix passes at 0.42.0-net.4, as it first did at 0.42.0-net.2: the fork implements `os.StartProcess` over
 `posix_spawn`, so C downloads the release, executes the new binary as its own smoke check, swaps it in and keeps the
