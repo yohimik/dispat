@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/docs/v1.7.1 (2026-09-02)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.7.1): 1.7.0 -> 1.7.1
+
+
 ## packages/docs/v1.7.0 (2026-09-02)
 
 ### Features
