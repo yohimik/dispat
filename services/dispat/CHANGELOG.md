@@ -1,5 +1,34 @@
 # Changelog
 
+## services/dispat/v1.7.2 (2026-09-03)
+
+### Fixes
+
+- the release announces itself and ships its experiments ([e1ac8c5](https://github.com/yohimik/dispat/commit/e1ac8c514e68679a1ad9d881386fcaa443e8e054)) (by yohimik)
+  The release experiments run inside the release, as the docs package's
+  beforeBuild hook against the image the run has just published, and the
+  site's new release experiments page is built from what they recorded;
+  the records land in coverage/experiments and never under the harness.
+  tools/testreport reads the cells into the report and renders the job
+  summary, replacing summary.py. Every finding of the harness review is
+  fixed: the masked exit codes, the vacuous gating assert, the observer
+  that fetched into the clone under test, the shim's marker and log, the
+  proxy's deny rule and chunked uploads, the pinned fixture dates.
+
+  The release announces itself on Instagram and LinkedIn with crier, from
+  the announce folder at the root: a paginated card, the anthem clip, the
+  stories and the LinkedIn reel with an album fallback, with a ping job
+  ahead of the release and a replay workflow beside it.
+
+  scripts/install-tools.sh pins crier and the TinyGo fork in one place;
+  the tiny toolchain stage, the spike and the darwin script install
+  through it, and a shellcheck gate sweeps every script.
+
+### Authors
+
+- yohimik
+
+
 ## services/dispat/v1.7.1 (2026-09-02)
 
 ### Fixes
