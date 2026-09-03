@@ -7,12 +7,19 @@
 #
 # The binary under test is taken from the published dispat-alpine image, so
 # what runs here is the exact bytes a release shipped, fetched through the
-# channel it shipped by, and never a build of the checkout.
+# channel it shipped by, and never a build of the checkout. The tag is
+# mutable on purpose: the published bytes are the subject.
+#
+# The recorded platform is linux/amd64, which is what the CI runner builds
+# and runs. No --platform is forced here or in the build script: a developer
+# on an arm64 machine gets a native run rather than an emulated one, and the
+# platform travels with the record (`dispat 1.7.1 (linux_arm64)`) so a
+# reading is never mistaken for the recorded one.
 #
 #   docker buildx build --file tests/experiments/Dockerfile \
-#     --build-arg DISPAT_VERSION=1.7.0 --load -t dispat-experiments tests/experiments
-#   docker run --rm -v "$PWD/results:/results" dispat-experiments midrelease dispat
-ARG DISPAT_VERSION=1.7.0
+#     --build-arg DISPAT_VERSION=1.7.1 --load -t dispat-experiments tests/experiments
+#   docker run --rm -v "$PWD/coverage/experiments:/results" dispat-experiments midrelease dispat
+ARG DISPAT_VERSION=1.7.1
 ARG NODE_VERSION=22
 
 FROM docker.io/yohimik/dispat-alpine:${DISPAT_VERSION} AS official
@@ -23,11 +30,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # The compared tools at the pinned versions the results are about, installed
-# once here so no phase installs anything over the experiment registry.
+# once here so no phase installs anything over the experiment registry. From a
+# committed lockfile through `npm ci`, so the transitive tree is the one the
+# results were recorded against rather than whatever the registry served the
+# day the image was built.
 # Fixtures symlink /opt/tools/node_modules to satisfy nx's local-install check.
-RUN mkdir -p /opt/tools && cd /opt/tools && npm init -y >/dev/null \
- && npm i --no-audit --no-fund \
-      lerna@10.0.1 nx@23.1.2 @nx/js@23.1.2 @changesets/cli@3.0.1 verdaccio@6.2.0 \
+COPY tools/package.json tools/package-lock.json /opt/tools/
+RUN cd /opt/tools && npm ci --no-audit --no-fund \
  && npm cache clean --force >/dev/null 2>&1
 ENV PATH=/opt/tools/node_modules/.bin:$PATH
 

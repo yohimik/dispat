@@ -321,6 +321,11 @@
           "type": "doc",
           "id": "internals/benchmarks",
           "label": "Benchmarks"
+        },
+        {
+          "type": "doc",
+          "id": "internals/experiments",
+          "label": "Release experiments"
         }
       ]
     }

@@ -314,6 +314,11 @@
         },
         {
           "type": "doc",
+          "id": "internals/announce",
+          "label": "The release announcement"
+        },
+        {
+          "type": "doc",
           "id": "internals/coverage",
           "label": "Test coverage"
         },
@@ -326,6 +331,11 @@
           "type": "doc",
           "id": "internals/benchmarks",
           "label": "Benchmarks"
+        },
+        {
+          "type": "doc",
+          "id": "internals/experiments",
+          "label": "Release experiments"
         }
       ]
     }

@@ -23,15 +23,16 @@
 #
 # Toolchains are fetched on first use into a cache folder and reused after:
 # Go from go.dev, pinned below with its published checksums, and TinyGo from
-# the fork's GitHub release through `dispat install yohimik/tinygo` — the
-# same fetch the container spike makes, exercised here as a user would type
-# it. Re-asking the question is bumping the one TINYGO_VERSION number.
+# the fork's GitHub release through install-tools.sh, the repository's install
+# manifest, the same one line the container spike and the release's own
+# toolchain stage run, so all three halves fetch the same fork. Re-asking the
+# question is bumping the one number in that file.
 #
 # Requirements: macOS, dispat on PATH, git checkout, network.
 set -u
 
-# The pins.
-TINYGO_VERSION=0.43.0-net.1
+# The Go pin. TinyGo's is not here: it is read from install-tools.sh below,
+# because a second copy of it beside the manifest is a second thing to bump.
 GO_VERSION=1.26.7
 GO_SHA256_ARM64=020a1e8224811be75163e920bc77e0926a1390a6aeea19bdcf23f74b9d749f6d
 GO_SHA256_AMD64=92e8b34bff3c89ab16404c595669ac8cb004cc2f676dcbd1f5b87a6b8def3b47
@@ -45,6 +46,12 @@ die() {
 command -v dispat >/dev/null 2>&1 || die "dispat is not on PATH; https://dispat.dev/reference/ci/#the-install-script"
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+manifest="$root/scripts/install-tools.sh"
+
+# The fork's pin, from the manifest that carries it, so the log line and the
+# check below name the version the install is actually about to fetch.
+TINYGO_VERSION=$(sh "$manifest" --version tinygo) || die "could not read the tinygo pin"
+
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/tinygo-spike-darwin"
 spike="$root/coverage/tinygo-spike"
 out="$cache/out"
@@ -70,18 +77,12 @@ fi
 export PATH="$cache/go/bin:$cache/tinygo/bin:$PATH"
 export GOPATH="$cache/gopath"
 
-# TinyGo from the fork's release, through the command under test. --pipe
-# extracts the whole toolchain tree rather than installing one binary, because
-# tinygo is its bin/ plus the lib/ and src/ beside it.
-if ! "$cache/tinygo/bin/tinygo" version 2>/dev/null | grep -qF "$TINYGO_VERSION"; then
-	rm -rf "$cache/tinygo"
-	echo "fetching tinygo $TINYGO_VERSION via dispat install" >&2
-	dispat install yohimik/tinygo --prerelease --release "$TINYGO_VERSION" \
-		--asset 'tinygo{version}.{os}-{arch}.tar.gz' \
-		--bin-dir "$cache" --pipe 'tar -xz' \
-		|| die "dispat install yohimik/tinygo failed (is v$TINYGO_VERSION published?)"
-	"$cache/tinygo/bin/tinygo" version | grep -qF "$TINYGO_VERSION" || die "fetched tinygo reports the wrong version"
-fi
+# TinyGo from the fork's release, through the install manifest, which is the
+# command under test with its pin already in it. The manifest is idempotent on
+# `tinygo version` and unpacks the whole toolchain tree rather than one binary,
+# because tinygo is its bin/ plus the lib/ and src/ beside it.
+INSTALL_TOOLS_PREFIX="$cache" sh "$manifest" tinygo \
+	|| die "install-tools.sh tinygo failed (is v$TINYGO_VERSION published?)"
 
 # The same bypass and kill switch the container sets.
 export GOPRIVATE=github.com/yohimik/dispat
@@ -91,7 +92,7 @@ export DISPAT_UPDATE_CHECK=false
 
 log="$spike/darwin-build.log"
 : >"$log"
-cd "$root/services/dispat"
+cd "$root/services/dispat" || die "no services/dispat under $root"
 V=github.com/yohimik/dispat/services/dispat/internal/cli.Version
 for arch in amd64 arm64; do
 	echo "=== tinygo build darwin/$arch ===" >>"$log"
@@ -173,7 +174,7 @@ log="$spike/darwin-net.log"
 : >"$log"
 [ -z "$skipped" ] || echo "=== $skipped ===" >>"$log"
 export GOWORK=off
-cd "$work/netprobe"
+cd "$work/netprobe" || die "no netprobe folder under $work"
 printf 'module netprobe\n\ngo 1.24\n' >go.mod
 X="-X main.Bare=1.2.3 -X main.Initialed=1.2.3"
 for arch in $runnable; do
@@ -185,7 +186,7 @@ for arch in $runnable; do
 	echo "exit=$?" >>"$log"
 done
 echo "=== tls-reality build (gc) ===" >>"$log"
-cd "$work/tlsreality"
+cd "$work/tlsreality" || die "no tlsreality folder under $work"
 printf 'module tlsreality\n\ngo 1.24\n' >go.mod
 CGO_ENABLED=0 go build -o "$out/tlsreality" . >>"$log" 2>&1
 echo "exit=$?" >>"$log"
@@ -225,7 +226,7 @@ su="$work/su"
 mkdir -p "$su"
 
 echo "=== sufake build (gc) ===" >>"$log"
-cd "$work/sufake"
+cd "$work/sufake" || die "no sufake folder under $work"
 printf 'module sufake\n\ngo 1.24\n' >go.mod
 # sufake is a module of its own in a temp folder, so it is built with the
 # workspace off; the dispat builds below need it back on, and the net section
@@ -275,7 +276,7 @@ echo "(curl reads the file directly; Go on darwin hands verification to the plat
 
 # The four binaries the matrix moves between, per runnable arch.
 V=github.com/yohimik/dispat/services/dispat/internal/cli.Version
-cd "$root/services/dispat"
+cd "$root/services/dispat" || die "no services/dispat under $root"
 for arch in $runnable; do
 	for pair in tinygo:1.0.0 tinygo:1.1.0 gc:1.0.0 gc:1.1.0; do
 		toolchain="${pair%%:*}"

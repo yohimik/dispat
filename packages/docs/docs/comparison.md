@@ -68,6 +68,11 @@ Fault injection requires a registry the experiment is allowed to break. Each too
 registry (verdaccio 6) behind a proxy that fails the upload of one named package with a 502. Every phase was run
 twice. The machine-recorded transcripts are identical between repetitions.
 
+Two of them are now run again by every release, against the image that release just published, and what they recorded
+is on [release experiments](./internals/experiments.mdx). The harness that runs them, the fixture, the observer and the
+fault proxy are in
+[`tests/experiments`](https://github.com/yohimik/dispat/blob/main/tests/experiments/README.md).
+
 ### One denied upload
 
 The fixture is six npm packages: `core`; `cli`, `ui` and `api` depending on `core`; `theme` and `docs` depending on
@@ -75,10 +80,10 @@ The fixture is six npm packages: `core`; `cli`, `ui` and `api` depending on `cor
 
 Blast radius, observed. `lerna version --conventional-commits` and `nx release` both bumped `core` to 1.1.0 and all
 five dependents to 1.0.1. This included `theme` and `docs`, whose only dependency `ui` did not change. changesets,
-given a major changeset for `core`, bumped exactly until the ranges held again. It bumped `cli`, `ui` and `api` to
-1.0.1, because `^1.0.0` no longer admits 2.0.0. It left `theme` and `docs` untouched, because `ui`'s patch stays
-inside their ranges. dispat, under an explicit `feat(core)^`, planned four: `core` at 1.1.0 and its three direct
-consumers.
+given a minor changeset for `core`, bumped exactly until the ranges held again. It bumped `cli`, `ui` and `api` to
+1.0.1, because the fixture declares its dependencies as tilde ranges and `~1.0.0` no longer admits 1.1.0. It left
+`theme` and `docs` untouched, because `ui`'s patch stays inside their ranges. dispat, under an explicit `feat(core)^`,
+planned four: `core` at 1.1.0 and its three direct consumers.
 
 The orphan. With `cli`'s upload denied, lerna and nx had already written all six tags at their version steps. After
 the failed publish, the tag `cli@1.0.1` exists while the registry still serves 1.0.0. changesets and dispat, tagging

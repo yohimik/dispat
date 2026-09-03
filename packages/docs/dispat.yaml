@@ -5,6 +5,12 @@ versionGroup: cli
 dependencies:
   - provider: dispat
     keep: true
+  # The site's experiments page is measured against the published alpine
+  # image, so the image's publish is an input to this package's build. The
+  # docker space sets isBuildWaitingPublish, which is what makes this edge
+  # wait for the push to the Hub rather than for the image's build.
+  - provider: dispat-alpine
+    keep: true
   # The infra package applies the site's Google Cloud footprint; this edge
   # orders that apply ahead of the deploy below, and propagates: an infra
   # release patch-bumps the docs, so the site redeploys onto the footprint
@@ -94,6 +100,39 @@ scripts:
     echo "REPORT_COMMIT=${GITHUB_SHA:-}" >> "$DISPAT_OUTPUT"
     echo "measured $(wc -l < data/benchmarked.txt) modules into data/report.json"
 
+  # The release experiments, against the image this run has just published.
+  #
+  # A hook rather than a workflow job, for the same reason the report is one:
+  # the records have to exist before the site is built, and a job that ran
+  # after the release could only publish them on the run after. The package
+  # depends on dispat-alpine and the docker space waits for its publish, so
+  # by the time this runs the image the cells pull is on the Hub.
+  #
+  # The version is the workspace's dispat, which is the release this run is
+  # making: the experiments run the bytes that were just shipped, and never a
+  # build of the checkout. The exit code is the cells' own, so a dispat cell
+  # whose expectations did not hold fails the docs package and no site ships
+  # for that run. The records are the artifact either way.
+  #
+  # The cell count and the version go out as outputs, so the build after this
+  # can check the report carries every cell the run recorded.
+  experiments: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    EXPERIMENTS_DISPAT_VERSION=${DISPAT_WORKSPACE_DISPAT_VERSION}
+    export EXPERIMENTS_DISPAT_VERSION
+    echo "running the release experiments against yohimik/dispat-alpine:$EXPERIMENTS_DISPAT_VERSION"
+    rc=0
+    dispat exec experiments --for pkg:experiments --in pkg:experiments || rc=$?
+    dispat exec summary --for pkg:experiments --in pkg:experiments || true
+    cells=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json | wc -l | tr -d ' ')
+    {
+      echo "REPORT_EXPERIMENTS=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json -exec dirname {} \; | xargs -n 1 basename | sort | tr '\n' ' ')"
+      echo "REPORT_EXPERIMENTS_VERSION=$EXPERIMENTS_DISPAT_VERSION"
+    } >> "$DISPAT_OUTPUT"
+    echo "recorded $cells cells on dispat $EXPERIMENTS_DISPAT_VERSION"
+    exit "$rc"
+
   # The site, and the version snapshot that goes in it, from one build.
   #
   # `docs` and `dispat` share the `cli` version group, so they release
@@ -138,12 +177,17 @@ scripts:
       --build-arg DOCS_VERSION="$DOCS_VERSION" \
       --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
       --build-arg DOCS_BENCH_PACKAGES="${DISPAT_OUTPUT_REPORT_BENCHMARKS:-}" \
+      --build-arg DOCS_EXPERIMENTS="${DISPAT_OUTPUT_REPORT_EXPERIMENTS:-}" \
       $(sh ../../scripts/buildx-cache.sh docs) \
       --output "type=local,dest=$PWD" ../..
 # No record steps: the docs package's changelog, tag and GitHub release are
 # the finalize phase's. The site deploy is the publish; the records follow at
 # the end of the run.
+#
+# Two beforeBuild hooks, in order: the experiments run first because the
+# report the second one builds reads what they recorded, and a report built
+# before them would carry an empty section.
 flow:
-  beforeBuild: test-report
+  beforeBuild: [experiments, test-report]
   build: build
   publish: deploy-docs

@@ -26,11 +26,9 @@ run_experiment() {
   step next nx release --dry-run --skip-publish
   echo "   next plan: $(grep -E '^[a-z]+ .*New version [0-9.]+ written' "$OUT/step-next.log" | sed -E 's/^([a-z]+) .*New version ([0-9.]+) written.*/\1 \2/' | sort -u | tr '\n' ';')"
 
-  assert "the refused run exited non-zero" [ "${STEP_RC[publish]}" != 0 ]
-  assert "the refused package carries no tag for an unpublished version" \
-    observed after-refusal '.packages.cli.state != "orphan"'
-  assert "the recovery published the refused package" observed after-recovery '.packages.cli.registry == "1.0.1"'
+  orphan_asserts publish
   assert "every released package is consistent once pushed" \
     observed after-push '[.packages[] | select(.registry != "1.0.0")] | length > 0 and all(.state == "consistent")'
-  assert "the next plan is empty" bash -c "! grep -q 'New version' '$OUT/step-next.log'"
+  assert "the next plan is empty" \
+    bash -c '! grep -q "New version" "$1"' _ "$OUT/step-next.log"
 }

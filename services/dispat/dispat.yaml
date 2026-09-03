@@ -58,10 +58,18 @@ scripts:
     # validated, both linux binaries are executed, and the e2e smoke
     # suite runs against the exact bytes about to land in dist/. A
     # binary that merely compiled never comes out.
+    #
+    # The token rides in as a build secret, and only when there is one:
+    # the tiny-toolchain stage installs the TinyGo fork through
+    # scripts/install-tools.sh, whose one API call meets the
+    # unauthenticated rate limit on a runner sharing its IP. The
+    # ${VAR:+...} form passes no flag at all outside CI, where an empty
+    # env=GITHUB_TOKEN would fail the build for want of a variable.
     - >-
       docker buildx build --file Dockerfile --target export
       --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
       --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
+      ${GITHUB_TOKEN:+--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN}
       --output "type=local,dest=$PWD/dist" ../..
     # Already this stage's outputs, in $DISPAT_OUTPUT's own format.
     - cat dist/dispat-output >> "$DISPAT_OUTPUT"
@@ -105,16 +113,28 @@ scripts:
     $(sh ../../scripts/buildx-cache.sh release-dispat)
     --output type=cacheonly ../..
   # What the release did, as step outputs for the job that verifies the
-  # composite action afterwards. An announce stage runs only after this
-  # package's own publish succeeded, so the stage firing is the whole
-  # condition: a run that publishes only the docs or an image never reaches
-  # it, leaves cli-released unset, and the workflow's `== 'true'` reads that
-  # as no new CLI to install. Outside Actions there is no $GITHUB_OUTPUT, and
-  # /dev/null takes the lines a human does not need.
+  # composite action afterwards, and then the announcement itself. An
+  # announce stage runs only after this package's own publish succeeded, so
+  # the stage firing is the whole condition: a run that publishes only the
+  # docs or an image never reaches it, leaves cli-released unset, and the
+  # workflow's `== 'true'` reads that as no new CLI to install. Outside
+  # Actions there is no $GITHUB_OUTPUT, and /dev/null takes the lines a human
+  # does not need.
+  #
+  # The outputs are written first, before anything that can be slow or can
+  # fail: the post-release job's condition must not depend on whether a
+  # social network answered. announce/announce.sh renders the release's card
+  # with crier and posts it to Instagram and LinkedIn; it collects every
+  # reason not to post into a message and exits 0, so a missing secret is a
+  # line in the log rather than a red release. It lives at the repository
+  # root because its fonts and audio have no business in any package's build
+  # context, which is why it is reached through the toplevel rather than by a
+  # relative path from here.
   announce: |
     echo "cli-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "cli-version=$DISPAT_NEW_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "released dispat $DISPAT_NEW_VERSION"
+    sh "$(git rev-parse --show-toplevel)/announce/announce.sh"
 # onFail is the net for the paths the build script never finishes:
 # unlink is idempotent, so closing an already-closed bracket is a
 # no-op. It matters because beforePublish runs `dispat commit`, which

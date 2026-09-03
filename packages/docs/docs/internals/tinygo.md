@@ -105,6 +105,23 @@ dispat install yohimik/tinygo --prerelease --release 0.43.0-net.1 \
   --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
 ```
 
+That line lives in
+[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh), the repository's
+[install manifest](../cli/install.md#install-manifests-as-shell-scripts), which is where the fork's version is pinned
+and the only place it is written down. Three callers read it: the spike's `tinygo-spike-fork` stage, the
+`tiny-toolchain` stage of `services/dispat/Dockerfile` that builds the release's two tiny binaries, and the darwin half
+of the spike. Each one runs the manifest rather than repeating the command, so the release and the spike can never be
+asking about different forks:
+
+```sh
+sh scripts/install-tools.sh --version tinygo    # the pin, and nothing else
+INSTALL_TOOLS_PREFIX=~/.local sh scripts/install-tools.sh tinygo
+```
+
+A `--pipe` install unpacks a tree rather than writing one file, so there is no destination for dispat to compare a
+checksum against and the manifest checks what `tinygo version` reports instead. Running it again on a machine that
+already carries the pinned fork transfers nothing.
+
 The base image is upstream 0.42.0 and every stage up to `tinygo-spike-net` measures it, so the verdict above keeps
 its evidence. The two fork stages are the re-asking.
 
@@ -265,4 +282,5 @@ toolchain version that was installed; `selfupdate.log` carries the matrix above,
 the far end of the wire.
 
 Nothing here gates a release, and nothing in CI runs it. Re-asking the question is bumping one version number in
-`Dockerfile.tinygo` and running one command.
+[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh) and running one
+command. The release's own toolchain stage reads the same number, so the bump moves both at once.

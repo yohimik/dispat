@@ -9,24 +9,52 @@ every tool has a reason to release them.
 
     fixture.py <root> lerna|nx|changesets|dispat
     fixture.py <root> <flavour> --feature    also commit the change to core
+    fixture.py <root> <flavour> --colleague  also clone the origin a second time
+
+Every commit is made at a pinned date, so two runs of the same cell produce
+the same commit shas and two transcripts can be diffed against each other.
+The folder must not exist: a fixture built over a previous run's leftovers is
+a fixture nobody can reason about, and `git init` over an existing repository
+succeeds quietly.
 """
 import json
 import os
 import subprocess
 import sys
 
-PKGS = ["core", "cli", "ui", "api", "theme", "docs"]
+PKGS = os.environ.get("EXPERIMENT_PACKAGES", "core cli ui api theme docs").split()
 DEPS = {"cli": ["core"], "ui": ["core"], "api": ["core"],
         "theme": ["ui"], "docs": ["ui"]}
 REG = os.environ.get("REGISTRY", "http://127.0.0.1:4873")
 TOKEN = os.environ.get("NPM_TOKEN", "anonymous")
+BASELINE = os.environ.get("EXPERIMENT_BASELINE", "1.0.0")
+
+# The clock every commit is dated by: fixed, and advanced one minute per
+# commit so history reads in the order it was written. 2025-01-01T00:00:00Z.
+EPOCH = int(os.environ.get("EXPERIMENT_EPOCH", "1735689600"))
+COMMITS = 0
+
+
+def git_env():
+    stamp = f"{EPOCH + 60 * COMMITS} +0000"
+    return {**os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
 
 
 def sh(args, cwd):
-    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    """One command, with everything it said kept on failure. Truncated output
+    is how a fixture that could not build comes to fail on a later step for a
+    reason that names something else."""
+    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, env=git_env())
     if r.returncode != 0:
-        raise RuntimeError(f"{args}: {r.stdout[-400:]} {r.stderr[-400:]}")
+        raise RuntimeError(f"{args} in {cwd} exited {r.returncode}\n"
+                           f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}")
     return r.stdout
+
+
+def commit(root, message):
+    global COMMITS
+    COMMITS += 1
+    sh(["git", "commit", "-qm", message], root)
 
 
 def npmrc(path):
@@ -42,7 +70,10 @@ def write_json(path, data):
 
 
 def base(root, flavour):
-    os.makedirs(root, exist_ok=True)
+    for path in (root, root + "-origin.git", root + "-colleague"):
+        if os.path.exists(path):
+            raise SystemExit(f"{path} already exists: a fixture is built into a fresh folder")
+    os.makedirs(root)
     sh(["git", "init", "-q", "."], root)
     with open(os.path.join(root, ".gitignore"), "w") as f:
         f.write("node_modules\n")
@@ -50,8 +81,8 @@ def base(root, flavour):
         d = os.path.join(root, "packages", p)
         os.makedirs(d, exist_ok=True)
         write_json(os.path.join(d, "package.json"),
-                   {"name": p, "version": "1.0.0",
-                    "dependencies": {q: "~1.0.0" for q in DEPS.get(p, [])}})
+                   {"name": p, "version": BASELINE,
+                    "dependencies": {q: f"~{BASELINE}" for q in DEPS.get(p, [])}})
         with open(os.path.join(d, "index.js"), "w") as f:
             f.write("// v1\n")
         # npm publishes from the package folder and reads the .npmrc there,
@@ -125,9 +156,9 @@ github:
         raise SystemExit(f"unknown flavour {flavour}")
 
     sh(["git", "add", "-A"], root)
-    sh(["git", "commit", "-qm", "chore: baseline"], root)
+    commit(root, "chore: baseline")
     for p in PKGS:
-        sh(["git", "tag", f"{p}@1.0.0"], root)
+        sh(["git", "tag", f"{p}@{BASELINE}"], root)
     origin = root + "-origin.git"
     subprocess.run(["git", "init", "-q", "--bare", origin], check=True)
     sh(["git", "remote", "add", "origin", origin], root)
@@ -145,9 +176,8 @@ def feature(root, flavour):
         with open(os.path.join(root, ".changeset", "streaming-reader.md"), "w") as f:
             f.write('---\n"core": minor\n---\n\nstreaming reader\n')
     sh(["git", "add", "-A"], root)
-    msg = "feat(core)^: streaming reader" if flavour == "dispat" \
-        else "feat(core): streaming reader"
-    sh(["git", "commit", "-qm", msg], root)
+    commit(root, "feat(core)^: streaming reader" if flavour == "dispat"
+           else "feat(core): streaming reader")
     sh(["git", "push", "-q", "origin", "main"], root)
 
 

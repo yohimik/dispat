@@ -282,6 +282,11 @@ installs it onto a folder on `PATH`, so a setup step needs no package manager an
 Pin the version with `--release` for a reproducible job, and put `--check` in front of it on a cached runner: it exits
 `1` only when the destination does not already hold that exact file, so a warm cache costs no transfer.
 
+Collect those lines into an [install manifest](../cli/install.md#install-manifests-as-shell-scripts) once more than one
+job needs them, so the versions are pinned in one file rather than in each workflow: dispat's own is
+[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh), which three
+workflow jobs and two container stages all run.
+
 A private repository works too, with a token that may read its contents. dispat uses the same credential for the
 releases listing and for the download, taking the asset from its API endpoint rather than from the public URL. On
 GitHub Enterprise, name the variable with `--token-env`: the endpoint there is derived from the repository you typed

@@ -86,6 +86,7 @@ FROM source AS build
 ARG DOCS_VERSION
 ARG DOCS_REQUIRE_REPORT
 ARG DOCS_BENCH_PACKAGES
+ARG DOCS_EXPERIMENTS
 ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
 # The per-package freshness check, before anything is built.
 #
@@ -95,14 +96,14 @@ ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
 # in the site's own code because a missing section renders as an empty table
 # and an empty table reads as "this package has no benchmarks".
 #
-# It also checks that every frozen docs version carries the benchmarks page.
-# The numbers are global — every version's page renders the same measured
-# report — so a version whose copy of the page is missing is a version that
-# shows the site's other numbers and not these, and a patch release cuts no
-# new snapshot to fix it with.
+# It also checks that every frozen docs version carries the benchmarks and
+# experiments pages. The numbers are global (every version's page renders the
+# same measured report), so a version whose copy of a page is missing is a
+# version that shows the site's other numbers and not those, and a patch
+# release cuts no new snapshot to fix it with.
 RUN <<'EOF'
 set -eu
-[ -n "${DOCS_BENCH_PACKAGES}" ] || exit 0
+[ -n "${DOCS_BENCH_PACKAGES}${DOCS_EXPERIMENTS}" ] || exit 0
 for pkg in ${DOCS_BENCH_PACKAGES}; do
   grep -q "\"path\": \"${pkg}\"" packages/docs/data/report.json || {
     echo "the release measured ${pkg} but data/report.json carries nothing for it" >&2
@@ -110,12 +111,25 @@ for pkg in ${DOCS_BENCH_PACKAGES}; do
   }
   echo "report carries ${pkg}"
 done
-for dir in packages/docs/versioned_docs/version-*; do
-  [ -d "$dir" ] || continue
-  [ -f "$dir/internals/benchmarks.mdx" ] || {
-    echo "$dir has no internals/benchmarks.mdx: the measured numbers would reach the current docs and not that version" >&2
+# The same check for the experiments: the hook ran a campaign and said which
+# cells it recorded, and a cell missing from the report is a row missing from
+# a table that lists the other eleven, which reads as a cell that was never
+# run rather than as one that was lost.
+for cell in ${DOCS_EXPERIMENTS}; do
+  grep -q "\"id\": \"${cell}\"" packages/docs/data/report.json || {
+    echo "the release recorded ${cell} but data/report.json carries nothing for it" >&2
     exit 1
   }
+  echo "report carries ${cell}"
+done
+for dir in packages/docs/versioned_docs/version-*; do
+  [ -d "$dir" ] || continue
+  for page in benchmarks experiments; do
+    [ -f "$dir/internals/$page.mdx" ] || {
+      echo "$dir has no internals/$page.mdx: the measured numbers would reach the current docs and not that version" >&2
+      exit 1
+    }
+  done
 done
 EOF
 RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-${DOCS_VERSION}" ]; then \

@@ -1,23 +1,23 @@
 name: Experiments
 
-# The release experiments (tests/experiments): the image a release published,
-# put through the faults a unit test never reaches, beside lerna, nx and
-# changesets in the same fixture. Every cell runs the same way: build the
-# experiments image on yohimik/dispat-alpine:<version>, run one experiment
-# for one tool, keep what it recorded. The release workflow calls this one
-# after the images publish, with the version it just released; by hand it
-# takes any released version, and none means the newest.
+# The release experiments (tests/experiments) on demand: the image a release
+# published, put through the faults a unit test never reaches, beside lerna,
+# nx and changesets in the same fixture. Every cell runs the same way: build
+# the experiments image on yohimik/dispat-alpine:<version>, run one experiment
+# for one tool, keep what it recorded.
+#
+# This is the by-hand run, and only that. A release runs every cell of its
+# own, inside itself: the docs package's `experiments` beforeBuild hook runs
+# the campaign against the image the run has just published and the site's
+# experiments page is built from what it recorded. What this workflow is for
+# is asking the same question again, of any released version, without making
+# a release to ask it with, and the two runs' records are comparable cell by
+# cell because they are the same twelve cells through the same harness.
 #
 # The cells for dispat carry expectations and fail when one does not hold;
 # the cells for the other tools are records and pass either way. The summary
 # job joins every record into one table on the run's summary page.
 on:
-  workflow_call:
-    inputs:
-      version:
-        description: The released dispat version to run against
-        required: true
-        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -86,7 +86,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: experiment-${{ matrix.experiment }}-${{ matrix.tool }}${{ matrix.scenario && '-' }}${{ matrix.scenario }}
-          path: tests/experiments/results
+          path: coverage/experiments
           retention-days: 30
 
   summary:
@@ -100,6 +100,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # The summary is a build of Dockerfile.gotest like every other gate, so
+      # this job needs the builder and the cache credentials the cells' job
+      # needs.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
+
       - name: Set up dispat
         uses: ./
 
@@ -109,13 +115,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: experiment-*
-          path: tests/experiments/results
+          path: coverage/experiments
           merge-multiple: true
 
+      # The script prints the table and appends it to $GITHUB_STEP_SUMMARY
+      # itself, through the same `testreport experiments` verb the site's
+      # report reads the records with.
       - name: Summarise
-        run: |
-          {
-            echo "### Release experiments"
-            echo
-            dispat exec summary --for pkg:experiments --in pkg:experiments
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: dispat exec summary --for pkg:experiments --in pkg:experiments

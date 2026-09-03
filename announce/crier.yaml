@@ -1,0 +1,170 @@
+# The card dispat posts about its own releases.
+#
+# announce.sh drives this from dispat's announce stage; it is not a project
+# anybody runs by hand, though `crier render --config announce/crier.yaml`
+# with some DISPAT_* variables set is how the previews beside this file were
+# made.
+#
+# Two passes per release share this file. This is the feed post as it stands;
+# the story pass adds its own frame on the command line, so that what is
+# written here is one thing rather than a set of values half of which every run
+# has to undo.
+render:
+  # Two layouts rather than one. They share every load-bearing rule (the page
+  # geometry, the margin boxes that carry the version badge and the page
+  # counter, the wrapping of a changelog entry) and differ in how they look: a
+  # faint lattice on near-black against a radial pine wash with a framed card.
+  # crier picks one per run from the run's seed, which announce.sh derives from
+  # the version, so a release has a face of its own and every pass of that
+  # release wears the same one.
+  #
+  # A pool and render.template together would not be an error, but the pool
+  # would win and the file would read as two intentions, so there is no
+  # render.template here.
+  pool:
+    - template.html
+    - template-b.html
+  # The data comes from announce.sh on standard input, built out of the
+  # release-notes variables. It has arrays in it, which an env: prefix cannot
+  # carry: this is the case stdin exists for.
+  data: "-"
+  width: 1080
+  height: 1080
+  format: jpeg
+  # Instagram will not fetch a PNG, and the card is flat colour, so quality
+  # costs little.
+  jpeg-quality: 92
+  # Only the fonts beside this file: a release must not render differently
+  # because a runner has different fonts installed than a laptop. Poppins and
+  # Space Mono live under announce/fonts with their OFL licences.
+  hermetic-fonts: true
+  base-url: .
+  # The card paginates: page one is the cover, and a long changelog carries on
+  # across the pages after it. Ten is the default and it is stated here because
+  # it is load-bearing for this card: a release past it fails the render rather
+  # than posting a truncated version of itself, and notes.sh's own cap of
+  # twenty entries a section is what keeps a real release well under it.
+  pages-max: 10
+  video:
+    # The anthem, chosen the way the layout is: one of these per release, from
+    # the same seed, so a re-run of a release plays the same sixteen seconds.
+    # announce.sh turns video on with a flag for the one pass that renders the
+    # clip; the pool sits here because it belongs to the project rather than to
+    # that one invocation, and the pick is drawn on every run either way, which
+    # is what keeps the passes agreeing with each other.
+    #
+    # announce/anthem.md carries the provenance of all four. They are
+    # public-domain recordings, sixteen seconds each, normalised to the same
+    # loudness so one release is not twice as loud as the last.
+    audio-pool:
+      - anthem.mp3
+      - anthem-stars-and-stripes.mp3
+      - anthem-william-tell.mp3
+      - anthem-mountain-king.mp3
+
+publish:
+  # Instagram fetches the media from a public URL rather than taking bytes, so
+  # a release running on a runner needs a tunnel. announce.sh sets stage.mode
+  # and the tunnel; CRIER_STAGE_* overrides point it somewhere else. Every page
+  # is staged, because Instagram fetches every one of them.
+  #
+  # A folded block, so a paragraph is written across as many lines as it reads
+  # well on and reaches Instagram as one long line that wraps to the reader's
+  # own screen. Paragraphs are separated by two blank lines rather than one:
+  # a folded scalar turns n blank lines into n newlines, and one newline
+  # between paragraphs would run the whole caption together.
+  caption: >-
+    RENDERED AND POSTED BY THE RELEASE ITSELF, FROM GITHUB ACTIONS (THE
+    CHANGELOG COMES FROM THE COMMIT MESSAGES)
+
+
+    dispat v{{ .version }} is out. A release tool for polyglot monorepos:
+    conventional commits in, versions, changelogs, tags and releases out. npm,
+    Go, Cargo, Maven, Docker and the rest sit in one dependency graph and
+    release together.
+
+
+    {{ range .install }}{{ if eq .label "curl" }}{{ .command }}{{ end }}{{ end }}
+
+
+    https://dispat.dev
+
+
+    #golang #opensource #devtools #monorepo #releaseengineering #automation
+    #cicd #githubactions #semver #conventionalcommits
+
+  instagram:
+    enabled: true
+    # The token the release carries is generated through "API setup with
+    # Instagram business login", and a token of that flavour only parses on
+    # this host: graph.facebook.com answers it with OAuthException 190
+    # "Cannot parse access token". The Facebook-login flavour, a Page token,
+    # would use the registry's graph.facebook.com default instead.
+    api-base-url: https://graph.instagram.com/v25.0
+    # Meta takes its time fetching and processing a busy release, and a
+    # monorepo release is busy: several pages and a clip can all time out at
+    # the default two minutes. Five minutes is patience, not hope: a container
+    # that will finish usually does so well within it.
+    poll-timeout: 5m
+    # No width, height or fit here: the feed post is the card as it was drawn.
+    #
+    # No max-attachments either. A feed post takes ten, which is the same as
+    # render.pages-max, so a card that rendered at all is a card that fits in
+    # one carousel.
+    #
+    # The story pass adds them:
+    #
+    #   --publish-instagram-story
+    #   --publish-instagram-width 1080 --publish-instagram-height 1920
+    #   --publish-instagram-fit contain
+    #   --publish-instagram-fit-background "#101713"
+    #
+    # contain rather than cover because the card is mostly text: cropping a
+    # 1080 square to 9:16 would push 44% off each side and take the ends off
+    # every line. The background is the card's own, so the letterbox reads as
+    # part of the design instead of as bars.
+    #
+    # --publish-instagram-story also drops the carousel: stories have none, so
+    # the pages become one story each, posted in order, each one live before
+    # the next is created.
+
+  linkedin:
+    # Off in the file: announce.sh turns it on for its own pass with
+    # --publish-linkedin-enabled=true, and turns Instagram off for that pass,
+    # so each platform's post is its own step with its own failure. The token
+    # and the author URN come from the environment
+    # (CRIER_PUBLISH_LINKEDIN_TOKEN, CRIER_PUBLISH_LINKEDIN_AUTHOR_URN).
+    #
+    # LinkedIn takes the bytes directly, so this pass needs no tunnel and no
+    # staging. A post takes one video or up to twenty images, never both
+    # (content.multiImage is documented images-only), so the one post that can
+    # carry the whole release is the reel: the cover holding under the fanfare,
+    # then the changelog pages in reading order. With no ffmpeg to make it, the
+    # whole card goes out as one album instead, cover first.
+    enabled: false
+    # A commentary of its own rather than the shared caption: the Instagram
+    # caption is written for a feed of pictures, and this one is written for
+    # the people who would actually run the thing. The changelog rides along
+    # as text after the opening, because a reader deciding whether to update
+    # should not have to pause a video to find out what changed.
+    #
+    # A literal block rather than a folded one: the changelog list needs its
+    # line breaks kept exactly as written.
+    caption: |-
+      dispat v{{ .version }} is out. This post is part of the release: a GitHub Actions job read the changelog from the commit history, rendered the card with crier's Go HTML engine, cut the clip, and published it here before the workflow finished. Nobody wrote or scheduled it by hand.
+      {{ if .sections }}
+      What changed:{{ range .sections }}
+      {{ .label }}:{{ range .items }}
+      - {{ . }}{{ end }}{{ if gt .more 0 }}
+      - and {{ .more }} more{{ end }}{{ end }}
+      {{ end }}
+      dispat is one binary that releases a polyglot monorepo from its conventional commits: it works out each package's version, writes the changelogs, rewrites the manifests of everything that depends on it, tags, builds, publishes, and cuts the GitHub releases, in dependency order and in parallel. npm, Go, Cargo, Maven, .NET, Python, Docker and the rest sit in one graph. No daemon, no state file, no cache.
+
+      This repository releases itself with the binary the same run built, which is where the list above comes from.
+
+      Code and docs: https://dispat.dev
+
+      Install:
+      {{ range .install }}{{ if eq .label "curl" }}{{ .command }}{{ end }}{{ end }}
+
+      #golang #opensource #devtools #monorepo #releaseengineering #cicd #githubactions #semver #conventionalcommits #buildinpublic

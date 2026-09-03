@@ -6,28 +6,97 @@
 # runs": at a point in the tool's own sequence rather than on a timer, so the
 # interleaving is the same every time and the same for every tool.
 #
-#   SHIM_LOG      file every invocation is appended to (timestamp, cwd, args)
-#   SHIM_TRIGGER  extended regex over the space-joined arguments; the first
-#                 match fires the action. Empty: never fires.
-#   SHIM_EXCLUDE  extended regex; an invocation matching it never fires
+#   SHIM_LOG      file every invocation is appended to, one JSON object per
+#                 line: the time, the working directory, what kind of entry it
+#                 is, and the arguments as an array. A line per call rather
+#                 than the arguments joined with spaces, because a `git tag -m`
+#                 message spans lines and a log whose record boundaries a
+#                 reader has to guess is not a record.
+#   SHIM_TRIGGER  extended regex over the git subcommand alone; the first
+#                 match fires the action. Empty: never fires. The subcommand is
+#                 not argv[1] here: every caller passes global options first
+#                 (`git -C . push origin HEAD`), so the shim skips them the way
+#                 git does. Reading the subcommand rather than the whole
+#                 command line is also what keeps `git commit -m "...push..."`
+#                 from firing it.
+#   SHIM_EXCLUDE  extended regex; an invocation with any one argument matching
+#                 it never fires. This is what keeps dispat's push of its
+#                 release lock, which precedes the plan, from counting as the
+#                 release's first push.
 #   SHIM_ACTION   the shell command run once, with the real git on PATH
-#   SHIM_STATE    folder holding the fired marker
+#   SHIM_STATE    folder the fired marker is created in
 set -u
-REAL=/usr/bin/git
-args="$*"
-if [ -n "${SHIM_LOG:-}" ]; then
-  printf '%s\t%s\t%s\n' "$(date +%s.%N)" "$PWD" "$args" >> "$SHIM_LOG"
+
+# The PATH without this shim's own folder, and the real git on it. Fixed to
+# the folder this copy of the shim was invoked from rather than to
+# /usr/bin/git, so an image that moves git still runs the tool's calls, and
+# so the filter cannot delete a folder whose name merely contains the shim's.
+shim_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+real_path=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF -- "$shim_dir" | paste -sd: -)
+REAL=$(PATH=$real_path command -v git || true)
+[ -n "$REAL" ] || { echo "git-shim: no git on PATH beside $shim_dir" >&2; exit 127; }
+
+# The record is built by python rather than by jq, because git's arguments are
+# not safe to hand to jq: `jq --args` keeps parsing options after it, so
+# `git -C . push` logged a `-C`-coloured line without the -C in it, and
+# `git tag -m` failed with "Unknown option -m" and logged nothing at all.
+# python stops parsing its own options at -c, so everything after the program
+# is argv whatever it looks like.
+log_call() { # <kind> <args...>
+  [ -n "${SHIM_LOG:-}" ] || return 0
+  local kind=$1; shift
+  python3 -c 'import json, sys, time
+print(json.dumps({"time": "%.6f" % time.time(), "cwd": sys.argv[1],
+                  "kind": sys.argv[2], "args": sys.argv[3:]}))' \
+    "$PWD" "$kind" "$@" >> "$SHIM_LOG"
+}
+
+# The subcommand git itself would run: the first argument that is neither a
+# global option nor a global option's value.
+subcommand_of() {
+  while [ "$#" -gt 0 ]; do
+    case $1 in
+      -C|-c|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--config-env)
+        [ "$#" -ge 2 ] || return 0
+        shift 2 ;;
+      --) shift; [ "$#" -gt 0 ] && printf '%s' "$1"; return 0 ;;
+      -*) shift ;;
+      *) printf '%s' "$1"; return 0 ;;
+    esac
+  done
+}
+
+log_call call "$@"
+
+fires=0
+if [ -n "${SHIM_TRIGGER:-}" ] && [ -n "${SHIM_ACTION:-}" ]; then
+  subcommand=$(subcommand_of "$@")
+  if [[ $subcommand =~ ${SHIM_TRIGGER} ]]; then
+    fires=1
+    if [ -n "${SHIM_EXCLUDE:-}" ]; then
+      for argument in "$@"; do
+        if [[ $argument =~ ${SHIM_EXCLUDE} ]]; then fires=0; break; fi
+      done
+    fi
+  fi
 fi
-if [ -n "${SHIM_TRIGGER:-}" ] && [ -n "${SHIM_ACTION:-}" ] \
-   && [ ! -e "${SHIM_STATE:-/tmp/shim}/fired" ] \
-   && [[ "$args" =~ ${SHIM_TRIGGER} ]] \
-   && { [ -z "${SHIM_EXCLUDE:-}" ] || ! [[ "$args" =~ ${SHIM_EXCLUDE} ]]; }; then
-  mkdir -p "${SHIM_STATE:-/tmp/shim}"
-  : > "${SHIM_STATE:-/tmp/shim}/fired"
-  [ -n "${SHIM_LOG:-}" ] && printf '%s\t%s\tINJECT before: %s\n' "$(date +%s.%N)" "$PWD" "$args" >> "$SHIM_LOG"
-  # The action runs with the shim off PATH, so its own git calls are neither
-  # logged as the tool's nor able to fire it again.
-  PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$(dirname "$0")" | paste -sd:) \
-    bash -c "$SHIM_ACTION" >> "${SHIM_LOG:-/dev/null}" 2>&1
+
+if [ "$fires" = 1 ]; then
+  state=${SHIM_STATE:-/tmp/shim}
+  mkdir -p "$state"
+  # mkdir is the whole test rather than a check followed by a touch: it
+  # succeeds for exactly one caller, so two git processes reaching the trigger
+  # at once cannot both fire the action.
+  if mkdir "$state/fired" 2>/dev/null; then
+    log_call inject "$@"
+    # The action runs with the shim off PATH, so its own git calls are neither
+    # logged as the tool's nor able to fire it again. Its output goes to
+    # stderr, which is the step's own log: the call log stays one JSON object
+    # per line.
+    action_rc=0
+    PATH=$real_path bash -c "$SHIM_ACTION" >&2 || action_rc=$?
+    log_call inject-done "exit=$action_rc"
+  fi
 fi
+
 exec "$REAL" "$@"

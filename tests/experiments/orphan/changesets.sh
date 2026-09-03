@@ -25,11 +25,9 @@ run_experiment() {
   step status changeset status --verbose
   echo "   next plan: $(grep -E '^\s+- [a-z]+ -> |no changesets' "$OUT/step-status.log" | sed -E 's/^\s+- //' | sort -u | tr '\n' ';')"
 
-  assert "the refused run exited non-zero" [ "${STEP_RC[publish]}" != 0 ]
-  assert "the refused package carries no tag for an unpublished version" \
-    observed after-refusal '.packages.cli.state != "orphan"'
-  assert "the recovery published the refused package" observed after-recovery '.packages.cli.registry == "1.0.1"'
+  orphan_asserts publish
   assert "every released package is consistent once pushed" \
     observed after-push '[.packages[] | select(.registry != "1.0.0")] | length > 0 and all(.state == "consistent")'
-  assert "the next plan is empty" bash -c "! grep -Eq '^\s+- [a-z]+ -> ' '$OUT/step-status.log'"
+  assert "the next plan is empty" \
+    bash -c '! grep -Eq "^\s+- [a-z]+ -> " "$1"' _ "$OUT/step-status.log"
 }

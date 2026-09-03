@@ -71,6 +71,14 @@ jobs:
       - name: gofmt
         run: dispat exec gofmt-check
 
+      # The shell half of the same sweep: the installer, the CI scripts, the
+      # announcement's and the experiments harness's, through shellcheck in a
+      # stage of its own. Every gate of this repository is a build, and this
+      # one is deliberately not on the Go image: nothing it checks needs a
+      # toolchain.
+      - name: shellcheck
+        run: dispat exec shellcheck
+
       # One name swept across the monorepo instead of a module list to keep in
       # step by hand: each Go space defines what `vet` means for its packages,
       # tools and tests/integration carry their own as script-only packages
@@ -200,5 +208,14 @@ jobs:
       # Deliberately without --consumers, unlike the test sweep: every image
       # depends on the CLI, so consumers would turn any pkg/* change into four
       # emulated multi-arch image builds.
+      #
+      # GITHUB_TOKEN because the dispat package's build installs the TinyGo
+      # fork inside its toolchain stage, through scripts/install-tools.sh, and
+      # that install makes one GitHub API call. A runner sharing its IP with a
+      # cloud region meets the unauthenticated rate limit on a busy day; the
+      # build script forwards the variable as a build secret only when it is
+      # set, so nothing else changes.
       - name: Build what changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: dispat run build --since HEAD~1

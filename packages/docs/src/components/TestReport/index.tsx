@@ -1,14 +1,21 @@
 import Link from '@docusaurus/Link';
 import {usePluginData} from '@docusaurus/useGlobalData';
 import {TEST_REPORT_PLUGIN} from '@site/plugins/test-report/name';
-import type {BenchGroup, Counts, Group, Report, ReportData} from '@site/plugins/test-report/types';
+import type {
+  BenchGroup,
+  Counts,
+  ExperimentCell,
+  Group,
+  Report,
+  ReportData,
+} from '@site/plugins/test-report/types';
 import Admonition from '@theme/Admonition';
 import React from 'react';
 
 import styles from './styles.module.css';
 
-// The coverage, test-results and benchmarks pages, insofar as they are
-// numbers.
+// The coverage, test-results, benchmarks and experiments pages, insofar as
+// they are numbers.
 //
 // Everything here comes from one report measured by the release that published
 // this site (tools/testreport). Nothing on either page is a figure someone
@@ -394,5 +401,124 @@ export function FuzzTable(): React.ReactElement | null {
         ))}
       </tbody>
     </table>
+  );
+}
+
+/**
+ * How many cells a campaign ran, against which image, and how many hold.
+ *
+ * The image tag is the point of the sentence. Every cell copies its binary out
+ * of a published `yohimik/dispat-alpine:<version>`, so the page is about bytes
+ * somebody can pull rather than about a build of a checkout, and a reader who
+ * wants to disbelieve it has the tag to run it against.
+ */
+export function ExperimentsSummary(): React.ReactElement | null {
+  const report = useReport();
+  if (!report) {
+    return null;
+  }
+  const {version, cells} = report.experiments;
+  if (cells.length === 0) {
+    return null;
+  }
+  const own = cells.filter((cell) => cell.tool === 'dispat');
+  const holding = own.filter((cell) => cell.passed).length;
+  return (
+    <p>
+      This release ran <strong>{count(cells.length)} cells</strong> against{' '}
+      {version ? <code>yohimik/dispat-alpine:{version}</code> : <em>more than one published image</em>}: two faults,
+      four release tools, the same fixture each time. Of dispat&apos;s{' '}
+      <strong>{count(own.length)} cells</strong>, <strong>{count(holding)}</strong> hold every expectation. The other
+      tools&apos; cells are records rather than expectations, and their counts describe those tools.
+    </p>
+  );
+}
+
+/** The cells of one experiment and scenario, as a heading a reader can name. */
+function experimentTitle(cell: ExperimentCell): string {
+  return cell.scenario ? `${cell.experiment} (${cell.scenario})` : cell.experiment;
+}
+
+/** How a cell ended, in a clause: what held, or everything that did not. */
+function cellOutcome(cell: ExperimentCell): string {
+  if (cell.passed) {
+    return 'every expectation holds';
+  }
+  const failed = cell.checks.filter((check) => !check.ok);
+  if (failed.length === 0) {
+    return 'no expectations were recorded';
+  }
+  return failed.map((check) => check.check).join('; ');
+}
+
+/**
+ * One table per experiment and scenario, a row per tool.
+ *
+ * Grouped by the fault rather than by the tool, because what the page is about
+ * is what four tools do with one fault, and a table sorted by tool puts the
+ * four answers to one question in four different places.
+ */
+export function ExperimentsTable(): React.ReactElement | null {
+  const report = useReport();
+  if (!report) {
+    return null;
+  }
+  const cells = report.experiments.cells;
+  if (cells.length === 0) {
+    return null;
+  }
+  // Insertion order over the report's already-sorted cells, so the groups
+  // appear in the order the ids do and two builds of one report render
+  // identically.
+  const groups: {title: string; cells: ExperimentCell[]}[] = [];
+  for (const cell of cells) {
+    const title = experimentTitle(cell);
+    const group = groups.find((candidate) => candidate.title === title);
+    if (group) {
+      group.cells.push(cell);
+    } else {
+      groups.push({title, cells: [cell]});
+    }
+  }
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group.title}>
+          <h3>{group.title}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>Steps</th>
+                <th className={styles.number}>Expectations</th>
+                <th>Outcome</th>
+                <th>Final state</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.cells.map((cell) => (
+                <tr key={cell.id}>
+                  <td>
+                    <code>{cell.tool}</code>
+                  </td>
+                  <td>
+                    <code>{cell.steps.map((step) => `${step.step}=${step.exit}`).join(' ')}</code>
+                  </td>
+                  <td className={styles.number}>
+                    {count(cell.checks.filter((check) => check.ok).length)}/{count(cell.checks.length)}
+                  </td>
+                  <td>{cellOutcome(cell)}</td>
+                  <td>
+                    <code>
+                      {cell.final.packages.map((pkg) => `${pkg.name}=${pkg.registry}/${pkg.state}`).join(' ')}
+                    </code>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </>
   );
 }

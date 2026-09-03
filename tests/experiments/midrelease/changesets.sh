@@ -5,6 +5,18 @@
 # rebase onto the branch, push again, and ask changesets what it would
 # release next.
 
+# The packages a correct next plan holds once the colleague's commit is on
+# main and this run's release is recorded. changesets moves a dependent only
+# when a range no longer holds, so the colleague's patch of core reaches
+# nothing beyond core, and the clean scenario's patch of api is api's alone.
+# Sorted, space-ended, the way the transcript renders a plan's package list.
+next_plan() {
+  case "$SCENARIO" in
+    conflict) echo 'core ' ;;
+    *) echo 'api ' ;;
+  esac
+}
+
 run_experiment() {
   fixture changesets --feature --colleague
   baseline_publish
@@ -12,22 +24,20 @@ run_experiment() {
 
   step version changeset version
   step commit git commit -qam "chore: version packages"
-  local release
-  release=$(git rev-parse HEAD)
+  RELEASE=$(git rev-parse HEAD)
   step publish changeset publish
-  observe after-publish --mark release="$release"
+  observe_marked after-publish
 
+  # The push is the operator's: changesets makes none of its own, so the
+  # injection fires on the command the protocol runs here rather than on
+  # anything the tool does.
   step push with_shim git push --follow-tags origin main
-  local colleague
-  colleague=$(colleague_sha)
-  observe after-push ${colleague:+--mark colleague=$colleague} --mark release="$release"
+  COLLEAGUE=$(colleague_sha)
+  observe_marked after-push
 
-  step rebase git pull --rebase origin main
-  if [ "${STEP_RC[rebase]}" != 0 ]; then
-    step resolve bash -c 'git checkout --theirs -- packages/core/package.json && git add -A && GIT_EDITOR=true git rebase --continue'
-  fi
+  recover_by_rebase
   step push2 git push --follow-tags origin main
-  observe after-recovery ${colleague:+--mark colleague=$colleague} --mark release="$release"
+  observe_marked after-recovery
 
   step status changeset status --verbose
   echo "   next plan: $(grep -E '^\s+- [a-z]+ -> ' "$OUT/step-status.log" | sed -E 's/^\s+- //' | sort -u | tr '\n' ';')"
@@ -38,5 +48,6 @@ run_experiment() {
   assert "every released package is consistent after recovery" \
     observed after-recovery '[.packages[] | select(.registry != "1.0.0")] | length > 0 and all(.state == "consistent")'
   assert "the next plan is the colleague's change and its dependents alone" \
-    bash -c "[ \"\$(grep -E '^\s+- [a-z]+ -> ' '$OUT/step-status.log' | sed -E 's/^\s+- ([a-z]+) ->.*/\1/' | sort -u | tr '\n' ' ')\" = '$(expected_next)' ]"
+    bash -c '[ "$(grep -E "^\s+- [a-z]+ -> " "$1" | sed -E "s/^\s+- ([a-z]+) ->.*/\1/" | sort -u | tr "\n" " ")" = "$2" ]' \
+    _ "$OUT/step-status.log" "$(next_plan)"
 }

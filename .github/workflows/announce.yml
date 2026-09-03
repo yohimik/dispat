@@ -1,0 +1,62 @@
+# Replay an announcement for a version that already shipped. The release
+# workflow announces on release day; this one exists for the day a platform
+# refused a post for reasons of its own: the tags exist, the release cannot run
+# again, and one post still has to be said.
+#
+# The replay scripts under announce/ are written when a post has to be said
+# again, and each one is a record of what went out and why. This workflow is
+# what makes saying it again a dispatch rather than a laptop holding the
+# repository's secrets.
+name: announce
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: replay script under announce/ to run
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    name: Replay
+    runs-on: ubuntu-latest
+    env:
+      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
+      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+      SCRIPT: ${{ inputs.script }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up dispat
+        uses: ./
+
+      # The pinned release rather than a build of the tree: the bytes that
+      # announce are the bytes the release day used, and the version is the
+      # manifest's.
+      - name: Install the released crier
+        env:
+          INSTALL_TOOLS_BIN_DIR: ${{ github.workspace }}/replay-bin
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: sh scripts/install-tools.sh crier
+
+      - name: Install ffmpeg
+        # update first: the image's package lists go stale and a mirror 404 is
+        # what a missing update looks like.
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq ffmpeg >/dev/null
+          ffmpeg -version | head -1
+
+      # A single file name, not a path: the input is a dispatch field, and a
+      # replay is meant to run one of the scripts beside the announcement
+      # rather than anything else in the checkout.
+      - name: Replay
+        run: |
+          case "$SCRIPT" in
+            *[!A-Za-z0-9._-]*|'') echo "script names are a single file name" >&2; exit 2 ;;
+          esac
+          ANNOUNCE_CRIER_BIN="$PWD/replay-bin/crier" sh "announce/$SCRIPT"

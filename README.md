@@ -180,7 +180,10 @@ dispat stands on the shoulders of two things:
   tagged each module the way Go expects (`pkg/ccme/v1.0.0`, `services/dispat/v1.0.0`). This keeps
   `go install github.com/yohimik/dispat/services/dispat@latest` working. It also attached six cross-compiled binaries
   to the CLI's GitHub release, published the four container images, and released the versioned documentation site.
-  Every package received its own tag, changelog entry, and GitHub release.
+  Every package received its own tag, changelog entry, and GitHub release. The release also announces itself: its
+  `announce` stage renders a card from the changelog it just wrote and posts it to Instagram and LinkedIn with
+  [crier](https://github.com/yohimik/crier), from the same Actions run, which
+  [the announcement page](https://dispat.dev/internals/announce/) describes.
 - **[crier](https://github.com/yohimik/crier)**: a single-package repository, one Go module and one binary, which
   renders HTML templates to images and video and posts them to fourteen social platforms. It shows that dispat needs no
   monorepo. Its first release was a breaking change on the `rc` channel, and eighteen release candidates followed in

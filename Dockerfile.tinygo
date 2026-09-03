@@ -70,15 +70,16 @@
 # baseline the sizes are measured against and for the control the network
 # probe needs, TinyGo for everything else. It is Debian-based, not alpine, so
 # package installs are apt-get.
-ARG TINYGO_VERSION=0.42.0
-
-# The fork's release, fetched at build time by the gc-built dispat the build
-# stage already produced. A pin like TINYGO_VERSION, never passed as a
-# --build-arg: re-asking the question is bumping this one number.
-ARG TINYGO_FORK_VERSION=0.43.0-net.1
-
+#
 # The pin, never passed as --build-arg, exactly as GO_VERSION is the pin in
 # Dockerfile.gotest. Re-asking the question is bumping this one number.
+ARG TINYGO_VERSION=0.42.0
+
+# The fork's release is fetched at build time by the gc-built dispat the build
+# stage already produced, through scripts/install-tools.sh: that file is where
+# the fork's pin lives, and the release's own tiny-toolchain stage runs the
+# same line, so the spike and the release can never be asking about different
+# forks. Re-asking that question is bumping one number in that file.
 FROM tinygo/tinygo:${TINYGO_VERSION} AS base
 
 # The same uid-1001 gopher the gc gates run as, for the same reason: the
@@ -493,23 +494,30 @@ cat "$log"
 exit 0
 EOF
 
-# The fork, fetched with dispat's own install command — the gc binary the build
-# stage already produced, so the fetch is dogfooding rather than a curl. Its own
-# stage because a toolchain download must not be re-run every time a heredoc
-# below it changes, and because "did the fork install and report its version"
-# is a question worth answering on its own before anything is built with it.
+# The fork, fetched through the repository's install manifest: one
+# `dispat install` line, run by the gc binary the build stage already
+# produced, so the fetch is dogfooding rather than a curl and the version is
+# the same one the release's own toolchain stage installs. Its own stage
+# because a toolchain download must not be re-run every time a heredoc below
+# it changes, and because "did the fork install and report its version" is a
+# question worth answering on its own before anything is built with it.
+#
+# INSTALL_TOOLS_DISPAT names the binary under test and INSTALL_TOOLS_PREFIX
+# where the tree is unpacked; the manifest's own idempotence check reads
+# `tinygo version` out of that prefix, which is exactly what the log's second
+# header asks again.
 FROM tinygo-spike-net AS tinygo-spike-fork
 ARG TARGETARCH
-ARG TINYGO_FORK_VERSION
+COPY --chown=gopher:gopher scripts/install-tools.sh /src/scripts/install-tools.sh
 RUN <<'EOF'
 set -u
 log=/src/spike/fork.log
 : > "$log"
-echo "=== dispat install yohimik/tinygo $TINYGO_FORK_VERSION ===" >> "$log"
-/out/gc-dispat-linux-${TARGETARCH} install yohimik/tinygo \
-  --prerelease --release "$TINYGO_FORK_VERSION" \
-  --asset 'tinygo{version}.{os}-{arch}.tar.gz' \
-  --bin-dir /home/gopher/fork --pipe 'tar -xz' >> "$log" 2>&1
+version=$(sh /src/scripts/install-tools.sh --version tinygo)
+echo "=== install-tools.sh tinygo ($version) ===" >> "$log"
+INSTALL_TOOLS_DISPAT=/out/gc-dispat-linux-${TARGETARCH} \
+INSTALL_TOOLS_PREFIX=/home/gopher/fork \
+  sh /src/scripts/install-tools.sh tinygo >> "$log" 2>&1
 echo "exit=$?" >> "$log"
 echo "=== fork tinygo version ===" >> "$log"
 /home/gopher/fork/tinygo/bin/tinygo version >> "$log" 2>&1

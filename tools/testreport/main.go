@@ -16,8 +16,9 @@ const usage = `usage:
   testreport test  <log-name> -- <go test args...>              run go test -json, keep the log, print a summary
   testreport bench <log-name> -- <go test args...>              run go test -bench -json, keep the stream, summarise it
   testreport build  [-coverage dir] [-out file] [-commit sha] [-keep file] [-modules file]
-                                                                build the report from a full test run
+                    [-experiments dir]                          build the report from a full test run
   testreport render <log>                                       summarise one go test -json log
+  testreport experiments [-markdown] [dir]                      summarise a release experiments campaign
 `
 
 func main() {
@@ -45,6 +46,8 @@ func main() {
 		err = build(os.Args[2:])
 	case "render":
 		err = render(os.Args[2:])
+	case "experiments":
+		err = experiments(os.Args[2:])
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -65,8 +68,12 @@ func build(args []string) error {
 	commit := fs.String("commit", "", "the commit the run measured; discovered from git when empty")
 	keep := fs.String("keep", "", "an earlier report whose measurements are carried over for the modules this run did not measure")
 	modules := fs.String("modules", "", "where to list the modules this run benchmarked, one per line")
+	experimentsDir := fs.String("experiments", "", "the release experiments' results folder; <coverage>/experiments when empty")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *experimentsDir == "" {
+		*experimentsDir = filepath.Join(*dir, experimentsDirName)
 	}
 
 	report := Report{GeneratedAt: time.Now().UTC().Truncate(time.Second), Commit: *commit}
@@ -91,7 +98,17 @@ func build(args []string) error {
 		return err
 	}
 	report.Benchmarks = benchmarks
+
+	campaign, err := readExperiments(*experimentsDir)
+	if err != nil {
+		return err
+	}
+	report.Experiments = campaign
 	if *keep != "" {
+		// Benchmarks only, and deliberately: every release runs every cell, so
+		// a campaign is either this run's or absent, and a page showing an
+		// older run's cells beside this run's coverage would be claiming the
+		// released binary was put through faults nobody put it through.
 		carryForward(&report, *keep)
 	}
 
@@ -110,10 +127,10 @@ func build(args []string) error {
 			return err
 		}
 	}
-	logf(levelInfo, "wrote %s: %.1f%% of %d statements, %d tests, %d fuzz targets, %d benchmarks, commit %s",
+	logf(levelInfo, "wrote %s: %.1f%% of %d statements, %d tests, %d fuzz targets, %d benchmarks, %d experiment cells, commit %s",
 		*out, report.Coverage.Total.Percent, report.Coverage.Total.Statements,
 		report.Suite.Totals.Tests, report.Suite.Totals.Fuzz, benchCount(report.Benchmarks),
-		short(report.Commit))
+		len(report.Experiments.Cells), short(report.Commit))
 	return nil
 }
 

@@ -21,11 +21,12 @@ type Report struct {
 	// GeneratedAt and Commit are what make a stale artifact visible: the docs
 	// page prints both, so numbers from another commit cannot pass silently
 	// for this one.
-	GeneratedAt time.Time  `json:"generatedAt"`
-	Commit      string     `json:"commit"`
-	Coverage    Coverage   `json:"coverage"`
-	Suite       Suite      `json:"suite"`
-	Benchmarks  Benchmarks `json:"benchmarks"`
+	GeneratedAt time.Time   `json:"generatedAt"`
+	Commit      string      `json:"commit"`
+	Coverage    Coverage    `json:"coverage"`
+	Suite       Suite       `json:"suite"`
+	Benchmarks  Benchmarks  `json:"benchmarks"`
+	Experiments Experiments `json:"experiments"`
 }
 
 // Coverage is the statement coverage of the workspace, by layer and by
@@ -137,6 +138,87 @@ type Benchmark struct {
 	BytesPerOp  int     `json:"bytesPerOp"`
 	AllocsPerOp int     `json:"allocsPerOp"`
 	MBPerSec    float64 `json:"mbPerSec"`
+}
+
+// Experiments is what the release experiments recorded: one campaign of cells
+// against one published image.
+//
+// It is a section of its own for the same reason the benchmarks are. The
+// suite says the code is right and the benchmarks say what it costs; this
+// says what the released binary does when a registry refuses an upload
+// halfway through or somebody else pushes while it runs. Neither of the other
+// two can answer that, because neither runs the shipped bytes against a
+// registry that is allowed to break.
+type Experiments struct {
+	// Version is the dispat every cell ran against, read out of the binary's
+	// own --version line inside the container rather than from whatever asked
+	// for the run. Empty when the cells disagree, which is the only honest
+	// answer to "which release is this page about".
+	Version string `json:"version"`
+	Cells   []Cell `json:"cells"`
+}
+
+// Cell is one run of one protocol against one tool: the unit the harness
+// executes, records and names its results folder after.
+type Cell struct {
+	// ID is that folder's name, which is also how a cell is named on a
+	// command line: `midrelease-conflict-dispat`.
+	ID         string `json:"id"`
+	Experiment string `json:"experiment"`
+	// Scenario is empty for an experiment that has only one, which is a fact
+	// about the experiment rather than a field the harness forgot.
+	Scenario string `json:"scenario"`
+	Tool     string `json:"tool"`
+	// Dispat and Platform are the two halves of the version line the binary
+	// printed. The platform is part of the measurement: a release runner
+	// records linux_amd64 and a laptop does not, and a reading of one is not
+	// a reading of the other.
+	Dispat   string  `json:"dispat"`
+	Platform string  `json:"platform"`
+	Steps    []Step  `json:"steps"`
+	Checks   []Check `json:"checks"`
+	// Passed is the harness's own verdict, which gates the run only for the
+	// tool the expectations are about. A compared tool's cell is a record:
+	// `false` there describes that tool rather than a failure of the run.
+	Passed bool `json:"passed"`
+	// Final is the state the run ended in, from the last observation it took.
+	Final State `json:"final"`
+}
+
+// Step is one step of a protocol and the code it exited with. The field names
+// are the harness's own, so steps.jsonl decodes into this directly.
+type Step struct {
+	Name string `json:"step"`
+	Exit int    `json:"exit"`
+}
+
+// Check is one expectation about the state, and whether it held.
+type Check struct {
+	Name string `json:"check"`
+	OK   bool   `json:"ok"`
+}
+
+// State is one observation of the fixture: the clone, the origin and the
+// registry joined into one answer per package.
+type State struct {
+	// Label is the point in the protocol the observation was taken at
+	// (`after-recovery`), which is what makes a final state attributable.
+	Label    string         `json:"label"`
+	Packages []PackageState `json:"packages"`
+}
+
+// PackageState is one package's answer: what the registry serves, and how the
+// three places a release writes agree about it.
+type PackageState struct {
+	Name string `json:"name"`
+	// Registry is the version the registry serves, `absent`, or `error` when
+	// the registry itself answered with one. The last is not a state of the
+	// package and is deliberately distinguishable from the second.
+	Registry string `json:"registry"`
+	// State is the harness's vocabulary: consistent, orphan, unpushed,
+	// dangling, unrecorded. `baseline` never reaches here, because a package
+	// the run never touched is not part of what the run did.
+	State string `json:"state"`
 }
 
 // Counts is the tally of one invocation, or of the whole run.

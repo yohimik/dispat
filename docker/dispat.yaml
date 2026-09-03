@@ -4,6 +4,13 @@
 tagFormat: docker/{name}/v{version}
 autoVersion:
   enabled: true
+# The docs package depends on dispat-alpine and runs the release experiments
+# against the image before it builds the site, so the image's *publish* is the
+# input its build takes, not the image's build. Without this, a run whose push
+# to the Hub failed would still build a site whose experiments page named an
+# image nobody can pull. The pkg and services spaces already declare the same
+# thing for the same reason.
+isBuildWaitingPublish: true
 # An image releases whenever the CLI it installs does, so most of its entries
 # have nothing of their own to group. The line naming the shared version is
 # true but unhelpful: what a reader wants is the release the image is actually
@@ -65,19 +72,6 @@ scripts:
       | curl -fsS -X PATCH "https://hub.docker.com/v2/repositories/yohimik/${DISPAT_PACKAGE}/" \
         -H "Content-Type: application/json" -H "Authorization: Bearer ${token}" -d @- > /dev/null
     echo "updated the Docker Hub readme for yohimik/${DISPAT_PACKAGE}"
-  # What the publish did, as step outputs for the release experiments that
-  # run against the image afterwards (tests/experiments). The experiments
-  # copy their binary out of dispat-alpine, so that package's announce is
-  # the one that speaks; the stage fires only after its own publish
-  # succeeded, so a run that never pushed the image leaves images-released
-  # unset and the workflow's `== 'true'` reads that as nothing to run
-  # against. Outside Actions there is no $GITHUB_OUTPUT, and /dev/null takes
-  # the lines a human does not need.
-  announce: |
-    [ "$DISPAT_PACKAGE" = dispat-alpine ] || exit 0
-    echo "images-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"
-    echo "image-version=$DISPAT_NEW_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
-    echo "published yohimik/dispat-alpine:$DISPAT_NEW_VERSION"
 # No record steps here: the images' changelogs, tags and GitHub release pages
 # are the finalize phase's, at the end of the run. Nothing downstream needs
 # them earlier — the images themselves install the CLI release the dispat
@@ -89,7 +83,6 @@ flow:
   # After a successful publish, warn-only: the images are out either way, and
   # a Hub API hiccup must not fail a release that already shipped.
   postPublish: push-readme
-  announce: announce
 packages:
   dispat-ubuntu:
     versionGroup: cli

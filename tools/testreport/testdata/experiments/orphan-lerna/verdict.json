@@ -1,0 +1,55 @@
+{
+  "experiment": "orphan",
+  "tool": "lerna",
+  "scenario": "clean",
+  "dispat": "dispat 1.7.0 (linux_arm64)",
+  "steps": [
+    {
+      "step": "version",
+      "exit": 0
+    },
+    {
+      "step": "publish",
+      "exit": 1
+    },
+    {
+      "step": "recovery",
+      "exit": 1
+    },
+    {
+      "step": "cleanup",
+      "exit": 0
+    },
+    {
+      "step": "recovery2",
+      "exit": 0
+    },
+    {
+      "step": "changed",
+      "exit": 1
+    }
+  ],
+  "checks": [
+    {
+      "check": "the refused run exited non-zero",
+      "ok": true
+    },
+    {
+      "check": "the refused package carries no tag for an unpublished version",
+      "ok": false
+    },
+    {
+      "check": "the recovery published the refused package",
+      "ok": true
+    },
+    {
+      "check": "the recovery needed no manual cleanup",
+      "ok": false
+    },
+    {
+      "check": "the next plan is empty",
+      "ok": true
+    }
+  ],
+  "passed": false
+}

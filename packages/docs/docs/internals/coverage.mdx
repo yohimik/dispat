@@ -36,10 +36,12 @@ The per-package test inventory (what each package's suite actually asserts) is i
 The whole measurement is three commands from the monorepo root, and they are the ones the release workflow runs:
 
 ```sh
-dispat run tests --since all         # every module's profile and go test -json log, into coverage/
-sh scripts/coverage-badge.sh         # merges the profiles; writes the badge JSON
-go run github.com/yohimik/dispat/tools/testreport build   # writes packages/docs/data/report.json, read by this page
+dispat run tests --since all   # every module's profile and go test -json log, into coverage/
+dispat exec coverage-badge     # merges the profiles; writes the badge JSON and the summary table
+dispat exec test-report        # writes packages/docs/data/report.json, read by this page
 ```
+
+Every one of them is a build of `Dockerfile.gotest`, so none needs a Go toolchain on the machine running it.
 
 `--since all` is not optional. A run selected by a `--since` window tests part of the monorepo, so a total from it
 would be a number about whichever packages happened to change. That is why the badge is computed by the release

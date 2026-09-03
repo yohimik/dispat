@@ -115,6 +115,66 @@ export interface Benchmarks {
   groups: BenchGroup[];
 }
 
+/** One step of a protocol and the code it exited with. */
+export interface ExperimentStep {
+  step: string;
+  exit: number;
+}
+
+/** One expectation about the state a run left behind, and whether it held. */
+export interface ExperimentCheck {
+  check: string;
+  ok: boolean;
+}
+
+/**
+ * One package's answer at the end of a run. `registry` is the version served,
+ * `absent`, or `error` when the registry itself answered with one; `state` is
+ * the harness's vocabulary (consistent, orphan, unpushed, dangling,
+ * unrecorded).
+ */
+export interface ExperimentPackage {
+  name: string;
+  registry: string;
+  state: string;
+}
+
+/** The state a run ended in, from the last observation it took. */
+export interface ExperimentState {
+  label: string;
+  packages: ExperimentPackage[];
+}
+
+/**
+ * One cell: one experiment, one scenario where it has one, one tool. `passed`
+ * is the harness's own verdict, which gates a run only for the tool the
+ * expectations are about; for a compared tool the cell is a record, and
+ * `false` there describes that tool.
+ */
+export interface ExperimentCell {
+  id: string;
+  experiment: string;
+  /** Empty for an experiment that has only one scenario. */
+  scenario: string;
+  tool: string;
+  dispat: string;
+  platform: string;
+  steps: ExperimentStep[];
+  checks: ExperimentCheck[];
+  passed: boolean;
+  final: ExperimentState;
+}
+
+/**
+ * The release experiments' campaign: every cell run against one published
+ * image. `version` is empty when the cells disagree, which is the only honest
+ * answer to which release a merged folder is about.
+ */
+export interface Experiments {
+  version: string;
+  cells: ExperimentCell[];
+}
+
 export interface Report {
   /** RFC 3339, UTC. */
   generatedAt: string;
@@ -122,6 +182,7 @@ export interface Report {
   coverage: Coverage;
   suite: Suite;
   benchmarks: Benchmarks;
+  experiments: Experiments;
 }
 
 /** What the plugin puts in global data: the report, or nothing measured. */

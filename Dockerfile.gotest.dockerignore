@@ -33,8 +33,20 @@ packages/docs/*
 !packages/docs/docs
 
 # The profiles and logs a suite run left behind, for the badge and report
-# targets. The binary covdata folder stays out: integration.out is its
-# already-condensed form, and only the test-integration stage in here writes
-# or reads the raw counters.
+# targets, and the release experiments' records beside them: those run against
+# a registry a container is allowed to break, so they reach a build through
+# the context rather than from a stage. The binary covdata folder stays out:
+# integration.out is its already-condensed form, and only the test-integration
+# stage in here writes or reads the raw counters.
 !coverage
 coverage/covdata
+
+# The shell sweep's inputs. Shell files only: scripts/ also holds a python
+# renderer and announce/ holds fonts and video clips, three megabytes of them,
+# which would join every build context this file widens.
+!scripts
+scripts/*
+!scripts/*.sh
+!announce
+announce/*
+!announce/*.sh

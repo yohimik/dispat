@@ -32,6 +32,15 @@ scripts:
     docker buildx build --file Dockerfile.gotest --target gofmt
     $(sh scripts/buildx-cache.sh gofmt) --output type=cacheonly .
 
+  # The shell sweep beside it: every script this repository runs outside a Go
+  # program, checked by shellcheck in a stage of its own. The stage is
+  # self-contained (alpine, shellcheck, python3) rather than a layer on the Go
+  # image, because nothing it checks needs a toolchain and a lint gate should
+  # not wait on one.
+  shellcheck: >-
+    docker buildx build --file Dockerfile.gotest --target shellcheck
+    $(sh scripts/buildx-cache.sh shellcheck) --output type=cacheonly .
+
   # The TinyGo spike, as a build like every other gate. Its targets never
   # abort: the logs are what it produces, so the export lands them in
   # coverage/tinygo-spike/ whatever they say, and the verdict is read from the
@@ -171,9 +180,14 @@ packages:
   # published, put through the faults a unit test never reaches, beside
   # lerna, nx and changesets in the same fixture. Script-only like tools:
   # never versioned, never tagged, never published. `build` is what the
-  # build gate reaches when the folder changes; the experiments workflow
-  # runs `experiment` once per cell after the images of a release publish,
-  # and `summary` over the results it collected.
+  # build gate reaches when the folder changes; the docs package's
+  # beforeBuild hook runs `experiments` and `summary` inside every release,
+  # and the Experiments workflow runs the same scripts by hand.
+  #
+  # The records land in the repository's coverage/ folder beside the test
+  # profiles, never under tests/experiments: a run is reproduced rather than
+  # kept, and what a release measured travels to the site through the report
+  # rather than through the checkout.
   experiments:
     path: tests/experiments
     versioning: none
@@ -190,16 +204,81 @@ packages:
         docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
           $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
       # One cell, named the way run.sh takes it: EXPERIMENT and TOOL, and
-      # SCENARIO where the experiment has more than one. The results folder
-      # is the run's record and the summary's input. `exec` runs a script
-      # where the caller stands, hence `--in` on the nested build as on the
-      # workflow's own invocations.
+      # SCENARIO where the experiment has more than one. The image is assumed
+      # built, so a sweep pays for it once; `experiment` below is the form
+      # that builds first.
+      #
+      # The console goes to <cell>.log rather than to the terminal, because
+      # twelve of these run at once and interleaved transcripts are a record
+      # of nothing. The exit code is the harness verdict: the cell's own file
+      # says what happened, and the caller only needs to know whether it held.
+      cell: |
+        set -eu
+        : "${EXPERIMENT:?EXPERIMENT is required (orphan, midrelease)}"
+        : "${TOOL:?TOOL is required (lerna, nx, changesets, dispat)}"
+        ROOT=$(git rev-parse --show-toplevel)
+        RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+        cell=$EXPERIMENT${SCENARIO:+-$SCENARIO}-$TOOL
+        mkdir -p "$RESULTS"
+        rc=0
+        docker run --rm -v "$RESULTS:/results" \
+          -e "EXPECT=${EXPERIMENTS_EXPECT:-1}" \
+          dispat-experiments "$EXPERIMENT" "$TOOL" ${SCENARIO:-} > "$RESULTS/$cell.log" 2>&1 || rc=$?
+        echo "$cell: exit $rc"
+        exit "$rc"
+      # One cell, built first: the by-hand form, for re-recording a single
+      # protocol without paying for the other eleven.
       experiment: |
         set -eu
         dispat exec build --for pkg:experiments --in pkg:experiments
-        mkdir -p results
-        docker run --rm -v "$PWD/results:/results" dispat-experiments "$EXPERIMENT" "$TOOL" ${SCENARIO:-}
-      summary: python3 summary.py results --markdown
+        dispat exec cell --for pkg:experiments --in pkg:experiments
+      # Every cell of the campaign, four at a time. The folder is wiped
+      # through the image rather than by the host's rm, because the container
+      # writes it as root and a host rm of root-owned files needs a password
+      # nobody has in CI.
+      #
+      # xargs runs each cell and remembers whether any exited non-zero (123),
+      # so a release fails on a dispat cell whose expectations did not hold
+      # while every other cell still gets its record.
+      experiments: |
+        set -eu
+        ROOT=$(git rev-parse --show-toplevel)
+        RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+        dispat exec build --for pkg:experiments --in pkg:experiments
+        mkdir -p "$RESULTS"
+        docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
+          /results -mindepth 1 -delete
+        echo "running twelve cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
+        printf '%s\n' \
+          'orphan dispat' 'orphan lerna' 'orphan nx' 'orphan changesets' \
+          'midrelease dispat clean' 'midrelease lerna clean' 'midrelease nx clean' 'midrelease changesets clean' \
+          'midrelease dispat conflict' 'midrelease lerna conflict' 'midrelease nx conflict' 'midrelease changesets conflict' \
+        | EXPERIMENTS_RESULTS="$RESULTS" xargs -P "${EXPERIMENTS_JOBS:-4}" -L 1 sh -c \
+            'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments'
+      # The table over whatever the cells recorded, through the same verb the
+      # site's report reads them with, so a job summary and the published page
+      # are one renderer over one set of records.
+      #
+      # A build of Dockerfile.gotest like every other gate, which means it
+      # reads the repository's own coverage/experiments through the build
+      # context: EXPERIMENTS_RESULTS moves where the cells write, and a
+      # summary of a folder outside the checkout is a `testreport experiments`
+      # away rather than this script's business.
+      summary: |
+        set -eu
+        ROOT=$(git rev-parse --show-toplevel)
+        docker buildx build --file "$ROOT/Dockerfile.gotest" --target experiments-summary-export \
+          $(sh "$ROOT/scripts/buildx-cache.sh" experiments-summary) \
+          --output "type=local,dest=$ROOT/coverage" "$ROOT"
+        cat "$ROOT/coverage/experiments.md"
+        # The heading is the step summary's alone: a terminal already knows
+        # what it just asked for, and a summary page is a wall of other
+        # sections.
+        {
+          echo "### Release experiments"
+          echo
+          cat "$ROOT/coverage/experiments.md"
+        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
   # The Google Cloud footprint that serves dispat.dev, released like code.
   # Only the existence and the folder live here; everything the package says
   # about itself lives in infra/dispat.yaml, beside the Terraform it

@@ -1,0 +1,79 @@
+{
+  "experiment": "midrelease",
+  "tool": "dispat",
+  "scenario": "conflict",
+  "dispat": "dispat 1.7.0 (linux_arm64)",
+  "steps": [
+    {
+      "step": "release",
+      "exit": 0
+    },
+    {
+      "step": "status",
+      "exit": 0
+    },
+    {
+      "step": "rerun",
+      "exit": 0
+    }
+  ],
+  "checks": [
+    {
+      "check": "release exited 0",
+      "ok": true
+    },
+    {
+      "check": "registry serves core 1.1.0 and the three consumers at 1.0.1",
+      "ok": true
+    },
+    {
+      "check": "every released package is consistent (tag on origin, on main, matching the registry)",
+      "ok": true
+    },
+    {
+      "check": "the colleague's commit is on origin/main",
+      "ok": true
+    },
+    {
+      "check": "the release commit is on origin/main's first-parent chain",
+      "ok": true
+    },
+    {
+      "check": "the colleague's commit is outside the tagged tree",
+      "ok": true
+    },
+    {
+      "check": "the tag names a release commit, not a merge",
+      "ok": true
+    },
+    {
+      "check": "the clone is level with origin, nothing in progress",
+      "ok": true
+    },
+    {
+      "check": "the release lock was returned",
+      "ok": true
+    },
+    {
+      "check": "the conflict was reported (W243) and the release still landed (W242)",
+      "ok": true
+    },
+    {
+      "check": "the colleague's side is kept on a release-conflicts branch",
+      "ok": true
+    },
+    {
+      "check": "the merge carries the release's side of the conflicted file",
+      "ok": true
+    },
+    {
+      "check": "the next plan is the colleague's change and its dependents alone",
+      "ok": true
+    },
+    {
+      "check": "the next run released the colleague's change from the same clone",
+      "ok": true
+    }
+  ],
+  "passed": true
+}

@@ -116,4 +116,79 @@ func TestPackageAndModulePaths(t *testing.T) {
 	if got := moduleOf("tools"); got != "tools" {
 		t.Fatalf("moduleOf of a one-segment path = %q", got)
 	}
+	// Read from this repository's own go.work, which is the whole point: the
+	// two-segment rule would put this package in a module called
+	// `tools/testreport` that does not exist.
+	if got := moduleOf("tools/testreport"); got != "tools" {
+		t.Fatalf("moduleOf(tools/testreport) = %q, want the module go.work declares", got)
+	}
+}
+
+// The failure this fences: every module of this workspace sits two segments
+// deep except `tools`, which sits one, so the two-segment rule reported
+// `tools/testreport` as a module and the docs table grew a row for a package.
+// The declared list answers it; the rule stays for a caller with no workspace
+// above it.
+func TestUseListNamesTheModuleAPackageBelongsTo(t *testing.T) {
+	declared := useList{"pkg/ccme", "services/dispat", "tests/integration", "tools"}
+	for _, tc := range []struct {
+		name string
+		use  useList
+		pkg  string
+		want string
+	}{
+		{"a package of a one-segment module", declared, "tools/testreport", "tools"},
+		{"the module itself", declared, "tools", "tools"},
+		{"a package several segments deep", declared, "services/dispat/internal/plan", "services/dispat"},
+		{"a module nothing declares", declared, "pkg/writer/x", "pkg/writer"},
+		{"the nearest of two that match", useList{"a", "a/b"}, "a/b/c", "a/b"},
+		{"no workspace at all", nil, "tools/testreport", "tools/testreport"},
+		{"no workspace, one segment", nil, "tools", "tools"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.use.module(tc.pkg); got != tc.want {
+				t.Fatalf("module(%q) = %q, want %q", tc.pkg, got, tc.want)
+			}
+		})
+	}
+}
+
+// go.work is parsed rather than resolved with `go list`, because the stage
+// this runs in exists precisely so that no module graph has to be. Both
+// spellings of the directive are read, and a comment is not a module.
+func TestParseUse(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		want []string
+	}{
+		"the block form": {
+			"go 1.26\n\nuse (\n\tpkg/ccme\n\ttools\n)\n",
+			[]string{"pkg/ccme", "tools"},
+		},
+		"one line each": {
+			"go 1.26\nuse ./pkg/ccme\nuse tools/\n",
+			[]string{"pkg/ccme", "tools"},
+		},
+		"quoted and commented": {
+			"use (\n\t\"pkg/ccme\" // the parser\n\t// tools is next\n\ttools\n)\n",
+			[]string{"pkg/ccme", "tools"},
+		},
+		"use on its own line before the block": {
+			"use (\n)\n",
+			nil,
+		},
+		"nothing declared": {"go 1.26\n", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := parseUse(tc.body)
+			if len(got) != len(tc.want) {
+				t.Fatalf("parseUse = %q, want %q", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("parseUse = %q, want %q", got, tc.want)
+				}
+			}
+		})
+	}
 }

@@ -6,15 +6,27 @@
 # again, publish, push what nx left local, then ask nx what it would
 # version next.
 
+# The packages a correct next plan holds once the colleague's commit is on
+# main and this run's release is recorded. nx's cascade reaches every
+# dependent of a changed package, transitively, so the conflict scenario's
+# patch of core reaches all six; the clean scenario's patch of api reaches
+# api alone, which has no dependents. Sorted, space-ended, the way the
+# transcript renders a plan's package list.
+next_plan() {
+  case "$SCENARIO" in
+    conflict) echo 'api cli core docs theme ui ' ;;
+    *) echo 'api ' ;;
+  esac
+}
+
 run_experiment() {
   fixture nx --feature --colleague
   baseline_publish
   observe before
 
   step release with_shim nx release --skip-publish
-  local colleague
-  colleague=$(colleague_sha)
-  observe after-release ${colleague:+--mark colleague=$colleague}
+  COLLEAGUE=$(colleague_sha)
+  observe_marked after-release
   echo "   staged, uncommitted: $(git diff --cached --name-only | tr '\n' ' ')"
 
   # Recovery by hand. The rebase refuses a dirty index, and the staged bumps
@@ -22,15 +34,14 @@ run_experiment() {
   # dropped and nx runs again on the joined branch.
   step recover bash -c 'git reset -q --hard && git pull --rebase origin main'
   step release2 nx release --skip-publish
-  local release
-  release=$(git rev-list -n1 core@1.1.0 2>/dev/null || echo "")
-  observe after-release2 ${colleague:+--mark colleague=$colleague} ${release:+--mark release=$release}
+  RELEASE=$(release_sha core@1.1.0)
+  observe_marked after-release2
 
   step publish nx release publish --registry "$REGISTRY"
-  observe after-publish ${colleague:+--mark colleague=$colleague} ${release:+--mark release=$release}
+  observe_marked after-publish
 
   step push git push --follow-tags origin main
-  observe after-push ${colleague:+--mark colleague=$colleague} ${release:+--mark release=$release}
+  observe_marked after-push
 
   step next nx release --dry-run --skip-publish
   echo "   next plan: $(grep -E '^[a-z]+ .*New version [0-9.]+ written' "$OUT/step-next.log" | sed -E 's/^([a-z]+) .*New version ([0-9.]+) written.*/\1 \2/' | sort -u | tr '\n' ';')"
@@ -43,5 +54,6 @@ run_experiment() {
   assert "every released package is consistent once pushed by hand" \
     observed after-push '[.packages[] | select(.registry != "1.0.0")] | length > 0 and all(.state == "consistent")'
   assert "the next plan is the colleague's change and its dependents alone" \
-    bash -c "[ \"\$(grep -E '^[a-z]+ .*New version [0-9.]+ written' '$OUT/step-next.log' | cut -d' ' -f1 | sort -u | tr '\n' ' ')\" = '$(expected_next)' ]"
+    bash -c '[ "$(grep -E "^[a-z]+ .*New version [0-9.]+ written" "$1" | cut -d" " -f1 | sort -u | tr "\n" " ")" = "$2" ]' \
+    _ "$OUT/step-next.log" "$(next_plan)"
 }

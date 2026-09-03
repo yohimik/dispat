@@ -4,10 +4,10 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 // correctly on GitHub too. Ordering and labels therefore live here, and the
 // order mirrors the table in services/dispat/README.md so the two agree.
 //
-// The two Internals pages are .mdx rather than .md, and are the exception on
-// purpose: their figures come from the report a release measured, so they are
-// components rather than text, and there is nothing for GitHub to render
-// correctly.
+// The four measured Internals pages are .mdx rather than .md, and are the
+// exception on purpose: their figures come from the report a release measured,
+// so they are components rather than text, and there is nothing for GitHub to
+// render correctly.
 //
 // Doc ids are extensionless paths, which is why the configuration index is
 // `configuration/README` (its permalink is /configuration). Every folder is a
@@ -135,9 +135,11 @@ const sidebars: SidebarsConfig = {
       items: [
         {type: 'doc', id: 'internals/architecture', label: 'Architecture'},
         {type: 'doc', id: 'internals/tinygo', label: 'The TinyGo spike'},
+        {type: 'doc', id: 'internals/announce', label: 'The release announcement'},
         {type: 'doc', id: 'internals/coverage', label: 'Test coverage'},
         {type: 'doc', id: 'internals/test-results', label: 'Test results'},
         {type: 'doc', id: 'internals/benchmarks', label: 'Benchmarks'},
+        {type: 'doc', id: 'internals/experiments', label: 'Release experiments'},
       ],
     },
   ],

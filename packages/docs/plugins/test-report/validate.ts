@@ -6,6 +6,12 @@ import type {
   Coverage,
   CoverageModule,
   CoveragePackage,
+  ExperimentCell,
+  ExperimentCheck,
+  ExperimentPackage,
+  Experiments,
+  ExperimentState,
+  ExperimentStep,
   FuzzTarget,
   Group,
   Report,
@@ -184,6 +190,61 @@ function suite(value: unknown, at: string): Suite {
   };
 }
 
+function experimentStep(value: unknown, at: string): ExperimentStep {
+  const o = object(value, at);
+  return {step: string(o.step, `${at}.step`), exit: number(o.exit, `${at}.exit`)};
+}
+
+function experimentCheck(value: unknown, at: string): ExperimentCheck {
+  const o = object(value, at);
+  return {check: string(o.check, `${at}.check`), ok: boolean(o.ok, `${at}.ok`)};
+}
+
+function experimentPackage(value: unknown, at: string): ExperimentPackage {
+  const o = object(value, at);
+  return {
+    name: string(o.name, `${at}.name`),
+    registry: string(o.registry, `${at}.registry`),
+    state: string(o.state, `${at}.state`),
+  };
+}
+
+function experimentState(value: unknown, at: string): ExperimentState {
+  const o = object(value, at);
+  return {
+    label: string(o.label, `${at}.label`),
+    // A cell that recorded no observations serialises its packages as null,
+    // which is Go's nil slice and not a missing field.
+    packages: optionalArray(o.packages, `${at}.packages`).map((p, i) =>
+      experimentPackage(p, `${at}.packages[${i}]`),
+    ),
+  };
+}
+
+function experimentCell(value: unknown, at: string): ExperimentCell {
+  const o = object(value, at);
+  return {
+    id: string(o.id, `${at}.id`),
+    experiment: string(o.experiment, `${at}.experiment`),
+    scenario: string(o.scenario, `${at}.scenario`),
+    tool: string(o.tool, `${at}.tool`),
+    dispat: string(o.dispat, `${at}.dispat`),
+    platform: string(o.platform, `${at}.platform`),
+    steps: optionalArray(o.steps, `${at}.steps`).map((s, i) => experimentStep(s, `${at}.steps[${i}]`)),
+    checks: optionalArray(o.checks, `${at}.checks`).map((c, i) => experimentCheck(c, `${at}.checks[${i}]`)),
+    passed: boolean(o.passed, `${at}.passed`),
+    final: experimentState(o.final, `${at}.final`),
+  };
+}
+
+function experiments(value: unknown, at: string): Experiments {
+  const o = object(value, at);
+  return {
+    version: string(o.version, `${at}.version`),
+    cells: optionalArray(o.cells, `${at}.cells`).map((c, i) => experimentCell(c, `${at}.cells[${i}]`)),
+  };
+}
+
 /** Validates a parsed report.json, throwing at the first field that is wrong. */
 export function validateReport(value: unknown): Report {
   const o = object(value, 'report');
@@ -193,5 +254,6 @@ export function validateReport(value: unknown): Report {
     coverage: coverage(o.coverage, 'report.coverage'),
     suite: suite(o.suite, 'report.suite'),
     benchmarks: benchmarks(o.benchmarks, 'report.benchmarks'),
+    experiments: experiments(o.experiments, 'report.experiments'),
   };
 }

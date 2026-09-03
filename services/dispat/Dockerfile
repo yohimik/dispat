@@ -34,15 +34,6 @@
 # emulation, which is why six targets cost roughly what one does.
 ARG GO_VERSION=1.26
 
-# The TinyGo fork the two extra linux assets are built with, and the digests
-# its release published for the tarballs this build downloads. A pin like
-# GO_VERSION, never passed as --build-arg: moving to a newer fork is bumping
-# these three values, and the same number is bumped in Dockerfile.tinygo,
-# which is where the toolchain is interrogated rather than merely used.
-ARG TINYGO_FORK_VERSION=0.43.0-net.1
-ARG TINYGO_FORK_SHA256_AMD64=391e7324844215b7d20c57133525236da160ee80463faf72b5bb3f30801ff206
-ARG TINYGO_FORK_SHA256_ARM64=46cd832d1c90076b3b5a4dd85e720034831769ccff1621d76ea92ba556c44a81
-
 FROM golang:${GO_VERSION}-alpine AS build
 
 # The version the ldflags bake in. `dev` is what an un-stamped build reports
@@ -96,11 +87,18 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # `dispat-<os>-<arch>`, which is a contract nothing here touches — so a
 # release carries them beside the six rather than instead of any of them.
 #
-# The toolchain is fetched as its release tarball, by URL and against the
-# digest that release published, rather than with `dispat install`: the thing
-# being built here is dispat, and a build of dispat that needs a working
-# dispat to start is a bootstrap cycle. The checksum is the part `install`
-# would have done, kept.
+# The toolchain is installed by the binary this build just produced, through
+# the repository's install manifest: `sh scripts/install-tools.sh tinygo` is
+# one `dispat install` line, and the fork's version is pinned in that file and
+# nowhere else. So the fetch is the product installing its own toolchain, the
+# checksum is dispat's own, and moving to a newer fork is bumping one number
+# in one file rather than a version and two digests here.
+#
+# The trade-off is cache. The stage now descends from `build`, so any change
+# to the gc binaries throws the toolchain layer away and the fork is fetched
+# again: 185 MB, which is seconds on a runner and the price of having one pin
+# instead of three. The compile below stays in a stage of its own, so a source
+# edit alone still re-uses this layer.
 #
 # Debian rather than alpine, unlike every other stage in this file: the fork
 # ships a glibc-linked LLVM beside its own binary, and musl does not run it.
@@ -109,20 +107,27 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # binaries can do, which as of the fork is everything the gc ones can.
 FROM golang:${GO_VERSION} AS tiny-toolchain
 ARG TARGETARCH
-ARG TINYGO_FORK_VERSION
-ARG TINYGO_FORK_SHA256_AMD64
-ARG TINYGO_FORK_SHA256_ARM64
-RUN set -eu; \
-    case "$TARGETARCH" in \
-      amd64) sha="$TINYGO_FORK_SHA256_AMD64" ;; \
-      arm64) sha="$TINYGO_FORK_SHA256_ARM64" ;; \
-      *) echo "no fork toolchain pinned for $TARGETARCH" >&2; exit 1 ;; \
-    esac; \
-    url="https://github.com/yohimik/tinygo/releases/download/v${TINYGO_FORK_VERSION}/tinygo${TINYGO_FORK_VERSION}.linux-${TARGETARCH}.tar.gz"; \
-    curl -fsSL -o /tmp/tinygo.tar.gz "$url"; \
-    echo "$sha  /tmp/tinygo.tar.gz" | sha256sum -c -; \
-    tar -xzf /tmp/tinygo.tar.gz -C /usr/local; \
-    rm /tmp/tinygo.tar.gz; \
+COPY --from=build /out/dispat-linux-${TARGETARCH} /usr/local/bin/dispat
+COPY scripts/install-tools.sh /tmp/install-tools.sh
+# A stamped binary otherwise checks the GitHub API for a newer dispat while it
+# is installing something else; anything that parses as false turns it off.
+ENV DISPAT_UPDATE_CHECK=false
+# GITHUB_TOKEN as a build secret rather than a build arg, so it never reaches
+# the image's history: the releases listing is one API call, and a runner
+# sharing its IP with the rest of a cloud region meets the unauthenticated
+# rate limit on a busy day. Optional, because a hand build on a laptop has no
+# token and does not need one. The mount is present either way, and the file
+# it points at is what decides.
+RUN --mount=type=secret,id=GITHUB_TOKEN \
+    set -eu; \
+    if [ -f /run/secrets/GITHUB_TOKEN ]; then \
+      GITHUB_TOKEN="$(cat /run/secrets/GITHUB_TOKEN)"; \
+      export GITHUB_TOKEN; \
+      echo "installing the toolchain with a GitHub token"; \
+    else \
+      echo "installing the toolchain unauthenticated (no GITHUB_TOKEN secret)"; \
+    fi; \
+    sh /tmp/install-tools.sh tinygo; \
     /usr/local/tinygo/bin/tinygo version
 
 # The compile itself, in a stage of its own so that a source edit never

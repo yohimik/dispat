@@ -148,6 +148,7 @@ needed:
 | [Architecture](https://dispat.dev/internals/architecture/)                              | Modules, algorithms, execution model, design decisions, testing.                                                                                                                           |
 | [Test coverage](https://dispat.dev/internals/coverage/)                                 | What the suite reaches, per package, measured by the release that published the page.                                                                                                      |
 | [Test results](https://dispat.dev/internals/test-results/)                              | What the suite did: the counts, the timings, the race pass, and what each area covers.                                                                                                     |
+| [Release experiments](https://dispat.dev/internals/experiments/)                        | The published binary against a registry that refuses an upload and a branch that moves mid-release, beside lerna, nx and changesets in the same fixture.                                     |
 | [Integration tests](../../tests/integration)                                                         | The black-box suite itself: setup, running, and the test plan.                                                                                                                             |
 
 See [`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) to inspect every

@@ -6,9 +6,11 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // modulePrefix is the workspace's module path. Profile lines name their files
@@ -157,16 +159,118 @@ func packageOf(blockKey string) string {
 	return strings.TrimPrefix(path.Dir(file), modulePrefix)
 }
 
-// moduleOf names the module a workspace-relative package belongs to. Every
-// module in this workspace sits exactly two segments deep (`pkg/ccme`,
-// `services/dispat`), which is what makes the rule a rule rather than a list
-// to keep in step with go.work.
+// moduleOf names the module a workspace-relative package belongs to, from the
+// list go.work declares.
+//
+// It used to be a rule instead: every module sits exactly two segments deep.
+// That was true of six of them and false of `tools`, which is one segment,
+// so `tools/testreport` reported as a module of its own and the docs table
+// grew a row for a package rather than for the module holding it. The rule
+// stays as the fallback for a caller with no workspace above it.
 func moduleOf(pkg string) string {
+	return workspaceUse().module(pkg)
+}
+
+// useList is the modules go.work declares, workspace-relative.
+type useList []string
+
+// module names the module a package belongs to: the longest declared module
+// the package sits in, or the two-segment fallback when the list holds none.
+//
+// Longest rather than first, because nothing forbids a workspace from
+// declaring both a folder and something under it, and the nearer module is
+// the one a package actually belongs to.
+func (u useList) module(pkg string) string {
+	best := ""
+	for _, candidate := range u {
+		if pkg != candidate && !strings.HasPrefix(pkg, candidate+"/") {
+			continue
+		}
+		if len(candidate) > len(best) {
+			best = candidate
+		}
+	}
+	if best != "" {
+		return best
+	}
 	parts := strings.SplitN(pkg, "/", 3)
 	if len(parts) < 2 {
 		return pkg
 	}
 	return parts[0] + "/" + parts[1]
+}
+
+// The workspace's use list, read once per process.
+//
+// Once because moduleOf runs for every coverage block of every profile, which
+// is tens of thousands of calls per report, and because the answer cannot
+// change while the program runs. The two values are a memoised lookup rather
+// than state: nothing writes them again, and nothing reads them expecting
+// anything but the file's contents.
+var (
+	useOnce sync.Once
+	useOf   useList
+)
+
+func workspaceUse() useList {
+	useOnce.Do(func() {
+		root, err := repoRoot()
+		if err != nil {
+			logf(levelWarn, "%v; modules are grouped by the two-segment rule instead", err)
+			return
+		}
+		body, err := os.ReadFile(filepath.Join(root, "go.work"))
+		if err != nil {
+			logf(levelWarn, "could not read %s: %v; modules are grouped by the two-segment rule instead",
+				filepath.Join(root, "go.work"), err)
+			return
+		}
+		useOf = parseUse(string(body))
+		logf(levelDebug, "go.work declares %d modules: %s", len(useOf), strings.Join(useOf, " "))
+	})
+	return useOf
+}
+
+// parseUse reads the `use` directives of a go.work, in both the block form
+// this workspace writes and the one-line form.
+//
+// A parse rather than `go list`: this program runs inside a container stage
+// whose whole point is that it needs no module graph resolved, and the
+// directive is three lines of syntax.
+func parseUse(body string) useList {
+	var out useList
+	block := false
+	for _, line := range strings.Split(body, "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "":
+		case block && line == ")":
+			block = false
+		case block:
+			out = append(out, cleanUse(line))
+		case line == "use (":
+			block = true
+		case strings.HasPrefix(line, "use "):
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "use "))
+			if rest == "(" {
+				block = true
+				continue
+			}
+			out = append(out, cleanUse(rest))
+		}
+	}
+	return out
+}
+
+// cleanUse turns one `use` path into the workspace-relative form coverage
+// keys carry: no quotes, no leading `./`, no trailing slash.
+func cleanUse(path string) string {
+	path = strings.Trim(path, `"`)
+	path = strings.TrimPrefix(path, "./")
+	return strings.TrimSuffix(path, "/")
 }
 
 // percent is the one place a coverage ratio is turned into a number, so the

@@ -191,9 +191,14 @@ RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
 FROM scratch AS export-writer
 COPY --from=test-writer /src/coverage /
 
+# The repository tooling's own suite, profiled like every other module's. It
+# was the one suite that measured nothing, so testreport, which is what every
+# other number on the site comes out of, was the only Go in the workspace the
+# coverage page could not report on.
 FROM runner AS test-tools
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
-    cd tools && go run github.com/yohimik/dispat/tools/testreport test tools -- ./... -count=1
+    cd tools && go run github.com/yohimik/dispat/tools/testreport test tools -- \
+    ./... -count=1 -covermode=atomic -coverprofile=/src/coverage/tools.out
 FROM scratch AS export-tools
 COPY --from=test-tools /src/coverage /
 
@@ -377,7 +382,9 @@ COPY --from=badge /src/coverage/coverage.json /src/coverage/coverage.out \
 #
 # This target reads the host's coverage/ folder, so its caller is whoever just
 # ran the suite: `dispat exec test-report` after `dispat run tests --since
-# all`. The `measured` target below is the same report built from the stages
+# all`. That folder is also where a campaign of release experiments lands, so
+# a host-side report carries whatever `dispat exec experiments` last recorded.
+# The `measured` target below is the same report built from the stages
 # themselves, for the caller that has no coverage/ folder to point at.
 FROM runner AS report
 ARG COMMIT
@@ -404,6 +411,18 @@ COPY --from=report /src/packages/docs/data/report.json /
 # this build owes the site instead is the list of modules it measured, which
 # rides out beside the report as benchmarked.txt and becomes the docs build's
 # per-package check.
+#
+# The experiments are the one section that cannot come from a stage. They run
+# the published image against a registry they are allowed to break, which is a
+# container of its own with a network and a docker socket, so the campaign is
+# already on the host by the time this builds and arrives through the context
+# like the `report` target's profiles do. The glob is what makes a run that
+# recorded none still produce a report: a COPY naming a folder that is not
+# there fails the build, and one whose pattern matches nothing does not. Both
+# segments are globbed, not only the last: the check is an lstat of the
+# literal prefix, so `coverage/experiment[s]` still fails a context in which
+# coverage/ itself is absent, which is every context Docker built from a tree
+# nobody has run a suite in.
 FROM runner AS measured
 ARG COMMIT
 COPY --from=test-ccme /src/coverage ./coverage
@@ -412,14 +431,101 @@ COPY --from=test-manifest /src/coverage ./coverage
 COPY --from=test-models /src/coverage ./coverage
 COPY --from=test-scanner /src/coverage ./coverage
 COPY --from=test-writer /src/coverage ./coverage
+COPY --from=test-tools /src/coverage ./coverage
 COPY --from=test-dispat /src/coverage ./coverage
 COPY --from=test-integration /src/coverage/integration.out ./coverage/integration.out
 COPY --from=test-integration /src/coverage/testlog ./coverage/testlog
 COPY --from=bench-ccme /src/coverage/benchlog ./coverage/benchlog
 COPY --from=bench-config /src/coverage/benchlog ./coverage/benchlog
 COPY --from=bench-dispat /src/coverage/benchlog ./coverage/benchlog
+COPY --chown=gopher:gopher coverag[e]/experiment[s] ./coverage/experiments
 RUN go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" \
     -modules packages/docs/data/benchmarked.txt
 FROM scratch AS measured-export
 COPY --from=measured /src/packages/docs/data/report.json \
      /src/packages/docs/data/benchmarked.txt /
+
+# The campaign's table on its own, for the job summary the experiments print
+# and for a terminal. The same verb the report reads the records with, so the
+# summary a run prints and the page it publishes cannot say different things
+# about one set of records.
+#
+# On `runner` rather than a stage with the workspace in it: nothing here reads
+# a source file, only the records the context carries.
+FROM runner AS experiments-summary
+COPY --chown=gopher:gopher coverag[e]/experiment[s] ./coverage/experiments
+# mkdir before the redirect: with no campaign in the context the COPY above
+# matches nothing and coverage/ does not exist, and a table of no cells is
+# still the right answer to give.
+RUN mkdir -p coverage \
+ && go run github.com/yohimik/dispat/tools/testreport experiments -markdown \
+    > coverage/experiments.md \
+ && cat coverage/experiments.md
+FROM scratch AS experiments-summary-export
+COPY --from=experiments-summary /src/coverage/experiments.md /
+
+# The shell sweep: every script this repository runs outside a Go program,
+# through shellcheck, and the notes generator through a parser.
+#
+# Self-contained, on alpine rather than on the Go image, because nothing here
+# needs a toolchain and a lint gate that waits for one is a lint gate people
+# stop running. It is in this file rather than a Dockerfile of its own because
+# the context is already the whole repository and one lint file per language
+# is a file per language to keep in step.
+#
+# The globs are what let a folder be absent: a COPY naming a path that is not
+# there fails the build, and there is no arrangement of this repository in
+# which every one of these folders exists at once during a bisect.
+FROM alpine:3.22 AS shellcheck
+RUN apk add --no-cache shellcheck python3
+WORKDIR /src
+COPY install.sh ./
+COPY script[s] ./scripts
+COPY announc[e] ./announce
+COPY tests/experiments/run.sh tests/experiments/
+COPY tests/experiments/lib/common.sh tests/experiments/lib/
+RUN <<'EOF'
+set -eu
+# POSIX sh, which is what these declare and what they are run as. The spike
+# script is checked apart from the rest: it is the one script that runs
+# without `set -e` on purpose (its targets never abort, the logs are what it
+# produces), so shellcheck cannot see that a failing `cd` there is followed by
+# commands which record their own failure. Its `cd` calls fail through `die`
+# like anything fatal there; only the grouped-redirect style note (SC2129) is
+# left alone, because one log line per probe is the shape its logs are read in.
+sh -n install.sh
+set -- install.sh
+for f in scripts/*.sh announce/*.sh; do
+  [ -f "$f" ] || continue
+  case "$f" in scripts/tinygo-spike-darwin.sh) continue ;; esac
+  set -- "$@" "$f"
+done
+echo "shellcheck (sh): $*"
+shellcheck -s sh "$@"
+if [ -f scripts/tinygo-spike-darwin.sh ]; then
+  echo "shellcheck (sh, without SC2129): scripts/tinygo-spike-darwin.sh"
+  shellcheck -s sh --exclude=SC2129 scripts/tinygo-spike-darwin.sh
+fi
+
+# The two that are bash on purpose: the harness entrypoint and its library
+# use arrays and [[ ]], which is why they carry a bash shebang.
+echo "shellcheck (bash): tests/experiments/run.sh tests/experiments/lib/common.sh"
+shellcheck -s bash tests/experiments/run.sh tests/experiments/lib/common.sh
+
+# The announcement's notes generator emits JSON that another program reads, so
+# a syntax check is not enough: it is run against a sample release and its
+# output parsed. Guarded on the file, which is written by the announcement's
+# own work and absent until then.
+if [ -f announce/notes.sh ]; then
+  echo "announce/notes.sh: parsing a sample release"
+  DISPAT_PACKAGE=dispat DISPAT_NEW_VERSION=1.7.2 DISPAT_VERSION=1.7.1 \
+  DISPAT_FIXES="the tiny binaries build on the fork
+the observer never fetches into the clone" \
+  DISPAT_DEPENDENCIES="models: 1.7.0 -> 1.7.1" \
+  DISPAT_CHANGELOG="### Fixes
+
+- fix(dispat): the tiny binaries build on the fork" \
+    sh announce/notes.sh | python3 -m json.tool > /dev/null
+  echo "announce/notes.sh: the sample parses"
+fi
+EOF

@@ -31,3 +31,10 @@ packages/*
 !packages/docs
 packages/docs/*
 !packages/docs/docs
+
+# The install manifest the fork stage runs, and nothing else under scripts/:
+# it carries the fork's pin, and letting the whole folder in would put every
+# unrelated script's edits in this build's cache key.
+!scripts
+scripts/*
+!scripts/install-tools.sh

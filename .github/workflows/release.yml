@@ -17,10 +17,15 @@ name: Release
 # Node or Terraform; what remains here is checkouts, Docker plumbing,
 # credentials and artifact transport.
 #
-# Five jobs, in order: is there anything to release, does the whole suite pass,
-# release it, then check that what was released installs and run the release
-# experiments against the image it published. Each is a gate on the next, so
-# nothing is published by a run whose tests never ran.
+# Five jobs, in order: is there anything to release, do the announcement's
+# credentials still work, does the whole suite pass, release it, and then check
+# that what was released installs. Each is a gate on the next, so nothing is
+# published by a run whose tests never ran.
+#
+# The release experiments are not a job here. They run inside the release, as
+# the docs package's beforeBuild hook, against the image the same run just
+# published, so the figures the site ships are that run's own rather than a
+# courier's. What remains here is keeping their records as an artifact.
 on:
   workflow_dispatch:
 
@@ -104,6 +109,58 @@ jobs:
               ;;
             *) exit "$rc" ;;
           esac
+
+  ping:
+    name: Do the announcement's credentials still work
+    needs: plan
+    if: needs.plan.outputs.releasing == 'true'
+    runs-on: ubuntu-latest
+    # The credentials the announcement will use, checked up front with
+    # `crier ping`, which is read-only and posts nothing, so a revoked or
+    # expired token fails the run in a minute instead of surfacing as a
+    # skipped announcement after the release already spent twenty. Job-level
+    # env for the same reason as the release job: a step's `if` is evaluated
+    # before its own `env`.
+    #
+    # No secrets, no gate: a repository without the announcement secrets skips
+    # the ping and releases without announcing, exactly as before.
+    env:
+      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
+      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
+      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
+      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up dispat
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+        uses: ./
+
+      # The pinned release rather than a build of the checkout: the point is
+      # the credentials, not the code, and crier is a tool this repository
+      # installs rather than one it builds. scripts/install-tools.sh is what
+      # says which version that is, here and in the release job both.
+      - name: Install crier
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+        env:
+          INSTALL_TOOLS_BIN_DIR: ${{ github.workspace }}/ping-bin
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: sh scripts/install-tools.sh crier
+
+      # LinkedIn is enabled only when its token is set, mirroring how the
+      # announce script decides whether that pass runs at all. stdin is closed
+      # because the announce config reads its data document from it.
+      - name: Ping the announcement's platforms
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+        run: |
+          ./ping-bin/crier ping --config announce/crier.yaml \
+            ${CRIER_PUBLISH_LINKEDIN_TOKEN:+--publish-linkedin-enabled=true} \
+            </dev/null
+
+      - name: Nothing to ping
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN == ''
+        run: echo "no announcement secrets; the release will skip the announcement"
 
   tests:
     name: Full suite
@@ -193,7 +250,7 @@ jobs:
 
   release:
     name: Run dispat, publish binaries
-    needs: tests
+    needs: [tests, ping]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # commits, tags, GitHub releases
@@ -201,8 +258,24 @@ jobs:
     outputs:
       cli-released: ${{ steps.dispat.outputs.cli-released }}
       cli-version: ${{ steps.dispat.outputs.cli-version }}
-      images-released: ${{ steps.dispat.outputs.images-released }}
-      image-version: ${{ steps.dispat.outputs.image-version }}
+    # The announcement's secrets live on the job rather than on the steps that
+    # use them, because a step's `if` is evaluated before its own `env`, and
+    # the ngrok install has to be able to ask whether there is a token before
+    # spending a minute on apt.
+    #
+    # Every one is optional. announce.sh says what is missing and exits 0: a
+    # release must not go red for want of a social media token.
+    #
+    # CRIER_STAGE_MODE is a repository variable rather than a secret, and it
+    # is the escape hatch from the tunnel: setting it to s3 or url points the
+    # staging somewhere that needs no ngrok.
+    env:
+      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
+      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
+      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
+      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+      NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+      CRIER_STAGE_MODE: ${{ vars.CRIER_STAGE_MODE }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -252,17 +325,56 @@ jobs:
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
+      # crier renders and posts the release's announcement from the dispat
+      # package's announce stage. It is a tool this repository installs rather
+      # than one it builds, and scripts/install-tools.sh is the one file that
+      # says which version. The destination is the folder the bootstrap build
+      # above already put on PATH, so `crier` resolves for the announce script
+      # without another PATH entry.
+      - name: Install the tools the release needs
+        env:
+          INSTALL_TOOLS_BIN_DIR: ${{ runner.temp }}/dispat-fresh
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: sh scripts/install-tools.sh crier
+
+      # Instagram fetches the media from a public URL of its own accord and a
+      # runner has none, so the stage server needs a tunnel. Installed only
+      # when there is a token to run it with, since the whole announcement is
+      # skipped without one.
+      - name: Install ngrok
+        if: env.NGROK_AUTHTOKEN != ''
+        run: |
+          set -eu
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc |
+            sudo gpg --dearmor -o /etc/apt/keyrings/ngrok.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/ngrok.gpg] https://ngrok-agent.s3.amazonaws.com buster main" |
+            sudo tee /etc/apt/sources.list.d/ngrok.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ngrok
+          ngrok version
+
+      # The anthem story is a video, and the runner image carries no ffmpeg of
+      # its own: the announce script checks and goes out silent without it.
+      # update first, because the image's package lists go stale and a mirror
+      # 404 is what a missing update looks like.
+      - name: Install ffmpeg
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq ffmpeg >/dev/null
+          ffmpeg -version | head -1
+
       - name: Run the release
         id: dispat
         # dispat does the whole release itself: autoVersion rewrites, the
         # post-version test gates (flow.beforeBuild in the pkg and services
         # spaces), the release commit, tags, the push, and the GitHub release
-        # with the six cross-compiled binaries its containerised build stage
+        # with the cross-compiled binaries its containerised build stage
         # exported. The dispat package's announce stage writes this step's
-        # cli-released / cli-version outputs, and only fires when that package
-        # published; see services/dispat/dispat.yaml. The docker space's does
-        # the same for images-released / image-version once dispat-alpine is
-        # out; see docker/dispat.yaml.
+        # cli-released / cli-version outputs and then posts the announcement,
+        # and only fires when that package published; see
+        # services/dispat/dispat.yaml.
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -282,6 +394,21 @@ jobs:
         # stage scripts resolve it too. The committer identity comes from
         # commit.name/commit.email in dispat.yaml.
         run: dispat --log-format json
+
+      # The experiments' records, from the docs package's beforeBuild hook.
+      # always(), because a cell that failed is the record most worth keeping:
+      # it is what says which tool did what, and the run that failed is the one
+      # somebody will want to read back. if-no-files-found: ignore, because a
+      # run that never reached the docs package leaves the folder absent, which
+      # is not a failure of this step.
+      - name: Keep the experiments' records
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: experiments
+          path: coverage/experiments
+          if-no-files-found: ignore
+          retention-days: 30
 
   post-release:
     name: ${{ matrix.os }}
@@ -323,16 +450,3 @@ jobs:
             "${{ needs.release.outputs.cli-version }}" \
             "${{ steps.setup.outputs.version }}" \
             "${{ steps.setup.outputs.path }}"
-
-  experiments:
-    name: Release experiments
-    needs: release
-    # Only when the images published: the experiments take their binary out
-    # of the dispat-alpine image, so a run that released just the docs or the
-    # CLI has no new image to run against. !cancelled() for the reason the
-    # install check gives: the image's leg records itself mid-run, and a run
-    # that failed later still shipped an image worth running.
-    if: ${{ !cancelled() && needs.release.outputs.images-released == 'true' }}
-    uses: ./.github/workflows/experiments.yml
-    with:
-      version: ${{ needs.release.outputs.image-version }}

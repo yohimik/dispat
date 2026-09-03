@@ -1,0 +1,13 @@
+{
+  "name": "dispat-experiments-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The release tools the experiments compare, and the registry they run against, at the versions the recorded results are about.",
+  "dependencies": {
+    "@changesets/cli": "3.0.1",
+    "@nx/js": "23.1.2",
+    "lerna": "10.0.1",
+    "nx": "23.1.2",
+    "verdaccio": "6.2.0"
+  }
+}

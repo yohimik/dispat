@@ -1,0 +1,51 @@
+{
+  "experiment": "orphan",
+  "tool": "dispat",
+  "scenario": "",
+  "dispat": "dispat 1.7.0 (linux_arm64)",
+  "steps": [
+    {
+      "step": "release1",
+      "exit": 1
+    },
+    {
+      "step": "release2",
+      "exit": 0
+    },
+    {
+      "step": "status",
+      "exit": 0
+    }
+  ],
+  "checks": [
+    {
+      "check": "the refused run exited non-zero",
+      "ok": true
+    },
+    {
+      "check": "the refused package is neither tagged nor on the registry after the refusal",
+      "ok": true
+    },
+    {
+      "check": "the packages that published are consistent after the refusal",
+      "ok": true
+    },
+    {
+      "check": "the recovery run exited 0",
+      "ok": true
+    },
+    {
+      "check": "the recovery published the refused package and tagged it",
+      "ok": true
+    },
+    {
+      "check": "the recovery republished nothing",
+      "ok": true
+    },
+    {
+      "check": "the next plan is empty",
+      "ok": true
+    }
+  ],
+  "passed": true
+}
