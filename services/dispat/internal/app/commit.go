@@ -122,9 +122,9 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		// The commits and tags this run made are already in the repository,
 		// so the push is the copy that is missing, not the work.
 		work.crit.record(a.log, plan.CodePushFailed, pushErr, "push failed",
-			func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", remote) })
+			func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", gitx.RedactURL(remote)) })
 	} else {
-		a.log.Info().Str("remote", remote).Strs("tags", work.tags).Msg("pushed")
+		a.log.Info().Str("remote", gitx.RedactURL(remote)).Strs("tags", work.tags).Msg("pushed")
 	}
 	return work.crit.err()
 }

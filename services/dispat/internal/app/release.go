@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
@@ -102,7 +103,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if !a.lockDisabled() {
 		lock := &release.Lock{Git: a.git, Remote: a.pushRemote(), Log: a.log}
 		if err := lock.Acquire(ctx); err != nil {
-			a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", a.pushRemote()).
+			a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", gitx.RedactURL(a.pushRemote())).
 				Str("remedy", release.LockRemedy).Msg("unable to create the release lock tag")
 			return nil, err
 		}
@@ -130,14 +131,14 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// that reject ls-remote but accept pushes.
 	if pushMode && a.cfg.Commit.VerifyEnabled() {
 		if err := a.git.VerifyRemote(ctx, remote); err != nil {
-			a.log.Error().Err(err).Str("remote", remote).Msg("git remote verification failed")
+			a.log.Error().Err(err).Str("remote", gitx.RedactURL(remote)).Msg("git remote verification failed")
 			return nil, err
 		}
 		// Under the same flag as the reachability check, and for the same
 		// reason: this is another ls-remote, and commit.verify=false exists
 		// for remotes that reject one but accept pushes.
 		if err := a.checkNotBehind(ctx, remote); err != nil {
-			a.log.Error().Err(err).Str("remote", remote).Msg("refusing to release")
+			a.log.Error().Err(err).Str("remote", gitx.RedactURL(remote)).Msg("refusing to release")
 			return nil, err
 		}
 	}
@@ -156,6 +157,28 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// two; the git verification above it guards the plan itself.
 	if err := a.checkBranchAllowed(ctx); err != nil {
 		a.log.Error().Err(err).Msg("refusing to release")
+		return nil, err
+	}
+
+	// Release writers and failure rollback both own the selected package
+	// paths. Refuse before hooks or writes if those paths already contain user
+	// work, because rollback cannot distinguish it from this run's changes.
+	var protected []string
+	for _, rel := range pl.Releasing() {
+		protected = append(protected, rel.Pkg.Dir)
+	}
+	if commitMode {
+		protected = a.appendIncludeDirs(protected, a.cfg.Commit.Include)
+	}
+	var dirty []string
+	if len(protected) > 0 {
+		dirty, err = a.git.DirtyPaths(ctx, protected)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("checking release paths for local changes: %w", err)
+	} else if len(dirty) > 0 {
+		err := fmt.Errorf("release paths have pre-existing local changes (%s); commit, stash, or move them before releasing", strings.Join(dirty, ", "))
+		a.log.Error().Err(err).Strs("paths", dirty).Msg("refusing to release")
 		return nil, err
 	}
 
@@ -232,9 +255,10 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// published packages, detached from the cancellation.
 	interrupted := ctx.Err() != nil
 	finCtx := ctx
+	finCancel := func() {}
 	if interrupted {
 		a.log.Warn().Msg("interrupted: skipping run hooks, recording completed releases")
-		finCtx = context.WithoutCancel(ctx)
+		finCtx, finCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	} else {
 		hooks.env = release.RunEnv(pl, results, a.log)
 		// postAll runs once the whole task graph has finished, releases or not —
@@ -244,6 +268,11 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	}
 	crit := &criticals{}
 	a.finalize(finCtx, finalizer{gh: gh, remote: remote, hooks: hooks, crit: crit, skipHooks: interrupted}, pl, results)
+	finCancel()
+	if interrupted && errors.Is(finCtx.Err(), context.DeadlineExceeded) {
+		crit.record(a.log, plan.CodeCommitFailed, finCtx.Err(),
+			"recording completed releases timed out after interruption", nil)
+	}
 	failed, _ := a.summarize(pl, results, time.Since(start))
 	// Everything the run owed has now been attempted. What is left to decide
 	// is only what to report, in order of what the operator has to do about

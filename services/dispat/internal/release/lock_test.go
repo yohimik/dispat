@@ -11,6 +11,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
 // The lock's contract with git is small enough to state exactly, so these
@@ -26,7 +28,9 @@ type fakeLockGit struct {
 	messages []string
 	// failures are keyed by call name ("push", "create", "delete",
 	// "deleteRemote").
-	failures map[string]error
+	failures       map[string]error
+	deleteOID      string
+	deleteDeadline bool
 }
 
 func (f *fakeLockGit) record(call string) error {
@@ -34,16 +38,25 @@ func (f *fakeLockGit) record(call string) error {
 	return f.failures[call]
 }
 
-func (f *fakeLockGit) CreateTagForce(_ context.Context, _, message, _ string) error {
+func (f *fakeLockGit) CreateTag(_ context.Context, _, message, _ string) error {
 	f.messages = append(f.messages, message)
 	return f.record("create")
 }
 
-func (f *fakeLockGit) PushTag(_ context.Context, _, _ string) error { return f.record("push") }
+func (f *fakeLockGit) TagObject(_ context.Context, _ string) (string, error) {
+	err := f.record("resolve")
+	return "object-id", err
+}
+
+func (f *fakeLockGit) PushObjectToTag(_ context.Context, _, _, _ string) error {
+	return f.record("push")
+}
 
 func (f *fakeLockGit) DeleteTag(_ context.Context, _ string) error { return f.record("delete") }
 
-func (f *fakeLockGit) DeleteRemoteTag(_ context.Context, _, _ string) error {
+func (f *fakeLockGit) DeleteRemoteTagLease(ctx context.Context, _, _, oid string) error {
+	f.deleteOID = oid
+	_, f.deleteDeadline = ctx.Deadline()
 	return f.record("deleteRemote")
 }
 
@@ -60,11 +73,13 @@ func TestLockRoundTrip(t *testing.T) {
 	lock := newLock(git, &bytes.Buffer{})
 
 	require.NoError(t, lock.Acquire(context.Background()))
-	assert.Equal(t, []string{"create", "push"}, git.calls)
+	assert.Equal(t, []string{"create", "resolve", "push"}, git.calls)
 
 	lock.Release(context.Background())
-	assert.Equal(t, []string{"create", "push", "deleteRemote", "delete"}, git.calls,
+	assert.Equal(t, []string{"create", "resolve", "push", "deleteRemote", "delete"}, git.calls,
 		"the remote copy goes first: it is the one another run is waiting on")
+	assert.Equal(t, "object-id", git.deleteOID, "unlock carries the immutable acquisition object")
+	assert.True(t, git.deleteDeadline, "unlock is bounded even with an unbounded caller context")
 }
 
 // TestLockRejectedPushLeavesNothingBehind: the case the whole feature exists
@@ -78,12 +93,12 @@ func TestLockRejectedPushLeavesNothingBehind(t *testing.T) {
 	err := lock.Acquire(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists", "the git rejection survives the wrapping")
-	assert.Equal(t, []string{"create", "push", "delete"}, git.calls)
+	assert.Equal(t, []string{"create", "resolve", "push", "delete"}, git.calls)
 
 	// And a lock that was never taken is never given back, whatever the caller
 	// does next: the tag on the remote is another run's.
 	lock.Release(context.Background())
-	assert.Equal(t, []string{"create", "push", "delete"}, git.calls,
+	assert.Equal(t, []string{"create", "resolve", "push", "delete"}, git.calls,
 		"releasing an unacquired lock must touch nothing")
 }
 
@@ -134,6 +149,7 @@ func TestLockMessagesAreUniquePerAttempt(t *testing.T) {
 	for _, msg := range git.messages {
 		assert.Contains(t, msg, "pid ", "the message says which process holds it")
 		assert.Contains(t, msg, "host ")
+		assert.Contains(t, msg, "attempt "+gitx.LockAttemptTagPrefix)
 	}
 }
 
@@ -150,7 +166,7 @@ func TestLockReleaseReportsFailuresAndCarriesOn(t *testing.T) {
 	require.NoError(t, lock.Acquire(ctx))
 	lock.Release(ctx)
 
-	assert.Equal(t, []string{"create", "push", "deleteRemote", "delete"}, git.calls,
+	assert.Equal(t, []string{"create", "resolve", "push", "deleteRemote", "delete"}, git.calls,
 		"the local tag goes even when the remote one would not")
 	logged := out.String()
 	assert.Contains(t, logged, `"level":"error"`)

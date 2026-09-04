@@ -742,6 +742,79 @@ func TestDeleteTagLocalAndRemote(t *testing.T) {
 		"a fully qualified refspec makes the remote delete idempotent")
 }
 
+func TestImmutableLockObjectAndLeasedDelete(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+
+	require.NoError(t, cli.CreateTag(ctx, "attempt-one", "one", ""))
+	require.NoError(t, cli.CreateTag(ctx, "attempt-two", "two", ""))
+	one, err := cli.TagObject(ctx, "attempt-one")
+	require.NoError(t, err)
+	two, err := cli.TagObject(ctx, "attempt-two")
+	require.NoError(t, err)
+	require.NotEqual(t, one, two)
+
+	require.NoError(t, cli.PushObjectToTag(ctx, "origin", one, LockTagName))
+	require.Error(t, cli.PushObjectToTag(ctx, "origin", two, LockTagName),
+		"a second attempt from the same checkout must not share ownership")
+	assert.Equal(t, one, remoteTagObject(t, bare, LockTagName))
+
+	require.Error(t, cli.DeleteRemoteTagLease(ctx, "origin", LockTagName, two),
+		"a process must not delete a lock whose object is no longer its own")
+	assert.Equal(t, one, remoteTagObject(t, bare, LockTagName))
+	require.NoError(t, cli.DeleteRemoteTagLease(ctx, "origin", LockTagName, one))
+	assert.NotContains(t, runGit(t, bare, "tag"), LockTagName)
+}
+
+func TestCommitDirsPreservesUnrelatedStagedFiles(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	pkg := filepath.Join(root, "packages", "core")
+	unrelated := filepath.Join(root, "unrelated.txt")
+	require.NoError(t, os.WriteFile(unrelated, []byte("mine\n"), 0o644))
+	runGit(t, root, "add", "unrelated.txt")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "release.txt"), []byte("release\n"), 0o644))
+
+	committed, err := cli.CommitDirs(ctx, []string{pkg}, "chore(release): core")
+	require.NoError(t, err)
+	require.True(t, committed)
+	assert.Contains(t, runGit(t, root, "diff", "--cached", "--name-only"), "unrelated.txt")
+	assert.NotContains(t, runGit(t, root, "show", "--format=", "--name-only", "HEAD"), "unrelated.txt")
+}
+
+func TestDirtyPathsFindsStagedTrackedAndUntrackedWithinScope(t *testing.T) {
+	root, cli := initRepo(t)
+	pkg := filepath.Join(root, "packages", "core")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "main.txt"), []byte("tracked\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "staged.txt"), []byte("staged\n"), 0o644))
+	runGit(t, root, "add", "packages/core/staged.txt")
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "untracked.txt"), []byte("untracked\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "outside.txt"), []byte("outside\n"), 0o644))
+
+	dirty, err := cli.DirtyPaths(context.Background(), []string{pkg})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		"packages/core/main.txt", "packages/core/staged.txt", "packages/core/untracked.txt",
+	}, dirty)
+}
+
+func TestGitOutputRedactsNamedRemoteCredentials(t *testing.T) {
+	out := redactGitOutput("fatal: cannot reach 'https://bot:secret@example.test/repo?token=private#fragment'", []string{"push", "origin"})
+	assert.NotContains(t, out, "secret")
+	assert.NotContains(t, out, "private")
+	assert.NotContains(t, out, "fragment")
+	assert.Contains(t, out, "example.test/repo")
+}
+
+func TestDirtyPathsReportsRenameDestinationOnce(t *testing.T) {
+	root, cli := initRepo(t)
+	runGit(t, root, "mv", "packages/core/main.txt", "packages/core/renamed file.txt")
+	dirty, err := cli.DirtyPaths(context.Background(), []string{filepath.Join(root, "packages", "core")})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"packages/core/renamed file.txt"}, dirty)
+}
+
 // TestTagsIgnoreTheReleaseLock: the lock tag sits on HEAD for the whole of
 // the run that is doing the planning, so a format broad enough to match it
 // would read it as the package's newest release and see no pending commits at
@@ -752,6 +825,7 @@ func TestTagsIgnoreTheReleaseLock(t *testing.T) {
 
 	require.NoError(t, cli.CreateTag(ctx, "0.1.0", "release 0.1.0", ""))
 	require.NoError(t, cli.CreateTag(ctx, LockTagName, "held", ""))
+	require.NoError(t, cli.CreateTag(ctx, LockAttemptTagPrefix+"ab12", "attempt", ""))
 
 	// "{version}" is the broadest format there is: its glob is "*" and its
 	// shape check accepts any name at all.
@@ -896,6 +970,14 @@ func TestConfiguredCommitterIdentity(t *testing.T) {
 	out, err = cli.run(context.Background(), "for-each-ref", "--format=%(taggername) %(taggeremail)", "refs/tags/core@1.0.0")
 	require.NoError(t, err)
 	assert.Equal(t, "release bot <bot@dispat.test>", strings.TrimSpace(out))
+}
+
+func TestRedactGitArgsHidesURLCredentials(t *testing.T) {
+	got := redactGitArgs([]string{"push", "https://bot:s3cr3t@example.test/repo.git?token=also-secret", "HEAD"})
+	joined := strings.Join(got, " ")
+	assert.NotContains(t, joined, "s3cr3t")
+	assert.NotContains(t, joined, "also-secret")
+	assert.Contains(t, joined, "https://REDACTED@example.test/repo.git?REDACTED")
 }
 
 func TestResolveCommit(t *testing.T) {

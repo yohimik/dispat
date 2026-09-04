@@ -8,9 +8,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +85,10 @@ const DefaultTagFormat TagFormat = "{name}@{version}"
 // enough to match — and it lives here, beside the reading of tags, because
 // that is where the reservation has to hold.
 const LockTagName = "dispat-release-lock"
+
+// LockAttemptTagPrefix reserves the per-process local refs used to build an
+// immutable lock object before it is offered under LockTagName remotely.
+const LockAttemptTagPrefix = LockTagName + "-attempt-"
 
 const (
 	tagNamePlaceholder    = "{name}"
@@ -563,14 +569,56 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 	if mutates(args) {
 		level = zerolog.DebugLevel
 	}
-	ev := c.Log.WithLevel(level).Strs("args", args).Dur("took", time.Since(started))
+	safeArgs := redactGitArgs(args)
+	ev := c.Log.WithLevel(level).Strs("args", safeArgs).Dur("took", time.Since(started))
 	if err != nil {
-		ev.Err(err).Str("stderr", strings.TrimSpace(stderr.String())).Msg("git failed")
+		safeStderr := strings.TrimSpace(redactGitOutput(stderr.String(), args))
+		ev.Err(err).Str("stderr", safeStderr).Msg("git failed")
 		return "", fmt.Errorf("git %s: %w: %s",
-			strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+			strings.Join(safeArgs, " "), err, safeStderr)
 	}
 	ev.Int("outBytes", out.Len()).Msg("git")
 	return out.String(), nil
+}
+
+func redactGitOutput(output string, args []string) string {
+	for i, safe := range redactGitArgs(args) {
+		if safe != args[i] {
+			output = strings.ReplaceAll(output, args[i], safe)
+		}
+	}
+	return gitOutputURL.ReplaceAllStringFunc(output, RedactURL)
+}
+
+var gitOutputURL = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"<>]+`)
+
+// RedactURL removes user information, query strings and fragments from a
+// remote URL before it is recorded. Named remotes are returned unchanged.
+func RedactURL(value string) string {
+	u, err := url.Parse(value)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return value
+	}
+	if u.User != nil {
+		u.User = url.User("REDACTED")
+	}
+	if u.RawQuery != "" {
+		u.RawQuery = "REDACTED"
+	}
+	if u.Fragment != "" {
+		u.Fragment = "REDACTED"
+	}
+	return u.String()
+}
+
+// redactGitArgs removes credentials from URL-shaped arguments before they
+// reach logs or returned errors. Git still receives the original arguments.
+func redactGitArgs(args []string) []string {
+	safe := append([]string(nil), args...)
+	for i, arg := range safe {
+		safe[i] = RedactURL(arg)
+	}
+	return safe
 }
 
 // Tags returns every reachable tag of the package, newest first by creation
@@ -604,7 +652,7 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 			continue
 		}
 		name := strings.TrimSpace(f[0])
-		if name == LockTagName {
+		if name == LockTagName || strings.HasPrefix(name, LockAttemptTagPrefix) {
 			// dispat's own coordination ref, which is on HEAD for the whole of
 			// the run doing the planning. A format broad enough to match it —
 			// "{version}" makes the glob "*" — would otherwise adopt it as the
@@ -871,12 +919,37 @@ func (c *CLI) PushTag(ctx context.Context, remote, name string) error {
 	return err
 }
 
+// PushObjectToTag creates name on remote from the immutable object oid. The
+// destination is never forced: an existing lock must make acquisition fail.
+// Naming the source object, rather than a mutable local ref, also makes this
+// safe when two dispat processes share one checkout.
+func (c *CLI) PushObjectToTag(ctx context.Context, remote, oid, name string) error {
+	_, err := c.run(ctx, "push", remote, oid+":refs/tags/"+name)
+	return err
+}
+
+// TagObject resolves the tag object itself (without peeling it to its commit).
+func (c *CLI) TagObject(ctx context.Context, name string) (string, error) {
+	out, err := c.run(ctx, "rev-parse", "refs/tags/"+name)
+	return strings.TrimSpace(out), err
+}
+
 // DeleteRemoteTag removes a tag from the remote. Deleting a ref the remote
 // does not have succeeds: git warns and reports the deletion, because the
 // fully qualified refspec leaves nothing to guess about. Cleanup is therefore
 // idempotent on this side, unlike DeleteTag.
 func (c *CLI) DeleteRemoteTag(ctx context.Context, remote, name string) error {
 	_, err := c.run(ctx, "push", remote, "--delete", "refs/tags/"+name)
+	return err
+}
+
+// DeleteRemoteTagLease deletes name only while it still names expectedOID.
+// If ownership changed, git rejects the operation and preserves the new
+// owner's lock.
+func (c *CLI) DeleteRemoteTagLease(ctx context.Context, remote, name, expectedOID string) error {
+	ref := "refs/tags/" + name
+	_, err := c.run(ctx, "push", "--force-with-lease="+ref+":"+expectedOID,
+		remote, ":"+ref)
 	return err
 }
 
@@ -950,14 +1023,51 @@ func (c *CLI) CommitDirs(ctx context.Context, dirs []string, message string) (bo
 	if _, err := c.run(ctx, args...); err != nil {
 		return false, err
 	}
-	// diff --cached --quiet exits non-zero when something is staged.
-	if _, err := c.run(ctx, "diff", "--cached", "--quiet"); err == nil {
+	paths := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		paths = append(paths, c.pathspec(d))
+	}
+	// Check only this operation's paths. Unrelated staged changes belong to
+	// the caller and must neither cause nor enter this commit.
+	diffArgs := append([]string{"diff", "--cached", "--quiet", "--"}, paths...)
+	if _, err := c.run(ctx, diffArgs...); err == nil {
 		return false, nil // nothing staged
 	}
-	if _, err := c.run(ctx, "commit", "-m", message); err != nil {
+	commitArgs := append([]string{"commit", "--only", "-m", message, "--"}, paths...)
+	if _, err := c.run(ctx, commitArgs...); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// DirtyPaths returns tracked, staged, and untracked paths beneath dirs. It is
+// used before release work so automatic rollback and commit cannot overwrite
+// changes that predate the run.
+func (c *CLI) DirtyPaths(ctx context.Context, dirs []string) ([]string, error) {
+	args := []string{"status", "--porcelain=v1", "-z", "--untracked-files=all", "--"}
+	for _, d := range dirs {
+		args = append(args, c.pathspec(d))
+	}
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
+			continue
+		}
+		path := entry[3:]
+		paths = append(paths, path)
+		// Porcelain -z lists the destination followed by the source for
+		// renames and copies. The source has no status prefix of its own.
+		if strings.ContainsAny(entry[:2], "RC") {
+			i++
+		}
+	}
+	return paths, nil
 }
 
 // HeadSHA returns the full SHA of the current HEAD commit.

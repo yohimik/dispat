@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"strings"
@@ -46,10 +47,11 @@ const LockRemedy = "another release may hold it; if you are sure nothing else is
 // be able to fail, so the one operation that would make it always succeed is
 // deliberately out of reach.
 type LockGit interface {
-	CreateTagForce(ctx context.Context, name, message, target string) error
-	PushTag(ctx context.Context, remote, name string) error
+	CreateTag(ctx context.Context, name, message, target string) error
+	TagObject(ctx context.Context, name string) (string, error)
+	PushObjectToTag(ctx context.Context, remote, oid, name string) error
 	DeleteTag(ctx context.Context, name string) error
-	DeleteRemoteTag(ctx context.Context, remote, name string) error
+	DeleteRemoteTagLease(ctx context.Context, remote, name, expectedOID string) error
 }
 
 // Lock is one run's claim on the repository. Acquire it before anything the
@@ -71,7 +73,9 @@ type Lock struct {
 	// held records that this run, and not some earlier one, put the tag on the
 	// remote. Release does nothing without it, because deleting a lock nobody
 	// here took is deleting somebody else's.
-	held bool
+	held     bool
+	localTag string
+	oid      string
 }
 
 // Acquire claims the lock, or reports why it could not.
@@ -82,29 +86,36 @@ type Lock struct {
 // all a remote this run cannot use to coordinate with the next one, and
 // releasing without coordination is the thing being prevented.
 func (l *Lock) Acquire(ctx context.Context) error {
-	// Force locally, and only locally. The tag in this clone may be a leftover
-	// from a run that was killed before it could clean up, and that leftover
-	// says nothing about who holds the lock; the push below is what asks.
-	if err := l.Git.CreateTagForce(ctx, LockTagName, lockMessage(), "HEAD"); err != nil {
+	// Each attempt gets its own local ref. A shared checkout may have two
+	// processes acquiring at once; neither may be able to retarget the source
+	// the other is about to push.
+	l.localTag = localLockTag()
+	if err := l.Git.CreateTag(ctx, l.localTag, lockMessage(l.localTag), "HEAD"); err != nil {
 		return fmt.Errorf("creating the release lock tag: %w", err)
 	}
-	if err := l.Git.PushTag(ctx, l.Remote, LockTagName); err != nil {
+	oid, err := l.Git.TagObject(ctx, l.localTag)
+	if err != nil {
+		_ = l.Git.DeleteTag(ctx, l.localTag)
+		return fmt.Errorf("resolving the release lock object: %w", err)
+	}
+	l.oid = oid
+	if err := l.Git.PushObjectToTag(ctx, l.Remote, oid, LockTagName); err != nil {
 		// The local tag was this attempt's, so it goes with the attempt. Left
 		// behind it would be read as a lock this clone holds by anyone looking
 		// at `git tag`, which is exactly the wrong thing to suggest.
-		if derr := l.Git.DeleteTag(ctx, LockTagName); derr != nil {
-			l.Log.Debug().Err(derr).Str("tag", LockTagName).
+		if derr := l.Git.DeleteTag(ctx, l.localTag); derr != nil {
+			l.Log.Debug().Err(derr).Str("tag", l.localTag).
 				Msg("could not remove the local lock tag after a failed push")
 		}
 		if holder := l.describeHolder(ctx); holder != "" {
-			return fmt.Errorf("pushing the release lock tag to %s (%s): %w", l.Remote, holder, err)
+			return fmt.Errorf("pushing the release lock tag to %s (%s): %w", gitx.RedactURL(l.Remote), holder, err)
 		}
-		return fmt.Errorf("pushing the release lock tag to %s: %w", l.Remote, err)
+		return fmt.Errorf("pushing the release lock tag to %s: %w", gitx.RedactURL(l.Remote), err)
 	}
 	l.held = true
 	// Info, not debug: "who holds the lock" is the first question of a stuck
 	// pipeline, and this is the line that answers it at the default level.
-	l.Log.Info().Str("tag", LockTagName).Str("remote", l.Remote).Msg("release lock acquired")
+	l.Log.Info().Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).Msg("release lock acquired")
 	return nil
 }
 
@@ -126,14 +137,32 @@ func (l *Lock) Release(ctx context.Context) {
 	// Whatever happens below, this run has stopped claiming the lock: a second
 	// call must not try again, and a failure here is not retried.
 	l.held = false
-	if err := l.Git.DeleteRemoteTag(ctx, l.Remote, LockTagName); err != nil {
-		l.Log.Error().Err(err).Str("tag", LockTagName).Str("remote", l.Remote).
+	// Reserve the final second for local cleanup, so a remote that consumes
+	// its entire allowance cannot strand the attempt ref in this checkout.
+	remoteCtx, remoteCancel := detachedDeadline(ctx, 29*time.Second)
+	if err := l.Git.DeleteRemoteTagLease(remoteCtx, l.Remote, LockTagName, l.oid); err != nil {
+		l.Log.Error().Err(err).Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
 			Str("remedy", LockRemedy).Msg("could not remove the release lock tag from the remote")
 	}
-	if err := l.Git.DeleteTag(ctx, LockTagName); err != nil {
-		l.Log.Error().Err(err).Str("tag", LockTagName).
+	remoteCancel()
+	localCtx, localCancel := detachedDeadline(ctx, time.Second)
+	defer localCancel()
+	if err := l.Git.DeleteTag(localCtx, l.localTag); err != nil {
+		l.Log.Error().Err(err).Str("tag", l.localTag).
 			Msg("could not remove the local release lock tag")
 	}
+}
+
+func detachedDeadline(ctx context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {
+	base := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < maximum {
+		return context.WithDeadline(base, deadline)
+	}
+	return context.WithTimeout(base, maximum)
+}
+
+func localLockTag() string {
+	return gitx.LockAttemptTagPrefix + rand.Text()
 }
 
 // lockInspector is the optional capability behind the holder line in a
@@ -184,11 +213,11 @@ func (l *Lock) describeHolder(ctx context.Context) string {
 // rejection — it is a no-op that succeeds. Both runs would then believe they
 // held the lock. The host, the process id and a nanosecond timestamp are here
 // to make that impossible; they are worth reading in `git show` besides.
-func lockMessage() string {
+func lockMessage(attempt string) string {
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown"
 	}
-	return fmt.Sprintf("dispat release lock\n\nhost %s\npid %d\nat %s\n",
-		host, os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
+	return fmt.Sprintf("dispat release lock\n\nhost %s\npid %d\nat %s\nattempt %s\n",
+		host, os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano), attempt)
 }

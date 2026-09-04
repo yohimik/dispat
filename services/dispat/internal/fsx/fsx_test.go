@@ -78,6 +78,23 @@ func TestWriteFileAtomicRenameFailureCleansUp(t *testing.T) {
 	assert.Len(t, entries, 1, "only the pre-existing folder remains")
 }
 
+func TestWriteFileAtomicRefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	link := filepath.Join(dir, "dispat.json")
+	require.NoError(t, os.WriteFile(target, []byte("kept"), 0o644))
+	require.NoError(t, os.Symlink(target, link))
+
+	err := WriteFileAtomic(link, []byte("replaced"), 0o644)
+	require.Error(t, err)
+	data, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "kept", string(data))
+	info, statErr := os.Lstat(link)
+	require.NoError(t, statErr)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link itself survives")
+}
+
 // assertOnly fails when dir holds anything besides the named file — a leftover
 // temp file is exactly the litter the helper promises not to leave.
 func assertOnly(t *testing.T, dir, name string) {

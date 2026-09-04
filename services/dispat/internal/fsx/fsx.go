@@ -7,6 +7,7 @@
 package fsx
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -15,6 +16,11 @@ import (
 // rename. The temp file lands beside the target so the rename never crosses a
 // filesystem, and it is removed on every failure.
 func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to replace symlink %s", path)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-")
 	if err != nil {

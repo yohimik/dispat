@@ -206,9 +206,9 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			// releases below still go out — they document the release, and
 			// withholding them would lose the second record too.
 			fin.crit.record(a.log, plan.CodePushFailed, err, "push failed",
-				func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", fin.remote) })
+				func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", gitx.RedactURL(fin.remote)) })
 		} else {
-			a.log.Info().Str("remote", fin.remote).Strs("tags", pushTags).Msg("pushed release commit and tags")
+			a.log.Info().Str("remote", gitx.RedactURL(fin.remote)).Strs("tags", pushTags).Msg("pushed release commit and tags")
 			fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
 		}
 	}
@@ -306,7 +306,7 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 				"commits landed on %s/%s during the release and could not be merged with it: %w",
 				fin.remote, branch, err)
 		}
-		a.log.Warn().Str("code", plan.CodePushMerged).Str("remote", fin.remote).Str("branch", branch).
+		a.log.Warn().Str("code", plan.CodePushMerged).Str("remote", gitx.RedactURL(fin.remote)).Str("branch", branch).
 			Int("attempt", attempt).
 			Msg("pulled the branch during the release to sync changes that landed while it ran; " +
 				"the release tags point at the tree that was planned and the release commit was merged on top")
@@ -316,7 +316,7 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 		}
 		// Somebody landed another commit while this was merging the last one.
 		// Round again, on the tip that now exists.
-		a.log.Debug().Str("remote", fin.remote).Str("branch", branch).Int("attempt", attempt).
+		a.log.Debug().Str("remote", gitx.RedactURL(fin.remote)).Str("branch", branch).Int("attempt", attempt).
 			Msg("the branch moved again during the recovery; merging what arrived and pushing once more")
 	}
 }
@@ -378,7 +378,7 @@ func (a *App) settleConflict(ctx context.Context, fin finalizer, rels []*plan.Re
 			gh.Note = "### Note\n\n" + note + "\n"
 		}
 	}
-	a.log.Warn().Str("code", plan.CodePushConflicted).Str("remote", fin.remote).Str("branch", branch).
+	a.log.Warn().Str("code", plan.CodePushConflicted).Str("remote", gitx.RedactURL(fin.remote)).Str("branch", branch).
 		Strs("paths", paths).Str("keptAt", quarantine).
 		Msg("commits landed on the branch during the release and changed the same content; " +
 			"this release's side was kept and theirs was pushed to a branch of its own to be reconciled")
@@ -480,11 +480,11 @@ func mergeMessage(remote, branch, release string, tags []string) string {
 // a replaced one means this run overwrote a published ref.
 func (a *App) reportPush(report gitx.PushReport, remote string) {
 	for _, tag := range report.Skipped {
-		a.log.Warn().Str("tag", tag).Str("remote", remote).
+		a.log.Warn().Str("tag", tag).Str("remote", gitx.RedactURL(remote)).
 			Msg("tag already exists on the remote, skipped")
 	}
 	for _, tag := range report.Replaced {
-		a.log.Warn().Str("tag", tag).Str("remote", remote).
+		a.log.Warn().Str("tag", tag).Str("remote", gitx.RedactURL(remote)).
 			Msg("tag already existed on the remote and was overwritten")
 	}
 }
