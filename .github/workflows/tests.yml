@@ -61,6 +61,8 @@ jobs:
       # to the runner and reports `dev`.
       - name: Build dispat from the checkout
         run: |
+          # buildx-cache emits separate CLI arguments by design.
+          # shellcheck disable=SC2046
           docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
@@ -105,6 +107,8 @@ jobs:
       - name: No local link survived a build
         run: |
           dispat scanner --verify-unlinked
+          # The nested shell expands DISPAT_ITEM after dispat starts it.
+          # shellcheck disable=SC2016
           dispat for ccme config manifest models scanner writer --do '
             grep -q "github.com/yohimik/dispat/pkg/$DISPAT_ITEM " services/dispat/go.mod || exit 0
             grep -q "^github.com/yohimik/dispat/pkg/$DISPAT_ITEM " services/dispat/go.sum \
@@ -130,6 +134,8 @@ jobs:
       # The bootstrap-then-fresh pair (see the workflow's env comment).
       - name: Build dispat from the checkout
         run: |
+          # buildx-cache emits separate CLI arguments by design.
+          # shellcheck disable=SC2046
           docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
@@ -191,6 +197,8 @@ jobs:
       # The bootstrap-then-fresh pair (see the workflow's env comment).
       - name: Build dispat from the checkout
         run: |
+          # buildx-cache emits separate CLI arguments by design.
+          # shellcheck disable=SC2046
           docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .

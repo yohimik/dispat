@@ -83,6 +83,8 @@ jobs:
       # release, not from the release before it.
       - name: Build dispat from the checkout
         run: |
+          # buildx-cache emits separate CLI arguments by design.
+          # shellcheck disable=SC2046
           docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
@@ -186,6 +188,8 @@ jobs:
       # The bootstrap-then-fresh pair, as in the plan job.
       - name: Build dispat from the checkout
         run: |
+          # buildx-cache emits separate CLI arguments by design.
+          # shellcheck disable=SC2046
           docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
@@ -320,6 +324,8 @@ jobs:
       # not from the release before it.
       - name: Build dispat from the checkout
         run: |
+          # buildx-cache emits separate CLI arguments by design.
+          # shellcheck disable=SC2046
           docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
