@@ -1705,6 +1705,7 @@ func (cp *computation) loadTagsAndWindows() error {
 	// share a window origin (every never-stably-released package shares the
 	// whole history) share the listing instead of re-reading it.
 	commitsBySince := make(map[string][]gitx.Commit)
+	windowsBySince := make(map[string]map[string]bool)
 
 	// Every package's aliases, compiled once: an alias of one package can land
 	// in another's listing, so the filter is the workspace's rather than the
@@ -1788,17 +1789,28 @@ func (cp *computation) loadTagsAndWindows() error {
 				return fmt.Errorf("plan: %s: %w", p.Name, err)
 			}
 			commitsBySince[since] = commits
+			lists = append(lists, commits)
 		}
-		w := make(map[string]bool, len(commits))
-		for _, c := range commits {
-			w[commitKey(c)] = true
-		}
-		cp.window[p.Name] = w
-		lists = append(lists, commits)
+		cp.window[p.Name] = sharedCommitWindow(windowsBySince, since, commits)
 	}
 
 	cp.buildUnion(lists)
 	return nil
+}
+
+// sharedCommitWindow returns the immutable membership set for one stable
+// baseline. Every consumer of computation.window only reads membership, so
+// packages with the same baseline can share this potentially large set.
+func sharedCommitWindow(cache map[string]map[string]bool, since string, commits []gitx.Commit) map[string]bool {
+	if window, ok := cache[since]; ok {
+		return window
+	}
+	window := make(map[string]bool, len(commits))
+	for _, commit := range commits {
+		window[commitKey(commit)] = true
+	}
+	cache[since] = window
+	return window
 }
 
 // duplicateVersionTags finds two parsed tags carrying the same version on

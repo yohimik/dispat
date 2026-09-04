@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -209,6 +210,42 @@ func TestPlanningQueriesGitOncePerPackage(t *testing.T) {
 	for since, n := range git.logQueries {
 		assert.Equal(t, 1, n, "log range %q must be walked once", since)
 	}
+}
+
+func TestCommitWindowsShareStorageOnlyForTheSameBaseline(t *testing.T) {
+	commits := []gitx.Commit{{SHA: "one"}, {SHA: "two"}}
+	cache := make(map[string]map[string]bool)
+
+	first := sharedCommitWindow(cache, "v1", commits)
+	same := sharedCommitWindow(cache, "v1", append(commits, gitx.Commit{SHA: "ignored"}))
+	other := sharedCommitWindow(cache, "v2", commits)
+
+	require.Equal(t, first, same)
+	assert.Equal(t, reflect.ValueOf(first).Pointer(), reflect.ValueOf(same).Pointer(),
+		"packages sharing a baseline must share one immutable commit set")
+	assert.NotEqual(t, reflect.ValueOf(first).Pointer(), reflect.ValueOf(other).Pointer(),
+		"distinct baselines must retain distinct membership sets")
+	assert.False(t, same["ignored"], "a cached baseline cannot be rebuilt from another package's input")
+}
+
+func TestSharedCommitWindowsKeepDistinctBaselineMembership(t *testing.T) {
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a,b,c,d): initial release"},
+		commit{sha: "c2", message: "feat(a,b,c,d): newer baseline"},
+		commit{sha: "c3", message: "fix(a,b,c,d): pending work"},
+	).tag("a", "1.0.0", "c1").tag("b", "1.0.0", "c1").
+		tag("c", "1.0.0", "c2").tag("d", "1.0.0", "c2")
+	pkgs := make([]*model.Package, 0, 4)
+	for _, name := range []string{"a", "b", "c", "d"} {
+		pkgs = append(pkgs, &model.Package{Name: name, Dir: "/r/" + name})
+	}
+
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	assertVersion(t, v(1, 1, 0), p.Releases["a"].Next)
+	assertVersion(t, v(1, 1, 0), p.Releases["b"].Next)
+	assertVersion(t, v(1, 0, 1), p.Releases["c"].Next)
+	assertVersion(t, v(1, 0, 1), p.Releases["d"].Next)
 }
 
 // testPackages is the standard three-package workspace: two libraries and an
