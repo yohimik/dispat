@@ -231,7 +231,15 @@ export DISPAT_COVERDIR=/src/coverage/covdata
 rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
 go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
 go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/integration.out
-DISPAT_TEST_RACE=1 go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
+# Every black-box CLI is race-instrumented. Go's default one-second race
+# runtime exit sleep would therefore be paid hundreds of times. Reports go
+# to a shared directory so TestMain can fail even when a scenario expects the
+# child's non-zero (normally exit 66) status.
+race_log_dir=/tmp/dispat-race-reports
+rm -rf "$race_log_dir" && mkdir -p "$race_log_dir"
+GORACE="atexit_sleep_ms=0 log_path=$race_log_dir/race" \
+  DISPAT_TEST_RACE=1 DISPAT_TEST_RACE_LOG_DIR="$race_log_dir" \
+  go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration ./... -count=1 -timeout 20m -race
 EOF
 FROM scratch AS export-integration
 COPY --from=test-integration /src/coverage/integration.out /integration.out

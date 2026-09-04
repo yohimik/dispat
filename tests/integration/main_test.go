@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -12,6 +13,10 @@ import (
 // so only the end of the whole run may remove it.
 func TestMain(m *testing.M) {
 	code := m.Run()
+	if err := harness.CheckRaceReports(os.Getenv("DISPAT_TEST_RACE_LOG_DIR")); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		code = 1
+	}
 	harness.CleanupBinaries()
 	os.Exit(code)
 }
