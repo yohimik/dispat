@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -51,6 +52,7 @@ type LockGit interface {
 	TagObject(ctx context.Context, name string) (string, error)
 	PushObjectToTag(ctx context.Context, remote, oid, name string) error
 	DeleteTag(ctx context.Context, name string) error
+	TagExists(ctx context.Context, name string) (bool, error)
 	DeleteRemoteTagLease(ctx context.Context, remote, name, expectedOID string) error
 }
 
@@ -89,7 +91,11 @@ func (l *Lock) Acquire(ctx context.Context) error {
 	// Each attempt gets its own local ref. A shared checkout may have two
 	// processes acquiring at once; neither may be able to retarget the source
 	// the other is about to push.
-	l.localTag = localLockTag()
+	var err error
+	l.localTag, err = localLockTag()
+	if err != nil {
+		return fmt.Errorf("creating a release lock identity: %w", err)
+	}
 	if err := l.Git.CreateTag(ctx, l.localTag, lockMessage(l.localTag), "HEAD"); err != nil {
 		return fmt.Errorf("creating the release lock tag: %w", err)
 	}
@@ -151,6 +157,13 @@ func (l *Lock) Release(ctx context.Context) {
 		l.Log.Error().Err(err).Str("tag", l.localTag).
 			Msg("could not remove the local release lock tag")
 	}
+	// Older versions used the remote lock name as a local scratch tag.
+	// Acquiring the remote lock proved no owner still relies on that tag.
+	if exists, err := l.Git.TagExists(localCtx, LockTagName); err == nil && exists {
+		if err := l.Git.DeleteTag(localCtx, LockTagName); err != nil {
+			l.Log.Debug().Err(err).Msg("could not remove the legacy local lock tag")
+		}
+	}
 }
 
 func detachedDeadline(ctx context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {
@@ -161,8 +174,12 @@ func detachedDeadline(ctx context.Context, maximum time.Duration) (context.Conte
 	return context.WithTimeout(base, maximum)
 }
 
-func localLockTag() string {
-	return gitx.LockAttemptTagPrefix + rand.Text()
+func localLockTag() (string, error) {
+	var identity [16]byte
+	if _, err := rand.Read(identity[:]); err != nil {
+		return "", err
+	}
+	return gitx.LockAttemptTagPrefix + hex.EncodeToString(identity[:]), nil
 }
 
 // lockInspector is the optional capability behind the holder line in a

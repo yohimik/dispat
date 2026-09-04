@@ -54,6 +54,8 @@ func (f *fakeLockGit) PushObjectToTag(_ context.Context, _, _, _ string) error {
 
 func (f *fakeLockGit) DeleteTag(_ context.Context, _ string) error { return f.record("delete") }
 
+func (f *fakeLockGit) TagExists(context.Context, string) (bool, error) { return false, nil }
+
 func (f *fakeLockGit) DeleteRemoteTagLease(ctx context.Context, _, _, oid string) error {
 	f.deleteOID = oid
 	_, f.deleteDeadline = ctx.Deadline()
