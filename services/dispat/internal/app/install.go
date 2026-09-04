@@ -256,7 +256,7 @@ func runInstallPipe(ctx context.Context, opts InstallOptions, target install.Tar
 		Stdout: opts.pipeOut(), Stderr: opts.pipeOut(), Log: opts.Log,
 	}
 	err := install.Stage(ctx, installer, asset, func(path string) error {
-		opts.Log.Debug().Str("command", opts.Pipe).Str("dir", target.Dir).
+		opts.Log.Debug().Int("commandBytes", len(opts.Pipe)).Str("dir", target.Dir).
 			Msg("install: handing the asset to the pipe")
 		return pipe.Run(ctx, path, asset.Name)
 	})

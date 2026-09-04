@@ -38,6 +38,22 @@ func fakeBinary(t *testing.T, path, version string) {
 	require.NoError(t, os.WriteFile(path, []byte(script), 0o755))
 }
 
+func TestVersionValidatorRequiresExactVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture is a shell script")
+	}
+	path := filepath.Join(t.TempDir(), "dispat")
+	for _, version := range []string{"1.2.30", "1.2.3-rc.1", "11.2.3"} {
+		t.Run(version, func(t *testing.T) {
+			fakeBinary(t, path, version)
+			err := (VersionValidator{Want: "1.2.3"}).Validate(context.Background(), path)
+			require.ErrorContains(t, err, "different version")
+		})
+	}
+	fakeBinary(t, path, "1.2.3")
+	require.NoError(t, (VersionValidator{Want: "1.2.3"}).Validate(context.Background(), path))
+}
+
 // brokenBinary writes a file that cannot run at all.
 func brokenBinary(t *testing.T, path string) {
 	t.Helper()

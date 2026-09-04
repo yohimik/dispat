@@ -246,7 +246,7 @@ func (i *Installer) fetch(ctx context.Context, a Asset, f *os.File, url string, 
 	}
 	// The token itself is never logged; only the address it was sent to and
 	// the fact that it was sent.
-	i.Log.Debug().Str("asset", a.Name).Str("url", url).Bool("authenticated", authed).
+	i.Log.Debug().Str("asset", a.Name).Bool("authenticated", authed).
 		Msg(i.what() + ": downloading the release asset")
 	resp, err := i.client().Do(req)
 	if err != nil {
@@ -300,7 +300,8 @@ func smokeTest(ctx context.Context, path, want string) error {
 	if err != nil {
 		return fmt.Errorf("selfupdate: the downloaded binary does not run: %w", err)
 	}
-	if want != "" && !strings.Contains(string(out), want) {
+	fields := strings.Fields(string(out))
+	if want != "" && (len(fields) < 2 || fields[0] != "dispat" || fields[1] != want) {
 		return fmt.Errorf("selfupdate: the downloaded binary reports a different version than %s", want)
 	}
 	return nil

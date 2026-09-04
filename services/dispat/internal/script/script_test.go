@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,6 +27,16 @@ func TestShellRunnerDefault(t *testing.T) {
 	err := r.Run(context.Background(), t.TempDir(), "echo $DISPAT_PACKAGE", []string{"DISPAT_PACKAGE=core"}, &out, &errb)
 	require.NoError(t, err)
 	assert.Equal(t, "core\n", out.String(), "env must reach the script")
+}
+
+func TestShellTraceOmitsLiteralCommandCredentials(t *testing.T) {
+	requireShell(t, "/bin/sh")
+	var logs, out bytes.Buffer
+	r := &ShellRunner{Log: zerolog.New(&logs)}
+	require.NoError(t, r.Run(context.Background(), t.TempDir(), "SECRET=private-token true", nil, &out, &out))
+	assert.Contains(t, logs.String(), "script finished")
+	assert.Contains(t, logs.String(), "commandBytes")
+	assert.NotContains(t, logs.String(), "private-token")
 }
 
 func TestShellRunnerCustomShell(t *testing.T) {

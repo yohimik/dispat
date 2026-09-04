@@ -16,9 +16,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -148,7 +150,7 @@ func (d *Dispatcher) Event(ev release.Event) {
 				Msg("webhook delivery enqueued")
 		default:
 			d.log.Warn().Str("code", plan.CodeWebhookFailed).Str("webhook", w.ep.Name).
-				Str("url", w.ep.URL).Str("event", ev.Name).
+				Str("event", ev.Name).
 				Msg("webhook delivery dropped, queue is full")
 		}
 	}
@@ -237,7 +239,7 @@ func (d *Dispatcher) deliver(ep Endpoint, del delivery) {
 			break
 		}
 	}
-	log.Warn().Str("code", plan.CodeWebhookFailed).Str("url", ep.URL).Err(lastErr).
+	log.Warn().Str("code", plan.CodeWebhookFailed).Err(lastErr).
 		Msg("webhook delivery failed")
 }
 
@@ -256,7 +258,7 @@ func (d *Dispatcher) attempt(ep Endpoint, del delivery) (status int, err error) 
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, ep.Method, ep.URL, bytes.NewReader(del.body))
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("invalid webhook request")
 	}
 	// The defaults first, then the configured headers — which may override
 	// them — then dispat's own delivery headers, which nothing overrides: a
@@ -273,6 +275,12 @@ func (d *Dispatcher) attempt(ep Endpoint, del delivery) (status int, err error) 
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {
+		// Webhook paths and query strings frequently carry credentials.
+		// net/http wraps transport failures with the full request URL.
+		var requestErr *url.Error
+		if errors.As(err, &requestErr) {
+			err = requestErr.Err
+		}
 		return 0, err
 	}
 	// Drained and closed whatever the status, so the shared client's

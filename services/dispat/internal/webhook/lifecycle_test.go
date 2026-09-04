@@ -1,7 +1,9 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +17,32 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
+
+type failedTransport struct{}
+
+func (failedTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("connection unavailable")
+}
+
+func TestTransportFailureDoesNotLogWebhookCredentials(t *testing.T) {
+	var logs bytes.Buffer
+	d := NewDispatcher(nil, &http.Client{Transport: failedTransport{}}, zerolog.New(&logs))
+	defer d.Close(context.Background())
+	ep := Endpoint{Name: "notifications", URL: "https://host.test/private-hook-token?key=secret-query", Method: "POST", Timeout: time.Second}
+	_, err := d.attempt(ep, delivery{body: []byte("{}")})
+	require.ErrorContains(t, err, "connection unavailable")
+	assert.NotContains(t, err.Error(), "private-hook-token")
+	assert.NotContains(t, err.Error(), "secret-query")
+	// A non-retryable response exercises the final warning as well.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+	defer srv.Close()
+	d.client = srv.Client()
+	ep.URL = srv.URL + "/private-hook-token?key=secret-query"
+	d.deliver(ep, delivery{body: []byte("{}")})
+	assert.Contains(t, logs.String(), "webhook delivery failed")
+	assert.NotContains(t, logs.String(), "private-hook-token")
+	assert.NotContains(t, logs.String(), "secret-query")
+}
 
 func TestCloseCancelsRequestsAndDiscardsQueuedDeliveries(t *testing.T) {
 	started := make(chan struct{}, 1)

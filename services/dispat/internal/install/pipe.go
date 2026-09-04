@@ -87,7 +87,7 @@ func (p Pipe) Run(ctx context.Context, path, assetName string) error {
 
 	started := time.Now()
 	err = cmd.Run()
-	p.Log.Debug().Str("command", p.Command).Str("dir", p.Dir).
+	p.Log.Debug().Int("commandBytes", len(p.Command)).Str("dir", p.Dir).
 		Dur("took", time.Since(started)).Err(err).Msg("install: the pipe finished")
 	if err != nil {
 		return fmt.Errorf("install: the pipe failed: %w", err)

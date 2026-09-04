@@ -101,18 +101,19 @@ func newScriptFixture(t *testing.T, token string) *scriptFixture {
 	t.Cleanup(f.public.Close)
 
 	var apiBase string
-	f.api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	f.api = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		authed := f.token == "" || req.Header.Get("Authorization") == "Bearer "+f.token
 		if req.URL.Path == "/assets/1" {
 			f.mu.Lock()
 			f.apiHits++
+			refuseAsset := f.refuseAsset
 			f.mu.Unlock()
 			if !authed || req.Header.Get("Accept") != "application/octet-stream" {
 				w.WriteHeader(http.StatusNotFound)
 				fmt.Fprint(w, `{"message":"Not Found"}`)
 				return
 			}
-			if f.refuseAsset {
+			if refuseAsset {
 				w.WriteHeader(http.StatusForbidden)
 				fmt.Fprint(w, `{"message":"Resource not accessible by personal access token"}`)
 				return
@@ -129,8 +130,9 @@ func newScriptFixture(t *testing.T, token string) *scriptFixture {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, f.releaseJSON(apiBase))
 	}))
+	apiBase = "http://" + f.api.Listener.Addr().String()
+	f.api.Start()
 	t.Cleanup(f.api.Close)
-	apiBase = f.api.URL
 	// Written out by hand for the sake of the key order, so it is checked
 	// rather than assumed to still be a document.
 	require.True(t, json.Valid([]byte(f.releaseJSON(apiBase))), "the fixture is not valid JSON")
@@ -319,7 +321,9 @@ func TestInstallScriptFallsBackToThePublicURL(t *testing.T) {
 			// A public repository's fixture, so the public URL serves the
 			// binary, with the endpoint refusing an authenticated request.
 			f := newScriptFixture(t, "")
+			f.mu.Lock()
 			f.refuseAsset = true
+			f.mu.Unlock()
 
 			out, code, target := f.run(t, downloader, "--token", "sesame")
 			require.Equal(t, 0, code, "output:\n%s", out)
