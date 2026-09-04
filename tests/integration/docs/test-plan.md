@@ -8,10 +8,9 @@ claim, **nanosecond-resolution execution timelines** recorded by a purpose-built
 
 ## Goals
 
-Forty-eight goals across fifty-two test files, one file each except goal 21, which the three shell helpers split
-between `if_test.go`, `if_changed_test.go`, `for_test.go`, `for_changed_test.go` and `exec_test.go`. They are grouped
-by what they are about rather than by the order they were written in, so you land in one place when looking for how a
-plan gets computed or which command does what.
+The goals are grouped by behavior so readers can find how a plan is computed or which command owns a rule.
+Some goals span several files. Harness checks have a separate owner because they validate the reliability of the
+integration suite itself.
 
 ### Planning and versioning
 
@@ -1376,6 +1375,12 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsCorrectionsAndSuppression`     | A restatement is attributed to whoever restated it, not to the commit it corrects (§7.4.2); a revert takes both entries and their attribution out of the notes (§7.3).                                                                       |
 | `TestAuthorsPrereleaseFreshWindow`         | Attribution narrows exactly as the notes do: each prerelease credits its own changeset, and the stable graduation collecting the train credits the whole train.                                                                             |
 | `TestAuthorsPreviewRendersTheBlocks`       | `dispat preview` prints the record bodies a release would write, so it gains both blocks by construction.                                                                                                                                    |
+
+### Goal 49: integration harness integrity (`internal/harness/race_test.go`)
+
+| Test | Claim proven |
+| --- | --- |
+| `TestCheckRaceReports` | Any recorded subprocess race fails the suite, even when a behavioral scenario accepts a nonzero exit. Unconfigured normal runs and empty report directories pass; unrelated files do not count as race reports. |
 
 ## Regression fences
 
