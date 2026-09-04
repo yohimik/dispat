@@ -163,6 +163,8 @@ func (cp *computation) resolveAuthors(rec *commitRec) {
 // no footers worth reading — and the newest-first order of cp.commits is kept,
 // which is the order rel.Units is built in.
 func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author) {
+	windowSeen := make(map[string]bool)
+	freshSeen := make(map[string]bool)
 	for _, rec := range cp.commits {
 		if !cp.window[name][rec.key] {
 			continue
@@ -171,12 +173,21 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 		if a.empty() {
 			continue
 		}
-		window = append(window, a)
+		window = appendUniqueAuthor(window, windowSeen, a)
 		if !cp.containedInBaseline(name, rec.key) {
-			fresh = append(fresh, a)
+			fresh = appendUniqueAuthor(fresh, freshSeen, a)
 		}
 	}
-	return dedupeAuthors(window), dedupeAuthors(fresh)
+	return window, fresh
+}
+
+func appendUniqueAuthor(out []Author, seen map[string]bool, author Author) []Author {
+	key := author.key()
+	if seen[key] {
+		return out
+	}
+	seen[key] = true
+	return append(out, author)
 }
 
 // dedupeAuthors keeps the first occurrence of each identity, preserving order.
@@ -187,15 +198,10 @@ func dedupeAuthors(in []Author) []Author {
 	if len(in) < 2 {
 		return in
 	}
-	seen := make(map[string]bool, len(in))
-	out := make([]Author, 0, len(in))
+	seen := make(map[string]bool)
+	out := make([]Author, 0, min(len(in), 8))
 	for _, a := range in {
-		k := a.key()
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		out = append(out, a)
+		out = appendUniqueAuthor(out, seen, a)
 	}
 	return out
 }

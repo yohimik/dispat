@@ -232,10 +232,14 @@ func TestComputeFreshWindowAuthorsNarrowOnAPrerelease(t *testing.T) {
 	// not by everyone the train has ever seen. The stable graduation widens
 	// back to the whole window, which AllAuthors is what decides.
 	git := newFakeGit(
+		commit{sha: "c0", message: "fix(core): groundwork",
+			files: []string{"libs/core/zero.txt"}, author: "Linus", email: "linus@example.com"},
 		commit{sha: "c1", message: "feat(core)%beta: first beta work",
 			files: []string{"libs/core/a.txt"}, author: "Ada", email: "ada@example.com"},
 		commit{sha: "c2", message: "fix(core): later work",
 			files: []string{"libs/core/b.txt"}, author: "Grace", email: "grace@example.com"},
+		commit{sha: "c3", message: "fix(core): newest work",
+			files: []string{"libs/core/c.txt"}, author: "A. Lovelace", email: "ADA@example.com"},
 	).tag("core", "1.0.0", "").tag("core", "1.1.0-beta.0", "c1").
 		tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
 
@@ -244,10 +248,10 @@ func TestComputeFreshWindowAuthorsNarrowOnAPrerelease(t *testing.T) {
 	require.NotNil(t, rel)
 	require.True(t, rel.IsPrerelease(), "next: %s", rel.Next)
 
-	assert.Equal(t, []Author{{"Grace", "grace@example.com"}, {"Ada", "ada@example.com"}},
-		rel.WindowAuthors, "the window still spans the train")
-	assert.Equal(t, []Author{{"Grace", "grace@example.com"}}, rel.FreshWindowAuthors,
-		"c1 shipped in beta.0, so only c2 is fresh")
+	assert.Equal(t, []Author{{"A. Lovelace", "ADA@example.com"}, {"Grace", "grace@example.com"}, {"Linus", "linus@example.com"}},
+		rel.WindowAuthors, "newest spelling wins for duplicate identities while the window spans the train")
+	assert.Equal(t, []Author{{"A. Lovelace", "ADA@example.com"}, {"Grace", "grace@example.com"}}, rel.FreshWindowAuthors,
+		"published authors are excluded unless newer fresh work names the same identity")
 	assert.Equal(t, rel.FreshWindowAuthors, rel.AllAuthors(),
 		"a prerelease is attributed to its own changeset alone")
 }
