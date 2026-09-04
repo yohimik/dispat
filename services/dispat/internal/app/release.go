@@ -160,12 +160,16 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		return nil, err
 	}
 
-	// Release writers and failure rollback both own the selected package
-	// paths. Refuse before hooks or writes if those paths already contain user
-	// work, because rollback cannot distinguish it from this run's changes.
+	// An automatic release commit can capture pre-existing work, and
+	// revertOnFail can discard it. Refuse before hooks or writes when either
+	// behavior is active. A release with both disabled preserves writer edits
+	// in the working tree and performs no Git reset, so existing changelog or
+	// manifest edits remain valid input (including an interrupted run's output).
 	var protected []string
 	for _, rel := range pl.Releasing() {
-		protected = append(protected, rel.Pkg.Dir)
+		if commitMode || rel.Pkg.Space.RevertOnFail {
+			protected = append(protected, rel.Pkg.Dir)
+		}
 	}
 	if commitMode {
 		protected = a.appendIncludeDirs(protected, a.cfg.Commit.Include)

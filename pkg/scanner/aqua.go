@@ -84,7 +84,12 @@ func parseAqua(rel string, data []byte) (Manifest, error) {
 		}
 		m.Deps = append(m.Deps, DeclaredDep{Name: name, Range: version})
 	}
-	sort.Slice(m.Deps, func(i, j int) bool { return m.Deps[i].Name < m.Deps[j].Name })
+	sort.Slice(m.Deps, func(i, j int) bool {
+		if m.Deps[i].Name != m.Deps[j].Name {
+			return m.Deps[i].Name < m.Deps[j].Name
+		}
+		return m.Deps[i].Range < m.Deps[j].Range
+	})
 	sort.Strings(m.Dropped)
 	return m, nil
 }

@@ -109,3 +109,28 @@ func TestAquaComputeAndAutoversionUseQualifiedOwnership(t *testing.T) {
 	assert.Contains(t, string(b), "acme/core@0.1.0", "caret policy still writes an exact Aqua pin")
 	assert.NotContains(t, string(b), "^0.1.0")
 }
+
+func TestAquaWriterBatchKeepsCompletedWriteWhenSymlinkRefuses(t *testing.T) {
+	r := harness.New(t)
+	first := "packages:\n- name: cli/cli@v1.0.0 # user comment\n"
+	target := "packages:\n- name: cli/cli@v1.0.0 # linked user file\n"
+	r.WriteFile("aqua.yaml", first)
+	r.WriteFile("user-owned.yaml", target)
+	require.NoError(t, os.Symlink(r.Path("user-owned.yaml"), r.Path(".aqua.yaml")))
+
+	res := r.Command("writer", "aqua.yaml", ".aqua.yaml", "--set", "cli/cli=v2.0.0")
+	require.Equal(t, 1, res.Code, "a later refused file fails the batch")
+	assert.Contains(t, res.Stdout, "aqua.yaml")
+	assert.Contains(t, res.Stdout, "applied")
+	assert.Contains(t, res.Stdout+res.Stderr, "refusing to rewrite a symbolic link")
+	gotFirst, err := os.ReadFile(r.Path("aqua.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "packages:\n- name: cli/cli@v2.0.0 # user comment\n", string(gotFirst),
+		"the completed independent write remains and preserves user content")
+	gotTarget, err := os.ReadFile(r.Path("user-owned.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, target, string(gotTarget), "the symlink target is untouched")
+	info, err := os.Lstat(r.Path(".aqua.yaml"))
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the Aqua name dispatch reached and preserved the symlink itself")
+}

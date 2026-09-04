@@ -216,15 +216,15 @@ func TestWebhookFailingEndpointNeverAffectsTheRelease(t *testing.T) {
 
 	assert.True(t, r.HasTag("core@0.1.0"), "the release itself is untouched")
 	assert.True(t, harness.HasCode(res.Events, "W239"), "every failed delivery warns with its code")
-	// The warning names the endpoint, so an operator with several webhooks
-	// knows which one is down.
+	// The warning names the endpoint without repeating its path or query,
+	// which may contain credentials.
 	found := false
 	for _, e := range res.Events {
-		if e.Code() == "W239" && strings.Contains(e.Str("url"), sink.srv.URL) {
+		if e.Code() == "W239" && e.Str("webhook") == strings.TrimPrefix(sink.srv.URL, "http://") {
 			found = true
 		}
 	}
-	assert.True(t, found, "the W239 line carries the endpoint url")
+	assert.True(t, found, "the W239 line carries the redacted endpoint name")
 }
 
 func TestWebhookUnreachableEndpointNeverAffectsTheRelease(t *testing.T) {

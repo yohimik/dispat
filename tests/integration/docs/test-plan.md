@@ -39,6 +39,8 @@ plan gets computed or which command does what.
    with no `DueTo` link to follow; a package joining a versioning group with no version, and one joining with a version
    that outranks the group's; and the boundary where `revertOnFail` stops. Each one fails by producing a *plausible*
    release rather than an error, which is what makes them worth a file of their own.
+   `TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted` owns the dirty-tree boundary: existing work is preserved
+   for a package whose effective `revertOnFail` is false and refused only where rollback could overwrite it.
 
 34. **Versioning `none`** (`versioning_none_test.go`): the mode that leaves the release flow entirely. A `none` package
     is never versioned, tagged, changelogged or published, runs scripts from the default `dispat run` window whenever
@@ -155,6 +157,10 @@ plan gets computed or which command does what.
     with the full environment, resolved per package through the three `scripts` levels, the `dispat <script>`
     shorthand, the `--package`/`--space` selection, the `--since` window and the `--consumers` expansion and how they
     compose, the `--on-error` policies, the concurrency budget, and cross-package output carrying.
+    `TestSelectionWindowsFromHEAD1ThroughHEAD9` holds the revision-depth regression across `HEAD~1` through `HEAD~9`,
+    `all`, and a transitive `--consumers` expansion ending at a web package. `TestRunSceneFixtureSelection` binds the
+    checked-in demo graph to the real CLI, while `TestCITestModuleSelectionRunsAffectedOnceAndAllRunsEveryModule`
+    owns the module-selection contract used by the repository's CI sweep.
 19. **The standalone step commands** (`standalone_test.go`): `dispat changelog`, `dispat autoversion`, `dispat commit`
     and `dispat github` through the binary: the shared package selection, changelog idempotence (W226), the in-flow
     scenario where nested step commands land the changelog inside the tagged commit, the `--tag`/`--push` committer
@@ -204,6 +210,14 @@ plan gets computed or which command does what.
     no config file, no commit and no plan at all, that their outcomes reach the process exit code, and that the verify
     gates (`--verify-unlinked`, `--verify-linked`, `--forbid-range`, `--require-range`), the link sweep
     (`--drop-links`) and the build-counter write (`--set-build`) hold their contracts over a process boundary.
+    Aqua's composed-manifest boundary is covered separately in `aqua_test.go`: `.aqua/aqua.yaml` imports an
+    arbitrary-name package list, scanner reports literal and dynamic entries without evaluation, writer reaches the
+    imported file through `--manifest-format aqua`, malformed YAML preserves healthy partial results, and
+    compute/autoversion share the registry-qualified ownership while writing an exact pin.
+    `TestAquaDemoFixtureThroughManifestCommands` owns scanner/writer composition,
+    `TestAquaComputeAndAutoversionUseQualifiedOwnership` owns qualified compute/autoversion identity, and
+    `TestAquaWriterBatchKeepsCompletedWriteWhenSymlinkRefuses` owns partial-write reporting and preservation when a
+    later dot-named Aqua symlink is refused.
 26. **The `autowriter` command** (`autowriter_test.go`): `dispat writer`'s edits applied to the packages the plan
     selects, including the edits derived from the workspace itself (`--set-local`, `--link-local`).
 27. **The `autoreplacer` command** (`autoreplacer_test.go`): a replacement fanned out across the packages the plan
@@ -219,6 +233,10 @@ plan gets computed or which command does what.
     compares the checkout against the branch it would push to and refuses a stale one. The pair is also proven to be
     off unless asked for. The guard closes before the plan exists, so a commit pushed while the run is working reaches
     the finalize push instead, where the release merges itself with what landed or says why it cannot.
+    `TestReleaseReconcilesGithubCreateWhoseResponseWasLost` in `release_lost_response_test.go` covers the external-write
+    ambiguity after publication: GitHub persists a create,
+    its response is lost, independent work continues, the run reports E222 and exits non-zero, and durable tags make
+    the rerun a no-op without another POST.
 30. **The release lock** (`lock_test.go`): one tag on the remote decides who releases. Two runs against one repository
     is not a race dispat can win by being careful, so it refuses to enter it: the first to push the lock tag releases,
     the second is told to come back later, and the tag is gone by the time either exits.
@@ -353,6 +371,7 @@ tests/integration/
   draft_test.go             goal 46
   commands_test.go          goal 17
   run_test.go               goal 18
+  selection_depth_test.go   goal 18
   standalone_test.go        goal 19
   filter_test.go            goal 20
   if_test.go                goal 21 (dispat if)
@@ -367,12 +386,14 @@ tests/integration/
   compute_test.go           goal 23
   autoversion_test.go       goal 24
   manifests_test.go         goal 25
+  aqua_test.go              goals 23-25
   autowriter_test.go        goal 26
   autoreplacer_test.go    goal 27
   docker_test.go            goal 28
 
   the guards
   guard_test.go             goal 29
+  release_lost_response_test.go goal 29
   lock_test.go              goal 30
 
   correcting the record
@@ -1407,7 +1428,7 @@ than showing up as a puzzling behaviour change somewhere downstream.
 | **A package with no parseable manifest never became a name owner**, so `manifestNames` could not make it visible to `dispat compute`.                                                                             | `TestAutoVersionManifestNamesMakeAnEdgeVisible`; `TestComputeStatedManifestNamesDeriveEdges`, `TestComputeStatedNameOutranksADeclaredOne` | `autoversion_test.go`; `internal/app` |
 | **A replacement landing inside a binary file.** A glob reaching a PNG that happens to contain the version text would have corrupted it.                                                                            | `TestAutoVersionReplaceStrategy`; `TestReplaceRuleSkipsBinaryAndOversizedFiles`, `TestReplaceRefusesABinaryFile`             | `autoversion_test.go`; `internal/release`, `pkg/writer` |
 | **An empty `find` matching at every position.** Both the API and the command line refuse it rather than shredding the file.                                                                                        | `TestReplaceRefusesAnEmptyFind`, `TestReplaceBytesIgnoresAnEmptyFind`, `TestParseReplaceSpec`                                | `pkg/writer`, `internal/cli` |
-| **Two span replacements covering the same bytes**, or spans queued against a file a writer also regenerated whole: the result would have depended on the order they were queued in.                                | `TestLinkrRefusesOverlappingPatches`, `TestLinkrRefusesSpansOnARegeneratedFile`                                          | `pkg/writer` |
+| **Two span replacements covering the same bytes**, or spans queued against a file a writer also regenerated whole: the result would have depended on the order they were queued in.                                | `TestSplicerRefusesOverlappingPatches`, `TestSplicerRefusesSpansOnARegeneratedFile`                                      | `pkg/writer` |
 | **A correction that reached no package said nothing at all.** A correction with no scope-set takes its packages from its targets, so a target no pending window still holds left it addressing nothing, and it was skipped before it could report. This is the one shape `W209` exists to prevent: the operator writes the correction, sees no diagnostic, and believes the record was fixed. | `TestCorrectionReachingNoPackageStillReportsW209`                                                                        | `internal/plan` |
 | **`E213` reported once per target rather than once per package.** Two targets that both omit the same package is one mistake in one scope-set, fixed once; reporting it per footer scaled the noise with the number of footers.                                | `TestCorrectionWideningIsReportedOncePerPackage`                                                                          | `internal/plan` |
 | **A unit naming one target twice reported `W210` against itself.** §7.4.1 collapses several targets into the one carrying record, so the second mention is redundant rather than superseded; the warning told the operator a newer commit had overridden their correction and named the correction's own commit as the culprit. | `TestCorrectionNamingOneTargetTwiceIsNotSuperseded`                                                                       | `internal/plan` |

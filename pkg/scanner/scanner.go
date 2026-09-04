@@ -518,21 +518,40 @@ func scanAquaImports(ctx context.Context, dir string, mans []Manifest) ([]Manife
 	}
 	seen := make(map[string]bool)
 	seenReal := make(map[string]bool)
+	var errs []error
+	// The ordinary walk can encounter two conventional Aqua names that are
+	// aliases for one file. Give canonical sources one deterministic owner,
+	// and do not retain a conventional-name symlink that escapes the scan root.
+	sort.SliceStable(mans, func(i, j int) bool { return mans[i].Path < mans[j].Path })
+	owned := mans[:0]
 	for _, m := range mans {
-		if m.Ecosystem == EcosystemAqua {
-			p := filepath.Clean(filepath.Join(root, filepath.FromSlash(m.Path)))
-			seen[p] = true
-			if real, e := filepath.EvalSymlinks(p); e == nil {
-				seenReal[real] = true
-			}
+		if m.Ecosystem != EcosystemAqua {
+			owned = append(owned, m)
+			continue
 		}
+		p := filepath.Clean(filepath.Join(root, filepath.FromSlash(m.Path)))
+		real, evalErr := filepath.EvalSymlinks(p)
+		if evalErr != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", m.Path, evalErr))
+			continue
+		}
+		if !pathContained(realRoot, real) {
+			errs = append(errs, fmt.Errorf("%s: aqua manifest escapes scanned directory through symlink", m.Path))
+			continue
+		}
+		if seenReal[real] {
+			continue
+		}
+		seen[p] = true
+		seenReal[real] = true
+		owned = append(owned, m)
 	}
+	mans = owned
 	queue := make([]string, 0, len(seen))
 	for p := range seen {
 		queue = append(queue, p)
 	}
 	sort.Strings(queue)
-	var errs []error
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)

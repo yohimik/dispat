@@ -542,6 +542,44 @@ func TestEdgeRevertOnFailIsThreeStateAtThePackageLevel(t *testing.T) {
 		"the package that said nothing inherits the root's true")
 }
 
+func TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted(t *testing.T) {
+	makeRepo := func(t *testing.T) *harness.Repo {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.RevertOnFail = models.Bool(true)
+		cfg.Packages = map[string]models.PackageConfig{
+			"keeper": {RevertOnFail: models.Bool(false)},
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "keeper")
+		r.SeedPackage("packages", "cleaner")
+		r.Commit("feat(keeper,cleaner): seed packages")
+		return r
+	}
+
+	t.Run("non-reverted package preserves existing work", func(t *testing.T) {
+		r := makeRepo(t)
+		r.WriteFile("packages/keeper/local.txt", "keep me\n")
+		r.ReleaseOK()
+		kept, err := os.ReadFile(r.Path("packages", "keeper", "local.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "keep me\n", string(kept))
+		assert.True(t, r.HasTag("keeper@0.1.0"))
+	})
+
+	t.Run("reverted package refuses existing work", func(t *testing.T) {
+		r := makeRepo(t)
+		r.WriteFile("packages/cleaner/local.txt", "keep me\n")
+		res := r.Release()
+		require.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout, "pre-existing local changes")
+		kept, err := os.ReadFile(r.Path("packages", "cleaner", "local.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "keep me\n", string(kept))
+		assert.Empty(t, r.TagList())
+	})
+}
+
 // TestEdgeRevertOnFailNeverReachesAFailedCommit: the far side of the same
 // boundary. The other two tests fail a package *before* it published, where
 // reverting is the whole point; this one fails the release commit, which

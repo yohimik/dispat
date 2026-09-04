@@ -52,6 +52,8 @@ func TestVersionValidatorRequiresExactVersion(t *testing.T) {
 	}
 	fakeBinary(t, path, "1.2.3")
 	require.NoError(t, (VersionValidator{Want: "1.2.3"}).Validate(context.Background(), path))
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nprintf '  logo\\n\\ndispat 1.2.3 (linux_arm64)\\n'\n"), 0o755))
+	require.NoError(t, (VersionValidator{Want: "1.2.3"}).Validate(context.Background(), path), "the version line may follow the CLI logo")
 }
 
 // brokenBinary writes a file that cannot run at all.

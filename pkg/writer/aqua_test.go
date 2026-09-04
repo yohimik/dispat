@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/yohimik/dispat/pkg/manifest"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRewriteAquaPreservesLayoutQuotesCommentsAndCRLF(t *testing.T) {
@@ -29,6 +30,36 @@ func TestRewriteAquaPreservesLayoutQuotesCommentsAndCRLF(t *testing.T) {
 	if got != want {
 		t.Fatalf("write changed surrounding bytes\ngot %q\nwant %q", got, want)
 	}
+}
+
+func FuzzRewriteAquaNeverCommitsInvalidYAML(f *testing.F) {
+	f.Add([]byte("packages:\n- name: cli/cli@v1.0.0\n"))
+	f.Add([]byte("packages: [{name: cli/cli@v1.0.0}]\n"))
+	f.Add([]byte("version: &v v1\npackages:\n- name: cli/cli\n  version: *v\n"))
+	f.Fuzz(func(t *testing.T, src []byte) {
+		if len(src) > 64<<10 {
+			return
+		}
+		path := filepath.Join(t.TempDir(), "aqua.yaml")
+		if err := os.WriteFile(path, src, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Rewrite(path, "", []Edit{{Name: "cli/cli", Range: "v2.0.0"}})
+		got, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err != nil {
+			if string(got) != string(src) {
+				t.Fatal("failed rewrite changed the file")
+			}
+			return
+		}
+		var doc yaml.Node
+		if yaml.Unmarshal(got, &doc) != nil {
+			t.Fatal("successful rewrite committed invalid YAML")
+		}
+	})
 }
 
 func TestRewriteAsAquaImportedFilenameAndDynamicSkip(t *testing.T) {

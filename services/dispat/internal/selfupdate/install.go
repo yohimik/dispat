@@ -300,8 +300,15 @@ func smokeTest(ctx context.Context, path, want string) error {
 	if err != nil {
 		return fmt.Errorf("selfupdate: the downloaded binary does not run: %w", err)
 	}
-	fields := strings.Fields(string(out))
-	if want != "" && (len(fields) < 2 || fields[0] != "dispat" || fields[1] != want) {
+	matched := want == ""
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "dispat" && fields[1] == want {
+			matched = true
+			break
+		}
+	}
+	if !matched {
 		return fmt.Errorf("selfupdate: the downloaded binary reports a different version than %s", want)
 	}
 	return nil
