@@ -282,12 +282,15 @@ func (r *Releaser) once(ctx context.Context, call apiCall, attempt int) ([]byte,
 	if limit <= 0 {
 		limit = maxErrorBody
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		// A truncated success body would corrupt what the caller parses out
 		// of it (a created release's upload URL), so it fails the call even
 		// when the status looked right.
 		return nil, resp.StatusCode, 0, fmt.Errorf("github: %s: reading response: %w", call.What, err)
+	}
+	if int64(len(data)) > limit {
+		return nil, resp.StatusCode, 0, fmt.Errorf("github: %s: response exceeds %d bytes", call.What, limit)
 	}
 	if resp.StatusCode != call.WantStatus && resp.StatusCode != call.TolerateStatus {
 		return nil, resp.StatusCode, retryAfterOf(resp), fmt.Errorf("github: %s: unexpected status %s: %s",

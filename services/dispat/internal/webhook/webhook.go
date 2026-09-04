@@ -79,6 +79,8 @@ type Dispatcher struct {
 	log     zerolog.Logger
 	workers []*worker
 	wg      sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
 	// mu serialises enqueues against Close: Event holds it shared while
 	// sending, Close holds it exclusively while closing the queues, so a send
 	// on a closed channel cannot happen.
@@ -95,7 +97,8 @@ func NewDispatcher(endpoints []Endpoint, client *http.Client, log zerolog.Logger
 	if client == nil {
 		client = &http.Client{}
 	}
-	d := &Dispatcher{client: client, log: log}
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &Dispatcher{client: client, log: log, ctx: ctx, cancel: cancel}
 	for _, ep := range endpoints {
 		w := &worker{ep: ep, queue: make(chan delivery, queueSize)}
 		d.workers = append(d.workers, w)
@@ -158,6 +161,7 @@ func (d *Dispatcher) Event(ev release.Event) {
 // Idempotent; only the first call does anything.
 func (d *Dispatcher) Close(ctx context.Context) {
 	d.once.Do(func() {
+		defer d.cancel()
 		d.mu.Lock()
 		d.closed = true
 		for _, w := range d.workers {
@@ -184,6 +188,7 @@ func (d *Dispatcher) Close(ctx context.Context) {
 }
 
 func (d *Dispatcher) abandon() {
+	d.cancel()
 	d.log.Warn().Str("code", plan.CodeWebhookFailed).Int64("abandoned", d.pending.Load()).
 		Msg("webhook deliveries abandoned, flush deadline reached")
 }
@@ -192,7 +197,11 @@ func (d *Dispatcher) abandon() {
 func (d *Dispatcher) work(w *worker) {
 	defer d.wg.Done()
 	for del := range w.queue {
-		d.deliver(w.ep, del)
+		// Close's deadline also ends network requests and retries. Drain the
+		// remaining queue without sending so its payloads can be released.
+		if d.ctx.Err() == nil {
+			d.deliver(w.ep, del)
+		}
 		d.pending.Add(-1)
 	}
 }
@@ -205,8 +214,17 @@ func (d *Dispatcher) deliver(ep Endpoint, del delivery) {
 	start := time.Now()
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if d.ctx.Err() != nil {
+			return
+		}
 		if attempt > 1 {
-			time.Sleep(retryDelay << (attempt - 2))
+			timer := time.NewTimer(retryDelay << (attempt - 2))
+			select {
+			case <-d.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 		}
 		status, err := d.attempt(ep, del)
 		log.Trace().Int("attempt", attempt).Int("status", status).Err(err).Msg("webhook delivery attempt")
@@ -234,7 +252,7 @@ func retryableStatus(status int) bool {
 // built fresh per attempt — the body bytes are immutable, so each attempt
 // reads them from the start.
 func (d *Dispatcher) attempt(ep Endpoint, del delivery) (status int, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), ep.Timeout)
+	ctx, cancel := context.WithTimeout(d.ctx, ep.Timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, ep.Method, ep.URL, bytes.NewReader(del.body))
 	if err != nil {
