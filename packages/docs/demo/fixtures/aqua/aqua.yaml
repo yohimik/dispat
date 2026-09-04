@@ -1,0 +1,6 @@
+# Aqua configuration used by both the real-CLI regression and the demo scene.
+packages:
+  - import: tools.inc
+  - name: private/tool
+    registry: corp
+    version: "1.4.0"

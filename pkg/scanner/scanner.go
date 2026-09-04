@@ -97,6 +97,7 @@ const (
 	EcosystemGradle    Ecosystem = "gradle"    // libs.versions.toml, build.gradle(.kts)
 	EcosystemRubyGems  Ecosystem = "rubygems"  // Gemfile, *.gemspec
 	EcosystemDocker    Ecosystem = "docker"    // Dockerfile, compose.yaml
+	EcosystemAqua      Ecosystem = "aqua"      // aqua.yaml and imported package lists
 
 	// The game engines, each named after the engine rather than a package
 	// manager, because that is what resolves their manifests.
@@ -147,6 +148,7 @@ var ecosystems = map[manifest.Format]Ecosystem{
 	manifest.FormatDefoldProject:        EcosystemDefold,
 	manifest.FormatO3DEProject:          EcosystemO3DE,
 	manifest.FormatO3DEGem:              EcosystemO3DE,
+	manifest.FormatAqua:                 EcosystemAqua,
 }
 
 // EcosystemOf reports the ecosystem a format's manifests belong to.
@@ -216,6 +218,12 @@ func (m Manifest) AtPackageRoot() bool {
 	if !ok {
 		return false
 	}
+	if format == manifest.FormatAqua {
+		switch m.Path {
+		case "aqua/aqua.yaml", "aqua/aqua.yml", ".aqua/aqua.yaml", ".aqua/aqua.yml":
+			return true
+		}
+	}
 	suffix, ok := manifest.PathSuffix(format)
 	return ok && m.Path == suffix
 }
@@ -269,6 +277,7 @@ var parsers = map[manifest.Format]parseFunc{
 	manifest.FormatGemspec:         parseGemspec,
 	manifest.FormatDockerfile:      parseDockerfile,
 	manifest.FormatCompose:         parseCompose,
+	manifest.FormatAqua:            parseAqua,
 
 	manifest.FormatUnityPackages:        parseUnityPackages,
 	manifest.FormatUnityProjectSettings: parseUnityProjectSettings,
@@ -447,7 +456,9 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if path != dir && SkipWorkspaceDir(name) {
+			// .aqua is a documented Aqua configuration directory, so it is
+			// the one dot-directory a manifest walk enters.
+			if path != dir && name != ".aqua" && SkipWorkspaceDir(name) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -487,8 +498,143 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 	if walkErr != nil {
 		errs = append(errs, walkErr)
 	}
+	mans, aquaErrs := scanAquaImports(ctx, dir, mans)
+	errs = append(errs, aquaErrs...)
 	sort.Slice(mans, func(i, j int) bool { return mans[i].Path < mans[j].Path })
 	return mans, errors.Join(errs...)
+}
+
+// scanAquaImports follows only local Aqua package-list imports. It never asks
+// a registry or evaluates a version expression. Every expanded path must stay
+// beneath the scanned directory, including after symlink resolution.
+func scanAquaImports(ctx context.Context, dir string, mans []Manifest) ([]Manifest, []error) {
+	root, err := filepath.Abs(dir)
+	if err != nil {
+		return mans, []error{err}
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		realRoot = root
+	}
+	seen := make(map[string]bool)
+	seenReal := make(map[string]bool)
+	for _, m := range mans {
+		if m.Ecosystem == EcosystemAqua {
+			p := filepath.Clean(filepath.Join(root, filepath.FromSlash(m.Path)))
+			seen[p] = true
+			if real, e := filepath.EvalSymlinks(p); e == nil {
+				seenReal[real] = true
+			}
+		}
+	}
+	queue := make([]string, 0, len(seen))
+	for p := range seen {
+		queue = append(queue, p)
+	}
+	sort.Strings(queue)
+	var errs []error
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
+		path := queue[0]
+		queue = queue[1:]
+		data, err := readManifest(path)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", path, err))
+			continue
+		}
+		importDir, patterns, err := parseAquaImports(data)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", path, err))
+			continue
+		}
+		if importDir != "" {
+			patterns = append(patterns, filepath.Join(importDir, "*.yaml"), filepath.Join(importDir, "*.yml"))
+		}
+		for _, pattern := range patterns {
+			if err := ctx.Err(); err != nil {
+				errs = append(errs, err)
+				return mans, errs
+			}
+			candidate := filepath.Clean(filepath.Join(filepath.Dir(path), filepath.FromSlash(pattern)))
+			if !pathContained(root, candidate) {
+				errs = append(errs, fmt.Errorf("%s: aqua import escapes scanned directory: %s", path, pattern))
+				continue
+			}
+			matches, err := filepath.Glob(candidate)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: malformed aqua import %q: %w", path, pattern, err))
+				continue
+			}
+			sort.Strings(matches)
+			for _, match := range matches {
+				if err := ctx.Err(); err != nil {
+					errs = append(errs, err)
+					return mans, errs
+				}
+				info, statErr := os.Stat(match)
+				if statErr != nil || !info.Mode().IsRegular() {
+					if statErr != nil {
+						errs = append(errs, statErr)
+					}
+					continue
+				}
+				real, evalErr := filepath.EvalSymlinks(match)
+				if evalErr != nil {
+					errs = append(errs, evalErr)
+					continue
+				}
+				if !pathContained(realRoot, real) {
+					errs = append(errs, fmt.Errorf("%s: aqua import escapes scanned directory through symlink", match))
+					continue
+				}
+				if seenReal[real] {
+					continue
+				}
+				match = filepath.Clean(match)
+				if seen[match] {
+					continue
+				}
+				seen[match] = true
+				seenReal[real] = true
+				b, readErr := readManifest(match)
+				if readErr != nil {
+					errs = append(errs, readErr)
+					continue
+				}
+				rel, relErr := filepath.Rel(root, match)
+				if relErr != nil {
+					errs = append(errs, relErr)
+					continue
+				}
+				rel = filepath.ToSlash(rel)
+				m, parseErr := parseAqua(rel, b)
+				if parseErr != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", rel, parseErr))
+					continue
+				}
+				mans = append(mans, m)
+				queue = append(queue, match)
+			}
+		}
+	}
+	// A recognised import may already have been found by the ordinary walk.
+	// Keep one manifest per source path, with the first deterministically won.
+	sort.SliceStable(mans, func(i, j int) bool { return mans[i].Path < mans[j].Path })
+	out := mans[:0]
+	for _, m := range mans {
+		if len(out) == 0 || out[len(out)-1].Path != m.Path {
+			out = append(out, m)
+		}
+	}
+	return out, errs
+}
+
+func pathContained(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // ScanRoot implements Scanner.
@@ -535,6 +681,33 @@ func (fsScanner) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 		}
 		mans = append(mans, m)
 	}
+	// Aqua treats these nested conventional files, and the local files they
+	// import, as the directory's configuration. Include that logical root in a
+	// root-only scan even though other nested manifests remain excluded.
+	for _, rel := range []string{"aqua/aqua.yaml", "aqua/aqua.yml", ".aqua/aqua.yaml", ".aqua/aqua.yml"} {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			errs = append(errs, ctxErr)
+			break
+		}
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		data, readErr := readManifest(path)
+		if errors.Is(readErr, os.ErrNotExist) {
+			continue
+		}
+		if readErr != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", rel, readErr))
+			continue
+		}
+		m, parseErr := parseAqua(rel, data)
+		if parseErr != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", rel, parseErr))
+			continue
+		}
+		mans = append(mans, m)
+	}
+	mans, aquaErrs := scanAquaImports(ctx, dir, mans)
+	errs = append(errs, aquaErrs...)
+	sort.Slice(mans, func(i, j int) bool { return mans[i].Path < mans[j].Path })
 	return mans, errors.Join(errs...)
 }
 

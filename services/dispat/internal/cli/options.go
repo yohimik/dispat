@@ -94,6 +94,7 @@ type options struct {
 	scVerifyUnlinked, scVerifyLinked       *bool
 	scForbidRange, scRequireRange          *[]string
 	wrSetVersion, wrSetBuild               *string
+	wrManifestFormat                       *string
 	wrSet, wrLink                          *[]string
 	wrSetLocal, wrLinkLocal, wrUnlinkLocal *bool
 	wrDropLinks                            *bool
@@ -269,6 +270,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"scanner: fail when no declared dependency range matches this pattern; each pattern is asked on its own (repeatable)")
 	o.wrSetVersion = fs.String("set-version", "",
 		"rewrite each manifest's own version field to this version")
+	o.wrManifestFormat = fs.String("manifest-format", "",
+		"writer: parse arbitrary imported file names as this format (aqua)")
 	o.wrSetBuild = fs.String("set-build", "",
 		"writer: write each manifest's build counter (CFBundleVersion, android:versionCode, CURRENT_PROJECT_VERSION, Gradle versionCode, a pubspec version's + suffix, Unity's bundle version codes, Godot's version/code, an Unreal plugin's Version and Android StoreVersion)")
 	o.wrSet = fs.StringArray("set", nil,

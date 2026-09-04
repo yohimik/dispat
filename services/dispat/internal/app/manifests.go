@@ -74,6 +74,9 @@ type WriteOptions struct {
 	Root string
 	// Paths are the manifest files to edit, relative to Root.
 	Paths []string
+	// Format overrides file-name detection, for imported Aqua files whose
+	// names are intentionally arbitrary.
+	Format manifest.Format
 	// Version, when set, rewrites each manifest's own version field.
 	Version string
 	// Build, when set, writes each manifest's build counter where its format
@@ -382,7 +385,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 	out := listing(opts.Out)
 	edit := manifestEdit{
 		Version: opts.Version, Build: opts.Build, Edits: opts.Edits, Links: opts.Links,
-		DropLinks: opts.DropLinks, Writer: opts.Writer,
+		DropLinks: opts.DropLinks, Writer: opts.Writer, Format: opts.Format,
 	}
 	for _, rel := range opts.Paths {
 		if err := ctx.Err(); err != nil {
@@ -444,6 +447,7 @@ func WriteManifests(ctx context.Context, opts WriteOptions) error {
 // autowriter` builds once per covered package, so both spell "what a write
 // does to a manifest" the same way.
 type manifestEdit struct {
+	Format manifest.Format
 	// Version, when set, rewrites the manifest's own version field.
 	Version string
 	// Build, when set, writes the manifest's build counter.
@@ -491,7 +495,12 @@ func (e manifestEdit) apply(path string) (writer.Result, writer.LinkResult, erro
 		w = writer.New()
 	}
 	if e.Version != "" || len(e.Edits) > 0 {
-		if res, err = w.Rewrite(path, e.Version, e.Edits); err != nil {
+		if e.Format != "" && e.Writer == nil {
+			res, err = writer.RewriteAs(path, e.Format, e.Version, e.Edits)
+		} else {
+			res, err = w.Rewrite(path, e.Version, e.Edits)
+		}
+		if err != nil {
 			return res, linkRes, err
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
+	"github.com/yohimik/dispat/pkg/manifest"
 	"github.com/yohimik/dispat/pkg/scanner"
 	"github.com/yohimik/dispat/pkg/writer"
 
@@ -101,7 +102,7 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr // interrupted mid-stage: no more rewrites
 		}
-		if !writer.Supported(m.Path) {
+		if !writer.Supported(m.Path) && m.Ecosystem != scanner.EcosystemAqua {
 			// Defensive: every scanned format has a writer today, and the
 			// fence tests keep it so. The guard stays for the day one gains a
 			// reader first.
@@ -132,7 +133,12 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 			continue
 		}
 		path := filepath.Join(tc.rel.Pkg.Dir, filepath.FromSlash(m.Path))
-		res, err := writer.Rewrite(path, version, edits)
+		var res writer.Result
+		if m.Ecosystem == scanner.EcosystemAqua {
+			res, err = writer.RewriteAs(path, manifest.FormatAqua, version, edits)
+		} else {
+			res, err = writer.Rewrite(path, version, edits)
+		}
 		if err != nil {
 			return err
 		}
@@ -351,6 +357,10 @@ func RangeText(policy, version string, ecosystem scanner.Ecosystem) string {
 			// come to that is naming the version outright.
 			return version
 		}
+	case scanner.EcosystemAqua:
+		// Aqua package versions are pins. Its updater understands an exact
+		// version, not npm-style caret or tilde ranges.
+		return version
 	case scanner.EcosystemUnity:
 		switch policy {
 		case "", "caret", "tilde", "exact":

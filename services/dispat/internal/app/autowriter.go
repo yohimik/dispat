@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/yohimik/dispat/pkg/manifest"
 	"github.com/yohimik/dispat/pkg/scanner"
 	"github.com/yohimik/dispat/pkg/writer"
 
@@ -415,7 +416,7 @@ func (w *writerWork) manifests(ctx context.Context, rel *plan.Release) ([]scanne
 	}
 	out := make([]scanner.Manifest, 0, len(mans))
 	for _, m := range mans {
-		if !writer.Supported(m.Path) {
+		if !writer.Supported(m.Path) && m.Ecosystem != scanner.EcosystemAqua {
 			continue // a read-only ecosystem: nothing here can write it
 		}
 		if w.scope == model.ScopeAll && w.ownedElsewhere(rel.Pkg.Name, rel.Pkg.Dir, m.Path) {
@@ -450,6 +451,9 @@ func (w *writerWork) write(ctx context.Context, rel *plan.Release, mans []scanne
 			return err
 		}
 		one := edits
+		if m.Ecosystem == scanner.EcosystemAqua {
+			one.Format = manifest.FormatAqua
+		}
 		if !m.AtPackageRoot() {
 			// The own-version write applies to the package's own manifests
 			// alone: a nested example has its own version story, and stamping

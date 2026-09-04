@@ -39,6 +39,7 @@ const (
 	FormatGemspec         Format = "gemspec"          // *.gemspec
 	FormatDockerfile      Format = "dockerfile"       // Dockerfile, Dockerfile.*, *.Dockerfile
 	FormatCompose         Format = "compose"          // compose.yaml, docker-compose.yml, ...
+	FormatAqua            Format = "aqua"             // aqua.yaml, .aqua.yaml, aqua/aqua.yaml
 
 	// The game engines. Each keeps its version somewhere a package manager
 	// would not look, and several of them declare dependencies beside it.
@@ -64,7 +65,7 @@ var Formats = []Format{
 	FormatPackagesProps, FormatPackagesConfig, FormatPubspec, FormatPlist,
 	FormatAndroidManifest, FormatGradleCatalog, FormatGradleBuild,
 	FormatXcodeProject, FormatPodfile, FormatPodspec, FormatGemfile,
-	FormatGemspec, FormatDockerfile, FormatCompose,
+	FormatGemspec, FormatDockerfile, FormatCompose, FormatAqua,
 	FormatUnityPackages, FormatUnityProjectSettings, FormatGodotProject,
 	FormatGodotPlugin, FormatGodotExportPresets, FormatUnrealProject,
 	FormatUnrealPlugin, FormatUnrealGameConfig, FormatUnrealEngineConfig,
@@ -88,6 +89,10 @@ var byName = map[string]Format{
 	"Gemfile":                  FormatGemfile,
 	"Directory.Packages.props": FormatPackagesProps,
 	"packages.config":          FormatPackagesConfig,
+	"aqua.yaml":                FormatAqua,
+	"aqua.yml":                 FormatAqua,
+	".aqua.yaml":               FormatAqua,
+	".aqua.yml":                FormatAqua,
 	"build.gradle":             FormatGradleBuild,
 	"build.gradle.kts":         FormatGradleBuild,
 	// A Gradle version catalog sits at gradle/libs.versions.toml by

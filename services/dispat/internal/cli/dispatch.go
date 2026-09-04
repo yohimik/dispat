@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 
+	"github.com/yohimik/dispat/pkg/manifest"
 	"github.com/yohimik/dispat/pkg/writer"
 
 	"github.com/yohimik/dispat/services/dispat/internal/app"
@@ -823,10 +824,16 @@ func (r *runner) runManifests() int {
 			return 1
 		}
 	default:
+		format := manifest.Format(*r.o.wrManifestFormat)
+		if format != "" && format != manifest.FormatAqua {
+			r.boot.Error().Str("format", string(format)).Msg("unknown --manifest-format value (want aqua)")
+			return 2
+		}
 		if app.WriteManifests(ctx, app.WriteOptions{
 			Root: *r.o.root, Paths: r.inv.paths, Version: r.write.version,
-			Build: r.write.build,
-			Edits: r.write.edits, Links: r.write.links, DropLinks: r.write.dropLinks,
+			Format: format,
+			Build:  r.write.build,
+			Edits:  r.write.edits, Links: r.write.links, DropLinks: r.write.dropLinks,
 			Strict: *r.o.strict,
 			JSON:   *r.o.logFormat == "json", Out: r.stdout, Log: log,
 		}) != nil {

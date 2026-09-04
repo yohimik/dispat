@@ -136,6 +136,7 @@ var rewriters = map[manifest.Format]rewriteFunc{
 	manifest.FormatPodspec:         rewritePodspec,
 	manifest.FormatGemspec:         rewriteGemspec,
 	manifest.FormatCompose:         rewriteCompose,
+	manifest.FormatAqua:            rewriteAqua,
 
 	manifest.FormatUnityProjectSettings: rewriteUnityProjectSettings,
 	manifest.FormatGodotProject:         rewriteGodotProject,
@@ -227,6 +228,39 @@ func Rewrite(path, version string, edits []Edit) (Result, error) {
 	rewrite, ok := dispatch(path)
 	if !ok {
 		return Result{}, fmt.Errorf("%s: %w", path, ErrUnsupportedManifest)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Result{}, err
+	}
+	if info.Size() > maxManifestBytes {
+		return Result{}, tooLarge(path, info.Size())
+	}
+	res, err := rewrite(path, version, edits)
+	res.Path = path
+	return res, err
+}
+
+// RewriteAs applies edits using format even when path has a non-standard file
+// name, as Aqua imports commonly do. The format must be a supported writer.
+func RewriteAs(path string, format manifest.Format, version string, edits []Edit) (Result, error) {
+	rewrite, ok := rewriters[format]
+	if !ok {
+		return Result{}, fmt.Errorf("%s: %w", path, ErrUnsupportedManifest)
+	}
+	copied := false
+	for i, e := range edits {
+		kind, ok := manifest.ParseKind(string(e.Kind))
+		if !ok {
+			return Result{}, fmt.Errorf("writer: edit %q: unknown dependency kind %q", e.Name, e.Kind)
+		}
+		if kind != e.Kind {
+			if !copied {
+				edits = append([]Edit(nil), edits...)
+				copied = true
+			}
+			edits[i].Kind = kind
+		}
 	}
 	info, err := os.Stat(path)
 	if err != nil {

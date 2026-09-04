@@ -1,0 +1,10 @@
+{
+  "commands": [
+    "dispat scanner . --root-only --log-format json",
+    "dispat writer .aqua/tools.inc --manifest-format aqua --set cli/cli=v2.1.0"
+  ],
+  "selectedPackages": ["cli/cli", "corp:private/tool"],
+  "versionsBefore": {"cli/cli": "v2.0.0", "corp:private/tool": "1.4.0"},
+  "versionsAfter": {"cli/cli": "v2.1.0", "corp:private/tool": "1.4.0"},
+  "outcomes": {"applied": 1, "skippedDynamic": 1, "missing": 0}
+}

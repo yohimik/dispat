@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/yohimik/dispat/pkg/manifest v1.1.1
 	golang.org/x/mod v0.29.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require github.com/pelletier/go-toml/v2 v2.2.4
