@@ -50,6 +50,15 @@ func goTest(args []string, w io.Writer) (int, error) {
 		return 1, err
 	}
 	logPath := filepath.Join(logDir, name+".json")
+	stamp := filepath.Join(root, "coverage", name+".commit")
+	commit := os.Getenv("TESTREPORT_COMMIT")
+	if !strings.HasSuffix(name, "-race") {
+		// Invalidate an earlier pass before starting. A failed or interrupted
+		// run must never certify an old profile as fresh.
+		if err := os.Remove(stamp); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return 1, err
+		}
+	}
 
 	// To stdout beside the summary, not through logf: the command line is the
 	// run's human output, and a stderr line would surface as a warning in the
@@ -82,6 +91,11 @@ func goTest(args []string, w io.Writer) (int, error) {
 
 	if err := summarise(logPath, w); err != nil {
 		logf(levelWarn, "could not summarise %s: %v; the tests themselves exited %d", logPath, err, code)
+	}
+	if code == 0 && commit != "" && !strings.HasSuffix(name, "-race") {
+		if err := os.WriteFile(stamp, []byte(commit+"\n"), 0o644); err != nil {
+			return 1, err
+		}
 	}
 	return code, nil
 }

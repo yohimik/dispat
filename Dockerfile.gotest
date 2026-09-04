@@ -24,6 +24,7 @@ ARG GO_VERSION=1.26
 # making folders read-only, and root does not honour file permissions, so a
 # root run turns those tests' expected errors into successes that fail them.
 FROM golang:${GO_VERSION} AS base
+ARG TEST_COMMIT
 RUN useradd --create-home --uid 1001 gopher
 WORKDIR /src
 RUN chown gopher:gopher /src
@@ -35,6 +36,7 @@ ENV GOPRIVATE=github.com/yohimik/dispat
 ENV DISPAT_UPDATE_CHECK=false
 ENV GOPATH=/home/gopher/go
 ENV GOCACHE=/home/gopher/.cache/go-build
+ENV TESTREPORT_COMMIT=${TEST_COMMIT}
 USER gopher
 
 # The dependency layer every workspace gate shares: the manifests alone,
@@ -54,7 +56,7 @@ COPY --chown=gopher:gopher pkg/scanner/go.mod pkg/scanner/go.sum pkg/scanner/
 COPY --chown=gopher:gopher pkg/writer/go.mod pkg/writer/go.sum pkg/writer/
 COPY --chown=gopher:gopher services/dispat/go.mod services/dispat/go.sum services/dispat/
 COPY --chown=gopher:gopher tests/integration/go.mod tests/integration/go.sum tests/integration/
-COPY --chown=gopher:gopher tools/go.mod tools/
+COPY --chown=gopher:gopher tools/go.mod tools/go.sum tools/
 RUN go mod download
 
 # testreport rides along with every suite (each tests script runs through it),
@@ -62,6 +64,12 @@ RUN go mod download
 # tooling change re-runs every suite, a package change re-runs one.
 FROM deps AS runner
 COPY --chown=gopher:gopher tools ./tools
+
+# Tools conformance tests import the workspace scanner while keeping Aqua's
+# dependency graph out of the production module.
+FROM runner AS src-tools
+COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
+COPY --chown=gopher:gopher pkg/scanner ./pkg/scanner
 
 # One source stage per package: its own folder plus the workspace providers
 # its go.mod requires, and nothing else. What a stage copies is what busts
@@ -102,6 +110,7 @@ COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md ./packag
 
 FROM src-dispat AS src-integration
 COPY --chown=gopher:gopher tests/integration ./tests/integration
+COPY --chown=gopher:gopher packages/docs/demo ./packages/docs/demo
 
 # The lint gate, one target per module: what `dispat run vet --since all`
 # sweeps. vet compiles what it analyses, so these are the build gates too.
@@ -136,7 +145,7 @@ FROM src-dispat AS vet-dispat
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     go vet -C services/dispat ./...
 
-FROM runner AS vet-tools
+FROM src-tools AS vet-tools
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     go vet -C tools ./...
 
@@ -195,7 +204,7 @@ COPY --from=test-writer /src/coverage /
 # was the one suite that measured nothing, so testreport, which is what every
 # other number on the site comes out of, was the only Go in the workspace the
 # coverage page could not report on.
-FROM runner AS test-tools
+FROM src-tools AS test-tools
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd tools && go run github.com/yohimik/dispat/tools/testreport test tools -- \
     ./... -count=1 -covermode=atomic -coverprofile=/src/coverage/tools.out
@@ -222,10 +231,11 @@ export DISPAT_COVERDIR=/src/coverage/covdata
 rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
 go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
 go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/integration.out
-go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
+DISPAT_TEST_RACE=1 go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration . -count=1 -timeout 20m -race
 EOF
 FROM scratch AS export-integration
 COPY --from=test-integration /src/coverage/integration.out /integration.out
+COPY --from=test-integration /src/coverage/integration.commit /integration.commit
 COPY --from=test-integration /src/coverage/testlog /testlog
 
 # The benchmark gates: one stage per module that has benchmarks, each writing
@@ -289,6 +299,7 @@ FROM runner AS src-all
 COPY --chown=gopher:gopher pkg ./pkg
 COPY --chown=gopher:gopher services/dispat ./services/dispat
 COPY --chown=gopher:gopher tests ./tests
+COPY --chown=gopher:gopher packages/docs/demo ./packages/docs/demo
 FROM src-all AS gofmt
 RUN out=$(gofmt -l .); [ -z "$out" ] || { printf '%s\n' "$out" >&2; exit 1; }
 
@@ -347,17 +358,32 @@ badge() { # <label> <percentage> <file>: shields.io endpoint JSON
 # through word splitting. The merge outputs are skipped explicitly: they land
 # in this folder too, and a re-run would otherwise fold them into themselves.
 cd coverage
+test -n "$TESTREPORT_COMMIT" || { echo "TEST_COMMIT is required for a coverage artifact" >&2; exit 1; }
 set --
 for f in *.out; do
   case "$f" in integration.out|coverage.out|coverage-unit.out) continue ;; esac
   set -- "$@" "$f"
+  test "$(cat "${f%.out}.commit")" = "$TESTREPORT_COMMIT" || {
+    echo "$f was not measured at $TESTREPORT_COMMIT" >&2; exit 1;
+  }
 done
+test "$(cat integration.commit)" = "$TESTREPORT_COMMIT" || {
+  echo "integration.out was not measured at $TESTREPORT_COMMIT" >&2; exit 1;
+}
 echo "unit profiles: $*"
 merge coverage-unit.out "$@"
 merge coverage.out      "$@" integration.out
 UNIT=$(pct coverage-unit.out)
 INTEGRATION=$(pct integration.out)
 TOTAL=$(pct coverage.out)
+set -- $(go run github.com/yohimik/dispat/tools/testreport coverage -coverage . -commit "$TESTREPORT_COMMIT")
+COVERED=$1
+STATEMENTS=$2
+TOTAL=$3
+if [ $((COVERED * 100)) -lt $((STATEMENTS * 95)) ]; then
+  echo "combined coverage ${COVERED}/${STATEMENTS} is below 95%" >&2
+  exit 1
+fi
 echo "unit ${UNIT} / integration ${INTEGRATION} / total ${TOTAL}"
 
 {
@@ -390,7 +416,7 @@ FROM runner AS report
 ARG COMMIT
 COPY --chown=gopher:gopher coverage ./coverage
 RUN mkdir -p packages/docs/data \
- && go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT"
+ && go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" -require-fresh
 FROM scratch AS report-export
 COPY --from=report /src/packages/docs/data/report.json /
 
@@ -434,13 +460,24 @@ COPY --from=test-writer /src/coverage ./coverage
 COPY --from=test-tools /src/coverage ./coverage
 COPY --from=test-dispat /src/coverage ./coverage
 COPY --from=test-integration /src/coverage/integration.out ./coverage/integration.out
+COPY --from=test-integration /src/coverage/integration.commit ./coverage/integration.commit
 COPY --from=test-integration /src/coverage/testlog ./coverage/testlog
 COPY --from=bench-ccme /src/coverage/benchlog ./coverage/benchlog
 COPY --from=bench-config /src/coverage/benchlog ./coverage/benchlog
 COPY --from=bench-dispat /src/coverage/benchlog ./coverage/benchlog
 COPY --chown=gopher:gopher coverag[e]/experiment[s] ./coverage/experiments
-RUN go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" \
-    -modules packages/docs/data/benchmarked.txt
+RUN <<'EOF'
+set -eu
+set -- $(go run github.com/yohimik/dispat/tools/testreport coverage -coverage coverage -commit "$COMMIT")
+covered=$1
+statements=$2
+if [ $((covered * 100)) -lt $((statements * 95)) ]; then
+  echo "combined coverage ${covered}/${statements} is below 95%" >&2
+  exit 1
+fi
+go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" \
+  -require-fresh -modules packages/docs/data/benchmarked.txt
+EOF
 FROM scratch AS measured-export
 COPY --from=measured /src/packages/docs/data/report.json \
      /src/packages/docs/data/benchmarked.txt /

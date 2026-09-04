@@ -99,9 +99,7 @@ scripts:
     docker buildx build --file ../../Dockerfile.gotest --target export-integration
     $(sh ../../scripts/buildx-cache.sh gotest-integration)
     --output type=local,dest=../../coverage ../..
-  tests:
-    - dispat exec tests:unit --for pkg:dispat
-    - dispat exec tests:integration --for pkg:dispat
+  tests: dispat exec tests:unit --for pkg:dispat
   # The post-version gate the services space hooks into beforeBuild: the unit
   # suite against this module as autoVersion rewrote it and syncLock tidied
   # it, resolving the pkg/* tags the earlier legs of this run pushed, with no

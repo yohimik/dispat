@@ -38,6 +38,69 @@ func measuredRun(t *testing.T) string {
 	return dir
 }
 
+func TestVerifyCoverageStampsRejectsMissingStaleAndMixedRuns(t *testing.T) {
+	const commit = "0123456789abcdef"
+	makeRun := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		for _, name := range []string{"ccme", "config", "manifest", "models", "scanner", "writer", "tools", "dispat", "integration"} {
+			write(t, filepath.Join(dir, name+".out"), "mode: atomic\np/a.go:1.1,2.2 1 1\n")
+			write(t, filepath.Join(dir, name+".commit"), commit+"\n")
+		}
+		return dir
+	}
+	t.Run("complete fresh run", func(t *testing.T) {
+		if err := verifyCoverageStamps(makeRun(t), commit); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("stale profile", func(t *testing.T) {
+		dir := makeRun(t)
+		write(t, filepath.Join(dir, "tools.commit"), "older\n")
+		if err := verifyCoverageStamps(dir, commit); err == nil {
+			t.Fatal("want stale stamp rejected")
+		}
+	})
+	t.Run("missing profile", func(t *testing.T) {
+		dir := makeRun(t)
+		if err := os.Remove(filepath.Join(dir, "writer.out")); err != nil {
+			t.Fatal(err)
+		}
+		if err := verifyCoverageStamps(dir, commit); err == nil {
+			t.Fatal("want missing profile rejected")
+		}
+	})
+	t.Run("mixed extra profile", func(t *testing.T) {
+		dir := makeRun(t)
+		write(t, filepath.Join(dir, "old.out"), "mode: atomic\np/a.go:1.1,2.2 1 1\n")
+		if err := verifyCoverageStamps(dir, commit); err == nil {
+			t.Fatal("want unexpected profile rejected")
+		}
+	})
+}
+
+func TestCoverageCommandPrintsTheMergedIntegerDenominator(t *testing.T) {
+	const commit = "0123456789abcdef"
+	dir := t.TempDir()
+	for _, name := range []string{"ccme", "config", "manifest", "models", "scanner", "writer", "tools", "dispat", "integration"} {
+		covered := "0"
+		if name == "ccme" || name == "integration" {
+			covered = "1"
+		}
+		write(t, filepath.Join(dir, name+".out"),
+			"mode: atomic\nexample.test/"+name+"/x.go:1.1,2.2 3 "+covered+"\n")
+		write(t, filepath.Join(dir, name+".commit"), commit+"\n")
+	}
+	var out, errs strings.Builder
+	code := run([]string{"coverage", "-coverage", dir, "-commit", commit}, &out, &errs)
+	if code != 0 || errs.Len() != 0 {
+		t.Fatalf("coverage command = %d, stderr %q", code, errs.String())
+	}
+	if got := out.String(); got != "6 27 22.2%\n" {
+		t.Fatalf("coverage output = %q, want merged covered statements, denominator and display percent", got)
+	}
+}
+
 // TestRunDispatchesTheVerbs: the dispatch is what every gate calls, so a verb
 // that fell through to the usage text, or a failure that came back as
 // success, would pass every unit test in this package and fail the release.

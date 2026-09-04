@@ -79,6 +79,11 @@ jobs:
       - name: shellcheck
         run: dispat exec shellcheck
 
+      - name: CI selection and test-plan references
+        run: |
+          sh scripts/ci-base-test.sh
+          sh scripts/check-test-plan.sh
+
       # One name swept across the monorepo instead of a module list to keep in
       # step by hand: each Go space defines what `vet` means for its packages,
       # tools and tests/integration carry their own as script-only packages
@@ -143,16 +148,13 @@ jobs:
       - name: Link the workspace dependencies
         run: dispat run link --since all -p dispat
 
-      # HEAD~1 is the whole window on both triggers, which is why no base
-      # revision has to be worked out: a push to main lands one commit, and a
-      # pull_request is checked out as its merge commit, whose first parent is
-      # the base branch tip.
-      #
       # --consumers is the point of running this through dispat: a change to
       # pkg/manifest tests scanner, writer and the CLI too, because they are
       # what the change can break.
       - name: Run the tests dispat selects
-        run: dispat run tests --since HEAD~1 --consumers
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: dispat run tests --since "$(sh scripts/ci-base.sh)" --consumers
 
       # always(): the redirects must not outlive the job whatever the suite
       # did, and unlink is idempotent, so closing an already-closed bracket is
@@ -218,4 +220,5 @@ jobs:
       - name: Build what changed
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: dispat run build --since HEAD~1
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: dispat run build --since "$(sh scripts/ci-base.sh)"

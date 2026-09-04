@@ -93,7 +93,7 @@ scripts:
   # coverage/ folder to point at.
   test-report: >-
     docker buildx build --file Dockerfile.gotest --target report-export
-    --build-arg COMMIT="$GITHUB_SHA"
+    --build-arg COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD)}"
     $(sh scripts/buildx-cache.sh report) --output type=local,dest=packages/docs/data .
 
   # Publish the coverage badge: force-push coverage/coverage.json to an orphan
@@ -163,12 +163,10 @@ packages:
   integration:
     path: tests/integration
     versioning: none
-    # The module requires pkg/models; declared so `dispat compute --check`
-    # stays quiet about the derived edge. No `tests` script on purpose: the
-    # black-box suite is the dispat package's own gate (tests:integration in
-    # services/dispat/dispat.yaml), attributed there for coverage, and a
-    # second name for the same run would execute it twice per sweep.
-    dependencies: [models]
+    # The module requires models and drives the CLI. Owning its test script
+    # makes an integration-only change a real gate; the dispat dependency
+    # makes --consumers select it after a CLI change, exactly once.
+    dependencies: [models, dispat]
     scripts:
       vet: >-
         docker buildx build --file ../../Dockerfile.gotest --target vet-integration
@@ -176,6 +174,10 @@ packages:
       build: >-
         docker buildx build --file ../../Dockerfile.gotest --target vet-integration
         $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
+      tests: >-
+        docker buildx build --file ../../Dockerfile.gotest --target export-integration
+        $(sh ../../scripts/buildx-cache.sh gotest-integration)
+        --output type=local,dest=../../coverage ../..
   # The release experiments (tests/experiments): the image a release just
   # published, put through the faults a unit test never reaches, beside
   # lerna, nx and changesets in the same fixture. Script-only like tools:

@@ -72,6 +72,11 @@ func coverDir() string { return os.Getenv("DISPAT_COVERDIR") }
 // means the suite builds its own, as it always has.
 func prebuiltBin() string { return os.Getenv("DISPAT_TEST_BINARY") }
 
+// go test -race instruments the test process, but not subprocesses built by
+// this harness. The race pass sets this flag so every dispat binary it drives
+// is instrumented too.
+func raceBuild() bool { return os.Getenv("DISPAT_TEST_RACE") == "1" }
+
 func build() (dispat, tsmark string, err error) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
@@ -88,6 +93,9 @@ func build() (dispat, tsmark string, err error) {
 	var coverArgs []string
 	if coverDir() != "" {
 		coverArgs = []string{"-cover", "-covermode=atomic", "-coverpkg=./..."}
+	}
+	if raceBuild() {
+		coverArgs = append(coverArgs, "-race")
 	}
 	if pre := prebuiltBin(); pre != "" {
 		// A prebuilt binary carries no instrumentation, so counters asked for
@@ -173,6 +181,9 @@ func BuildVersioned(t testing.TB, version string) string {
 		"-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=" + version}
 	if coverDir() != "" {
 		args = append(args, "-cover", "-covermode=atomic", "-coverpkg=./...")
+	}
+	if raceBuild() {
+		args = append(args, "-race")
 	}
 	if err := goBuild(goBin, out, filepath.Join(root, "services", "dispat"), args...); err != nil {
 		t.Fatalf("building dispat %s: %v", version, err)

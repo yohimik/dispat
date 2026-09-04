@@ -31,6 +31,9 @@ packages/*
 !packages/docs
 packages/docs/*
 !packages/docs/docs
+!packages/docs/demo
+packages/docs/demo/illustration/node_modules
+packages/docs/demo/illustration/out
 
 # The profiles and logs a suite run left behind, for the badge and report
 # targets, and the release experiments' records beside them: those run against

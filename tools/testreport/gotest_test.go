@@ -55,6 +55,7 @@ func TestGoTestUsage(t *testing.T) {
 // parser `build` folds it with.
 func TestGoTestPassWritesLog(t *testing.T) {
 	root := workspace(t, "package mod\n\nimport \"testing\"\n\nfunc TestOK(t *testing.T) {}\n")
+	t.Setenv("TESTREPORT_COMMIT", "new-commit")
 
 	code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
 	if err != nil || code != 0 {
@@ -67,6 +68,10 @@ func TestGoTestPassWritesLog(t *testing.T) {
 	if log.Tests != 1 || log.Passed != 1 || log.Failed != 0 {
 		t.Fatalf("log counts = %d tests, %d passed, %d failed; want 1, 1, 0", log.Tests, log.Passed, log.Failed)
 	}
+	body, err := os.ReadFile(filepath.Join(root, "coverage", "unit.commit"))
+	if err != nil || string(body) != "new-commit\n" {
+		t.Fatalf("passing run stamp = %q, %v", body, err)
+	}
 }
 
 // TestGoTestFailurePropagates: the exit code is the test run's own, and the
@@ -74,6 +79,8 @@ func TestGoTestPassWritesLog(t *testing.T) {
 // not lose.
 func TestGoTestFailurePropagates(t *testing.T) {
 	root := workspace(t, "package mod\n\nimport \"testing\"\n\nfunc TestNo(t *testing.T) { t.Fatal(\"no\") }\n")
+	t.Setenv("TESTREPORT_COMMIT", "new-commit")
+	write(t, filepath.Join(root, "coverage", "unit.commit"), "old-commit\n")
 
 	code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
 	if err != nil {
@@ -88,6 +95,9 @@ func TestGoTestFailurePropagates(t *testing.T) {
 	}
 	if log.Failed != 1 {
 		t.Fatalf("log counts %d failed; want 1", log.Failed)
+	}
+	if _, err := os.Stat(filepath.Join(root, "coverage", "unit.commit")); !os.IsNotExist(err) {
+		t.Fatalf("failed run retained a coverage stamp: %v", err)
 	}
 }
 

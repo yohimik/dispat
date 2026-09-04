@@ -92,12 +92,13 @@ scripts:
   # own stages and hooks, which is exactly the distance this has to travel.
   test-report: |
     set -eu
+    commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
     docker buildx build --file ../../Dockerfile.gotest --target measured-export \
-      --build-arg COMMIT="${GITHUB_SHA:-}" \
+      --build-arg COMMIT="$commit" \
       $(sh ../../scripts/buildx-cache.sh measured) \
       --output type=local,dest=data ../..
     echo "REPORT_BENCHMARKS=$(tr '\n' ' ' < data/benchmarked.txt)" >> "$DISPAT_OUTPUT"
-    echo "REPORT_COMMIT=${GITHUB_SHA:-}" >> "$DISPAT_OUTPUT"
+    echo "REPORT_COMMIT=$commit" >> "$DISPAT_OUTPUT"
     echo "measured $(wc -l < data/benchmarked.txt) modules into data/report.json"
 
   # The release experiments, against the image this run has just published.

@@ -18,6 +18,7 @@ const usage = `usage:
   testreport bench <log-name> -- <go test args...>              run go test -bench -json, keep the stream, summarise it
   testreport build  [-coverage dir] [-out file] [-commit sha] [-keep file] [-modules file]
                     [-experiments dir]                          build the report from a full test run
+  testreport coverage [-coverage dir] -commit sha               validate and print covered statements percent
   testreport render <log>                                       summarise one go test -json log
   testreport experiments [-markdown] [dir]                      summarise a release experiments campaign
 `
@@ -55,6 +56,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return code
 	case "build":
 		err = build(args[1:])
+	case "coverage":
+		err = coverageCheck(args[1:], stdout)
 	case "render":
 		err = render(args[1:], stdout)
 	case "experiments":
@@ -70,6 +73,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func coverageCheck(args []string, w io.Writer) error {
+	fs := flag.NewFlagSet("coverage", flag.ContinueOnError)
+	dir := fs.String("coverage", "coverage", "folder holding coverage profiles")
+	commit := fs.String("commit", "", "tested commit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *commit == "" {
+		return fmt.Errorf("coverage requires -commit")
+	}
+	if err := verifyCoverageStamps(*dir, *commit); err != nil {
+		return err
+	}
+	cov, err := readCoverage(*dir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "%d %d %.1f%%\n", cov.Total.Covered, cov.Total.Statements, cov.Total.Percent)
+	return nil
+}
+
 // build assembles the report from what a full test run left in the coverage
 // folder: one profile per package's `tests` script, and one `go test -json`
 // log per invocation.
@@ -80,6 +104,7 @@ func build(args []string) error {
 	commit := fs.String("commit", "", "the commit the run measured; discovered from git when empty")
 	keep := fs.String("keep", "", "an earlier report whose measurements are carried over for the modules this run did not measure")
 	modules := fs.String("modules", "", "where to list the modules this run benchmarked, one per line")
+	requireFresh := fs.Bool("require-fresh", false, "require every coverage profile to carry the tested commit")
 	experimentsDir := fs.String("experiments", "", "the release experiments' results folder; <coverage>/experiments when empty")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -96,6 +121,14 @@ func build(args []string) error {
 	cov, err := readCoverage(*dir)
 	if err != nil {
 		return err
+	}
+	if *requireFresh {
+		if report.Commit == "" {
+			return fmt.Errorf("a tested commit is required with -require-fresh")
+		}
+		if err := verifyCoverageStamps(*dir, report.Commit); err != nil {
+			return err
+		}
 	}
 	report.Coverage = cov
 
@@ -143,6 +176,41 @@ func build(args []string) error {
 		*out, report.Coverage.Total.Percent, report.Coverage.Total.Statements,
 		report.Suite.Totals.Tests, report.Suite.Totals.Fuzz, benchCount(report.Benchmarks),
 		len(report.Experiments.Cells), short(report.Commit))
+	return nil
+}
+
+func verifyCoverageStamps(dir, commit string) error {
+	profiles, err := filepath.Glob(filepath.Join(dir, "*.out"))
+	if err != nil {
+		return err
+	}
+	want := map[string]bool{"ccme.out": true, "config.out": true, "manifest.out": true,
+		"models.out": true, "scanner.out": true, "writer.out": true, "tools.out": true,
+		"dispat.out": true, "integration.out": true}
+	seen := map[string]bool{}
+	for _, profile := range profiles {
+		if mergeOutputs[filepath.Base(profile)] {
+			continue
+		}
+		name := filepath.Base(profile)
+		if !want[name] {
+			return fmt.Errorf("unexpected coverage profile %s from a mixed run", name)
+		}
+		seen[name] = true
+		stamp := strings.TrimSuffix(profile, ".out") + ".commit"
+		body, err := os.ReadFile(stamp)
+		if err != nil {
+			return fmt.Errorf("%s has no tested-commit stamp: %w", profile, err)
+		}
+		if got := strings.TrimSpace(string(body)); got != commit {
+			return fmt.Errorf("%s was measured at %s, want %s", profile, got, commit)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			return fmt.Errorf("missing coverage profile %s: run the full suite", name)
+		}
+	}
 	return nil
 }
 

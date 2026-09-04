@@ -15,5 +15,7 @@
 # before any dispat command runs.
 set -eu
 scope=$1
+commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
+printf '%s' "--build-arg TEST_COMMIT=$commit"
 [ "${GITHUB_ACTIONS:-}" = "true" ] || exit 0
-printf '%s' "--cache-from type=gha,scope=$scope --cache-to type=gha,scope=$scope,mode=max"
+printf '%s' " --cache-from type=gha,scope=$scope --cache-to type=gha,scope=$scope,mode=max"
