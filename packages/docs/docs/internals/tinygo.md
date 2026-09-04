@@ -101,26 +101,21 @@ both. The spike fetches it with dispat's own [install command](../cli/install.md
 it:
 
 ```sh
-dispat install yohimik/tinygo --prerelease --release 0.43.0-net.1 \
+dispat install yohimik/tinygo --prerelease \
   --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
 ```
 
-That line lives in
+The line names no version on purpose: it installs the fork's newest release, which is what the release's
+`tiny-toolchain` stage in `services/dispat/Dockerfile`, the spike's `tinygo-spike-fork` stage and the darwin half of
+the spike all run, each with its own `--bin-dir`, so a new fork release is what every one of them asks about next. The
+same line without a folder is one of the two in
 [`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh), the repository's
-[install manifest](../cli/install.md#install-manifests-as-shell-scripts), which is where the fork's version is pinned
-and the only place it is written down. Three callers read it: the spike's `tinygo-spike-fork` stage, the
-`tiny-toolchain` stage of `services/dispat/Dockerfile` that builds the release's two tiny binaries, and the darwin half
-of the spike. Each one runs the manifest rather than repeating the command, so the release and the spike can never be
-asking about different forks:
-
-```sh
-sh scripts/install-tools.sh --version tinygo    # the pin, and nothing else
-INSTALL_TOOLS_PREFIX=~/.local sh scripts/install-tools.sh tinygo
-```
+[install manifest](../cli/install.md#install-manifests-as-shell-scripts) for a runner; a build that must hold one
+particular fork adds `--release`.
 
 A `--pipe` install unpacks a tree rather than writing one file, so there is no destination for dispat to compare a
-checksum against and the manifest checks what `tinygo version` reports instead. Running it again on a machine that
-already carries the pinned fork transfers nothing.
+checksum against: every run fetches the tarball again, and the darwin spike keeps the tree it unpacked in its cache
+until `TINYGO_REFRESH=1` asks for the newest one.
 
 The base image is upstream 0.42.0 and every stage up to `tinygo-spike-net` measures it, so the verdict above keeps
 its evidence. The two fork stages are the re-asking.
@@ -281,6 +276,6 @@ The logs are the artefact. Each is a sequence of `=== what ===` headers followed
 toolchain version that was installed; `selfupdate.log` carries the matrix above, with `sufake:` lines interleaved from
 the far end of the wire.
 
-Nothing here gates a release, and nothing in CI runs it. Re-asking the question is bumping one version number in
-[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh) and running one
-command. The release's own toolchain stage reads the same number, so the bump moves both at once.
+Nothing here gates a release, and nothing in CI runs it. Re-asking the question is running one command: the spike
+installs the fork's newest release, as the release's own toolchain stage does, so a new fork release is asked about the
+next time either of them runs.

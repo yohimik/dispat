@@ -34,14 +34,12 @@ jobs:
       - name: Set up dispat
         uses: ./
 
-      # The pinned release rather than a build of the tree: the bytes that
-      # announce are the bytes the release day used, and the version is the
-      # manifest's.
+      # The newest release rather than a build of the tree: a replay posts
+      # with the crier a release would install today.
       - name: Install the released crier
         env:
-          INSTALL_TOOLS_BIN_DIR: ${{ github.workspace }}/replay-bin
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh scripts/install-tools.sh crier
+        run: dispat install yohimik/crier --bin-dir replay-bin
 
       - name: Install ffmpeg
         # update first: the image's package lists go stale and a mirror 404 is

@@ -16,15 +16,6 @@ services/*
 # Dockerfile's test stage.
 !tests
 
-# The install manifest the tiny-toolchain stage runs, and nothing else under
-# scripts/: it is the one file that carries the TinyGo fork's pin, and letting
-# the whole folder in would put every unrelated script's edits in this build's
-# cache key. The same spelling out of every level as above: scripts/ is let
-# back in, then filtered down to the one file.
-!scripts
-scripts/*
-!scripts/install-tools.sh
-
 # The export folder of a previous build. It is the one thing under
 # services/dispat that is output rather than source, and shipping it into the
 # context would grow with every build.

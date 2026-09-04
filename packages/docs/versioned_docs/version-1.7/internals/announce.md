@@ -114,7 +114,7 @@ again is not an option once the tags exist. A replay that fails exits non-zero, 
 one thing, and a green run would hide that it did not happen.
 
 `ANNOUNCE_CRIER_BIN` names the binary to use, for a machine where crier is not on `PATH`. Everywhere else it comes from
-the [install manifest](../reference/ci.md#the-other-tools-a-job-needs), which pins the version.
+the [install manifest](../reference/ci.md#the-other-tools-a-job-needs), which installs its newest release.
 
 The replay itself is a dispatch rather than a laptop holding the repository's secrets:
 [`announce.yml`](https://github.com/yohimik/dispat/blob/main/.github/workflows/announce.yml) takes the name of a script

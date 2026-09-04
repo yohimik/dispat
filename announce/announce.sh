@@ -31,7 +31,7 @@
 #
 # crier is a tool the release installs rather than a binary this repository
 # builds, so it is resolved from PATH or named by ANNOUNCE_CRIER_BIN. The
-# release workflow puts the pinned version there through
+# release workflow puts its newest release there through
 # scripts/install-tools.sh; the replay workflow points the variable at its
 # own copy.
 set -eu

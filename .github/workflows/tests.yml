@@ -210,7 +210,7 @@ jobs:
       # emulated multi-arch image builds.
       #
       # GITHUB_TOKEN because the dispat package's build installs the TinyGo
-      # fork inside its toolchain stage, through scripts/install-tools.sh, and
+      # fork inside its toolchain stage with one `dispat install` line, and
       # that install makes one GitHub API call. A runner sharing its IP with a
       # cloud region meets the unauthenticated rate limit on a busy day; the
       # build script forwards the variable as a build secret only when it is

@@ -137,16 +137,16 @@ jobs:
         if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
         uses: ./
 
-      # The pinned release rather than a build of the checkout: the point is
+      # The newest release rather than a build of the checkout: the point is
       # the credentials, not the code, and crier is a tool this repository
-      # installs rather than one it builds. scripts/install-tools.sh is what
-      # says which version that is, here and in the release job both.
+      # installs rather than one it builds. One tool into one folder, so the
+      # line is run directly rather than through scripts/install-tools.sh,
+      # which installs every tool the release job needs.
       - name: Install crier
         if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
         env:
-          INSTALL_TOOLS_BIN_DIR: ${{ github.workspace }}/ping-bin
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh scripts/install-tools.sh crier
+        run: dispat install yohimik/crier --bin-dir ping-bin
 
       # LinkedIn is enabled only when its token is set, mirroring how the
       # announce script decides whether that pass runs at all. stdin is closed
@@ -327,15 +327,16 @@ jobs:
 
       # crier renders and posts the release's announcement from the dispat
       # package's announce stage. It is a tool this repository installs rather
-      # than one it builds, and scripts/install-tools.sh is the one file that
-      # says which version. The destination is the folder the bootstrap build
-      # above already put on PATH, so `crier` resolves for the announce script
-      # without another PATH entry.
+      # than one it builds, and scripts/install-tools.sh is the list of such
+      # tools, each at its newest release. DISPAT_BIN_DIR is dispat's own
+      # destination variable: the folder the bootstrap build above already put
+      # on PATH, so `crier` resolves for the announce script without another
+      # PATH entry.
       - name: Install the tools the release needs
         env:
-          INSTALL_TOOLS_BIN_DIR: ${{ runner.temp }}/dispat-fresh
+          DISPAT_BIN_DIR: ${{ runner.temp }}/dispat-fresh
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh scripts/install-tools.sh crier
+        run: sh scripts/install-tools.sh
 
       # Instagram fetches the media from a public URL of its own accord and a
       # runner has none, so the stage server needs a tunnel. Installed only

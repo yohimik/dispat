@@ -87,18 +87,17 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # `dispat-<os>-<arch>`, which is a contract nothing here touches — so a
 # release carries them beside the six rather than instead of any of them.
 #
-# The toolchain is installed by the binary this build just produced, through
-# the repository's install manifest: `sh scripts/install-tools.sh tinygo` is
-# one `dispat install` line, and the fork's version is pinned in that file and
-# nowhere else. So the fetch is the product installing its own toolchain, the
-# checksum is dispat's own, and moving to a newer fork is bumping one number
-# in one file rather than a version and two digests here.
+# The toolchain is installed by the binary this build just produced, with one
+# `dispat install` line: the fork's newest release, unpinned, so a build takes
+# whatever the fork published last and the checksum is the one GitHub carries
+# for that asset, checked by dispat. Nothing here names a version; the same
+# line, without a folder, is what scripts/install-tools.sh runs for a runner,
+# and a build that must hold one particular fork adds `--release` here.
 #
-# The trade-off is cache. The stage now descends from `build`, so any change
-# to the gc binaries throws the toolchain layer away and the fork is fetched
-# again: 185 MB, which is seconds on a runner and the price of having one pin
-# instead of three. The compile below stays in a stage of its own, so a source
-# edit alone still re-uses this layer.
+# The trade-off is cache. The stage descends from `build`, so any change to
+# the gc binaries throws the toolchain layer away and the fork is fetched
+# again: 185 MB, which is seconds on a runner. The compile below stays in a
+# stage of its own, so a source edit alone still re-uses this layer.
 #
 # Debian rather than alpine, unlike every other stage in this file: the fork
 # ships a glibc-linked LLVM beside its own binary, and musl does not run it.
@@ -108,7 +107,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM golang:${GO_VERSION} AS tiny-toolchain
 ARG TARGETARCH
 COPY --from=build /out/dispat-linux-${TARGETARCH} /usr/local/bin/dispat
-COPY scripts/install-tools.sh /tmp/install-tools.sh
 # A stamped binary otherwise checks the GitHub API for a newer dispat while it
 # is installing something else; anything that parses as false turns it off.
 ENV DISPAT_UPDATE_CHECK=false
@@ -127,7 +125,8 @@ RUN --mount=type=secret,id=GITHUB_TOKEN \
     else \
       echo "installing the toolchain unauthenticated (no GITHUB_TOKEN secret)"; \
     fi; \
-    sh /tmp/install-tools.sh tinygo; \
+    dispat install yohimik/tinygo --prerelease \
+      --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir /usr/local --pipe 'tar -xz'; \
     /usr/local/tinygo/bin/tinygo version
 
 # The compile itself, in a stage of its own so that a source edit never

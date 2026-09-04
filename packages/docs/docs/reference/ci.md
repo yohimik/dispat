@@ -283,9 +283,10 @@ Pin the version with `--release` for a reproducible job, and put `--check` in fr
 `1` only when the destination does not already hold that exact file, so a warm cache costs no transfer.
 
 Collect those lines into an [install manifest](../cli/install.md#install-manifests-as-shell-scripts) once more than one
-job needs them, so the versions are pinned in one file rather than in each workflow: dispat's own is
-[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh), which three
-workflow jobs and two container stages all run.
+job needs them, so the list lives in one file rather than in each workflow: dispat's own is
+[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh), two lines that
+install the newest crier and the newest TinyGo fork for the release job. A job that needs one of them, or needs it in a
+particular folder, runs that tool's `dispat install` line directly.
 
 A private repository works too, with a token that may read its contents. dispat uses the same credential for the
 releases listing and for the download, taking the asset from its API endpoint rather than from the public URL. On

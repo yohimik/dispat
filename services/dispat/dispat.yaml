@@ -60,8 +60,8 @@ scripts:
     # binary that merely compiled never comes out.
     #
     # The token rides in as a build secret, and only when there is one:
-    # the tiny-toolchain stage installs the TinyGo fork through
-    # scripts/install-tools.sh, whose one API call meets the
+    # the tiny-toolchain stage installs the TinyGo fork with one
+    # `dispat install` line, whose API call meets the
     # unauthenticated rate limit on a runner sharing its IP. The
     # ${VAR:+...} form passes no flag at all outside CI, where an empty
     # env=GITHUB_TOKEN would fail the build for want of a variable.

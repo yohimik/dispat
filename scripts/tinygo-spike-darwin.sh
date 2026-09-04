@@ -23,16 +23,16 @@
 #
 # Toolchains are fetched on first use into a cache folder and reused after:
 # Go from go.dev, pinned below with its published checksums, and TinyGo from
-# the fork's GitHub release through install-tools.sh, the repository's install
-# manifest, the same one line the container spike and the release's own
-# toolchain stage run, so all three halves fetch the same fork. Re-asking the
-# question is bumping the one number in that file.
+# the fork's newest GitHub release with the same `dispat install` line the
+# container spike and the release's own toolchain stage run, so all three
+# halves fetch the same fork. There is no pin: a fresh cache asks the newest
+# fork, and TINYGO_REFRESH=1 asks it again on a cache that already has one.
 #
 # Requirements: macOS, dispat on PATH, git checkout, network.
 set -u
 
-# The Go pin. TinyGo's is not here: it is read from install-tools.sh below,
-# because a second copy of it beside the manifest is a second thing to bump.
+# The Go pin. The fork has none: its newest release is what the install
+# below fetches, and the log records which one it was.
 GO_VERSION=1.26.7
 GO_SHA256_ARM64=020a1e8224811be75163e920bc77e0926a1390a6aeea19bdcf23f74b9d749f6d
 GO_SHA256_AMD64=92e8b34bff3c89ab16404c595669ac8cb004cc2f676dcbd1f5b87a6b8def3b47
@@ -46,12 +46,6 @@ die() {
 command -v dispat >/dev/null 2>&1 || die "dispat is not on PATH; https://dispat.dev/reference/ci/#the-install-script"
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-manifest="$root/scripts/install-tools.sh"
-
-# The fork's pin, from the manifest that carries it, so the log line and the
-# check below name the version the install is actually about to fetch.
-TINYGO_VERSION=$(sh "$manifest" --version tinygo) || die "could not read the tinygo pin"
-
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/tinygo-spike-darwin"
 spike="$root/coverage/tinygo-spike"
 out="$cache/out"
@@ -77,12 +71,18 @@ fi
 export PATH="$cache/go/bin:$cache/tinygo/bin:$PATH"
 export GOPATH="$cache/gopath"
 
-# TinyGo from the fork's release, through the install manifest, which is the
-# command under test with its pin already in it. The manifest is idempotent on
-# `tinygo version` and unpacks the whole toolchain tree rather than one binary,
-# because tinygo is its bin/ plus the lib/ and src/ beside it.
-INSTALL_TOOLS_PREFIX="$cache" sh "$manifest" tinygo \
-	|| die "install-tools.sh tinygo failed (is v$TINYGO_VERSION published?)"
+# TinyGo from the fork's newest release, through the command under test, into
+# the cache once: --pipe unpacks the whole toolchain tree rather than one
+# binary, because tinygo is its bin/ plus the lib/ and src/ beside it. A cache
+# that already holds a fork is reused, so a rerun asks the same fork the last
+# run answered with; TINYGO_REFRESH=1 throws it away and fetches the newest.
+if [ -n "${TINYGO_REFRESH:-}" ] || [ ! -x "$cache/tinygo/bin/tinygo" ]; then
+	rm -rf "$cache/tinygo"
+	dispat install yohimik/tinygo --prerelease \
+		--asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir "$cache" --pipe 'tar -xz' \
+		|| die "dispat install yohimik/tinygo failed"
+fi
+echo "tinygo: $("$cache/tinygo/bin/tinygo" version)" >&2
 
 # The same bypass and kill switch the container sets.
 export GOPRIVATE=github.com/yohimik/dispat
