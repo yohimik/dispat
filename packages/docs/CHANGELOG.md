@@ -1,5 +1,32 @@
 # Changelog
 
+## packages/docs/v1.7.3 (2026-09-04)
+
+### Fixes
+
+- the description names the saga polyglot release tool ([d9d906b](https://github.com/yohimik/dispat/commit/d9d906be9b1d3941f1d3555014ca9bf01a7cfb86)) (by yohimik)
+  The one-line description is the repository's everywhere it is said: the
+  README, the site's tagline, title and metadata, the web manifest, the
+  announcement card and its captions, and the CLI's README. The landing
+  page names the saga pattern as the run's core and the distributed-systems
+  patterns beside it (forward recovery, the tag store as ledger, idempotent
+  reruns with exactly-once delivery, compare-and-swap mutual exclusion,
+  topological ordering), says which repository shapes it releases, and
+  carries the keywords and structured data for monorepo and polyrepo
+  searches. The comparison page's experiments section describes the
+  harness as it runs now.
+
+  Beside it: the tools module is covered to 98.8% (the verbs, the runners
+  and the error arms, behind small writer seams), the twelve experiment
+  cells are enumerated once by a `cells` script that both the release
+  sweep and the workflow matrix read, and the docs build guard also
+  requires every frozen version's sidebar to list the measured pages.
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.7.2 (2026-09-03)
 
 ### Dependencies
