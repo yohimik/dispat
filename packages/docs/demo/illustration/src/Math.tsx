@@ -7,11 +7,9 @@ import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, msg, kv} from './co
 // seconds at Root.tsx's twenty frames per second, three properties as three
 // equations. Determinism: the plan is a pure function of history, graph, and
 // configuration, with no clocks and no state files, so the same status
-// prints twice. Idempotence: a re-run recomputes the same transaction and
-// executes only the legs whose record is missing, so released state is a
-// fixed point. Linearity: the commit parser is one left-to-right scan with a
-// byte of lookahead, no backtracking and no recursion, O(n) time in O(1)
-// space, drawn as a cursor sweeping a commit once.
+// prints twice. Recovery consults durable release evidence, while an
+// ambiguous publish must be safe for the publisher to repeat. The final
+// beat draws the commit parser's bounded left-to-right scan.
 //
 // No title: the landing page crops the clip's empty top strip away and
 // shows the feature text under the clip.
@@ -34,7 +32,7 @@ const rows: TermRow[] = [
   outRow(206, [...INF, msg('done'), ...kv('failed', '1'), ...kv('published', '2'), ...kv('skipped', '1'), ...kv('unchanged', '3')]),
   cmdRow(228, 'dispat'),
   outRow(260, [...INF, msg('done'), ...kv('failed', '0'), ...kv('published', '2'), ...kv('skipped', '0'), ...kv('unchanged', '5')]),
-  outRow(292, [{text: '# only the legs whose record is missing: released state is a fixed point', color: colors.dim}]),
+  outRow(292, [{text: '# confirmed tags skip completed work; ambiguous publish => safe repeat', color: colors.dim}]),
   outRow(360, [{text: '# ccme: untrusted commit messages in CI, parsed in one pass', color: colors.dim}]),
 ];
 
@@ -84,19 +82,15 @@ export const Math_: React.FC = () => {
     {
       from: 168,
       to: 328,
-      chip: 'idempotent',
+      chip: 'recorded progress',
       equation: (
         <>
-          <span style={{color: colors.fg}}>release(release(</span>
-          <span style={{color: colors.cyan}}>S</span>
-          <span style={{color: colors.fg}}>))</span>
-          <span style={{color: colors.dim}}> = </span>
-          <span style={{color: colors.fg}}>release(</span>
-          <span style={{color: colors.cyan}}>S</span>
-          <span style={{color: colors.fg}}>)</span>
+          <span style={{color: colors.green}}>confirmed tag</span>
+          <span style={{color: colors.dim}}> → skip · ambiguous publish → </span>
+          <span style={{color: colors.cyan}}>safe repeat</span>
         </>
       ),
-      note: 'a re-run recomputes the same transaction and executes only the legs whose record is missing',
+      note: 'recovery follows durable evidence; the publisher owns safe repetition across an uncertain network result',
     },
     {
       from: 328,
@@ -107,14 +101,10 @@ export const Math_: React.FC = () => {
           <span style={{color: colors.fg}}>O(</span>
           <span style={{color: colors.cyan}}>n</span>
           <span style={{color: colors.fg}}>)</span>
-          <span style={{color: colors.dim}}> time · </span>
-          <span style={{color: colors.fg}}>O(</span>
-          <span style={{color: colors.cyan}}>1</span>
-          <span style={{color: colors.fg}}>)</span>
-          <span style={{color: colors.dim}}> space</span>
+          <span style={{color: colors.dim}}> bounded left-to-right scan</span>
         </>
       ),
-      note: 'the commit parser: one left-to-right scan, a byte of lookahead, no backtracking, no recursion',
+      note: 'the commit parser advances through untrusted input without backtracking',
     },
   ];
 

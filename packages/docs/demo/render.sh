@@ -1,8 +1,8 @@
 #!/bin/sh
 # Renders the demo animations from packages/docs/demo/illustration and writes
 # the committed assets in imgs/: a gif of the full story for the repository
-# README, a gif of the blast-radius cut for the commit-messages page, and a
-# webm/mp4 pair per key-feature illustration for the landing page's carousel.
+# README and a gif of the blast-radius cut for the commit-messages page. The
+# landing page imports these scene components into Remotion Player directly.
 # Requires node with pnpm and ffmpeg with gifsicle (brew install ffmpeg
 # gifsicle).
 set -eu
@@ -17,7 +17,7 @@ command -v gifsicle >/dev/null || { echo "gifsicle is not installed (brew instal
 cd "$ill"
 [ -d node_modules ] || pnpm install
 
-for comp in Master Blast BlastClip Order Heal Control Polyglot Terminal Compute Run Single Hooks Polyrepo Lock Glue Math Why; do
+for comp in Master Blast; do
   npx remotion render src/index.ts "$comp" "$out/$comp.mp4"
 done
 
@@ -35,17 +35,6 @@ for pair in Master:demo-release Blast:demo-blast; do
   gifsicle -b -O3 --lossy=40 "$root/imgs/$asset.gif"
 done
 
-# One video pair per key-feature illustration for the landing page carousel.
-# The composition-to-asset list here must match FEATURE_MEDIA in
-# packages/docs/src/components/DemoCarousel/index.tsx, which is what plays
-# them.
-for pair in Order:demo-order BlastClip:demo-blast Heal:demo-heal Control:demo-control Polyglot:demo-polyglot Terminal:demo-terminal Compute:demo-compute Run:demo-run Single:demo-single Hooks:demo-hooks Polyrepo:demo-polyrepo Lock:demo-lock Glue:demo-glue Math:demo-math Why:demo-why; do
-  comp="${pair%%:*}"
-  asset="${pair#*:}"
-  ffmpeg -y -loglevel error -i "$out/$comp.mp4" -c:v libvpx-vp9 -b:v 0 -crf 40 -an "$root/imgs/$asset.webm"
-  cp "$out/$comp.mp4" "$root/imgs/$asset.mp4"
-done
-
 # The committed gif budget, in bytes: the README embed is camo-cached by
 # GitHub and deserves to stay small.
 size="$(wc -c <"$root/imgs/demo-release.gif" | tr -d ' ')"
@@ -54,4 +43,4 @@ if [ "$size" -gt 2621440 ]; then
   exit 1
 fi
 
-ls -lh "$root"/imgs/demo-*
+ls -lh "$root"/imgs/demo-*.gif

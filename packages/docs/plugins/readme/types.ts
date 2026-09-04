@@ -29,6 +29,8 @@ export interface Argument {
 
 /** One `## Key features` bullet of the CLI README, as a card. */
 export interface Feature {
+  /** Stable across copy edits; used by the demo controls and regression tests. */
+  id: string;
   title: string;
   body: Inline[];
 }

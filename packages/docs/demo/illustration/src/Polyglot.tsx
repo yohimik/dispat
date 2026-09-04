@@ -5,10 +5,10 @@ import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, msg, kv, CapSeg} fr
 
 // The polyglot claim, shown rather than listed: one manifest after another
 // opens in the same editor panel and the version write happens in place. The
-// value being changed is the only thing that moves; every other byte of the
-// file sits still, which is the writer's whole contract. The plist beat makes
-// the complementary point: the build number beside the marketing version is
-// read but never moved.
+// Each writer changes the requested value while preserving the manifest's
+// supported structure and formatting. Some formats, including go.mod, may
+// also run their standard formatter. The plist beat makes the complementary
+// point: the build number beside the marketing version is read but unchanged.
 //
 // Twenty frames per second, like every composition in Root.tsx. No title:
 // the landing page overlays the feature's own text over the top strip, so

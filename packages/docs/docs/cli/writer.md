@@ -21,6 +21,19 @@ Read [Manifest tools](../editing/manifests.md) for the full guide, worked exampl
 
 These options apply alongside the [global flags](./README.md#global-flags):
 
+### `--manifest-format aqua`
+
+Treat every named file as an Aqua configuration, including imported YAML files whose names do not identify their
+format. This option applies to `writer` only. Aqua tools use exact version pins and have no own package version or
+build counter.
+
+```sh
+dispat writer .aqua/tools.inc --manifest-format aqua --set cli/cli=v2.70.0
+```
+
+The writer preserves ordinary block declarations and leaves expression-derived values unchanged. See the
+[Aqua editing limits](../editing/manifests.md#aqua) for YAML forms it refuses without writing.
+
 ### `--set-version`
 
 `writer` and `autowriter`: rewrite the manifest's own version field. Pass `{version}` to `autowriter` to write the

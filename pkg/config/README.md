@@ -48,7 +48,7 @@ func configFields(dst *Config) config.Fields {
 
 The table is keyed in lower case; a file spells a key however it likes and the decode folds it to find the setter, so
 `logLevel` and `loglevel` both load. A key with no entry in the table is a key the model has no field for, and that is
-the unknown-key refusal — structural rather than a check somebody has to remember to run.
+the unknown-key refusal. This is structural rather than a check somebody has to remember to run.
 
 ## Resolving
 
@@ -84,7 +84,7 @@ areas:
 - Keys written beside the reference override what it brought in, in their own spelling.
 - A reference naming several files reads them in order and merges: objects key by key with the later file winning,
   lists end to end. Files that disagree about what they hold are refused rather than guessed at.
-- A file is never cached between positions, which is what makes a file appearing twice in one chain — and only that —
+- A file is never cached between positions, which is what makes a file appearing twice in one chain, and only that,
   a cycle. The error names every hop that closed it.
 - Nesting is capped (`Options.MaxRefDepth`, 32 by default), which catches the loops the chain check cannot see, such
   as two names for one file through a symlink.
@@ -114,7 +114,7 @@ setter to write a setter with: it carries the object rules and takes your reader
 something the library has no shape for still gets them.
 
 The comma shorthand lives in `Strings` and `Ints` and nowhere else, which is what keeps a comma inside a shell command
-the character the file wrote — the mistake a reflected decoder makes when the hook that lifts a scalar into a list
+the character the file wrote. This avoids the mistake a reflected decoder makes when the hook that lifts a scalar into a list
 fires on a Go type and cannot see the key that produced it.
 
 ## Overrides
@@ -128,7 +128,7 @@ settings := tree.Settings(l, config.Overrides{
 })
 ```
 
-The value replaces whatever spelling the file used rather than sitting beside it — a file writing `logLevel` and an
+The value replaces whatever spelling the file used rather than sitting beside it. A file writing `logLevel` and an
 override writing `loglevel` would otherwise be two keys the decode refuses as a collision, over a value the operator
 passed correctly. This is the generic form of a flag overlay, and it works at nested paths.
 
@@ -164,7 +164,7 @@ err = config.ApplyEdits(ctx, file, []config.Edit{{KeyPath: keyPath, Value: []str
 
 `ResolveEdit` follows the same references the loader did, so a configuration split across files is written where each
 key is written and the reference itself survives the write. The previous bytes are saved beside the file with
-`BackupSuffix`, and both writes are atomic — temp file, fsync, rename.
+`BackupSuffix`, and both writes are atomic through a temporary file, fsync, and rename.
 
 ## Logging
 
@@ -207,13 +207,13 @@ moves the watches with it. A reload that fails keeps the last good value.
 
 The package is alloc-budgeted rather than merely fast. `bench_test.go` measures every stage against fixtures built in
 code and served through `Options.ReadFile`, so a run measures the loader and not the filesystem underneath it; the two
-benchmarks that cannot be — the ascent, which stats directories, and the writers, which rewrite files — use a temp tree
+benchmarks that cannot be deterministic, including the directory ascent and file writers, use a temporary tree
 and say so. Benchmarks run with `-run '^$'`, because a pass that runs the tests alongside them is timing a machine that
 was busy doing something else.
 
 `alloc_test.go` is what turns those measurements into a gate. It pins the allocation counts as tests, with one
 allocation of headroom so a toolchain change does not fail a build for a rounding difference, and a reintroduced deep
-copy of the tree — or a flat intermediate map in the settings rendering — fails it immediately. An allocation count is
+copy of the tree, or a flat intermediate map in the settings rendering, fails it immediately. An allocation count is
 a property of the code rather than of the machine, which is what makes it worth pinning at all.
 
 There are no figures in this file on purpose. The numbers each release measured are on the
@@ -250,7 +250,7 @@ of this one.
 
 - No struct-tag table generator. A `go:generate` tool that writes a `Fields` table from tags would remove the one piece
   of duplication the design has; the tables are hand-written for now.
-- No remote providers — etcd, Consul, S3. `Options.ReadFile` is the seam a caller reaches through, and a provider
+- No remote providers such as etcd, Consul, or S3. `Options.ReadFile` is the seam a caller reaches through, and a provider
   belongs in a module of its own rather than in this one's dependency list.
 - No pflag adapter. `Overrides` is the shape a flag overlay takes; building one from a `*pflag.FlagSet` is a dozen
   lines a caller writes, and is not worth a dependency here.

@@ -5,21 +5,38 @@
  */
 
 .hero {
-  padding: 3rem 0 2rem;
+  padding: clamp(2.5rem, 6vw, 5rem) 0 2.5rem;
   text-align: center;
-  background: var(--ifm-color-emphasis-100);
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--ifm-color-primary) 13%, transparent), transparent 38rem),
+    linear-gradient(180deg, var(--ifm-color-emphasis-100), var(--ifm-background-color));
   border-bottom: 1px solid var(--ifm-color-emphasis-200);
 }
 
 .logo {
-  height: 128px;
-  width: 128px;
+  height: 48px;
+  width: 48px;
+  filter: drop-shadow(0 14px 26px color-mix(in srgb, var(--ifm-color-primary) 24%, transparent));
 }
 
 .title {
-  margin-bottom: 0.5rem;
-  font-size: 3rem;
+  margin: 1.5rem auto;
+  max-width: 62rem;
+  font-size: clamp(2.4rem, 4.8vw, 4.1rem);
+  line-height: 1.12;
+  letter-spacing: -0.045em;
 }
+
+.wordmark { display: flex; align-items: center; justify-content: center; gap: .75rem; font-size: 1.6rem; font-weight: 700; }
+.heroNote { color: var(--ifm-color-emphasis-700); font-size: .9rem; margin: 0; }
+.installSection { scroll-margin-top: 5rem; }
+.firstRun { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; max-width: 64rem; margin: 1.5rem auto; }
+.firstRun p { color: var(--ifm-color-emphasis-800); }
+.firstRun pre { margin-bottom: 0; }
+.installLinks { text-align: center; margin: 1.5rem 0 0; }
+.recoveryNote { margin-top: 2rem; padding: 1.5rem 2rem; border-left: 3px solid var(--ifm-color-primary); background: var(--ifm-background-surface-color); border-radius: 0 12px 12px 0; }
+.recoveryNote p { margin-bottom: 0; }
+@media (max-width: 650px) { .firstRun { grid-template-columns: 1fr; gap: .5rem; } .desktopBreak { display: none; } .recoveryNote { padding: 1.25rem; } }
 
 
 /* Readable line length for the long paragraphs on an otherwise wide page. */
@@ -27,7 +44,7 @@
 .sectionLead {
   max-width: 52rem;
   margin: 0 auto 1.5rem;
-  font-size: 1rem;
+  font-size: 1.07rem;
   line-height: 1.65;
 }
 
@@ -57,7 +74,7 @@
    mono title, so the page below the deck speaks the deck's language. */
 .section {
   border-top: 1px solid var(--ifm-color-emphasis-200);
-  padding: 3rem 0 3.25rem;
+  padding: clamp(3.5rem, 7vw, 6rem) 0;
 }
 
 .chip {
@@ -73,8 +90,8 @@
 
 .sectionTitle {
   text-align: center;
-  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
-  font-size: 1.5rem;
+  font-family: var(--ifm-font-family-base);
+  font-size: clamp(1.65rem, 3vw, 2.2rem);
   margin-bottom: 1.4rem;
 }
 
@@ -133,6 +150,13 @@
   /* A grid child's min-width is auto, so one long token inside a card would
      otherwise size the whole column past a phone's viewport. */
   min-width: 0;
+  box-shadow: var(--doc-panel-shadow);
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.feature:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--ifm-color-primary) 45%, var(--ifm-color-emphasis-200));
 }
 
 .feature p {
@@ -210,14 +234,25 @@
   margin-bottom: 1.5rem;
 }
 
-.install > :last-child {
-  grid-column: 1 / -1;
-}
-
 @media (max-width: 996px) {
   .install {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 576px) {
+  .hero { padding-top: 2.6rem; }
+  .logo { width: 96px; height: 96px; }
+  .lead, .sectionLead { font-size: 1rem; text-align: left; }
+  .sectionTitle { font-size: 1.35rem; }
+  .feature { padding: 1.1rem; }
+  .projects { grid-template-columns: 1fr; }
+  .manifests { padding: 0.25rem 0.75rem 0.75rem; }
+  .reference { text-align: left; list-style-position: outside; padding-left: 1.25rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feature { transition: none; }
 }
 
 /* A command is one long URL: wrap it inside its block rather than clipping

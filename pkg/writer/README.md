@@ -1,7 +1,7 @@
 # writer
 
-Use dispat's manifest writer to make format-preserving edits in place. It replaces only the target version text while
-preserving every other byte, including indentation, key order, and comments. This library serves as the writing
+Use dispat's manifest writer to update version declarations in place. Most formats use byte edits that preserve
+surrounding indentation, key order, and comments. Go modules use the Go module formatter. This library serves as the writing
 counterpart to [`pkg/scanner`](../scanner), shares its vocabulary through [`pkg/manifest`](../manifest), and powers
 native auto-versioning in dispat.
 
@@ -67,6 +67,17 @@ manifest does not declare.
 | `Config/DefaultEngine.ini`              | none to write                                              | yes (Android `VersionDisplayName`)     | no such directive            |
 | `game.project`                          | none to write (a library is an archive URL)                | yes (`version`)                        | no such directive            |
 | `project.json`/`gem.json`               | yes (the whole `Gem==1.0.0` literal)                       | yes, where one is declared             | no such directive            |
+| Aqua YAML                               | yes (literal package pins)                                | no such field                          | no such directive            |
+
+For Aqua, the writer updates exact pins in either `name@version` or a separate `version` field. It leaves
+`version_expr`, `go_version_file`, `import`, and `import_dir` entries alone and explains the skip in its result. It
+does not evaluate expressions, fetch registry metadata, install packages, or rewrite checksums. Pass
+`--manifest-format aqua` when an imported Aqua file has an arbitrary filename.
+
+The Aqua writer accepts block mappings with plain or one-line quoted scalars and preserves comments, quotes, order,
+and CRLF. It atomically refuses flow-style package maps, anchors or aliases in the package tree, and block or multiline
+name and version scalars because those forms do not have an unambiguous byte span to replace. The scanner can still
+read valid YAML aliases.
 
 Use `Relink` to manage the directive that points a dependency at a folder in your repository instead of a registry.
 Only five formats support this directive, while formats like NuGet and Maven name packages without any local redirect

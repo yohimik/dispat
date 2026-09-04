@@ -25,6 +25,13 @@ Reads are capped at 16 MiB per file (`ErrManifestTooLarge`), and output order is
 
 ## Supported manifests
 
+Aqua configuration is discovered as `aqua.yaml`, `aqua.yml`, `.aqua.yaml`, `.aqua.yml`, and the matching files inside
+`aqua/` or `.aqua/`. A package pin may use `name@version` or separate `name` and `version` fields; the inline version
+wins when both are present. Standard-registry packages use their bare name, while other registries use
+`registry:name`. Imports stay inside the scan root, are cycle-safe, and are returned in deterministic order. The
+scanner never evaluates `version_expr` or `go_version_file`, contacts a registry, installs a tool, or changes a
+checksum.
+
 | File                | Ecosystem | Reads                                                                                             |
 |---------------------|-----------|---------------------------------------------------------------------------------------------------|
 | `package.json`      | npm       | name, version, the four dependency fields, `file:`/`link:` local paths                            |

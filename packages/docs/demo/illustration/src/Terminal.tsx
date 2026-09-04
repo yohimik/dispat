@@ -54,7 +54,7 @@ const ROWS: Row[] = [
     eco: 'docker',
     ecoColor: colors.blue,
     y: 562,
-    note: 'flow.beforePublish: [changelog, commit] — the commit contains the changelog',
+    note: 'flow.beforePublish: [changelog, commit]. The commit contains the changelog.',
     steps: [
       {name: 'build', at: 40, dur: 64},
       {name: 'changelog', at: 110, dur: 18, step: true},
@@ -67,7 +67,7 @@ const ROWS: Row[] = [
     eco: 'go',
     ecoColor: colors.cyan,
     y: 732,
-    note: 'announce: dispat github — the release, right after the artifact upload',
+    note: 'announce: dispat github. The GitHub release follows the artifact upload.',
     steps: [
       {name: 'build', at: 40, dur: 60},
       {name: 'publish', at: 106, dur: 36},

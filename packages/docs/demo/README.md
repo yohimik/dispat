@@ -22,9 +22,9 @@ Every composition runs at twenty frames per second (`Root.tsx`), which is what s
 `Master` composition is the whole release story, forty-five seconds in five scenes; `Heal` is a cut of its timeline
 (`SCENES` in [`src/Master.tsx`](./illustration/src/Master.tsx)), and the rest are their own storyboards. `Order` in
 particular is not a cut: the master fails api on purpose, and the graph-not-a-list slide wants the run that
-completes. The landing page's carousel pairs each CLI README key-feature bullet with its clip (`FEATURE_MEDIA` in
+completes. The landing page's carousel pairs each CLI README key-feature bullet with its live scene (`FEATURE_MEDIA` in
 [`DemoCarousel`](../src/components/DemoCarousel/index.tsx)), in the README's order, and follows them with the
-`EXTRA_SLIDES` defined there: eight more stories the documentation describes, each with its own animation:
+`EXTRA_SLIDES` defined there. The asset column is a stable scene key; only the two GIF rows produce committed media:
 
 | Composition | Asset | Story | Embedded in |
 |---|---|---|---|
@@ -36,14 +36,15 @@ completes. The landing page's carousel pairs each CLI README key-feature bullet 
 | `Polyglot` | `demo-polyglot` | One manifest after another opens in the same editor and the version write happens in place, package.json to go.mod to Cargo.toml to pom.xml to pubspec.yaml to Info.plist to a Dockerfile, with the plist's build number pointedly untouched. | the carousel: "Polyglot by construction" |
 | `Terminal` | `demo-terminal` | Three package rows, each with its own step set inside one run: core on the release's default order, api nesting `[changelog, commit]` before its publish, utils publishing its GitHub release from announce; then `dispat changelog` alone finds the work done (`W226`). | the carousel: "Every release step is also a command" |
 | `Compute` | `demo-compute` | The config's spaces, then `dispat compute` proposing four edges and a starting version with manifest evidence, each edge drawing as its line prints, confirmed with `--interactive` and applied with `--write`. | the carousel: "The graph comes from the manifests" |
-| `Run` | `demo-run` | `dispat run tests --since HEAD~1 --consumers`: a utils fix runs the tests script on utils and its consumers api and sdk, in graph order; nothing releases and the rest of the graph, web included, is not selected. | the carousel: "Scripts for what changed" |
+| `Run` | live scene | `dispat run tests --since HEAD~1 --consumers`: the checked fixture runs utils, then api and sdk, then the transitive web consumer; nothing releases, while core, docs, and mobile remain unselected. | the carousel: "Scripts for what changed" |
 | `Single` | `demo-single` | The single-package example: one standalone entry, a scoped commit, the documentation's own status line, and a release leaving the tag, CHANGELOG.md, and a GitHub release under the card. | the carousel: "One package, no monorepo" |
 | `Hooks` | `demo-hooks` | Three package rows across two spaces, the same stage strip in each, with only that package's configured hooks above it and the libs login visibly shared, while core's print-env hook writes the `DISPAT_*` environment into the terminal. | the carousel: "Stages, hooks, and one environment" |
 | `Polyrepo` | `demo-polyrepo` | The control repository: three cards with git submodule pointers, a sync moving sdk's pointer, and the fleet releasing in dependency order while web stays unchanged. | the carousel: "Many repositories, one release" |
-| `Why` | `demo-why` | The README's two breaking situations, drawn: a Docker consumer failing to build under build-all-then-publish-all, a mid-run error leaving half published with the rest unknown, and dispat running build and publish as legs of one graph. | the carousel: "Why one more monorepo tool?" |
-| `Math` | `demo-math` | Three properties as three equations: `plan = f(history, graph, config)` with the identical status printed twice, `release(release(S)) = release(S)` with a failed run converging on re-run, and the parser's `O(n)` time in `O(1)` space as a cursor sweeping a commit once. | the carousel: "Mathematics, not machinery" |
+| `Why` | live scene | A concrete Dispat workflow: read the package graph, plan affected releases, publish providers before consumers, and use confirmed registry records to resume interrupted work. | the carousel: "Build and publish one dependency graph" |
+| `Aqua` | `demo-aqua` | The checked Aqua fixture is scanned through an imported package file, then its literal CLI version is updated while a dynamic private package is safely skipped. | the carousel: "Aqua manifests, read and rewritten directly" |
+| `Math` | live scene | Repeatable planning from stable inputs, recovery based on confirmed tags and registry records, safe publisher repetition after an ambiguous result, and bounded left-to-right commit parsing. | the carousel: "Recorded progress and repeatable plans" |
 | `Glue` | `demo-glue` | Three acts: `dispat if` branching on `ENV=prod`, `dispat replacer` swapping a Gradle coordinate and a README install line, and the local-link bracket: `autowriter --link-local` writing the go.mod `replace`, tests against the tree, `--unlink-local`, and `scanner --verify-unlinked`. | the carousel: "The glue between the steps" |
-| `Lock` | `demo-lock` | The release lock: a runner claims the `dispat-release-lock` tag and releases, a second run is rejected with nothing planned or built, and the returned lock lets the retry claim cleanly. | the carousel: "One release at a time" |
+| `Lock` | live scene | Each run pushes a unique lock object with holder metadata; release removes it with an object-ID lease, so cleanup cannot delete another run's lock. A rejected second run plans and publishes nothing. | the carousel: "One release at a time" |
 
 The scenes restate the documentation's claims:
 [concepts](https://dispat.dev/concepts/),

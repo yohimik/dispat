@@ -9,24 +9,24 @@ importers:
   .:
     dependencies:
       '@remotion/cli':
-        specifier: ^4.0.246
+        specifier: 4.0.515
         version: 4.0.515(postcss@8.5.26)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)(typescript@5.9.3)
       '@remotion/google-fonts':
-        specifier: ^4.0.246
+        specifier: 4.0.515
         version: 4.0.515(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      remotion:
+        specifier: 4.0.515
+        version: 4.0.515(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.18
       react:
         specifier: ^19.0.0
         version: 19.2.8
       react-dom:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
-      remotion:
-        specifier: ^4.0.246
-        version: 4.0.515(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-    devDependencies:
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.18
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
@@ -1962,7 +1962,7 @@ snapshots:
 
   '@svgr/hast-util-to-babel-ast@8.0.0':
     dependencies:
-      '@babel/types': 7.24.0
+      '@babel/types': 7.29.8
       entities: 4.5.0
 
   '@svgr/plugin-jsx@8.1.0(@svgr/core@8.1.0(supports-color@8.1.1)(typescript@5.9.3))(supports-color@8.1.1)':

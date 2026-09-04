@@ -1,36 +1,21 @@
 import Link from '@docusaurus/Link';
-import useBaseUrl from '@docusaurus/useBaseUrl';
+import BrowserOnly from '@docusaurus/BrowserOnly';
+import type {PlayerRef} from '@remotion/player';
 import type {Feature} from '@site/plugins/readme/types';
 import Inlines from '@site/src/components/Inline';
 import Heading from '@theme/Heading';
 import React from 'react';
+import aquaFixture from '../../../demo/fixtures/aqua/expected.json';
+import runFixture from '../../../demo/fixtures/run/expected.json';
 
 import styles from './styles.module.css';
 
-// The landing page hero's deck: one slide per key feature, playing round
-// robin. Each slide is an animated illustration of its claim, diagram over
-// terminal, with the claim's title over the clip's top strip and its words
-// in a band underneath. The compositions keep a taller strip empty (the
-// master's scene titles live there), so the video is shown cropped to the
-// bottom 840 of its 1080 rows, which leaves just enough strip for the one
-// title line.
-//
-// The features are the CLI README's `## Key features` bullets, read at build
-// time like every claim on this page, in the README's order. FEATURE_MEDIA
-// pairs each bullet with the clip that illustrates it (rendered by
-// packages/docs/demo/render.sh from the compositions in
-// packages/docs/demo/illustration); a bullet without a clip still gets a
-// slide, its title on the canvas, until an animation is made for it.
-//
-// The player: a clip plays once and hands over the moment it ends, straight
-// round robin. Repeat-one replays the current slide instead, pause freezes
-// clip and rotation together, the speed cycler drives playbackRate, and a
-// pointer resting on the slide replays it rather than rotating a reader
-// away mid-paragraph. The nav names every slide, so a reader who wants one
-// claim again does not have to sit through the rest of the deck.
+// README features use stable IDs to select shared Remotion compositions.
+// Load only the selected scene. Playback follows the user's transport choice,
+// document visibility, and viewport intersection; scene timing stays in its source.
 
 type Media = {
-  /** Base name of the webm and mp4 pair in imgs/, served at the site root. */
+  /** Base name retained as the stable scene key and recording file name. */
   asset: string;
   /** The nav button's word or two. */
   name: string;
@@ -38,9 +23,46 @@ type Media = {
   label: string;
 };
 
+const FPS = 20;
+const LivePlayer = React.lazy(() => import('./LivePlayer'));
+const SCENE_COMMANDS: Record<string, string> = {
+  'demo-why': 'dispat status', 'demo-order': 'dispat', 'demo-blast': 'dispat status',
+  'demo-heal': 'dispat', 'demo-control': 'dispat status', 'demo-polyglot': 'dispat writer',
+  'demo-terminal': 'dispat changelog', 'demo-compute': 'dispat compute --interactive',
+  'demo-run': runFixture.command, 'demo-single': 'dispat',
+  'demo-hooks': 'dispat', 'demo-polyrepo': 'dispat', 'demo-math': 'dispat status',
+  'demo-glue': 'dispat autowriter --link-local', 'demo-lock': 'dispat release',
+  'demo-aqua': aquaFixture.commands.join('\n'),
+};
+
+class SceneBoundary extends React.Component<{children: React.ReactNode; fallback: React.ReactNode}, {failed: boolean}> {
+  state = {failed: false};
+  static getDerivedStateFromError() { return {failed: true}; }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+type LoadedScene = {component: React.ComponentType; duration: number};
+const SCENES: Record<string, () => Promise<LoadedScene>> = {
+  'demo-order': () => import('../../../demo/illustration/src/Order').then((m) => ({component: m.Order, duration: m.ORDER_DURATION})),
+  'demo-blast': () => import('../../../demo/illustration/src/Blast').then((m) => ({component: m.Blast, duration: m.BLAST_DURATION})),
+  'demo-heal': () => import('../../../demo/illustration/src/Master').then((m) => ({component: m.Heal, duration: m.HEAL_DURATION})),
+  'demo-control': () => import('../../../demo/illustration/src/Control').then((m) => ({component: m.Control, duration: m.CONTROL_DURATION})),
+  'demo-polyglot': () => import('../../../demo/illustration/src/Polyglot').then((m) => ({component: m.Polyglot, duration: m.POLYGLOT_DURATION})),
+  'demo-terminal': () => import('../../../demo/illustration/src/Terminal').then((m) => ({component: m.Terminal, duration: m.TERMINAL_DURATION})),
+  'demo-why': () => import('../../../demo/illustration/src/Why').then((m) => ({component: m.Why, duration: m.WHY_DURATION})),
+  'demo-compute': () => import('../../../demo/illustration/src/Compute').then((m) => ({component: m.Compute, duration: m.COMPUTE_DURATION})),
+  'demo-run': () => import('../../../demo/illustration/src/Run').then((m) => ({component: m.Run, duration: m.RUN_DURATION})),
+  'demo-single': () => import('../../../demo/illustration/src/Single').then((m) => ({component: m.Single, duration: m.SINGLE_DURATION})),
+  'demo-hooks': () => import('../../../demo/illustration/src/Hooks').then((m) => ({component: m.Hooks, duration: m.HOOKS_DURATION})),
+  'demo-polyrepo': () => import('../../../demo/illustration/src/Polyrepo').then((m) => ({component: m.Polyrepo, duration: m.POLYREPO_DURATION})),
+  'demo-math': () => import('../../../demo/illustration/src/Math').then((m) => ({component: m.Math_, duration: m.MATH_DURATION})),
+  'demo-glue': () => import('../../../demo/illustration/src/Glue').then((m) => ({component: m.Glue, duration: m.GLUE_DURATION})),
+  'demo-lock': () => import('../../../demo/illustration/src/Lock').then((m) => ({component: m.Lock, duration: m.LOCK_DURATION})),
+  'demo-aqua': () => import('../../../demo/illustration/src/Aqua').then((m) => ({component: m.Aqua, duration: m.AQUA_DURATION})),
+};
+
 const FEATURE_MEDIA = new Map<string, Media>([
   [
-    'Releases the graph, not a list',
+    'release-graph',
     {
       asset: 'demo-order',
       name: 'Releases the graph',
@@ -49,7 +71,7 @@ const FEATURE_MEDIA = new Map<string, Media>([
     },
   ],
   [
-    'Blast radius written in the commit',
+    'blast-radius',
     {
       asset: 'demo-blast',
       name: 'Blast radius',
@@ -58,7 +80,7 @@ const FEATURE_MEDIA = new Map<string, Media>([
     },
   ],
   [
-    'Self-healing runs, because a release is a distributed transaction',
+    'self-healing',
     {
       asset: 'demo-heal',
       name: 'Self-healing runs',
@@ -67,7 +89,7 @@ const FEATURE_MEDIA = new Map<string, Media>([
     },
   ],
   [
-    'Release control from commits',
+    'release-control',
     {
       asset: 'demo-control',
       name: 'Release control',
@@ -76,16 +98,16 @@ const FEATURE_MEDIA = new Map<string, Media>([
     },
   ],
   [
-    'Polyglot by construction: any language, any registry, any tooling',
+    'polyglot',
     {
       asset: 'demo-polyglot',
       name: 'Polyglot',
       label:
-        'One manifest after another opens in the same editor, package.json to go.mod to Cargo.toml to pom.xml to pubspec.yaml to Info.plist to a Dockerfile, and in each one the version value is rewritten in place while every other byte sits still.',
+        'One manifest after another opens in the same editor, package.json to go.mod to Cargo.toml to pom.xml to pubspec.yaml to Info.plist to a Dockerfile, and in each one the version value is rewritten in place while the surrounding manifest structure stays recognizable. Go manifests use the standard formatter.',
     },
   ],
   [
-    'Every release step is also a command, with the records built in',
+    'step-commands',
     {
       asset: 'demo-terminal',
       name: 'Steps as commands',
@@ -110,15 +132,13 @@ type ExtraSlide = {title: string; name: string; body: React.ReactNode; media: Me
  * monorepo tool?" section: the repository README's two situations, drawn.
  */
 const WHY_SLIDE: ExtraSlide = {
-  title: 'Why one more monorepo tool?',
-  name: 'Why dispat',
+  title: 'Build and publish one dependency graph',
+  name: 'How it works',
   body: (
     <>
-      Every major tool can topologically sort a build, but the language-agnostic ones stop before the release and the
-      ones that publish serve a single ecosystem. Two situations break build-all-then-publish-all: an error in the
-      middle of a run leaves half the packages shipped with recovery as a script you write, and a Docker consumer can
-      only be built once its provider is published. dispat is built for exactly that mix;{' '}
-      <Link to="/concepts">Concepts</Link> works both situations through end to end.
+      Dispat reads package relationships, plans the affected releases, then builds and publishes each dependency
+      before its consumers. It records completed work so an interrupted release can resume from what the registry
+      confirms. <Link to="/concepts">Concepts</Link> follows that workflow end to end.
     </>
   ),
   media: {
@@ -130,6 +150,18 @@ const WHY_SLIDE: ExtraSlide = {
 };
 
 const EXTRA_SLIDES: ExtraSlide[] = [
+  {
+    title: 'Aqua manifests, read and rewritten directly',
+    name: 'Aqua',
+    body: (
+      <>The scanner follows Aqua package imports, preserves registry-qualified names, and the writer updates literal versions while reporting dynamic entries it cannot safely rewrite. The scene reads the same deterministic fixture the real CLI integration test drives.</>
+    ),
+    media: {
+      asset: 'demo-aqua',
+      name: 'Aqua',
+      label: 'The real Aqua fixture is scanned into cli/cli and corp:private/tool. The writer updates cli/cli from v2.0.0 to v2.1.0, preserves the private tool at 1.4.0, and reports one applied change with one dynamic version skipped.',
+    },
+  },
   {
     title: 'The graph comes from the manifests',
     name: 'Compute',
@@ -160,7 +192,7 @@ const EXTRA_SLIDES: ExtraSlide[] = [
           <code>dispat run tests --since HEAD~1</code>
         </Link>{' '}
         executes each changed package’s script in graph order, and <code>--consumers</code> adds the changed
-        packages’ consumers, so a shared-library fix tests its dependents without a shell loop, the{' '}
+        packages’ direct and transitive consumers, so a shared-library fix tests its full downstream path without a shell loop, the{' '}
         <Link to="/reference/pipelines">pipeline patterns</Link> this repository tests itself with. Nothing is
         released and nothing is tagged.
       </>
@@ -169,7 +201,7 @@ const EXTRA_SLIDES: ExtraSlide[] = [
       asset: 'demo-run',
       name: 'dispat run',
       label:
-        'A fix lands in utils and dispat run tests --since HEAD~1 --consumers runs the tests script on utils, then its consumers api and sdk side by side, in graph order, while web, core, docs, and mobile stay unselected and the log ends with ok=3 released=0.',
+        'A fix lands in utils and dispat run tests --since HEAD~1 --consumers runs utils first, then api and sdk side by side, then the transitive web consumer; core, docs, and mobile stay unselected and the log ends with ok=4 released=0.',
     },
   },
   {
@@ -227,22 +259,21 @@ const EXTRA_SLIDES: ExtraSlide[] = [
     },
   },
   {
-    title: 'Mathematics, not machinery',
-    name: 'The math',
+    title: 'Recorded progress and repeatable plans',
+    name: 'Repeatable plans',
     body: (
       <>
-        <Link to="/internals/architecture">The plan is a pure function</Link> of history, graph, and configuration,
-        with no clocks and no state files, so the same inputs always print the same plan. A re-run recomputes the same
-        transaction and executes only the legs whose record is missing, which makes released state a fixed point. Even{' '}
-        <Link to="/go/ccme">the commit parser</Link> is one left-to-right pass, O(n) time in O(1) space, with no
-        backtracking to feed untrusted input.
+        <Link to="/internals/architecture">Planning is deterministic</Link>: the same history, graph, and configuration
+        produce the same plan. During release, tags and registry records let a retry skip work already confirmed.
+        If a publish result is ambiguous, the publisher must make repeating that operation safe.{' '}
+        <Link to="/go/ccme">Commit parsing</Link> remains a bounded left-to-right scan.
       </>
     ),
     media: {
       asset: 'demo-math',
-      name: 'The math',
+      name: 'Repeatable plans',
       label:
-        'Three properties as three equations: plan = f(history, graph, config) while dispat status prints the identical plan twice; release(release(S)) = release(S) while a failed run and its re-run converge to done failed=0; and O(n) time, O(1) space while a cursor sweeps a commit message once, left to right.',
+        'The same inputs produce the same release plan. A retry checks recorded tags and registry state, skips confirmed work, and treats an ambiguous publish as an operation the publisher must safely repeat. A cursor then shows bounded left-to-right commit parsing.',
     },
   },
   {
@@ -282,8 +313,9 @@ const EXTRA_SLIDES: ExtraSlide[] = [
         <Link to="/reference/releasing/release-lock">
           <code>dispat-release-lock</code> tag
         </Link>
-        ; a rejected push is the lock. A second run stops with nothing planned, built, or published, and the lock is
-        given back on the way out even when a run fails, so the retry claims it cleanly.
+        ; a rejected push is the lock. Each attempt has a unique tag object, names its host and process, and removes
+        the remote lock only with an object-ID lease, so one run cannot delete another run’s claim. A second run stops
+        before planning, and cleanup lets the retry claim it cleanly.
       </>
     ),
     media: {
@@ -322,7 +354,7 @@ function DeckControls({
   speed,
   onCycleSpeed,
 }: {
-  slides: Array<{title: string; name: string}>;
+  slides: Array<{id: string; title: string; name: string}>;
   active: number;
   onSelect: (i: number) => void;
   loop: boolean;
@@ -380,9 +412,10 @@ function DeckControls({
       </div>
       <span className={styles.divider} />
       <div className={styles.pills} role="group" aria-label="Key features">
-        {slides.map(({title, name}, i) => (
+        {slides.map(({id, title, name}, i) => (
           <button
-            key={title}
+            key={id}
+            data-demo-feature={id}
             type="button"
             className={i === active ? `${styles.navButton} ${styles.activeNavButton}` : styles.navButton}
             aria-label={title}
@@ -399,22 +432,25 @@ function DeckControls({
 export default function DemoCarousel({features}: {features: Feature[]}): React.ReactElement {
   const slides = React.useMemo(
     () => [
-      {
-        title: WHY_SLIDE.title,
-        name: WHY_SLIDE.name,
-        media: WHY_SLIDE.media,
-        body: WHY_SLIDE.body,
-      },
       ...features.map((feature) => {
-        const media = FEATURE_MEDIA.get(feature.title);
+        const media = FEATURE_MEDIA.get(feature.id);
         return {
+          id: feature.id,
           title: feature.title,
           name: media?.name ?? shortName(feature.title),
           media,
           body: <Inlines tokens={feature.body} />,
         };
       }),
+      {
+        id: 'how-it-works',
+        title: WHY_SLIDE.title,
+        name: WHY_SLIDE.name,
+        media: WHY_SLIDE.media,
+        body: WHY_SLIDE.body,
+      },
       ...EXTRA_SLIDES.map((extra) => ({
+        id: extra.media.asset.replace(/^demo-/, ''),
         title: extra.title,
         name: extra.name,
         media: extra.media,
@@ -425,122 +461,131 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
   );
   const [active, setActive] = React.useState(0);
   const [loop, setLoop] = React.useState(false);
-  const [paused, setPaused] = React.useState(false);
+  // SSR starts on the meaningful still. Hydration opts into motion only
+  // after reading the user's preference, avoiding a moving server fallback.
+  const [paused, setPaused] = React.useState(true);
   const [speed, setSpeed] = React.useState(1);
-  // The handlers below run outside render, so they read the ref.
-  const pausedRef = React.useRef(false);
-  const videos = React.useRef<Array<HTMLVideoElement | null>>([]);
-  // useBaseUrl is a hook, so it runs once for the root rather than once per
-  // slide inside the map below.
-  const base = useBaseUrl('/');
-
-  // Autoplay attributes would start every clip at once; instead the active
-  // one is played from its first frame and the rest are paused, so the
-  // rotation is the only thing in motion.
+  const [onscreen, setOnscreen] = React.useState(false);
+  const [pageVisible, setPageVisible] = React.useState(true);
+  const transportTouched = React.useRef(false);
+  const root = React.useRef<HTMLDivElement>(null);
+  const [player, setPlayer] = React.useState<PlayerRef | null>(null);
+  const current = slides[active];
+  const sceneLoader = current.media ? SCENES[current.media.asset] : undefined;
+  const [scene, setScene] = React.useState<LoadedScene>();
+  const [sceneFailed, setSceneFailed] = React.useState(false);
   React.useEffect(() => {
-    for (const [i, video] of videos.current.entries()) {
-      if (!video) continue;
-      if (i === active) {
-        video.currentTime = 0;
-        video.playbackRate = speedRef.current;
-        // Autoplay of muted video is allowed everywhere, but play() still
-        // returns a promise a strict browser can reject.
-        if (!pausedRef.current) void video.play().catch(() => undefined);
-      } else {
-        video.pause();
-      }
-    }
-    // A background tab, or a battery saver, is allowed to pause the clip
-    // mid-play, and nothing else would ever start it again. Picking the
-    // active clip back up when the page returns keeps the deck from coming
-    // back frozen.
-    const resume = () => {
-      const video = videos.current[active];
-      if (document.visibilityState === 'visible' && video && video.paused && !pausedRef.current) {
-        void video.play().catch(() => undefined);
-      }
-    };
-    document.addEventListener('visibilitychange', resume);
-    return () => document.removeEventListener('visibilitychange', resume);
-  }, [active, slides]);
+    let currentLoad = true;
+    setScene(undefined);
+    setSceneFailed(false);
+    if (sceneLoader) void sceneLoader()
+      .then((loaded) => { if (currentLoad) setScene(loaded); })
+      .catch(() => { if (currentLoad) setSceneFailed(true); });
+    return () => { currentLoad = false; };
+  }, [sceneLoader]);
 
-  // Pause is the player's own: it freezes the active clip and, through the
-  // effect below, the rotation with it.
   React.useEffect(() => {
-    pausedRef.current = paused;
-    const video = videos.current[active];
-    if (!video) return;
-    if (paused) video.pause();
-    else void video.play().catch(() => undefined);
-  }, [paused, active]);
-
-  // Speed applies to whatever is playing; speedRef keeps the play effect
-  // above from re-reading a stale value when the slide changes.
-  const speedRef = React.useRef(1);
+    const node = root.current;
+    if (!node) return undefined;
+    const observer = new IntersectionObserver(([entry]) => setOnscreen(entry.isIntersecting), {threshold: 0.2});
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   React.useEffect(() => {
-    speedRef.current = speed;
-    const video = videos.current[active];
-    if (video) video.playbackRate = speed;
-  }, [speed, active]);
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const changed = () => { if (!transportTouched.current) setPaused(preference.matches); };
+    changed();
+    preference.addEventListener('change', changed);
+    return () => preference.removeEventListener('change', changed);
+  }, []);
+  React.useEffect(() => {
+    const changed = () => setPageVisible(document.visibilityState === 'visible');
+    changed();
+    document.addEventListener('visibilitychange', changed);
+    return () => document.removeEventListener('visibilitychange', changed);
+  }, []);
 
-  // The rotation is the clips' own: a clip plays once and hands over the
-  // moment it ends, straight round robin, unconditionally. Repeat-one is the
-  // one way to stay on a slide (the video's loop attribute, so `ended`
-  // never fires while it is on); nothing else, hover and focus included,
-  // may hold the rotation, because any implicit hold reads as a looping
-  // bug.
+  const shouldPlay = !paused && onscreen && pageVisible;
+  React.useEffect(() => {
+    if (shouldPlay) player?.play();
+    else player?.pause();
+  }, [shouldPlay, active, scene, player]);
+
   const slidesCount = React.useRef(slides.length);
   slidesCount.current = slides.length;
   const onClipEnded = React.useCallback(() => {
-    setActive((current) => (current + 1) % slidesCount.current);
-  }, []);
+    if (!loop) setActive((current) => (current + 1) % slidesCount.current);
+  }, [loop]);
+  React.useEffect(() => {
+    if (!player) return undefined;
+    player.addEventListener('ended', onClipEnded);
+    return () => player.removeEventListener('ended', onClipEnded);
+  }, [active, onClipEnded, scene, player]);
 
   return (
-    <div className={styles.carousel}>
+    <div className={styles.carousel} ref={root} data-demo-id="landing-demos">
       <div className={styles.frame}>
         <div className={styles.stack}>
-        {slides.map(({title, media, body}, i) => (
-          <div
-            key={title}
-            className={i === active ? `${styles.slide} ${styles.activeSlide}` : styles.slide}
-            aria-hidden={i !== active}>
-            {media ? (
-              <video
-                ref={(el) => {
-                  videos.current[i] = el;
-                }}
-                className={styles.video}
-                loop={loop}
-                muted
-                playsInline
-                preload="auto"
-                width={1920}
-                height={1080}
-                aria-label={media.label}
-                onEnded={onClipEnded}>
-                <source src={`${base}${media.asset}.webm`} type="video/webm" />
-                <source src={`${base}${media.asset}.mp4`} type="video/mp4" />
-              </video>
-            ) : (
-              <div className={styles.video} />
-            )}
+          <div key={current.id} className={`${styles.slide} ${styles.activeSlide}`} data-slide-id={current.id}>
+            <div className={styles.video}>
+              <div className={styles.mobilePanHint}>Swipe horizontally to inspect the animation. The full transcript follows.</div>
+              <div
+                className={styles.sceneScroller}
+                data-demo-canvas
+                role="region"
+                aria-label={`Scrollable interactive animation: ${current.media?.label ?? current.title}`}
+                tabIndex={0}>
+                <div className={styles.sceneViewport}>
+              {scene ? (
+                <BrowserOnly fallback={<div className={styles.loading}>Interactive demo</div>}>
+                  {() => (
+                    <SceneBoundary fallback={<div className={styles.loading}>Demo unavailable. Read the description below.</div>}>
+                      <React.Suspense fallback={<div className={styles.loading}>Loading interactive demo…</div>}>
+                        <LivePlayer
+                          ref={setPlayer}
+                          component={scene.component}
+                          durationInFrames={scene.duration}
+                          compositionWidth={1920}
+                          compositionHeight={1080}
+                          fps={FPS}
+                          loop={loop}
+                          playbackRate={speed}
+                          initialFrame={Math.min(Math.round(scene.duration / 3), scene.duration - 1)}
+                          controls={false}
+                          acknowledgeRemotionLicense
+                          style={{width: '100%', height: '100%'}}
+                        />
+                      </React.Suspense>
+                    </SceneBoundary>
+                  )}
+                </BrowserOnly>
+              ) : <div className={styles.loading}>{sceneFailed ? 'Demo unavailable. Read the description below.' : 'Loading interactive demo…'}</div>}
+                </div>
+              </div>
+            </div>
             <Heading as="h3" className={styles.slideTitle}>
-              {title}
+              {current.title}
             </Heading>
             <div className={styles.band}>
-              <p className={styles.bandBody}>{body}</p>
+              <p className={styles.bandBody}>{current.body}</p>
+              {current.media && (
+                <details className={styles.transcript} open>
+                  <summary>Accessible description and transcript</summary>
+                  <code className={styles.command}>{SCENE_COMMANDS[current.media.asset]}</code>
+                  <p>{current.media.label}</p>
+                </details>
+              )}
             </div>
           </div>
-        ))}
         </div>
         <DeckControls
           slides={slides}
           active={active}
-          onSelect={setActive}
+          onSelect={(next) => { setActive(next); }}
           loop={loop}
           onToggleLoop={() => setLoop((l) => !l)}
           playing={!paused}
-          onTogglePlay={() => setPaused((p) => !p)}
+          onTogglePlay={() => { transportTouched.current = true; setPaused((p) => !p); }}
           speed={speed}
           onCycleSpeed={() => setSpeed((s) => ({1: 1.5, 1.5: 2, 2: 0.5, 0.5: 1}[s] ?? 1))}
         />

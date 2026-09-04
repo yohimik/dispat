@@ -30,7 +30,7 @@ published  package=core   tag=core@1.5.0
 published  package=api    tag=api@0.8.3    # waited for core's publish
 done  published=3
 
-$ dispat                            # re-running is always safe
+$ dispat                            # re-run after checking any publish interrupted before its tag
 done  published=0  unchanged=4
 ```
 
@@ -38,7 +38,8 @@ The output above is abridged. Before your first release, edit the starter config
 their build and publish commands. If `api` fails to build in that run, `core` and `utils` still ship, dispat exits
 non-zero, and the next run releases `api` at the exact version it was owed.
 
-Runs are self-healing, and [Concepts](https://dispat.dev/concepts/) explains this failure model in depth.
+Recorded publishes recover forward on the next run. If a publish process was killed before dispat wrote its tag,
+check that destination before retrying. [Concepts](https://dispat.dev/concepts/) explains the full failure model.
 
 Run these commands for common daily tasks:
 
@@ -60,37 +61,30 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 
 ## Key features
 
-- **Releases the graph, not a list.** dispat manages consumer and provider ordering across your workspace. It runs
-  builds and publishes in parallel with separate concurrency budgets, and supports `isBuildWaitingPublish` for
-  ecosystems like Docker where a consumer must wait for its provider to publish before building.
-- **Blast radius written in the commit.** A `feat(core):` commit releases `core` alone, `^` bumps its direct consumers,
-  `^^` reaches the full transitive closure, and `+N` reaches up to N edges away. You control the exact blast radius
-  directly from git history.
-- **Self-healing runs, because a release is a distributed transaction.** Publishing a graph performs irreversible
-  writes across external registries without rollbacks, so each package commits its leg by creating an annotated git tag
-  only after publishing succeeds. If a package fails, dispat skips only its dependants while unrelated packages
-  continue shipping. Re-running *is* the recovery because the plan is a pure function of git history, the dependency
-  graph, and your configuration, so the next run executes only the unfinished legs without state files or repair
-  scripts. Read more in [Details](https://dispat.dev/internals/architecture/).
-- **Release control from commits.** Use `%beta` to start a prerelease train and `%beta>stable` to graduate it. Set
-  `Release-As: none` to hold a package, `Release-As: auto` to resume releases, `Release-As: 2.0.0` to pin a version, or
-  `cancel(pkg)` to drop pending changes. Because you write these directives into commit messages, release decisions are
-  reviewed and tracked like code. Read more in
-  [Details](https://dispat.dev/reference/commits/#release-control).
-- **Polyglot by construction: any language, any registry, any tooling.** Stages execute shell commands populated with a
-  rich [`DISPAT_*` environment](https://dispat.dev/reference/environment/), storing release state
-  entirely in git tags. dispat reads and rewrites thirty-five manifest formats across twenty ecosystems, from npm to
-  `go.mod` to `Podfile` and game project files in Unity, Godot, Unreal, Defold, and O3DE, so `dispat compute` derives
-  your graph and starting versions automatically. Unchanged packages stay out of the plan entirely, letting external
-  caches like BuildKit, Turborepo, Nx, Bazel, or Gradle operate inside stages without affecting versioning or tags.
-- **Every release step is also a command, with the records built in.** Generate per-package changelogs, annotated tags,
-  GitHub releases, or release commits individually with standalone commands like `dispat changelog`, `commit`, or
-  `github`. When the main release stage runs later, it detects completed records and skips them. You can dry-run plans
-  with `dispat status`, prevent concurrent runs using a
-  [release lock](https://dispat.dev/reference/releasing/release-lock/), release subsets using
-  `dispat release -p core` (or `-s libs`, `-g platform`), and assemble custom workflows with `dispat if`, `exec`,
-  `autowriter`, and `autoreplacer`. Read more in
-  [Details](https://dispat.dev/reference/releasing/steps/).
+- **Build and publish in dependency order.** Dispat schedules each package after the packages it needs. A package that
+  uses another is its consumer; the package it needs is its provider. Independent work runs in parallel, with separate
+  limits for builds and publishes. Set `isBuildWaitingPublish` when a build needs its provider's published artifact,
+  as Docker image builds often do.
+- **Choose which packages release.** A `feat(core):` commit releases `core`. Add `^` to include direct consumers,
+  `^^` to include every downstream consumer, or `+N` to reach up to N dependency edges away. The commit records your
+  choice for review alongside the code.
+- **Recover unfinished releases.** Dispat writes a Git tag after a successful publish. If a package fails, independent
+  packages can still finish. The next run uses those tags to plan unfinished work. A successful publish whose tag was
+  never written remains ambiguous: check its destination before retrying, or use a publisher that safely accepts
+  repeated requests. See [recovery behavior](https://dispat.dev/reference/releasing/recovery/).
+- **Manage prerelease versions in Git.** A prerelease lets you publish a version for testing before marking it stable.
+  Use `%beta` to start one and `%beta>stable` to graduate it. `Release-As: none` holds a package, `Release-As: auto`
+  resumes releases, and `Release-As: 2.0.0` selects an exact version. See
+  [release controls](https://dispat.dev/reference/commits/#release-control) for the full syntax.
+- **Keep your existing tools.** Configure shell commands for each package's build and publish stages. Dispat reads
+  dependency manifests across Go, npm, Python, Cargo, Docker, mobile, and game projects. `dispat compute` can derive
+  the graph and starting versions from these files. Your existing build caches continue to work inside those commands.
+  [Aqua tool pins](https://dispat.dev/next/editing/manifests/#aqua) are supported in the unreleased version.
+- **Run release steps separately.** Generate changelogs, create tags, write GitHub releases, or make release commits with
+  standalone commands. Preview the plan with `dispat status`, select a subset with `dispat release -p core`, and use
+  `dispat if`, `exec`, `autowriter`, or `autoreplacer` to compose your own workflow. The
+  [release lock](https://dispat.dev/reference/releasing/release-lock/) coordinates concurrent release runs.
+
 
 ## Documentation
 
@@ -208,4 +202,3 @@ Join the community to ask questions, report issues, or share projects:
 
 You can also submit bug reports and feature requests directly through
 [GitHub issues](https://github.com/yohimik/dispat/issues).
-

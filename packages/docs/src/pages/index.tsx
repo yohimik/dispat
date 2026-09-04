@@ -1,6 +1,5 @@
 import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
-import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import {usePluginData} from '@docusaurus/useGlobalData';
 import {README_PLUGIN} from '@site/plugins/readme/name';
 import type {Argument, ReadmeData} from '@site/plugins/readme/types';
@@ -76,12 +75,12 @@ function Argued({argument, className}: {argument: Argument; className: string}):
  * small uppercase chip naming the territory, and a mono title, the same
  * shapes the hero's slides and the clips' chips use.
  */
-function Section({chip, title, children}: {chip: string; title: string; children: React.ReactNode}): React.ReactElement {
+function Section({chip, title, id, children}: {chip: string; title: string; id?: string; children: React.ReactNode}): React.ReactElement {
   return (
     <section className={styles.section}>
       <div className="container">
         <p className={styles.chip}>{chip}</p>
-        <Heading as="h2" className={styles.sectionTitle}>
+        <Heading as="h2" id={id} className={styles.sectionTitle}>
           {title}
         </Heading>
         {children}
@@ -94,72 +93,67 @@ function Section({chip, title, children}: {chip: string; title: string; children
 // a leading comment: the copy button then hands over exactly what you run, and
 // a reader copying the Linux block never carries the wget alternative with it.
 const INSTALL_CURL = 'curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh';
-const INSTALL_WGET = 'wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh';
 const INSTALL_WINDOWS = 'irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex';
 
 function Hero(): React.ReactElement {
-  const {siteConfig} = useDocusaurusContext();
-  const {repository, cli} = useReadme();
-
+  const {repository} = useReadme();
   return (
     <header className={styles.hero}>
       <div className="container">
-        <img
-          className={styles.logo}
-          src={useBaseUrl('/logo.svg')}
-          alt="dispat logo"
-          width={128}
-          height={128}
-        />
-        <Heading as="h1" className={styles.title}>
-          {siteConfig.title}
-        </Heading>
-        {/* No tagline line here, deliberately: the repository README's opening
-            paragraph below says what the tagline says, in more words, and one
-            under the other read as a stutter. siteConfig.tagline is still the
-            navbar's, the page <title>'s and the meta description's. */}
-        {/* The same two badges the repository README carries: the tests workflow
-            and the coverage endpoint the coverage job publishes to the badges
-            branch. The coverage one links to the page that explains the number
-            rather than back to the workflow. */}
-        <div className={styles.badges}>
-          <Link to={`${GITHUB}/actions/workflows/tests.yml`}>
-            <img src={`${GITHUB}/actions/workflows/tests.yml/badge.svg`} alt="tests workflow status" height={20} />
-          </Link>
-          <Link to="/internals/coverage">
-            <img
-              src="https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json"
-              alt="statement coverage"
-              height={20}
-            />
-          </Link>
+        <div className={styles.wordmark}>
+          <img className={styles.logo} src={useBaseUrl('/logo.svg')} alt="" width={48} height={48} />
+          <span>dispat</span>
         </div>
-        {/* The repository README's opening, up to its install commands. */}
-        {repository.lead.map((paragraph, i) => (
-          // Read from a file at build time; the order never changes.
-          // eslint-disable-next-line react/no-array-index-key
-          <p className={styles.lead} key={i}>
-            <Inlines tokens={paragraph} />
-          </p>
+        <Heading as="h1" className={styles.title}>
+          Release your packages together,<br className={styles.desktopBreak} /> across languages.
+        </Heading>
+        {repository.lead.slice(0, 2).map((paragraph, i) => (
+          <p className={styles.lead} key={i}><Inlines tokens={paragraph} /></p>
         ))}
         <div className={styles.buttons}>
-          <Link className="button button--primary button--lg" to="/getting-started">
-            Get started
-          </Link>
-          <Link className="button button--secondary button--lg" to="/examples">
-            Examples
-          </Link>
+          <Link className="button button--primary button--lg" to="#install">Install Dispat</Link>
+          <Link className="button button--secondary button--lg" to="/getting-started">Start your first release</Link>
         </div>
-        {/* The CLI README's key features as a deck: one slide per bullet,
-            each an animated illustration of its claim with the README's own
-            words in a band underneath. The deck replaced the terminal
-            transcript and the feature-card grid that used to sit on this
-            page: the pretty log's lines play inside the animations, and the
-            feature bullets are still read from the README at build time, so
-            the evidence moved into the deck rather than out of the page. */}
-        <DemoCarousel features={cli.features} />
+        <p className={styles.heroNote}>One binary. Your build commands. A release plan you can inspect first.</p>
       </div>
     </header>
+  );
+}
+
+function Demos(): React.ReactElement {
+  const {cli} = useReadme();
+  return (
+    <Section chip="see it work" title="Follow a release from commit to publish">
+      <p className={styles.sectionLead}>
+        Choose an example to see how Dispat selects packages, orders their work, and handles failures.
+      </p>
+      <DemoCarousel features={cli.features} />
+    </Section>
+  );
+}
+
+function Workflows(): React.ReactElement {
+  return (
+    <Section chip="built for your project" title="Keep the tools your team already uses">
+      <div className={styles.libraries}>
+        <div className={styles.feature}>
+          <Heading as="h3">Release across languages</Heading>
+          <p>Build a Go service, publish an npm library, and push a Docker image in one run. Dispat calls the shell commands you configure for each package.</p>
+        </div>
+        <div className={styles.feature}>
+          <Heading as="h3">Put dependencies in order</Heading>
+          <p>A package waits for the packages it needs. Independent packages can build and publish in parallel. Preview the selected packages and next versions with <code>dispat status</code>.</p>
+        </div>
+        <div className={styles.feature}>
+          <Heading as="h3">Use one or several repositories</Heading>
+          <p>Start with a single package or a monorepo. For work spread across repositories, bring them together with Git submodules in a <Link to="/control-repository">control repository</Link>.</p>
+        </div>
+      </div>
+      <div className={styles.recoveryNote}>
+        <Heading as="h3">Know what to do when a release stops</Heading>
+        <p>Dispat records successful publishes with Git tags. A later run uses those records to find unfinished work. If a publisher succeeded before its tag was written, check the destination before retrying. <Link to="/reference/releasing/recovery">Read the recovery guide</Link>.</p>
+      </div>
+    </Section>
   );
 }
 
@@ -183,6 +177,7 @@ const MANIFESTS: [language: string, files: string][] = [
   ['Unreal Engine', '*.uproject, *.uplugin, Config/DefaultGame.ini, Config/DefaultEngine.ini'],
   ['Defold', 'game.project'],
   ['O3DE', 'project.json, gem.json'],
+  ['Aqua tool management', 'aqua.yaml, aqua.yml, hidden and directory variants'],
 ];
 
 // dispat's pieces are separate Go modules, usable with no dispat in sight. Each
@@ -192,14 +187,9 @@ function Libraries(): React.ReactElement {
   return (
     <Section chip="libraries" title="Lightweight libraries, usable on their own">
       <p className={styles.sectionLead}>
-        Parsing commit messages and reading and rewriting dependency manifests are problems far older than releases, so
-        dispat keeps all three as standalone Go modules with no dependency on the CLI, on git or on a network. The
-        manifest pair shares its vocabulary through{' '}
-        <Link to="/go/manifest">
-          <code>pkg/manifest</code>
-        </Link>{' '}
-        (dependency kinds, manifest file-name rules, PEP 503 normalisation) so the reader and the writer can never
-        drift apart.
+        Use Dispat's Go libraries in your own tools. Parse commit messages, inspect dependencies, or update manifest
+        versions without running the CLI. The reader and writer share format definitions through{' '}
+        <Link to="/go/manifest"><code>pkg/manifest</code></Link>.
       </p>
       <div className={styles.libraries}>
         <div className={styles.feature}>
@@ -210,14 +200,9 @@ function Libraries(): React.ReactElement {
             : the commit parser
           </Heading>
           <p>
-            Conventional Commits, Monorepo Extension: a strict superset of Conventional Commits 1.0.0 that adds scopes as
-            packages, propagation depth and prerelease channels. No regular expressions: one left-to-right index scan
-            with a byte of lookahead, no backtracking, no recursion, O(n) time and O(1) working space, which is what
-            matters when the input is untrusted commit messages in CI. The specification is vendored beside it as{' '}
-            <Link to={`${GITHUB}/blob/main/pkg/ccme/SPEC.md`}>
-              <code>SPEC.md</code>
-            </Link>
-            , and every section reference in the code points into it.
+            Parse Conventional Commits and Dispat's package scopes, dependency propagation, and prerelease channels.
+            The parser scans the input once. Its formal rules live in{' '}
+            <Link to={`${GITHUB}/blob/main/pkg/ccme/SPEC.md`}><code>SPEC.md</code></Link>.
           </p>
         </div>
         <div className={styles.feature}>
@@ -228,9 +213,8 @@ function Libraries(): React.ReactElement {
             : the manifest reader
           </Heading>
           <p>
-            Thin per-format parsers turning every manifest below into one ecosystem-neutral shape: declared identity,
-            dependencies, ranges and local-path signals. No SBOM machinery, no lockfile resolution, no network; bounded
-            reads, deterministic order, and a partial result even when one file fails to parse.
+            Read package names, versions, and dependencies from the formats below. Results have a consistent shape
+            and order. Scanning uses bounded local reads and returns valid results alongside any parsing errors.
           </p>
         </div>
         <div className={styles.feature}>
@@ -241,11 +225,9 @@ function Libraries(): React.ReactElement {
             : the manifest writer
           </Heading>
           <p>
-            Format-preserving in-place edits for every manifest the scanner reads: only the version text being changed
-            is replaced, and every other byte (indentation, key order, comments) survives verbatim. Writes are atomic
-            (temp file, fsync, rename) and skipped when nothing changed, and the result separates what was applied from
-            what was deliberately left alone, such as a value that defers to a Maven property or a workspace
-            inheritance.
+            Update supported version declarations while preserving surrounding formatting where the format allows it.
+            Each file is validated before an atomic replacement. The result tells you which edits were applied,
+            missing, or skipped because a value is inherited or calculated.
           </p>
         </div>
       </div>
@@ -272,60 +254,42 @@ function Libraries(): React.ReactElement {
           </tbody>
         </table>
         <p>
-          The mobile formats also carry a build number beside their marketing version (<code>CFBundleVersion</code>,{' '}
-          <code>android:versionCode</code>, <code>CURRENT_PROJECT_VERSION</code>): the scanner reads it, no version
-          write ever moves it, and{' '}
-          <Link to="/cli/writer">
-            <code>--set-build</code>
-          </Link>{' '}
-          is the write that does. <Link to="/cli/compute">
-            <code>dispat compute</code>
-          </Link>{' '}
-          derives a monorepo&apos;s dependency graph from these files, and{' '}
-          <Link to="/configuration/autoversion">
-            <code>autoVersion</code>
-          </Link>{' '}
-          rewrites them at the version stage.
+          <Link to="/cli/compute"><code>dispat compute</code></Link> reads these manifests to derive package dependencies.
+          Enable <Link to="/configuration/autoversion"><code>autoVersion</code></Link> to update supported declarations during
+          a release. Mobile build numbers are separate from package versions; change them explicitly with{' '}
+          <Link to="/cli/writer"><code>--set-build</code></Link>.
+          Aqua support is available in the <Link to="/next/editing/manifests#aqua">unreleased version</Link>.
         </p>
       </div>
     </Section>
   );
 }
 
-// Install sits after the manifests table on purpose: by here a reader knows
-// whether dispat reads their ecosystem, which is the question that decides
-// whether the command is worth running.
 function Install(): React.ReactElement {
   return (
-    <Section chip="install" title="Install">
-      <p className={styles.sectionLead}>
-        One command, and no runtime to install first. The script downloads the binary for your platform, checks it
-        against the checksum GitHub published, and puts it on your <code>PATH</code>.
-      </p>
-      <div className={styles.install}>
-        <CodeBlock language="sh" title="Linux and macOS">
-          {INSTALL_CURL}
-        </CodeBlock>
-        <CodeBlock language="sh" title="Linux and macOS, with wget">
-          {INSTALL_WGET}
-        </CodeBlock>
-        <CodeBlock language="powershell" title="Windows">
-          {INSTALL_WINDOWS}
-        </CodeBlock>
-      </div>
-      <p className={styles.sectionLead}>
-        After that the binary keeps itself current:{' '}
-        <Link to="/cli/self-update">
-          <code>dispat self-update</code>
-        </Link>{' '}
-        replaces it with the latest release and keeps the old one beside it for a week in case you want it back. Every
-        command mentions a newer release on its way out, so you find out without going looking.
-      </p>
-      <p className={styles.sectionLead}>
-        More ways to install (<code>go install</code>, the GitHub Action, the container images) and how to pin a
-        version are in <Link to="/getting-started">Getting started</Link>.
-      </p>
-    </Section>
+    <div className={styles.installSection}>
+      <Section id="install" chip="get started" title="Install once. Preview your first release.">
+        <p className={styles.sectionLead}>
+          The installer downloads the binary for your platform and verifies its checksum. No language runtime is required.
+        </p>
+        <div className={styles.install}>
+          <CodeBlock language="sh" title="macOS and Linux">{INSTALL_CURL}</CodeBlock>
+          <CodeBlock language="powershell" title="Windows PowerShell">{INSTALL_WINDOWS}</CodeBlock>
+        </div>
+        <div className={styles.firstRun}>
+          <div>
+            <Heading as="h3">Start in your Git repository</Heading>
+            <p>Generate a starter configuration, edit its package paths and build and publish commands, then inspect the plan. <code>status</code> leaves your project unchanged.</p>
+          </div>
+          <CodeBlock language="sh" title="Configure and preview">{'dispat init\n# Edit dispat.json for your packages\ndispat status'}</CodeBlock>
+        </div>
+        <p className={styles.installLinks}>
+          <Link to="/getting-started">Installation options and setup guide</Link>
+          <span aria-hidden="true"> · </span>
+          <Link to="/reference/ci">GitHub Actions and other CI systems</Link>
+        </p>
+      </Section>
+    </div>
   );
 }
 
@@ -436,12 +400,14 @@ function Community(): React.ReactElement {
 export default function Home(): React.ReactElement {
   return (
     <Layout
-      title="The saga polyglot release tool for monorepos and polyrepos"
-      description="dispat is the saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, tags, releases out. It reads your conventional commits, works out every package version with propagation to dependants, and builds and publishes each changed package in dependency order, in parallel, with changelogs, git tags and GitHub releases. A package is a folder and a stage is a shell command, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph. It releases a monorepo, a polyrepo of many repositories through a control repository, or a single package.">
+      title="Release automation across languages and repositories"
+      description="Dispat turns conventional commits into versions, changelogs, and ordered releases. Automate publishing across languages in one repository or several.">
       <Hero />
       <main>
-        <Libraries />
         <Install />
+        <Demos />
+        <Workflows />
+        <Libraries />
         <Projects />
         <Reference />
         <Inspiration />

@@ -30,7 +30,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Examples',
-      collapsed: false,
+      collapsed: true,
       link: {type: 'doc', id: 'examples/README'},
       items: [
         {type: 'doc', id: 'examples/npm', label: 'An npm monorepo'},
@@ -148,7 +148,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'CLI',
-      collapsed: false,
+      collapsed: true,
       link: {type: 'doc', id: 'cli/README'},
       items: [
         {type: 'doc', id: 'cli/release', label: 'release'},
@@ -178,7 +178,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Configuration',
-      collapsed: false,
+      collapsed: true,
       link: {type: 'doc', id: 'configuration/README'},
       items: [
         'configuration/spaces',

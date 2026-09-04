@@ -2,6 +2,7 @@ import type {Options as PwaOptions} from '@docusaurus/plugin-pwa';
 import type * as Preset from '@docusaurus/preset-classic';
 import type {Config} from '@docusaurus/types';
 import {themes as prismThemes} from 'prism-react-renderer';
+import path from 'node:path';
 
 import readme from './plugins/readme';
 import testReport from './plugins/test-report';
@@ -10,28 +11,12 @@ const GITHUB = 'https://github.com/yohimik/dispat';
 const DISCORD = 'https://discord.gg/83PwVSCCmk';
 const SITE = 'https://dispat.dev';
 
-// The project named the way a share card and a structured-data block should
-// name it: the tool first, then the two repository shapes it is looked for
-// under. The page <title> is built from the landing page's own Layout title
-// plus the site title, which spells the same thing without repeating "dispat".
-const TITLE = 'dispat: the saga polyglot release tool for monorepos and polyrepos';
-
-// The project's one-line description, word for word the one the GitHub
-// repository carries, so the two places a reader meets dispat first say the
-// same sentence. DESCRIPTION opens with it and then goes on.
-const TAGLINE =
-  'The saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, tags, releases out';
-
-// One description and one keyword list, used by the meta tags and by both
-// structured-data blocks below, so a crawler is never told two different things
-// about the same project.
+// Shared metadata for search results and social previews.
+const TITLE = 'Dispat: release automation across languages and repositories';
+const TAGLINE = 'Release your packages together, across languages';
 const DESCRIPTION =
-  'dispat is the saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, ' +
-  'tags, releases out. It reads your conventional commits, works out every package version with propagation to ' +
-  'dependants, and builds and publishes each changed package in dependency order, in parallel, with changelogs, ' +
-  'git tags and GitHub releases. A package is a folder and a stage is a shell command, so npm, Go, Cargo, Maven, ' +
-  '.NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph. It releases a monorepo, a ' +
-  'polyrepo of many repositories through a control repository, or a single package.';
+  'Dispat turns conventional commits into versions, changelogs, and ordered releases. ' +
+  'Automate publishing across languages in one repository or several.';
 
 // What a reader types into a search engine when they are looking for this tool,
 // in the three shapes it is looked for under: the monorepo one, the
@@ -64,8 +49,7 @@ const KEYWORDS = [
   'saga pattern',
   'saga',
   'forward recovery',
-  'exactly-once delivery',
-  'idempotent release',
+  'idempotent release planning',
   'distributed transaction',
   'release lock',
 ];
@@ -168,6 +152,18 @@ const config: Config = {
   staticDirectories: ['static', '../../imgs'],
 
   plugins: [
+    (context) => ({
+      name: 'single-react-remotion-runtime',
+      configureWebpack: () => ({
+        resolve: {
+          alias: {
+            react: path.join(context.siteDir, 'node_modules/react'),
+            'react-dom': path.join(context.siteDir, 'node_modules/react-dom'),
+            remotion: path.join(context.siteDir, 'node_modules/remotion'),
+          },
+        },
+      }),
+    }),
     // The two places this site states something measured rather than written.
     // Both are imported as functions rather than named by path: the config is
     // TypeScript, and importing them means they are compiled by the same

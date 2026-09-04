@@ -61,6 +61,8 @@ const rows: TermRow[] = [
   outRow(272, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '7'), ...kv('releasing', '3')]),
 ];
 
+export const BLAST_DURATION = 360;
+
 export const Blast: React.FC<{clip?: boolean}> = ({clip = false}) => {
   const f = useCurrentFrame();
   const views = Object.fromEntries(IDS.map((id) => [id, view(id, f)]));

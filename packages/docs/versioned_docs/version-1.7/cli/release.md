@@ -51,6 +51,15 @@ through needs this setting, and no other command takes the lock.
 Read [The release lock](../reference/releasing/release-lock.md) for the full guide, including how to clear a lock left
 behind by a killed run.
 
+Before hooks or version writers run, dispat protects paths that the release could change destructively. With release
+commits enabled, it refuses staged, unstaged, or untracked changes in selected package folders and `commit.include`
+paths so the automatic commit cannot absorb earlier work. It applies the same check to each selected package whose
+`revertOnFail` setting could reset its folder. Commit or stash those protected paths, then run the release again.
+
+When both release commits and `revertOnFail` are disabled, dispat leaves writer output in the working tree and performs
+no automatic Git reset. Existing changelog or manifest edits can then be input to the release, including output kept
+from an interrupted attempt.
+
 ## Flags
 
 Beside the [global flags](./README.md#global-flags):

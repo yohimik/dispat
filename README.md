@@ -3,21 +3,15 @@
 [![tests](https://github.com/yohimik/dispat/actions/workflows/tests.yml/badge.svg)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 [![coverage](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 
-**dispat** is the saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, tags,
-releases out. It reads your conventional commits to find which packages changed and calculates their next semantic
-versions. Then it propagates those bumps to dependants and builds every package in dependency order. Finally, dispat
-publishes them in parallel, writing changelogs, git tags, and GitHub releases on the way out.
+**dispat** reads your conventional commits, works out the next versions, and builds and publishes changed packages in
+dependency order. Preview the release with `dispat status` before running it.
 
-Polyglot is the point. A package is a folder and a stage is a shell command. This means npm, Go, Cargo, Maven, .NET,
-Python, Ruby, Dart, Docker, iOS, and Android sit in one dependency graph and release together.
+Use your existing build and publish commands across Go, npm, Cargo, Python, Docker, and other tools. Dispat works with
+one package, a [monorepo](https://dispat.dev/monorepo/), or several repositories joined through a
+[control repository](https://dispat.dev/control-repository/).
 
-The shape of your repositories is the point too. dispat releases a [monorepo](https://dispat.dev/monorepo/) of many
-packages, a polyrepo of many repositories linked as submodules into a
-[control repository](https://dispat.dev/control-repository/), and a single package in a repository of its own. The
-dependency graph is whatever one checkout holds, so a fleet of repositories releases in the same order, with the same
-changelogs and tags, as a monorepo does.
-
-You install one binary and write one config file. You run no daemon, manage no state file, and operate no cache.
+Install the binary, run `dispat init` in your Git repository, and edit the generated `dispat.json` for your packages.
+The [setup guide](https://dispat.dev/getting-started/) walks through your first release.
 
 ```sh
 # Linux and macOS
@@ -103,8 +97,9 @@ $ dispat
   versions get computed, in what order things publish, or what gets tagged.
 - **Built around an error model, not a happy path.** A failure never aborts the run. dispat skips the broken package's
   consumers unless they have changes of their own, and every unaffected subgraph keeps releasing. Failed and skipped
-  consumers are not lost. The next run catches them up automatically at the exact version they were originally owed,
-  with no state file and no double release. Recovery is re-running.
+  consumers are not lost. The next run catches them up automatically at the version they were originally owed, using
+  release tags rather than a state file. A publish interrupted before its tag is the ambiguous case; check the registry
+  before retrying it. Recovery for recorded work is re-running.
 - **The graph can come from the manifests themselves.** Run `dispat compute` to read the packages' project files
   (package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml, requirements files,
   Dockerfiles, and compose files). dispat derives the consumer and provider graph from them, including an image chain
@@ -118,11 +113,10 @@ $ dispat
 - **A release is treated as what it really is: a distributed transaction.** Publishing a graph of packages means
   irreversible writes across independent services (an npm registry, a Docker registry, GitHub) with no rollback to fall
   back on. dispat handles this the way distributed systems do. Each package's leg commits by durably recording its own
-  completion as an annotated git tag, written only once the publish succeeds. There are no state files and no registry
-  queries, so nothing can drift from what actually happened. Recovery is deterministic replay, because the plan is a
-  pure function of history, graph, and configuration. A re-run recomputes the same transaction and executes only the
-  legs whose record is missing. Completed work is never repeated, owed work is never lost, and the run converges
-  however many times it is interrupted.
+  completion as an annotated git tag, written only after the publish succeeds. There are no state files or registry
+  queries. A re-run recomputes the plan from history, graph, configuration, and those tags, then continues the work
+  whose record is missing. If a publish succeeds and the process stops before its tag is written, inspect the registry
+  before retrying because dispat cannot prove whether that shell command completed.
 
 You could probably wire the same thing up in a general-purpose task scheduler with enough YAML and glue. dispat
 deliberately does less. It handles release logic only, meaning build and publish to a registry with versioning,
@@ -141,8 +135,9 @@ dispat stands on the shoulders of three things:
   completing the legs a run still owes rather than by rolling back the ones that succeeded, which no registry would
   allow anyway. The [saga's ledger](https://dispat.dev/comparison/) is the release tags themselves, each written
   strictly after the artefact it names exists, so the record never claims more than was delivered. The plan is a pure
-  function of git history and the graph, which makes re-running idempotent and delivery exactly once over arbitrary
-  targets, with no registry query anywhere. Mutual exclusion is compare-and-swap on the
+  function of git history and the graph, so a re-run can plan the work that recorded tags still leave pending without
+  querying a registry. A publisher can succeed before its tag is written, so a hard interruption in that small gap
+  still needs an operator to check the destination before retrying. Mutual exclusion is compare-and-swap on the
   [release lock](https://dispat.dev/reference/releasing/release-lock/) tag, whose unforced push the remote accepts from
   one run and rejects for every other, so there is no lock service to operate. The legs themselves are
   [ordered topologically](https://dispat.dev/concepts/) and execute in parallel wherever the graph leaves them
@@ -176,9 +171,10 @@ dispat stands on the shoulders of three things:
   and the mobile platforms (Info.plist, project.pbxproj, Podfile, and .podspec on iOS; AndroidManifest.xml, Gradle
   version catalogs, and build scripts on Android). This is the library behind `dispat compute`, auto-versioning, and
   the `dispat scanner` command.
-- **[writer](./pkg/writer)**: the manifest writer. It performs format-preserving, byte-precise in-place edits for
-  **every** manifest the scanner reads. It provides atomic writes and validated output. This is the library behind
-  auto-versioning and the `dispat writer` command.
+- **[writer](./pkg/writer)**: the manifest writer. It makes targeted, validated edits for the supported writable
+  manifests and preserves their supported structure and formatting. Format-specific tools such as the Go formatter
+  may normalize the file. Writes are atomic. This is the library behind auto-versioning and the `dispat writer`
+  command.
 - **[docker](./docker)**: the four container images. Each is a dispat package whose `docker-compose.yml` *is* its
   manifest. The build stage runs `docker compose build`, and the publish stage runs `docker compose build --push`.
 - **[infra](./infra)**: the Google Cloud footprint that serves [dispat.dev](https://dispat.dev), written only from CI

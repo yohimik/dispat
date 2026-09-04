@@ -103,7 +103,7 @@ the reference override what it brought in, in their own spelling. A reference na
 and merges: objects key by key with the later file winning, lists end to end, with files that disagree about what they
 hold refused rather than guessed at.
 
-A file is never cached between positions, which is what makes a file appearing twice in one chain — and only that — a
+A file is never cached between positions, which is what makes a file appearing twice in one chain, and only that, a
 cycle; the error names every hop that closed it. Nesting is capped as well, which catches the loops the chain check
 cannot see, such as two names for one file through a symlink.
 

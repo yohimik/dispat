@@ -288,6 +288,41 @@ same set:
 | Unreal | `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` | [Unreal](../examples/unreal.md) |
 | Defold | `game.project` | [Games](../examples/game.md) |
 | O3DE | `project.json`, `gem.json` | [Games](../examples/game.md) |
+| Aqua | `aqua.yaml`, `aqua.yml`, hidden and `aqua/` variants | This page |
+
+### Aqua
+
+The scanner follows `import` and `import_dir` entries that stay inside the scan root. It handles cycles, sorts the
+result, and treats imported files as local input only. Package entries can spell a pin as `name@version` or with
+separate `name` and `version` fields; the inline value wins. Names from Aqua's standard registry remain bare, while a
+different registry is reported as `registry:name`.
+
+The writer changes literal pins only. It reports `version_expr` and `go_version_file` entries as skipped rather than
+evaluating them. Neither side fetches a registry, installs a package, or mutates a checksum. Aqua has no package-level
+version or build number for dispat to write. For an imported file with an arbitrary name, pass
+`dispat writer --manifest-format aqua <file>`.
+
+For example, this file pins a tool from Aqua's standard registry:
+
+```yaml title="aqua.yaml"
+packages:
+  - name: cli/cli@v2.69.0 # GitHub CLI
+```
+
+```sh
+dispat writer aqua.yaml --set cli/cli=v2.70.0
+```
+
+To connect a tool to a package in your Dispat graph, add its exact Aqua identity to that package's `manifestNames`.
+For a custom registry, include the registry prefix, such as `internal:acme/tool`. Automatic versioning writes exact
+pins while retaining a configured version prefix such as `v`.
+
+Normal block mappings preserve comments, quote style, key order, and CRLF. The writer refuses flow-style package
+maps, anchors or aliases anywhere in the package tree, and block or multiline name and version scalars. Those forms do
+not expose an unambiguous byte span for a format-preserving edit, so the file is left untouched. The scanner can still
+read valid YAML aliases.
+
+### Formats identified by their directory
 
 Four of those names only act as manifests in the right folder. A `manifest.json` is a web app manifest nearly
 everywhere else. An `.asset` file is any serialised Unity object, and an Unreal config file is generic configuration

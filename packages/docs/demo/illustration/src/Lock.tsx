@@ -28,6 +28,7 @@ const rows: TermRow[] = [
   outRow(B_REJECT, [
     ...ERR,
     msg('unable to create the release lock tag'),
+    ...kv('holder', '"host ci-runner-7 pid 4242"'),
     ...kv('error', '"! [rejected] dispat-release-lock (already exists)"'),
   ]),
   outRow(B_REJECT + 10, [{text: 'nothing was planned, built, published, or tagged', color: colors.dim}]),
@@ -76,7 +77,7 @@ export const Lock: React.FC = () => {
       ? {text: '', color: colors.faint}
       : f < A_DONE
         ? {text: 'releasing…', color: colors.cyan}
-        : {text: '✓ released, lock returned', color: colors.green};
+        : {text: '✓ released, owned lock returned', color: colors.green};
   const bState =
     f < 96
       ? {text: '', color: colors.faint}
@@ -121,10 +122,10 @@ export const Lock: React.FC = () => {
             borderRadius: 999,
             padding: '7px 26px',
           }}>
-          dispat-release-lock
+          dispat-release-lock · unique attempt
         </div>
         <div style={{marginTop: 10, fontSize: 19, color: colors.dim, minHeight: 26}}>
-          {holder ? `held by ${holder}` : 'free'}
+          {holder ? `held by ${holder}; release guarded by object-id lease` : 'free'}
         </div>
       </div>
       <Runner name="ci-runner-7" x={560} state={aState} />

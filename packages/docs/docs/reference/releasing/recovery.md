@@ -1,6 +1,11 @@
 # Recovering from a failed run
 
-Run `dispat` again to recover from a failed release run. dispat finishes exactly what the first run still owed.
+Run `dispat` again to recover from a failed release run. Tags written after successful publishes let the next plan
+skip recorded packages and continue with their pending consumers.
+
+There is one interval a tag cannot describe: a publish command may succeed and the process may stop before dispat
+writes its tag. If a run is killed during that interval, inspect that package's registry or destination before you
+retry. dispat does not claim exactly-once delivery across an arbitrary shell command.
 
 In this example, `core` and its consumer `app` release together. The tests for `app` break its build after `core`
 already published.
@@ -48,7 +53,16 @@ run, while `core` is never re-released. If a *provider* fails instead, dispat sk
 `W194`, so you can catch them up with a re-run once you fix the provider.
 
 An interrupted run follows the same rule. If you press Ctrl-C or a CI job dies, packages with a completed publish keep
-their record. dispat reports everything else as `cancelled`, and your next run picks up exactly the remainder.
+their record. dispat reports everything else as `cancelled`, and your next run recomputes the remaining plan.
+
+After an ordinary cancellation, dispat gives completed publishes up to five minutes to finish their commit, tags,
+push, and GitHub release record. It skips further user hooks during this detached finalization. A timeout is reported
+as a recording failure, with the local tags and commits left available for inspection.
+
+If release commits are enabled, commit or stash pre-existing changes in selected package folders and `commit.include`
+paths before retrying; dispat refuses them so its automatic commit cannot capture unrelated work. It likewise refuses
+pre-existing changes only in selected package folders where `revertOnFail` could reset them. With both features off,
+writer output left by the earlier run remains valid input to the retry.
 
 Catch-up has a manifest half as well as a release half. A consumer that failed to release beside its provider keeps its
 old range until its own next release, when the version stage reconciles the range to the provider's published version

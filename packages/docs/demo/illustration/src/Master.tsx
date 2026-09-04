@@ -179,6 +179,7 @@ export type SceneCut = {
 export const SCENES: SceneCut[] = [
   {id: 'Heal', asset: 'demo-heal', from: 560, to: 900},
 ];
+export const HEAL_DURATION = SCENES[0].to - SCENES[0].from;
 
 // A negative Sequence offset starts the master timeline mid-story, so a scene
 // is a window onto the same continuous animation rather than a re-staging:
@@ -198,3 +199,6 @@ export const Scene: React.FC<{from: number}> = ({from}) => {
     </div>
   );
 };
+
+/** Browser-player entry for the self-healing cut of the master timeline. */
+export const Heal: React.FC = () => <Scene from={560} />;

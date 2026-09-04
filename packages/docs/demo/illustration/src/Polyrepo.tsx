@@ -49,7 +49,7 @@ function view(id: string, f: number): {label: string; color: string; bumped: boo
 }
 
 const rows: TermRow[] = [
-  cmdRow(8, 'git -C libs/sdk/src fetch origin && git checkout origin/main', 0.6),
+  cmdRow(8, 'git -C libs/sdk/src fetch origin && git -C libs/sdk/src checkout origin/main', 0.6),
   outRow(52, [{text: 'libs/sdk/src: ', color: colors.dim}, {text: '9f3c2a1', color: colors.yellow}, {text: ' -> ', color: colors.dim}, {text: 'b82d47e', color: colors.yellow}]),
   cmdRow(72, 'git commit -am "feat(sdk)^: new tokenizer"', 0.7),
   cmdRow(118, 'dispat status'),
@@ -94,7 +94,7 @@ export const Polyrepo: React.FC = () => {
           borderRadius: 22,
         }}>
         <span style={{position: 'absolute', left: 30, top: -16, background: colors.bg, padding: '0 14px', fontSize: 21, color: colors.dim}}>
-          platform — the control repository (dispat.yaml lives here)
+          platform: the control repository (dispat.yaml lives here)
         </span>
       </div>
       <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}} viewBox="0 0 1920 1080">

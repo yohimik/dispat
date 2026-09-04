@@ -21,6 +21,10 @@ export const CLI_README = {path: 'services/dispat/README.md', dir: 'services/dis
 
 type Source = typeof ROOT_README;
 
+// Explicit content slots: copy edits do not rename anchors, selectors, or
+// recordings. Adding/reordering a README feature requires choosing its ID.
+const FEATURE_IDS = ['release-graph', 'blast-radius', 'self-healing', 'release-control', 'polyglot', 'step-commands'] as const;
+
 /** Parses one block of inline markdown, naming the source if it fails. */
 function inline(text: string, source: Source, where: string): Inline[] {
   return parseInline(text, `${source.path}: ${where}`, source.dir);
@@ -83,7 +87,7 @@ export function parseRepositoryReadme(src: string): RepositoryReadme {
  * heading, where a code span or a link would either be dropped or come out as
  * literal markdown, and neither is something to discover on the published page.
  */
-function feature(bullet: string): Feature {
+function feature(bullet: string, index: number): Feature {
   const titled = /^\*\*(.+?)\*\*\s*/.exec(bullet);
   if (!titled) {
     throw new Error(`${CLI_README.path}: a key feature does not open with its own **title**: ${bullet.slice(0, 60)}…`);
@@ -92,10 +96,14 @@ function feature(bullet: string): Feature {
   if (/[`*[\]]/.test(title)) {
     throw new Error(`${CLI_README.path}: the key feature title "${title}" must be plain text`);
   }
+  const normalizedTitle = title.replace(/\.$/, '');
+  const id = FEATURE_IDS[index];
+  if (!id) throw new Error(`${CLI_README.path}: key feature ${index + 1} has no stable feature ID`);
   return {
+    id,
     // The README ends each title with a full stop because it reads as the
     // opening of a sentence there. On a card it is a heading.
-    title: title.replace(/\.$/, ''),
+    title: normalizedTitle,
     body: inline(bullet.slice(titled[0].length), CLI_README, `key feature "${title}"`),
   };
 }

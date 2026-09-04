@@ -13,9 +13,10 @@ the repository, it stops.
 
 ## How the claim works
 
-The claim is a git tag called `dispat-release-lock` that dispat pushes to your remote. An unforced tag push is the only
-git operation that depends on what another machine already did. If the name is taken, git rejects the push. That
-rejection acts as the lock.
+The claim is a git tag called `dispat-release-lock` that dispat pushes to your remote. Each attempt first creates a
+unique annotated-tag object, remembers its object ID, and offers that immutable object under the shared remote name.
+The push is not forced. If the name is taken, git rejects the push and that rejection acts as the lock. Using the
+object ID matters when two processes share one checkout: neither process can retarget the object the other is pushing.
 
 A release happens in four steps:
 
@@ -24,10 +25,11 @@ A release happens in four steps:
    from a stale checkout recomputes versions somebody else has already published, so the check runs before the plan
    exists and under the lock that keeps its answer from going stale.
 3. Do everything else: plan, build, publish, record, tag, push.
-4. Delete the tag from the remote and from your clone.
+4. Delete the remote tag only if it still points to this run's object, then remove the local attempt tag.
 
 Step 4 happens no matter what steps 2 and 3 did. A failed package, a guard refusing the run, or an empty plan all
-trigger cleanup. dispat gives the lock back on the way out even if you press Ctrl-C halfway through a build.
+trigger cleanup. Cleanup is detached from a cancelled release context and bounded to 30 seconds. If another owner has
+replaced the remote ref, the expected-object lease rejects the delete and preserves that owner's lock.
 
 The claim is unconditional. No flag moves the plan ahead of it, because whether there is work to do is not known
 until after planning, and planning is the thing the lock exists to serialise. A run that turns out to have nothing to

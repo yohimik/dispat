@@ -78,6 +78,7 @@ line. These are not errors because the manifest parsed, and you decide whether t
 | Unreal | `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` |
 | Defold | `game.project` |
 | O3DE | `project.json`, `gem.json` |
+| Aqua | `aqua.yaml`, `aqua.yml`, hidden and directory variants |
 
 Several formats are matched by name rather than extension. A Dockerfile matches `Dockerfile`, `Dockerfile.dev`,
 `api.Dockerfile`, and Podman's `Containerfile`. A requirements file matches by whole words, so `dev-requirements.txt`

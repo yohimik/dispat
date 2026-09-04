@@ -1,7 +1,7 @@
 import React from 'react';
 import {Composition} from 'remotion';
 import {Master, Scene, SCENES} from './Master';
-import {Blast} from './Blast';
+import {Blast, BLAST_DURATION} from './Blast';
 import {Compute, COMPUTE_DURATION} from './Compute';
 import {Control, CONTROL_DURATION} from './Control';
 import {Glue, GLUE_DURATION} from './Glue';
@@ -15,6 +15,7 @@ import {Run, RUN_DURATION} from './Run';
 import {Single, SINGLE_DURATION} from './Single';
 import {Terminal, TERMINAL_DURATION} from './Terminal';
 import {Why, WHY_DURATION} from './Why';
+import {Aqua, AQUA_DURATION} from './Aqua';
 
 // Twenty frames per second across the board: the storyboards are written in
 // frames, so one number here is what sets the deck's unhurried pace.
@@ -27,8 +28,8 @@ export const Root: React.FC = () => (
     {/* Blast twice: titled for the commit-messages page's gif, and as the
         landing page's clip, which leaves the top strip to the page's own
         feature-text overlay. */}
-    <Composition id="Blast" component={Blast} durationInFrames={360} {...SIZE} />
-    <Composition id="BlastClip" component={Blast} defaultProps={{clip: true}} durationInFrames={360} {...SIZE} />
+    <Composition id="Blast" component={Blast} durationInFrames={BLAST_DURATION} {...SIZE} />
+    <Composition id="BlastClip" component={Blast} defaultProps={{clip: true}} durationInFrames={BLAST_DURATION} {...SIZE} />
     <Composition id="Order" component={Order} durationInFrames={ORDER_DURATION} {...SIZE} />
     <Composition id="Control" component={Control} durationInFrames={CONTROL_DURATION} {...SIZE} />
     <Composition id="Polyglot" component={Polyglot} durationInFrames={POLYGLOT_DURATION} {...SIZE} />
@@ -42,6 +43,7 @@ export const Root: React.FC = () => (
     <Composition id="Glue" component={Glue} durationInFrames={GLUE_DURATION} {...SIZE} />
     <Composition id="Math" component={Math_} durationInFrames={MATH_DURATION} {...SIZE} />
     <Composition id="Why" component={Why} durationInFrames={WHY_DURATION} {...SIZE} />
+    <Composition id="Aqua" component={Aqua} durationInFrames={AQUA_DURATION} {...SIZE} />
     {SCENES.map((s) => (
       <Composition
         key={s.id}

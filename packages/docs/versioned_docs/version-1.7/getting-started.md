@@ -1,26 +1,19 @@
 # Getting started
 
-:::info dispat 1.0.0 is out
-
-dispat cut this first stable release itself in one run. It released eleven packages together. These include the CLI
-with six static binaries (Linux, macOS and Windows, on amd64 and arm64), five Go modules (`ccme`, `manifest`, `models`,
-`scanner`, `writer`), four Docker images (`alpine`, `debian`, `dind`, `ubuntu`) and this documentation site. Each has
-its own tag, changelog entry and GitHub release, plus the moving `v1` alias for consumers that pin the major.
-
-:::
-
-Set up monorepo release automation in four steps. Install the binary, write one config file, name packages in your
-commits, and wire the release into CI. Nothing below assumes a particular language.
+Your first useful result is a release plan you can review without touching a file or registry. Install the binary, run
+`dispat init`, let `dispat compute --write` discover the graph, then run `dispat status`. Once the names, versions, and
+order look right, the same configuration can run the release locally or in CI.
 
 dispat is built for polyglot monorepos. A package is a folder and a stage is a shell command, so dispat does not care
 whether a package is npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS or Android. They all go in the same
 dependency graph and release in the same run.
 
-Read this path to see the shape of the tool before the details.
+This is the basic workflow. The sections below explain each step.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
-dispat init             # a starter dispat.json
+dispat init             # create dispat.json
+# Edit package paths and build and publish commands before continuing
 dispat compute --write  # read the manifests: the dependency graph and the current versions
 dispat status           # the plan, with nothing touched
 dispat                  # release

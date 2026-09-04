@@ -39,7 +39,9 @@ deletes. A past release can therefore not be recomputed from history. Its propag
 bumps only when the released version leaves the dependent's declared semver range.
 
 dispat tags after publish and reads its plan from commit messages and tags alone. The same plan can be recomputed at
-any commit. Delivery is exactly once over arbitrary targets, and recovery requires no registry query of any kind.
+any commit. A re-run can recover work whose successful publish was recorded by a tag without asking the registry.
+There is still a narrow ambiguous interval between a publisher succeeding and its tag being written; after a hard
+interruption there, check the destination before retrying that package.
 
 ## Blast radius
 
@@ -54,7 +56,7 @@ transitive ones. The `+N` modifier bounds the depth, so two changes in one windo
 | bump source | commit text | changeset files | commit text |
 | tag written | before publish | after publish | after publish |
 | blast radius | all dependents | until ranges hold | per commit: `^`, `^^`, `+N` |
-| delivery | at most once | once, npm only | exactly once |
+| delivery | at most once | registry-aware retry, npm only | tag-based forward recovery; ambiguous publish gap |
 | recovery | npm query or CI re-run | npm query | re-run, any target |
 | replayable from history | yes | no, files consumed | yes |
 | prerelease channels | global switch | global mode | per commit |

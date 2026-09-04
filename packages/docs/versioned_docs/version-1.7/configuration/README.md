@@ -177,5 +177,5 @@ Everything else is repository-wide and only exists at the root. This includes `s
 Read [the override ladder](./packages.md#the-override-ladder) to see the full order for one package from weakest to
 strongest.
 
-The loader itself — the `$ref` composition, the case-preserving keys, the upward search for the root — is published as
+The loader itself, including `$ref` composition, case-preserving keys, and the upward search for the root, is published as
 [`pkg/config`](../go/config.md), so a program of your own can read its configuration the way dispat reads this one.
