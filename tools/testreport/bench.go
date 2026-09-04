@@ -123,6 +123,14 @@ type benchLog struct {
 func readBenchLog(id string, r io.Reader) (*benchLog, error) {
 	log := &benchLog{id: id}
 	pkg := ""
+	// A line arrives in as many output events as the test binary took writes
+	// to print it, and a benchmark's line is printed in two: the testing
+	// package writes the name before the benchmark runs and the figures after
+	// it, so under load the stream carries `BenchmarkX-4 \t` as one event and
+	// `1\t 12 ns/op\n` as the next. Fragments are held until the newline that
+	// ends the line, and a reader that took each event as a line would drop
+	// exactly the rows that took the longest to measure.
+	var partial strings.Builder
 	dec := json.NewDecoder(r)
 	for {
 		var ev event
@@ -134,7 +142,12 @@ func readBenchLog(id string, r io.Reader) (*benchLog, error) {
 		if ev.Action != "output" {
 			continue
 		}
-		line := strings.TrimRight(ev.Output, "\r\n")
+		partial.WriteString(ev.Output)
+		if !strings.HasSuffix(ev.Output, "\n") {
+			continue
+		}
+		line := strings.TrimRight(partial.String(), "\r\n")
+		partial.Reset()
 		if header, value, ok := benchHeader(line); ok {
 			switch header {
 			case "goos":
@@ -151,6 +164,14 @@ func readBenchLog(id string, r io.Reader) (*benchLog, error) {
 			}
 			continue
 		}
+		if result, ok := parseBenchLine(line); ok {
+			result.Package = strings.TrimPrefix(pkg, modulePrefix)
+			log.results = append(log.results, result)
+		}
+	}
+	// A stream that ends mid-line still ends: the last fragment is the last
+	// line, newline or not.
+	if line := strings.TrimRight(partial.String(), "\r\n"); line != "" {
 		if result, ok := parseBenchLine(line); ok {
 			result.Package = strings.TrimPrefix(pkg, modulePrefix)
 			log.results = append(log.results, result)

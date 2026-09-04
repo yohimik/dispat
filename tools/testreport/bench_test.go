@@ -423,3 +423,36 @@ func TestReadBenchmarksRefusesWhatItCannotRead(t *testing.T) {
 		t.Fatal("want the corrupt stream reported rather than an empty section")
 	}
 }
+
+// TestReadBenchLogJoinsALineSplitAcrossEvents: the testing package prints a
+// benchmark's name before it runs and its figures after, so under load the
+// two arrive as two output events. A reader that took each event as a line
+// dropped the measurement, which is how a release lost rows from its table
+// while the benchmarks themselves passed.
+func TestReadBenchLogJoinsALineSplitAcrossEvents(t *testing.T) {
+	const split = `
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Output":"goos: linux\n"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Output":"goarch: amd64\n"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Output":"pkg: github.com/yohimik/dispat/pkg/config\n"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Test":"BenchmarkNothing","Output":"BenchmarkNothing-15    \t"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Test":"BenchmarkNothing","Output":"       1\t         0 ns/op\n"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Output":"BenchmarkTail-15    \t"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Output":"       2\t         5 ns/op"}
+`
+	log, err := readBenchLog("config", strings.NewReader(split))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log.results) != 2 {
+		t.Fatalf("results = %#v, want the split line and the unterminated one both read", log.results)
+	}
+	if log.results[0].Name != "BenchmarkNothing" || log.results[0].Runs != 1 || log.results[0].Procs != 15 {
+		t.Errorf("split line read as %#v", log.results[0])
+	}
+	if log.results[1].Name != "BenchmarkTail" || log.results[1].NsPerOp != 5 {
+		t.Errorf("unterminated line read as %#v", log.results[1])
+	}
+	if log.goos != "linux" || log.path != "pkg/config" {
+		t.Errorf("headers lost across the join: %s %s", log.goos, log.path)
+	}
+}
