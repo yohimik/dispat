@@ -3,9 +3,9 @@
 :::info dispat 1.0.0 is out
 
 dispat cut this first stable release itself in one run. It released eleven packages together. These include the CLI
-with six static binaries (Linux, macOS and Windows, on amd64 and arm64), five Go modules (`ccme`, `manifest`, `models`,
-`scanner`, `writer`), four Docker images (`alpine`, `debian`, `dind`, `ubuntu`) and this documentation site. Each has
-its own tag, changelog entry and GitHub release, plus the moving `v1` alias for consumers that pin the major.
+with six static binaries (Linux, macOS and Windows, on amd64 and arm64), six Go modules (`ccme`, `config`, `manifest`,
+`models`, `scanner`, `writer`), four Docker images (`alpine`, `debian`, `dind`, `ubuntu`) and this documentation site.
+Each has its own tag, changelog entry and GitHub release, plus the moving `v1` alias for consumers that pin the major.
 
 :::
 

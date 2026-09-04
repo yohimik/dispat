@@ -247,8 +247,9 @@ where.
 
 The `internal/graph.TopoSort` function uses Kahn's algorithm over package names with one refinement. The zero-in-degree
 frontier is a **min-heap**. Ties always break alphabetically, so the same graph yields the same order on every machine
-(§17.2). The heap makes the sort O ((V+E) log V). Combined with one bounded `git tag` and `git log` query pair per
-package, this keeps planning cheap at monorepo scale.
+(§17.2). The heap makes the sort O (V log V + E): every package enters and leaves the heap once, and every edge is
+relaxed once. Combined with one `git tag` read and one bounded `git log` per distinct stable baseline, this keeps
+planning cheap at monorepo scale.
 
 ```
     a     b        frontier = nodes with no pending providers: {a, b}
@@ -260,7 +261,8 @@ package, this keeps planning cheap at monorepo scale.
                    the planner reports as E200 with the edges' manifest kinds
 ```
 
-The cost is O ((V+E) log V) for the heap pops. dispat runs this once per plan.
+The cost is O (V log V + E): a heap operation per package on the way in and out, one relaxation per edge. dispat runs
+this once per plan.
 
 ### The task graph: what a release actually schedules
 
@@ -466,8 +468,8 @@ each successful publish. A recorder error is a critical (`E222`), and the remain
 Other choices:
 
 - Versions live in git tags only, so you have no version files to commit.
-- dispat uses one `git tag` and `git log` pair per package rather than a global log walk. This is simple and correct
-  for per-package tag baselines.
+- dispat uses one `git tag` read and one bounded `git log` per distinct stable baseline rather than a global log walk;
+  packages sharing a baseline share the walk. This is simple and correct for per-package tag baselines.
 - It shells out to the git binary to match CI byte-for-byte.
 - Script output streams line-by-line into the structured logger, keeping parallel package logs attributable.
 - Ordering is deterministic everywhere. dispat uses alphabetical tie-breaks in the toposort and sorted space iteration
@@ -477,8 +479,9 @@ Two diagnostics are deliberately not suppressible. Each explains a release outco
 cannot account for. A **catch-up** and a **channel-only** release explain a package's *presence* in a plan. A
 **blocked** package and a **suppressed propagation** explain an *absence*.
 
-Discovery runs in O (packages) time. Planning takes O (V+E) graph work per propagation phase plus exactly one `git tag`
-and one bounded `git log` per package. Execution adds O (V+E) scheduling overhead on top of script runtime.
+Discovery runs in O (packages) time. Planning takes O (U·(V+E)) graph work per propagation phase, one bounded walk per
+unit, plus one `git tag` read and one bounded `git log` per distinct stable baseline. Execution adds O (V log V + E)
+scheduling overhead on top of script runtime.
 
 That bound is easy to lose in two places, and both are guarded by construction rather than by care. A package needs two
 baselines, and asking for them separately runs the same tag query twice. The listing is the primitive, and both
@@ -553,7 +556,7 @@ in-memory fakes. Every internal package and every `pkg/` module has its own suit
 
 The integration suite is catalogued claim by claim in the
 [test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md). Its coverage matrix maps
-each of its forty-one goals onto the tests that prove it. The results are summarised per area in
+each of its forty-eight goals onto the tests that prove it. The results are summarised per area in
 [test results](./test-results.mdx). The unit suites have no equivalent catalogue. What they assert is stated in each
 test's own name and doc comment. You can see what the whole suite reaches per package in [coverage](./coverage.mdx).
 

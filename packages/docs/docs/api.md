@@ -24,7 +24,7 @@ package overrides its space.
 
 ## The Go packages
 
-Read [Go packages](./go/README.md) for details on the five modules dispat uses. You can import each module on its own.
+Read [Go packages](./go/README.md) for details on the six modules dispat uses. You can import each module on its own.
 They do not require a dispat binary, a git repository, or network access.
 
 | Package | What it does |
