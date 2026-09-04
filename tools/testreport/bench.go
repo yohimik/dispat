@@ -44,7 +44,10 @@ const benchDirName = "benchlog"
 // The caller supplies the benchmark flags. This runs no benchmark the caller
 // did not ask for, because which benchmarks are worth a release's time is the
 // package's own decision and not this program's.
-func goBench(args []string) (int, error) {
+//
+// The summary and the command line go to the writer the caller hands over,
+// which is the process's stdout in production.
+func goBench(args []string, w io.Writer) (int, error) {
 	if len(args) < 2 || args[0] == "" || args[1] != "--" {
 		return 2, errors.New("usage: testreport bench <log-name> -- <go test args...>")
 	}
@@ -60,7 +63,7 @@ func goBench(args []string) (int, error) {
 	}
 	logPath := filepath.Join(logDir, name+".json")
 
-	fmt.Printf("%s: go test %s -json\n", name, strings.Join(rest, " "))
+	fmt.Fprintf(w, "%s: go test %s -json\n", name, strings.Join(rest, " "))
 
 	f, err := os.Create(logPath)
 	if err != nil {
@@ -84,19 +87,19 @@ func goBench(args []string) (int, error) {
 		code = exit.ExitCode()
 	}
 
-	if err := summariseBench(logPath); err != nil {
+	if err := summariseBench(logPath, w); err != nil {
 		logf(levelWarn, "could not summarise %s: %v; the benchmarks themselves exited %d", logPath, err, code)
 	}
 	return code, nil
 }
 
 // summariseBench prints the human line a benchmark pass leaves behind.
-func summariseBench(name string) error {
+func summariseBench(name string, w io.Writer) error {
 	log, err := readBenchFile(strings.TrimSuffix(filepath.Base(name), ".json"), name)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s: %d benchmarks on %s/%s\n", log.id, len(log.results), log.goos, log.goarch)
+	fmt.Fprintf(w, "%s: %d benchmarks on %s/%s\n", log.id, len(log.results), log.goos, log.goarch)
 	return nil
 }
 

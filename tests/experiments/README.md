@@ -95,6 +95,9 @@ EXPERIMENT=midrelease TOOL=dispat SCENARIO=conflict \
 
 # the table, to the terminal and to a job summary
 dispat exec summary --for pkg:experiments --in pkg:experiments
+
+# the twelve cells the campaign is made of, one `<experiment> <tool> [scenario]` per line
+dispat exec cells --for pkg:experiments --in pkg:experiments
 ```
 
 `build` takes the version from `EXPERIMENTS_DISPAT_VERSION`, or the newest `docker/dispat-alpine/v*` tag when it is
@@ -103,7 +106,8 @@ unset. `EXPERIMENTS_RESULTS` moves the results folder, `EXPERIMENTS_JOBS` sets h
 
 Every release reruns every cell: the docs package's `beforeBuild` hook runs them against the image the run has just
 published, and the site page is built from what they recorded. The `Experiments` workflow is the by-hand run, for any
-released version, on demand.
+released version, on demand; its matrix is `cells` read at the start of the run, so the two runs are the same twelve
+cells and a cell added to `cells` is a cell both of them measure.
 
 Underneath, one cell is one container:
 

@@ -8,30 +8,79 @@ import testReport from './plugins/test-report';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
 const DISCORD = 'https://discord.gg/83PwVSCCmk';
+const SITE = 'https://dispat.dev';
+
+// The project named the way a share card and a structured-data block should
+// name it: the tool first, then the two repository shapes it is looked for
+// under. The page <title> is built from the landing page's own Layout title
+// plus the site title, which spells the same thing without repeating "dispat".
+const TITLE = 'dispat: the saga polyglot release tool for monorepos and polyrepos';
+
+// The project's one-line description, word for word the one the GitHub
+// repository carries, so the two places a reader meets dispat first say the
+// same sentence. DESCRIPTION opens with it and then goes on.
+const TAGLINE =
+  'The saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, tags, releases out';
 
 // One description and one keyword list, used by the meta tags and by both
 // structured-data blocks below, so a crawler is never told two different things
 // about the same project.
 const DESCRIPTION =
-  'dispat is a release tool for polyglot monorepos. It reads your conventional commits, works out every ' +
-  'package version with propagation to dependants, and builds and publishes each changed package in dependency ' +
-  'order, in parallel, with changelogs, git tags and GitHub releases. A package is a folder and a stage is a shell ' +
-  'command, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.';
+  'dispat is the saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, ' +
+  'tags, releases out. It reads your conventional commits, works out every package version with propagation to ' +
+  'dependants, and builds and publishes each changed package in dependency order, in parallel, with changelogs, ' +
+  'git tags and GitHub releases. A package is a folder and a stage is a shell command, so npm, Go, Cargo, Maven, ' +
+  '.NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph. It releases a monorepo, a ' +
+  'polyrepo of many repositories through a control repository, or a single package.';
 
+// What a reader types into a search engine when they are looking for this tool,
+// in the three shapes it is looked for under: the monorepo one, the
+// many-repositories one, and the pattern the run is built on. The list is one
+// place because the meta tag and both structured-data blocks read it.
 const KEYWORDS = [
   'monorepo release tool',
   'monorepo',
   'polyglot monorepo',
+  'polyrepo',
+  'polyrepo release tool',
+  'multi-repo release',
+  'control repository',
   'release automation',
+  'release orchestration',
   'monorepo versioning',
+  'monorepo changelog',
+  'monorepo tagging',
   'semantic release monorepo',
   'conventional commits',
   'semantic versioning',
   'changelog',
+  'github releases automation',
   'lerna alternative',
   'npm',
   'docker',
   'go modules',
+  'cargo',
+  'maven',
+  'saga pattern',
+  'saga',
+  'forward recovery',
+  'exactly-once delivery',
+  'idempotent release',
+  'distributed transaction',
+  'release lock',
+];
+
+// What the project is *about*, as things rather than as search terms: the
+// structured-data blocks below carry both, and a crawler reads this one as the
+// subject and the keyword list as the phrasing.
+const SUBJECTS = [
+  {'@type': 'Thing', name: 'Release automation'},
+  {'@type': 'Thing', name: 'Saga pattern'},
+  {'@type': 'Thing', name: 'Distributed transaction'},
+  {'@type': 'Thing', name: 'Monorepo'},
+  {'@type': 'Thing', name: 'Polyrepo'},
+  {'@type': 'Thing', name: 'Conventional Commits'},
+  {'@type': 'Thing', name: 'Semantic versioning'},
 ];
 
 // Sitemap priorities, by what a page is for. The value is relative within this
@@ -78,7 +127,7 @@ function sitemapPriority(path: string): number {
 
 const config: Config = {
   title: 'dispat',
-  tagline: 'The polyglot monorepo release tool: conventional commits in, ordered parallel publishes out',
+  tagline: TAGLINE,
   // The SVG carries its own prefers-color-scheme rule, so the glyph stays
   // visible on a dark tab strip; the .ico in headTags is the fallback for
   // whatever cannot read it.
@@ -299,12 +348,14 @@ const config: Config = {
         '@context': 'https://schema.org',
         '@type': 'SoftwareSourceCode',
         name: 'dispat',
+        alternateName: TITLE,
         description: DESCRIPTION,
-        url: 'https://dispat.dev/',
+        url: `${SITE}/`,
         codeRepository: GITHUB,
         programmingLanguage: 'Go',
         license: 'https://opensource.org/licenses/MIT',
         author: {'@type': 'Person', name: 'yohimik', url: 'https://github.com/yohimik'},
+        about: SUBJECTS,
         keywords: KEYWORDS,
       }),
     },
@@ -317,14 +368,16 @@ const config: Config = {
         '@context': 'https://schema.org',
         '@type': 'SoftwareApplication',
         name: 'dispat',
+        alternateName: TITLE,
         description: DESCRIPTION,
-        url: 'https://dispat.dev/',
+        url: `${SITE}/`,
         applicationCategory: 'DeveloperApplication',
         operatingSystem: 'Linux, macOS, Windows',
         softwareRequirements: 'git',
         license: 'https://opensource.org/licenses/MIT',
         author: {'@type': 'Person', name: 'yohimik', url: 'https://github.com/yohimik'},
         offers: {'@type': 'Offer', price: '0', priceCurrency: 'USD'},
+        about: SUBJECTS,
         keywords: KEYWORDS,
       }),
     },
@@ -345,17 +398,32 @@ const config: Config = {
       {
         name: 'keywords',
         content:
-          `${KEYWORDS.join(', ')}, release orchestration, git tags, github releases, cargo, maven, nuget, pypi, ` +
-          'rubygems, pub, ios, android, npm workspaces, pnpm workspaces',
+          `${KEYWORDS.join(', ')}, git tags, github releases, nuget, pypi, rubygems, pub, ios, android, ` +
+          'npm workspaces, pnpm workspaces, git submodules',
       },
-      // og:title/og:image/og:description come from the page title, themeConfig
-      // image and each page's description. The card type is `summary` because
-      // the image is the square logo, and that is what `summary` is for:
-      // `summary_large_image` reserves a 1.91:1 banner and crops or letterboxes
-      // anything that is not one. Drawing a 1200x630 card and pointing
-      // themeConfig.image at it is what would earn the larger type.
+      // og:title, og:description and og:image are emitted per page as well,
+      // from the page's own title, description and themeConfig.image, and the
+      // page's own win where they differ. These are the site-wide defaults, so
+      // a share of a page that states none of them still carries the project's
+      // own name, sentence and mark rather than nothing.
       {property: 'og:type', content: 'website'},
+      {property: 'og:site_name', content: 'dispat'},
+      {property: 'og:title', content: TITLE},
+      {property: 'og:description', content: DESCRIPTION},
+      {property: 'og:image', content: `${SITE}/logo.png`},
+      {property: 'og:image:alt', content: 'dispat logo'},
+      // twitter:title and twitter:description have no per-page emitter, so
+      // without these a card falls back to the og:* pair above, which says the
+      // same thing. The card type is `summary` because the image is the square
+      // logo, and that is what `summary` is for: `summary_large_image` reserves
+      // a 1.91:1 banner and crops or letterboxes anything that is not one.
+      // Drawing a 1200x630 card and pointing themeConfig.image at it is what
+      // would earn the larger type.
       {name: 'twitter:card', content: 'summary'},
+      {name: 'twitter:title', content: TITLE},
+      {name: 'twitter:description', content: DESCRIPTION},
+      {name: 'twitter:image', content: `${SITE}/logo.png`},
+      {name: 'twitter:image:alt', content: 'dispat logo'},
     ],
     navbar: {
       title: 'dispat',

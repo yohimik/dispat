@@ -213,22 +213,34 @@ var (
 )
 
 func workspaceUse() useList {
-	useOnce.Do(func() {
-		root, err := repoRoot()
-		if err != nil {
-			logf(levelWarn, "%v; modules are grouped by the two-segment rule instead", err)
-			return
-		}
-		body, err := os.ReadFile(filepath.Join(root, "go.work"))
-		if err != nil {
-			logf(levelWarn, "could not read %s: %v; modules are grouped by the two-segment rule instead",
-				filepath.Join(root, "go.work"), err)
-			return
-		}
-		useOf = parseUse(string(body))
-		logf(levelDebug, "go.work declares %d modules: %s", len(useOf), strings.Join(useOf, " "))
-	})
+	useOnce.Do(func() { useOf = readUse() })
 	return useOf
+}
+
+// readUse reads the workspace's use list from the go.work above the working
+// directory, and answers with none when there is no answer to be had.
+//
+// It is a function rather than the memoised closure's body so that both ways
+// of having none are reachable more than once in a process: no workspace
+// above the caller at all, and a go.work that is there and unreadable. Each
+// is a warning rather than a failure, because the two-segment fallback still
+// names a module for every package, and a report is worth more than a
+// refusal.
+func readUse() useList {
+	root, err := repoRoot()
+	if err != nil {
+		logf(levelWarn, "%v; modules are grouped by the two-segment rule instead", err)
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(root, "go.work"))
+	if err != nil {
+		logf(levelWarn, "could not read %s: %v; modules are grouped by the two-segment rule instead",
+			filepath.Join(root, "go.work"), err)
+		return nil
+	}
+	out := parseUse(string(body))
+	logf(levelDebug, "go.work declares %d modules: %s", len(out), strings.Join(out, " "))
+	return out
 }
 
 // parseUse reads the `use` directives of a go.work, in both the block form

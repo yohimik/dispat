@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -251,5 +252,63 @@ func TestReadLogKeepsBenchmarksOutOfTheTestCount(t *testing.T) {
 	}
 	if parsed.Passed+parsed.Failed+parsed.Skipped != parsed.Tests+parsed.Fuzz {
 		t.Errorf("the outcomes do not tally with the functions: %+v", parsed.Counts)
+	}
+}
+
+// TestReadLogFileRefusesWhatItCannotRead: the id survives into the report and
+// so must the name of a log that could not be read, because the file is the
+// only thing that says which invocation broke.
+func TestReadLogFileRefusesWhatItCannotRead(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := readLogFile("unit", filepath.Join(dir, "absent.json")); err == nil {
+		t.Fatal("want the absent log reported")
+	}
+	corrupt := filepath.Join(dir, "unit.json")
+	if err := os.WriteFile(corrupt, []byte("not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readLogFile("unit", corrupt)
+	if err == nil || !strings.Contains(err.Error(), corrupt) {
+		t.Fatalf("err = %v, want the corrupt log reported by name", err)
+	}
+}
+
+// TestFuzzTargetsAreOrderedByPackageThenName: two runs of one suite have to
+// produce the same document, and the order a Go map yields is deliberately
+// not one. Two targets of a name in two packages have to stay apart as well.
+func TestFuzzTargetsAreOrderedByPackageThenName(t *testing.T) {
+	const log = `
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/writer","Test":"FuzzA","Elapsed":0.1}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzB","Elapsed":0.1}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzA","Elapsed":0.1}
+`
+	parsed, err := readLog("unit", strings.NewReader(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FuzzTarget{
+		{Name: "FuzzA", Package: "pkg/ccme"},
+		{Name: "FuzzB", Package: "pkg/ccme"},
+		{Name: "FuzzA", Package: "pkg/writer"},
+	}
+	if got := parsed.group().FuzzTargets; !slices.Equal(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+// TestWriteFailuresRefusesWhatItCannotReadOrWrite: the failure report is a
+// second read of the same stream written to somebody else's writer, and a
+// half-written report of a failure is worse than a run that said it could not
+// write one.
+func TestWriteFailuresRefusesWhatItCannotReadOrWrite(t *testing.T) {
+	log, err := readLog("unit", strings.NewReader(failingLog))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.writeFailures(strings.NewReader("not json\n"), io.Discard); err == nil {
+		t.Fatal("want the unreadable second pass reported")
+	}
+	if err := log.writeFailures(strings.NewReader(failingLog), errWriter{}); err == nil {
+		t.Fatal("want the undelivered failure output reported")
 	}
 }

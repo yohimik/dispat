@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -177,6 +180,10 @@ func TestParseUse(t *testing.T) {
 			"use (\n)\n",
 			nil,
 		},
+		"the block opened a space further out": {
+			"use  (\n\tpkg/ccme\n)\n",
+			[]string{"pkg/ccme"},
+		},
 		"nothing declared": {"go 1.26\n", nil},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -191,4 +198,59 @@ func TestParseUse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAddFileRefusesWhatItCannotRead: a profile the folder names and nothing
+// can read is a broken run rather than a package that covered nothing, and
+// the failure carries the file's name so the run can be found.
+func TestAddFileRefusesWhatItCannotRead(t *testing.T) {
+	dir := t.TempDir()
+	if err := newCoverage().addFile(filepath.Join(dir, "absent.out")); err == nil {
+		t.Fatal("want the absent profile reported")
+	}
+	corrupt := filepath.Join(dir, "ccme.out")
+	if err := os.WriteFile(corrupt, []byte("mode: atomic\np/a.go:1.1,2.2 x 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := newCoverage().addFile(corrupt)
+	if err == nil || !strings.Contains(err.Error(), corrupt) {
+		t.Fatalf("err = %v, want the corrupt profile reported by name", err)
+	}
+}
+
+// The failure this fences: the use list is memoised for the life of the
+// process, so the two ways of having none were reachable once each and never
+// from a test: no workspace above the caller, and a go.work that is there and
+// unreadable. Both are warnings, because the two-segment fallback still names
+// a module for every package, and a report is worth more than a refusal.
+func TestReadUseAnswersWithNothingWhenItCannotRead(t *testing.T) {
+	t.Run("the workspace above the caller", func(t *testing.T) {
+		root := t.TempDir()
+		write(t, filepath.Join(root, "go.work"), "go 1.26\n\nuse (\n\t./pkg/ccme\n\ttools\n)\n")
+		pkg := filepath.Join(root, "pkg", "ccme")
+		if err := os.MkdirAll(pkg, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(pkg)
+		if got := readUse(); !slices.Equal(got, useList{"pkg/ccme", "tools"}) {
+			t.Fatalf("readUse = %q, want what the go.work above declares", got)
+		}
+	})
+	t.Run("no workspace at all", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if got := readUse(); got != nil {
+			t.Fatalf("readUse = %q, want none and the two-segment rule", got)
+		}
+	})
+	t.Run("a go.work it cannot read", func(t *testing.T) {
+		// A folder by that name: the ascent finds it and the read does not.
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "go.work"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(root)
+		if got := readUse(); got != nil {
+			t.Fatalf("readUse = %q, want none and the two-segment rule", got)
+		}
+	})
 }

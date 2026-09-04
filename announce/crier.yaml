@@ -78,8 +78,9 @@ publish:
     CHANGELOG COMES FROM THE COMMIT MESSAGES)
 
 
-    dispat v{{ .version }} is out. A release tool for polyglot monorepos:
-    conventional commits in, versions, changelogs, tags and releases out. npm,
+    dispat v{{ .version }} is out. The saga polyglot release tool:
+    conventional commits in; ordered parallel versions, changelogs, tags,
+    releases out. npm,
     Go, Cargo, Maven, Docker and the rest sit in one dependency graph and
     release together.
 
@@ -158,7 +159,7 @@ publish:
       - {{ . }}{{ end }}{{ if gt .more 0 }}
       - and {{ .more }} more{{ end }}{{ end }}
       {{ end }}
-      dispat is one binary that releases a polyglot monorepo from its conventional commits: it works out each package's version, writes the changelogs, rewrites the manifests of everything that depends on it, tags, builds, publishes, and cuts the GitHub releases, in dependency order and in parallel. npm, Go, Cargo, Maven, .NET, Python, Docker and the rest sit in one graph. No daemon, no state file, no cache.
+      dispat is the saga polyglot release tool, one binary that releases a monorepo, a polyrepo or a single package from its conventional commits: it works out each package's version, writes the changelogs, rewrites the manifests of everything that depends on it, tags, builds, publishes, and cuts the GitHub releases, in dependency order and in parallel. npm, Go, Cargo, Maven, .NET, Python, Docker and the rest sit in one graph. No daemon, no state file, no cache.
 
       This repository releases itself with the binary the same run built, which is where the list above comes from.
 

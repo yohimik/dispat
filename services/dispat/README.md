@@ -1,6 +1,7 @@
 # dispat <img alt="dispat logo" align="right" width="128" height="128" src="../../imgs/logo.png" />
 
-The dispat command line tool is a single Go binary that plans and runs monorepo releases from conventional commits.
+The dispat command line tool is a single Go binary that plans and runs releases of a monorepo, a polyrepo or a single
+package from conventional commits. It runs a release as a saga, so an interrupted one recovers by being run again.
 Read the [repository README](../../README.md) to learn why dispat exists, or follow this guide to start using it.
 
 ## In the terminal

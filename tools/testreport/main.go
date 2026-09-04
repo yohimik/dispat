@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,40 +23,51 @@ const usage = `usage:
 `
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run is the verb dispatch, over the streams the caller hands it and with the
+// exit code returned rather than taken.
+//
+// The process's own streams and its exit are `main`'s alone, so that what a
+// verb printed and what the run is worth are both readable by whoever called
+// it: the release gate in production, and a test everywhere else.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 1 {
+		fmt.Fprint(stderr, usage)
+		return 2
 	}
 	var err error
-	switch os.Args[1] {
+	switch args[0] {
 	case "test":
 		// The exit code is the test run's own rather than a flat 1, so the
 		// gates driving this stay transparent to what go test reported.
-		code, err := goTest(os.Args[2:])
+		code, err := goTest(args[1:], stdout)
 		if err != nil {
 			logf(levelError, "%v", err)
 		}
-		os.Exit(code)
+		return code
 	case "bench":
-		code, err := goBench(os.Args[2:])
+		code, err := goBench(args[1:], stdout)
 		if err != nil {
 			logf(levelError, "%v", err)
 		}
-		os.Exit(code)
+		return code
 	case "build":
-		err = build(os.Args[2:])
+		err = build(args[1:])
 	case "render":
-		err = render(os.Args[2:])
+		err = render(args[1:], stdout)
 	case "experiments":
-		err = experiments(os.Args[2:])
+		err = experiments(args[1:], stdout)
 	default:
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		fmt.Fprint(stderr, usage)
+		return 2
 	}
 	if err != nil {
 		logf(levelError, "%v", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // build assembles the report from what a full test run left in the coverage
@@ -328,7 +340,7 @@ func readSuite(dir string) (Suite, error) {
 // It is what makes the JSON stream acceptable as the only output of a test
 // run: `go test -json` is unreadable, and a CI log that hides why a test
 // failed is worse than a missing report.
-func render(args []string) error {
+func render(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("render", flag.ExitOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -336,12 +348,12 @@ func render(args []string) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("render takes one log file")
 	}
-	return summarise(fs.Arg(0))
+	return summarise(fs.Arg(0), w)
 }
 
 // summarise is render's body, shared with `test`: the human summary of one
 // log, with the output of everything that failed printed first.
-func summarise(name string) error {
+func summarise(name string, w io.Writer) error {
 	f, err := os.Open(name)
 	if err != nil {
 		return err
@@ -356,7 +368,7 @@ func summarise(name string) error {
 		if _, err := f.Seek(0, 0); err != nil {
 			return err
 		}
-		if err := log.writeFailures(f, os.Stdout); err != nil {
+		if err := log.writeFailures(f, w); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 	}
@@ -375,7 +387,7 @@ func summarise(name string) error {
 	if len(log.failedPackages) > 0 && log.Failed == 0 {
 		summary += fmt.Sprintf(", %d package(s) FAILED to build", len(log.failedPackages))
 	}
-	fmt.Println(summary)
+	fmt.Fprintln(w, summary)
 	return nil
 }
 

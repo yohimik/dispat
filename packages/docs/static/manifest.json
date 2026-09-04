@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "dispat: the release tool for polyglot monorepos",
+  "name": "dispat: the saga polyglot release tool",
   "short_name": "dispat",
-  "description": "A monorepo release tool that reads your conventional commits, works out every version, and publishes each changed package in dependency order.",
+  "description": "The saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, tags, releases out",
   "lang": "en",
   "dir": "ltr",
   "start_url": "/",

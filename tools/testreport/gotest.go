@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,10 @@ import (
 // The returned code is the test run's own, whatever the summary does: a
 // failing suite must fail the release gate this guards even when its log
 // cannot be summarised.
-func goTest(args []string) (int, error) {
+//
+// The summary and the command line go to the writer the caller hands over,
+// which is the process's stdout in production.
+func goTest(args []string, w io.Writer) (int, error) {
 	if len(args) < 2 || args[0] == "" || args[1] != "--" {
 		return 2, errors.New("usage: testreport test <log-name> -- <go test args...>")
 	}
@@ -50,7 +54,7 @@ func goTest(args []string) (int, error) {
 	// To stdout beside the summary, not through logf: the command line is the
 	// run's human output, and a stderr line would surface as a warning in the
 	// driver's log.
-	fmt.Printf("%s: go test %s -json\n", name, strings.Join(rest, " "))
+	fmt.Fprintf(w, "%s: go test %s -json\n", name, strings.Join(rest, " "))
 
 	f, err := os.Create(logPath)
 	if err != nil {
@@ -76,7 +80,7 @@ func goTest(args []string) (int, error) {
 		code = exit.ExitCode()
 	}
 
-	if err := summarise(logPath); err != nil {
+	if err := summarise(logPath, w); err != nil {
 		logf(levelWarn, "could not summarise %s: %v; the tests themselves exited %d", logPath, err, code)
 	}
 	return code, nil

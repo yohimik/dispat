@@ -380,7 +380,10 @@ func escapePipes(s string) string { return strings.ReplaceAll(s, "|", `\|`) }
 // It exists so the summary a job prints and the page a release publishes are
 // one renderer over one set of records. A second implementation in shell or
 // python is how the two came to say different things about the same run.
-func experiments(args []string) error {
+//
+// The table goes to the writer the caller hands over, which is the process's
+// stdout in production.
+func experiments(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("experiments", flag.ContinueOnError)
 	markdown := fs.Bool("markdown", false, "render the table as markdown for a job summary")
 	if err := fs.Parse(args); err != nil {
@@ -400,7 +403,7 @@ func experiments(args []string) error {
 	// Buffered, and flushed once: a table written a cell at a time to a pipe
 	// that a job summary is reading is a table that arrives interleaved with
 	// whatever else the step said.
-	out := bufio.NewWriter(os.Stdout)
+	out := bufio.NewWriter(w)
 	if *markdown {
 		if err := writeExperimentsMarkdown(out, campaign); err != nil {
 			return err

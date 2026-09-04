@@ -436,8 +436,8 @@ function Community(): React.ReactElement {
 export default function Home(): React.ReactElement {
   return (
     <Layout
-      title="The polyglot monorepo release tool"
-      description="dispat is a release tool for polyglot monorepos. It reads your conventional commits, works out every package version with propagation to dependants, and builds and publishes each changed package in dependency order, in parallel, with changelogs, git tags and GitHub releases. A package is a folder and a stage is a shell command, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph.">
+      title="The saga polyglot release tool for monorepos and polyrepos"
+      description="dispat is the saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, tags, releases out. It reads your conventional commits, works out every package version with propagation to dependants, and builds and publishes each changed package in dependency order, in parallel, with changelogs, git tags and GitHub releases. A package is a folder and a stage is a shell command, so npm, Go, Cargo, Maven, .NET, Python, Ruby, Dart, Docker, iOS and Android live in one dependency graph. It releases a monorepo, a polyrepo of many repositories through a control repository, or a single package.">
       <Hero />
       <main>
         <Libraries />

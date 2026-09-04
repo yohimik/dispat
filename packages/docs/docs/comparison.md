@@ -62,15 +62,18 @@ transitive ones. The `+N` modifier bounds the depth, so two changes in one windo
 
 ## The experiments
 
-The readings above start as documentation. The following experiments executed them against the tools themselves, using
-the latest published version of each: lerna 10.0.1, nx 23.1.2, changesets 3.0.1 under turbo 2.10.12, and dispat.
-Fault injection requires a registry the experiment is allowed to break. Each tool ran against its own fresh local
-registry (verdaccio 6) behind a proxy that fails the upload of one named package with a 502. Every phase was run
-twice. The machine-recorded transcripts are identical between repetitions.
+The readings above start as documentation. The experiments below execute them against the tools themselves, using the
+latest published version of each: lerna 10.0.1, nx 23.1.2, changesets 3.0.1, which is the release step Turborepo
+delegates to, and dispat as the binary copied out of the image the release under test published. Fault injection
+requires a registry the experiment is allowed to break, so every cell is a container of its own holding a fresh
+verdaccio behind a proxy that answers 502 to the upload of one named package and forwards everything else untouched.
+No cell shares a registry, a clone or an origin with another, and every commit is dated from a fixed clock, so a cell
+run twice produces the same shas and two transcripts that diff against each other.
 
-Two of them are now run again by every release, against the image that release just published, and what they recorded
-is on [release experiments](./internals/experiments.mdx). The harness that runs them, the fixture, the observer and the
-fault proxy are in
+Every release reruns all twelve cells against the image it has just published, and what they recorded is on
+[release experiments](./internals/experiments.mdx). The same twelve run on demand, for any released version, through
+the [Experiments workflow](https://github.com/yohimik/dispat/actions/workflows/experiments.yml). The harness that runs
+them, the fixture, the observer and the fault proxy are in
 [`tests/experiments`](https://github.com/yohimik/dispat/blob/main/tests/experiments/README.md).
 
 ### One denied upload

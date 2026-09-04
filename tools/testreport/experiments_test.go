@@ -257,7 +257,7 @@ func TestExperimentsVerbReportsAnUnreadableCampaign(t *testing.T) {
 	dir := t.TempDir()
 	writeCell(t, dir, "orphan-dispat", `{`, "")
 	for _, args := range [][]string{{dir}, {"-markdown", dir}} {
-		if err := experiments(args); err == nil {
+		if err := experiments(args, io.Discard); err == nil {
 			t.Fatalf("experiments(%q) succeeded; want the malformed record reported", args)
 		}
 	}
@@ -441,34 +441,32 @@ func TestRenderingAnUnnameableCampaign(t *testing.T) {
 // fail rather than quietly summarise the default.
 func TestExperimentsVerb(t *testing.T) {
 	t.Run("markdown over a folder", func(t *testing.T) {
-		out := captureStdout(t, func() {
-			if err := experiments([]string{"-markdown", fixtures}); err != nil {
-				t.Fatal(err)
-			}
-		})
-		if !strings.Contains(out, "3 cells on dispat 1.7.0") || !strings.Contains(out, "| cell |") {
-			t.Fatalf("got:\n%s", out)
+		var out bytes.Buffer
+		if err := experiments([]string{"-markdown", fixtures}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "3 cells on dispat 1.7.0") || !strings.Contains(out.String(), "| cell |") {
+			t.Fatalf("got:\n%s", out.String())
 		}
 	})
 	t.Run("plain over a folder", func(t *testing.T) {
-		out := captureStdout(t, func() {
-			if err := experiments([]string{fixtures}); err != nil {
-				t.Fatal(err)
-			}
-		})
-		if !strings.Contains(out, "midrelease-conflict-dispat") || strings.Contains(out, "| cell |") {
-			t.Fatalf("got:\n%s", out)
+		var out bytes.Buffer
+		if err := experiments([]string{fixtures}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "midrelease-conflict-dispat") || strings.Contains(out.String(), "| cell |") {
+			t.Fatalf("got:\n%s", out.String())
 		}
 	})
 	t.Run("two folders", func(t *testing.T) {
-		if err := experiments([]string{fixtures, fixtures}); err == nil {
+		if err := experiments([]string{fixtures, fixtures}, io.Discard); err == nil {
 			t.Fatal("want an error rather than a summary of one of them")
 		}
 	})
 	t.Run("an unknown flag", func(t *testing.T) {
 		// ContinueOnError, so the flag package returns the error rather than
 		// killing the process a test is running in.
-		if err := experiments([]string{"-nope"}); err == nil {
+		if err := experiments([]string{"-nope"}, io.Discard); err == nil {
 			t.Fatal("want an error rather than the default folder summarised")
 		}
 	})
@@ -574,24 +572,20 @@ func writeCell(t *testing.T, dir, id, verdict, observations string) {
 	}
 }
 
-// captureStdout runs f with stdout redirected, and returns what it printed.
-// The verb writes to os.Stdout because that is what a job summary reads.
-func captureStdout(t *testing.T, f func()) string {
-	t.Helper()
-	saved := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+// TestExperimentsVerbReportsATableItCouldNotDeliver: the table is buffered
+// and flushed once, so a reader that stops taking it has to surface as the
+// verb's own error. A job summary that is quietly half a table is a campaign
+// misreported rather than a step that failed.
+func TestExperimentsVerbReportsATableItCouldNotDeliver(t *testing.T) {
+	dir := t.TempDir()
+	// Longer than either buffer, so the failure is reached while the table is
+	// being written rather than only on the final flush.
+	long := strings.Repeat("an expectation too long for any buffer ", 200)
+	writeCell(t, dir, "orphan-dispat",
+		`{"tool":"dispat","dispat":"dispat 1.7.1 (linux_amd64)","checks":[{"check":"`+long+`","ok":false}]}`, "")
+	for _, args := range [][]string{{dir}, {"-markdown", dir}} {
+		if err := experiments(args, errWriter{}); err == nil {
+			t.Fatalf("experiments(%q) succeeded on a reader that took none of it", args)
+		}
 	}
-	os.Stdout = w
-	done := make(chan string, 1)
-	go func() {
-		var b bytes.Buffer
-		_, _ = io.Copy(&b, r)
-		done <- b.String()
-	}()
-	f()
-	_ = w.Close()
-	os.Stdout = saved
-	return <-done
 }

@@ -3,13 +3,19 @@
 [![tests](https://github.com/yohimik/dispat/actions/workflows/tests.yml/badge.svg)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 [![coverage](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 
-**dispat** is a release tool for polyglot monorepos. It reads your conventional commits to find which packages changed
-and calculates their next semantic versions. Then it propagates those bumps to dependants and builds every package in
-dependency order. Finally, dispat publishes them in parallel, writing changelogs, git tags, and GitHub releases on the
-way out.
+**dispat** is the saga polyglot release tool: conventional commits in; ordered parallel versions, changelogs, tags,
+releases out. It reads your conventional commits to find which packages changed and calculates their next semantic
+versions. Then it propagates those bumps to dependants and builds every package in dependency order. Finally, dispat
+publishes them in parallel, writing changelogs, git tags, and GitHub releases on the way out.
 
 Polyglot is the point. A package is a folder and a stage is a shell command. This means npm, Go, Cargo, Maven, .NET,
 Python, Ruby, Dart, Docker, iOS, and Android sit in one dependency graph and release together.
+
+The shape of your repositories is the point too. dispat releases a [monorepo](https://dispat.dev/monorepo/) of many
+packages, a polyrepo of many repositories linked as submodules into a
+[control repository](https://dispat.dev/control-repository/), and a single package in a repository of its own. The
+dependency graph is whatever one checkout holds, so a fleet of repositories releases in the same order, with the same
+changelogs and tags, as a monorepo does.
 
 You install one binary and write one config file. You run no daemon, manage no state file, and operate no cache.
 
@@ -128,8 +134,19 @@ the ordering, the orchestration, and the failure semantics.
 
 ## Inspiration
 
-dispat stands on the shoulders of two things:
+dispat stands on the shoulders of three things:
 
+- **The saga pattern**, from Garcia-Molina and Salem's *Sagas* (1987), which models a long transaction as a sequence of
+  steps that each commit independently and recover forwards. A release is that shape exactly, so dispat recovers by
+  completing the legs a run still owes rather than by rolling back the ones that succeeded, which no registry would
+  allow anyway. The [saga's ledger](https://dispat.dev/comparison/) is the release tags themselves, each written
+  strictly after the artefact it names exists, so the record never claims more than was delivered. The plan is a pure
+  function of git history and the graph, which makes re-running idempotent and delivery exactly once over arbitrary
+  targets, with no registry query anywhere. Mutual exclusion is compare-and-swap on the
+  [release lock](https://dispat.dev/reference/releasing/release-lock/) tag, whose unforced push the remote accepts from
+  one run and rejects for every other, so there is no lock service to operate. The legs themselves are
+  [ordered topologically](https://dispat.dev/concepts/) and execute in parallel wherever the graph leaves them
+  independent.
 - **[Lerna](https://lerna.js.org/)**, and the workspaces of [npm](https://docs.npmjs.com/cli/using-npm/workspaces) and
   [pnpm](https://pnpm.io/workspaces) it grew up beside. Between them they proved that many packages in one repository
   can share a dependency graph. They also proved that versioning and publishing all of them can be one command. dispat

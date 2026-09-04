@@ -97,10 +97,13 @@ ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
 # and an empty table reads as "this package has no benchmarks".
 #
 # It also checks that every frozen docs version carries the benchmarks and
-# experiments pages. The numbers are global (every version's page renders the
-# same measured report), so a version whose copy of a page is missing is a
-# version that shows the site's other numbers and not those, and a patch
-# release cuts no new snapshot to fix it with.
+# experiments pages, and that its sidebar lists them. The numbers are global
+# (every version's page renders the same measured report), so a version whose
+# copy of a page is missing is a version that shows the site's other numbers
+# and not those, and a patch release cuts no new snapshot to fix it with. A
+# page the sidebar does not list is the same failure with the file present:
+# the build succeeds, the page ships, and no reader of that version has a way
+# to reach it.
 RUN <<'EOF'
 set -eu
 [ -n "${DOCS_BENCH_PACKAGES}${DOCS_EXPERIMENTS}" ] || exit 0
@@ -124,9 +127,14 @@ for cell in ${DOCS_EXPERIMENTS}; do
 done
 for dir in packages/docs/versioned_docs/version-*; do
   [ -d "$dir" ] || continue
+  sidebars="packages/docs/versioned_sidebars/${dir##*/}-sidebars.json"
   for page in benchmarks experiments; do
     [ -f "$dir/internals/$page.mdx" ] || {
       echo "$dir has no internals/$page.mdx: the measured numbers would reach the current docs and not that version" >&2
+      exit 1
+    }
+    grep -q "\"id\": \"internals/$page\"" "$sidebars" || {
+      echo "$sidebars does not list internals/$page: that version's page would build with no way to reach it" >&2
       exit 1
     }
   done

@@ -232,6 +232,24 @@ packages:
         set -eu
         dispat exec build --for pkg:experiments --in pkg:experiments
         dispat exec cell --for pkg:experiments --in pkg:experiments
+      # The campaign, as lines: one cell per line, `<experiment> <tool>` and a
+      # scenario where the experiment has more than one, which is the argument
+      # order `cell` and run.sh take.
+      #
+      # This is the only place the twelve are enumerated. The sweep below pipes
+      # it into xargs and the Experiments workflow turns it into its matrix, so
+      # a cell added here is a cell both runs, and neither can drift into
+      # measuring a different campaign than the other.
+      cells: |
+        set -eu
+        for tool in dispat lerna nx changesets; do
+          echo "orphan $tool"
+        done
+        for scenario in clean conflict; do
+          for tool in dispat lerna nx changesets; do
+            echo "midrelease $tool $scenario"
+          done
+        done
       # Every cell of the campaign, four at a time. The folder is wiped
       # through the image rather than by the host's rm, because the container
       # writes it as root and a host rm of root-owned files needs a password
@@ -249,10 +267,7 @@ packages:
         docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
           /results -mindepth 1 -delete
         echo "running twelve cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
-        printf '%s\n' \
-          'orphan dispat' 'orphan lerna' 'orphan nx' 'orphan changesets' \
-          'midrelease dispat clean' 'midrelease lerna clean' 'midrelease nx clean' 'midrelease changesets clean' \
-          'midrelease dispat conflict' 'midrelease lerna conflict' 'midrelease nx conflict' 'midrelease changesets conflict' \
+        dispat exec cells --for pkg:experiments --in pkg:experiments \
         | EXPERIMENTS_RESULTS="$RESULTS" xargs -P "${EXPERIMENTS_JOBS:-4}" -L 1 sh -c \
             'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments'
       # The table over whatever the cells recorded, through the same verb the

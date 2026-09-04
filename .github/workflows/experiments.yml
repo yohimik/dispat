@@ -30,26 +30,50 @@ permissions:
   contents: read
 
 jobs:
+  # The campaign is enumerated once, by the `cells` script, and this job is
+  # how a workflow matrix reads a list that lives in dispat.yaml. A matrix
+  # written out here would be a second list to keep in step with the sweep a
+  # release runs, and the two runs are only comparable while they are the
+  # same cells.
+  cells:
+    name: Cells
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.cells.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up dispat
+        uses: ./
+
+      # `<experiment> <tool> [scenario]` per line into one object per cell,
+      # scenario empty where the experiment has only one, which is the shape
+      # the matrix below indexes and the artifact names read.
+      - name: List the cells
+        id: cells
+        run: |
+          set -eu
+          cells=$(dispat exec cells --for pkg:experiments --in pkg:experiments)
+          echo "$cells"
+          matrix=$(printf '%s\n' "$cells" | jq -Rsc '
+            split("\n") | map(select(length > 0) | split(" ")
+              | {experiment: .[0], tool: .[1], scenario: (.[2] // "")})')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   experiment:
     name: ${{ matrix.experiment }} ${{ matrix.scenario }} ${{ matrix.tool }}
+    needs: cells
     runs-on: ubuntu-latest
     strategy:
       # Every cell is its own record; one that fails says nothing about
       # the others.
       fail-fast: false
       matrix:
-        experiment: [orphan, midrelease]
-        scenario: ["", clean, conflict]
-        tool: [dispat, lerna, nx, changesets]
-        # orphan has one scenario, midrelease two: the empty scenario is
-        # orphan's and the named ones are midrelease's.
-        exclude:
-          - experiment: orphan
-            scenario: clean
-          - experiment: orphan
-            scenario: conflict
-          - experiment: midrelease
-            scenario: ""
+        # include alone, so the cells are exactly the twelve the script
+        # printed rather than a product with the combinations it never
+        # names cut back out.
+        include: ${{ fromJSON(needs.cells.outputs.matrix) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

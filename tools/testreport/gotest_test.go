@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,7 +42,7 @@ func TestGoTestUsage(t *testing.T) {
 		"empty log name": {"", "--", "./..."},
 	} {
 		t.Run(name, func(t *testing.T) {
-			code, err := goTest(args)
+			code, err := goTest(args, io.Discard)
 			if code != 2 || err == nil {
 				t.Fatalf("goTest(%q) = %d, %v; want 2 and a usage error", args, code, err)
 			}
@@ -55,7 +56,7 @@ func TestGoTestUsage(t *testing.T) {
 func TestGoTestPassWritesLog(t *testing.T) {
 	root := workspace(t, "package mod\n\nimport \"testing\"\n\nfunc TestOK(t *testing.T) {}\n")
 
-	code, err := goTest([]string{"unit", "--", "./..."})
+	code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
 	if err != nil || code != 0 {
 		t.Fatalf("goTest = %d, %v; want 0, nil", code, err)
 	}
@@ -74,7 +75,7 @@ func TestGoTestPassWritesLog(t *testing.T) {
 func TestGoTestFailurePropagates(t *testing.T) {
 	root := workspace(t, "package mod\n\nimport \"testing\"\n\nfunc TestNo(t *testing.T) { t.Fatal(\"no\") }\n")
 
-	code, err := goTest([]string{"unit", "--", "./..."})
+	code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
 	if err != nil {
 		t.Fatalf("goTest error = %v; a test failure is a code, not an error", err)
 	}
@@ -95,8 +96,69 @@ func TestGoTestFailurePropagates(t *testing.T) {
 // folder.
 func TestRepoRootNotFound(t *testing.T) {
 	t.Chdir(t.TempDir())
-	code, err := goTest([]string{"unit", "--", "./..."})
+	code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
 	if code != 1 || err == nil {
 		t.Fatalf("goTest = %d, %v; want 1 and the no-go.work error", code, err)
+	}
+}
+
+// TestGoTestRefusesWhatItCannotRecord: the log is the record `build` folds
+// into the report, so a pass whose log could not be written is a failure of
+// the run rather than a suite nobody kept the results of.
+func TestGoTestRefusesWhatItCannotRecord(t *testing.T) {
+	const body = "package mod\n\nimport \"testing\"\n\nfunc TestOK(t *testing.T) {}\n"
+	t.Run("a log folder it cannot make", func(t *testing.T) {
+		root := workspace(t, body)
+		write(t, filepath.Join(root, "coverage"), "not a folder\n")
+		code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
+		if code != 1 || err == nil {
+			t.Fatalf("goTest = %d, %v; want 1 and the folder it could not make", code, err)
+		}
+	})
+	t.Run("a log it cannot create", func(t *testing.T) {
+		root := workspace(t, body)
+		if err := os.MkdirAll(filepath.Join(root, "coverage", "testlog", "unit.json"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
+		if code != 1 || err == nil {
+			t.Fatalf("goTest = %d, %v; want 1 and the log it could not create", code, err)
+		}
+	})
+	t.Run("no toolchain to run", func(t *testing.T) {
+		workspace(t, body)
+		t.Setenv("PATH", "")
+		code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
+		if code != 1 || err == nil {
+			t.Fatalf("goTest = %d, %v; want 1 and the toolchain it could not run", code, err)
+		}
+	})
+}
+
+// TestGoTestWarnsWhenItCannotSummarise: the summary is a rendering, and a
+// gate reads the suite's own exit code. Losing a passing run to a rendering
+// that failed would fail a release nothing was wrong with.
+func TestGoTestWarnsWhenItCannotSummarise(t *testing.T) {
+	// The runner holds the log open, so unlinking it from inside the run
+	// leaves the pass to finish and the summary with nothing to read.
+	root := workspace(t, `package mod
+
+import (
+	"os"
+	"testing"
+)
+
+func TestUnlinksItsOwnLog(t *testing.T) {
+	if err := os.Remove("../coverage/testlog/unit.json"); err != nil {
+		t.Fatal(err)
+	}
+}
+`)
+	code, err := goTest([]string{"unit", "--", "./..."}, io.Discard)
+	if code != 0 || err != nil {
+		t.Fatalf("goTest = %d, %v; want the run's own 0 despite the summary", code, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "coverage", "testlog", "unit.json")); !os.IsNotExist(err) {
+		t.Fatalf("the test did not remove its own log: %v", err)
 	}
 }
