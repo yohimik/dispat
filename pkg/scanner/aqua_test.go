@@ -97,7 +97,7 @@ func TestScanAquaConventionalSymlinksHaveContainedCanonicalOwnership(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(mans) != 1 || mans[0].Path != ".aqua.yaml" {
+	if len(mans) != 1 || mans[0].Path != "aqua.yaml" {
 		t.Fatalf("canonical Aqua source does not have one deterministic owner: %#v", mans)
 	}
 

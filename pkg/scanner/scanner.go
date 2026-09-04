@@ -520,9 +520,22 @@ func scanAquaImports(ctx context.Context, dir string, mans []Manifest) ([]Manife
 	seenReal := make(map[string]bool)
 	var errs []error
 	// The ordinary walk can encounter two conventional Aqua names that are
-	// aliases for one file. Give canonical sources one deterministic owner,
-	// and do not retain a conventional-name symlink that escapes the scan root.
-	sort.SliceStable(mans, func(i, j int) bool { return mans[i].Path < mans[j].Path })
+	// aliases for one file. Prefer the real source over an alias, then choose
+	// lexically, so a later writer receives an editable deterministic owner.
+	aquaLink := make(map[string]bool)
+	for _, m := range mans {
+		if m.Ecosystem == EcosystemAqua {
+			info, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(m.Path)))
+			aquaLink[m.Path] = statErr == nil && info.Mode()&os.ModeSymlink != 0
+		}
+	}
+	sort.SliceStable(mans, func(i, j int) bool {
+		if mans[i].Ecosystem == EcosystemAqua && mans[j].Ecosystem == EcosystemAqua && aquaLink[mans[i].Path] != aquaLink[mans[j].Path] {
+			return !aquaLink[mans[i].Path]
+		}
+		return mans[i].Path < mans[j].Path
+	})
+	// Do not retain a conventional-name symlink that escapes the scan root.
 	owned := mans[:0]
 	for _, m := range mans {
 		if m.Ecosystem != EcosystemAqua {
