@@ -295,6 +295,8 @@ func TestEveryFormatDeclaresLinkSupport(t *testing.T) {
 		// registry, and there is no spelling for "resolve this one from a
 		// folder instead" to manage.
 		manifest.FormatDockerfile: true, manifest.FormatCompose: true,
+		// Aqua pins registry packages but has no local path override table.
+		manifest.FormatAqua: true,
 		// No game engine has a redirect table. Unity comes closest: a
 		// dependency may read "file:../core", but that is the declaration's own
 		// spelling rather than an override sitting beside it, so there is

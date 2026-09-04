@@ -55,6 +55,11 @@ type splicer struct {
 // size is checked against the open handle and again against what was read, so
 // a file growing between the two cannot slip past.
 func openSplicer(path string) (*splicer, error) {
+	if info, err := os.Lstat(path); err != nil {
+		return nil, err
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("%s: refusing to rewrite a symbolic link", path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -171,9 +176,12 @@ func (r *splicer) commit(verify func(out []byte) error) error {
 // half-written manifest (a power loss is the filesystem's problem, and the
 // fsync narrows even that window).
 func atomicWrite(path string, data []byte) error {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s: refusing to rewrite a symbolic link", path)
 	}
 	// The temp file must live beside the target so the rename stays on one
 	// filesystem.

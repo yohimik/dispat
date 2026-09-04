@@ -36,6 +36,7 @@ var everyWriterName = []string{
 	"MyGame.uproject", "AcmeNet.uplugin",
 	"Config/DefaultGame.ini", "Config/DefaultEngine.ini",
 	"game.project", "project.json", "gem.json",
+	"aqua.yaml",
 }
 
 func TestEveryWriterNameCoversEveryFormat(t *testing.T) {
@@ -71,6 +72,29 @@ func TestRewriteReportsAnUnreadableManifest(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: an unreadable manifest must be an error, got %+v", name, res)
 		}
+	}
+}
+
+func TestRewriteRefusesSymlinkAndPreservesTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	link := filepath.Join(dir, "package.json")
+	src := `{"name":"acme","version":"1.0.0"}`
+	if err := os.WriteFile(target, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Rewrite(link, "2.0.0", nil); err == nil {
+		t.Fatal("a symlink manifest must be refused")
+	}
+	if got := read(t, target); got != src {
+		t.Fatalf("target changed: %q", got)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link was replaced: info=%v err=%v", info, err)
 	}
 }
 
