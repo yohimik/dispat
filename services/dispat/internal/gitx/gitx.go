@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package gitx wraps the git operations the tool needs behind an interface,
 // with a CLI implementation that shells out to the git binary (matching CI
 // environments exactly).

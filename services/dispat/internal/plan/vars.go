@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package plan
 
 // The variables a release carries into everything that reads it: the script

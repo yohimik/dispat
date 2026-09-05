@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package plan reads git history and computes the release plan: which
 // packages changed, what their next versions and channels are, and in which
 // order they must be processed.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package release
 
 // The release stage's use of the replacing strategy (§9.4): the rules come

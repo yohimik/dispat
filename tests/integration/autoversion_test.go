@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package integration
 
 // Area 11: native auto-versioning through the compiled binary. A space with

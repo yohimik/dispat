@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package models holds the public configuration model of the dispat CLI: the
 // structs a dispat.json / dispat.yaml file decodes into. It contains models
 // only — loading, validation and package discovery live in the CLI's internal

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package integration
 
 // Area 9: repository-scoped errors (the §16 fatal bucket). These codes mean no

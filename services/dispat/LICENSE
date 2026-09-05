@@ -1,3 +1,22 @@
+License scope for services/dispat
+
+Source files bearing SPDX-License-Identifier: GPL-3.0-or-later are licensed
+under GNU GPL version 3 or, at your option, any later version. This covers
+source files referencing or incorporating the GPL-covered CCME specification.
+See LICENSE.GPL-3.0 for the full license text. The MIT grant below does not
+apply to those source files; file-level GPL notices take precedence.
+
+Other source files in this module are licensed under the MIT license below,
+except material with its own third-party license notice. Merely importing or
+calling the MIT-licensed CCME parser does not designate a file as GPL.
+
+The copyright holder separately grants MIT for Dispat executables in compiled
+form distributed through the project's official releases and container
+images. That binary grant does not include corresponding GPL source files or
+specification documents, or change third-party license terms. See the root
+LICENSE in https://github.com/yohimik/dispat for the complete scope policy.
+Previously distributed copies retain their original license grants.
+
 MIT License
 
 Copyright (c) 2026 yohimik

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package release executes a computed plan: it builds and publishes every
 // changed package with bounded parallelism while honouring the dependency
 // graph and each space's isBuildWaitingPublish setting.

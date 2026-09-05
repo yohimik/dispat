@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package integration
 
 // Area 27: the release edge cases that sit between two features, where each

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package app is the application: it plans and releases the monorepo. The two
 // operations a user can ask for — see the plan, run the plan — are methods on
 // App, callable with nothing but a configuration and a logger, so the cli

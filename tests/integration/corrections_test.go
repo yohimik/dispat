@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Goal 31: corrections and reverted changelogs. A release record is written in
 // a commit message, and a commit message cannot be rewritten once it is
 // pushed. The `Edits` and `Deletes` footers correct such a record by naming it:

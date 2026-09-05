@@ -52,4 +52,7 @@ dependency: [`pkg/ccme`](../ccme), used for resolved parser configuration types.
 
 ## Licence
 
-MIT. See [LICENSE](./LICENSE).
+`models.go` references the CCME specification and is licensed under GPL-3.0-or-later, as its SPDX notice states.
+Other source files remain MIT unless separately licensed. See [LICENSE](./LICENSE) for the scope of each grant and
+[LICENSE.GPL-3.0](./LICENSE.GPL-3.0) for the GPL text. The MIT grant for official Dispat binaries does not relicense
+this module's GPL source files.

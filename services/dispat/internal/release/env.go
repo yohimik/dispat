@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package release
 
 // The DISPAT_* environment renderers: the workspace listing, the per-task

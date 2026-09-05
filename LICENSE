@@ -1,3 +1,47 @@
+Dispat licensing
+
+1. Official release binaries: MIT
+
+The copyright holder grants the MIT license printed below for the compiled
+Dispat binaries published in this project's official releases, including the
+Dispat executables in its official container images. For this binary grant,
+"Software" means those executables in compiled form. It does not include the
+corresponding source files, the CCME specification, or other GPL material in
+source or document form. This grant does not change third-party license terms
+for dependencies or other contents of a container image.
+
+2. Source referencing GPL material: GPL-3.0-or-later
+
+Dispat source files that reference or incorporate GPL-covered specification
+text, algorithms or proofs are licensed under GPL-3.0-or-later. This includes
+source references to sections of the CCME specification. These files carry
+SPDX-License-Identifier: GPL-3.0-or-later notices. The MIT grant below does not
+apply to their source form. Removing a reference or notice does not grant an
+MIT license to that source.
+
+The CCME specification and its accompanying material in specs/ccme-spec/ are
+also licensed under GPL-3.0-or-later. The full GNU General Public License text
+is in specs/ccme-spec/LICENSE, with copies in services/dispat/ and pkg/models/.
+
+The CCME parser in pkg/ccme/ is expressly excluded from this source rule and
+remains MIT-licensed, including its specification references. Merely importing
+or calling that MIT parser does not designate another source file as GPL.
+License notices and navigation links alone are not substantive specification
+references under this policy.
+
+3. Other source: MIT
+
+Dispat source files without GPL-covered material or substantive references to
+it remain under the MIT license below. File-level GPL notices take precedence
+over a package's default MIT grant. Third-party code, fonts and other material
+retain their own license notices and terms.
+
+These grants distinguish official compiled binaries from source files. They
+do not offer MIT as an alternative for GPL-designated source. Previously
+distributed copies retain the licenses under which they were distributed.
+The MIT grants for other files do not override applicable GPL requirements
+when those files are combined with GPL-covered source.
+
 MIT License
 
 Copyright (c) 2026 yohimik

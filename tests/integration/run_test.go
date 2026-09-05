@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package integration
 
 // Area 6: the `dispat run <script>` command. `dispat run x` (or the shorthand

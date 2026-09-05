@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package integration
 
 // Area 5: space versioning modes. A space declares how much of its packages'

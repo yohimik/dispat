@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package graph provides directed-graph machinery shared by planning and
 // execution: a generic dependency Scheduler (the incremental core of Kahn's
 // algorithm) and a small named Graph with deterministic topological sorting in

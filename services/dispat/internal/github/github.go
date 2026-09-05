@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package github creates a GitHub release for every published package that
 // opted in by exporting DISPAT_EXPORT_GITHUB. It is the same changelog data
 // as the file writer, delivered through a different release.ReleaseRecorder

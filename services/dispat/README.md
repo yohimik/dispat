@@ -202,3 +202,9 @@ Join the community to ask questions, report issues, or share projects:
 
 You can also submit bug reports and feature requests directly through
 [GitHub issues](https://github.com/yohimik/dispat/issues).
+
+## License
+
+Official release binaries are licensed under MIT. Source files with a GPL-3.0-or-later SPDX notice use that license;
+other source files remain MIT unless separately licensed. The binary grant does not relicense GPL source files.
+See [LICENSE](./LICENSE) for the scope of each grant and [LICENSE.GPL-3.0](./LICENSE.GPL-3.0) for the GPL text.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package plan
 
 // Narrowing a plan: releasing part of the graph rather than all of it.

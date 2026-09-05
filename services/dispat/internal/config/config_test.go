@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package config
 
 // Configs are authored as typed models (config aliases the public pkg/models

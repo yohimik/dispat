@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package config loads and validates the monorepo configuration file and
 // discovers the packages living inside the configured spaces.
 //

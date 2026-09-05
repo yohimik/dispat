@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 // Package changelog renders release entries and prepends them to a changelog
 // file inside each package folder. The rendering helpers are shared with other
 // release recorders (e.g. GitHub releases), which present the same changelog

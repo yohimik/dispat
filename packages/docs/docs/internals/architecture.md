@@ -5,7 +5,10 @@ assembled from, the algorithms behind the plan, the execution model, and the des
 References like `§N.N` point into the separately versioned CCME specification, located at
 [`specs/ccme-spec/SPEC.md`](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md). The specification document is licensed under
 GPL-3.0-or-later. Quotations or adaptations of its text retain those terms.
-The parser and other implementation code remain under MIT.
+This page is licensed under GPL-3.0-or-later. Source files that reference the GPL specification carry the same
+license in their SPDX notices. The CCME parser and other source files without GPL material or substantive references
+remain MIT. Official release binaries have a separate MIT grant; see the
+[license policy](https://github.com/yohimik/dispat/blob/main/LICENSE).
 
 ## Runtime steps
 

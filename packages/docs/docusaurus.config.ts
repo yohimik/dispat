@@ -349,7 +349,7 @@ const config: Config = {
         url: `${SITE}/`,
         codeRepository: GITHUB,
         programmingLanguage: 'Go',
-        license: 'https://opensource.org/licenses/MIT',
+        license: `${GITHUB}/blob/main/LICENSE`,
         author: {'@type': 'Person', name: 'yohimik', url: 'https://github.com/yohimik'},
         about: SUBJECTS,
         keywords: KEYWORDS,
@@ -476,7 +476,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} yohimik. Code: MIT. CCME specification: GPL-3.0-or-later.`,
+      copyright: `Copyright © ${new Date().getFullYear()} yohimik. Official binaries: MIT. Source: MIT or GPL-3.0-or-later; see Licences.`,
     },
     prism: {
       theme: prismThemes.github,
