@@ -202,7 +202,7 @@ function Libraries(): React.ReactElement {
           <p>
             Parse Conventional Commits and Dispat's package scopes, dependency propagation, and prerelease channels.
             The parser scans the input once. Its formal rules live in{' '}
-            <Link to={`${GITHUB}/blob/main/pkg/ccme/SPEC.md`}><code>SPEC.md</code></Link>.
+            <Link to={`${GITHUB}/blob/main/specs/ccme-spec/SPEC.md`}><code>SPEC.md</code></Link>.
           </p>
         </div>
         <div className={styles.feature}>

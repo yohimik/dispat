@@ -8,7 +8,7 @@ The parser uses no regular expressions. It runs a single left-to-right index sca
 backtracking, and no recursion. This gives O(n) time and O(1) working space, which matters when you feed it untrusted
 commit messages from a repository in CI.
 
-Read the vendored specification at [SPEC.md](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md). Every
+Read the separately versioned specification at [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md). Every
 section reference in the package points into this file.
 
 ```sh

@@ -8,7 +8,7 @@ The parser uses no regular expressions. It is a single left-to-right index scan 
 backtracking and no recursion, which gives O(n) time and O(1) working space. That property is what matters when the
 input is untrusted commit messages arriving from a repository in CI.
 
-The specification is vendored beside the code as [SPEC.md](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md),
+The separately versioned specification is [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md),
 and every section reference in the package points into it.
 
 ```sh

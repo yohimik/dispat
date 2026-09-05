@@ -472,11 +472,11 @@ const config: Config = {
             {label: 'GitHub', href: GITHUB},
             {label: 'Discord', href: DISCORD},
             {label: 'Releases', href: `${GITHUB}/releases`},
-            {label: 'License', href: `${GITHUB}/blob/main/LICENSE`},
+            {label: 'Licences', href: `${GITHUB}/blob/main/README.md#license`},
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} yohimik. MIT licensed.`,
+      copyright: `Copyright © ${new Date().getFullYear()} yohimik. Code: MIT. CCME specification: GPL-3.0-or-later.`,
     },
     prism: {
       theme: prismThemes.github,

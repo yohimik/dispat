@@ -4,8 +4,8 @@ How dispat is built: the modules it is assembled from, the algorithms behind the
 design decisions that shape both. This page is for reading the source, or for understanding why a behaviour is the way
 it is.
 
-`§N.N` references throughout point into the conventional-commits specification the parser implements,
-[`pkg/ccme/SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md).
+`§N.N` references throughout point into the separately versioned CCME specification,
+[`specs/ccme-spec/SPEC.md`](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md).
 
 ## Runtime steps
 
@@ -147,12 +147,15 @@ cancels only.
    republish with no content, and a stable package would ship declaring a prerelease dependency.
 
 There is no circularity in the other direction: phase 1 reads only the units and the packages' *baselines*, never a
-value computed in this run. That is also what makes the channel axis converge: having arrived on `beta`, a package is
-already there, so nothing further is proposed even though the commit is still in its window.
+value computed in this run. Both axes admit a contribution only while its commit remains in the dependant's fresh
+window. After a successful baseline tag it is no longer fresh. The channel check also rejects a proposal when the
+package is already on that channel.
 
 The traversal is shared by both axes: breadth-first from the unit's source packages, single-visit, shortest-path depth,
 measured from the originating source set and never re-based on an intermediate. A package republishing as a catch-up
-does not propagate onward, so a failed publish can never enlarge what a commit releases.
+does not propagate onward. Across a retry, targets only shrink while the corrected sources, traversal, and channel
+eligibility remain unchanged. If those inputs move, dispat surfaces any newly eligible targets for review before
+publishing.
 
 **Versioning groups.** Packages with shared versioning are grouped by their resolved group key: the space's own name
 for a space with its own mode, or the declared `versionGroups` entry the space or package joined, so a group may span
@@ -197,7 +200,7 @@ sections below.
 
 | Package              | Role                                                                                                                                                                                                         |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md). |
+| `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md). |
 | `pkg/models`         | The public configuration model (own module): the structs a `dispat.json`/`.yaml` decodes into, so external tooling and the integration suite author configs as typed values.                                 |
 | `pkg/manifest`       | Shared manifest vocabulary (own module): dependency kinds, the requirements-file name rule, PEP 503 normalisation; definitions the scanner and writer must apply identically.                                |
 | `pkg/scanner`        | Deliberately lightweight manifest reader (own module): npm, Go, Cargo, Python, Composer, Maven, .NET, pub, RubyGems and the mobile formats parsed into one `Manifest` shape with declared names, versions, dependencies and local paths; bounded reads, partial results with joined errors. No lockfile resolution, no network. Exposed on its own as `dispat scanner`. |
@@ -366,16 +369,16 @@ when it had providers to pick up and none of them survive.
 
 Failed or skipped consumers are not lost across runs, and nothing about that depends on tag creation times; those are
 not stable under merges, rebases or equal timestamps, and are used for reporting only. A commit propagates to a
-dependant while the *dependant's* window still contains it, so a consumer that missed a run is simply still owed its
+dependant while the *dependant's* fresh window still contains it, so a consumer that missed a run is simply still owed its
 release (`DueTo` then contains an *unchanged* provider: it gets no task nodes, and the version stage passes its released
 version, the case that makes `Updates` a union of `DueTo` and this run's releasing providers rather than either
 alone). A consumer that was never released while a provider has been is the same case, with the whole history as its
 window. Such a release is labelled a catch-up and reported with the origin's published version.
 
-Because admission is a window test, the guarantees are structural rather than heuristic. A contribution survives every
-run until the dependant releases past it, and is not re-admitted afterwards. The version a package is caught up at is
-the one it was planned at originally. And a later run's target set is always a subset of the first run's, so a failed
-publish can never widen a commit's blast radius.
+Admission is a release-ledger test. A successful baseline tag removes a contribution from the dependant's fresh
+window, so dispat does not re-admit that ledger entry. A catch-up keeps its reviewed version and target set while its
+baseline, corrected sources, traversal, and resolved channels remain unchanged. If those inputs change, the recomputed
+plan may expose a finite follow-up; dispat must surface it for review before publishing.
 
 A skipped package is recorded as *blocked* with the dependency responsible, rather than being silently absent from the
 summary: a package that was in the plan and produced nothing has to be accounted for.

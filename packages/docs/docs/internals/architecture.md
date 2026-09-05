@@ -2,10 +2,10 @@
 
 Read this page to understand the source code or why a behaviour works the way it does. It covers the modules dispat is
 assembled from, the algorithms behind the plan, the execution model, and the design decisions that shape both.
-References like `§N.N` point into the conventional-commits specification the parser implements, located at
-[`pkg/ccme/SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md). The specification is licensed under
-GPL-3.0-or-later, and dispat uses GPL licensed materials from CCME wherever this documentation quotes or restates it.
-The parser itself and the rest of dispat remain under MIT.
+References like `§N.N` point into the separately versioned CCME specification, located at
+[`specs/ccme-spec/SPEC.md`](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md). The specification document is licensed under
+GPL-3.0-or-later. Quotations or adaptations of its text retain those terms.
+The parser and other implementation code remain under MIT.
 
 ## Runtime steps
 
@@ -159,12 +159,15 @@ cancels only.
    dependency.
 
 There is no circularity in the other direction. Phase 1 reads only the units and the packages' *baselines*, never a
-value computed in this run. This makes the channel axis converge. Having arrived on `beta`, a package is already there,
-so dispat proposes nothing further even though the commit remains in its window.
+value computed in this run. Both axes admit a contribution only while its commit remains in the dependant's fresh
+window. After a successful baseline tag it is no longer fresh. The channel check also rejects a proposal when the
+package is already on that channel.
 
 Both axes share the traversal. It runs breadth-first from the unit's source packages with a single-visit, shortest-path
 depth. dispat measures this from the originating source set and never re-bases on an intermediate. A package
-republishing as a catch-up does not propagate onward. A failed publish can never enlarge what a commit releases.
+republishing as a catch-up does not propagate onward. Across a retry, targets only shrink while the corrected sources,
+traversal, and channel eligibility remain unchanged. If those inputs move, dispat surfaces any newly eligible targets
+for review before publishing.
 
 **Versioning groups.** Packages with shared versioning are grouped by their resolved group key. This key is the space's
 own name for a space with its own mode, or the declared `versionGroups` entry the space or package joined. A group may
@@ -216,7 +219,7 @@ the sections below.
 
 | Package              | Role                                                                                                                                                                                                         |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md). |
+| `pkg/ccme`           | The commit-message parser: units, headers, directives, footers, scope terms, semver. Regex-free, single-pass, immutable; knows nothing of git or workspaces. Spec in [`SPEC.md`](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md). |
 | `pkg/config`         | The generic configuration loader (own module): json/yaml/toml into one tree, `$ref` composition, the upward root ascent, a reflection-free setter-table decode that keeps a key's written case and refuses unknown keys and two spellings of one name, env layering and ref-aware format-preserving edits. Knows nothing of dispat's own model. |
 | `pkg/models`         | The public configuration model (own module): the structs a `dispat.json`/`.yaml` decodes into, so external tooling and the integration suite author configs as typed values.                                 |
 | `pkg/manifest`       | Shared manifest vocabulary (own module): dependency kinds, the requirements-file name rule, PEP 503 normalisation; definitions the scanner and writer must apply identically.                                |
@@ -394,16 +397,16 @@ pick up and none of them survive.
 
 Failed or skipped consumers are not lost across runs. Nothing about this depends on tag creation times, because those
 are not stable under merges, rebases, or equal timestamps. dispat uses them for reporting only. A commit propagates to
-a dependant while the *dependant's* window still contains it. A consumer that missed a run is simply still owed its
+a dependant while the *dependant's* fresh window still contains it. A consumer that missed a run is simply still owed its
 release. The `DueTo` field then contains an *unchanged* provider. It gets no task nodes, and the version stage passes
 its released version. This case makes `Updates` a union of `DueTo` and this run's releasing providers rather than
 either alone. A consumer that was never released while a provider has been is the same case, using the whole history as
 its window. dispat labels such a release a catch-up and reports it with the origin's published version.
 
-Because admission is a window test, the guarantees are structural rather than heuristic. A contribution survives every
-run until the dependant releases past it. dispat does not re-admit it afterwards. The version a package is caught up at
-is the one dispat planned it at originally. A later run's target set is always a subset of the first run's, so a failed
-publish can never widen a commit's blast radius.
+Admission is a release-ledger test. A successful baseline tag removes a contribution from the dependant's fresh
+window, so dispat does not re-admit that ledger entry. A catch-up keeps its reviewed version and target set while its
+baseline, corrected sources, traversal, and resolved channels remain unchanged. If those inputs change, the recomputed
+plan may expose a finite follow-up; dispat must surface it for review before publishing.
 
 dispat records a skipped package as *blocked* with the responsible dependency. It is never silently absent from the
 summary. A package that was in the plan and produced nothing has to be accounted for.

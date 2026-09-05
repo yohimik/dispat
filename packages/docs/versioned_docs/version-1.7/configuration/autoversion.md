@@ -35,7 +35,7 @@ because the indirection is deliberate. Use `replace` or a `flow.version` script 
 actually lives.
 
 Know two consequences before you turn this on. First, the reconciliation rule (§9.4 of the
-[commit specification](https://github.com/yohimik/dispat/blob/main/pkg/ccme/SPEC.md)) covers *every* workspace
+[commit specification](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md)) covers *every* workspace
 dependency, including providers released by earlier runs, so an auto-versioning space runs a version task for **every**
 releasing package even when its providers are quiet. Second, a rewriting failure fails the version stage, and
 `revertOnFail` rolls the half-edited folder back.

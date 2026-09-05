@@ -138,4 +138,6 @@ no global installs, because `corepack enable` or `pnpm/action-setup` is enough.
 
 ## Licence
 
-This is MIT licensed. See [LICENSE](../../LICENSE) for details.
+The site implementation is [MIT licensed](../../LICENSE). The [CCME specification](../../specs/ccme-spec/SPEC.md)
+is separately licensed under [GPL-3.0-or-later](../../specs/ccme-spec/LICENSE); quoted or adapted specification material
+retains those terms. Fonts and other third-party assets retain their own licence notices.

@@ -176,18 +176,21 @@ tracked files and removing untracked ones, so a half-finished release leaves no 
 Publishing is not atomic, so a run can end with some packages published and others not. Catch-up is not a repair pass
 bolted on for that case. It is what the ordinary rule does when asked against the right window.
 
-A commit propagates to a dependant exactly while *the dependant's own* window still contains it, and that does not
+A commit propagates to a dependant exactly while *the dependant's own* fresh window still contains it, and that does not
 change when the provider releases. So a consumer that missed a run is still owed its release on the next one, with no
 state file, no timestamp comparison and no second traversal.
 
-Four properties follow, and they are what make re-running safe:
+Four properties explain safe [failure recovery](#failure-and-recovery):
 
-- **No orphans.** A contribution survives every run until the dependant releases at a commit containing it.
-- **Exactly once.** Once it does, the commit leaves its window and the contribution is gone. No double release.
-- **Same version.** A package caught up on run 5 gets the version it was planned at on run 1, since its baseline never
-  moved and the bump is a `max()` over the same commits.
-- **No widening.** A later run's targets are always a subset of the first run's, so a failed publish can never enlarge
-  what a commit releases.
+- **No orphans.** A contribution remains owed until the dependant releases it, while its corrected source set and
+  channel eligibility remain unchanged.
+- **Once in the release ledger.** The successful baseline tag removes the contribution from the dependant's fresh
+  window. Publication and tagging are separate external operations, so recovery may reconcile an artefact that already
+  exists rather than promise exactly-once network delivery.
+- **Same version under the same inputs.** A catch-up keeps its reviewed version while its baseline, corrected sources,
+  and resolved source and target channels remain unchanged. If those inputs move, dispat surfaces the recomputed plan.
+- **No widening under the same admission inputs.** Targets only shrink while sources, traversal, and channel eligibility
+  stay fixed. A newly eligible source or channel can expose a finite follow-up, which must be reviewed before publishing.
 
 Such a release is labelled a **catch-up** in the plan and reported with the origin's *published* version, because a
 package appearing with no commits of its own and no releasing dependency is otherwise baffling to review. Its version
