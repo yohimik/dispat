@@ -11,6 +11,10 @@ if [ -L VERSION ] || [ -L SPEC.md ]; then
 fi
 
 version=$(cat VERSION)
+if [ "${DISPAT_STAGE:-}" = build ] && [ -n "${DISPAT_NEW_VERSION:-}" ] && [ "$version" != "$DISPAT_NEW_VERSION" ]; then
+  echo "specification version $version does not match planned release $DISPAT_NEW_VERSION" >&2
+  exit 1
+fi
 case "$version" in
   ''|*[!0-9A-Za-z.+-]*)
     echo "VERSION is not a semantic version: $version" >&2

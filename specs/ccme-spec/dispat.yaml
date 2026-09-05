@@ -4,18 +4,34 @@ tagFormat: specs/ccme-spec/v{version}
 versionGroup: ccme
 
 scripts:
-  version-spec: sh version.sh
   verify-spec: sh verify.sh
   tests: sh test.sh
+
+# The specification has no dependency manifests. Its four normative version
+# markers are literal text, so native auto-versioning updates exactly those
+# markers and nothing else.
+autoVersion:
+  manifests: none
+  replace:
+    - files: [VERSION]
+      find: '{previous}'
+      write: '{version}'
+    - files: [SPEC.md]
+      find: '**Version:** {previous} **Status:**'
+      write: '**Version:** {version} **Status:**'
+    - files: [SPEC.md]
+      find: 'conforms to CCME {previous} if and only if'
+      write: 'conforms to CCME {version} if and only if'
+    - files: [SPEC.md]
+      find: 'This document is CCME **{previous}**'
+      write: 'This document is CCME **{version}**'
 
 # Version substitution and validation happen before any release record is
 # written. The shared changelog and commit scripts create the immutable tag;
 # the run's final GitHub stage creates the release page after all legs finish.
 flow:
-  # A standalone specification has no provider manifests to update, so the
-  # executor does not create a native version task for it. Run the stamp as a
-  # gating build hook instead; beforeBuild always runs immediately before the
-  # verifier and carries the planned DISPAT_NEW_VERSION.
-  beforeBuild: [version-spec]
+  # Refuse malformed baseline markers before the native replacements run,
+  # then verify their consistency again as the build gate.
+  beforeVersion: [verify-spec]
   build: verify-spec
   publish: [changelog, commit]
