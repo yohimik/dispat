@@ -22,80 +22,24 @@ fixture() {
   dir=$1
   version=$2
   mkdir -p "$dir"
-  cp "$here/version.sh" "$here/verify.sh" "$here/LICENSE" "$dir/"
+  cp "$here/verify.sh" "$here/LICENSE" "$here/dispat.yaml" "$dir/"
   printf '%s\n' "$version" > "$dir/VERSION"
   cat > "$dir/SPEC.md" <<EOF
 **Version:** $version **Status:** Normative
 **License:** GPL-3.0-or-later. See [LICENSE](./LICENSE).
 An implementation conforms to CCME $version if and only if it:
 This document is CCME **$version** and is itself versioned under SemVer:
+Example version 1.0.0 is not a normative declaration.
 EOF
 }
 
-success=$tmp/success
-fixture "$success" 2.0.0
-(cd "$success" && DISPAT_BIN="$dispat" DISPAT_NEW_VERSION=2.0.1 sh version.sh)
-test "$(cat "$success/VERSION")" = 2.0.1
-(cd "$success" && sh verify.sh)
-(cd "$success" && DISPAT_BIN="$dispat" DISPAT_NEW_VERSION=2.0.1 sh version.sh)
-
-metadata=$tmp/metadata
-fixture "$metadata" '1.0.0+build.01'
-(cd "$metadata" && sh verify.sh)
-fixture "$tmp/metadata-hyphen" '1.0.0+meta-01'
-(cd "$tmp/metadata-hyphen" && sh verify.sh)
-
-malformed=$tmp/malformed
-fixture "$malformed" 2.0.0
-sed 's/conforms to CCME 2.0.0 if and only if/missing conformance declaration/' \
-  "$malformed/SPEC.md" > "$malformed/SPEC.new"
-mv "$malformed/SPEC.new" "$malformed/SPEC.md"
-before=$(cksum "$malformed/VERSION" "$malformed/SPEC.md")
-if (cd "$malformed" && DISPAT_BIN="$dispat" DISPAT_NEW_VERSION=2.0.1 sh version.sh >/dev/null 2>&1); then
-  echo "malformed specification unexpectedly versioned" >&2
-  exit 1
-fi
-test "$before" = "$(cksum "$malformed/VERSION" "$malformed/SPEC.md")"
-
-linked=$tmp/linked
-fixture "$linked" 2.0.0
-mv "$linked/VERSION" "$linked/real-version"
-ln -s real-version "$linked/VERSION"
-if (cd "$linked" && DISPAT_BIN="$dispat" DISPAT_NEW_VERSION=2.0.1 sh version.sh >/dev/null 2>&1); then
-  echo "symlinked VERSION unexpectedly versioned" >&2
-  exit 1
-fi
-test "$(cat "$linked/real-version")" = 2.0.0
-
-rollback=$tmp/rollback
-fixture "$rollback" 2.0.0
-before=$(cksum "$rollback/VERSION" "$rollback/SPEC.md")
-mkdir "$tmp/bin"
-cat > "$tmp/bin/cp" <<'EOF'
-#!/bin/sh
-case "$1:$2" in
-  .ccme-version.*/SPEC.md:SPEC.md|*/.ccme-version.*/SPEC.md:SPEC.md) exit 73 ;;
-  *) exec /bin/cp "$@" ;;
-esac
-EOF
-chmod +x "$tmp/bin/cp"
-if (cd "$rollback" && PATH="$tmp/bin:$PATH" DISPAT_BIN="$dispat" \
-    DISPAT_NEW_VERSION=2.0.1 sh version.sh >/dev/null 2>&1); then
-  echo "injected installation failure unexpectedly succeeded" >&2
-  exit 1
-fi
-test "$before" = "$(cksum "$rollback/VERSION" "$rollback/SPEC.md")"
-test -z "$(find "$rollback" -maxdepth 1 -type d -name '.ccme-version.*' -print -quit)"
-
-# Exercise the release scheduler, not only version.sh in isolation. A
-# standalone package has no provider updates, so it has no native version
-# task; its beforeBuild hook must still stamp the exact planned version before
-# the build verifier runs.
-release=$tmp/release
-mkdir -p "$release/specs/ccme-spec"
-fixture "$release/specs/ccme-spec" 1.0.0
-cp "$here/dispat.yaml" "$release/specs/ccme-spec/dispat.yaml"
-cat > "$release/dispat.yaml" <<'EOF'
+# The production package config must drive the real release scheduler and
+# commit the replacements, without scanning or rewriting unrelated manifests.
+repository() {
+  repo=$1
+  fixture "$repo/specs/ccme-spec" 1.0.0
+  printf '%s\n' '{"name":"ccme-spec","version":"1.0.0"}' > "$repo/specs/ccme-spec/package.json"
+  cat > "$repo/dispat.yaml" <<'EOF'
 unsafeDisableLock: true
 changelog:
   enabled: false
@@ -116,22 +60,74 @@ packages:
   ccme-spec:
     path: specs/ccme-spec
 EOF
+  (
+    cd "$repo"
+    git init -q -b main
+    git config user.name 'CCME specification test'
+    git config user.email 'ccme-spec-test@example.invalid'
+    git add .
+    git commit -qm 'chore(ccme-spec): establish baseline'
+    printf '%s\n' 'breaking specification revision' > specs/ccme-spec/change.txt
+    git add .
+    git commit -qm 'feat(ccme-spec)!: revise normative algorithm'
+  )
+}
+
+release=$tmp/release
+repository "$release"
 (
   cd "$release"
-  git init -q -b main
-  git config user.name 'CCME specification test'
-  git config user.email 'ccme-spec-test@example.invalid'
-  git add .
-  git commit -qm 'chore(ccme-spec): establish baseline'
-  printf '%s\n' 'breaking specification revision' > specs/ccme-spec/change.txt
-  git add specs/ccme-spec/change.txt
-  git commit -qm 'feat(ccme-spec)!: revise normative algorithm'
   DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec --require-release
-  test "$(cat specs/ccme-spec/VERSION)" = 2.0.0
-  grep -Fq '**Version:** 2.0.0 **Status:**' specs/ccme-spec/SPEC.md
   test "$(git show specs/ccme-spec/v2.0.0:specs/ccme-spec/VERSION)" = 2.0.0
   git show specs/ccme-spec/v2.0.0:specs/ccme-spec/SPEC.md |
     grep -Fq '**Version:** 2.0.0 **Status:**'
+  grep -Fq 'Example version 1.0.0' specs/ccme-spec/SPEC.md
+  test "$(cat specs/ccme-spec/package.json)" = '{"name":"ccme-spec","version":"1.0.0"}'
+  before=$(git rev-parse HEAD)
+  DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec
+  test "$(git rev-parse HEAD)" = "$before"
+  printf '%s\n' 'editorial correction' >> specs/ccme-spec/change.txt
+  git add .
+  git commit -qm 'fix(ccme-spec): clarify wording'
+  DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec --require-release
+  test "$(git show specs/ccme-spec/v2.0.1:specs/ccme-spec/VERSION)" = 2.0.1
+  sh specs/ccme-spec/verify.sh
 )
+
+# Bad source declarations and symlinks must fail before replacement. A fully
+# consistent but stale version must also fail the build rather than be tagged.
+for problem in malformed symlink stale; do
+  repo=$tmp/$problem
+  repository "$repo"
+  case "$problem" in
+    malformed)
+      sed 's/conforms to CCME 1.0.0 if and only if/missing conformance declaration/' \
+        "$repo/specs/ccme-spec/SPEC.md" > "$repo/specs/ccme-spec/SPEC.new"
+      mv "$repo/specs/ccme-spec/SPEC.new" "$repo/specs/ccme-spec/SPEC.md"
+      ;;
+    symlink)
+      mv "$repo/specs/ccme-spec/VERSION" "$repo/specs/ccme-spec/real-version"
+      ln -s real-version "$repo/specs/ccme-spec/VERSION"
+      ;;
+    stale) fixture "$repo/specs/ccme-spec" 9.0.0 ;;
+  esac
+  (
+    cd "$repo"
+    git add .
+    git commit -qm 'test(ccme-spec): invalid input'
+    before=$(cksum specs/ccme-spec/VERSION specs/ccme-spec/SPEC.md)
+    if DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec --require-release > "$tmp/$problem.log" 2>&1; then
+      echo "$problem specification unexpectedly released" >&2
+      exit 1
+    fi
+    test -z "$(git tag -l 'specs/ccme-spec/*')"
+    test "$before" = "$(cksum specs/ccme-spec/VERSION specs/ccme-spec/SPEC.md)"
+  )
+done
+
+for version in '1.0.0+build.01' '1.0.0+meta-01'; do
+  fixture "$tmp/metadata" "$version"
+  (cd "$tmp/metadata" && sh verify.sh)
+done
 
 echo "CCME specification release tests passed"

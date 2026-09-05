@@ -122,7 +122,7 @@ the new specification tag found that its files still declared 1.0.0. The standal
 the scheduler: `flow.version` only runs for provider updates or configured native `autoVersion`, as documented in
 `packages/docs/docs/configuration/spaces.md`. The standalone specification has neither.
 
-The corrected configuration runs the stamping script through the documented `beforeBuild` hook. Its regression
+An intermediate correction ran the stamping script through the documented `beforeBuild` hook. Its regression
 uses the production package configuration in a disposable Git repository, runs the actual release command, and
 checks both working files and the committed tag for version 2.0.0. It fails with the previous configuration and
 passes with the correction. Shellcheck and the existing script regression suite passed too.
@@ -133,3 +133,15 @@ release can run together. Remote checks confirmed that all intended release tags
 1.8.0 tags are absent. Main was rebuilt from the pre-release revision with the verified lifecycle correction.
 Further configuration changes require reading the relevant project documentation before editing and validating
 the configured behavior through the CLI before release.
+
+## Native specification replacement
+
+At the owner's direction, the final configuration uses `autoVersion` with `manifests: none` and four explicit
+literal replacement rules. The configuration and replacer documentation were read before editing. The custom
+stamping script was removed. Verification runs before native replacement and during the build; the build also
+rejects a version that differs from the planned release, including a consistently stale file that only raised W222.
+
+The disposable CLI release suite verifies the initial 1.0.0 to 2.0.0 release, the committed specification tag, a
+no-change rerun, and a subsequent patch. It verifies that manifest files and example versions remain unchanged,
+and that malformed declarations, symlinks and stale versions cannot publish. Build metadata validation remains
+covered. The suite and Shellcheck passed. These tests supersede the former custom script's rollback tests.
