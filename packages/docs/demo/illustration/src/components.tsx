@@ -92,6 +92,7 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
           marginTop: 7,
           lineHeight: '22px',
           overflowWrap: 'anywhere',
+        wordBreak: 'break-all',
         }}
       >
         {manifestLine}
@@ -233,8 +234,20 @@ export const outRow = (start: number, segs: CapSeg[]): TermRow => ({kind: 'out',
  * and blinks whenever the session is between commands.
  */
 export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number}> = ({rows, f, lines = 4}) => {
-  const shownCount = rows.filter((r) => f >= r.start).length;
-  const visible = rows.filter((r) => f >= r.start).slice(-lines);
+  const available = rows.filter((row) => f >= row.start);
+  const shownCount = available.length;
+  // Reserve whole physical lines at the fixed monospace canvas width. Drop
+  // complete older rows when a command wraps, rather than clipping half a row.
+  const visible: TermRow[] = [];
+  let remaining = lines;
+  for (let index = available.length - 1; index >= 0; index--) {
+    const row = available[index];
+    const text = row.kind === 'cmd' ? `$ ${row.text}█` : row.segs.map((segment) => segment.text).join('');
+    const physicalLines = text.split('\n').reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 128)), 0);
+    if (physicalLines > remaining && visible.length) break;
+    visible.unshift(row);
+    remaining -= physicalLines;
+  }
   const last = visible[visible.length - 1];
   const typing = last !== undefined && last.kind === 'cmd' && f < last.typeEnd;
   // The prompt only comes back once the running command's output is
@@ -243,7 +256,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
   const next = rows[shownCount];
   const prompt = !typing && (next === undefined || next.kind === 'cmd');
   const blink = Math.floor(f / 10) % 2 === 0;
-  const roomForPrompt = visible.length < lines;
+  const roomForPrompt = remaining > 0;
   return (
     <div
       data-demo-terminal
@@ -252,7 +265,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
         left: 150,
         right: 150,
         bottom: 26,
-        height: lines * 32 + 30,
+        height: lines * 32 + 34,
         boxSizing: 'border-box',
         borderRadius: 12,
         background: colors.panel,
@@ -263,6 +276,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
         lineHeight: '32px',
         whiteSpace: 'pre-wrap',
         overflowWrap: 'anywhere',
+        wordBreak: 'break-all',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
