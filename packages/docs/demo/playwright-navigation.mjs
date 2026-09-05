@@ -44,20 +44,18 @@ try {
   assert.equal(await deck.locator('[data-slide-id]').getAttribute('data-slide-id'), original);
   assert.equal(await originalScene.evaluate((node) => node.isConnected), true, 'old player was unmounted while loading');
   assert.equal(await deck.getByText('Loading interactive demo…', {exact: true}).count(), 0);
-  const loading = deck.getByRole('status');
-  await loading.waitFor();
-  assert.match(await loading.innerText(), /Loading .*current demo remains available/i);
-  assert.deepEqual(await captionGeometry(), beforeLoading, 'pending status moved the caption or transcript');
+  assert.equal(await deck.getByRole('status').count(), 0, 'pending selection displayed loading feedback');
+  assert.equal(await deck.getByRole('button', {name: 'Cancel', exact: true}).count(), 0);
+  assert.deepEqual(await captionGeometry(), beforeLoading, 'pending selection moved the caption or transcript');
   const speed = deck.getByRole('button', {name: /Playback speed/});
   const speedBefore = await speed.innerText(); await speed.click();
   assert.notEqual(await speed.innerText(), speedBefore, 'controls stopped responding while a scene loaded');
-  await deck.getByRole('button', {name: 'Cancel'}).click();
-  assert.equal(await deck.getByRole('status').count(), 0, 'cancel left pending feedback visible');
-  assert.equal(await deck.locator('[data-slide-id]').getAttribute('data-slide-id'), original, 'cancel replaced the current slide');
-  const cancelledRequests = pending.splice(0);
-  await Promise.all(cancelledRequests.map((release) => release()));
+  // Selecting the current scene supersedes a pending import without a cancel UI.
+  await deck.locator(`[data-demo-feature="${original}"]`).click();
+  const supersededRequests = pending.splice(0);
+  await Promise.all(supersededRequests.map((release) => release()));
   await page.waitForTimeout(300);
-  assert.equal(await deck.locator('[data-slide-id]').getAttribute('data-slide-id'), original, 'cancelled import completion replaced the current slide');
+  assert.equal(await deck.locator('[data-slide-id]').getAttribute('data-slide-id'), original, 'superseded import replaced the current slide');
 
   await deck.locator('[data-demo-feature="glue"]').click();
   await waitForRequest(1);
@@ -124,7 +122,7 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log('navigation passed: visible cancellable loading, responsive controls, logical cancel, latest selection, failure/retry, shared category hover and keyboard behavior');
+  console.log('navigation passed: silent loading, responsive controls, superseded requests, latest selection, failure/retry, shared category hover and keyboard behavior');
 } finally {
   await context.close();
   await browser.close();

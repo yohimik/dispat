@@ -7,4 +7,5 @@ for Terraform's own working state and disappears with the fixture. Dispat adds n
 bucket; its durable completion record is the `infra/v1.3.0` Git tag.
 
 The marker commands never invoke Terraform or a cloud API. They model rebuild/import, plan, and apply only to let
-`verify-infra.py` prove that backend and frontend both wait for the infrastructure apply, then build independently.
+`verify-infra.py` prove that backend and frontend builds start while the infrastructure apply is running, while both
+application publishes wait for that apply to finish. A bounded marker rendezvous makes that overlap deterministic.

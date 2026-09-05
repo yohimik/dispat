@@ -176,7 +176,8 @@ const EXTRA_SLIDES: ExtraSlide[] = [
     name: 'Terraform',
     body: (
       <>
-        Treat infrastructure as a versioned package. Plan and apply it before the backend and frontend deploy.
+        Treat infrastructure as a versioned package. Backend and frontend builds can run while Terraform applies its plan;
+        their deployments wait for the apply to finish.
         This repository rebuilds temporary Terraform state by importing its known cloud resources, so it needs no
         persistent state bucket. Git tags record completed releases. See the <Link to="/examples/terraform">Terraform example</Link>
         {' '}for the import mapping and deployment configuration.
@@ -185,7 +186,7 @@ const EXTRA_SLIDES: ExtraSlide[] = [
     media: {
       asset: 'demo-terraform',
       name: 'Terraform',
-      label: 'A commit versions infrastructure from 1.2.0 to 1.3.0 and selects backend 0.8.3 and frontend 2.1.1. The infrastructure build reconstructs temporary state and saves a Terraform plan. Its publish stage applies that plan and records a Git tag. The backend and frontend are independent consumers of infra and can then build and deploy in parallel. Known resource imports replace a persistent state bucket for this specific setup.',
+      label: 'A commit versions infrastructure from 1.2.0 to 1.3.0 and selects backend 0.8.3 and frontend 2.1.1. The infrastructure build reconstructs temporary state and saves a Terraform plan. Its publish stage applies that plan and records a Git tag. After the plan is saved, backend and frontend build independently while Terraform applies it. Their deployments wait for infrastructure publish to succeed. Known resource imports replace a persistent state bucket for this specific setup.',
     },
   },
   {
@@ -540,12 +541,6 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
     setFailedRequest(null);
     setPending({index, revision});
   }, []);
-  const cancelPending = React.useCallback(() => {
-    // Dynamic import promises cannot be aborted. Advancing the generation
-    // logically cancels this choice so its eventual completion is ignored.
-    requestGeneration.current += 1;
-    setPending(null);
-  }, []);
   const [loop, setLoop] = React.useState(false);
   // SSR starts on the meaningful still. Hydration opts into motion only
   // after reading the user's preference, avoiding a moving server fallback.
@@ -660,10 +655,10 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                 tabIndex={0}>
                 <div className={styles.sceneViewport} data-demo-layout={mobile ? 'portrait' : 'landscape'} data-demo-duration={scene?.duration} data-demo-fps={FPS} aria-hidden="true">
                   {scene ? (
-                    <BrowserOnly fallback={<div className={styles.loading}>Interactive demo</div>}>
+                    <BrowserOnly fallback={null}>
                       {() => (
-                        <SceneBoundary fallback={<div className={styles.loading}>Demo unavailable. Read the description below.</div>}>
-                          <React.Suspense fallback={<div className={styles.loading}>Loading interactive demo…</div>}>
+                        <SceneBoundary fallback={<div className={styles.placeholder}>Demo unavailable. Read the description below.</div>}>
+                          <React.Suspense fallback={null}>
                             <LivePlayer
                               ref={setPlayer}
                               component={scene.component}
@@ -683,18 +678,13 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                         </SceneBoundary>
                       )}
                     </BrowserOnly>
-                  ) : <div className={styles.loading}>{sceneFailed ? 'Demo unavailable. Read the description below.' : pending ? 'Loading interactive demo…' : 'Choose a demo to play.'}</div>}
+                  ) : <div className={styles.placeholder}>{sceneFailed ? 'Demo unavailable. Read the description below.' : ''}</div>}
                 </div>
               </div>
-              {(pending || sceneFailed) && (
+              {sceneFailed && (
                 <div className={styles.loadOverlay} role="status" data-demo-load-status>
-                  {pending ? <>
-                    Loading {slides[pending.index].name}…{scene ? ' The current demo remains available. ' : ' '}
-                    <button type="button" onClick={cancelPending}>Cancel</button>
-                  </> : <>
-                    {scene ? 'The next demo could not load. The current demo is still available. ' : 'This demo could not load. Choose another scene or try again. '}
-                    <button type="button" onClick={() => { if (failedRequest !== null) selectSlide(failedRequest); }}>Try again</button>
-                  </>}
+                  {scene ? 'The next demo could not load. The current demo is still available. ' : 'This demo could not load. Choose another scene or try again. '}
+                  <button type="button" onClick={() => { if (failedRequest !== null) selectSlide(failedRequest); }}>Try again</button>
                 </div>
               )}
             </div>

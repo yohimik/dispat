@@ -7,9 +7,9 @@ import {NodeView, SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './
 import {type Edge, type Pkg} from './graph';
 import {Pulse, Stage} from './Stage';
 
-// A versioned infrastructure change is planned and applied before either
-// application deploy starts. Terraform still uses state: this repository's
-// tf-plan script reconstructs it, saves tfplan, and tf-apply applies exactly
+// A versioned infrastructure change is planned before application builds and
+// applied before either application deploy starts. Terraform still uses state:
+// this repository's tf-plan script reconstructs it, saves tfplan, and tf-apply applies exactly
 // that saved plan. Dispat supplies release ordering around those scripts.
 
 const bar = (frame: number, from: number, to: number) =>
@@ -25,8 +25,8 @@ const packages: Pkg[] = [
 ];
 
 const edges: Edge[] = [
-  {from: 'infra', to: 'backend', label: 'wait for publish'},
-  {from: 'infra', to: 'frontend', label: 'wait for publish'},
+  {from: 'infra', to: 'backend', label: 'deploy waits apply'},
+  {from: 'infra', to: 'frontend', label: 'deploy waits apply'},
 ];
 
 function infraView(frame: number): NodeView {
@@ -39,23 +39,25 @@ function infraView(frame: number): NodeView {
 
 function backendView(frame: number): NodeView {
   if (frame < 120) return {state: 'idle'};
-  if (frame < 306) return {state: frame < 145 ? 'changed' : 'waiting', bumped: true, note: frame < 145 ? undefined : 'waits for infra publish'};
-  if (frame < 350) return {state: 'building', bumped: true, progress: bar(frame, 306, 348)};
-  if (frame < 395) return {state: 'publishing', bumped: true, progress: bar(frame, 350, 393)};
+  if (frame < 235) return {state: frame < 145 ? 'changed' : 'waiting', bumped: true, note: frame < 145 ? undefined : 'waits for infra plan'};
+  if (frame < 285) return {state: 'building', bumped: true, progress: bar(frame, 235, 283), note: 'overlaps infra apply'};
+  if (frame < 305) return {state: 'waiting', bumped: true, note: 'built · waits to deploy'};
+  if (frame < 365) return {state: 'publishing', bumped: true, progress: bar(frame, 305, 363)};
   return {state: 'published', bumped: true, tag: 'backend@0.8.3'};
 }
 
 function frontendView(frame: number): NodeView {
   if (frame < 124) return {state: 'idle'};
-  if (frame < 312) return {state: frame < 145 ? 'changed' : 'waiting', bumped: true, note: frame < 145 ? undefined : 'waits for infra publish'};
-  if (frame < 365) return {state: 'building', bumped: true, progress: bar(frame, 312, 363)};
-  if (frame < 415) return {state: 'publishing', bumped: true, progress: bar(frame, 365, 413)};
+  if (frame < 240) return {state: frame < 145 ? 'changed' : 'waiting', bumped: true, note: frame < 145 ? undefined : 'waits for infra plan'};
+  if (frame < 290) return {state: 'building', bumped: true, progress: bar(frame, 240, 288), note: 'overlaps infra apply'};
+  if (frame < 310) return {state: 'waiting', bumped: true, note: 'built · waits to deploy'};
+  if (frame < 415) return {state: 'publishing', bumped: true, progress: bar(frame, 310, 413)};
   return {state: 'published', bumped: true, tag: 'frontend@2.1.1'};
 }
 
 const pulses: Pulse[] = [
-  {edge: 0, start: 300},
-  {edge: 1, start: 300},
+  {edge: 0, start: 230},
+  {edge: 1, start: 230},
 ];
 
 const rows: TermRow[] = [
@@ -70,10 +72,12 @@ const rows: TermRow[] = [
   cmdRow(145, 'dispat'),
   outRow(165, [...INF, msg('build started'), ...kv('package', 'infra'), ...kv('stage', 'build')]),
   outRow(230, [...INF, msg('publish started'), ...kv('package', 'infra'), ...kv('stage', 'publish')]),
+  outRow(235, [...INF, msg('build started'), ...kv('package', 'backend'), ...kv('stage', 'build')]),
+  outRow(240, [...INF, msg('build started'), ...kv('package', 'frontend'), ...kv('stage', 'build')]),
   outRow(300, [...INF, msg('published'), ...kv('package', 'infra'), ...kv('tag', 'infra/v1.3.0'), ...kv('version', '1.3.0')]),
-  outRow(306, [...INF, msg('build started'), ...kv('package', 'backend'), ...kv('stage', 'build')]),
-  outRow(312, [...INF, msg('build started'), ...kv('package', 'frontend'), ...kv('stage', 'build')]),
-  outRow(395, [...INF, msg('published'), ...kv('package', 'backend'), ...kv('tag', 'backend@0.8.3'), ...kv('version', '0.8.3')]),
+  outRow(305, [...INF, msg('publish started'), ...kv('package', 'backend'), ...kv('stage', 'publish')]),
+  outRow(310, [...INF, msg('publish started'), ...kv('package', 'frontend'), ...kv('stage', 'publish')]),
+  outRow(365, [...INF, msg('published'), ...kv('package', 'backend'), ...kv('tag', 'backend@0.8.3'), ...kv('version', '0.8.3')]),
   outRow(415, [...INF, msg('published'), ...kv('package', 'frontend'), ...kv('tag', 'frontend@2.1.1'), ...kv('version', '2.1.1')]),
   outRow(425, [...INF, msg('done'), ...kv('cancelled', '0'), ...kv('failed', '0'), ...kv('published', '3'), ...kv('skipped', '0'), ...kv('unchanged', '0')]),
 ];

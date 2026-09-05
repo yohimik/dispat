@@ -77,11 +77,11 @@ def main() -> None:
 concurrency: [3, 3]
 initials: {infra: 1.2.0, backend: 0.8.2, frontend: 2.1.0}
 scripts:
-  build: 'root=$(git rev-parse --show-toplevel); case "$DISPAT_PACKAGE" in infra) printf "terraform-state-rebuild-start\\n" >> "$root/events"; printf "imported known cloud resources\\n" > terraform.tfstate; printf "terraform-state-rebuild-end\\nterraform-plan-start\\n" >> "$root/events"; printf "planned application database\\n" > tfplan;; backend) test -f "$root/infra/terraform.tfstate"; printf "build-start backend\\n" >> "$root/events";; frontend) test -f "$root/infra/terraform.tfstate"; printf "build-start frontend\\n" >> "$root/events";; esac; sleep 0.08; case "$DISPAT_PACKAGE" in infra) printf "terraform-plan-end\\n" >> "$root/events";; *) printf "build-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events";; esac'
-  publish: 'root=$(git rev-parse --show-toplevel); case "$DISPAT_PACKAGE" in infra) test -f tfplan; printf "terraform-apply-start\\n" >> "$root/events"; sleep 0.08; printf "terraform-owned-state\\n" > terraform.tfstate; printf "terraform-apply-end\\n" >> "$root/events";; *) printf "publish-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; sleep 0.08; mkdir -p "$root/.published"; touch "$root/.published/$DISPAT_PACKAGE"; printf "publish-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events";; esac'
+  build: 'set -eu; root=$(git rev-parse --show-toplevel); case "$DISPAT_PACKAGE" in infra) printf "terraform-state-rebuild-start\\n" >> "$root/events"; printf "imported known cloud resources\\n" > terraform.tfstate; printf "terraform-state-rebuild-end\\nterraform-plan-start\\n" >> "$root/events"; printf "planned application database\\n" > tfplan; sleep 0.08; printf "terraform-plan-end\\n" >> "$root/events";; *) attempts=0; while test ! -f "$root/terraform-apply-start" && test "$attempts" -lt 500; do attempts=$((attempts + 1)); sleep 0.01; done; test -f "$root/terraform-apply-start"; printf "build-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; touch "$root/build-start-$DISPAT_PACKAGE"; printf "build-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events";; esac'
+  publish: 'set -eu; root=$(git rev-parse --show-toplevel); case "$DISPAT_PACKAGE" in infra) test -f tfplan; printf "terraform-apply-start\\n" >> "$root/events"; touch "$root/terraform-apply-start"; attempts=0; while { test ! -f "$root/build-start-backend" || test ! -f "$root/build-start-frontend"; } && test "$attempts" -lt 500; do attempts=$((attempts + 1)); sleep 0.01; done; test -f "$root/build-start-backend"; test -f "$root/build-start-frontend"; printf "terraform-owned-state\\n" > terraform.tfstate; printf "terraform-apply-end\\n" >> "$root/events";; *) printf "publish-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; mkdir -p "$root/.published"; touch "$root/.published/$DISPAT_PACKAGE"; printf "publish-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events";; esac'
 flow: {build: build, publish: publish}
 packages:
-  infra: {path: infra, tagFormat: 'infra/v{version}', isBuildWaitingPublish: true}
+  infra: {path: infra, tagFormat: 'infra/v{version}'}
   backend: {path: backend, dependencies: [infra]}
   frontend: {path: frontend, dependencies: [infra]}
 commit: {enabled: false}
@@ -109,10 +109,10 @@ github: {enabled: false}
         assert_before(events, "terraform-state-rebuild-end", "terraform-plan-start")
         assert_before(events, "terraform-plan-start", "terraform-plan-end")
         assert_before(events, "terraform-plan-end", "terraform-apply-start")
-        assert_before(events, "terraform-apply-end", "build-start backend")
-        assert_before(events, "terraform-apply-end", "build-start frontend")
-        assert_before(events, "build-start backend", "build-end frontend")
-        assert_before(events, "build-start frontend", "build-end backend")
+        assert_before(events, "terraform-apply-start", "build-start backend")
+        assert_before(events, "terraform-apply-start", "build-start frontend")
+        assert_before(events, "build-start backend", "terraform-apply-end")
+        assert_before(events, "build-start frontend", "terraform-apply-end")
         assert_before(events, "terraform-apply-end", "publish-start backend")
         assert_before(events, "terraform-apply-end", "publish-start frontend")
         if (repo / ".dispat").exists():
@@ -157,7 +157,7 @@ github: {enabled: false}
         if set(git(repo, "tag", "--list").stdout.splitlines()) != tags:
             raise AssertionError("unchanged rerun changed the durable release tags")
 
-        print("verified Terraform plan/apply, publish-gated application order, versions, tags, and empty rerun")
+        print("verified builds overlap Terraform apply, deploys wait for apply, versions, tags, and empty rerun")
 
 
 if __name__ == "__main__":
