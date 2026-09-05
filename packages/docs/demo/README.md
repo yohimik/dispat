@@ -83,7 +83,7 @@ DISPAT_DEMO_BIN=/absolute/path/to/dispat python3 packages/docs/demo/fixtures/ver
 DISPAT_DEMO_BIN=/absolute/path/to/dispat python3 packages/docs/demo/fixtures/verify-control.py
 ```
 
-The verifiers use disposable Git repositories and checks the displayed Compute, Run, For, and utility command results. Separate fixtures exercise scheduling, interrupted releases, and every release-control directive. Animation timing remains separate from those command results.
+The verifiers use disposable Git repositories and check the displayed Compute, Run, For, and utility command results. Separate fixtures exercise scheduling, interrupted releases, and every release-control directive. Animation timing remains separate from those command results.
 
 The README gif is budgeted at 2.5 MiB and `render.sh` fails when a regeneration exceeds it. `pnpm studio` inside
 `illustration/` opens the Remotion studio for editing the scenes.

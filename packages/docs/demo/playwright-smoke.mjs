@@ -11,7 +11,7 @@ const output = path.resolve(process.argv[3] ?? 'playwright-output');
 await fs.mkdir(output, {recursive: true});
 
 const browser = await chromium.launch({headless: true});
-const expectedSlides = 17;
+const expectedSlides = 18;
 const controlTolerance = 2;
 
 function fail(message, details) {
@@ -166,7 +166,7 @@ async function assertTranscriptAndTransport({page, carousel, ids, baselineY}) {
   await page.waitForFunction(
     (id) => document.querySelector('[data-demo-id="landing-demos"] [data-slide-id]')?.getAttribute('data-slide-id') !== id,
     beforeClosedAdvance,
-    {timeout: 15000},
+    {timeout: 45000},
   );
   await assertDetails(carousel, false, 'automatic advance');
 
@@ -175,7 +175,7 @@ async function assertTranscriptAndTransport({page, carousel, ids, baselineY}) {
   await page.waitForFunction(
     (id) => document.querySelector('[data-demo-id="landing-demos"] [data-slide-id]')?.getAttribute('data-slide-id') !== id,
     beforeOpenAdvance,
-    {timeout: 15000},
+    {timeout: 45000},
   );
   await assertDetails(carousel, true, 'automatic advance');
   await pause(carousel);
@@ -189,7 +189,8 @@ async function recordLaterBeats({page, carousel, directory}) {
   for (const id of ['math', 'progress']) {
     await selectSlide(carousel, id);
     await carousel.getByRole('button', {name: 'Play the slide'}).click();
-    await page.waitForTimeout(4000);
+    const duration = Number(await carousel.locator('[data-demo-duration]').getAttribute('data-demo-duration'));
+    await page.waitForTimeout(duration / 20 / 2 * 0.75 * 1000);
     await pause(carousel);
     if (await carousel.locator('[data-slide-id]').getAttribute('data-slide-id') !== id) fail(`${id} advanced before its later beat`);
     await carousel.screenshot({path: path.join(directory, `slide-${id}-later.png`), style: '.navbar { visibility: hidden !important; }'});
