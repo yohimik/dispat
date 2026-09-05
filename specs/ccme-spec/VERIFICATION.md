@@ -109,3 +109,8 @@ The rollback removed all eleven publications from the failed run, including the 
 Docker rollback run 33947918048 verified the four image repositories: stable aliases again resolve to 1.7.2 and the
 1.8/1.8.0 tags are absent. Discord deletion was verified through its API; the owner confirmed LinkedIn and Instagram
 cleanup. The corrected main revision requires fresh CI and the complete release gates before publication.
+
+An isolated copy of the checked-in specification passed the real release hook from 1.0.0 to 2.0.0. The hook
+updated `VERSION` and all three normative Markdown declarations, and the resulting specification passed validation.
+The version-hook regression suite also passed. README wording distinguishes the unchanged 1.0.0 message grammar
+from the separately versioned specification, so publishing 2.0.0 does not leave a stale current-version claim.
