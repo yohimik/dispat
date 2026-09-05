@@ -70,7 +70,7 @@ def main() -> None:
 concurrency: [4, 4]
 initials: {core: 1.4.2, api: 0.8.2, utils: 2.0.3, sdk: 0.3.1, web: 2.1.0, docs: 1.1.0, mobile: 3.1.0}
 scripts:
-  build: 'root=$(git rev-parse --show-toplevel); printf "build-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; case "$DISPAT_PACKAGE" in api) test -f "$root/.published/core" && test "$DISPAT_UPDATED_CORE_NEW_VERSION" = 1.5.0 && grep -q "go mod edit -require=example.invalid/core@v" Dockerfile && grep -q "example.invalid/core" main.go;; web) test -f "$root/.published/api" && test "$DISPAT_UPDATED_API_NEW_VERSION" = 0.8.3 && grep -q "FROM acme/api" Dockerfile && test -f webassets/index.html;; sdk) grep -q "workspace:\\*" package.json && test -f "$root/utils/package.json";; esac; if [ "$DISPAT_PACKAGE" = api ] && grep -q fail check; then exit 1; fi; sleep 0.12; printf "build-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events"'
+  build: 'root=$(git rev-parse --show-toplevel); printf "build-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; case "$DISPAT_PACKAGE" in api) test -f "$root/.published/core" && test "$DISPAT_UPDATED_CORE_NEW_VERSION" = 1.5.0 && grep -q "go mod edit -require=example.invalid/core@v" Dockerfile && grep -q "example.invalid/core" main.go;; web) test -f "$root/.published/api" && test -f "$root/.built/sdk" && test "$DISPAT_UPDATED_API_NEW_VERSION" = 0.8.3 && grep -q "FROM acme/api" Dockerfile && grep -q "sdk/dist/sdk.js" Dockerfile && test -f webassets/index.html && test -f "$root/sdk/dist/sdk.js";; sdk) grep -q "workspace:\\*" package.json && test -f "$root/utils/package.json" && test -f src/client.js && mkdir -p dist && cp src/client.js dist/sdk.js;; esac; if [ "$DISPAT_PACKAGE" = api ] && grep -q fail check; then exit 1; fi; sleep 0.12; mkdir -p "$root/.built"; touch "$root/.built/$DISPAT_PACKAGE"; printf "build-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events"'
   publish: 'root=$(git rev-parse --show-toplevel); printf "publish-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; sleep 0.18; mkdir -p "$root/.published"; touch "$root/.published/$DISPAT_PACKAGE"; printf "publish-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events"'
 flow: {build: build, publish: publish}
 packages:
@@ -78,7 +78,7 @@ packages:
   api: {path: api, dependencies: [core], isBuildWaitingPublish: true}
   utils: {path: utils}
   sdk: {path: sdk, dependencies: [utils]}
-  web: {path: web, dependencies: [api], isBuildWaitingPublish: true}
+  web: {path: web, dependencies: [api, sdk], isBuildWaitingPublish: true}
   docs: {path: docs}
   mobile: {path: mobile}
 commit: {enabled: false}
@@ -135,8 +135,10 @@ github: {enabled: false}
             )
         if second.returncode != 0:
             raise AssertionError(f"second release exited {second.returncode}: {second.stderr}")
-        second_events = (repo / "events").read_text().splitlines()[len(events):]
+        all_events = (repo / "events").read_text().splitlines()
+        second_events = all_events[len(events):]
         assert_before(second_events, "publish-end api", "build-start web")
+        assert_before(all_events, "build-end sdk", "build-start web")
         second_items = reports(second_path)
         expected_second = {"published": 2, "failed": 0, "skipped": 0, "unchanged": 5}
         second_summary = summary(second_items)

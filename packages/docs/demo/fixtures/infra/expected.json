@@ -1,0 +1,31 @@
+{
+  "commit": "feat(infra)^^: add application database",
+  "plan": [
+    {
+      "package": "infra",
+      "version": "1.2.0 -> 1.3.0",
+      "dueToProviders": [],
+      "reason": "direct"
+    },
+    {
+      "package": "backend",
+      "version": "0.8.2 -> 0.8.3",
+      "dependsOn": ["infra"],
+      "dueToProviders": ["infra"],
+      "reason": "propagated from infra"
+    },
+    {
+      "package": "frontend",
+      "version": "2.1.0 -> 2.1.1",
+      "dependsOn": ["infra"],
+      "dueToProviders": ["infra"],
+      "reason": "propagated from infra"
+    }
+  ],
+  "published": [
+    {"package": "backend", "version": "0.8.3", "tag": "backend@0.8.3"},
+    {"package": "frontend", "version": "2.1.1", "tag": "frontend@2.1.1"},
+    {"package": "infra", "version": "1.3.0", "tag": "infra/v1.3.0"}
+  ],
+  "summary": {"published": 3, "failed": 0, "skipped": 0, "unchanged": 0}
+}

@@ -29,7 +29,8 @@ completes. The landing page's carousel pairs each CLI README key-feature bullet 
 | Composition | Asset | Story | Embedded in |
 |---|---|---|---|
 | `Master` | `demo-release.gif` | All five scenes in one take. | the repository [README](../../../README.md) |
-| `Order` | `demo-order` | The run that completes: builds and publishes in dependency order, in parallel, the API Docker build waiting for core’s published Go module and the derived web image waiting for the published API image, while an npm SDK builds from its local workspace during utils’ publish, and all five selected packages finishing. | the carousel: "Build and publish in dependency order" |
+| `Infra` | live scene | A versioned Terraform package rebuilds temporary state from known resources, saves and applies the plan, then the independent backend and frontend deploy after the apply. Git tags record completion without a separate progress database or persistent state bucket in this setup. | the carousel: "Terraform" |
+| `Order` | `demo-order` | The run that completes: builds and publishes in dependency order, in parallel, the API Docker build waiting for core’s published Go module and the derived web image waiting for both the published API image and the built npm SDK assets, while that SDK builds from its local workspace during utils’ publish, and all five selected packages finishing. | the carousel: "Build and publish in dependency order" |
 | `Blast` | `demo-blast`, `demo-blast.gif` | The same commit planned twice. As `feat(core)` only core releases; amended to `feat(core)^^` the whole consumer closure joins the plan, and utils, a provider, stays unchanged either way. | the carousel: "Blast radius written in the commit", and the [commit messages](../docs/reference/commits.md) page |
 | `Heal` | `demo-heal` | api fails while independent core, utils, and sdk still ship. Repair the failing test, commit it, and rerun the same command to finish api and web. | the carousel: "Fix and rerun" |
 | `Control` | `demo-control` | One package card answers a series of commits: a feat bumps it, `%beta` starts a prerelease train, a breaking change mid-train moves the whole train to the next major, `%beta>stable` graduates it there, `Release-As: none` holds it, `Release-As: auto` resumes it. | the carousel: "Release control from commits" |
@@ -58,7 +59,7 @@ is JetBrains Mono throughout, so the animations read as the same product as the 
 The live player reserves a fixed 1920×800 canvas beneath the page heading. It crops the unused top 280 pixels from
 1920×1080 scenes; Aqua lays out its content directly in the shorter canvas. Playback and slide controls sit immediately
 below that canvas, before the description, so changing slides or closing the transcript does not move the controls.
-The transcript keeps the reader's open or closed choice across slide changes. Selecting a scene loads only that scene’s chunk; the current scene and its caption stay visible until the selection is ready. A failed load keeps the current scene available and offers a retry.
+The transcript keeps the reader's open or closed choice across slide changes. Selecting a scene loads only that scene’s chunk; the current scene and its caption stay visible until the selection is ready. You can cancel a pending selection or choose another scene while it loads. A cancelled download cannot replace a newer choice. A failed load keeps the current scene available and offers a retry.
 
 The player follows the site's light or dark theme through scoped `--demo-*` CSS variables. Standalone exports use the
 dark fallback palette. Below 720px, shared scenes use a 720×1280 portrait layout with stacked cards and a wrapped terminal. The whole diagram fits the page without horizontal panning. Reduced motion starts on a still frame, and playback requires an explicit action.
@@ -74,17 +75,18 @@ PLAYWRIGHT_RUNTIME=/path/to/node-runtime node packages/docs/demo/playwright-smok
 
 `PLAYWRIGHT_RUNTIME` must contain a `node_modules/playwright` installation. The checks record desktop and mobile
 playback in both themes and capture each slide. They also verify transcript state, control placement, keyboard
-navigation, and reduced motion. `playwright-navigation.mjs` additionally checks delayed and failed scene loads, rapid selection, retries, and the shared sidebar category controls in both themes and current and historical docs. Run it with the same arguments. `playwright-mobile.mjs` checks every portrait scene at three points in its timeline and its paused still. An optional fourth argument names one feature for a focused recheck. `playwright-menu.mjs` checks the mobile overlay height, internal scrolling, keyboard close/navigation, and reopening after browser back on landing, current docs, and 1.7 docs. `playwright-resources.mjs` checks silent autoplay, font requests, and audio allocation. `playwright-pages.mjs` checks shared page and code-block widths using `DISPAT_DOCS_URL` and `DISPAT_PAGES_OUTPUT`. `playwright-stories.mjs` records every complete story at 1× and checks terminal text for horizontal overflow throughout playback.
+navigation, and reduced motion. `playwright-navigation.mjs` additionally checks delayed and failed scene loads, rapid selection, retries, and the shared sidebar category controls in both themes and current and historical docs. `playwright-anchors.mjs` verifies that page and version navigation clears stale heading anchors while preserving explicit links and browser history. Run both with the same arguments. `playwright-mobile.mjs` checks every portrait scene at three points in its timeline and its paused still. An optional fourth argument names one feature for a focused recheck. `playwright-menu.mjs` checks the mobile overlay height, internal scrolling, keyboard close/navigation, and reopening after browser back on landing, current docs, and 1.7 docs. `playwright-resources.mjs` checks silent autoplay, font requests, and audio allocation. `playwright-pages.mjs` checks shared page and code-block widths using `DISPAT_DOCS_URL` and `DISPAT_PAGES_OUTPUT`. `playwright-stories.mjs` records every complete story at 1× and checks terminal text for horizontal overflow throughout playback.
 
 Validate command examples against a built CLI before changing their scenes:
 
 ```sh
 DISPAT_DEMO_BIN=/absolute/path/to/dispat python3 packages/docs/demo/fixtures/verify.py
 DISPAT_DEMO_BIN=/absolute/path/to/dispat python3 packages/docs/demo/fixtures/verify-release.py
+DISPAT_DEMO_BIN=/absolute/path/to/dispat python3 packages/docs/demo/fixtures/verify-infra.py
 DISPAT_DEMO_BIN=/absolute/path/to/dispat python3 packages/docs/demo/fixtures/verify-control.py
 ```
 
-The verifiers use disposable Git repositories and check the displayed Compute, Run, For, and utility command results. Separate fixtures exercise scheduling, interrupted releases, and every release-control directive. Animation timing remains separate from those command results.
+The verifiers use disposable Git repositories and check the displayed Compute, Run, For, and utility command results. Separate fixtures exercise scheduling, interrupted releases, infrastructure apply ordering, and every release-control directive. Animation timing remains separate from those command results.
 
 The README gif is budgeted at 2.5 MiB and `render.sh` fails when a regeneration exceeds it. `pnpm studio` inside
 `illustration/` opens the Remotion studio for editing the scenes.

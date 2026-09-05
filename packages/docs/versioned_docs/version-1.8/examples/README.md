@@ -62,6 +62,7 @@ run.
 |---------|----------------|
 | [Cross-platform binaries](./binaries.md) | Four targets, checksums, and assets attached to the GitHub release. |
 | [Helm charts that follow the image](./helm.md) | `appVersion` and image tags written by the run that pushed the image. |
+| [Terraform before application deployment](./terraform.md) | Versioned infrastructure, temporary imported state, and dependent backend and frontend deployments. |
 | [A site deployed from the release](./pages.md) | A docs or marketing site published during the run, with a CI-only guard. |
 
 ## Shaping the repository

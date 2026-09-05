@@ -28,6 +28,7 @@ const ecoBadge: Record<Pkg['eco'], {label: string; color: string}> = {
   docker: {label: 'docker', color: colors.blue},
   cargo: {label: 'cargo', color: colors.yellow},
   ios: {label: 'ios', color: colors.fg},
+  terraform: {label: 'terraform', color: colors.yellow},
 };
 
 export type NodeView = {
@@ -50,6 +51,7 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
   const c = stateColor[view.state];
   const active = view.state !== 'idle';
   const badge = ecoBadge[pkg.eco];
+  const stackedHeader = mobile || pkg.stackedHeader;
   const rewrite = view.rewrite ?? 0;
   const manifestLine = pkg.manifest;
   const width = mobile ? MOBILE_NODE_W : NODE_W;
@@ -73,7 +75,7 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
         opacity: view.opacity ?? 1,
       }}
     >
-      <div style={{display: 'flex', flexWrap: mobile ? 'wrap' : 'nowrap', alignItems: 'center', gap: mobile ? '4px 10px' : 10, minWidth: 0}}>
+      <div style={{display: 'flex', flexWrap: stackedHeader ? 'wrap' : 'nowrap', alignItems: 'center', gap: stackedHeader ? '4px 10px' : 10, minWidth: 0}}>
         <span style={{fontSize: mobile ? 30 : 27, lineHeight: mobile ? '34px' : '32px', fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere'}}>{pkg.id}</span>
         <span
           style={{
@@ -88,11 +90,11 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
         >
           {badge.label}
         </span>
-        <span style={{marginLeft: mobile ? 0 : 'auto', flexBasis: mobile ? '100%' : undefined, fontSize: mobile ? 26 : 18, lineHeight: mobile ? '30px' : '24px', color: c, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0}}>
+        <span style={{marginLeft: stackedHeader ? 0 : 'auto', flexBasis: stackedHeader ? '100%' : undefined, fontSize: mobile ? 26 : 18, lineHeight: mobile ? '30px' : '24px', color: c, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0}}>
           {stateLabel[view.state]}
         </span>
       </div>
-      {!mobile && <div
+      {!stackedHeader && <div
         style={{
           fontSize: 17,
           color: rewrite > 0.4 && rewrite < 1 ? colors.cyan : colors.dim,

@@ -19,6 +19,7 @@ import {Single, SINGLE_DURATION} from './Single';
 import {Terminal, TERMINAL_DURATION} from './Terminal';
 import {Why, WHY_DURATION} from './Why';
 import {Aqua, AQUA_DURATION} from './Aqua';
+import {Infra, INFRA_DURATION} from './Infra';
 
 // Twenty frames per second across the board: the storyboards are written in
 // frames, so one number here is what sets the deck's unhurried pace.
@@ -48,6 +49,7 @@ export const Root: React.FC = () => (
     <Composition id="Math" component={Math_} durationInFrames={MATH_DURATION} {...SIZE} />
     <Composition id="Progress" component={Progress} durationInFrames={PROGRESS_DURATION} {...SIZE} />
     <Composition id="Why" component={Why} durationInFrames={WHY_DURATION} {...SIZE} />
+    <Composition id="Infra" component={Infra} durationInFrames={INFRA_DURATION} {...SIZE} />
     <Composition id="Aqua" component={Aqua} durationInFrames={AQUA_DURATION} {...SIZE} />
     {SCENES.map((s) => (
       <Composition

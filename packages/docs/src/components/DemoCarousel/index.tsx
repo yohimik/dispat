@@ -35,6 +35,7 @@ const SCENE_COMMANDS: Record<string, string> = {
   'demo-glue': 'dispat autowriter --link-local', 'demo-lock': 'dispat release',
   'demo-aqua': aquaFixture.commands.join('\n'),
   'demo-for': forFixture.command,
+  'demo-terraform': 'git commit -m "feat(infra)^^: add application database"\ndispat status\ndispat',
   'demo-progress': 'dispat\n# A publish response was lost. Check the registry before retrying.\nnpm view @acme/api@1.5.0 version',
 };
 
@@ -62,6 +63,7 @@ const SCENES: Record<string, () => Promise<LoadedScene>> = {
   'demo-glue': () => import('../../../demo/illustration/src/Glue').then((m) => ({component: m.Glue, duration: m.GLUE_DURATION, stillFrame: 420})),
   'demo-lock': () => import('../../../demo/illustration/src/Lock').then((m) => ({component: m.Lock, duration: m.LOCK_DURATION})),
   'demo-for': () => import('../../../demo/illustration/src/For').then((m) => ({component: m.For, duration: m.FOR_DURATION})),
+  'demo-terraform': () => import('../../../demo/illustration/src/Infra').then((m) => ({component: m.Infra, duration: m.INFRA_DURATION})),
   'demo-aqua': () => import('../../../demo/illustration/src/Aqua').then((m) => ({component: m.Aqua, duration: m.AQUA_DURATION})),
 };
 
@@ -86,7 +88,7 @@ const FEATURE_MEDIA = new Map<string, Media>([
       asset: 'demo-order',
       name: 'Releases the graph',
       label:
-        'The Go module core and npm package utils build and publish independently. The API Docker build imports core’s published Go module. Its derived web image uses FROM acme/api and waits for that image to publish. The providers core and api set isBuildWaitingPublish: true. The npm SDK builds against its local workspace as soon as utils finishes building, while utils is still publishing. Five packages publish; docs and mobile remain unchanged.',
+        'The Go module core and npm package utils build and publish independently. The API Docker build imports core’s published Go module. Its derived web image uses FROM acme/api and waits for that image to publish. The providers core and api set isBuildWaitingPublish: true. The npm SDK builds against its local workspace as soon as utils finishes building, while utils is still publishing. The web image also bundles the built SDK assets, so it waits for the SDK build and the published API image. Five packages publish; docs and mobile remain unchanged.',
     },
   ],
   [
@@ -169,6 +171,23 @@ const WHY_SLIDE: ExtraSlide = {
 };
 
 const EXTRA_SLIDES: ExtraSlide[] = [
+  {
+    title: 'Apply infrastructure before deploying its consumers',
+    name: 'Terraform',
+    body: (
+      <>
+        Treat infrastructure as a versioned package. Plan and apply it before the backend and frontend deploy.
+        This repository rebuilds temporary Terraform state by importing its known cloud resources, so it needs no
+        persistent state bucket. Git tags record completed releases. See the <Link to="/examples/terraform">Terraform example</Link>
+        {' '}for the import mapping and deployment configuration.
+      </>
+    ),
+    media: {
+      asset: 'demo-terraform',
+      name: 'Terraform',
+      label: 'A commit versions infrastructure from 1.2.0 to 1.3.0 and selects backend 0.8.3 and frontend 2.1.1. The infrastructure build reconstructs temporary state and saves a Terraform plan. Its publish stage applies that plan and records a Git tag. The backend and frontend are independent consumers of infra and can then build and deploy in parallel. Known resource imports replace a persistent state bucket for this specific setup.',
+    },
+  },
   {
     title: 'Aqua manifests, read and rewritten directly',
     name: 'Aqua',
@@ -511,12 +530,21 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
     ],
     [features],
   );
-  const [requested, setRequested] = React.useState({index: 0, revision: 0});
+  const requestGeneration = React.useRef(0);
+  const [pending, setPending] = React.useState<{index: number; revision: number} | null>({index: 0, revision: 0});
   const [displayed, setDisplayed] = React.useState<{index: number; scene?: LoadedScene}>({index: 0});
   const active = displayed.index;
   const scene = displayed.scene;
   const selectSlide = React.useCallback((index: number) => {
-    setRequested((previous) => ({index, revision: previous.revision + 1}));
+    const revision = ++requestGeneration.current;
+    setFailedRequest(null);
+    setPending({index, revision});
+  }, []);
+  const cancelPending = React.useCallback(() => {
+    // Dynamic import promises cannot be aborted. Advancing the generation
+    // logically cancels this choice so its eventual completion is ignored.
+    requestGeneration.current += 1;
+    setPending(null);
   }, []);
   const [loop, setLoop] = React.useState(false);
   // SSR starts on the meaningful still. Hydration opts into motion only
@@ -532,22 +560,34 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
   const frame = React.useRef<HTMLDivElement>(null);
   const [player, setPlayer] = React.useState<PlayerRef | null>(null);
   const current = slides[active];
-  const requestedAsset = slides[requested.index]?.media?.asset;
-  const [sceneFailed, setSceneFailed] = React.useState(false);
+  const requestedAsset = pending ? slides[pending.index]?.media?.asset : undefined;
+  const [failedRequest, setFailedRequest] = React.useState<number | null>(null);
+  const sceneFailed = failedRequest !== null;
   React.useEffect(() => {
-    let currentLoad = true;
-    setSceneFailed(false);
+    if (!pending) return undefined;
+    let disposed = false;
+    const {index, revision} = pending;
+    setFailedRequest(null);
     if (requestedAsset && SCENES[requestedAsset]) {
       void loadScene(requestedAsset)
         .then((loaded) => {
-          if (currentLoad) setDisplayed({index: requested.index, scene: loaded});
+          if (disposed || requestGeneration.current !== revision) return;
+          setDisplayed({index, scene: loaded});
+          setPending(null);
         })
-        .catch(() => { if (currentLoad) setSceneFailed(true); });
+        .catch(() => {
+          if (disposed || requestGeneration.current !== revision) return;
+          setFailedRequest(index);
+          setPending(null);
+        });
     } else {
-      setDisplayed({index: requested.index});
+      if (!disposed && requestGeneration.current === revision) {
+        setDisplayed({index});
+        setPending(null);
+      }
     }
-    return () => { currentLoad = false; };
-  }, [requested, requestedAsset]);
+    return () => { disposed = true; };
+  }, [pending, requestedAsset]);
 
   React.useEffect(() => {
     const node = frame.current;
@@ -594,8 +634,8 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
   const slidesCount = React.useRef(slides.length);
   slidesCount.current = slides.length;
   const onClipEnded = React.useCallback(() => {
-    if (!loop && requested.index === active && !sceneFailed) selectSlide((active + 1) % slidesCount.current);
-  }, [loop, requested.index, active, sceneFailed, selectSlide]);
+    if (!loop && !pending && !sceneFailed) selectSlide((active + 1) % slidesCount.current);
+  }, [loop, pending, active, sceneFailed, selectSlide]);
   React.useEffect(() => {
     if (!player) return undefined;
     player.addEventListener('ended', onClipEnded);
@@ -643,7 +683,7 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                         </SceneBoundary>
                       )}
                     </BrowserOnly>
-                  ) : <div className={styles.loading}>{sceneFailed ? 'Demo unavailable. Read the description below.' : 'Loading interactive demo…'}</div>}
+                  ) : <div className={styles.loading}>{sceneFailed ? 'Demo unavailable. Read the description below.' : pending ? 'Loading interactive demo…' : 'Choose a demo to play.'}</div>}
                 </div>
               </div>
             </div>
@@ -659,9 +699,15 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
               onCycleSpeed={() => setSpeed((s) => ({1: 1.5, 1.5: 2, 2: 0.5, 0.5: 1}[s] ?? 1))}
             />
             <div className={styles.band}>
+              {pending && (
+                <p className={styles.loadStatus} role="status">
+                  Loading {slides[pending.index].name}…{scene ? ' The current demo remains available. ' : ' '}
+                  <button type="button" onClick={cancelPending}>Cancel</button>
+                </p>
+              )}
               {sceneFailed && scene && (
                 <p role="status">The next demo could not load. The current demo is still available.{' '}
-                  <button type="button" onClick={() => selectSlide(requested.index)}>Try again</button>
+                  <button type="button" onClick={() => { if (failedRequest !== null) selectSlide(failedRequest); }}>Try again</button>
                 </p>
               )}
               <p id="landing-demo-description" className={styles.bandBody}>{current.body}</p>

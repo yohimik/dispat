@@ -5,8 +5,8 @@ import {edges, edgeAnchors, edgePath, pkgs, type Edge, type Pkg} from './graph';
 import {MOBILE_NODE_H, NodeView, PkgNode, Wordmark} from './components';
 import {MOBILE_HEIGHT, MOBILE_WIDTH, useDemoLayout} from './layout';
 
-const MOBILE_GRAPH_TOP = 120;
-const MOBILE_GRAPH_BOTTOM = 810;
+const MOBILE_GRAPH_TOP = 110;
+const MOBILE_GRAPH_BOTTOM = 840;
 
 /** Stable topological rows for portrait. Cycles fall back to source order. */
 const portraitPkgs = (graphPkgs: Pkg[], graphEdges: Edge[]): Pkg[] => {
@@ -43,12 +43,14 @@ const portraitPkgs = (graphPkgs: Pkg[], graphEdges: Edge[]): Pkg[] => {
     const layer = graphPkgs.filter(({id}) => rank.get(id) === level);
     for (let index = 0; index < layer.length; index += 2) rows.push(layer.slice(index, index + 2));
   }
-  const gap = rows.length > 1 ? (MOBILE_GRAPH_BOTTOM - MOBILE_GRAPH_TOP) / (rows.length - 1) : 0;
+  const gap = rows.length > 1 ? Math.min(360, (MOBILE_GRAPH_BOTTOM - MOBILE_GRAPH_TOP) / (rows.length - 1)) : 0;
+  const span = gap * Math.max(0, rows.length - 1);
+  const firstRowY = (MOBILE_GRAPH_TOP + MOBILE_GRAPH_BOTTOM - span) / 2;
   return rows.flatMap((row, rowIndex) =>
     row.map((pkg, column) => ({
       ...pkg,
       x: row.length === 1 ? MOBILE_WIDTH / 2 : column === 0 ? 180 : 540,
-      y: MOBILE_GRAPH_TOP + rowIndex * gap,
+      y: firstRowY + rowIndex * gap,
     })),
   );
 };
@@ -127,6 +129,14 @@ export const Stage: React.FC<{
             const path = mobile
               ? `M ${anchors.x1} ${anchors.y1} C ${anchors.x1} ${(anchors.y1 + anchors.y2) / 2}, ${anchors.x2} ${(anchors.y1 + anchors.y2) / 2}, ${anchors.x2} ${anchors.y2}`
               : edgePath(e, nodeLookup);
+            const siblings = graphEdges.filter((edge) => edge.from === e.from);
+            const fanout = mobile && siblings.length > 1;
+            const verticalGap = anchors.y2 - anchors.y1;
+            const labelT = fanout && verticalGap >= 100 ? 0.8 : 0.5;
+            const smoothX = 3 * labelT * labelT - 2 * labelT * labelT * labelT;
+            const smoothY = 1.5 * labelT - 1.5 * labelT * labelT + labelT * labelT * labelT;
+            const labelX = mobile ? anchors.x1 + (anchors.x2 - anchors.x1) * smoothX : (anchors.x1 + anchors.x2) / 2;
+            const labelY = mobile ? anchors.y1 + verticalGap * smoothY : (anchors.y1 + anchors.y2) / 2;
             return (
               <g key={i}>
                 <path
@@ -139,16 +149,26 @@ export const Stage: React.FC<{
                   strokeDashoffset={1 - draw}
                 />
                 {edgeLabels && e.label && draw > 0.8 && (
-                  <text
-                    x={(anchors.x1 + anchors.x2) / 2}
-                    y={(anchors.y1 + anchors.y2) / 2 + (mobile ? 7 : -12)}
-                    textAnchor="middle"
-                    fill={colors.dim}
-                    fontFamily="'JetBrains Mono', monospace"
-                    fontSize={mobile ? 20 : 17}
-                  >
-                    {e.label}
-                  </text>
+                  <g data-demo-edge-label>
+                    <rect
+                      x={labelX - (e.label.length * (mobile ? 12 : 10.2) + (mobile ? 24 : 18)) / 2}
+                      y={mobile ? labelY - 15 : labelY - 30}
+                      width={e.label.length * (mobile ? 12 : 10.2) + (mobile ? 24 : 18)}
+                      height={mobile ? 30 : 24}
+                      rx={6}
+                      fill={colors.bg}
+                    />
+                    <text
+                      x={labelX}
+                      y={labelY + (mobile ? 7 : -12)}
+                      textAnchor="middle"
+                      fill={colors.dim}
+                      fontFamily="'JetBrains Mono', monospace"
+                      fontSize={mobile ? 20 : 17}
+                    >
+                      {e.label}
+                    </text>
+                  </g>
                 )}
               </g>
             );

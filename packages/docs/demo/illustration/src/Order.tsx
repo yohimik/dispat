@@ -9,7 +9,8 @@ import {releaseGraph} from './graph';
 // Root.tsx's twenty frames per second: the one clip where the run completes,
 // under the stage budgets `concurrency: [4, 4]`. The independent providers
 // core and utils build and publish together. sdk may build from the local npm
-// workspace as soon as utils' build finishes. api consumes the Go module core
+// workspace as soon as utils' build finishes. web can bundle sdk's built
+// assets as soon as that build completes. api consumes the Go module core
 // from its published location, so core explicitly sets isBuildWaitingPublish
 // and api stays parked until core's publish lands. web's Dockerfile starts
 // from the published api image, so api applies the same policy to web.
@@ -74,6 +75,7 @@ const pulses: Pulse[] = [
   {edge: 0, start: 210}, // core published; api may build
   {edge: 2, start: 140}, // utils built; sdk may build from the workspace
   {edge: 1, start: 336}, // api published; web may build from its image
+  {edge: 3, start: 220}, // sdk built; web may bundle its local assets
 ];
 
 export const ORDER_DURATION = 520;

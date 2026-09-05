@@ -75,6 +75,7 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'examples/binaries', label: 'Cross-platform binaries'},
             {type: 'doc', id: 'examples/helm', label: 'Helm charts'},
             {type: 'doc', id: 'examples/pages', label: 'A site deploy'},
+            {type: 'doc', id: 'examples/terraform', label: 'Terraform before deployment'},
           ],
         },
         {

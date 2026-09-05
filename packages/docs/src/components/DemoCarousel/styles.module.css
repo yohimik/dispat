@@ -146,6 +146,8 @@
   background: var(--demo-panel);
   color: var(--demo-dim);
 }
+.loadStatus { margin: 0 auto 0.8rem; max-width: 78ch; color: var(--demo-cyan); }
+.loadStatus button { margin-left: 0.25rem; }
 .bandBody {
   max-width: 78ch;
   margin: 0 auto;

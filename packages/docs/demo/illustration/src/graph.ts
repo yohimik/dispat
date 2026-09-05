@@ -3,12 +3,14 @@
 // unrelated story means.
 export type Pkg = {
   id: string;
-  eco: 'npm' | 'go' | 'docker' | 'cargo' | 'ios';
+  eco: 'npm' | 'go' | 'docker' | 'cargo' | 'ios' | 'terraform';
   manifest: string;
   base: string;
   next: string;
   x: number;
   y: number;
+  /** Keep long package names and ecosystem labels clear of the status. */
+  stackedHeader?: boolean;
 };
 
 export const NODE_W = 350;
@@ -53,6 +55,7 @@ export const releaseGraph = {
     {from: 'core', to: 'api', label: 'wait for publish'},
     {from: 'api', to: 'web', label: 'wait for publish'},
     {from: 'utils', to: 'sdk', label: 'local workspace'},
+    {from: 'sdk', to: 'web', label: 'built SDK'},
   ] satisfies Edge[],
 };
 

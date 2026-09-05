@@ -91,6 +91,7 @@ const pulses: Pulse[] = [
   {edge: 0, start: 478}, // core published; api may build
   {edge: 2, start: 420}, // utils built; sdk uses the local workspace
   {edge: 1, start: 835}, // api published on the re-run; web can resolve FROM
+  {edge: 3, start: 470}, // sdk built; web may bundle its local assets
 ];
 
 // The scene's terminal, in step with the graph: the plan lines print as the
