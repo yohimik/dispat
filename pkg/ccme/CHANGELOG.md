@@ -1,5 +1,10 @@
 # Changelog
 
+## pkg/ccme/v2.0.0 (2026-09-05)
+
+No changes: a version bump to keep the versioning group on one major and minor version.
+
+
 ## pkg/ccme/v1.0.0 (2026-08-16)
 
 ### Breaking Changes
