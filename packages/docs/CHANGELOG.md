@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.8.4 (2026-09-05)
+
+### Fixes
+
+- restore mobile navigation ([ab05286](https://github.com/yohimik/dispat/commit/ab05286210c277207f6f6671a8ec511f483bdd60)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.8.3 (2026-09-05)
 
 ### Fixes
