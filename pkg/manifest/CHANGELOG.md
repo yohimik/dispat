@@ -1,5 +1,10 @@
 # Changelog
 
+## pkg/manifest/v1.2.0 (2026-09-05)
+
+No changes: a version bump to keep the versioning group on one version.
+
+
 ## pkg/manifest/v1.1.1 (2026-08-19)
 
 ### Fixes
