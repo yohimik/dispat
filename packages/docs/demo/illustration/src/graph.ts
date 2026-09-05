@@ -45,13 +45,13 @@ export const edges: Edge[] = [
 export const releaseGraph = {
   pkgs: pkgs.map((pkg): Pkg => {
     if (pkg.id === 'core') return {...pkg, eco: 'go', manifest: 'go.mod'};
-    if (pkg.id === 'api') return {...pkg, eco: 'go', manifest: 'go.mod'};
+    if (pkg.id === 'api' || pkg.id === 'web') return {...pkg, eco: 'docker', manifest: 'Dockerfile'};
     if (pkg.id === 'utils' || pkg.id === 'sdk') return {...pkg, eco: 'npm', manifest: 'package.json'};
     return pkg;
   }),
   edges: [
     {from: 'core', to: 'api', label: 'wait for publish'},
-    {from: 'api', to: 'web'},
+    {from: 'api', to: 'web', label: 'wait for publish'},
     {from: 'utils', to: 'sdk', label: 'local workspace'},
   ] satisfies Edge[],
 };

@@ -80,6 +80,35 @@ body {
   margin: 0 auto;
 }
 
+/* Infima's sidebar is a fixed child of the flex navbar. Chromium otherwise
+   resolves its auto block size to the 3.6rem navbar height even though both
+   vertical insets are zero, collapsing the menu items to zero pixels. Give
+   the overlay an explicit viewport block size and keep scrolling inside its
+   item pane. */
+@media (max-width: 996px) {
+  .navbar-sidebar,
+  .navbar-sidebar__backdrop {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .navbar-sidebar {
+    max-height: 100dvh;
+    z-index: calc(var(--ifm-z-index-fixed) + 1);
+  }
+
+  .navbar-sidebar__items {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .navbar-sidebar__item {
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 .navbar__brand {
   -webkit-user-select: none;
   user-select: none;

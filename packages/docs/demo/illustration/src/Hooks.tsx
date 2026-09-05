@@ -143,18 +143,18 @@ export const Hooks: React.FC = () => {
             const active = lit && f < step.at + step.dur;
             const c = active ? colors.cyan : lit ? colors.green : colors.faint;
             return (
-              <div key={step.name} data-demo-stage style={{position: 'absolute', left: mobile ? 16 + (i % 3) * 236 : BLOCK_X[i], top: mobile ? 120 + ROWS.indexOf(row) * 275 + Math.floor(i / 3) * 118 : row.y - 26, width: mobile ? 216 : BLOCK_W}}>
+              <div key={step.name} data-demo-stage style={{position: 'absolute', left: mobile ? 16 + (i % 3) * 236 : BLOCK_X[i], top: mobile ? 120 + ROWS.indexOf(row) * 275 + Math.floor(i / 3) * 118 : row.y - 46, width: mobile ? 216 : BLOCK_W}}>
                 <div
                   style={{
-                    height: mobile ? 56 : 22,
+                    height: mobile ? 56 : 42,
                     fontSize: mobile ? 22 : 15,
-                    lineHeight: mobile ? '26px' : undefined,
+                    lineHeight: mobile ? '26px' : '18px',
                     color: colors.dim,
                     textAlign: 'center',
-                    whiteSpace: mobile ? 'normal' : 'nowrap',
+                    whiteSpace: 'normal',
                     opacity: step.hook && f >= step.at - 12 ? 1 : 0,
                   }}>
-                  {step.hook ? mobile ? step.hook : `${step.hook} ✓` : ''}
+                  {step.hook ? mobile ? step.hook : <>{step.hook.split(': ')[0]}:<br />{step.hook.split(': ')[1]} ✓</> : ''}
                 </div>
                 <div
                   style={{

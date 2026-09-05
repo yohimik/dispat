@@ -1,6 +1,7 @@
 import React from 'react';
 import {Composition} from 'remotion';
 import {Master, Scene, SCENES} from './Master';
+import {MASTER_DURATION} from './title-timeline';
 import {Blast, BLAST_DURATION} from './Blast';
 import {Compute, COMPUTE_DURATION} from './Compute';
 import {Control, CONTROL_DURATION} from './Control';
@@ -26,7 +27,7 @@ const SIZE = {fps: FPS, width: 1920, height: 1080} as const;
 
 export const Root: React.FC = () => (
   <>
-    <Composition id="Master" component={Master} durationInFrames={900} {...SIZE} />
+    <Composition id="Master" component={Master} durationInFrames={MASTER_DURATION} {...SIZE} />
     {/* Blast twice: titled for the commit-messages page's gif, and as the
         landing page's clip, which leaves the top strip to the page's own
         feature-text overlay. */}

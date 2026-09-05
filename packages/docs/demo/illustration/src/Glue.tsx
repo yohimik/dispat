@@ -141,7 +141,7 @@ export const Glue: React.FC = () => {
             style={{
               position: 'absolute',
               left: mobile ? 30 : panel.file === 'build.gradle' ? 340 : 990,
-              width: mobile ? 660 : 590,
+              width: mobile ? 660 : panel.file === 'build.gradle' ? 620 : 590,
               top: mobile ? 250 + FILES.indexOf(panel) * 300 : 430,
               borderRadius: 16,
               background: colors.panel,

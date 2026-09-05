@@ -3,6 +3,7 @@ import {interpolate, Sequence, useCurrentFrame} from 'remotion';
 import {NodeView, SceneTerminal, SceneTitle, TermRow, cmdRow, outRow, typingProgress, INF, ERR, msg, kv} from './components';
 import {Pulse, Stage} from './Stage';
 import {releaseGraph} from './graph';
+import {MASTER_TITLES, MASTER_DURATION, isTitleVisible} from './title-timeline';
 
 // The story, forty-five seconds at Root.tsx's twenty frames per second:
 //   S1    0-140   the graph comes from the manifests
@@ -22,7 +23,7 @@ function coreView(f: number): NodeView {
   if (f < 210) return {state: 'idle'};
   if (f < 350) return {state: 'changed', bumped: f > 188};
   if (f < 420) return {state: 'building', bumped: true, progress: bar(f, 350, 418)};
-  if (f < 470) return {state: 'publishing', bumped: true, progress: bar(f, 420, 468)};
+  if (f < 478) return {state: 'publishing', bumped: true, progress: bar(f, 420, 476)};
   if (f < 735) return {state: 'published', bumped: true, tag: 'core@1.5.0'};
   return {state: 'unchanged', bumped: true, tag: 'core@1.5.0'};
 }
@@ -48,9 +49,9 @@ function sdkView(f: number): NodeView {
 function apiView(f: number): NodeView {
   if (f < 326) return {state: 'idle'};
   if (f < 350) return {state: 'changed', bumped: f > 230};
-  if (f < 470) return {state: 'waiting', bumped: true, note: 'waits for core@1.5.0'};
-  if (f < 580) return {state: 'building', bumped: true, progress: bar(f, 470, 578), note: 'downloads core@v1.5.0'};
-  if (f < 750) return {state: 'failed', bumped: true, progress: 0.85, note: 'tests failed'};
+  if (f < 480) return {state: 'waiting', bumped: true, note: 'waits for core@1.5.0'};
+  if (f < 580) return {state: 'building', bumped: true, progress: bar(f, 480, 578), note: 'downloads core@v1.5.0'};
+  if (f < 765) return {state: 'failed', bumped: true, progress: 0.85, note: 'tests failed'};
   if (f < 775) return {state: 'catchup', bumped: true};
   if (f < 815) return {state: 'building', bumped: true, progress: bar(f, 775, 813)};
   if (f < 835) return {state: 'publishing', bumped: true, progress: bar(f, 815, 833)};
@@ -60,11 +61,11 @@ function apiView(f: number): NodeView {
 function webView(f: number): NodeView {
   if (f < 328) return {state: 'idle'};
   if (f < 350) return {state: 'changed', bumped: f > 258};
-  if (f < 600) return {state: 'waiting', bumped: true, note: 'waits for api'};
-  if (f < 735) return {state: 'skipped', bumped: true, note: 'provider failed'};
-  if (f < 815) return {state: 'waiting', bumped: true, note: 'waits for api build'};
-  if (f < 835) return {state: 'building', bumped: true, progress: bar(f, 815, 833)};
-  if (f < 880) return {state: 'publishing', bumped: true, progress: bar(f, 835, 878)};
+  if (f < 580) return {state: 'waiting', bumped: true, note: 'waits for api publish'};
+  if (f < 765) return {state: 'skipped', bumped: true, note: 'provider failed'};
+  if (f < 837) return {state: 'waiting', bumped: true, note: 'FROM waits for published api'};
+  if (f < 860) return {state: 'building', bumped: true, progress: bar(f, 837, 858), note: 'FROM acme/api:0.8.3'};
+  if (f < 880) return {state: 'publishing', bumped: true, progress: bar(f, 860, 878)};
   return {state: 'published', bumped: true, tag: 'web@2.1.1'};
 }
 
@@ -82,22 +83,14 @@ function bystanderView(f: number): NodeView {
 // the run relights each edge at the configured readiness point. core's
 // publish unlocks api; utils' build unlocks sdk from the local npm workspace.
 // api's failure leaves the web edge dark through S4, and the re-run's api
-// build is what finally lights it; web's publish still waits for api's.
+// published image is what finally lets Docker resolve web's FROM line.
 const pulses: Pulse[] = [
   {edge: 0, start: 322, off: 344}, // planning: core -> api
   {edge: 1, start: 326, off: 344}, // planning: api -> web
   {edge: 2, start: 330, off: 344}, // planning: utils -> sdk
-  {edge: 0, start: 466}, // core published; api may build
-  {edge: 2, start: 418}, // utils built; sdk uses the local workspace
-  {edge: 1, start: 813}, // api built on the re-run; web may build while it publishes
-];
-
-const titles: Array<{text: string; in: [number, number]; out: number}> = [
-  {text: 'A package is a folder. The graph comes from its manifests.', in: [15, 52], out: 140},
-  {text: 'The commit decides the blast radius.', in: [150, 178], out: 330},
-  {text: 'Builds and publishes in dependency order, in parallel.', in: [340, 375], out: 560},
-  {text: 'An error in the middle stays contained.', in: [565, 592], out: 720},
-  {text: 'Fix it, commit it, then run the same command.', in: [670, 705], out: 885},
+  {edge: 0, start: 478}, // core published; api may build
+  {edge: 2, start: 420}, // utils built; sdk uses the local workspace
+  {edge: 1, start: 835}, // api published on the re-run; web can resolve FROM
 ];
 
 // The scene's terminal, in step with the graph: the plan lines print as the
@@ -113,15 +106,22 @@ const rows: TermRow[] = [
   outRow(330, [...INF, msg('● changed'), ...kv('package', 'utils'), ...kv('bump', 'patch'), ...kv('version', '"2.0.3 -> 2.0.4"')]),
   outRow(334, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '7'), ...kv('releasing', '5')]),
   cmdRow(340, 'dispat'),
+  outRow(350, [...INF, msg('build started'), ...kv('package', 'core'), ...kv('stage', 'build')]),
+  outRow(352, [...INF, msg('build started'), ...kv('package', 'utils'), ...kv('stage', 'build')]),
+  outRow(420, [...INF, msg('build started'), ...kv('package', 'sdk'), ...kv('stage', 'build')]),
   outRow(470, [...INF, msg('published'), ...kv('package', 'utils'), ...kv('tag', 'utils@2.0.4'), ...kv('version', '2.0.4')]),
   outRow(478, [...INF, msg('published'), ...kv('package', 'core'), ...kv('tag', 'core@1.5.0'), ...kv('version', '1.5.0')]),
-  outRow(590, [...ERR, msg('build script failed'), ...kv('error', '"exit status 1"'), ...kv('package', 'api'), ...kv('stage', 'build')]),
+  outRow(480, [...INF, msg('build started'), ...kv('package', 'api'), ...kv('stage', 'build')]),
+  outRow(515, [...INF, msg('published'), ...kv('package', 'sdk'), ...kv('tag', 'sdk@0.3.2')]),
+  outRow(580, [...ERR, msg('build script failed'), ...kv('error', '"exit status 1"'), ...kv('package', 'api'), ...kv('stage', 'build')]),
   outRow(664, [...INF, msg('done'), ...kv('cancelled', '0'), ...kv('failed', '1'), ...kv('published', '3'), ...kv('skipped', '1'), ...kv('unchanged', '2')]),
   cmdRow(670, 'git commit -am "chore(api): repair failing test"'),
   cmdRow(750, 'dispat'),
   outRow(765, [...INF, msg('↻ catch-up'), ...kv('package', 'api'), ...kv('reason', '"catch-up from core"'), ...kv('version', '"0.8.2 -> 0.8.3"')]),
-  outRow(838, [...INF, msg('published'), ...kv('package', 'api'), ...kv('tag', 'api@0.8.3'), ...kv('version', '0.8.3')]),
-  outRow(883, [...INF, msg('published'), ...kv('package', 'web'), ...kv('tag', 'web@2.1.1'), ...kv('version', '2.1.1')]),
+  outRow(775, [...INF, msg('build started'), ...kv('package', 'api'), ...kv('stage', 'build')]),
+  outRow(835, [...INF, msg('published'), ...kv('package', 'api'), ...kv('tag', 'api@0.8.3'), ...kv('version', '0.8.3')]),
+  outRow(837, [...INF, msg('build started'), ...kv('package', 'web'), ...kv('stage', 'build')]),
+  outRow(880, [...INF, msg('published'), ...kv('package', 'web'), ...kv('tag', 'web@2.1.1'), ...kv('version', '2.1.1')]),
   outRow(888, [...INF, msg('done'), ...kv('cancelled', '0'), ...kv('failed', '0'), ...kv('published', '2'), ...kv('skipped', '0'), ...kv('unchanged', '5')]),
 ];
 
@@ -147,7 +147,7 @@ export const Master: React.FC<{titles?: boolean}> = ({titles: withTitles = true}
       extrapolateRight: 'clamp',
     });
   }
-  const graphOpacity = interpolate(f, [888, 900], [1, 0], {
+  const graphOpacity = interpolate(f, [MASTER_DURATION - 12, MASTER_DURATION], [1, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
@@ -164,12 +164,12 @@ export const Master: React.FC<{titles?: boolean}> = ({titles: withTitles = true}
       terminal={<SceneTerminal rows={rows} f={f} />}
     >
       {withTitles &&
-        titles.map((t, i) => (
+        MASTER_TITLES.filter((title) => isTitleVisible(title, f)).map((t, i) => (
           <div
             key={i}
-            style={{opacity: interpolate(f, [t.out - 10, t.out], [1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}
+            style={{opacity: interpolate(f, [t.end - 10, t.end], [1, 0], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'})}}
           >
-            <SceneTitle text={t.text} progress={typingProgress(f, t.in[0], t.text)} />
+            <SceneTitle text={t.text} progress={typingProgress(f, t.start, t.text)} />
           </div>
         ))}
 
@@ -195,7 +195,7 @@ export type SceneCut = {
 };
 
 export const SCENES: SceneCut[] = [
-  {id: 'Heal', asset: 'demo-heal', from: 560, to: 900},
+  {id: 'Heal', asset: 'demo-heal', from: 560, to: MASTER_DURATION},
 ];
 export const HEAL_DURATION = SCENES[0].to - SCENES[0].from;
 

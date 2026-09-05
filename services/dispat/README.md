@@ -63,8 +63,8 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 
 - **Build and publish in dependency order.** Dispat schedules each package after the packages it needs. A package that
   uses another is its consumer; the package it needs is its provider. Independent work runs in parallel, with separate
-  limits for builds and publishes. Set `isBuildWaitingPublish` when a build needs its provider's published artifact,
-  as Docker image builds often do.
+  limits for builds and publishes. Set `isBuildWaitingPublish: true` on the provider package or space when consumers need its published artifact.
+  For example, a Docker image using `FROM acme/api` must wait for that API image to reach the registry.
 - **Choose which packages release.** A `feat(core):` commit releases `core`. Add `^` to include direct consumers,
   `^^` to include every downstream consumer, or `+N` to reach up to N dependency edges away. The commit records your
   choice for review alongside the code.

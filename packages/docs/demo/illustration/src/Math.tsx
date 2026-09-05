@@ -83,12 +83,12 @@ export const Math_: React.FC = () => {
       chip: 'qualified idempotence',
       equation: (
         <>
-          <span style={{color: colors.green, fontWeight: 700}}>recorded tag</span>
-          <span style={{color: colors.dim}}> ⇒ </span>
-          <span style={{color: colors.fg}}>skip completed package</span>
+          <span style={{color: colors.green, fontWeight: 700}}>release(s)</span>
+          <span style={{color: colors.dim}}> = </span>
+          <span style={{color: colors.fg}}>release(release(s))</span>
         </>
       ),
-      note: 'if a publisher returned an unknown outcome before the tag was recorded, reconcile that destination before retrying',
+      note: 'Applies to successfully recorded releases with unchanged inputs. External publish outcomes may need checking after an interrupted run.',
     },
     {
       from: 300,

@@ -11,12 +11,14 @@ import {releaseGraph} from './graph';
 // core and utils build and publish together. sdk may build from the local npm
 // workspace as soon as utils' build finishes. api consumes the Go module core
 // from its published location, so core explicitly sets isBuildWaitingPublish
-// and api stays parked until core's publish lands.
+// and api stays parked until core's publish lands. web's Dockerfile starts
+// from the published api image, so api applies the same policy to web.
 // The master storyline fails api on purpose (that failure is the
 // self-healing slide's story), so this composition is not a cut of it. It
 // opens on the plan, all five marked changed, then runs it. api waits for
-// core@1.5.0, while sdk's build overlaps utils' publish; web follows api. The
-// run ends with all five published. docs and mobile sit it out, unchanged.
+// core@1.5.0, while sdk's build overlaps utils' publish; web waits for the api
+// image to publish before it builds. The run ends with all five published.
+// docs and mobile sit it out, unchanged.
 //
 // No title: the landing page crops the clip's empty top strip away and
 // shows the feature text under the clip.
@@ -24,58 +26,57 @@ import {releaseGraph} from './graph';
 const bar = (frame: number, a: number, b: number) =>
   interpolate(frame, [a, b], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
 
-// The plan beat: everything before RUN is the four cards standing marked
+// The plan beat: everything before RUN is the five cards standing marked
 // `● changed`, so the run visibly starts from a plan rather than mid-air.
 const RUN = 56;
 
 function coreView(f: number): NodeView {
-  if (f < RUN) return {state: 'changed', bumped: true};
-  if (f < 140) return {state: 'building', bumped: true, progress: bar(f, RUN, 138)};
-  if (f < 206) return {state: 'publishing', bumped: true, progress: bar(f, 140, 204)};
+  if (f < 62) return {state: 'changed', bumped: true};
+  if (f < 140) return {state: 'building', bumped: true, progress: bar(f, 62, 138)};
+  if (f < 210) return {state: 'publishing', bumped: true, progress: bar(f, 140, 208)};
   return {state: 'published', bumped: true, tag: 'core@1.5.0'};
 }
 
 function utilsView(f: number): NodeView {
-  if (f < RUN) return {state: 'changed', bumped: true};
-  if (f < 140) return {state: 'building', bumped: true, progress: bar(f, RUN, 138)};
-  if (f < 206) return {state: 'publishing', bumped: true, progress: bar(f, 140, 204)};
+  if (f < 68) return {state: 'changed', bumped: true};
+  if (f < 140) return {state: 'building', bumped: true, progress: bar(f, 68, 138)};
+  if (f < 216) return {state: 'publishing', bumped: true, progress: bar(f, 140, 214)};
   return {state: 'published', bumped: true, tag: 'utils@2.0.4'};
 }
 
 function apiView(f: number): NodeView {
   if (f < RUN + 4) return {state: 'changed', bumped: true};
-  if (f < 206) return {state: 'waiting', bumped: true, note: 'configured: wait for core publish'};
-  if (f < 286) return {state: 'building', bumped: true, progress: bar(f, 206, 284), note: 'downloads core@v1.5.0'};
-  if (f < 332) return {state: 'publishing', bumped: true, progress: bar(f, 286, 330)};
+  if (f < 222) return {state: 'waiting', bumped: true, note: 'configured: wait for core publish'};
+  if (f < 286) return {state: 'building', bumped: true, progress: bar(f, 222, 284), note: 'downloads core@v1.5.0'};
+  if (f < 336) return {state: 'publishing', bumped: true, progress: bar(f, 286, 334)};
   return {state: 'published', bumped: true, tag: 'api@0.8.3'};
 }
 
 function sdkView(f: number): NodeView {
   if (f < RUN + 4) return {state: 'changed', bumped: true};
-  if (f < 140) return {state: 'waiting', bumped: true, note: 'waits for utils build'};
-  if (f < 220) return {state: 'building', bumped: true, progress: bar(f, 140, 218), note: 'uses local npm workspace'};
-  if (f < 266) return {state: 'publishing', bumped: true, progress: bar(f, 220, 264)};
+  if (f < 144) return {state: 'waiting', bumped: true, note: 'waits for utils build'};
+  if (f < 220) return {state: 'building', bumped: true, progress: bar(f, 144, 218), note: 'uses local npm workspace'};
+  if (f < 270) return {state: 'publishing', bumped: true, progress: bar(f, 220, 268)};
   return {state: 'published', bumped: true, tag: 'sdk@0.3.2'};
 }
 
 function webView(f: number): NodeView {
   if (f < RUN + 8) return {state: 'changed', bumped: true};
-  if (f < 286) return {state: 'waiting', bumped: true, note: 'waits for api build'};
-  if (f < 326) return {state: 'building', bumped: true, progress: bar(f, 286, 324)};
-  if (f < 332) return {state: 'waiting', bumped: true, note: 'publish waits for api'};
-  if (f < 382) return {state: 'publishing', bumped: true, progress: bar(f, 332, 380)};
+  if (f < 342) return {state: 'waiting', bumped: true, note: 'configured: wait for api publish'};
+  if (f < 390) return {state: 'building', bumped: true, progress: bar(f, 342, 388), note: 'FROM acme/api:0.8.3'};
+  if (f < 438) return {state: 'publishing', bumped: true, progress: bar(f, 390, 436)};
   return {state: 'published', bumped: true, tag: 'web@2.1.1'};
 }
 
 // Each edge lights at the moment its configured prerequisite lands: utils'
-// local build for sdk, but a completed core publish for api.
+// local build for sdk, but completed publishes for both Docker consumers.
 const pulses: Pulse[] = [
-  {edge: 0, start: 204}, // core published; api may build
-  {edge: 2, start: 138}, // utils built; sdk may build from the workspace
-  {edge: 1, start: 284}, // api built; web may build while api publishes
+  {edge: 0, start: 210}, // core published; api may build
+  {edge: 2, start: 140}, // utils built; sdk may build from the workspace
+  {edge: 1, start: 336}, // api published; web may build from its image
 ];
 
-export const ORDER_DURATION = 492;
+export const ORDER_DURATION = 520;
 
 // The scene's terminal, in step with the graph: the command that starts the
 // run, then every log line at the moment the diagram shows the state it
@@ -91,10 +92,10 @@ const rows: TermRow[] = [
   outRow(216, [...INF, msg('published'), ...kv('package', 'utils'), ...kv('tag', 'utils@2.0.4'), ...kv('version', '2.0.4')]),
   outRow(222, [...INF, msg('build started'), ...kv('package', 'api'), ...kv('stage', 'build'), ...kv('version', '0.8.3')]),
   outRow(270, [...INF, msg('published'), ...kv('package', 'sdk'), ...kv('tag', 'sdk@0.3.2'), ...kv('version', '0.3.2')]),
-  outRow(292, [...INF, msg('build started'), ...kv('package', 'web'), ...kv('stage', 'build'), ...kv('version', '2.1.1')]),
   outRow(336, [...INF, msg('published'), ...kv('package', 'api'), ...kv('tag', 'api@0.8.3'), ...kv('version', '0.8.3')]),
-  outRow(388, [...INF, msg('published'), ...kv('package', 'web'), ...kv('tag', 'web@2.1.1'), ...kv('version', '2.1.1')]),
-  outRow(396, [...INF, msg('done'), ...kv('cancelled', '0'), ...kv('failed', '0'), ...kv('published', '5'), ...kv('skipped', '0'), ...kv('unchanged', '2')]),
+  outRow(342, [...INF, msg('build started'), ...kv('package', 'web'), ...kv('stage', 'build'), ...kv('version', '2.1.1')]),
+  outRow(438, [...INF, msg('published'), ...kv('package', 'web'), ...kv('tag', 'web@2.1.1'), ...kv('version', '2.1.1')]),
+  outRow(446, [...INF, msg('done'), ...kv('cancelled', '0'), ...kv('failed', '0'), ...kv('published', '5'), ...kv('skipped', '0'), ...kv('unchanged', '2')]),
 ];
 
 export const Order: React.FC = () => {

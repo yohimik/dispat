@@ -59,18 +59,10 @@ def main() -> None:
         git(repo, "config", "user.name", "Dispat demo")
         git(repo, "config", "user.email", "demo@example.invalid")
 
-        for name in ("core", "api", "utils", "sdk", "web", "docs", "mobile"):
+        fixtures = Path(__file__).resolve().parent / "release"
+        shutil.copytree(fixtures, repo, dirs_exist_ok=True)
+        for name in ("docs", "mobile"):
             (repo / name).mkdir()
-        (repo / "core/go.mod").write_text("module example.invalid/core\n\ngo 1.22\n")
-        (repo / "api/go.mod").write_text(
-            "module example.invalid/api\n\ngo 1.22\n\nrequire example.invalid/core v1.4.2\n"
-        )
-        (repo / "api/check").write_text("fail\n")
-        (repo / "utils/package.json").write_text('{"name":"utils","version":"2.0.3"}\n')
-        (repo / "sdk/package.json").write_text(
-            '{"name":"sdk","version":"0.3.1","dependencies":{"utils":"workspace:*"}}\n'
-        )
-        (repo / "web/package.json").write_text('{"name":"web","version":"2.1.0"}\n')
         (repo / "docs/file").write_text("unchanged\n")
         (repo / "mobile/file").write_text("unchanged\n")
         (repo / "dispat.yaml").write_text(
@@ -78,15 +70,15 @@ def main() -> None:
 concurrency: [4, 4]
 initials: {core: 1.4.2, api: 0.8.2, utils: 2.0.3, sdk: 0.3.1, web: 2.1.0, docs: 1.1.0, mobile: 3.1.0}
 scripts:
-  build: 'printf "build-start %s\\n" "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/events"; if [ "$DISPAT_PACKAGE" = api ] && grep -q fail check; then exit 1; fi; sleep 0.12; printf "build-end %s\\n" "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/events"'
-  publish: 'printf "publish-start %s\\n" "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/events"; sleep 0.18; printf "publish-end %s\\n" "$DISPAT_PACKAGE" >> "$(git rev-parse --show-toplevel)/events"'
+  build: 'root=$(git rev-parse --show-toplevel); printf "build-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; case "$DISPAT_PACKAGE" in api) test -f "$root/.published/core" && test "$DISPAT_UPDATED_CORE_NEW_VERSION" = 1.5.0 && grep -q "go mod edit -require=example.invalid/core@v" Dockerfile && grep -q "example.invalid/core" main.go;; web) test -f "$root/.published/api" && test "$DISPAT_UPDATED_API_NEW_VERSION" = 0.8.3 && grep -q "FROM acme/api" Dockerfile && test -f webassets/index.html;; sdk) grep -q "workspace:\\*" package.json && test -f "$root/utils/package.json";; esac; if [ "$DISPAT_PACKAGE" = api ] && grep -q fail check; then exit 1; fi; sleep 0.12; printf "build-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events"'
+  publish: 'root=$(git rev-parse --show-toplevel); printf "publish-start %s\\n" "$DISPAT_PACKAGE" >> "$root/events"; sleep 0.18; mkdir -p "$root/.published"; touch "$root/.published/$DISPAT_PACKAGE"; printf "publish-end %s\\n" "$DISPAT_PACKAGE" >> "$root/events"'
 flow: {build: build, publish: publish}
 packages:
   core: {path: core, isBuildWaitingPublish: true}
-  api: {path: api, dependencies: [core]}
+  api: {path: api, dependencies: [core], isBuildWaitingPublish: true}
   utils: {path: utils}
   sdk: {path: sdk, dependencies: [utils]}
-  web: {path: web, dependencies: [api]}
+  web: {path: web, dependencies: [api], isBuildWaitingPublish: true}
   docs: {path: docs}
   mobile: {path: mobile}
 commit: {enabled: false}
@@ -99,7 +91,7 @@ github: {enabled: false}
         git(repo, "remote", "add", "origin", str(remote))
         git(repo, "push", "-u", "origin", "main")
 
-        (repo / "core/core.go").write_text("package core\n")
+        (repo / "core/core.go").write_text('package core\n\nconst Version = "1.5.0"\n')
         git(repo, "add", "core")
         git(repo, "commit", "-m", "feat(core)^^: add streaming api")
         (repo / "utils/package.json").write_text('{"name":"utils","version":"2.0.3","fixed":true}\n')
@@ -124,6 +116,8 @@ github: {enabled: false}
         assert_before(events, "build-end utils", "build-start sdk")
         assert_before(events, "build-start sdk", "publish-end utils")
         assert_before(events, "publish-end core", "build-start api")
+        if "build-start web" in events:
+            raise AssertionError(f"web built before api published in the failed run: {events!r}")
 
         first_summary = summary(reports(first_path))
         expected_first = {"published": 3, "failed": 1, "skipped": 1, "unchanged": 2}
@@ -141,6 +135,8 @@ github: {enabled: false}
             )
         if second.returncode != 0:
             raise AssertionError(f"second release exited {second.returncode}: {second.stderr}")
+        second_events = (repo / "events").read_text().splitlines()[len(events):]
+        assert_before(second_events, "publish-end api", "build-start web")
         second_items = reports(second_path)
         expected_second = {"published": 2, "failed": 0, "skipped": 0, "unchanged": 5}
         second_summary = summary(second_items)
@@ -160,7 +156,7 @@ github: {enabled: false}
         if not expected_tags.issubset(tags):
             raise AssertionError(f"missing release tags: {expected_tags - tags}")
 
-        print("verified independent providers, npm local build, Go publish wait, and catch-up recovery")
+        print("verified independent providers, npm local build, two publish-gated Docker consumers, and catch-up recovery")
 
 
 if __name__ == "__main__":

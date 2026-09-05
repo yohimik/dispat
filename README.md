@@ -83,9 +83,9 @@ $ dispat
   project and nuspec family, Dart, Ruby, Dockerfiles, and compose files. It also supports mobile platforms (Info.plist,
   project.pbxproj, Podfile, and .podspec on iOS; AndroidManifest.xml, Gradle build scripts, and version catalogs on
   Android) and game engines (Unity, Godot, Unreal, Defold, and O3DE), which keep their versions in files no package
-  manager understands. Set the per-[space](https://dispat.dev/concepts/) `isBuildWaitingPublish` option
-  to state whether a consumer's build needs its provider merely *built*, as node does, or already *published*, as
-  docker does. This schedules a four-level npm to docker chain correctly with no extra work.
+  manager understands. Set `isBuildWaitingPublish: true` on a provider package or [space](https://dispat.dev/configuration/spaces/)
+  when its consumers need the published artifact. A local npm workspace can build from source, while a Docker
+  `FROM` instruction needs its base image available in the registry. Dispat schedules those requirements in the same graph.
 - **No task cache, because there is nothing to cache.** Most monorepo tools make unchanged work cheap by running it and
   short-circuiting on a cache hit. This buys you cache keys, a remote cache to operate, invalidation rules, and a
   command to clear the cache when it gets one wrong. dispat computes which packages changed from git history and tags.

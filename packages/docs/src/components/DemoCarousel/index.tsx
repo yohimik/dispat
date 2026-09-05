@@ -86,7 +86,7 @@ const FEATURE_MEDIA = new Map<string, Media>([
       asset: 'demo-order',
       name: 'Releases the graph',
       label:
-        'The Go module core and npm package utils build and publish independently. The Go API is configured to wait for core’s published version. The npm SDK builds against its local workspace as soon as utils finishes building, while utils is still publishing. The web app follows the API. Five packages publish; docs and mobile remain unchanged.',
+        'The Go module core and npm package utils build and publish independently. The API Docker build imports core’s published Go module. Its derived web image uses FROM acme/api and waits for that image to publish. The providers core and api set isBuildWaitingPublish: true. The npm SDK builds against its local workspace as soon as utils finishes building, while utils is still publishing. Five packages publish; docs and mobile remain unchanged.',
     },
   ],
   [
@@ -292,7 +292,7 @@ const EXTRA_SLIDES: ExtraSlide[] = [
       asset: 'demo-math',
       name: 'Math',
       label:
-        'Two dispat status runs produce the same plan from the same inputs. The planner needs no persistent release cache or database and does not use the clock for version decisions. Recorded release tags make completed versions safe to skip on reruns, while an unrecorded publish needs reconciliation. A cursor then demonstrates the commit parser moving through the input once, without backtracking.',
+        'Two dispat status runs produce the same plan from the same inputs. The planner needs no persistent release cache or database and does not use the clock for version decisions. The formula release(s) = release(release(s)) describes repeated releases with unchanged inputs and recorded completion. An unrecorded publish needs reconciliation. A cursor then demonstrates the commit parser moving through the input once, without backtracking.',
     },
   },
   {
