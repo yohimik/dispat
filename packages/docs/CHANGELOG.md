@@ -1,5 +1,18 @@
 # Changelog
 
+## packages/docs/v1.8.1 (2026-09-05)
+
+### Fixes
+
+- preserve versioned evidence ([c89a2b0](https://github.com/yohimik/dispat/commit/c89a2b0b484cbb38fcf29c583b613681a98cb6ba)) (by yohimik)
+
+- stabilize landing demos ([d45d331](https://github.com/yohimik/dispat/commit/d45d331257cf85931765901a99d483a7cffa1d26)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.8.0 (2026-09-05)
 
 ### Features
