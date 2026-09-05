@@ -255,13 +255,12 @@ async function assertSelectionPolicy(page, carousel) {
     fail('transcript command is not selectable', selectedCommand);
   }
 
-  const logo = page.locator('img[class*="logo"]').first();
-  const logoPolicy = await logo.evaluate((node) => ({
-    draggable: node.getAttribute('draggable'),
-    wordmarkUserSelect: getComputedStyle(node.parentElement).userSelect,
-  }));
-  if (logoPolicy.draggable !== 'false' || logoPolicy.wordmarkUserSelect !== 'none') {
-    fail('landing logo/wordmark selection policy is missing', logoPolicy);
+  if (await page.locator('header[class*="hero"] img').count()) {
+    fail('the removed hero logo row is still present');
+  }
+  const brand = page.locator('.navbar__brand').first();
+  if (await brand.evaluate((node) => getComputedStyle(node).userSelect) !== 'none') {
+    fail('navbar brand selection policy is missing');
   }
 }
 
