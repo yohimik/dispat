@@ -36,7 +36,16 @@ packages/docs/build
 packages/docs/.docusaurus
 packages/docs/.cache-loader
 
-# The demo-rendering tooling: the site build plays the committed assets in
-# imgs/ and never runs Remotion, so its sources, dependencies and renders
-# have no business in the image.
-packages/docs/demo
+# The browser demo imports its fixtures and shared illustration components at
+# typecheck and build time. Keep those two source trees, but leave the separate
+# Remotion workspace, its 600MB dependency tree and rendered output outside the
+# context: the docs package supplies the browser's dependencies through its own
+# workspace install.
+packages/docs/demo/*
+!packages/docs/demo/fixtures
+!packages/docs/demo/fixtures/**
+!packages/docs/demo/illustration
+packages/docs/demo/illustration/*
+!packages/docs/demo/illustration/src
+!packages/docs/demo/illustration/src/**
+packages/docs/demo/illustration/src/out

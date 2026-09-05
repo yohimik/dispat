@@ -83,10 +83,10 @@ RUN pnpm --filter dispat-docs typecheck
 # without figures, which is fine for them and would not be fine for the site
 # people read.
 FROM source AS build
-ARG DOCS_VERSION
-ARG DOCS_REQUIRE_REPORT
-ARG DOCS_BENCH_PACKAGES
-ARG DOCS_EXPERIMENTS
+ARG DOCS_VERSION=""
+ARG DOCS_REQUIRE_REPORT=""
+ARG DOCS_BENCH_PACKAGES=""
+ARG DOCS_EXPERIMENTS=""
 ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
 # The per-package freshness check, before anything is built.
 #
