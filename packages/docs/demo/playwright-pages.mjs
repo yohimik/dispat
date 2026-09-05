@@ -11,7 +11,7 @@ const {chromium} = require('playwright');
 const base = process.env.DISPAT_DOCS_URL ?? 'http://127.0.0.1:3000';
 const output = process.env.DISPAT_PAGES_OUTPUT ?? 'output/playwright/pages-mobile';
 const widths = [320, 390, 768];
-const pages = ['/', '/getting-started', '/cli/run', '/go/ccme', '/1.7/getting-started'];
+const pages = ['/', '/getting-started', '/cli/run', '/go/ccme', '/1.7/getting-started', '/examples/terraform', '/next/examples/terraform'];
 
 await fs.mkdir(output, {recursive: true});
 const browser = await chromium.launch({headless: true});

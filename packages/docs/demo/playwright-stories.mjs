@@ -28,7 +28,7 @@ try {
       await deck.locator('[data-demo-scene-root]').waitFor();
       await deck.getByRole('button', {name: 'Loop the current slide'}).click();
       const ids = await deck.locator('[data-demo-feature]').evaluateAll((nodes) => nodes.map((node) => node.dataset.demoFeature));
-      assert.equal(ids.length, 18);
+      assert.equal(ids.length, 19);
       for (const id of ids.filter((_, index) => index % 3 === group)) {
         await deck.locator(`[data-demo-feature="${id}"]`).click();
         await deck.locator(`[data-slide-id="${id}"]`).waitFor();
@@ -68,5 +68,5 @@ try {
     } finally { await context.close(); }
   }));
   await fs.writeFile(path.join(output, 'results.json'), JSON.stringify(results, null, 2) + '\n');
-  console.log('all 18 stories recorded at 1x with terminal overflow checks');
+  console.log('all 19 stories recorded at 1x with terminal overflow checks');
 } finally { await browser.close(); }

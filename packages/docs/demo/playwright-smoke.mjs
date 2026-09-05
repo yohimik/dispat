@@ -11,7 +11,7 @@ const output = path.resolve(process.argv[3] ?? 'playwright-output');
 await fs.mkdir(output, {recursive: true});
 
 const browser = await chromium.launch({headless: true});
-const expectedSlides = 18;
+const expectedSlides = 19;
 const controlTolerance = 2;
 
 function fail(message, details) {

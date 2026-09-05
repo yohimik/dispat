@@ -10,7 +10,7 @@ const base = process.argv[2] ?? 'http://127.0.0.1:3000/';
 const output = path.resolve(process.argv[3] ?? 'output/playwright/mobile-scenes');
 await fs.mkdir(output, {recursive: true});
 
-const expectedSlides = 18;
+const expectedSlides = 19;
 const selectedScene = process.argv[4];
 const checkpoints = [0.1, 0.45, 0.8];
 const scenarios = [
@@ -98,6 +98,24 @@ async function inspectGeometry(deck, id, checkpoint) {
       const terminal = root.querySelector('[data-demo-terminal]');
       if (terminal && stage.getBoundingClientRect().bottom > terminal.getBoundingClientRect().top + tolerance) {
         failures.push(`${marker}: hook stage overlaps terminal`);
+      }
+    }
+
+    const edgeLabels = [...root.querySelectorAll('[data-demo-edge-label]')].filter((label) => {
+      if (!visible(label)) return false;
+      for (let element = label.parentElement; element && element !== root; element = element.parentElement) {
+        if (Number(getComputedStyle(element).opacity) <= 0.02) return false;
+      }
+      return true;
+    });
+    for (let left = 0; left < edgeLabels.length; left++) {
+      for (let right = left + 1; right < edgeLabels.length; right++) {
+        const a = edgeLabels[left].getBoundingClientRect();
+        const b = edgeLabels[right].getBoundingClientRect();
+        if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > tolerance
+            && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > tolerance) {
+          failures.push(`${marker}: edge labels overlap: ${edgeLabels[left].textContent?.trim()} / ${edgeLabels[right].textContent?.trim()}`);
+        }
       }
     }
 

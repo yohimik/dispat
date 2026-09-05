@@ -53,7 +53,7 @@ try {
 
   const buttons = carousel.locator('[data-demo-feature]');
   const count = await buttons.count();
-  if (count !== 18) throw new Error(`expected 18 scenes, found ${count}`);
+  if (count !== 19) throw new Error(`expected 19 scenes, found ${count}`);
   const first = await buttons.first().getAttribute('data-demo-feature');
   for (let index = 0; index < count; index += 1) {
     const button = buttons.nth(index);
@@ -83,7 +83,7 @@ try {
   if (resourceWarnings.length) throw new Error(`resource/autoplay console diagnostics: ${JSON.stringify(resourceWarnings)}`);
   await carousel.screenshot({path: path.join(output, 'resources-final.png')});
   await fs.writeFile(path.join(output, 'resources.json'), JSON.stringify({fontRequests, resources}, null, 2) + '\n');
-  console.log(`resource regression passed: 18 scenes, ${fontRequests.length} font requests, zero AudioContexts/audio elements`);
+  console.log(`resource regression passed: 19 scenes, ${fontRequests.length} font requests, zero AudioContexts/audio elements`);
   await context.close();
 } finally {
   await browser.close();

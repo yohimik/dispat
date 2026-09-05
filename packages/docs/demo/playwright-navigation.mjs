@@ -37,6 +37,22 @@ try {
   assert.equal(await deck.locator('[data-slide-id]').getAttribute('data-slide-id'), original);
   assert.equal(await originalScene.evaluate((node) => node.isConnected), true, 'old player was unmounted while loading');
   assert.equal(await deck.getByText('Loading interactive demo…', {exact: true}).count(), 0);
+  const loading = deck.getByRole('status');
+  await loading.waitFor();
+  assert.match(await loading.innerText(), /Loading .*current demo remains available/i);
+  const speed = deck.getByRole('button', {name: /Playback speed/});
+  const speedBefore = await speed.innerText(); await speed.click();
+  assert.notEqual(await speed.innerText(), speedBefore, 'controls stopped responding while a scene loaded');
+  await deck.getByRole('button', {name: 'Cancel'}).click();
+  assert.equal(await deck.getByRole('status').count(), 0, 'cancel left pending feedback visible');
+  assert.equal(await deck.locator('[data-slide-id]').getAttribute('data-slide-id'), original, 'cancel replaced the current slide');
+  const cancelledRequests = pending.splice(0);
+  await Promise.all(cancelledRequests.map((release) => release()));
+  await page.waitForTimeout(300);
+  assert.equal(await deck.locator('[data-slide-id]').getAttribute('data-slide-id'), original, 'cancelled import completion replaced the current slide');
+
+  await deck.locator('[data-demo-feature="glue"]').click();
+  await waitForRequest(1);
   const firstRequests = pending.splice(0);
   await deck.locator('[data-demo-feature="for"]').click();
   await waitForRequest(1);
@@ -100,7 +116,7 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log('navigation passed: retained lazy scene, latest selection, failure/retry, shared category hover and keyboard behavior in both themes and versions');
+  console.log('navigation passed: visible cancellable loading, responsive controls, logical cancel, latest selection, failure/retry, shared category hover and keyboard behavior');
 } finally {
   await context.close();
   await browser.close();
