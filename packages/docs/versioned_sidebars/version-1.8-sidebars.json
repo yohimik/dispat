@@ -1,0 +1,586 @@
+{
+  "docs": [
+    "getting-started",
+    "concepts",
+    {
+      "type": "doc",
+      "id": "comparison",
+      "label": "Beside other release tools"
+    },
+    {
+      "type": "doc",
+      "id": "monorepo",
+      "label": "One repository or many"
+    },
+    {
+      "type": "doc",
+      "id": "control-repository",
+      "label": "A control repository"
+    },
+    {
+      "type": "category",
+      "label": "Examples",
+      "collapsed": true,
+      "link": {
+        "type": "doc",
+        "id": "examples/README"
+      },
+      "items": [
+        {
+          "type": "doc",
+          "id": "examples/npm",
+          "label": "An npm monorepo"
+        },
+        {
+          "type": "category",
+          "label": "Ecosystem by ecosystem",
+          "collapsed": true,
+          "items": [
+            {
+              "type": "doc",
+              "id": "examples/pnpm",
+              "label": "A pnpm workspace"
+            },
+            {
+              "type": "doc",
+              "id": "examples/go",
+              "label": "Go modules"
+            },
+            {
+              "type": "doc",
+              "id": "examples/rust",
+              "label": "A Cargo workspace"
+            },
+            {
+              "type": "doc",
+              "id": "examples/python",
+              "label": "A Python monorepo"
+            },
+            {
+              "type": "doc",
+              "id": "examples/java",
+              "label": "Maven modules"
+            },
+            {
+              "type": "doc",
+              "id": "examples/gradle",
+              "label": "Gradle and its catalog"
+            },
+            {
+              "type": "doc",
+              "id": "examples/dotnet",
+              "label": ".NET packages"
+            },
+            {
+              "type": "doc",
+              "id": "examples/php",
+              "label": "Composer packages"
+            },
+            {
+              "type": "doc",
+              "id": "examples/ruby",
+              "label": "Ruby gems"
+            },
+            {
+              "type": "doc",
+              "id": "examples/flutter",
+              "label": "Flutter and Dart"
+            },
+            {
+              "type": "doc",
+              "id": "examples/apple",
+              "label": "iOS and CocoaPods"
+            },
+            {
+              "type": "doc",
+              "id": "examples/android",
+              "label": "An Android app"
+            },
+            {
+              "type": "doc",
+              "id": "examples/docker",
+              "label": "A Docker image chain"
+            },
+            {
+              "type": "doc",
+              "id": "examples/unity",
+              "label": "Unity"
+            },
+            {
+              "type": "doc",
+              "id": "examples/godot",
+              "label": "Godot"
+            },
+            {
+              "type": "doc",
+              "id": "examples/unreal",
+              "label": "Unreal Engine"
+            }
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Game development",
+          "collapsed": true,
+          "items": [
+            {
+              "type": "doc",
+              "id": "examples/game",
+              "label": "One package to many"
+            },
+            {
+              "type": "doc",
+              "id": "examples/steam",
+              "label": "Publishing to Steam"
+            },
+            {
+              "type": "doc",
+              "id": "examples/itch",
+              "label": "Publishing to itch.io"
+            }
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Shipping artifacts",
+          "collapsed": true,
+          "items": [
+            {
+              "type": "doc",
+              "id": "examples/binaries",
+              "label": "Cross-platform binaries"
+            },
+            {
+              "type": "doc",
+              "id": "examples/helm",
+              "label": "Helm charts"
+            },
+            {
+              "type": "doc",
+              "id": "examples/pages",
+              "label": "A site deploy"
+            }
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Shaping the repository",
+          "collapsed": true,
+          "items": [
+            {
+              "type": "doc",
+              "id": "examples/single-package",
+              "label": "A single package"
+            },
+            {
+              "type": "doc",
+              "id": "examples/adopting",
+              "label": "Adopting dispat"
+            },
+            {
+              "type": "doc",
+              "id": "examples/layout",
+              "label": "Config beside the code"
+            },
+            {
+              "type": "doc",
+              "id": "examples/mixed",
+              "label": "npm and Docker in one graph"
+            },
+            {
+              "type": "doc",
+              "id": "examples/login",
+              "label": "Registry login"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Editing the monorepo",
+      "collapsed": true,
+      "items": [
+        {
+          "type": "doc",
+          "id": "editing/manifests",
+          "label": "Manifest tools"
+        },
+        {
+          "type": "doc",
+          "id": "editing/autowriter",
+          "label": "Editing across the monorepo"
+        },
+        {
+          "type": "doc",
+          "id": "editing/autoreplacer",
+          "label": "Replacing across the monorepo"
+        },
+        {
+          "type": "doc",
+          "id": "editing/replacer",
+          "label": "The replacer"
+        }
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Releasing",
+      "collapsed": true,
+      "items": [
+        {
+          "type": "doc",
+          "id": "reference/releasing/versioning",
+          "label": "Shared versions"
+        },
+        {
+          "type": "doc",
+          "id": "reference/releasing/steps",
+          "label": "Release steps"
+        },
+        {
+          "type": "doc",
+          "id": "reference/releasing/partial-releases",
+          "label": "Partial releases"
+        },
+        {
+          "type": "doc",
+          "id": "reference/releasing/prerelease-branches",
+          "label": "Prerelease branches"
+        },
+        {
+          "type": "doc",
+          "id": "reference/releasing/release-lock",
+          "label": "The release lock"
+        },
+        {
+          "type": "doc",
+          "id": "reference/releasing/recovery",
+          "label": "Recovering from a failed run"
+        }
+      ]
+    },
+    {
+      "type": "category",
+      "label": "dispat in CI",
+      "collapsed": true,
+      "items": [
+        {
+          "type": "doc",
+          "id": "reference/ci",
+          "label": "Getting dispat onto a runner"
+        },
+        {
+          "type": "doc",
+          "id": "reference/ci-providers",
+          "label": "Other CI providers"
+        },
+        {
+          "type": "doc",
+          "id": "reference/pipelines",
+          "label": "Pipeline patterns"
+        }
+      ]
+    },
+    {
+      "type": "doc",
+      "id": "reference/corrections",
+      "label": "Correcting a record"
+    },
+    {
+      "type": "doc",
+      "id": "reference/self-update",
+      "label": "Updating dispat"
+    },
+    {
+      "type": "doc",
+      "id": "faq",
+      "label": "FAQ"
+    },
+    {
+      "type": "category",
+      "label": "Internals",
+      "collapsed": true,
+      "items": [
+        {
+          "type": "doc",
+          "id": "internals/architecture",
+          "label": "Architecture"
+        },
+        {
+          "type": "doc",
+          "id": "internals/tinygo",
+          "label": "The TinyGo spike"
+        },
+        {
+          "type": "doc",
+          "id": "internals/announce",
+          "label": "The release announcement"
+        },
+        {
+          "type": "doc",
+          "id": "internals/coverage",
+          "label": "Test coverage"
+        },
+        {
+          "type": "doc",
+          "id": "internals/test-results",
+          "label": "Test results"
+        },
+        {
+          "type": "doc",
+          "id": "internals/benchmarks",
+          "label": "Benchmarks"
+        },
+        {
+          "type": "doc",
+          "id": "internals/experiments",
+          "label": "Release experiments"
+        }
+      ]
+    }
+  ],
+  "api": [
+    "api",
+    {
+      "type": "category",
+      "label": "CLI",
+      "collapsed": true,
+      "link": {
+        "type": "doc",
+        "id": "cli/README"
+      },
+      "items": [
+        {
+          "type": "doc",
+          "id": "cli/release",
+          "label": "release"
+        },
+        {
+          "type": "doc",
+          "id": "cli/status",
+          "label": "status"
+        },
+        {
+          "type": "doc",
+          "id": "cli/run",
+          "label": "run"
+        },
+        {
+          "type": "doc",
+          "id": "cli/init",
+          "label": "init"
+        },
+        {
+          "type": "doc",
+          "id": "cli/preview",
+          "label": "preview"
+        },
+        {
+          "type": "doc",
+          "id": "cli/changelog",
+          "label": "changelog"
+        },
+        {
+          "type": "doc",
+          "id": "cli/autoversion",
+          "label": "autoversion"
+        },
+        {
+          "type": "doc",
+          "id": "cli/autowriter",
+          "label": "autowriter"
+        },
+        {
+          "type": "doc",
+          "id": "cli/autoreplacer",
+          "label": "autoreplacer"
+        },
+        {
+          "type": "doc",
+          "id": "cli/commit",
+          "label": "commit"
+        },
+        {
+          "type": "doc",
+          "id": "cli/github",
+          "label": "github"
+        },
+        {
+          "type": "doc",
+          "id": "cli/trigger",
+          "label": "trigger"
+        },
+        {
+          "type": "doc",
+          "id": "cli/compute",
+          "label": "compute"
+        },
+        {
+          "type": "doc",
+          "id": "cli/if",
+          "label": "if"
+        },
+        {
+          "type": "doc",
+          "id": "cli/for",
+          "label": "for"
+        },
+        {
+          "type": "doc",
+          "id": "cli/exec",
+          "label": "exec"
+        },
+        {
+          "type": "doc",
+          "id": "cli/locations",
+          "label": "Naming a place"
+        },
+        {
+          "type": "doc",
+          "id": "cli/self-update",
+          "label": "self-update"
+        },
+        {
+          "type": "doc",
+          "id": "cli/install",
+          "label": "install"
+        },
+        {
+          "type": "doc",
+          "id": "cli/scanner",
+          "label": "scanner"
+        },
+        {
+          "type": "doc",
+          "id": "cli/writer",
+          "label": "writer"
+        },
+        {
+          "type": "doc",
+          "id": "cli/replacer",
+          "label": "replacer"
+        }
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Configuration",
+      "collapsed": true,
+      "link": {
+        "type": "doc",
+        "id": "configuration/README"
+      },
+      "items": [
+        "configuration/spaces",
+        "configuration/packages",
+        "configuration/change-scope",
+        "configuration/versions",
+        "configuration/alias-tags",
+        "configuration/records",
+        "configuration/parser",
+        {
+          "type": "doc",
+          "id": "configuration/dependencies",
+          "label": "dependencies"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/autoversion",
+          "label": "autoVersion"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/scripts",
+          "label": "Script sequences"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/run-hooks",
+          "label": "Run-level hooks"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/webhooks",
+          "label": "Webhooks"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/env",
+          "label": "Static env"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/dotenv",
+          "label": "The .env file"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/custom",
+          "label": "custom"
+        },
+        {
+          "type": "doc",
+          "id": "configuration/refs",
+          "label": "Splitting the file ($ref)"
+        }
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Go packages",
+      "collapsed": true,
+      "link": {
+        "type": "doc",
+        "id": "go/README"
+      },
+      "items": [
+        {
+          "type": "doc",
+          "id": "go/ccme",
+          "label": "ccme"
+        },
+        {
+          "type": "doc",
+          "id": "go/config",
+          "label": "config"
+        },
+        {
+          "type": "doc",
+          "id": "go/scanner",
+          "label": "scanner"
+        },
+        {
+          "type": "doc",
+          "id": "go/writer",
+          "label": "writer"
+        },
+        {
+          "type": "doc",
+          "id": "go/manifest",
+          "label": "manifest"
+        },
+        {
+          "type": "doc",
+          "id": "go/models",
+          "label": "models"
+        }
+      ]
+    },
+    {
+      "type": "doc",
+      "id": "reference/commits",
+      "label": "Commit messages"
+    },
+    {
+      "type": "doc",
+      "id": "reference/environment",
+      "label": "Script environment"
+    },
+    {
+      "type": "doc",
+      "id": "reference/plan-errors",
+      "label": "Diagnostic codes"
+    }
+  ]
+}

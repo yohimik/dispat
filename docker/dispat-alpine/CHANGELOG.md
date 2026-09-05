@@ -1,5 +1,12 @@
 # Changelog
 
+## docker/dispat-alpine/v1.8.0 (2026-09-05)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.8.0): 1.7.2 -> 1.8.0
+
+
 ## docker/dispat-alpine/v1.7.2 (2026-09-03)
 
 ### Dependencies

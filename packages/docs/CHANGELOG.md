@@ -1,5 +1,25 @@
 # Changelog
 
+## packages/docs/v1.8.0 (2026-09-05)
+
+### Features
+
+- refresh guides and live demos ([3419488](https://github.com/yohimik/dispat/commit/3419488c1ef374518858386ee94e8060bd354b83)) (by yohimik)
+
+### Fixes
+
+- include live demo build inputs ([1efa6a4](https://github.com/yohimik/dispat/commit/1efa6a404dab623178cfab0668d2a4a48a67ef4b)) (by yohimik)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.8.0): 1.7.2 -> 1.8.0
+- [dispat-alpine](https://github.com/yohimik/dispat/releases/tag/docker/dispat-alpine/v1.8.0): 1.7.2 -> 1.8.0
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.7.3 (2026-09-04)
 
 ### Fixes
