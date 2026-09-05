@@ -1,7 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {colors, font} from './theme';
-import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv, CapSeg} from './components';
+import {SceneTerminal, TermRow, cmdRow, outRow, typingFrames, INF, msg, kv, CapSeg} from './components';
 
 // The release-control claim, one decision per beat: a commit is typed into
 // the scene's terminal and the package card's next release answers it. An
@@ -26,6 +26,8 @@ type Beat = {
   /** Badge on the card while this beat holds. */
   state: {text: string; color: string};
   held?: boolean;
+  release?: boolean;
+  syntax: string;
   caption: CapSeg[];
 };
 
@@ -35,64 +37,96 @@ const BEATS: Beat[] = [
     from: '1.4.2',
     to: '1.5.0',
     state: {text: 'minor', color: colors.green},
+    syntax: 'feat(core)  → scope core · minor bump',
     caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('version', '"1.4.2 -> 1.5.0"')],
   },
   {
     cmd: 'git commit -m "feat(core)%beta: try it out"',
-    from: '1.4.2',
-    to: '1.5.0-beta.0',
+    from: '1.5.0',
+    to: '1.6.0-beta.0',
     state: {text: 'beta train', color: colors.yellow},
-    caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('channel', 'beta'), ...kv('version', '"1.5.0-beta.0"')],
+    syntax: '%beta  → enter the beta channel',
+    caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('channel', 'beta'), ...kv('version', '"1.5.0 -> 1.6.0-beta.0"')],
   },
   {
     cmd: 'git commit -m "fix(core)%beta: tighten retries"',
-    from: '1.5.0-beta.0',
-    to: '1.5.0-beta.1',
+    from: '1.6.0-beta.0',
+    to: '1.6.0-beta.1',
     state: {text: 'beta train', color: colors.yellow},
-    caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('channel', 'beta'), ...kv('version', '"1.5.0-beta.1"')],
+    syntax: '%beta  → continue the same train',
+    caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('channel', 'beta'), ...kv('version', '"1.6.0-beta.0 -> 1.6.0-beta.1"')],
   },
   {
     // Mid-train, a breaking change: the next prerelease is computed over the
     // whole train, so the train itself moves to the next major.
     cmd: 'git commit -m "feat(core)%beta!: drop the v1 wire format"',
-    from: '1.5.0-beta.1',
+    from: '1.6.0-beta.1',
     to: '2.0.0-beta.0',
     state: {text: '! train moved', color: colors.red},
+    syntax: '!  → breaking change · recompute the train',
     caption: [...INF, msg('● changed'), ...kv('bump', 'major'), ...kv('channel', 'beta'), ...kv('package', 'core'), ...kv('version', '"2.0.0-beta.0"')],
   },
   {
-    cmd: 'git commit -m "release(core)%beta>stable:"',
+    cmd: 'git commit -m "release(core)%beta>stable: graduate"',
     from: '2.0.0-beta.0',
     to: '2.0.0',
     state: {text: 'graduated', color: colors.green},
-    caption: [...INF, msg('graduated'), ...kv('package', 'core'), ...kv('channel', '"beta -> stable"'), ...kv('version', '2.0.0')],
+    syntax: '%beta>stable  → graduate beta to stable',
+    caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('channel', 'stable'), ...kv('version', '"2.0.0-beta.0 -> 2.0.0"')],
   },
   {
-    cmd: 'git commit -m "chore(core): pause releases" -m "Release-As: none"',
+    cmd: 'git commit -m "feat(core): queue dashboard" -m "Release-As: none"',
     from: '2.0.0',
     to: 'held',
-    state: {text: '⊘ held', color: colors.dim},
+    state: {text: '‖ held', color: colors.dim},
     held: true,
-    caption: [...INF, msg('⊘ held'), ...kv('package', 'core'), ...kv('reason', '"Release-As: none"')],
+    release: false,
+    syntax: 'Release-As: none  → hold this package',
+    caption: [...INF, msg('‖ held (Release-As: none)'), ...kv('package', 'core'), ...kv('version', '"2.0.0 -> 2.1.0"')],
   },
   {
-    cmd: 'git commit -m "chore(core): resume releases" -m "Release-As: auto"',
+    cmd: 'git commit --allow-empty -m "release(core): resume" -m "Release-As: auto"',
     from: 'held',
-    to: '2.0.0',
+    to: '2.1.0',
     state: {text: 'resumed', color: colors.green},
-    caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('version', '"1.4.2 -> 2.0.0"')],
+    syntax: 'Release-As: auto  → resume computed releases',
+    caption: [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('version', '"2.0.0 -> 2.1.0"')],
   },
 ];
 
 const INTRO = 16;
-const BEAT = 68;
-export const CONTROL_DURATION = INTRO + BEATS.length * BEAT + 20;
+type Schedule = {start: number; status: number; answer: number; run?: number; build?: number; published?: number; end: number};
+const schedules: Schedule[] = [];
+let cursor = INTRO;
+for (const beat of BEATS) {
+  const start = cursor + 2;
+  const status = start + typingFrames(beat.cmd) + 10;
+  const answer = status + typingFrames('dispat status') + 8;
+  if (beat.release === false) {
+    schedules.push({start, status, answer, end: answer + 36});
+  } else {
+    const run = answer + 18;
+    const build = run + typingFrames('dispat') + 8;
+    const published = build + 32;
+    schedules.push({start, status, answer, run, build, published, end: published + 24});
+  }
+  cursor = schedules.at(-1)!.end;
+}
+export const CONTROL_DURATION = cursor + 20;
 
-// The scene's terminal: each beat is one commit typed fast (they are long
-// lines) and the pretty log's answer, printed the moment the card answers.
+// Every directive is typed at the shared terminal pace; the answer gets a
+// short reading beat after the complete commit.
 const rows: TermRow[] = BEATS.flatMap((beat, i) => {
-  const start = INTRO + i * BEAT;
-  return [cmdRow(start + 2, beat.cmd, 0.55), outRow(start + 52, beat.caption)];
+  const at = schedules[i];
+  const result: TermRow[] = [cmdRow(at.start, beat.cmd), cmdRow(at.status, 'dispat status'), outRow(at.answer, beat.caption)];
+  if (at.run !== undefined && at.build !== undefined && at.published !== undefined) {
+    result.push(
+      cmdRow(at.run, 'dispat'),
+      outRow(at.build, [...INF, msg('build started'), ...kv('package', 'core'), ...kv('stage', 'build'), ...kv('version', beat.to)]),
+      outRow(at.published, [...INF, msg('published'), ...kv('package', 'core'), ...kv('tag', `core@${beat.to}`)]),
+    );
+  }
+  return result;
 });
 
 export const Control: React.FC = () => {
@@ -105,12 +139,13 @@ export const Control: React.FC = () => {
     });
   const cardIn = interpolate(f, [6, 18], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
 
-  const active = Math.min(BEATS.length - 1, Math.max(0, Math.floor((f - INTRO) / BEAT)));
+  const nextSchedule = schedules.findIndex((schedule) => f < schedule.end);
+  const active = nextSchedule === -1 ? BEATS.length - 1 : nextSchedule;
   const beat = BEATS[active];
-  const b = f - (INTRO + active * BEAT);
+  const schedule = schedules[active];
   // The answer arrives after the commit is typed: terminal first, then the
   // card, then the log line confirming what the card already shows.
-  const answer = interpolate(b, [40, 48], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
+  const answer = interpolate(f, [schedule.answer - 4, schedule.answer + 2], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
   const held = beat.held ? answer : 0;
 
   return (
@@ -165,6 +200,7 @@ export const Control: React.FC = () => {
             {beat.to}
           </span>
         </div>
+        <div style={{marginTop: 18, fontSize: 21, color: beat.state.color, opacity: answer}}>{beat.syntax}</div>
       </div>
       </div>
     </AbsoluteFill>

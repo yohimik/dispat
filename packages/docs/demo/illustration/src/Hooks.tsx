@@ -1,7 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
-import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
+import {SceneTerminal, TermRow, cmdRow, outRow, DBG, INF, msg, kv} from './components';
 
 // The hooks claim, twenty seconds at Root.tsx's twenty frames per second:
 // the release flow is the same everywhere, version, build, login, publish,
@@ -84,14 +84,14 @@ const dim = (t: string) => ({text: t, color: colors.dim});
 
 const rows: TermRow[] = [
   cmdRow(8, 'cat dispat.yaml'),
-  outRow(26, [{text: 'packages.core.flow:     ', color: colors.cyan}, {text: '{ beforeBuild: lint, beforePublish: print-env }'}]),
-  outRow(30, [{text: 'packages.utils.flow:    ', color: colors.cyan}, {text: '{ beforePublish: verify-sbom }'}]),
-  outRow(34, [{text: 'packages.api.flow:      ', color: colors.cyan}, {text: '{ beforeVersion: check-migrations, announce: notify-slack }'}]),
+  outRow(38, [{text: 'packages.core.flow:     ', color: colors.cyan}, {text: '{ beforeBuild: lint, beforePublish: print-env }'}]),
+  outRow(42, [{text: 'packages.utils.flow:    ', color: colors.cyan}, {text: '{ beforePublish: verify-sbom }'}]),
+  outRow(46, [{text: 'packages.api.flow:      ', color: colors.cyan}, {text: '{ beforeVersion: check-migrations, announce: notify-slack }'}]),
   cmdRow(58, 'dispat'),
-  outRow(106, [...INF, msg('hook'), ...kv('package', 'api'), ...kv('stage', 'beforeVersion'), ...kv('script', 'check-migrations')]),
-  outRow(134, [...INF, msg('hook'), ...kv('package', 'core'), ...kv('stage', 'beforeBuild'), ...kv('script', 'lint')]),
-  outRow(202, [...INF, msg('login'), ...kv('space', 'libs'), ...kv('stage', 'login')]),
-  outRow(214, [...INF, msg('login'), ...kv('space', 'services'), ...kv('stage', 'login')]),
+  outRow(106, [...DBG, msg('hook started'), ...kv('hook', 'beforeVersion'), ...kv('package', 'api'), ...kv('stage', 'version')]),
+  outRow(134, [...DBG, msg('hook started'), ...kv('hook', 'beforeBuild'), ...kv('package', 'core'), ...kv('stage', 'build')]),
+  outRow(202, [...INF, msg('login started'), ...kv('space', 'libs'), ...kv('stage', 'login')]),
+  outRow(214, [...INF, msg('login started'), ...kv('space', 'services'), ...kv('stage', 'login')]),
   outRow(246, [dim('print-env  '), {text: 'DISPAT_STAGE=beforePublish DISPAT_PACKAGE=core DISPAT_SPACE=libs', color: colors.cyan}]),
   outRow(254, [dim('print-env  '), {text: 'DISPAT_OLD_VERSION=1.4.2 DISPAT_NEW_VERSION=1.5.0 DISPAT_TAG=core@1.5.0', color: colors.cyan}]),
   outRow(306, [...INF, msg('published'), ...kv('package', 'core'), ...kv('tag', 'core@1.5.0')]),

@@ -3,7 +3,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
 
-// The single-package claim, twenty seconds at Root.tsx's twenty frames per
+// The single-package claim, nineteen seconds at Root.tsx's twenty frames per
 // second: no monorepo required. One standalone `packages` entry pointing at
 // a folder is the whole setup, and the session is the documentation's own:
 // a scoped commit, the status line it produces, and a release that leaves a
@@ -17,12 +17,12 @@ const bar = (frame: number, a: number, b: number) =>
   interpolate(frame, [a, b], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
 
 const rows: TermRow[] = [
-  cmdRow(8, 'git commit -m "feat(app): first version"', 0.8),
-  cmdRow(52, 'dispat status'),
-  outRow(82, [...INF, msg('● changed'), ...kv('bump', 'minor'), ...kv('ownCommits', '1'), ...kv('package', 'app'), ...kv('reason', 'direct'), ...kv('version', '"0.0.0 -> 0.1.0"')]),
-  outRow(94, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '1'), ...kv('releasing', '1')]),
-  cmdRow(116, 'dispat'),
-  outRow(140, [...INF, msg('build started'), ...kv('package', 'app'), ...kv('stage', 'build'), ...kv('version', '0.1.0')]),
+  cmdRow(8, 'git commit -m "feat(app): first version"'),
+  cmdRow(88, 'dispat status'),
+  outRow(115, [...INF, msg('● changed'), ...kv('bump', 'minor'), ...kv('ownCommits', '1'), ...kv('package', 'app'), ...kv('reason', 'direct'), ...kv('version', '"0.0.0 -> 0.1.0"')]),
+  outRow(127, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '1'), ...kv('releasing', '1')]),
+  cmdRow(150, 'dispat'),
+  outRow(170, [...INF, msg('build started'), ...kv('package', 'app'), ...kv('stage', 'build'), ...kv('version', '0.1.0')]),
   outRow(212, [...INF, msg('published'), ...kv('package', 'app'), ...kv('tag', 'app@0.1.0'), ...kv('version', '0.1.0')]),
   outRow(236, [...INF, msg('changelog written'), ...kv('package', 'app'), ...kv('file', 'CHANGELOG.md')]),
   outRow(258, [...INF, msg('github release created'), ...kv('tag', 'app@0.1.0')]),
@@ -31,10 +31,10 @@ const rows: TermRow[] = [
 
 /** What the card is doing, keyed to the session above. */
 function state(f: number): {label: string; color: string; progress?: number} {
-  if (f < 42) return {label: '', color: colors.faint};
-  if (f < 84) return {label: '● changed', color: colors.green};
-  if (f < 140) return {label: '● changed', color: colors.green};
-  if (f < 208) return {label: 'build', color: colors.cyan, progress: bar(f, 140, 206)};
+  if (f < 70) return {label: '', color: colors.faint};
+  if (f < 115) return {label: '● changed', color: colors.green};
+  if (f < 170) return {label: '● changed', color: colors.green};
+  if (f < 208) return {label: 'build', color: colors.cyan, progress: bar(f, 170, 206)};
   return {label: '✓ published', color: colors.green};
 }
 
@@ -44,12 +44,12 @@ const RECORDS: Array<{at: number; text: string}> = [
   {at: 262, text: 'GitHub release'},
 ];
 
-export const SINGLE_DURATION = 348;
+export const SINGLE_DURATION = 380;
 
 export const Single: React.FC = () => {
   const f = useCurrentFrame();
   const s = state(f);
-  const changed = f >= 42;
+  const changed = f >= 70;
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [SINGLE_DURATION - 10, SINGLE_DURATION - 2], [1, 0], {
@@ -111,7 +111,7 @@ export const Single: React.FC = () => {
         <div style={{marginTop: 12, fontSize: 21, color: colors.dim}}>src/</div>
         <div style={{marginTop: 10, fontSize: 30}}>
           <span style={{color: changed ? colors.dim : colors.fg}}>0.0.0</span>
-          {f > 84 && (
+          {f > 115 && (
             <>
               <span style={{color: colors.dim}}>{' -> '}</span>
               <span style={{color: colors.green, fontWeight: 700}}>0.1.0</span>

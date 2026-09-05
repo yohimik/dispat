@@ -5,6 +5,7 @@ import {Blast, BLAST_DURATION} from './Blast';
 import {Compute, COMPUTE_DURATION} from './Compute';
 import {Control, CONTROL_DURATION} from './Control';
 import {Glue, GLUE_DURATION} from './Glue';
+import {For, FOR_DURATION} from './For';
 import {Hooks, HOOKS_DURATION} from './Hooks';
 import {Lock, LOCK_DURATION} from './Lock';
 import {Math_, MATH_DURATION} from './Math';
@@ -41,6 +42,7 @@ export const Root: React.FC = () => (
     <Composition id="Hooks" component={Hooks} durationInFrames={HOOKS_DURATION} {...SIZE} />
     <Composition id="Polyrepo" component={Polyrepo} durationInFrames={POLYREPO_DURATION} {...SIZE} />
     <Composition id="Lock" component={Lock} durationInFrames={LOCK_DURATION} {...SIZE} />
+    <Composition id="For" component={For} durationInFrames={FOR_DURATION} {...SIZE} />
     <Composition id="Glue" component={Glue} durationInFrames={GLUE_DURATION} {...SIZE} />
     <Composition id="Math" component={Math_} durationInFrames={MATH_DURATION} {...SIZE} />
     <Composition id="Progress" component={Progress} durationInFrames={PROGRESS_DURATION} {...SIZE} />

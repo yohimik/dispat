@@ -1,14 +1,13 @@
 # docs
 
-Open the documentation site at <https://dispat.dev/>. This Docusaurus project is the only Node package in
-the repository. Everything else is Go.
+Open the documentation site at <https://dispat.dev/>. This Docusaurus project contains the site and its live demo player. The CLI and libraries are written in Go.
 
 The site is a released package. dispat discovers it as a folder of the `packages` space declared in the root
 [`dispat.yaml`](../../dispat.yaml), and everything it says about itself lives in [`dispat.yaml`](./dispat.yaml) here.
 dispat ships it through a release run just like the binaries.
 
-Edit the pages in [`docs/`](./docs). They are plain markdown with **no frontmatter**, so they read correctly on GitHub.
-Ordering and labels live in [`sidebars.ts`](./sidebars.ts).
+Edit the pages in [`docs/`](./docs). They use Markdown, with optional frontmatter for page metadata.
+Ordering and navigation labels live in [`sidebars.ts`](./sidebars.ts).
 
 The Docusaurus docs plugin falls back to the opening paragraph for each page's `<meta name="description">`
 (`frontMatter.description ?? excerpt`). The landing page is [`src/pages/index.tsx`](./src/pages/index.tsx). The shared

@@ -15,13 +15,12 @@ const bar = (frame: number, a: number, b: number) =>
 const rows: TermRow[] = [
   cmdRow(18, 'dispat'),
   outRow(55, [{text: '# operator note: publish response lost before its tag was recorded', color: colors.yellow}]),
-  cmdRow(204, 'dispat status'),
-  outRow(242, [{text: '# operator checks the destination before deciding whether to retry', color: colors.cyan}]),
-  outRow(274, [{text: '# confirmed tags remove recorded work from the next plan', color: colors.dim}]),
-  cmdRow(302, 'dispat'),
+  cmdRow(204, 'npm view @acme/api@1.5.0 version'),
+  outRow(270, [{text: '1.5.0  # destination confirms the publish landed', color: colors.cyan}]),
+  outRow(298, [{text: '# record/reconcile that result before any retry', color: colors.dim}]),
 ];
 
-export const PROGRESS_DURATION = 400;
+export const PROGRESS_DURATION = 380;
 
 const Card: React.FC<{
   active: number;

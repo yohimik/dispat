@@ -1,0 +1,11 @@
+{
+  "command": "dispat compute",
+  "writeCommand": "dispat compute --write",
+  "previewContains": [
+    "+ add     web -> core (dependencies)",
+    "packages/web/package.json dependencies \"@acme/core\": \"workspace:*\"",
+    "+ initial core 1.4.2",
+    "+ initial web 2.1.0"
+  ],
+  "writeContains": "applied 3 change(s)"
+}

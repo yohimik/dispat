@@ -3,7 +3,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, WRN, msg, kv} from './components';
 
-// The steps-as-commands claim, twenty-one seconds at Root.tsx's twenty
+// The steps-as-commands claim, twenty-two seconds at Root.tsx's twenty
 // frames per second: the release flow is the same everywhere, but each
 // package orders its own step set inside it, so the strip is drawn INSIDE
 // each package's row. core takes the release's default, publish first and
@@ -90,11 +90,11 @@ const rows: TermRow[] = [
   outRow(260, [...INF, msg('github release'), ...kv('package', 'core'), ...kv('by', 'release')]),
   outRow(282, [...INF, msg('done'), ...kv('published', '3'), ...kv('failed', '0')]),
   cmdRow(312, 'dispat changelog -p core'),
-  outRow(342, [...WRN, msg('W226'), ...kv('package', 'core'), ...kv('reason', '"CHANGELOG.md already has the entry for core@1.5.0"')]),
-  outRow(360, [{text: '# every step is also a command; run alone, it finds the work done', color: colors.dim}]),
+  outRow(356, [...WRN, msg('W226'), ...kv('package', 'core'), ...kv('reason', '"CHANGELOG.md already has the entry for core@1.5.0"')]),
+  outRow(378, [{text: '# every step is also a command; run alone, it finds the work done', color: colors.dim}]),
 ];
 
-export const TERMINAL_DURATION = 424;
+export const TERMINAL_DURATION = 442;
 
 const BLOCK_W = 246;
 

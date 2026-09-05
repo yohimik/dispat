@@ -22,20 +22,19 @@ const bar = (frame: number, a: number, b: number) =>
   interpolate(frame, [a, b], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'});
 
 const rows: TermRow[] = [
-  cmdRow(10, "dispat if 'ENV=prod' --then 'deploy prod' --else 'deploy stage'", 0.7),
-  outRow(66, [{text: 'ENV=prod holds: ', color: colors.dim}, {text: 'deploy prod', color: colors.green, weight: 700}]),
-  outRow(76, [{text: 'deploying to prod', color: colors.dim}]),
-  cmdRow(150, "dispat replacer --replace 'com.acme:core:1.4.2=>com.acme:core:1.5.0' build.gradle README.md", 0.6),
-  outRow(248, [...INF, msg('replaced'), ...kv('file', 'build.gradle'), ...kv('matches', '1')]),
-  outRow(296, [...INF, msg('replaced'), ...kv('file', 'README.md'), ...kv('matches', '1')]),
-  cmdRow(316, 'dispat autowriter --link-local --since all --sync-lock=false', 0.7),
-  outRow(364, [...INF, msg('linked'), ...kv('package', 'api'), ...kv('redirects', '1')]),
-  cmdRow(382, 'dispat tests'),
-  outRow(404, [{text: 'tests pass against the working tree', color: colors.dim}]),
-  cmdRow(420, 'dispat autowriter --unlink-local --since all --sync-lock=false', 0.7),
-  outRow(470, [...INF, msg('unlinked'), ...kv('package', 'api'), ...kv('redirects', '0')]),
-  cmdRow(488, 'dispat scanner --verify-unlinked'),
-  outRow(524, [...INF, msg('verified'), ...kv('redirects', '0'), ...kv('exit', '0')]),
+  cmdRow(10, "dispat if 'ENV=prod' --then 'echo deploying to prod' --else 'echo deploying to stage'"),
+  outRow(148, [{text: 'deploying to prod', color: colors.green, weight: 700}]),
+  cmdRow(180, "dispat replacer --replace 'com.acme:core:1.4.2=>com.acme:core:1.5.0' --replace '@acme/core@1.4.2=>@acme/core@1.5.0' build.gradle README.md"),
+  outRow(402, [{text: 'build.gradle  applied  com.acme:core:1.4.2 -> com.acme:core:1.5.0', color: colors.green}]),
+  outRow(430, [{text: 'README.md     applied  @acme/core@1.4.2 -> @acme/core@1.5.0', color: colors.green}]),
+  cmdRow(466, 'dispat autowriter --link-local --since all --sync-lock=false'),
+  outRow(568, [{text: 'packages/api/go.mod  applied  link  github.com/acme/core  ../core', color: colors.green}]),
+  cmdRow(586, 'dispat tests'),
+  outRow(620, [...INF, msg('run finished'), ...kv('failed', '0'), ...kv('ran', '2'), ...kv('script', 'tests')]),
+  cmdRow(646, 'dispat autowriter --unlink-local --since all --sync-lock=false'),
+  outRow(750, [{text: 'packages/api/go.mod  applied  link  github.com/acme/core  (removed)', color: colors.green}]),
+  cmdRow(768, 'dispat scanner --verify-unlinked'),
+  outRow(834, [{text: '3 manifest(s), 1 dependency declaration(s)', color: colors.dim}]),
 ];
 
 /** The two files the replacer touches, drawn like the polyglot editor. */
@@ -46,7 +45,7 @@ const FILES: Array<{
 }> = [
   {
     file: 'build.gradle',
-    start: 212,
+    start: 386,
     lines: [
       [{t: 'dependencies {', c: colors.dim}],
       [{t: '  implementation ', c: colors.cyan}, {t: '"com.acme:core:', c: colors.fg}, {edit: ['1.4.2', '1.5.0']}, {t: '"', c: colors.fg}],
@@ -55,7 +54,7 @@ const FILES: Array<{
   },
   {
     file: 'README.md',
-    start: 262,
+    start: 418,
     lines: [
       [{t: '## Install', c: colors.dim}],
       [{t: 'npm install ', c: colors.cyan}, {t: '@acme/core@', c: colors.fg}, {edit: ['1.4.2', '1.5.0']}],
@@ -63,7 +62,7 @@ const FILES: Array<{
   },
 ];
 
-export const GLUE_DURATION = 576;
+export const GLUE_DURATION = 900;
 
 export const Glue: React.FC = () => {
   const f = useCurrentFrame();
@@ -74,8 +73,8 @@ export const Glue: React.FC = () => {
       extrapolateRight: 'clamp',
     });
   // Act one holds the stage until the replacer command starts typing.
-  const actOne = fadeIO(f, 16, 26, 140, 152);
-  const chosen = f >= 62;
+  const actOne = fadeIO(f, 16, 26, 166, 180);
+  const chosen = f >= 140;
 
   return (
     <AbsoluteFill style={{background: colors.bg, fontFamily: font}}>
@@ -132,7 +131,7 @@ export const Glue: React.FC = () => {
       {/* Act two: literal text, swapped in place. */}
       {FILES.map((panel) => {
         const b = f - panel.start;
-        const panelOpacity = fadeIO(f, panel.start, panel.start + 6, 300, 308);
+        const panelOpacity = fadeIO(f, panel.start, panel.start + 6, 450, 460);
         if (panelOpacity <= 0) return null;
         return (
           <div
@@ -171,11 +170,11 @@ export const Glue: React.FC = () => {
       })}
       {/* Act three: the local-link bracket, opened and closed. */}
       {(() => {
-        const panelOpacity = fadeIO(f, 312, 320, GLUE_DURATION - 18, GLUE_DURATION - 10);
+        const panelOpacity = fadeIO(f, 460, 468, GLUE_DURATION - 18, GLUE_DURATION - 10);
         if (panelOpacity <= 0) return null;
         // The replace directive exists exactly between the link and the
         // unlink, which is the bracket's whole point.
-        const link = fadeIO(f, 358, 364, 464, 470);
+        const link = fadeIO(f, 562, 568, 744, 750);
         return (
           <div
             style={{

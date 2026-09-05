@@ -46,12 +46,7 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
   const active = view.state !== 'idle';
   const badge = ecoBadge[pkg.eco];
   const rewrite = view.rewrite ?? 0;
-  const manifestLine =
-    pkg.id === 'api'
-      ? rewrite > 0
-        ? `FROM acme/core:${rewrite < 0.5 ? pkg.base.replace('0.8.2', '1.4.2') : '1.5.0'}`
-        : 'FROM acme/core:1.4.2'
-      : pkg.manifest;
+  const manifestLine = pkg.manifest;
   return (
     <div
       style={{
@@ -212,15 +207,19 @@ export type TermRow =
   | {kind: 'cmd'; start: number; typeEnd: number; text: string}
   | {kind: 'out'; start: number; segs: CapSeg[]};
 
-/**
- * A typed command row. The default pace is sixteen-ish characters a second
- * at 20 fps; a smaller `speed` types faster, for the scenes whose commands
- * are long and whose beats are not.
- */
-export const cmdRow = (start: number, text: string, speed = 1.1): TermRow => ({
+/** One shared terminal cadence: fourteen visible characters each second. */
+export const TYPING_CHARS_PER_SECOND = 14;
+export const typingFrames = (text: string, fps = 20) => Math.ceil(text.length * fps / TYPING_CHARS_PER_SECOND);
+export const typingProgress = (frame: number, start: number, text: string, fps = 20) =>
+  interpolate(frame, [start, start + typingFrames(text, fps)], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+
+export const cmdRow = (start: number, text: string): TermRow => ({
   kind: 'cmd',
   start,
-  typeEnd: start + Math.ceil(text.length * speed),
+  typeEnd: start + typingFrames(text),
   text,
 });
 
@@ -247,6 +246,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
   const roomForPrompt = visible.length < lines;
   return (
     <div
+      data-demo-terminal
       style={{
         position: 'absolute',
         left: 150,
@@ -261,8 +261,12 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
         fontFamily: font,
         fontSize: 20,
         lineHeight: '32px',
-        whiteSpace: 'pre',
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'anywhere',
         overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-end',
       }}
     >
       {visible.map((row) => {
@@ -271,7 +275,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
           const frac = done ? 1 : Math.max(0, (f - row.start) / (row.typeEnd - row.start));
           const shown = row.text.slice(0, Math.ceil(row.text.length * frac));
           return (
-            <div key={`c${row.start}`} style={{height: 32}}>
+            <div key={`c${row.start}`} style={{minHeight: 32, lineHeight: '32px', flexShrink: 0}}>
               <span style={{color: colors.green, fontWeight: 700}}>$ </span>
               <span style={{color: colors.fg}}>{shown}</span>
               {!done && <span style={{color: colors.green}}>█</span>}
@@ -279,7 +283,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
           );
         }
         return (
-          <div key={`o${row.start}`} style={{height: 32}}>
+          <div key={`o${row.start}`} style={{minHeight: 32, lineHeight: '32px', flexShrink: 0}}>
             {row.segs.map((s, j) => (
               <span key={j} style={{color: s.color ?? colors.fg, fontWeight: s.weight ?? 400}}>
                 {s.text}
@@ -289,7 +293,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
         );
       })}
       {prompt && roomForPrompt && (
-        <div style={{height: 32}}>
+        <div style={{minHeight: 32, lineHeight: '32px', flexShrink: 0}}>
           <span style={{color: colors.green, fontWeight: 700}}>$ </span>
           <span style={{color: colors.fg, opacity: blink ? 1 : 0}}>█</span>
         </div>
@@ -359,6 +363,7 @@ export const T = (t: string): CapSeg => ({text: t, color: colors.dim});
 export const INF: CapSeg[] = [T('12:04:05 '), {text: 'INF ', color: colors.green, weight: 700}];
 export const ERR: CapSeg[] = [T('12:04:05 '), {text: 'ERR ', color: colors.red, weight: 700}];
 export const WRN: CapSeg[] = [T('12:04:05 '), {text: 'WRN ', color: colors.yellow, weight: 700}];
+export const DBG: CapSeg[] = [T('12:04:05 '), {text: 'DBG ', color: colors.dim, weight: 700}];
 export const msg = (t: string): CapSeg => ({text: t, weight: 700});
 export const kv = (k: string, v: string): CapSeg[] => [
   {text: ` ${k}=`, color: colors.cyan},

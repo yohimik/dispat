@@ -3,7 +3,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, msg, kv} from './components';
 
-// The claim that the model is mathematics rather than machinery, eighteen
+// The claim that the model is mathematics rather than machinery, twenty-three
 // seconds at Root.tsx's twenty frames per second. Planning is a pure function
 // of the explicit history, graph, and configuration inputs. It needs no
 // persistent release cache or database, and version decisions do not consult
@@ -27,7 +27,9 @@ const rows: TermRow[] = [
   outRow(102, CHANGED),
   outRow(106, PLAN),
   outRow(122, [{text: '# same inputs, same plan: the planner is a pure function', color: colors.dim}]),
-  outRow(210, [{text: '# ccme: untrusted commit messages in CI, parsed in one pass', color: colors.dim}]),
+  outRow(142, [{text: '# qualified idempotence: recorded tags are skipped on a rerun', color: colors.green}]),
+  outRow(158, [{text: '# unknown publish outcome: reconcile the destination before retrying', color: colors.yellow}]),
+  outRow(326, [{text: '# ccme: untrusted commit messages in CI, parsed in one pass', color: colors.dim}]),
 ];
 
 const COMMIT = 'feat(core)^^%beta!: add streaming api';
@@ -40,7 +42,7 @@ type Beat = {
   note: string;
 };
 
-export const MATH_DURATION = 360;
+export const MATH_DURATION = 460;
 
 export const Math_: React.FC = () => {
   const f = useCurrentFrame();
@@ -50,7 +52,7 @@ export const Math_: React.FC = () => {
       extrapolateLeft: 'clamp',
       extrapolateRight: 'clamp',
     });
-  const sweep = bar(f, 196, 284);
+  const sweep = bar(f, 320, 408);
   const shown = Math.floor(COMMIT.length * sweep);
 
   const beats: Beat[] = [
@@ -75,7 +77,20 @@ export const Math_: React.FC = () => {
     },
     {
       from: 174,
-      to: 346,
+      to: 300,
+      chip: 'qualified idempotence',
+      equation: (
+        <>
+          <span style={{color: colors.green, fontWeight: 700}}>recorded tag</span>
+          <span style={{color: colors.dim}}> ⇒ </span>
+          <span style={{color: colors.fg}}>skip completed package</span>
+        </>
+      ),
+      note: 'if a publisher returned an unknown outcome before the tag was recorded, reconcile that destination before retrying',
+    },
+    {
+      from: 300,
+      to: 446,
       chip: 'linear',
       equation: (
         <>

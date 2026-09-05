@@ -23,41 +23,44 @@ const bar = (frame: number, a: number, b: number) =>
 
 const rows: TermRow[] = [
   outRow(24, [{text: '# the assumed model: build everything, then publish everything', color: colors.dim}]),
-  outRow(100, [...ERR, msg('build failed'), ...kv('package', 'api'), ...kv('error', '"pull acme/core:1.5.0: not found"')]),
-  outRow(126, [{text: '# the provider was never published: mixed graphs break the model', color: colors.dim}]),
-  outRow(186, [...ERR, msg('publish failed'), ...kv('package', 'api'), ...kv('published', '"core, utils"'), ...kv('left', 'unknown')]),
-  outRow(224, [{text: '# a registry answers one ecosystem; recovery becomes a script you write', color: colors.dim}]),
-  cmdRow(316, 'dispat'),
-  outRow(348, [...INF, msg('build started'), ...kv('package', 'core'), ...kv('stage', 'build'), ...kv('version', '1.5.0')]),
-  outRow(382, [...INF, msg('published'), ...kv('package', 'core'), ...kv('tag', 'core@1.5.0'), ...kv('version', '1.5.0')]),
-  outRow(438, [...INF, msg('published'), ...kv('package', 'api'), ...kv('tag', 'api@0.8.3'), ...kv('version', '0.8.3')]),
-  outRow(450, [...INF, msg('done'), ...kv('published', '2'), ...kv('failed', '0'), ...kv('skipped', '0')]),
+  outRow(120, [...ERR, msg('build failed'), ...kv('package', 'api'), ...kv('error', '"pull acme/core:1.5.0: not found"')]),
+  outRow(160, [{text: '# the provider was never published: mixed graphs break the model', color: colors.dim}]),
+  outRow(280, [...ERR, msg('publish failed'), ...kv('package', 'api'), ...kv('published', '"core, utils"'), ...kv('left', 'unknown')]),
+  outRow(330, [{text: '# a registry answers one ecosystem; recovery becomes a script you write', color: colors.dim}]),
+  cmdRow(440, 'dispat'),
+  outRow(450, [...INF, msg('build started'), ...kv('package', 'core'), ...kv('stage', 'build'), ...kv('version', '1.5.0')]),
+  outRow(530, [...INF, msg('published'), ...kv('package', 'core'), ...kv('tag', 'core@1.5.0'), ...kv('version', '1.5.0')]),
+  outRow(532, [...INF, msg('build started'), ...kv('package', 'api'), ...kv('stage', 'build'), ...kv('version', '0.8.3')]),
+  outRow(600, [...INF, msg('published'), ...kv('package', 'api'), ...kv('tag', 'api@0.8.3'), ...kv('version', '0.8.3')]),
+  outRow(620, [...INF, msg('done'), ...kv('published', '2'), ...kv('failed', '0'), ...kv('skipped', '0')]),
 ];
 
-const CORE: Pkg = {id: 'core', eco: 'npm', manifest: 'package.json', base: '1.4.2', next: '1.5.0', x: 640, y: 660};
+const CORE: Pkg = {id: 'core', eco: 'docker', manifest: 'Dockerfile', base: '1.4.2', next: '1.5.0', x: 640, y: 660};
 const API: Pkg = {id: 'api', eco: 'docker', manifest: 'Dockerfile', base: '0.8.2', next: '0.8.3', x: 1280, y: 660};
 
 function beat1Views(f: number): [NodeView, NodeView] {
   return [
-    f < 58 ? {state: 'building', progress: bar(f, 30, 56)} : {state: 'building', progress: 1, note: 'built, waiting for publish all'},
-    f < 95 ? {state: 'building', progress: bar(f, 58, 93) * 0.4} : {state: 'failed', note: 'base image not in the registry'},
+    f < 72 ? {state: 'building', progress: bar(f, 30, 70)} : {state: 'building', progress: 1, note: 'built, waiting for publish all'},
+    f < 116 ? {state: 'building', progress: bar(f, 72, 112) * 0.4} : {state: 'failed', note: 'base image not in the registry'},
   ];
 }
 
 function beat3Views(f: number): [NodeView, NodeView] {
   const core: NodeView =
-    f < 350
-      ? {state: 'building', bumped: true, progress: bar(f, 318, 348)}
-      : f < 380
-        ? {state: 'publishing', bumped: true, progress: bar(f, 350, 378)}
+    f < 450
+      ? {state: 'changed', bumped: true}
+      : f < 500
+        ? {state: 'building', bumped: true, progress: bar(f, 450, 498)}
+        : f < 530
+          ? {state: 'publishing', bumped: true, progress: bar(f, 500, 528)}
         : {state: 'published', bumped: true, tag: 'core@1.5.0'};
   const api: NodeView =
-    f < 380
+    f < 530
       ? {state: 'waiting', bumped: true, note: 'isBuildWaitingPublish: core@1.5.0'}
-      : f < 414
-        ? {state: 'building', bumped: true, progress: bar(f, 380, 412)}
-        : f < 436
-          ? {state: 'publishing', bumped: true, progress: bar(f, 414, 434)}
+      : f < 574
+        ? {state: 'building', bumped: true, progress: bar(f, 532, 572)}
+        : f < 600
+          ? {state: 'publishing', bumped: true, progress: bar(f, 574, 598)}
           : {state: 'published', bumped: true, tag: 'api@0.8.3'};
   return [core, api];
 }
@@ -105,7 +108,7 @@ const Phase: React.FC<{text: string; x: number; state: 'idle' | 'active' | 'dead
   </div>
 );
 
-export const WHY_DURATION = 484;
+export const WHY_DURATION = 680;
 
 export const Why: React.FC = () => {
   const f = useCurrentFrame();
@@ -115,9 +118,9 @@ export const Why: React.FC = () => {
       extrapolateLeft: 'clamp',
       extrapolateRight: 'clamp',
     });
-  const b1 = fadeIO(f, 14, 22, 158, 166);
-  const b2 = fadeIO(f, 166, 174, 300, 308);
-  const b3 = fadeIO(f, 308, 316, WHY_DURATION - 16, WHY_DURATION - 8);
+  const b1 = fadeIO(f, 14, 22, 210, 218);
+  const b2 = fadeIO(f, 218, 226, 410, 418);
+  const b3 = fadeIO(f, 418, 426, WHY_DURATION - 16, WHY_DURATION - 8);
   const [b1core, b1api] = beat1Views(f);
   const [b3core, b3api] = beat3Views(f);
 
@@ -159,7 +162,7 @@ export const Why: React.FC = () => {
                 borderRadius: 14,
                 padding: '16px 28px',
                 whiteSpace: 'nowrap',
-                opacity: bar(f, 176 + c.x / 90, 184 + c.x / 90),
+                opacity: bar(f, 232 + c.x / 90, 240 + c.x / 90),
               }}>
               {c.text}
             </div>
@@ -174,7 +177,7 @@ export const Why: React.FC = () => {
               fontSize: 26,
               lineHeight: '40px',
               color: colors.dim,
-              opacity: bar(f, 216, 228),
+              opacity: bar(f, 320, 336),
             }}>
             what does the run still owe? a registry answers only whether a version is there, and only for one ecosystem
           </div>
@@ -186,8 +189,8 @@ export const Why: React.FC = () => {
           <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}} viewBox="0 0 1920 1080">
             <path
               d="M 815 660 L 1105 660"
-              stroke={f >= 378 ? colors.green : colors.faint}
-              strokeWidth={f >= 378 ? 5 : 3}
+              stroke={f >= 530 ? colors.green : colors.faint}
+              strokeWidth={f >= 530 ? 5 : 3}
               fill="none"
             />
           </svg>

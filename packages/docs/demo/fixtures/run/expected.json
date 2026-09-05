@@ -1,10 +1,49 @@
 {
   "command": "dispat run tests --since HEAD~1 --consumers",
-  "commit": "fix(utils): close file handle leak",
-  "edges": ["core->api", "utils->api", "api->web", "utils->sdk"],
-  "batches": [["utils"], ["api", "sdk"], ["web"]],
-  "selected": ["utils", "api", "sdk", "web"],
-  "unselected": ["core", "docs", "mobile"],
+  "commit": "fix(utils): Close file handle leak",
+  "edges": [
+    "core->api",
+    "utils->api",
+    "api->web",
+    "utils->sdk"
+  ],
+  "batches": [
+    [
+      "utils"
+    ],
+    [
+      "api",
+      "sdk"
+    ],
+    [
+      "web"
+    ]
+  ],
+  "selected": [
+    "utils",
+    "api",
+    "sdk",
+    "web"
+  ],
+  "unselected": [
+    "core",
+    "docs",
+    "mobile"
+  ],
   "versions": "unchanged",
-  "outcomes": {"ok": 4, "failed": 0, "unselected": 3, "released": 0}
+  "outcomes": {
+    "ok": 4,
+    "failed": 0,
+    "unselected": 3,
+    "released": 0
+  },
+  "baseVersions": {
+    "core": "1.4.2",
+    "utils": "2.0.3",
+    "api": "0.8.2",
+    "web": "2.1.0",
+    "sdk": "0.3.1",
+    "docs": "1.1.0",
+    "mobile": "3.1.0"
+  }
 }

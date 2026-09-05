@@ -33,7 +33,7 @@ const rows: TermRow[] = [
   ]),
   outRow(B_REJECT + 10, [{text: 'nothing was planned, built, published, or tagged', color: colors.dim}]),
   cmdRow(276, 'dispat release'),
-  outRow(B_CLAIM + 8, [...INF, msg('release lock claimed'), ...kv('remote', 'origin'), ...kv('tag', 'dispat-release-lock')]),
+  outRow(B_CLAIM + 8, [...INF, msg('release lock acquired'), ...kv('remote', 'origin'), ...kv('tag', 'dispat-release-lock')]),
   outRow(B_CLAIM + 26, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '7'), ...kv('releasing', '1')]),
 ];
 

@@ -1,10 +1,10 @@
 import React from 'react';
 import {interpolate, useCurrentFrame} from 'remotion';
 import {colors} from './theme';
-import {NodeView, SceneTerminal, SceneTitle, TermRow, cmdRow, outRow, typeIO, INF, msg, kv} from './components';
+import {NodeView, SceneTerminal, SceneTitle, TermRow, cmdRow, outRow, typingProgress, INF, msg, kv} from './components';
 import {Pulse, Stage} from './Stage';
 
-// The short cut, eighteen seconds at Root.tsx's twenty frames per second:
+// The short cut runs twenty-one and a half seconds at Root.tsx's twenty frames per second:
 // the same commit planned twice. Without carets only core releases; amended
 // to feat(core)^^ the whole consumer closure joins the plan. utils, a
 // provider, stays unchanged either way, and sdk, docs, and mobile never
@@ -15,23 +15,23 @@ import {Pulse, Stage} from './Stage';
 // top strip.
 
 function view(id: string, f: number): NodeView {
-  const changedCore = f > 70;
-  const propagated = {api: f > 215, web: f > 245};
+  const changedCore = f > 132;
+  const propagated = {api: f > 306, web: f > 332};
   switch (id) {
     case 'core':
-      return changedCore ? {state: 'changed', bumped: f > 82} : {state: 'idle'};
+      return changedCore ? {state: 'changed', bumped: f > 140} : {state: 'idle'};
     case 'api':
-      if (propagated.api) return {state: 'changed', bumped: f > 228};
+      if (propagated.api) return {state: 'changed', bumped: f > 314};
       break;
     case 'web':
-      if (propagated.web) return {state: 'changed', bumped: f > 258};
+      if (propagated.web) return {state: 'changed', bumped: f > 340};
       break;
     default:
       break;
   }
   // Everyone the plan leaves alone: utils untouched by the caretless fix,
   // and the bystanders the closure never reaches.
-  return f > 95 ? {state: 'unchanged'} : {state: 'idle'};
+  return f > 140 ? {state: 'unchanged'} : {state: 'idle'};
 }
 
 const IDS = ['core', 'utils', 'api', 'web', 'sdk', 'docs', 'mobile'] as const;
@@ -40,28 +40,28 @@ const IDS = ['core', 'utils', 'api', 'web', 'sdk', 'docs', 'mobile'] as const;
 // hop at a time, and they stay lit as the plan's path. The utils edges
 // never light up.
 const pulses: Pulse[] = [
-  {edge: 0, start: 185}, // core -> api
-  {edge: 2, start: 215}, // api -> web
+  {edge: 0, start: 298}, // core -> api
+  {edge: 2, start: 324}, // api -> web
 ];
 
 // The scene's terminal is the whole story: the caretless commit, a dry run
 // answering with one package releasing, the amend that adds the carets, and
 // the second dry run printing the propagation as the edges light.
 const rows: TermRow[] = [
-  cmdRow(28, 'git commit -m "feat(core): add streaming api"', 0.7),
-  cmdRow(84, 'dispat status'),
-  outRow(104, [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('bump', 'minor'), ...kv('version', '"1.4.2 -> 1.5.0"')]),
-  outRow(108, [{text: '  unchanged ', color: colors.dim}, ...kv('package', 'utils'), ...kv('version', '2.0.3')]),
-  outRow(114, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '7'), ...kv('releasing', '1')]),
-  cmdRow(148, 'git commit --amend -m "feat(core)^^: add streaming api"', 0.7),
-  cmdRow(196, 'dispat status'),
-  outRow(224, [...INF, msg('● changed'), ...kv('package', 'api'), ...kv('reason', '"propagated from core"'), ...kv('version', '"0.8.2 -> 0.8.3"')]),
-  outRow(252, [...INF, msg('● changed'), ...kv('package', 'web'), ...kv('reason', '"propagated from api"'), ...kv('version', '"2.1.0 -> 2.1.1"')]),
-  outRow(262, [{text: '  unchanged ', color: colors.dim}, ...kv('package', 'utils'), ...kv('version', '2.0.3')]),
-  outRow(272, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '7'), ...kv('releasing', '3')]),
+  cmdRow(20, 'git commit -m "feat(core): add streaming api"'),
+  cmdRow(105, 'dispat status'),
+  outRow(132, [...INF, msg('● changed'), ...kv('package', 'core'), ...kv('bump', 'minor'), ...kv('version', '"1.4.2 -> 1.5.0"')]),
+  outRow(140, [{text: '  unchanged ', color: colors.dim}, ...kv('package', 'utils'), ...kv('version', '2.0.3')]),
+  outRow(150, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '7'), ...kv('releasing', '1')]),
+  cmdRow(180, 'git commit --amend -m "feat(core)^^: add streaming api"'),
+  cmdRow(279, 'dispat status'),
+  outRow(306, [...INF, msg('● changed'), ...kv('package', 'api'), ...kv('reason', '"propagated from core"'), ...kv('version', '"0.8.2 -> 0.8.3"')]),
+  outRow(332, [...INF, msg('● changed'), ...kv('package', 'web'), ...kv('reason', '"propagated from api"'), ...kv('version', '"2.1.0 -> 2.1.1"')]),
+  outRow(344, [{text: '  unchanged ', color: colors.dim}, ...kv('package', 'utils'), ...kv('version', '2.0.3')]),
+  outRow(356, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '7'), ...kv('releasing', '3')]),
 ];
 
-export const BLAST_DURATION = 360;
+export const BLAST_DURATION = 430;
 
 export const Blast: React.FC<{clip?: boolean}> = ({clip = false}) => {
   const f = useCurrentFrame();
@@ -70,13 +70,13 @@ export const Blast: React.FC<{clip?: boolean}> = ({clip = false}) => {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const graphOut = interpolate(f, [350, 360], [1, 0], {
+  const graphOut = interpolate(f, [420, 430], [1, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
   return (
     <Stage views={views} pulses={pulses} graphOpacity={graphIn * graphOut} terminal={<SceneTerminal rows={rows} f={f} />}>
-      {!clip && <SceneTitle text="The commit decides the blast radius." progress={typeIO(f, 8, 36, 344)} />}
+      {!clip && <SceneTitle text="The commit decides the blast radius." progress={f >= 414 ? 0 : typingProgress(f, 8, 'The commit decides the blast radius.')} />}
     </Stage>
   );
 };

@@ -19,6 +19,7 @@ type Tok = {t: string; c?: string; w?: number} | {edit: [before: string, after: 
 
 type Beat = {
   file: string;
+  example: string;
   badge: string;
   badgeColor: string;
   lines: Tok[][];
@@ -32,6 +33,7 @@ const p = (t: string): Tok => ({t});
 const BEATS: Beat[] = [
   {
     file: 'package.json',
+    example: 'web workspace',
     badge: 'npm',
     badgeColor: colors.red,
     caption: [...INF, msg('version written'), ...kv('file', 'package.json'), ...kv('applied', '2')],
@@ -47,6 +49,7 @@ const BEATS: Beat[] = [
   },
   {
     file: 'go.mod',
+    example: 'native service',
     badge: 'go',
     badgeColor: colors.cyan,
     caption: [...INF, msg('version written'), ...kv('file', 'go.mod'), ...kv('applied', '1')],
@@ -60,6 +63,7 @@ const BEATS: Beat[] = [
   },
   {
     file: 'Cargo.toml',
+    example: 'game server',
     badge: 'cargo',
     badgeColor: colors.yellow,
     caption: [...INF, msg('version written'), ...kv('file', 'Cargo.toml'), ...kv('applied', '1')],
@@ -72,6 +76,7 @@ const BEATS: Beat[] = [
   },
   {
     file: 'pom.xml',
+    example: 'Android backend',
     badge: 'maven',
     badgeColor: colors.blue,
     caption: [...INF, msg('version written'), ...kv('file', 'pom.xml'), ...kv('applied', '1')],
@@ -85,6 +90,7 @@ const BEATS: Beat[] = [
   },
   {
     file: 'pubspec.yaml',
+    example: 'cross-platform game',
     badge: 'pub',
     badgeColor: colors.cyan,
     caption: [...INF, msg('version written'), ...kv('file', 'pubspec.yaml'), ...kv('applied', '1')],
@@ -98,6 +104,7 @@ const BEATS: Beat[] = [
   },
   {
     file: 'Info.plist',
+    example: 'native iOS app',
     badge: 'ios',
     badgeColor: colors.fg,
     caption: [...INF, msg('version written'), ...kv('file', 'Info.plist'), ...kv('kept', 'CFBundleVersion=87')],
@@ -110,6 +117,7 @@ const BEATS: Beat[] = [
   },
   {
     file: 'Dockerfile',
+    example: 'web deployment',
     badge: 'docker',
     badgeColor: colors.blue,
     caption: [...INF, msg('provider pinned'), ...kv('file', 'Dockerfile'), ...kv('applied', '1')],
@@ -214,6 +222,7 @@ export const Polyglot: React.FC = () => {
                   }}>
                   {beat.badge}
                 </span>
+                <span style={{marginLeft: 'auto', fontSize: 19, color: colors.dim}}>{beat.example}</span>
               </div>
               <div style={{padding: '24px 34px 28px', fontSize: 26, lineHeight: '42px', whiteSpace: 'pre'}}>
                 {beat.lines.map((line, li) => (

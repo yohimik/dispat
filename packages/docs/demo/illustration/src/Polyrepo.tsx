@@ -3,7 +3,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
 
-// The control-repository pattern, twenty-two seconds at Root.tsx's twenty
+// The control-repository pattern, twenty-nine and a half seconds at Root.tsx's twenty
 // frames per second: many repositories, one release. A small repository
 // holds the dispat configuration and a git submodule per linked repository,
 // which gives dispat the single checkout its graph needs. Moving a pointer
@@ -36,34 +36,36 @@ const CARD_W = 380;
 const CARD_Y = 500;
 
 function view(id: string, f: number): {label: string; color: string; bumped: boolean; progress?: number; tag?: string} {
-  const changed = {sdk: 150, api: 162}[id as 'sdk' | 'api'];
+  const changed = {sdk: 272, api: 286}[id as 'sdk' | 'api'];
   if (id === 'web') {
-    return f < 170 ? {label: '', color: colors.faint, bumped: false} : {label: 'unchanged', color: colors.dim, bumped: false};
+    return f < 298 ? {label: '', color: colors.faint, bumped: false} : {label: 'unchanged', color: colors.dim, bumped: false};
   }
   if (changed === undefined || f < changed) return {label: '', color: colors.faint, bumped: false};
-  const run = id === 'sdk' ? {b: 208, p: 268, done: 300, tag: 'sdk@2.4.0'} : {b: 306, p: 356, done: 386, tag: 'api@1.1.3'};
-  if (f < 200 || f < run.b) return {label: '● changed', color: colors.green, bumped: f > changed + 10};
+  const run = id === 'sdk' ? {b: 344, p: 404, done: 436, tag: 'sdk@2.4.0'} : {b: 442, p: 492, done: 522, tag: 'api@1.1.3'};
+  if (f < 336 || f < run.b) return {label: '● changed', color: colors.green, bumped: f > changed + 10};
   if (f < run.p) return {label: 'build', color: colors.cyan, bumped: true, progress: bar(f, run.b, run.p - 2)};
   if (f < run.done) return {label: 'publish', color: colors.cyan, bumped: true, progress: bar(f, run.p, run.done - 2)};
   return {label: '✓ published', color: colors.green, bumped: true, tag: run.tag};
 }
 
 const rows: TermRow[] = [
-  cmdRow(8, 'git -C libs/sdk/src fetch origin && git -C libs/sdk/src checkout origin/main', 0.6),
-  outRow(52, [{text: 'libs/sdk/src: ', color: colors.dim}, {text: '9f3c2a1', color: colors.yellow}, {text: ' -> ', color: colors.dim}, {text: 'b82d47e', color: colors.yellow}]),
-  cmdRow(72, 'git commit -am "feat(sdk)^: new tokenizer"', 0.7),
-  cmdRow(118, 'dispat status'),
-  outRow(152, [...INF, msg('● changed'), ...kv('package', 'sdk'), ...kv('reason', 'direct'), ...kv('version', '"2.3.0 -> 2.4.0"')]),
-  outRow(164, [...INF, msg('● changed'), ...kv('dueToProviders', '["sdk"]'), ...kv('package', 'api'), ...kv('version', '"1.1.2 -> 1.1.3"')]),
-  outRow(170, [{text: '  unchanged ', color: colors.dim}, ...kv('package', 'web'), ...kv('version', '5.0.1')]),
-  outRow(178, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '3'), ...kv('releasing', '2')]),
-  cmdRow(196, 'dispat'),
-  outRow(302, [...INF, msg('published'), ...kv('package', 'sdk'), ...kv('tag', 'sdk@2.4.0'), ...kv('version', '2.4.0')]),
-  outRow(388, [...INF, msg('published'), ...kv('package', 'api'), ...kv('tag', 'api@1.1.3'), ...kv('version', '1.1.3')]),
-  outRow(396, [...INF, msg('done'), ...kv('published', '2'), ...kv('unchanged', '1')]),
+  cmdRow(8, 'git -C libs/sdk/src fetch origin && git -C libs/sdk/src checkout origin/main'),
+  outRow(125, [{text: 'libs/sdk/src: ', color: colors.dim}, {text: '9f3c2a1', color: colors.yellow}, {text: ' -> ', color: colors.dim}, {text: 'b82d47e', color: colors.yellow}]),
+  cmdRow(145, 'git commit -am "feat(sdk)^: new tokenizer"'),
+  cmdRow(225, 'dispat status'),
+  outRow(252, [...INF, msg('● changed'), ...kv('package', 'sdk'), ...kv('reason', 'direct'), ...kv('version', '"2.3.0 -> 2.4.0"')]),
+  outRow(272, [...INF, msg('● changed'), ...kv('dueToProviders', '["sdk"]'), ...kv('package', 'api'), ...kv('version', '"1.1.2 -> 1.1.3"')]),
+  outRow(286, [{text: '  unchanged ', color: colors.dim}, ...kv('package', 'web'), ...kv('version', '5.0.1')]),
+  outRow(298, [...INF, msg('release plan ready'), ...kv('held', '0'), ...kv('packages', '3'), ...kv('releasing', '2')]),
+  cmdRow(324, 'dispat'),
+  outRow(344, [...INF, msg('build started'), ...kv('package', 'sdk'), ...kv('stage', 'build'), ...kv('version', '2.4.0')]),
+  outRow(436, [...INF, msg('published'), ...kv('package', 'sdk'), ...kv('tag', 'sdk@2.4.0'), ...kv('version', '2.4.0')]),
+  outRow(448, [...INF, msg('build started'), ...kv('package', 'api'), ...kv('stage', 'build'), ...kv('version', '1.1.3')]),
+  outRow(522, [...INF, msg('published'), ...kv('package', 'api'), ...kv('tag', 'api@1.1.3'), ...kv('version', '1.1.3')]),
+  outRow(534, [...INF, msg('done'), ...kv('published', '2'), ...kv('unchanged', '1')]),
 ];
 
-export const POLYREPO_DURATION = 452;
+export const POLYREPO_DURATION = 590;
 
 export const Polyrepo: React.FC = () => {
   const f = useCurrentFrame();
@@ -74,7 +76,7 @@ export const Polyrepo: React.FC = () => {
       extrapolateRight: 'clamp',
     });
   // The sdk pointer flips as the sync's line prints.
-  const synced = f >= 54;
+  const synced = f >= 125;
   const edgeHot = (at: number) => bar(f, at, at + 8);
 
   return (
@@ -100,8 +102,8 @@ export const Polyrepo: React.FC = () => {
       <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}} viewBox="0 0 1920 1080">
         <path
           d={`M ${520 + CARD_W / 2} ${CARD_Y} L ${960 - CARD_W / 2} ${CARD_Y}`}
-          stroke={f >= 300 ? colors.green : colors.faint}
-          strokeWidth={3 + edgeHot(300) * 2}
+          stroke={f >= 436 ? colors.green : colors.faint}
+          strokeWidth={3 + edgeHot(436) * 2}
           fill="none"
         />
         <path

@@ -1,0 +1,7 @@
+{
+  "command": "dispat for --changed --since HEAD~1 --consumers --do 'echo build-$DISPAT_ITEM'",
+  "changed": ["engine"],
+  "selected": ["engine", "game", "native"],
+  "order": ["engine", "game", "native"],
+  "output": ["build-engine", "build-game", "build-native"]
+}

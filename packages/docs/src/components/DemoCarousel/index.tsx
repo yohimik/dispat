@@ -6,6 +6,8 @@ import Inlines from '@site/src/components/Inline';
 import React from 'react';
 import aquaFixture from '../../../demo/fixtures/aqua/expected.json';
 import runFixture from '../../../demo/fixtures/run/expected.json';
+import forFixture from '../../../demo/fixtures/for/expected.json';
+import computeFixture from '../../../demo/fixtures/compute/expected.json';
 
 import styles from './styles.module.css';
 
@@ -26,13 +28,14 @@ const FPS = 20;
 const LivePlayer = React.lazy(() => import('./LivePlayer'));
 const SCENE_COMMANDS: Record<string, string> = {
   'demo-why': 'dispat status', 'demo-order': 'dispat', 'demo-blast': 'dispat status',
-  'demo-heal': 'dispat', 'demo-control': 'dispat status', 'demo-polyglot': 'dispat writer',
-  'demo-terminal': 'dispat changelog', 'demo-compute': 'dispat compute --interactive',
+  'demo-heal': 'dispat\n# Repair the failing test, then commit the change.\ngit commit -am "chore(api): repair failing test"\ndispat', 'demo-control': 'dispat status', 'demo-polyglot': 'dispat writer',
+  'demo-terminal': 'dispat changelog', 'demo-compute': `${computeFixture.command}\n${computeFixture.writeCommand}`,
   'demo-run': runFixture.command, 'demo-single': 'dispat',
   'demo-hooks': 'dispat', 'demo-polyrepo': 'dispat', 'demo-math': 'dispat status',
   'demo-glue': 'dispat autowriter --link-local', 'demo-lock': 'dispat release',
   'demo-aqua': aquaFixture.commands.join('\n'),
-  'demo-progress': 'dispat status\n# Check any ambiguous publish at its destination before retrying.\ndispat',
+  'demo-for': forFixture.command,
+  'demo-progress': 'dispat\n# A publish response was lost. Check the registry before retrying.\nnpm view @acme/api@1.5.0 version',
 };
 
 class SceneBoundary extends React.Component<{children: React.ReactNode; fallback: React.ReactNode}, {failed: boolean}> {
@@ -58,8 +61,23 @@ const SCENES: Record<string, () => Promise<LoadedScene>> = {
   'demo-progress': () => import('../../../demo/illustration/src/Progress').then((m) => ({component: m.Progress, duration: m.PROGRESS_DURATION})),
   'demo-glue': () => import('../../../demo/illustration/src/Glue').then((m) => ({component: m.Glue, duration: m.GLUE_DURATION})),
   'demo-lock': () => import('../../../demo/illustration/src/Lock').then((m) => ({component: m.Lock, duration: m.LOCK_DURATION})),
+  'demo-for': () => import('../../../demo/illustration/src/For').then((m) => ({component: m.For, duration: m.FOR_DURATION})),
   'demo-aqua': () => import('../../../demo/illustration/src/Aqua').then((m) => ({component: m.Aqua, duration: m.AQUA_DURATION})),
 };
+
+// A selected scene stays mounted while the next chunk loads. Cache only scenes
+// the reader requests, and evict failed requests so selecting again can retry.
+const sceneRequests = new Map<string, Promise<LoadedScene>>();
+function loadScene(asset: string): Promise<LoadedScene> {
+  const existing = sceneRequests.get(asset);
+  if (existing) return existing;
+  const request = SCENES[asset]().catch((error) => {
+    sceneRequests.delete(asset);
+    throw error;
+  });
+  sceneRequests.set(asset, request);
+  return request;
+}
 
 const FEATURE_MEDIA = new Map<string, Media>([
   [
@@ -68,7 +86,7 @@ const FEATURE_MEDIA = new Map<string, Media>([
       asset: 'demo-order',
       name: 'Releases the graph',
       label:
-        'An animated dependency graph over a terminal running dispat: core and utils build and publish side by side, api waits for core@1.5.0, rewrites its Dockerfile, builds and publishes, web follows, and the run ends with all four published, the path lit end to end, and the log reading done published=4 while three unchanged packages sit out.',
+        'The Go module core and npm package utils build and publish independently. The Go API is configured to wait for core’s published version. The npm SDK builds against its local workspace as soon as utils finishes building, while utils is still publishing. The web app follows the API. Five packages publish; docs and mobile remain unchanged.',
     },
   ],
   [
@@ -84,9 +102,9 @@ const FEATURE_MEDIA = new Map<string, Media>([
     'self-healing',
     {
       asset: 'demo-heal',
-      name: 'Self-healing runs',
+      name: 'Fix and rerun',
       label:
-        'api’s build fails, web is skipped because its provider failed, and core and utils still ship; the re-run marks api for catch-up at the same version, publishes it, releases web behind it, and ends with nothing failed and nothing skipped.',
+        'The API build fails and web is skipped. Independent packages core, utils, and SDK still publish. After repairing the test, the operator commits the change and runs dispat again. Tags preserve completed work; the API and web finish their pending releases.',
     },
   ],
   [
@@ -164,24 +182,23 @@ const EXTRA_SLIDES: ExtraSlide[] = [
     },
   },
   {
-    title: 'The graph comes from the manifests',
+    title: 'Discover dependencies from your package manifests',
     name: 'Compute',
     body: (
       <>
         <Link to="/cli/compute">
           <code>dispat compute</code>
         </Link>{' '}
-        reads every manifest in the folders your <Link to="/configuration/spaces">spaces</Link> declare and proposes
-        the edges and starting versions it finds, each suggestion carrying the manifest line as its evidence. Print
-        them, confirm them one by one with <code>--interactive</code>, or apply them with <code>--write</code>: nobody
-        transcribes a dependency graph by hand.
+        reads manifests in your configured <Link to="/configuration/spaces">spaces</Link> and proposes dependencies
+        and starting versions, with manifest evidence for each suggestion. Preview the changes first, then apply
+        them with <code>--write</code>. Use <code>--interactive</code> when you want to review each suggestion separately.
       </>
     ),
     media: {
       asset: 'demo-compute',
       name: 'Compute',
       label:
-        'A terminal prints the spaces from dispat.yaml, then dispat compute proposes four edges and a starting version with manifest evidence, each edge drawing itself into the graph as its line prints, before --interactive confirms two suggestions and --write applies them.',
+        'A small npm workspace has a web app that depends on core. dispat compute previews that relationship and the two initial versions from package.json files. The preview leaves configuration unchanged; a separate --write command applies the reviewed changes.',
     },
   },
   {
@@ -192,17 +209,17 @@ const EXTRA_SLIDES: ExtraSlide[] = [
         <Link to="/cli/run">
           <code>dispat run tests --since HEAD~1</code>
         </Link>{' '}
-        executes each changed package’s script in graph order, and <code>--consumers</code> adds the changed
-        packages’ direct and transitive consumers, so a shared-library fix tests its full downstream path without a shell loop, the{' '}
-        <Link to="/reference/pipelines">pipeline patterns</Link> this repository tests itself with. Nothing is
-        released and nothing is tagged.
+        runs scripts for packages changed in the last commit. Without <code>--since</code>, it uses the same
+        unreleased commit window as <code>dispat status</code>. Add <code>--consumers</code> to include packages that
+        depend on the selected packages, directly or transitively. Scripts run in dependency order; this command
+        does not publish packages or create release tags. See <Link to="/reference/pipelines">CI examples</Link>.
       </>
     ),
     media: {
       asset: 'demo-run',
       name: 'dispat run',
       label:
-        'A fix lands in utils and dispat run tests --since HEAD~1 --consumers runs utils first, then api and sdk side by side, then the transitive web consumer; core, docs, and mobile stay unselected and the log ends with ok=4 released=0.',
+        'A fix lands in utils and dispat run tests --since HEAD~1 --consumers runs utils first, then api and sdk side by side, then the transitive web consumer; core, docs, and mobile stay unselected and the log ends with ran=4 and failed=0.',
     },
   },
   {
@@ -260,13 +277,14 @@ const EXTRA_SLIDES: ExtraSlide[] = [
     },
   },
   {
-    title: 'Deterministic plans, bounded parsing',
+    title: 'Deterministic plans and recorded completion',
     name: 'Math',
     body: (
       <>
         <Link to="/internals/architecture">Planning is deterministic</Link>: the same history, package graph, and
         configuration produce the same plan. It needs no persistent release cache or database, and version decisions
-        do not depend on the clock. <Link to="/go/ccme">CCME parsing</Link> reads each commit message from left to right
+        do not depend on the clock. Repeating a completed release skips its recorded versions; a publish without
+        a recorded tag still needs a destination check or an idempotent publisher. <Link to="/go/ccme">CCME parsing</Link> reads each commit message from left to right
         without backtracking.
       </>
     ),
@@ -274,7 +292,7 @@ const EXTRA_SLIDES: ExtraSlide[] = [
       asset: 'demo-math',
       name: 'Math',
       label:
-        'Two dispat status runs produce the same plan from the same inputs. The planner needs no persistent release cache or database and does not use the clock for version decisions. A cursor then demonstrates the commit parser moving through the input once, without backtracking.',
+        'Two dispat status runs produce the same plan from the same inputs. The planner needs no persistent release cache or database and does not use the clock for version decisions. Recorded release tags make completed versions safe to skip on reruns, while an unrecorded publish needs reconciliation. A cursor then demonstrates the commit parser moving through the input once, without backtracking.',
     },
   },
   {
@@ -292,6 +310,22 @@ const EXTRA_SLIDES: ExtraSlide[] = [
       name: 'Recorded progress',
       label:
         'Three cards separate confirmed progress from uncertainty: a tag records a completed release, a lost publish response leaves the outcome unclear, and the operator checks the destination or uses an idempotent publisher before retrying. Recorded versions can be skipped; ambiguous outcomes still need care.',
+    },
+  },
+  {
+    title: 'Run a command for each selected package',
+    name: 'dispat for',
+    body: (
+      <>
+        <Link to="/cli/for"><code>dispat for</code></Link> runs a command once per item. With <code>--changed</code>,
+        it selects changed packages in dependency order and provides each name as <code>DISPAT_ITEM</code>.
+        This game workspace adds downstream packages with <code>--consumers</code>. Use <code>dispat run</code>
+        when packages already declare the script you want to run.
+      </>
+    ),
+    media: {
+      asset: 'demo-for', name: 'dispat for',
+      label: 'An engine change selects the engine, game, and native packages. The same shell command runs for each selected package, in dependency order, printing its name through DISPAT_ITEM.',
     },
   },
   {
@@ -477,7 +511,13 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
     ],
     [features],
   );
-  const [active, setActive] = React.useState(0);
+  const [requested, setRequested] = React.useState({index: 0, revision: 0});
+  const [displayed, setDisplayed] = React.useState<{index: number; scene?: LoadedScene}>({index: 0});
+  const active = displayed.index;
+  const scene = displayed.scene;
+  const selectSlide = React.useCallback((index: number) => {
+    setRequested((previous) => ({index, revision: previous.revision + 1}));
+  }, []);
   const [loop, setLoop] = React.useState(false);
   // SSR starts on the meaningful still. Hydration opts into motion only
   // after reading the user's preference, avoiding a moving server fallback.
@@ -490,18 +530,22 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
   const root = React.useRef<HTMLDivElement>(null);
   const [player, setPlayer] = React.useState<PlayerRef | null>(null);
   const current = slides[active];
-  const sceneLoader = current.media ? SCENES[current.media.asset] : undefined;
-  const [scene, setScene] = React.useState<LoadedScene>();
+  const requestedAsset = slides[requested.index]?.media?.asset;
   const [sceneFailed, setSceneFailed] = React.useState(false);
   React.useEffect(() => {
     let currentLoad = true;
-    setScene(undefined);
     setSceneFailed(false);
-    if (sceneLoader) void sceneLoader()
-      .then((loaded) => { if (currentLoad) setScene(loaded); })
-      .catch(() => { if (currentLoad) setSceneFailed(true); });
+    if (requestedAsset && SCENES[requestedAsset]) {
+      void loadScene(requestedAsset)
+        .then((loaded) => {
+          if (currentLoad) setDisplayed({index: requested.index, scene: loaded});
+        })
+        .catch(() => { if (currentLoad) setSceneFailed(true); });
+    } else {
+      setDisplayed({index: requested.index});
+    }
     return () => { currentLoad = false; };
-  }, [sceneLoader]);
+  }, [requested, requestedAsset]);
 
   React.useEffect(() => {
     const node = root.current;
@@ -524,17 +568,25 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
     return () => document.removeEventListener('visibilitychange', changed);
   }, []);
 
+  const startedPlayer = React.useRef<PlayerRef | null>(null);
   const shouldPlay = !paused && onscreen && pageVisible;
   React.useEffect(() => {
-    if (shouldPlay) player?.play();
-    else player?.pause();
+    if (shouldPlay && player) {
+      // A reduced-motion still is a preview. First playback tells the whole
+      // story; subsequent pause/resume keeps the reader’s position.
+      if (startedPlayer.current !== player) {
+        player.seekTo(0);
+        startedPlayer.current = player;
+      }
+      player.play();
+    } else player?.pause();
   }, [shouldPlay, active, scene, player]);
 
   const slidesCount = React.useRef(slides.length);
   slidesCount.current = slides.length;
   const onClipEnded = React.useCallback(() => {
-    if (!loop) setActive((current) => (current + 1) % slidesCount.current);
-  }, [loop]);
+    if (!loop && requested.index === active && !sceneFailed) selectSlide((active + 1) % slidesCount.current);
+  }, [loop, requested.index, active, sceneFailed, selectSlide]);
   React.useEffect(() => {
     if (!player) return undefined;
     player.addEventListener('ended', onClipEnded);
@@ -558,7 +610,7 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                 aria-labelledby="landing-demo-title"
                 aria-describedby="landing-demo-description"
                 tabIndex={0}>
-                <div className={styles.sceneViewport} aria-hidden="true">
+                <div className={styles.sceneViewport} data-demo-duration={scene?.duration} data-demo-fps={FPS} aria-hidden="true">
                   {scene ? (
                     <BrowserOnly fallback={<div className={styles.loading}>Interactive demo</div>}>
                       {() => (
@@ -575,7 +627,7 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                               fps={FPS}
                               loop={loop}
                               playbackRate={speed}
-                              initialFrame={Math.min(Math.round(scene.duration / 3), scene.duration - 1)}
+                              initialFrame={paused ? Math.min(Math.round(scene.duration / 3), scene.duration - 1) : 0}
                               controls={false}
                               acknowledgeRemotionLicense
                               style={{width: '100%', height: '100%'}}
@@ -591,7 +643,7 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
             <DeckControls
               slides={slides}
               active={active}
-              onSelect={(next) => { setActive(next); }}
+              onSelect={selectSlide}
               loop={loop}
               onToggleLoop={() => setLoop((l) => !l)}
               playing={!paused}
@@ -600,6 +652,11 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
               onCycleSpeed={() => setSpeed((s) => ({1: 1.5, 1.5: 2, 2: 0.5, 0.5: 1}[s] ?? 1))}
             />
             <div className={styles.band}>
+              {sceneFailed && scene && (
+                <p role="status">The next demo could not load. The current demo is still available.{' '}
+                  <button type="button" onClick={() => selectSlide(requested.index)}>Try again</button>
+                </p>
+              )}
               <p id="landing-demo-description" className={styles.bandBody}>{current.body}</p>
               {current.media && (
                 <details

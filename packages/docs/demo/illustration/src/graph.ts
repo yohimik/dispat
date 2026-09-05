@@ -1,10 +1,6 @@
-// The demo monorepo: seven packages across six ecosystems, the shape the CLI
-// README's terminal tour describes with room around it. The release story
-// runs along the top row: api is a container image, so it can only build
-// once core is published, and web consumes api. utils is a provider with a
-// fix of its own in the master cut, sdk consumes utils, and docs and mobile
-// stand alone. sdk, docs, and mobile exist to be left out: a release plan is
-// the packages the commits reach, and most of the graph is simply not in it.
+// The default demo monorepo used by the original graph scenes. Focused scenes
+// may supply another set of nodes and edges to Stage without changing what an
+// unrelated story means.
 export type Pkg = {
   id: string;
   eco: 'npm' | 'go' | 'docker' | 'cargo' | 'ios';
@@ -36,17 +32,34 @@ export const pkgs: Pkg[] = [
 export const byId = Object.fromEntries(pkgs.map((p) => [p.id, p]));
 
 /** provider -> consumer */
-export const edges: Array<{from: string; to: string}> = [
+export type Edge = {from: string; to: string; label?: string};
+
+export const edges: Edge[] = [
   {from: 'core', to: 'api'},
   {from: 'utils', to: 'api'},
   {from: 'api', to: 'web'},
   {from: 'utils', to: 'sdk'},
 ];
 
+/** The policy-focused graph used by Order and the recovery story. */
+export const releaseGraph = {
+  pkgs: pkgs.map((pkg): Pkg => {
+    if (pkg.id === 'core') return {...pkg, eco: 'go', manifest: 'go.mod'};
+    if (pkg.id === 'api') return {...pkg, eco: 'go', manifest: 'go.mod'};
+    if (pkg.id === 'utils' || pkg.id === 'sdk') return {...pkg, eco: 'npm', manifest: 'package.json'};
+    return pkg;
+  }),
+  edges: [
+    {from: 'core', to: 'api', label: 'wait for publish'},
+    {from: 'api', to: 'web'},
+    {from: 'utils', to: 'sdk', label: 'local workspace'},
+  ] satisfies Edge[],
+};
+
 /** Anchor points: provider's right edge center to consumer's left edge center. */
-export function edgeAnchors(e: {from: string; to: string}) {
-  const a = byId[e.from];
-  const b = byId[e.to];
+export function edgeAnchors(e: Edge, nodes: Record<string, Pkg> = byId) {
+  const a = nodes[e.from];
+  const b = nodes[e.to];
   return {
     x1: a.x + NODE_W / 2,
     y1: a.y,
@@ -55,8 +68,8 @@ export function edgeAnchors(e: {from: string; to: string}) {
   };
 }
 
-export function edgePath(e: {from: string; to: string}) {
-  const {x1, y1, x2, y2} = edgeAnchors(e);
+export function edgePath(e: Edge, nodes: Record<string, Pkg> = byId) {
+  const {x1, y1, x2, y2} = edgeAnchors(e, nodes);
   const dx = (x2 - x1) * 0.5;
   return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 }
