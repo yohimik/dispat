@@ -1,11 +1,15 @@
 # Release announcements
 
-The release posts one image carousel to Instagram and one to LinkedIn when their credentials are configured. The first photo is the cover; the remaining photos contain the changelog. Both platforms receive the changelog in their text caption, with a release-notes link before it. Platform text limits still apply to long captions.
+The release uses one `crier publish` command to render the cover and changelog pages and send one photo post to each configured destination: Instagram, LinkedIn, and Discord. Every post includes the changelog in its caption, with a release-notes link near the beginning. Discord explicitly enables `@everyone` notifications. Platform text limits still apply to long captions.
 
-There are no video or story posts. Instagram rendering is capped at ten pages and LinkedIn at twenty, matching each post's attachment limit. Rendering beyond the limit fails before publication instead of creating several posts.
+The same command also publishes an Instagram story: the first page, shown for sixteen seconds with music from the configured audio pool. It fits the cover into a vertical frame. Instagram's feed keeps its photo carousel and changelog caption; the story carries the music.
 
-For an account that cannot accept multiple images, set `ANNOUNCE_INSTAGRAM_COVER_ONLY=1` or `ANNOUNCE_LINKEDIN_COVER_ONLY=1`. `ANNOUNCE_COVER_ONLY=1` uses only the cover on both platforms. This removes changelog pages from the pictures while preserving the changelog in the caption data.
+Rendering is capped at ten pages, so each destination receives one photo post. If an account cannot accept multiple photos, set `ANNOUNCE_COVER_ONLY=1` to show only the cover on all destinations while keeping the changelog in their captions.
 
-A failed publishing request is not retried automatically: a lost response may mean the post already exists. Check the destination before replaying. `ANNOUNCE_ONLY=linkedin` replays LinkedIn without Instagram or a tunnel.
+The release workflow runs `crier ping` before publishing any packages. Failed credentials or required story inputs block the release. The publishing command reports each destination's result and returns failure if an announcement is incomplete. It does not retry an ambiguous publishing failure automatically. Inspect the destination before replaying to avoid duplicate posts. `ANNOUNCE_ONLY=linkedin` or `ANNOUNCE_ONLY=discord` limits a replay to that destination and needs no public staging tunnel.
 
-Run `python3 scripts/announce-test.py` from the repository root to check the flow with a fake publisher. It never contacts a social platform. The Docker shell gate also runs this check.
+Set the repository secret `CRIER_PUBLISH_DISCORD_WEBHOOK_URL` to an incoming Discord webhook URL. No separate Discord bot token is required. Keep that URL out of configuration files and logs.
+
+This flow requires a Crier release that supports `publish.instagram.cover-story` and `publish.discord.mention-everyone`. Earlier versions fail configuration validation at the ping gate.
+
+Run `python3 scripts/announce-test.py` from the repository root to check single-call orchestration with a fake publisher. It never contacts a social platform. The Docker shell gate also runs this check.

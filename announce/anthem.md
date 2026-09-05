@@ -1,4 +1,4 @@
-> These recordings are retained as historical assets. The current release flow posts photos and changelog text; it does not render or publish an anthem video.
+> These recordings supply the Instagram cover story. The Instagram, LinkedIn and Discord photo posts use photos and changelog text.
 
 # The anthems
 

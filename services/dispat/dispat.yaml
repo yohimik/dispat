@@ -122,9 +122,9 @@ scripts:
   # The outputs are written first, before anything that can be slow or can
   # fail: the post-release job's condition must not depend on whether a
   # social network answered. announce/announce.sh renders the release's card
-  # with crier and posts it to Instagram and LinkedIn; it collects every
-  # reason not to post into a message and exits 0, so a missing secret is a
-  # line in the log rather than a red release. It lives at the repository
+  # with one crier invocation for Instagram, LinkedIn and Discord, including
+  # the Instagram music story. An incomplete announcement returns failure;
+  # inspect the reported destinations before replaying. It lives at the repository
   # root because its fonts and audio have no business in any package's build
   # context, which is why it is reached through the toplevel rather than by a
   # relative path from here.

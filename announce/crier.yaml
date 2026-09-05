@@ -13,8 +13,8 @@ render:
   # counter, the wrapping of a changelog entry) and differ in how they look: a
   # faint lattice on near-black against a radial pine wash with a framed card.
   # crier picks one per run from the run's seed, which announce.sh derives from
-  # the version, so a release has a face of its own and every pass of that
-  # release wears the same one.
+  # the version, so a release has a face of its own and every destination receives
+  # the same design.
   #
   # A pool and render.template together would not be an error, but the pool
   # would win and the file would read as two intentions, so there is no
@@ -28,6 +28,7 @@ render:
   data: "-"
   width: 1080
   height: 1080
+  background: "#101713"
   format: jpeg
   # Instagram will not fetch a PNG, and the card is flat colour, so quality
   # costs little.
@@ -44,10 +45,16 @@ render:
   # twenty entries a section is what keeps a real release well under it.
   pages-max: 10
   video:
+    # Only the cover-story render enables video. Photo posts remain stills.
     enabled: false
+    audio-pool:
+      - anthem.mp3
+      - anthem-stars-and-stripes.mp3
+      - anthem-william-tell.mp3
+      - anthem-mountain-king.mp3
 
 publish:
-  # The same changelog appears in the Instagram caption and LinkedIn text.
+  # The same changelog appears in Instagram, LinkedIn and Discord text.
   # Keep the release link first so it survives the platform's caption limit.
   caption: |-
     dispat v{{ .version }} is out.
@@ -68,13 +75,34 @@ publish:
     api-base-url: https://graph.instagram.com/v25.0
     poll-timeout: 5m
     story: false
+    cover-story: true
     # Ten rendered photos fit in one carousel. The script caps rendering to
     # the same number, so crier cannot split an announcement into more posts.
     max-attachments: 10
 
   linkedin:
-    # announce.sh enables this for its own pass when credentials are present.
-    # LinkedIn supports multi-image posts. announce.sh raises the render and
-    # attachment limits together to twenty for this pass.
+    # Enabled with the other destinations in a single publishing command.
+    # The shared render cap keeps every destination within one photo post.
     enabled: false
     max-attachments: 10
+
+  discord:
+    mention-everyone: true
+    # Enabled with the other destinations. Incoming webhooks take
+    # ten ordered files in one multipart message, and crier never retries that
+    # request after an ambiguous failure.
+    enabled: false
+    max-attachments: 10
+    caption: |-
+      @everyone dispat v{{ .version }} is out.
+      Release notes: https://github.com/yohimik/dispat/releases
+      {{ if .sections }}
+      What changed:{{ range .sections }}
+      {{ .label }}:{{ range .items }}
+      - {{ . }}{{ end }}{{ if gt .more 0 }}
+      - and {{ .more }} more{{ end }}{{ end }}
+      {{ end }}
+      Release packages across languages in dependency order.
+      Get started: https://dispat.dev
+
+      #golang #opensource #devtools #releaseengineering

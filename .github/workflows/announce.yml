@@ -26,6 +26,7 @@ jobs:
     env:
       CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
       CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
       SCRIPT: ${{ inputs.script }}
     steps:
       - name: Checkout code

@@ -131,12 +131,13 @@ jobs:
       CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
       CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
       CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up dispat
-        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
         uses: ./
 
       # The newest release rather than a build of the checkout: the point is
@@ -145,23 +146,47 @@ jobs:
       # line is run directly rather than through scripts/install-tools.sh,
       # which installs every tool the release job needs.
       - name: Install crier
-        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: dispat install yohimik/crier --bin-dir ping-bin
 
-      # LinkedIn is enabled only when its token is set, mirroring how the
-      # announce script decides whether that pass runs at all. stdin is closed
+      # Check every configured destination, including incomplete credentials
+      # that must block the release. stdin is closed
       # because the announce config reads its data document from it.
-      - name: Ping the announcement's platforms
-        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+      - name: Install story encoder for the gate
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != ''
         run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq ffmpeg >/dev/null
+
+      - name: Ping the announcement's platforms
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
+        run: |
+          instagram=false
+          linkedin=false
+          discord=false
+          [ -z "$CRIER_PUBLISH_INSTAGRAM_TOKEN$CRIER_PUBLISH_INSTAGRAM_USER_ID" ] || instagram=true
+          [ -z "$CRIER_PUBLISH_LINKEDIN_TOKEN$CRIER_PUBLISH_LINKEDIN_AUTHOR_URN" ] || linkedin=true
+          [ -z "$CRIER_PUBLISH_DISCORD_WEBHOOK_URL" ] || discord=true
           ./ping-bin/crier ping --config announce/crier.yaml \
-            ${CRIER_PUBLISH_LINKEDIN_TOKEN:+--publish-linkedin-enabled=true} \
+            --publish-instagram-enabled="$instagram" \
+            --publish-linkedin-enabled="$linkedin" \
+            --publish-discord-enabled="$discord" \
             </dev/null
 
+      # The release uses the exact executable that passed this gate.
+      - name: Keep the verified crier
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: announcement-crier
+          path: ping-bin/crier
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Nothing to ping
-        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN == ''
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN == '' && env.CRIER_PUBLISH_INSTAGRAM_USER_ID == '' && env.CRIER_PUBLISH_LINKEDIN_TOKEN == '' && env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN == '' && env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL == ''
         run: echo "no announcement secrets; the release will skip the announcement"
 
   tests:
@@ -267,8 +292,8 @@ jobs:
     # the ngrok install has to be able to ask whether there is a token before
     # spending a minute on apt.
     #
-    # Every one is optional. announce.sh says what is missing and exits 0: a
-    # release must not go red for want of a social media token.
+    # Unconfigured platforms are optional. Incomplete or invalid credentials
+    # fail the ping gate; publication failures are reported by the release.
     #
     # CRIER_STAGE_MODE is a repository variable rather than a secret, and it
     # is the escape hatch from the tunnel: setting it to s3 or url points the
@@ -278,6 +303,7 @@ jobs:
       CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
       CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
       CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
       NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
       CRIER_STAGE_MODE: ${{ vars.CRIER_STAGE_MODE }}
     steps:
@@ -344,6 +370,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: sh scripts/install-tools.sh
 
+      - name: Download the crier that passed ping
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: announcement-crier
+          path: ${{ runner.temp }}/verified-crier
+
+      - name: Use the verified crier for announcements
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
+        run: |
+          chmod +x "$RUNNER_TEMP/verified-crier/crier"
+          echo "ANNOUNCE_CRIER_BIN=$RUNNER_TEMP/verified-crier/crier" >> "$GITHUB_ENV"
+
       # Instagram fetches the media from a public URL of its own accord and a
       # runner has none, so the stage server needs a tunnel. Installed only
       # when there is a token to run it with, since the whole announcement is
@@ -360,6 +399,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ngrok
           ngrok version
+
+      # Instagram's cover story needs ffmpeg; all feed posts remain photos.
+      - name: Install ffmpeg
+        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq ffmpeg >/dev/null
+          ffmpeg -version | head -1
 
       - name: Run the release
         id: dispat
