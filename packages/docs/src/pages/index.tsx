@@ -1,5 +1,4 @@
 import Link from '@docusaurus/Link';
-import useBaseUrl from '@docusaurus/useBaseUrl';
 import {usePluginData} from '@docusaurus/useGlobalData';
 import {README_PLUGIN} from '@site/plugins/readme/name';
 import type {Argument, ReadmeData} from '@site/plugins/readme/types';
@@ -100,10 +99,6 @@ function Hero(): React.ReactElement {
   return (
     <header className={styles.hero}>
       <div className="container">
-        <div className={styles.wordmark}>
-          <img className={styles.logo} draggable={false} src={useBaseUrl('/logo.svg')} alt="" width={48} height={48} />
-          <span>dispat</span>
-        </div>
         <Heading as="h1" className={styles.title}>
           Release your packages together,<br className={styles.desktopBreak} /> across languages.
         </Heading>

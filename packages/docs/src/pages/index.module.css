@@ -13,21 +13,14 @@
   border-bottom: 1px solid var(--ifm-color-emphasis-200);
 }
 
-.logo {
-  height: 48px;
-  width: 48px;
-  filter: drop-shadow(0 14px 26px color-mix(in srgb, var(--ifm-color-primary) 24%, transparent));
-}
-
 .title {
-  margin: 1.5rem auto;
+  margin: 0 auto 1.5rem;
   max-width: 62rem;
   font-size: clamp(2.4rem, 4.8vw, 4.1rem);
   line-height: 1.12;
   letter-spacing: -0.045em;
 }
 
-.wordmark { -webkit-user-select: none; user-select: none; display: flex; align-items: center; justify-content: center; gap: .75rem; font-size: 1.6rem; font-weight: 700; }
 .heroNote { color: var(--ifm-color-emphasis-700); font-size: .9rem; margin: 0; }
 .installSection { scroll-margin-top: 5rem; }
 .firstRun { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; max-width: 64rem; margin: 1.5rem auto; }
@@ -243,7 +236,6 @@
 
 @media (max-width: 576px) {
   .hero { padding-top: 2.6rem; }
-  .logo { width: 96px; height: 96px; }
   .lead, .sectionLead { font-size: 1rem; text-align: left; }
   .sectionTitle { font-size: 1.35rem; }
   .feature { padding: 1.1rem; }
