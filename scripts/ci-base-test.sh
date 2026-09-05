@@ -51,4 +51,9 @@ printf '# landing source\n' >> README.md
 git add README.md && git commit -qm root-readme
 got=$(GITHUB_EVENT_NAME=push GITHUB_EVENT_BEFORE=HEAD^ CI_REPOSITORY=$tmp sh "$helper")
 assert "$got" all 'root README changes rebuild the docs-derived landing through the full gate'
+mkdir -p specs/ccme-spec
+printf '# diagnostic registry\n' > specs/ccme-spec/SPEC.md
+git add specs/ccme-spec/SPEC.md && git commit -qm specification
+got=$(GITHUB_EVENT_NAME=push GITHUB_EVENT_BEFORE=HEAD^ CI_REPOSITORY=$tmp sh "$helper")
+assert "$got" all 'specification changes run the CLI diagnostic-reference test'
 printf 'ci base scenarios passed\n'

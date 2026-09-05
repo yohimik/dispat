@@ -106,6 +106,7 @@ COPY --chown=gopher:gopher pkg ./pkg
 COPY --chown=gopher:gopher services/dispat ./services/dispat
 COPY --chown=gopher:gopher install.sh install.ps1 ./
 COPY --chown=gopher:gopher docker ./docker
+COPY --chown=gopher:gopher specs/ccme-spec/SPEC.md ./specs/ccme-spec/SPEC.md
 COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md ./packages/docs/docs/internals/architecture.md
 
 FROM src-dispat AS src-integration
