@@ -75,11 +75,8 @@
 # Dockerfile.gotest. Re-asking the question is bumping this one number.
 ARG TINYGO_VERSION=0.42.0
 
-# The fork's newest release is fetched at build time by the gc-built dispat
-# the build stage already produced, with the same `dispat install` line the
-# release's own tiny-toolchain stage runs, so the spike and the release ask
-# about the same fork: whatever it published last. There is no pin to bump;
-# re-asking the question is running the build again.
+# The fork stages use .aqua/aqua.yaml, just like the release toolchain stage.
+# Dispat bootstraps Aqua, and Aqua downloads the recorded custom fork release.
 FROM tinygo/tinygo:${TINYGO_VERSION} AS base
 
 # The same uid-1001 gopher the gc gates run as, for the same reason: the
@@ -494,27 +491,19 @@ cat "$log"
 exit 0
 EOF
 
-# The fork, fetched through the repository's install manifest: one
-# `dispat install` line, run by the gc binary the build stage already
-# produced, so the fetch is dogfooding rather than a curl and the version is
-# the same one the release's own toolchain stage installs. Its own stage
-# because a toolchain download must not be re-run every time a heredoc below
-# it changes, and because "did the fork install and report its version" is a
-# question worth answering on its own before anything is built with it.
-#
-# The binary under test runs the line; --bin-dir names where the tree is
-# unpacked, and the log's second header reads `tinygo version` out of it, so
-# the record says which fork release the run drew.
+# The fork uses the shared Aqua manifest and checksum lock. Its own stage
+# keeps toolchain installation separate from the probes below it.
 FROM tinygo-spike-net AS tinygo-spike-fork
+COPY .aqua /opt/dispat-tools/.aqua
+COPY scripts/install-tools.sh /opt/dispat-tools/scripts/install-tools.sh
 ARG TARGETARCH
 RUN <<'EOF'
 set -u
 log=/src/spike/fork.log
 : > "$log"
-echo "=== dispat install yohimik/tinygo (newest prerelease) ===" >> "$log"
-/out/gc-dispat-linux-${TARGETARCH} install yohimik/tinygo --prerelease \
-  --asset 'tinygo{version}.{os}-{arch}.tar.gz' \
-  --bin-dir /home/gopher/fork --pipe 'tar -xz' >> "$log" 2>&1
+echo "=== Aqua install yohimik/tinygo (repository manifest) ===" >> "$log"
+DISPAT_BIN=/out/gc-dispat-linux-${TARGETARCH} \
+  sh /opt/dispat-tools/scripts/install-tools.sh tinygo /home/gopher/fork >> "$log" 2>&1
 echo "exit=$?" >> "$log"
 echo "=== fork tinygo version ===" >> "$log"
 /home/gopher/fork/tinygo/bin/tinygo version >> "$log" 2>&1

@@ -87,17 +87,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # `dispat-<os>-<arch>`, which is a contract nothing here touches — so a
 # release carries them beside the six rather than instead of any of them.
 #
-# The toolchain is installed by the binary this build just produced, with one
-# `dispat install` line: the fork's newest release, unpinned, so a build takes
-# whatever the fork published last and the checksum is the one GitHub carries
-# for that asset, checked by dispat. Nothing here names a version; the same
-# line, without a folder, is what scripts/install-tools.sh runs for a runner,
-# and a build that must hold one particular fork adds `--release` here.
-#
-# The trade-off is cache. The stage descends from `build`, so any change to
-# the gc binaries throws the toolchain layer away and the fork is fetched
-# again: 185 MB, which is seconds on a runner. The compile below stays in a
-# stage of its own, so a source edit alone still re-uses this layer.
+# Dispat bootstraps the latest Aqua; Aqua installs the custom TinyGo version
+# and GitHub asset checksums recorded in .aqua/. The complete toolchain stays
+# in Aqua's package cache, with /usr/local/tinygo linked to its root.
+# Manifest changes invalidate this stage without duplicating download policy.
 #
 # Debian rather than alpine, unlike every other stage in this file: the fork
 # ships a glibc-linked LLVM beside its own binary, and musl does not run it.
@@ -110,6 +103,8 @@ COPY --from=build /out/dispat-linux-${TARGETARCH} /usr/local/bin/dispat
 # A stamped binary otherwise checks the GitHub API for a newer dispat while it
 # is installing something else; anything that parses as false turns it off.
 ENV DISPAT_UPDATE_CHECK=false
+COPY .aqua /opt/dispat-tools/.aqua
+COPY scripts/install-tools.sh /opt/dispat-tools/scripts/install-tools.sh
 # GITHUB_TOKEN as a build secret rather than a build arg, so it never reaches
 # the image's history: the releases listing is one API call, and a runner
 # sharing its IP with the rest of a cloud region meets the unauthenticated
@@ -125,8 +120,7 @@ RUN --mount=type=secret,id=GITHUB_TOKEN \
     else \
       echo "installing the toolchain unauthenticated (no GITHUB_TOKEN secret)"; \
     fi; \
-    dispat install yohimik/tinygo --prerelease \
-      --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir /usr/local --pipe 'tar -xz'; \
+    sh /opt/dispat-tools/scripts/install-tools.sh tinygo /usr/local; \
     /usr/local/tinygo/bin/tinygo version
 
 # The compile itself, in a stage of its own so that a source edit never

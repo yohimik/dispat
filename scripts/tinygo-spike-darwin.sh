@@ -31,8 +31,7 @@
 # Requirements: macOS, dispat on PATH, git checkout, network.
 set -u
 
-# The Go pin. The fork has none: its newest release is what the install
-# below fetches, and the log records which one it was.
+# The Go pin. The custom TinyGo pin lives in .aqua/aqua.yaml.
 GO_VERSION=1.26.7
 GO_SHA256_ARM64=020a1e8224811be75163e920bc77e0926a1390a6aeea19bdcf23f74b9d749f6d
 GO_SHA256_AMD64=92e8b34bff3c89ab16404c595669ac8cb004cc2f676dcbd1f5b87a6b8def3b47
@@ -71,17 +70,12 @@ fi
 export PATH="$cache/go/bin:$cache/tinygo/bin:$PATH"
 export GOPATH="$cache/gopath"
 
-# TinyGo from the fork's newest release, through the command under test, into
-# the cache once: --pipe unpacks the whole toolchain tree rather than one
-# binary, because tinygo is its bin/ plus the lib/ and src/ beside it. A cache
-# that already holds a fork is reused, so a rerun asks the same fork the last
-# run answered with; TINYGO_REFRESH=1 throws it away and fetches the newest.
-if [ -n "${TINYGO_REFRESH:-}" ] || [ ! -x "$cache/tinygo/bin/tinygo" ]; then
+# Follow the repository's Aqua pin on every run. Existing Aqua downloads
+# are reused; the legacy unpacked tree is this script's own disposable cache.
+if [ -d "$cache/tinygo" ] && [ ! -L "$cache/tinygo" ]; then
 	rm -rf "$cache/tinygo"
-	dispat install yohimik/tinygo --prerelease \
-		--asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir "$cache" --pipe 'tar -xz' \
-		|| die "dispat install yohimik/tinygo failed"
 fi
+sh "$root/scripts/install-tools.sh" tinygo "$cache" || die "Aqua TinyGo install failed"
 echo "tinygo: $("$cache/tinygo/bin/tinygo" version)" >&2
 
 # The same bypass and kill switch the container sets.

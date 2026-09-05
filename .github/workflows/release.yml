@@ -140,16 +140,13 @@ jobs:
         if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
         uses: ./
 
-      # The newest release rather than a build of the checkout: the point is
-      # the credentials, not the code, and crier is a tool this repository
-      # installs rather than one it builds. One tool into one folder, so the
-      # line is run directly rather than through scripts/install-tools.sh,
-      # which installs every tool the release job needs.
+      # Aqua installs the Crier version recorded in .aqua/aqua.yaml.
+      # The verified standalone executable is carried into the release job.
       - name: Install crier
         if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: dispat install yohimik/crier --bin-dir ping-bin
+        run: sh scripts/install-tools.sh crier ping-bin
 
       # Check every configured destination, including incomplete credentials
       # that must block the release. stdin is closed
@@ -357,18 +354,13 @@ jobs:
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
-      # crier renders and posts the release's announcement from the dispat
-      # package's announce stage. It is a tool this repository installs rather
-      # than one it builds, and scripts/install-tools.sh is the list of such
-      # tools, each at its newest release. DISPAT_BIN_DIR is dispat's own
-      # destination variable: the folder the bootstrap build above already put
-      # on PATH, so `crier` resolves for the announce script without another
-      # PATH entry.
+      # Bootstrap the latest Aqua through Dispat, then install the pinned
+      # Crier executable. TinyGo is installed by Aqua inside its Docker stage.
       - name: Install the tools the release needs
         env:
           DISPAT_BIN_DIR: ${{ runner.temp }}/dispat-fresh
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh scripts/install-tools.sh
+        run: sh scripts/install-tools.sh crier
 
       - name: Download the crier that passed ping
         if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''

@@ -35,12 +35,11 @@ jobs:
       - name: Set up dispat
         uses: ./
 
-      # The newest release rather than a build of the tree: a replay posts
-      # with the crier a release would install today.
+      # Use the same Aqua manifest as the release gate.
       - name: Install the released crier
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: dispat install yohimik/crier --bin-dir replay-bin
+        run: sh scripts/install-tools.sh crier replay-bin
 
       # A single file name, not a path: the input is a dispatch field, and a
       # replay is meant to run one of the scripts beside the announcement

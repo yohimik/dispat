@@ -1,0 +1,44 @@
+{
+  "checksums": [
+    {
+      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-darwin-amd64",
+      "checksum": "B739FB1802D5D6DC7A928C13C168735FD33A694B6F623C2F6D7130260DD116D9",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-darwin-arm64",
+      "checksum": "2BBE4E398E64645C494A07350F676A274D96298C0C482178CDB23EEC3CD704AE",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-linux-amd64",
+      "checksum": "3ACD85F549CBA70E515293BB9DE2EF041FD55EDCFB6289ABEB9F3F46949F817C",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-linux-arm64",
+      "checksum": "89C62C2DB3617256393C4C87708947E51A4DC9E4F01A60A10A2DC860574BDF60",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.1/tinygo0.43.0-net.1.darwin-amd64.tar.gz",
+      "checksum": "32F32BA75A4C8CB0BB8614BFE5D98406BAAF7DAE45D6A400CAC1CFDC48CBD139",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.1/tinygo0.43.0-net.1.darwin-arm64.tar.gz",
+      "checksum": "80EA91AA18D53439BCA164EEE52AD13E8B0EAE5D58F833BAFCFCA0BA7A87C284",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.1/tinygo0.43.0-net.1.linux-amd64.tar.gz",
+      "checksum": "391E7324844215B7D20C57133525236DA160EE80463FAF72B5BB3F30801FF206",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.1/tinygo0.43.0-net.1.linux-arm64.tar.gz",
+      "checksum": "46CD832D1C90076B3B5A4DD85E720034831769CCFF1621D76EA92BA556C44A81",
+      "algorithm": "sha256"
+    }
+  ]
+}

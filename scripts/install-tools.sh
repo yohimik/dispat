@@ -1,16 +1,42 @@
 #!/bin/sh
-# The tools the release flow needs beside dispat itself, each at its newest
-# release. Nothing is pinned here on purpose: a run takes the crier and the
-# TinyGo fork their repositories published last, verified by dispat against
-# the digest GitHub carries for the asset. To install one tool, or into a
-# particular folder, run its line by hand with the flags it needs; without
-# --bin-dir, dispat's own ladder decides where a tool lands (DISPAT_BIN_DIR,
-# then /usr/local/bin when it is writable, then ~/.local/bin).
-#
-# The fork ships prereleases only and a tarball rather than a binary, so its
-# line says so: --prerelease admits them, and --pipe unpacks the whole
-# toolchain tree (bin/ plus the lib/ and src/ beside it) into the folder a
-# binary would have landed in, as <folder>/tinygo/bin/tinygo.
+# Bootstrap the latest Aqua with Dispat, then install the repository's tool pins.
+# Usage: install-tools.sh [all|crier|tinygo] [destination]
+# Crier is copied as a standalone executable. TinyGo links to Aqua's complete
+# toolchain tree, retaining the lib/ and src/ siblings its compiler requires.
 set -eu
-dispat install yohimik/tinygo --prerelease --asset 'tinygo{version}.{os}-{arch}.tar.gz' --pipe 'tar -xz'
-dispat install yohimik/crier
+
+tool=${1:-all}
+case "$tool" in all|crier|tinygo) ;; *) echo "unknown tool: $tool" >&2; exit 2 ;; esac
+[ "$#" -le 2 ] || { echo "usage: $0 [all|crier|tinygo] [destination]" >&2; exit 2; }
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+destination=${2:-${DISPAT_BIN_DIR:-"$HOME/.local/bin"}}
+mkdir -p "$destination"
+destination=$(CDPATH='' cd -- "$destination" && pwd)
+
+"${DISPAT_BIN:-dispat}" install aquaproj/aqua \
+  --asset 'aqua_{os}_{arch}.tar.gz' --bin-dir "$destination" --pipe 'tar -xz aqua'
+aqua="$destination/aqua"
+# The checked-in policy trusts only this repository's two local definitions.
+export AQUA_POLICY_CONFIG="$root/.aqua/aqua-policy.yaml"
+export AQUA_GITHUB_TOKEN="${AQUA_GITHUB_TOKEN:-${GITHUB_TOKEN:-}}"
+config="$root/.aqua/aqua.yaml"
+if [ "$tool" = all ]; then
+  "$aqua" -c "$config" install
+else
+  "$aqua" -c "$config" install --tags "$tool"
+fi
+
+if [ "$tool" = all ] || [ "$tool" = crier ]; then
+  "$aqua" -c "$config" cp --tags crier -o "$destination"
+fi
+if [ "$tool" = all ] || [ "$tool" = tinygo ]; then
+  tinygo_executable=$("$aqua" -c "$config" which tinygo)
+  tinygo_root=$(dirname "$(dirname "$tinygo_executable")")
+  test -d "$tinygo_root/lib"
+  test -d "$tinygo_root/src"
+  if [ -e "$destination/tinygo" ] && [ ! -L "$destination/tinygo" ]; then
+    echo "refusing to replace an existing TinyGo directory: $destination/tinygo" >&2
+    exit 1
+  fi
+  ln -sfn "$tinygo_root" "$destination/tinygo"
+fi

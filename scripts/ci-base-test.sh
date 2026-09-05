@@ -56,4 +56,9 @@ printf '# diagnostic registry\n' > specs/ccme-spec/SPEC.md
 git add specs/ccme-spec/SPEC.md && git commit -qm specification
 got=$(GITHUB_EVENT_NAME=push GITHUB_EVENT_BEFORE=HEAD^ CI_REPOSITORY=$tmp sh "$helper")
 assert "$got" all 'specification changes run the CLI diagnostic-reference test'
+mkdir -p .aqua
+printf 'packages: []\n' > .aqua/aqua.yaml
+git add .aqua/aqua.yaml && git commit -qm tool-manifest
+got=$(GITHUB_EVENT_NAME=push GITHUB_EVENT_BEFORE=HEAD^ CI_REPOSITORY=$tmp sh "$helper")
+assert "$got" all 'Aqua tool changes run the toolchain and release build gates'
 printf 'ci base scenarios passed\n'

@@ -1,7 +1,7 @@
 # Release scripts
 
-You will find four standalone shell scripts here: two for CI glue and checks shared across workflows, one install
-manifest listing the tools a release fetches at their newest releases, and one
+You will find four standalone shell scripts here: two for CI glue and checks shared across workflows, one tool
+installer backed by the repository's Aqua manifest, and one
 host-run half of the TinyGo spike, which is not CI glue at all — buildx reaches only linux, so the darwin probes run
 on a Mac by hand. Smaller scripts
 live directly in dispat configuration files as script entries, such as `push-badge` in the root
@@ -20,7 +20,7 @@ exported by CI.
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
 | [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its scope argument    | The `--cache-from`/`--cache-to` flags for that build's cache scope, or nothing outside Actions. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
-| [`install-tools.sh`](./install-tools.sh)   | the release job; the ping and replay jobs, the `tiny-toolchain` stage of [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), the `tinygo-spike-fork` stage of [`Dockerfile.tinygo`](../Dockerfile.tinygo) and `tinygo-spike-darwin.sh` run one of its lines directly with their own `--bin-dir` | `GITHUB_TOKEN`, `DISPAT_BIN_DIR` | Two `dispat install` lines, the newest crier and the newest TinyGo fork; nothing is pinned, and a tool needed on its own is one line of it run by hand. |
+| [`install-tools.sh`](./install-tools.sh)   | the release job; the ping and replay jobs, the `tiny-toolchain` stage of [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), the `tinygo-spike-fork` stage of [`Dockerfile.tinygo`](../Dockerfile.tinygo) and `tinygo-spike-darwin.sh` | `GITHUB_TOKEN`, `DISPAT_BIN_DIR`; optionally `[all\|crier\|tinygo] [destination]` | Installs the newest Aqua with dispat, then the repository-recorded crier and TinyGo fork through `.aqua/aqua.yaml`. The destination receives `aqua` and the selected tools: a real `crier` binary and/or a link to the complete TinyGo tree at `tinygo`. |
 | [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike — build, run, net and self-update probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`, with `darwin-selfupdate.log` carrying the real-TLS update matrix and the platform verifier's answer about `SSL_CERT_FILE`. |
 
 Every gate and stage of this repository runs inside Docker, so a CI job needs Docker, git and dispat itself — no Go,

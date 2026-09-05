@@ -28,7 +28,7 @@ fi
 # Check the whole event range: a shared change may be the first of several
 # pushed commits rather than HEAD itself.
 if git diff --name-only "$candidate" HEAD | grep -Eq \
-  '^(README\.md$|\.github/workflows/|Dockerfile\.gotest($|\.)|\.dockerignore$|go\.work(\.sum)?$|dispat\.yaml$|scripts/|tools/testreport/|packages/docs/demo/fixtures/|specs/ccme-spec/SPEC\.md$)'; then
+  '^(\.aqua/|README\.md$|\.github/workflows/|Dockerfile\.gotest($|\.)|\.dockerignore$|go\.work(\.sum)?$|dispat\.yaml$|scripts/|tools/testreport/|packages/docs/demo/fixtures/|specs/ccme-spec/SPEC\.md$)'; then
   echo all
 else
   echo "$candidate"

@@ -1,0 +1,14 @@
+registries:
+  - name: local
+    type: local
+    path: registry.yaml
+checksum:
+  enabled: true
+  require_checksum: true
+packages:
+  - name: yohimik/crier@v1.1.0
+    registry: local
+    tags: [crier]
+  - name: yohimik/tinygo@v0.43.0-net.1
+    registry: local
+    tags: [tinygo]

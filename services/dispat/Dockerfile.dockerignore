@@ -21,3 +21,9 @@ services/*
 # services/dispat that is output rather than source, and shipping it into the
 # context would grow with every build.
 services/dispat/dist
+
+# Shared Aqua registry, version/checksum manifests, and bootstrap helper.
+!.aqua
+!scripts
+scripts/*
+!scripts/install-tools.sh

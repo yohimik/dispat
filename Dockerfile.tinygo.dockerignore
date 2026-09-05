@@ -31,3 +31,9 @@ packages/*
 !packages/docs
 packages/docs/*
 !packages/docs/docs
+
+# Shared Aqua registry, version/checksum manifests, and bootstrap helper.
+!.aqua
+!scripts
+scripts/*
+!scripts/install-tools.sh

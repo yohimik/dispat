@@ -1,0 +1,26 @@
+packages:
+  - type: github_release
+    repo_owner: yohimik
+    repo_name: crier
+    asset: crier-{{.OS}}-{{.Arch}}
+    format: raw
+    checksum: {}
+    supported_envs:
+      - darwin/amd64
+      - darwin/arm64
+      - linux/amd64
+      - linux/arm64
+  - type: github_release
+    repo_owner: yohimik
+    repo_name: tinygo
+    asset: tinygo{{trimV .Version}}.{{.OS}}-{{.Arch}}.tar.gz
+    format: tar.gz
+    checksum: {}
+    files:
+      - name: tinygo
+        src: tinygo/bin/tinygo
+    supported_envs:
+      - darwin/amd64
+      - darwin/arm64
+      - linux/amd64
+      - linux/arm64
