@@ -21,6 +21,13 @@ try {
   await deck.locator('[data-demo-scene-root]').waitFor();
   const original = await deck.locator('[data-slide-id]').getAttribute('data-slide-id');
   const originalScene = await deck.locator('[data-demo-scene-root]').elementHandle();
+  const captionGeometry = () => deck.evaluate((node) => {
+    const outer = node.getBoundingClientRect();
+    const caption = node.querySelector('#landing-demo-description').getBoundingClientRect();
+    const summary = node.querySelector('summary').getBoundingClientRect();
+    return {height: outer.height, captionTop: caption.top - outer.top, summaryTop: summary.top - outer.top};
+  });
+  const beforeLoading = await captionGeometry();
   const pending = [];
   let holdRequests = true;
   await page.route('**/*.js', async (route) => {
@@ -40,6 +47,7 @@ try {
   const loading = deck.getByRole('status');
   await loading.waitFor();
   assert.match(await loading.innerText(), /Loading .*current demo remains available/i);
+  assert.deepEqual(await captionGeometry(), beforeLoading, 'pending status moved the caption or transcript');
   const speed = deck.getByRole('button', {name: /Playback speed/});
   const speedBefore = await speed.innerText(); await speed.click();
   assert.notEqual(await speed.innerText(), speedBefore, 'controls stopped responding while a scene loaded');

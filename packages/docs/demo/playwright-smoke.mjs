@@ -246,7 +246,7 @@ async function assertSelectionPolicy(page, carousel) {
   }
 
   await setDetails(carousel, true);
-  const command = carousel.locator('details code');
+  const command = carousel.locator('details code:visible');
   const selectedCommand = {
     text: await dragSelection(page, command),
     userSelect: await command.evaluate((node) => getComputedStyle(node).userSelect),
