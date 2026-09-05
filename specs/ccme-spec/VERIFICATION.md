@@ -23,7 +23,9 @@ The specification now has a standalone release package, an initial baseline of 1
 - The complete `services/dispat/internal/plan` test package passed in Go 1.27. Five new regression tests exercise specification vectors 134–138. Existing tests cover fresh prerelease discharge, including vector 133.
 - The version-hook regression suite passed against a real Dispat executable: version replacement, replay, build metadata, malformed declarations, symlink refusal, and rollback after the second installation write fails.
 - The Docker shell gate passed, including the new specification scripts and the announcement regressions.
-- CI baseline scenarios and the test-plan reference validator passed. The final report commit uses an all-package CCME scope so the normal affected-package selection reaches every module and the specification's own tests.
+- CI baseline scenarios and the test-plan reference validator passed during this review. The specification and parser
+  are members of the shared `ccme` version group, so their major and minor release lines remain aligned while their
+  package tests and patch versions remain independent.
 - Docusaurus typechecking and the production build passed with broken links, anchors, and Markdown links configured as errors. Current and archived concepts and architecture pages now qualify the proof summaries.
 - English and Russian technical reports and ICSE variants compile. Final reference checks pass; the ICSE layout retains four overfull-box warnings. Paper edits remain local and are excluded from commits.
 
@@ -31,6 +33,45 @@ The specification now has a standalone release package, an initial baseline of 1
 
 The written proofs are reviewed arguments, not machine-checked proofs. Global convergence outside the stated retry invariant and exactly-once arbitrary external effects are not claimed. The version hook recovers ordinary write failures and catchable interruptions; its two-file installation is not atomic across a machine crash. Failed restoration preserves backups for recovery.
 
-This change does not modify production Go behavior. Full combined coverage was not remeasured for this documentation and test change, and the existing coverage badge is not presented as a new measurement. Released-module build checks still depend on publishing the pending Aqua module versions; workspace planner tests passed.
+The specification corrections do not change the commit-message grammar or the parser's executable behavior. They do
+change normative release-planning rules, which is why the specification advances to 2.0.0. Full combined coverage was
+not remeasured for this documentation and test change, and the existing coverage badge is not presented as a new
+measurement. The CCME and models Go modules now use `/v2` import paths. Published-module checks remain release-time gates: they
+must resolve the stable tags written by the same run, without workspace replacements.
 
 The paper explicitly analyzes the historical 1.0.0 specification at `713f1a0b`. Its historical experiment counts were preserved. No paper, patent, or unrelated working files are part of these commits.
+
+
+## Coordinated 1.8.0 release verification
+
+The CLI remains at 1.8.0. CCME and its specification share `fixedMajorMinor` versioning and both plan 2.0.0.
+Models also plans 2.0.0 because its public fields expose CCME types. Its API version is independent from the CLI
+version group, so this Go API change does not force a CLI major release. The manifest, scanner, and writer libraries
+plan 1.2.0; all four container images and the documentation site plan 1.8.0. The real status command selects these
+12 packages in one release plan. Config and infra remain unchanged.
+
+The module migration is implemented in `3e8b5849`. Workspace-only `v2.0.0-0` requirements have exact local replacements
+until the new tags exist. AutoVersion rewrites releasing consumers to `v2.0.0` after their providers publish. The
+post-version checksum gate refuses remaining placeholders and checks the actual versioned module paths. Parser
+execution is unchanged; its package documentation now names CCME 2.0 and distinguishes parsing from release planning.
+
+Additional verification completed before CI dispatch:
+
+- The exact `Dockerfile.gotest` `test-dispat` target passed all 1,520 CLI tests under its non-root Go 1.26 environment.
+- The parser, planner, and Git adapter tests passed. Specification vectors 133–138 remain covered, including fresh
+  prerelease admission, suppression changes, channel eligibility, and per-unit self-source exclusion.
+- Bulk tag tests now include a divergent branch with an unreachable higher version. Tag visibility, alias handling,
+  and release-lock exclusion are preserved.
+- Histories are shared by peeled baseline commit identity, with a safe tag fallback when an adapter supplies no OID.
+  Regressions distinguish shared commits, distinct commits, and unknown commit identities.
+- The specification's performance discussion now correctly treats generation numbers as a way to prune ancestry
+  searches, not as a constant-time proof of reachability. Distinct baseline commits need not correspond to release runs.
+- The specification's version-hook suite, CI baseline scenarios, pre-release checksum checks, and single-call
+  announcement regression passed. Docusaurus typechecking and production build passed.
+- Full JSON status output was identical before and after bulk tag loading. Native median time changed from 1.452 to
+  1.242 seconds in the coordinator's three-run comparison. These timings cover that optimization, before the additional
+  baseline-identity cache change; they are not a benchmark of the published binary.
+
+The final `test(*)` commit requests the complete affected-package test sweep. CI and the release workflow must still
+pass on the pushed revision. The release workflow computes fresh combined coverage and requires an unrounded ratio
+of at least 95%; this document does not substitute earlier coverage measurements for that gate.
