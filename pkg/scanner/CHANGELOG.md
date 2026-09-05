@@ -1,5 +1,24 @@
 # Changelog
 
+## pkg/scanner/v1.2.0 (2026-09-05)
+
+### Features
+
+- support Aqua manifests ([18f3e2c](https://github.com/yohimik/dispat/commit/18f3e2c2891ad3959a02535f6b6d942a5c0fd326)) (by yohimik)
+
+### Fixes
+
+- prefer writable Aqua sources ([73a4e86](https://github.com/yohimik/dispat/commit/73a4e86bea17bf2e181628e9c54f6b4bc47ff08d)) (by yohimik)
+
+### Dependencies
+
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.0): 1.1.1 -> 1.2.0
+
+### Authors
+
+- yohimik
+
+
 ## pkg/scanner/v1.1.1 (2026-08-19)
 
 ### Fixes
