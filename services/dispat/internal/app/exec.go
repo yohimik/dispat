@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	public "github.com/yohimik/dispat/pkg/models"
+	public "github.com/yohimik/dispat/pkg/models/v2"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"

@@ -11,12 +11,12 @@ The six packages below are the whole of the importable surface.
 
 | Module | Import path | What it does |
 |--------|-------------|--------------|
-| [ccme](./ccme.md) | `github.com/yohimik/dispat/pkg/ccme` | Parses commit messages in the Conventional Commits Monorepo Extension format |
+| [ccme](./ccme.md) | `github.com/yohimik/dispat/pkg/ccme/v2` | Parses commit messages in the Conventional Commits Monorepo Extension format |
 | [config](./config.md) | `github.com/yohimik/dispat/pkg/config` | Loads JSON, YAML and TOML configuration without reflection |
 | [scanner](./scanner.md) | `github.com/yohimik/dispat/pkg/scanner` | Reads dependency manifests into one ecosystem-neutral shape |
 | [writer](./writer.md) | `github.com/yohimik/dispat/pkg/writer` | Rewrites those manifests in place, byte for byte |
 | [manifest](./manifest.md) | `github.com/yohimik/dispat/pkg/manifest` | The vocabulary the reader and the writer share |
-| [models](./models.md) | `github.com/yohimik/dispat/pkg/models` | The typed model of the configuration file |
+| [models](./models.md) | `github.com/yohimik/dispat/pkg/models/v2` | The typed model of the configuration file |
 
 ## How they fit together
 
@@ -33,16 +33,17 @@ configuration means, and `config` says how a configuration is loaded at all.
 
 ## Installing
 
-Each module is versioned and tagged separately. They use the layout Go expects for a multi-module repository. A tag
-reads `pkg/ccme/v1.0.0` rather than a repository-wide version:
+Each module is versioned and tagged separately. They use the layout Go expects for a multi-module repository. For
+example, the `github.com/yohimik/dispat/pkg/ccme/v2` module is released by the `pkg/ccme/v2.0.0` tag rather than a
+repository-wide version:
 
 ```sh
-go get github.com/yohimik/dispat/pkg/ccme
+go get github.com/yohimik/dispat/pkg/ccme/v2
 go get github.com/yohimik/dispat/pkg/config
 go get github.com/yohimik/dispat/pkg/scanner
 go get github.com/yohimik/dispat/pkg/writer
 go get github.com/yohimik/dispat/pkg/manifest
-go get github.com/yohimik/dispat/pkg/models
+go get github.com/yohimik/dispat/pkg/models/v2
 ```
 
 Taking one package does not pull the others in unless it needs them. None of them pulls in the CLI.

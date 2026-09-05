@@ -37,15 +37,9 @@ scripts:
   # scan can see, so it stays a grep.
   verify-unlinked: |
     dispat scanner --root-only --verify-unlinked || exit 1
-    # A module the go.mod does not require yet has no entry to lose: a
-    # library that has never been released rides the workspace alone
-    # until its first tag, and the release's own go-mod-tidy is what
-    # writes the requirement in. The guard is what lets the list name
-    # every library, released or not.
-    dispat for ccme config manifest models scanner writer --do '
-      grep -q "github.com/yohimik/dispat/pkg/$DISPAT_ITEM " go.mod || exit 0
-      grep -q "^github.com/yohimik/dispat/pkg/$DISPAT_ITEM " go.sum \
-        || { echo "go.sum lost its entry for pkg/$DISPAT_ITEM" >&2; exit 1; }'
+    phase=pre
+    [ "${DISPAT_STAGE:-}" = build ] && phase=post
+    sh ../../scripts/verify-go-sums.sh go.mod go.sum "$phase"
   build:
     - dispat exec link --for pkg:dispat
     # DISPAT_EXPORT_BASE is where the export is about to land, which is

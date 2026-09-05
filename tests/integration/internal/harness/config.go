@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/stretchr/testify/require"
-	"github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/pkg/models/v2"
 )
 
 // Bool returns a pointer to b, for the enable/disable *bool config fields

@@ -2661,15 +2661,20 @@ packages and a long history a literal implementation becomes the bottleneck for 
 structural and want the bucketing described below; the last two are ordinary loop-invariant and loop-inversion mistakes,
 and cost nothing to avoid if the code is written the right way round the first time.
 
-**Windows: group by distinct baseline commit.** `W(P)` is defined per package, but it is a function only of
-`stableCommit(P)`, and packages released together share one. The number of *distinct* baseline commits is therefore the
-number of release runs still in flight, in practice a handful rather than `P`. Computing `reach(s)` once per distinct
-`s` and testing membership by lookup replaces `P` traversals with `k`. Where the history has a commit-graph with
-generation numbers, ancestry is an `O(1)` comparison and no explicit commit sets are needed at all. Note also that
-storing `W(P)` as an explicit set per package costs `O(P · C)` **memory**, which on a large repository is the binding
-constraint before time is. Representing each distinct window as a bitset over commit indices (one bit per commit in
-`reach(HEAD)`, `k` bitsets in total) bounds it at `O(k · C)` bits and makes the admission test of §13.4a a single bit
-lookup.
+**Windows: group by distinct baseline commit.** For a fixed `HEAD`, `W(P)` is determined by
+`stableCommit(P)`. Different package tags that resolve to the same commit therefore share a window. A release MAY
+record packages at different commits; `k` counts distinct baseline commits, not release runs, and can be as large as
+`P`. Computing `reach(s)` once per distinct `s` and testing membership by lookup replaces `P` traversals with `k`.
+
+Commit-graph generation numbers can reject some ancestry candidates and bound a graph walk. They do not establish
+ancestry by a constant-time comparison: commits on different branches can have ordered generation numbers without
+an ancestor relationship. A positive answer still requires a reachability query or a previously computed index.
+See Git's [commit-graph design](https://git-scm.com/docs/commit-graph).
+
+Storing `W(P)` as an explicit set per package costs `O(P · C)` **memory**. Representing each distinct window as a bitset
+over commit indices (one bit per commit in `reach(HEAD)`, `k` bitsets in total) bounds the membership storage at
+`O(k · C)` bits and makes the admission test of §13.4a a single bit lookup. Building those windows still requires
+computing reachability.
 
 **Propagation: bucket by (window class, directive).** Admission depends on the target's window, and there are only `k`
 distinct windows; traversal depends only on the directive tuple: `(bump, depth, Propagate-Scope)` for the bump pass and

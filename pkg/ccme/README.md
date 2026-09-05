@@ -1,19 +1,24 @@
 # ccme
 
-A Go parser for **Conventional Commits, Monorepo Extension (CCME) 1.0.0**, a strict superset of Conventional Commits
+A Go parser for **Conventional Commits, Monorepo Extension (CCME) 2.0.0**, a strict superset of Conventional Commits
 1.0.0.
 
 It uses no regular expressions. The parser executes the single left-to-right index scan from §20 of the specification:
 one byte of lookahead, no backtracking, no recursion, O (n) time, and O (1) working space. This design ensures safe
 execution when parsing untrusted commit messages in CI.
 
-The separately versioned specification is [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md), and every `§n.m` reference in the code and
+The specification is [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md), and every `§n.m` reference in the code and
 documentation points to it. Chapter §20 covers parsing, while §17 covers Conformance.
+
+The parser and specification share major and minor versions through the `ccme` version group. Patch versions remain
+package-specific. Version 2 uses the same message grammar and parser behavior as version 1; Go callers must use the
+`/v2` import path. This package handles message syntax and message-local diagnostics. Git history, dependency graphs,
+fresh admission, propagation, and release planning belong to Dispat's release engine.
 
 ## Install
 
 ```sh
-go get github.com/yohimik/dispat/pkg/ccme
+go get github.com/yohimik/dispat/pkg/ccme/v2
 ```
 
 ## Use

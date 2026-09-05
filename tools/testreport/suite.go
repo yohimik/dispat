@@ -96,7 +96,7 @@ func readLog(id string, r io.Reader) (*suiteLog, error) {
 			return nil, err
 		}
 		if log.path == "" && ev.Package != "" {
-			log.path = moduleOf(strings.TrimPrefix(ev.Package, modulePrefix))
+			log.path = moduleOf(workspacePackage(ev.Package))
 		}
 		if !ev.terminal() {
 			continue
@@ -183,7 +183,7 @@ func (l *suiteLog) fuzzTargets() []FuzzTarget {
 		pkg, name, _ := strings.Cut(key, "\t")
 		out = append(out, FuzzTarget{
 			Name:    name,
-			Package: strings.TrimPrefix(pkg, modulePrefix),
+			Package: workspacePackage(pkg),
 			Seeds:   l.fuzzSeeds[key],
 		})
 	}

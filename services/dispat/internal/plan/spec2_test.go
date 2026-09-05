@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/ccme/v2"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 

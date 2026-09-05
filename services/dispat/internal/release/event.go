@@ -3,7 +3,7 @@ package release
 import (
 	"time"
 
-	public "github.com/yohimik/dispat/pkg/models"
+	public "github.com/yohimik/dispat/pkg/models/v2"
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )

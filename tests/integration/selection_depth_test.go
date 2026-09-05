@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/pkg/models/v2"
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 

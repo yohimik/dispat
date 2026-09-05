@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"golang.org/x/mod/modfile"
 )
 
 // modulePrefix is the workspace's module path. Profile lines name their files
@@ -150,13 +152,44 @@ func (c *coverage) modules() []Module {
 }
 
 // packageOf turns a block key into the workspace-relative package that holds
-// it: `github.com/yohimik/dispat/pkg/ccme/parse.go:12.34,15.2` -> `pkg/ccme`.
+// it: `github.com/yohimik/dispat/pkg/ccme/v2/parse.go:12.34,15.2` -> `pkg/ccme`.
 func packageOf(blockKey string) string {
 	file := blockKey
 	if i := strings.LastIndex(file, ":"); i >= 0 {
 		file = file[:i]
 	}
-	return strings.TrimPrefix(path.Dir(file), modulePrefix)
+	return workspacePackage(path.Dir(file))
+}
+
+type moduleDecl struct {
+	dir  string
+	path string
+}
+
+type moduleDecls []moduleDecl
+
+// workspacePath translates a Go import package through the module identities
+// declared by the workspace. A semantic-import suffix belongs to the module
+// name, not necessarily to its folder (`.../ccme/v2` lives in `pkg/ccme`).
+func (m moduleDecls) workspacePath(importPath string) string {
+	best := moduleDecl{}
+	for _, candidate := range m {
+		if importPath != candidate.path && !strings.HasPrefix(importPath, candidate.path+"/") {
+			continue
+		}
+		if len(candidate.path) > len(best.path) {
+			best = candidate
+		}
+	}
+	if best.path == "" {
+		return strings.TrimPrefix(importPath, modulePrefix)
+	}
+	suffix := strings.TrimPrefix(importPath, best.path)
+	return best.dir + suffix
+}
+
+func workspacePackage(importPath string) string {
+	return workspaceModules().workspacePath(importPath)
 }
 
 // moduleOf names the module a workspace-relative package belongs to, from the
@@ -208,14 +241,37 @@ func (u useList) module(pkg string) string {
 // than state: nothing writes them again, and nothing reads them expecting
 // anything but the file's contents.
 var (
-	useOnce sync.Once
-	useOf   useList
+	useOnce     sync.Once
+	useOf       useList
+	modulesOnce sync.Once
+	modulesOf   moduleDecls
 )
 
 func workspaceUse() useList {
 	useOnce.Do(func() { useOf = readUse() })
 	return useOf
 }
+
+func workspaceModules() moduleDecls {
+	modulesOnce.Do(func() {
+		root, err := repoRoot()
+		if err != nil {
+			return
+		}
+		for _, dir := range workspaceUse() {
+			body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(dir), "go.mod"))
+			if err != nil {
+				continue
+			}
+			if modulePath := declaredModulePath(body); modulePath != "" {
+				modulesOf = append(modulesOf, moduleDecl{dir: dir, path: modulePath})
+			}
+		}
+	})
+	return modulesOf
+}
+
+func declaredModulePath(body []byte) string { return modfile.ModulePath(body) }
 
 // readUse reads the workspace's use list from the go.work above the working
 // directory, and answers with none when there is no answer to be had.

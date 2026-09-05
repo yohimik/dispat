@@ -33,7 +33,7 @@ func measuredRun(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "coverage")
 	write(t, filepath.Join(dir, "ccme.out"),
-		"mode: atomic\ngithub.com/yohimik/dispat/pkg/ccme/parse.go:1.1,2.2 4 1\n")
+		"mode: atomic\ngithub.com/yohimik/dispat/pkg/ccme/v2/parse.go:1.1,2.2 4 1\n")
 	write(t, filepath.Join(dir, "testlog", "ccme.json"), sampleLog)
 	return dir
 }
@@ -333,7 +333,7 @@ func TestBuildRefusesWhatItCannotMeasureOrWrite(t *testing.T) {
 // script's own working files are in the same folder and are not a package's
 // measurement of anything.
 func TestReadCoverageKeepsTheLayersApart(t *testing.T) {
-	const block = "github.com/yohimik/dispat/pkg/ccme/parse.go"
+	const block = "github.com/yohimik/dispat/pkg/ccme/v2/parse.go"
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "ccme.out"),
 		"mode: atomic\n"+block+":1.1,2.2 2 1\n"+block+":4.1,5.2 2 0\n")

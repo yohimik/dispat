@@ -159,13 +159,13 @@ func readBenchLog(id string, r io.Reader) (*benchLog, error) {
 			case "pkg":
 				pkg = value
 				if log.path == "" {
-					log.path = moduleOf(strings.TrimPrefix(pkg, modulePrefix))
+					log.path = moduleOf(workspacePackage(pkg))
 				}
 			}
 			continue
 		}
 		if result, ok := parseBenchLine(line); ok {
-			result.Package = strings.TrimPrefix(pkg, modulePrefix)
+			result.Package = workspacePackage(pkg)
 			log.results = append(log.results, result)
 		}
 	}
@@ -173,7 +173,7 @@ func readBenchLog(id string, r io.Reader) (*benchLog, error) {
 	// line, newline or not.
 	if line := strings.TrimRight(partial.String(), "\r\n"); line != "" {
 		if result, ok := parseBenchLine(line); ok {
-			result.Package = strings.TrimPrefix(pkg, modulePrefix)
+			result.Package = workspacePackage(pkg)
 			log.results = append(log.results, result)
 		}
 	}

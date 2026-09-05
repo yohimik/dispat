@@ -3,7 +3,7 @@ package ccme_test
 import (
 	"fmt"
 
-	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/ccme/v2"
 )
 
 func ExampleParser_ParseSubject() {

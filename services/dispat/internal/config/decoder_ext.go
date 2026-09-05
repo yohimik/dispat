@@ -18,7 +18,7 @@ package config
 import (
 	lib "github.com/yohimik/dispat/pkg/config"
 
-	public "github.com/yohimik/dispat/pkg/models"
+	public "github.com/yohimik/dispat/pkg/models/v2"
 )
 
 // setter fills one field from the value written under its key. at is the key's

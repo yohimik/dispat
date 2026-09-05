@@ -23,7 +23,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/ccme/v2"
 )
 
 // File mirrors the configuration at the monorepo root. The file extension

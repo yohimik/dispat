@@ -360,8 +360,8 @@ func TestReadBenchLogOrdersAcrossPackages(t *testing.T) {
 	const stream = `
 {"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Output":"pkg: github.com/yohimik/dispat/pkg/config\n"}
 {"Action":"output","Package":"github.com/yohimik/dispat/pkg/config","Output":"BenchmarkZ-4\t10\t1.00 ns/op\n"}
-{"Action":"output","Package":"github.com/yohimik/dispat/pkg/ccme","Output":"pkg: github.com/yohimik/dispat/pkg/ccme\n"}
-{"Action":"output","Package":"github.com/yohimik/dispat/pkg/ccme","Output":"BenchmarkA-4\t10\t1.00 ns/op\n"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Output":"pkg: github.com/yohimik/dispat/pkg/ccme/v2\n"}
+{"Action":"output","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Output":"BenchmarkA-4\t10\t1.00 ns/op\n"}
 `
 	log, err := readBenchLog("all", strings.NewReader(stream))
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 
-	public "github.com/yohimik/dispat/pkg/models"
+	public "github.com/yohimik/dispat/pkg/models/v2"
 	"github.com/yohimik/dispat/pkg/writer"
 
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"

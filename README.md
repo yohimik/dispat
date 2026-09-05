@@ -223,7 +223,7 @@ suits you better.
 The implementation, including the CLI, Go packages, container definitions and GitHub action, is licensed under
 [MIT](./LICENSE). The Go parser in [pkg/ccme](./pkg/ccme) has its own [MIT licence](./pkg/ccme/LICENSE).
 
-The normative CCME specification is a separate, independently versioned package at
+The normative CCME specification is a separate package at
 [specs/ccme-spec](./specs/ccme-spec). Its text and accompanying material are licensed under
 [GPL-3.0-or-later](./specs/ccme-spec/LICENSE). Copies or adaptations of that material retain the applicable GPL terms.
 A link or section reference identifies the specification; it does not itself change the licence of the referring file.

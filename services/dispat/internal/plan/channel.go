@@ -3,7 +3,7 @@ package plan
 import (
 	"strconv"
 
-	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/ccme/v2"
 )
 
 // channelOf derives a package's channel from a version (§11.1).

@@ -1,5 +1,8 @@
 // Package ccme implements a parser for Conventional Commits: Monorepo
-// Extension (CCME) 1.0.0, a strict superset of Conventional Commits 1.0.0.
+// Extension (CCME) 2.0.0, a strict superset of Conventional Commits 1.0.0.
+// The 2.0.0 specification keeps the 1.0.0 message grammar unchanged; its
+// release-planning algorithm and workspace obligations belong to the engine,
+// not this parser.
 //
 // The parser is a single left-to-right index scan with one byte of lookahead:
 // no regular-expression engine, no backtracking, no recursion, and therefore

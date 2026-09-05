@@ -4,6 +4,9 @@ This package provides the public configuration model for the dispat CLI. It cont
 `dispat.json`, `dispat.yaml`, and `dispat.toml` decode into. External tools like generators, migration scripts, and
 test suites can build configurations as typed Go values and marshal them directly to valid config files.
 
+Import it as `github.com/yohimik/dispat/pkg/models/v2`. Version 2 follows the CCME 2 public types used by resolved
+parser configuration; it remains independently versioned from the Dispat CLI.
+
 ```go
 cfg := models.File{
 Scripts: map[string]models.Script{
@@ -50,4 +53,3 @@ dependency: [`pkg/ccme`](../ccme), used for resolved parser configuration types.
 ## Licence
 
 MIT. See [LICENSE](./LICENSE).
-

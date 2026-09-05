@@ -482,7 +482,7 @@ func TestBuildFoldsInTheExperiments(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(coverage, "ccme.out"),
-		"mode: atomic\ngithub.com/yohimik/dispat/pkg/ccme/parse.go:1.1,2.2 4 1\n")
+		"mode: atomic\ngithub.com/yohimik/dispat/pkg/ccme/v2/parse.go:1.1,2.2 4 1\n")
 	write(t, filepath.Join(coverage, "testlog", "ccme.json"), sampleLog)
 
 	out := filepath.Join(dir, "report.json")
@@ -540,7 +540,7 @@ func TestBuildFailsOnAMalformedCampaign(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(coverage, "ccme.out"),
-		"mode: atomic\ngithub.com/yohimik/dispat/pkg/ccme/parse.go:1.1,2.2 4 1\n")
+		"mode: atomic\ngithub.com/yohimik/dispat/pkg/ccme/v2/parse.go:1.1,2.2 4 1\n")
 	write(t, filepath.Join(coverage, "testlog", "ccme.json"), sampleLog)
 	writeCell(t, filepath.Join(coverage, experimentsDirName), "orphan-dispat", `{`, "")
 

@@ -15,11 +15,11 @@ import (
 // integration suite also reaches.
 func TestCoverageCountsARepeatedBlockOnce(t *testing.T) {
 	const profile = `mode: atomic
-github.com/yohimik/dispat/pkg/ccme/parse.go:10.1,12.2 2 1
-github.com/yohimik/dispat/pkg/ccme/parse.go:14.1,16.2 2 0
+github.com/yohimik/dispat/pkg/ccme/v2/parse.go:10.1,12.2 2 1
+github.com/yohimik/dispat/pkg/ccme/v2/parse.go:14.1,16.2 2 0
 mode: set
-github.com/yohimik/dispat/pkg/ccme/parse.go:10.1,12.2 2 3
-github.com/yohimik/dispat/pkg/ccme/parse.go:14.1,16.2 2 0
+github.com/yohimik/dispat/pkg/ccme/v2/parse.go:10.1,12.2 2 3
+github.com/yohimik/dispat/pkg/ccme/v2/parse.go:14.1,16.2 2 0
 `
 	c := newCoverage()
 	if err := c.add(strings.NewReader(profile)); err != nil {
@@ -49,7 +49,7 @@ func TestCoverageMergesRatherThanIntersects(t *testing.T) {
 
 func TestCoverageGroupsIntoModulesAndPackages(t *testing.T) {
 	const profile = `mode: atomic
-github.com/yohimik/dispat/pkg/ccme/parse.go:1.1,2.2 4 1
+github.com/yohimik/dispat/pkg/ccme/v2/parse.go:1.1,2.2 4 1
 github.com/yohimik/dispat/services/dispat/internal/plan/plan.go:1.1,2.2 1 1
 github.com/yohimik/dispat/services/dispat/internal/plan/plan.go:4.1,5.2 1 0
 github.com/yohimik/dispat/services/dispat/main.go:1.1,2.2 2 1
@@ -124,6 +124,29 @@ func TestPackageAndModulePaths(t *testing.T) {
 	// `tools/testreport` that does not exist.
 	if got := moduleOf("tools/testreport"); got != "tools" {
 		t.Fatalf("moduleOf(tools/testreport) = %q, want the module go.work declares", got)
+	}
+}
+
+func TestModuleDeclarationsMapSemanticImportVersionsToWorkspaceFolders(t *testing.T) {
+	declared := moduleDecls{
+		{dir: "pkg/ccme", path: "github.com/yohimik/dispat/pkg/ccme/v2"},
+		{dir: "pkg/tool", path: "github.com/yohimik/dispat/pkg/tool"},
+	}
+	for _, tc := range []struct{ importPath, want string }{
+		{"github.com/yohimik/dispat/pkg/ccme/v2", "pkg/ccme"},
+		{"github.com/yohimik/dispat/pkg/ccme/v2/internal/parser", "pkg/ccme/internal/parser"},
+		{"github.com/yohimik/dispat/pkg/tool/v2/helpers", "pkg/tool/v2/helpers"},
+	} {
+		if got := declared.workspacePath(tc.importPath); got != tc.want {
+			t.Errorf("workspacePath(%q) = %q, want %q", tc.importPath, got, tc.want)
+		}
+	}
+}
+
+func TestDeclaredModulePathUsesGoModSyntax(t *testing.T) {
+	body := []byte("/* generated header */\nmodule\t\"example.com/acme/tool/v2\" // semantic import\n\ngo 1.26\n")
+	if got := declaredModulePath(body); got != "example.com/acme/tool/v2" {
+		t.Fatalf("declaredModulePath = %q", got)
 	}
 }
 

@@ -107,6 +107,8 @@ scripts:
     echo "pushed the coverage badge to the badges branch"
 
 versionGroups:
+  ccme:
+    versioning: fixedMajorMinor
   manifests:
     versioning: fixed
   cli:

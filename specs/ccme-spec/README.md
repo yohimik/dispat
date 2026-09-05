@@ -2,7 +2,7 @@
 
 This package contains the normative Conventional Commits: Monorepo Extension specification. `SPEC.md` defines the format and its conformance requirements. `LICENSE` carries the unchanged GPL-3.0 license text that applies to the specification.
 
-The package has its own release line because changes to the specification and changes to Dispat's Go implementation are different compatibility decisions. Releases use tags such as `specs/ccme-spec/v2.0.0`. When no tag exists, Dispat uses the repository's `ccme-spec: 1.0.0` initial baseline. The 2.0.0 edition is a major revision because its corrected release algorithm changes plans for inputs that were valid under 1.0.0. The commit-message grammar is unchanged.
+The specification and Go parser share the `ccme` version group with `fixedMajorMinor` versioning. Their major and minor versions move together, while patch versions remain package-specific. Each package keeps its own release tags. Specification releases use tags such as `specs/ccme-spec/v2.0.0`. When no tag exists, Dispat uses the repository's `ccme-spec: 1.0.0` initial baseline. The 2.0.0 edition is a major revision because its corrected release algorithm changes plans for inputs that were valid under 1.0.0. The commit-message grammar is unchanged.
 
 Run the package check from this directory:
 

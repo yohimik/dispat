@@ -12,10 +12,6 @@ github.com/rogpeppe/go-internal v1.9.0 h1:73kH8U+JUqXU8lRuOHeVHaa/SZPifC7BkcraZV
 github.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/yohimik/dispat/pkg/ccme v1.0.0-rc.0 h1:H9glmXqEHoEDc9nYVaVDndF+q2GxrA05vAXWGatWC7c=
-github.com/yohimik/dispat/pkg/ccme v1.0.0-rc.0/go.mod h1:8UxO6Pk3eSjs5g99B0At74CfvZpI+6yVCiHMsENuyPE=
-github.com/yohimik/dispat/pkg/models v1.0.0-rc.0 h1:wXfS7DzaqVh6/BDx4w0PpwkOtIBAtKjBUmog4h8uB0U=
-github.com/yohimik/dispat/pkg/models v1.0.0-rc.0/go.mod h1:YbOB6Z786M+pRQAQKtVfGwC5tz9A2qNhIIcK0rEAwcU=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 h1:YR8cESwS4TdDjEe65xsg0ogRM/Nc3DYOhEAlW+xobZo=
 gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=

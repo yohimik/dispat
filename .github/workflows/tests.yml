@@ -107,12 +107,7 @@ jobs:
       - name: No local link survived a build
         run: |
           dispat scanner --verify-unlinked
-          # The nested shell expands DISPAT_ITEM after dispat starts it.
-          # shellcheck disable=SC2016
-          dispat for ccme config manifest models scanner writer --do '
-            grep -q "github.com/yohimik/dispat/pkg/$DISPAT_ITEM " services/dispat/go.mod || exit 0
-            grep -q "^github.com/yohimik/dispat/pkg/$DISPAT_ITEM " services/dispat/go.sum \
-              || { echo "services/dispat/go.sum lost its entry for pkg/$DISPAT_ITEM; a go work sync pruned it"; exit 1; }'
+          sh scripts/verify-go-sums.sh services/dispat/go.mod services/dispat/go.sum pre
 
   test:
     name: Tests

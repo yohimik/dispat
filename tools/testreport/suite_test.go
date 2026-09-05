@@ -13,17 +13,17 @@ import (
 // One package holding a test with two subtests, a fuzz target, a skipped test,
 // and a second package with no test files at all.
 const sampleLog = `
-{"Action":"start","Package":"github.com/yohimik/dispat/pkg/ccme"}
-{"Action":"run","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse"}
-{"Action":"run","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse/subject"}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse/subject","Elapsed":0.01}
-{"Action":"run","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse/footer"}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse/footer","Elapsed":0.01}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse","Elapsed":0.02}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse","Elapsed":0.30}
-{"Action":"skip","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestNeedsGit","Elapsed":0}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Elapsed":1.5}
-{"Action":"skip","Package":"github.com/yohimik/dispat/pkg/ccme/internal/fixtures","Elapsed":0}
+{"Action":"start","Package":"github.com/yohimik/dispat/pkg/ccme/v2"}
+{"Action":"run","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse"}
+{"Action":"run","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse/subject"}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse/subject","Elapsed":0.01}
+{"Action":"run","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse/footer"}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse/footer","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse","Elapsed":0.02}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"FuzzParse","Elapsed":0.30}
+{"Action":"skip","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestNeedsGit","Elapsed":0}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Elapsed":1.5}
+{"Action":"skip","Package":"github.com/yohimik/dispat/pkg/ccme/v2/internal/fixtures","Elapsed":0}
 `
 
 // The failure this fences: `go test -json` reports every subtest as a result
@@ -160,7 +160,7 @@ func TestSuiteGroupsAreOrderedByModule(t *testing.T) {
 		{"integration-race", "github.com/yohimik/dispat/tests/integration"},
 		{"dispat", "github.com/yohimik/dispat/services/dispat"},
 		{"integration", "github.com/yohimik/dispat/tests/integration"},
-		{"ccme", "github.com/yohimik/dispat/pkg/ccme"},
+		{"ccme", "github.com/yohimik/dispat/pkg/ccme/v2"},
 	} {
 		line := fmt.Sprintf(`{"Action":"pass","Package":%q,"Elapsed":1}`+"\n", tc.pkg)
 		if err := os.WriteFile(filepath.Join(dir, tc.id+".json"), []byte(line), 0o644); err != nil {
@@ -205,13 +205,13 @@ func TestCountsAdd(t *testing.T) {
 // it costs no second walk of the tree.
 func TestReadLogRecordsFuzzTargetsAndTheirCorpus(t *testing.T) {
 	const log = `
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse/seed#0","Elapsed":0.01}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse/seed#1","Elapsed":0.01}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse/d03d5667d745b3ab","Elapsed":0.01}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzParse","Elapsed":0.30}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse/one","Elapsed":0.01}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"TestParse","Elapsed":0.02}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Elapsed":1.0}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"FuzzParse/seed#0","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"FuzzParse/seed#1","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"FuzzParse/d03d5667d745b3ab","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"FuzzParse","Elapsed":0.30}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse/one","Elapsed":0.01}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"TestParse","Elapsed":0.02}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Elapsed":1.0}
 `
 	parsed, err := readLog("ccme", strings.NewReader(log))
 	if err != nil {
@@ -279,8 +279,8 @@ func TestReadLogFileRefusesWhatItCannotRead(t *testing.T) {
 func TestFuzzTargetsAreOrderedByPackageThenName(t *testing.T) {
 	const log = `
 {"Action":"pass","Package":"github.com/yohimik/dispat/pkg/writer","Test":"FuzzA","Elapsed":0.1}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzB","Elapsed":0.1}
-{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme","Test":"FuzzA","Elapsed":0.1}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"FuzzB","Elapsed":0.1}
+{"Action":"pass","Package":"github.com/yohimik/dispat/pkg/ccme/v2","Test":"FuzzA","Elapsed":0.1}
 `
 	parsed, err := readLog("unit", strings.NewReader(log))
 	if err != nil {

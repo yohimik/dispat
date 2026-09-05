@@ -1,6 +1,7 @@
-# CCME is a specification package, independent from the Go implementation.
+# CCME is a separate specification package in the parser’s version group.
 # Its tag path is stable even if the implementation later moves modules.
 tagFormat: specs/ccme-spec/v{version}
+versionGroup: ccme
 
 scripts:
   version-spec: sh version.sh

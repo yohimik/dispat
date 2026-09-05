@@ -1,0 +1,10 @@
+# The CCME parser and specification share major and minor versions.
+# Each package retains its own patch version and tag.
+versionGroup: ccme
+
+# Go major versions use a versioned import path.
+github:
+  footer:
+    - line: ["---", ""]
+    - line:
+        - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/ccme/v2@v${DISPAT_NEW_VERSION}) · [Documentation](https://dispat.dev/)"
