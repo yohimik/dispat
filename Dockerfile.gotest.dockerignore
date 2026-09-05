@@ -50,6 +50,7 @@ coverage/covdata
 !scripts
 scripts/*
 !scripts/*.sh
+!scripts/announce-test.py
 !announce
 announce/*
 !announce/*.sh

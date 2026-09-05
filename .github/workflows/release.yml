@@ -361,17 +361,6 @@ jobs:
           sudo apt-get install -y -qq ngrok
           ngrok version
 
-      # The anthem story is a video, and the runner image carries no ffmpeg of
-      # its own: the announce script checks and goes out silent without it.
-      # update first, because the image's package lists go stale and a mirror
-      # 404 is what a missing update looks like.
-      - name: Install ffmpeg
-        if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != ''
-        run: |
-          sudo apt-get update -qq >/dev/null
-          sudo apt-get install -y -qq ffmpeg >/dev/null
-          ffmpeg -version | head -1
-
       - name: Run the release
         id: dispat
         # dispat does the whole release itself: autoVersion rewrites, the

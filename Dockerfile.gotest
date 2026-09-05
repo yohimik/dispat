@@ -572,5 +572,6 @@ the observer never fetches into the clone" \
 - fix(dispat): the tiny binaries build on the fork" \
     sh announce/notes.sh | python3 -m json.tool > /dev/null
   echo "announce/notes.sh: the sample parses"
+  python3 scripts/announce-test.py
 fi
 EOF

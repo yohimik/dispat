@@ -1,3 +1,5 @@
+> These recordings are retained as historical assets. The current release flow posts photos and changelog text; it does not render or publish an anthem video.
+
 # The anthems
 
 The release picks one clip from a pool. Each is sixteen seconds of a

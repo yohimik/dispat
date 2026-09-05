@@ -90,9 +90,9 @@ esc_version=$(printf '%s' "$version" | escape)
 # tag dispat writes for its own CLI is v<version>, so the raw URL resolves to
 # the installer that shipped with it.
 printf '{'
-# ANNOUNCE_NO_COVER strips the cover from the render: the story pass posts
-# the changelog pages alone, because the cover story is the anthem video.
+# Optional render controls leave sections in the data for text captions.
 [ -z "${ANNOUNCE_NO_COVER:-}" ] || printf '"nocover":true,'
+[ -z "${ANNOUNCE_COVER_ONLY:-}" ] || printf '"coveronly":true,'
 printf '"version":"%s",' "$esc_version"
 printf '"sections":[%s],' "$sections"
 printf '"install":['

@@ -246,12 +246,12 @@
     </div>
   </div>{{ end }}{{ if .nocover }}<div class="version-only">v{{ .version }}</div>{{ end }}
 
-  {{ range .sections }}
+  {{ if not .coveronly }}{{ range .sections }}
   <div class="section{{ if eq .label "BREAKING" }} breaking{{ end }}{{ if eq .label "PICKS UP" }} picks{{ end }}">
     <h2>{{ .label }}</h2>
     <ul>{{ range .items }}<li>{{ . }}</li>{{ end }}</ul>
     {{ if gt .more 0 }}<div class="more">+{{ .more }} more</div>{{ end }}
   </div>
-  {{ end }}
+  {{ end }}{{ end }}
 </body>
 </html>
