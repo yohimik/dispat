@@ -6,6 +6,8 @@ import path from 'node:path';
 
 import readme from './plugins/readme';
 import testReport from './plugins/test-report';
+import historicalLinks from './plugins/historical-links';
+import remarkHistoricalLinks from './plugins/historical-links/remark';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
 const DISCORD = 'https://discord.gg/83PwVSCCmk';
@@ -170,6 +172,7 @@ const config: Config = {
     // loader and type-checked by `pnpm typecheck` along with everything else.
     readme,
     testReport,
+    historicalLinks,
     [
       // Installable, and readable offline once installed. The plugin emits
       // build/sw.js, served at /sw.js, so the worker's scope is the directory
@@ -237,9 +240,10 @@ const config: Config = {
           // README tables link to /<page>/, not /docs/<page>/.
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
-          editUrl: ({docPath}) =>
-            `${GITHUB}/edit/main/packages/docs/docs/${docPath}`,
-          editCurrentVersion: true,
+          remarkPlugins: [[remarkHistoricalLinks, {siteDir: __dirname}]],
+          editUrl: ({versionDocsDirPath, docPath}) =>
+            `${GITHUB}/edit/main/packages/docs/${versionDocsDirPath}/${docPath}`,
+          editCurrentVersion: false,
           showLastUpdateTime: true,
           // The unreleased version is a copy of the released docs, and
           // indexing it would only split the site against itself. noIndex

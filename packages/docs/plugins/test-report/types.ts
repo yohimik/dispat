@@ -185,7 +185,30 @@ export interface Report {
   experiments: Experiments;
 }
 
-/** What the plugin puts in global data: the report, or nothing measured. */
+/** A release report preserved under its documentation minor version. */
+export interface ArchivedReport {
+  docsVersion: string;
+  report?: Report;
+  evidence?: HistoricalEvidence;
+}
+
+/** Exact aggregate facts recovered when the full report was not retained. */
+export interface HistoricalEvidence {
+  releaseVersion: string;
+  generatedAt: string;
+  commit: string;
+  runUrl: string;
+  coverageArtifactUrl: string;
+  coverage: {unitPercent: number; integrationPercent: number; totalPercent: number; statements: number};
+  suite: {tests: number; fuzz: number};
+  benchmarks: number;
+  experiments?: {cells: number; artifactUrl: string};
+  experimentResults?: Experiments;
+}
+
+/** What the plugin puts in global data: the report and the doc versions it describes. */
 export interface ReportData {
   report: Report | null;
+  currentVersions: string[];
+  archivedVersions: string[];
 }

@@ -144,10 +144,9 @@ scripts:
 
   # The site, and the version snapshot that goes in it, from one build.
   #
-  # `docs` and `dispat` share the `cli` version group, so they release
-  # together, always: there is no run in which the docs are built
-  # without a CLI version to document, and no reason to freeze the
-  # snapshot in a stage of its own ahead of the build. Cutting it here
+  # `docs` and `dispat` share the major and minor of the `cli` version
+  # group. Docs patches can ship independently. New stable minors freeze
+  # a snapshot during the build that publishes them. Cutting it here
   # means the site that ships is the one built *with* it, and the
   # tracked files it writes — versioned_docs, versioned_sidebars,
   # versions.json — are staged by the finalize release commit along
@@ -182,9 +181,18 @@ scripts:
     if [ "$DISPAT_STAGE" = "build" ]; then
       DOCS_REQUIRE_REPORT="1"
     fi
+    DOCS_MODULE_VERSIONS=""
+    if [ "$DOCS_REQUIRE_REPORT" = "1" ] && [ -n "$DOCS_VERSION" ]; then
+      DOCS_MODULE_VERSIONS=$(printf '{"ccme":"v%s","config":"v%s","manifest":"v%s","models":"v%s","scanner":"v%s","writer":"v%s"}' \
+        "${DISPAT_WORKSPACE_CCME_VERSION:?}" "${DISPAT_WORKSPACE_CONFIG_VERSION:?}" \
+        "${DISPAT_WORKSPACE_MANIFEST_VERSION:?}" "${DISPAT_WORKSPACE_MODELS_VERSION:?}" \
+        "${DISPAT_WORKSPACE_SCANNER_VERSION:?}" "${DISPAT_WORKSPACE_WRITER_VERSION:?}")
+    fi
     docker buildx build --file Dockerfile --target export \
       --build-arg DOCS_VERSION="$DOCS_VERSION" \
       --build-arg DOCS_REQUIRE_REPORT="$DOCS_REQUIRE_REPORT" \
+      --build-arg DOCS_REPORT_COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD)}" \
+      --build-arg DOCS_MODULE_VERSIONS="$DOCS_MODULE_VERSIONS" \
       --build-arg DOCS_BENCH_PACKAGES="${DISPAT_OUTPUT_REPORT_BENCHMARKS:-}" \
       --build-arg DOCS_EXPERIMENTS="${DISPAT_OUTPUT_REPORT_EXPERIMENTS:-}" \
       $(sh ../../scripts/buildx-cache.sh docs) \

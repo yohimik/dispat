@@ -1,5 +1,13 @@
 # The TinyGo spike
 
+:::note Historical provenance
+
+This page was added after the last dispat 1.3 documentation release to preserve the first TinyGo spike alongside the
+CLI version it investigated. The Dockerfile link below pins the commit that introduced the spike instead of presenting
+it as a file from the earlier 1.3 release tag.
+
+:::
+
 Read this page to understand why dispat's six release binaries are built with the Go compiler, and why a release also
 carries two linux binaries built by a TinyGo fork at roughly 60% of the size. It describes a spike: an experiment kept
 in the repository because its answer is a version number away from changing, not a gate any job runs.

@@ -111,11 +111,9 @@ ships.
 
 ## Demo animations
 
-The animated demos on the landing page, in the repository README, and on the commit-messages page come from
-[`demo/`](./demo). Each clip is a [Remotion](https://www.remotion.dev) composition rendered into the committed assets
-in the repository's `imgs/` folder, which the site serves statically at `/<name>`. Run `demo/render.sh` to
-regenerate them after editing a scene. Read [`demo/README.md`](./demo/README.md) for the composition list and the size
-budget the script enforces.
+The landing page plays shared [Remotion](https://www.remotion.dev) scenes directly through Remotion Player.
+The repository README and commit-messages page use GIF exports from the same source. Run `demo/render.sh` when
+updating those exports. See [`demo/README.md`](./demo/README.md) for the scenes, browser checks, and asset budgets.
 
 ## Release
 
@@ -131,10 +129,33 @@ Tags use the format `packages/docs/v<version>`. The files `versioned_docs/`, `ve
 are **source**, not build output. A script writes them once, and you edit them by hand afterwards, so they remain
 tracked in [`.gitignore`](./.gitignore).
 
+Stable builds also preserve the full measured report in `static/test-reports/<minor>.json`, the source commit
+for that documentation line in `plugins/historical-links/refs.json`, and its planned Go module versions in
+`plugins/historical-links/modules.json`. These paths are exported from Docker and
+committed with the release. The build checks the report against the source commit passed in `DOCS_REPORT_COMMIT`.
+Ordinary builds never replace archives; prerelease reports belong only to Next.
+
+Historical pages load their own archive. Where complete older reports were not retained, the page identifies
+missing details and shows only recovered evidence with its original release-run link. It never substitutes the
+latest measurement. The preserved report for a minor is its latest available patch run, with that exact patch
+and commit identified.
+
+Historical source links, including the test plan and TinyGo sources, resolve to recorded Git commits. Internal
+links keep the selected documentation version. Pages added retrospectively say so, rather than presenting later
+experiments as results measured for an earlier release.
+
+The release passes all six `DISPAT_WORKSPACE_<KEY>_VERSION` values to the docs build. Historical API links use this
+plan record, so a combined release can link to the module version it is about to tag even though finalize creates
+that tag after the site build. Older documentation lines without a module record resolve the newest stable tag
+reachable from their recorded source commit.
+
 ## Requirements
 
-Install Node 20 or later and pnpm from the root `packageManager` field. CI uses the Node version in `.nvmrc`. You need
+Install Node 20 or later and pnpm from the root `packageManager` field. The container build and plugin tests use Node 22, as specified in `Dockerfile`. You need
 no global installs, because `corepack enable` or `pnpm/action-setup` is enough.
+
+Run `pnpm --filter dispat-docs typecheck` and `pnpm --filter dispat-docs test` before building. The Docker
+`typecheck` target runs both gates, including the historical report and link regressions.
 
 ## Licence
 

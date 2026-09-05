@@ -9,11 +9,13 @@
     "swizzle": "docusaurus swizzle",
     "clear": "docusaurus clear",
     "serve": "docusaurus serve",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "node --experimental-strip-types --test plugins/test-report/*.test.mjs plugins/historical-links/*.test.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",
     "@docusaurus/logger": "3.10.2",
+    "@docusaurus/plugin-content-docs": "3.10.2",
     "@docusaurus/plugin-pwa": "3.10.2",
     "@docusaurus/preset-classic": "3.10.2",
     "@easyops-cn/docusaurus-search-local": "^0.52.1",

@@ -1,0 +1,1122 @@
+{
+  "docsVersion": "1.7",
+  "evidence": {
+    "releaseVersion": "1.7.2",
+    "generatedAt": "2026-09-03T23:10:03Z",
+    "commit": "e1ac8c514e68",
+    "runUrl": "https://github.com/yohimik/dispat/actions/runs/33814918103",
+    "coverageArtifactUrl": "https://github.com/yohimik/dispat/actions/runs/33814918103/artifacts/9916234147",
+    "coverage": {
+      "unitPercent": 87.7,
+      "integrationPercent": 86.3,
+      "totalPercent": 94.7,
+      "statements": 19233
+    },
+    "suite": {
+      "tests": 2847,
+      "fuzz": 35
+    },
+    "benchmarks": 33,
+    "experiments": {
+      "cells": 12,
+      "artifactUrl": "https://github.com/yohimik/dispat/actions/runs/33814918103/artifacts/9916766988"
+    },
+    "experimentResults": {
+      "version": "1.7.2",
+      "cells": [
+        {
+          "id": "midrelease-clean-changesets",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "changesets",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "commit",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 1
+            },
+            {
+              "step": "rebase",
+              "exit": 0
+            },
+            {
+              "step": "push2",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "publish exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-clean-dispat",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "dispat",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            },
+            {
+              "step": "rerun",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0 and the three consumers at 1.0.1",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent (tag on origin, on main, matching the registry)",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is on origin/main",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main's first-parent chain",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is outside the tagged tree",
+              "ok": true
+            },
+            {
+              "check": "the tag names a release commit, not a merge",
+              "ok": true
+            },
+            {
+              "check": "the clone is level with origin, nothing in progress",
+              "ok": true
+            },
+            {
+              "check": "the release lock was returned",
+              "ok": true
+            },
+            {
+              "check": "the branch was joined, not refused (W242)",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            },
+            {
+              "check": "the next run released the colleague's change from the same clone",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-rerun",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.2",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-clean-lerna",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "lerna",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 1
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "rebase",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "changed",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "version exited 0",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": false
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-clean-nx",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "nx",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 1
+            },
+            {
+              "step": "recover",
+              "exit": 0
+            },
+            {
+              "step": "release2",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "next",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": false
+            },
+            {
+              "check": "the release run left a commit and tags behind",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit was pushed by the tool",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent once pushed by hand",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": false
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-changesets",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "changesets",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "commit",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 1
+            },
+            {
+              "step": "rebase",
+              "exit": 1
+            },
+            {
+              "step": "resolve",
+              "exit": 0
+            },
+            {
+              "step": "push2",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "publish exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-dispat",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "dispat",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            },
+            {
+              "step": "rerun",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0 and the three consumers at 1.0.1",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent (tag on origin, on main, matching the registry)",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is on origin/main",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main's first-parent chain",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is outside the tagged tree",
+              "ok": true
+            },
+            {
+              "check": "the tag names a release commit, not a merge",
+              "ok": true
+            },
+            {
+              "check": "the clone is level with origin, nothing in progress",
+              "ok": true
+            },
+            {
+              "check": "the release lock was returned",
+              "ok": true
+            },
+            {
+              "check": "the conflict was reported (W243) and the release still landed (W242)",
+              "ok": true
+            },
+            {
+              "check": "the colleague's side is kept on a release-conflicts branch",
+              "ok": true
+            },
+            {
+              "check": "the merge carries the release's side of the conflicted file",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            },
+            {
+              "check": "the next run released the colleague's change from the same clone",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-rerun",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-lerna",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "lerna",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 1
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "rebase",
+              "exit": 1
+            },
+            {
+              "step": "resolve",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "changed",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "version exited 0",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-nx",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "nx",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 1
+            },
+            {
+              "step": "recover",
+              "exit": 0
+            },
+            {
+              "step": "release2",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "next",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": false
+            },
+            {
+              "check": "the release run left a commit and tags behind",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit was pushed by the tool",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent once pushed by hand",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": false
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-changesets",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "changesets",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "commit",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 1
+            },
+            {
+              "step": "recovery",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package carries no tag for an unpublished version",
+              "ok": true
+            },
+            {
+              "check": "the recovery published the refused package",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent once pushed",
+              "ok": true
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-dispat",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "dispat",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release1",
+              "exit": 1
+            },
+            {
+              "step": "release2",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package is neither tagged nor on the registry after the refusal",
+              "ok": true
+            },
+            {
+              "check": "the packages that published are consistent after the refusal",
+              "ok": true
+            },
+            {
+              "check": "the recovery run exited 0",
+              "ok": true
+            },
+            {
+              "check": "the recovery published the refused package and tagged it",
+              "ok": true
+            },
+            {
+              "check": "the recovery republished nothing",
+              "ok": true
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-lerna",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "lerna",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 1
+            },
+            {
+              "step": "recovery",
+              "exit": 1
+            },
+            {
+              "step": "cleanup",
+              "exit": 0
+            },
+            {
+              "step": "recovery2",
+              "exit": 0
+            },
+            {
+              "step": "changed",
+              "exit": 1
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package carries no tag for an unpublished version",
+              "ok": false
+            },
+            {
+              "check": "the recovery published the refused package",
+              "ok": true
+            },
+            {
+              "check": "the recovery needed no manual cleanup",
+              "ok": false
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-nx",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "nx",
+          "dispat": "1.7.2",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 1
+            },
+            {
+              "step": "recovery",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "next",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package carries no tag for an unpublished version",
+              "ok": false
+            },
+            {
+              "check": "the recovery published the refused package",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent once pushed",
+              "ok": true
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

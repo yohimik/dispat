@@ -62,14 +62,15 @@ COPY .git ./.git
 
 # One gate that is not the build, so it can be asked for on its own.
 FROM source AS typecheck
-RUN pnpm --filter dispat-docs typecheck
+RUN pnpm --filter dispat-docs typecheck \
+ && pnpm --filter dispat-docs test
 
 # The build, with the version snapshot folded into it.
 #
 # Freezing a Docusaurus version is not a stage of its own because `docs` and
-# `dispat` share the `cli` version group: they release together, always, so the
-# snapshot belongs to the same build that produces the site it appears in — and
-# the site is then built *with* it, which is what ships.
+# `dispat` share the major and minor of the `cli` version group. A docs patch
+# can ship independently; a new stable minor freezes the pages during the build
+# that publishes them.
 #
 # DOCS_VERSION is the minor to freeze, or empty for no cut at all (a
 # prerelease: the rc train runs long, and every one of them would freeze
@@ -87,7 +88,11 @@ ARG DOCS_VERSION=""
 ARG DOCS_REQUIRE_REPORT=""
 ARG DOCS_BENCH_PACKAGES=""
 ARG DOCS_EXPERIMENTS=""
+ARG DOCS_REPORT_COMMIT=""
+ARG DOCS_MODULE_VERSIONS=""
 ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
+ENV DISPAT_DOCS_MODULE_VERSIONS=${DOCS_MODULE_VERSIONS}
+ENV GITHUB_SHA=${DOCS_REPORT_COMMIT}
 # The per-package freshness check, before anything is built.
 #
 # The release's beforeBuild hook measured a set of modules and said which; the
@@ -97,11 +102,9 @@ ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
 # and an empty table reads as "this package has no benchmarks".
 #
 # It also checks that every frozen docs version carries the benchmarks and
-# experiments pages, and that its sidebar lists them. The numbers are global
-# (every version's page renders the same measured report), so a version whose
-# copy of a page is missing is a version that shows the site's other numbers
-# and not those, and a patch release cuts no new snapshot to fix it with. A
-# page the sidebar does not list is the same failure with the file present:
+# experiments pages, and that its sidebar lists them. Each version reads its
+# own archived report; missing historical records are identified on the page.
+# A page the sidebar does not list is the same failure with the file present:
 # the build succeeds, the page ships, and no reader of that version has a way
 # to reach it.
 RUN <<'EOF'
@@ -144,6 +147,7 @@ RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-
       pnpm --filter dispat-docs exec docusaurus docs:version "${DOCS_VERSION}"; \
       echo "cut docs version ${DOCS_VERSION}"; \
     fi \
+ && if [ "${DOCS_REQUIRE_REPORT}" = "1" ]; then export DISPAT_DOCS_REPORT_VERSION="${DOCS_VERSION}"; fi \
  && pnpm --filter dispat-docs build
 
 # The build produces two different kinds of thing, and both go back to the
@@ -153,6 +157,8 @@ RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-
 #   versioned_docs/   the snapshot — tracked source, picked up by the release
 #   versioned_sidebars/   commit that follows the build
 #   versions.json
+#   static/test-reports/   preserved release measurements, committed with the docs
+#   plugins/historical-links/refs.json   source commits for each documentation line
 #
 # They are staged together because `--output type=local` writes a stage's whole
 # filesystem to one destination. The three source paths are copied only if they
@@ -162,7 +168,14 @@ RUN mkdir -p /out \
  && cp -R packages/docs/build /out/build \
  && for p in versioned_docs versioned_sidebars versions.json; do \
       if [ -e "packages/docs/$p" ]; then cp -R "packages/docs/$p" "/out/$p"; fi; \
-    done
+    done \
+ && if [ -d packages/docs/static/test-reports ]; then \
+      mkdir -p /out/static \
+      && cp -R packages/docs/static/test-reports /out/static/test-reports; \
+    fi \
+ && mkdir -p /out/plugins/historical-links \
+ && cp packages/docs/plugins/historical-links/refs.json /out/plugins/historical-links/refs.json \
+ && cp packages/docs/plugins/historical-links/modules.json /out/plugins/historical-links/modules.json
 
 FROM scratch AS export
 COPY --from=staged /out /

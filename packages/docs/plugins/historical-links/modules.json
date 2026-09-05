@@ -1,0 +1,10 @@
+{
+  "1.8": {
+    "ccme": "v2.0.0",
+    "config": "v1.0.0",
+    "manifest": "v1.2.0",
+    "models": "v1.8.0",
+    "scanner": "v1.2.0",
+    "writer": "v1.2.0"
+  }
+}

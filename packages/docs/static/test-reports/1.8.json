@@ -1,0 +1,2224 @@
+{
+  "docsVersion": "1.8",
+  "report": {
+    "generatedAt": "2026-09-05T07:22:04Z",
+    "commit": "4c5c2dc17fb0a3eae7614950f2dffde4d7b1d37e",
+    "coverage": {
+      "total": {
+        "statements": 19853,
+        "covered": 18867,
+        "percent": 95
+      },
+      "unit": {
+        "statements": 19853,
+        "covered": 17502,
+        "percent": 88.2
+      },
+      "integration": {
+        "statements": 11256,
+        "covered": 9697,
+        "percent": 86.1
+      },
+      "modules": [
+        {
+          "statements": 1328,
+          "covered": 1285,
+          "percent": 96.8,
+          "path": "pkg/ccme",
+          "packages": [
+            {
+              "statements": 1328,
+              "covered": 1285,
+              "percent": 96.8,
+              "path": "pkg/ccme"
+            }
+          ]
+        },
+        {
+          "statements": 1138,
+          "covered": 1091,
+          "percent": 95.9,
+          "path": "pkg/config",
+          "packages": [
+            {
+              "statements": 1036,
+              "covered": 1002,
+              "percent": 96.7,
+              "path": "pkg/config"
+            },
+            {
+              "statements": 102,
+              "covered": 89,
+              "percent": 87.3,
+              "path": "pkg/config/watch"
+            }
+          ]
+        },
+        {
+          "statements": 197,
+          "covered": 196,
+          "percent": 99.5,
+          "path": "pkg/manifest",
+          "packages": [
+            {
+              "statements": 197,
+              "covered": 196,
+              "percent": 99.5,
+              "path": "pkg/manifest"
+            }
+          ]
+        },
+        {
+          "statements": 278,
+          "covered": 272,
+          "percent": 97.8,
+          "path": "pkg/models",
+          "packages": [
+            {
+              "statements": 278,
+              "covered": 272,
+              "percent": 97.8,
+              "path": "pkg/models"
+            }
+          ]
+        },
+        {
+          "statements": 1466,
+          "covered": 1365,
+          "percent": 93.1,
+          "path": "pkg/scanner",
+          "packages": [
+            {
+              "statements": 1466,
+              "covered": 1365,
+              "percent": 93.1,
+              "path": "pkg/scanner"
+            }
+          ]
+        },
+        {
+          "statements": 3371,
+          "covered": 3113,
+          "percent": 92.3,
+          "path": "pkg/writer",
+          "packages": [
+            {
+              "statements": 3371,
+              "covered": 3113,
+              "percent": 92.3,
+              "path": "pkg/writer"
+            }
+          ]
+        },
+        {
+          "statements": 11256,
+          "covered": 10750,
+          "percent": 95.5,
+          "path": "services/dispat",
+          "packages": [
+            {
+              "statements": 1,
+              "covered": 1,
+              "percent": 100,
+              "path": "services/dispat"
+            },
+            {
+              "statements": 3099,
+              "covered": 2894,
+              "percent": 93.4,
+              "path": "services/dispat/internal/app"
+            },
+            {
+              "statements": 455,
+              "covered": 439,
+              "percent": 96.5,
+              "path": "services/dispat/internal/changelog"
+            },
+            {
+              "statements": 974,
+              "covered": 967,
+              "percent": 99.3,
+              "path": "services/dispat/internal/cli"
+            },
+            {
+              "statements": 52,
+              "covered": 51,
+              "percent": 98.1,
+              "path": "services/dispat/internal/cond"
+            },
+            {
+              "statements": 1669,
+              "covered": 1618,
+              "percent": 96.9,
+              "path": "services/dispat/internal/config"
+            },
+            {
+              "statements": 200,
+              "covered": 199,
+              "percent": 99.5,
+              "path": "services/dispat/internal/filter"
+            },
+            {
+              "statements": 27,
+              "covered": 16,
+              "percent": 59.3,
+              "path": "services/dispat/internal/fsx"
+            },
+            {
+              "statements": 195,
+              "covered": 183,
+              "percent": 93.8,
+              "path": "services/dispat/internal/github"
+            },
+            {
+              "statements": 694,
+              "covered": 640,
+              "percent": 92.2,
+              "path": "services/dispat/internal/gitx"
+            },
+            {
+              "statements": 14,
+              "covered": 14,
+              "percent": 100,
+              "path": "services/dispat/internal/globx"
+            },
+            {
+              "statements": 111,
+              "covered": 109,
+              "percent": 98.2,
+              "path": "services/dispat/internal/graph"
+            },
+            {
+              "statements": 64,
+              "covered": 64,
+              "percent": 100,
+              "path": "services/dispat/internal/ignore"
+            },
+            {
+              "statements": 226,
+              "covered": 222,
+              "percent": 98.2,
+              "path": "services/dispat/internal/install"
+            },
+            {
+              "statements": 55,
+              "covered": 55,
+              "percent": 100,
+              "path": "services/dispat/internal/model"
+            },
+            {
+              "statements": 1758,
+              "covered": 1699,
+              "percent": 96.6,
+              "path": "services/dispat/internal/plan"
+            },
+            {
+              "statements": 907,
+              "covered": 861,
+              "percent": 94.9,
+              "path": "services/dispat/internal/release"
+            },
+            {
+              "statements": 49,
+              "covered": 47,
+              "percent": 95.9,
+              "path": "services/dispat/internal/script"
+            },
+            {
+              "statements": 519,
+              "covered": 494,
+              "percent": 95.2,
+              "path": "services/dispat/internal/selfupdate"
+            },
+            {
+              "statements": 187,
+              "covered": 177,
+              "percent": 94.7,
+              "path": "services/dispat/internal/webhook"
+            }
+          ]
+        },
+        {
+          "statements": 819,
+          "covered": 795,
+          "percent": 97.1,
+          "path": "tools",
+          "packages": [
+            {
+              "statements": 819,
+              "covered": 795,
+              "percent": 97.1,
+              "path": "tools/testreport"
+            }
+          ]
+        }
+      ]
+    },
+    "suite": {
+      "totals": {
+        "packages": 31,
+        "tests": 2934,
+        "fuzz": 37,
+        "benchmarks": 0,
+        "subtests": 2660,
+        "passed": 2971,
+        "failed": 0,
+        "skipped": 0,
+        "elapsed": 139.00099999999998
+      },
+      "groups": [
+        {
+          "packages": 1,
+          "tests": 111,
+          "fuzz": 3,
+          "benchmarks": 0,
+          "subtests": 510,
+          "passed": 114,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 8.7,
+          "id": "ccme",
+          "path": "pkg/ccme",
+          "race": false,
+          "fuzzTargets": [
+            {
+              "name": "FuzzNormalize",
+              "package": "pkg/ccme",
+              "seeds": 114
+            },
+            {
+              "name": "FuzzParse",
+              "package": "pkg/ccme",
+              "seeds": 116
+            },
+            {
+              "name": "FuzzParseSubject",
+              "package": "pkg/ccme",
+              "seeds": 114
+            }
+          ]
+        },
+        {
+          "packages": 2,
+          "tests": 191,
+          "fuzz": 3,
+          "benchmarks": 0,
+          "subtests": 135,
+          "passed": 194,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 3.0069999999999997,
+          "id": "config",
+          "path": "pkg/config",
+          "race": false,
+          "fuzzTargets": [
+            {
+              "name": "FuzzParsers",
+              "package": "pkg/config",
+              "seeds": 9
+            },
+            {
+              "name": "FuzzRefTargets",
+              "package": "pkg/config",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzSettings",
+              "package": "pkg/config",
+              "seeds": 5
+            }
+          ]
+        },
+        {
+          "packages": 1,
+          "tests": 25,
+          "fuzz": 0,
+          "benchmarks": 0,
+          "subtests": 0,
+          "passed": 25,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 0.027,
+          "id": "manifest",
+          "path": "pkg/manifest",
+          "race": false,
+          "fuzzTargets": []
+        },
+        {
+          "packages": 1,
+          "tests": 40,
+          "fuzz": 0,
+          "benchmarks": 0,
+          "subtests": 28,
+          "passed": 40,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 0.02,
+          "id": "models",
+          "path": "pkg/models",
+          "race": false,
+          "fuzzTargets": []
+        },
+        {
+          "packages": 1,
+          "tests": 130,
+          "fuzz": 7,
+          "benchmarks": 0,
+          "subtests": 113,
+          "passed": 137,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 0.274,
+          "id": "scanner",
+          "path": "pkg/scanner",
+          "race": false,
+          "fuzzTargets": [
+            {
+              "name": "FuzzGradleLine",
+              "package": "pkg/scanner",
+              "seeds": 16
+            },
+            {
+              "name": "FuzzPBXSetting",
+              "package": "pkg/scanner",
+              "seeds": 9
+            },
+            {
+              "name": "FuzzParseAquaBounded",
+              "package": "pkg/scanner",
+              "seeds": 1
+            },
+            {
+              "name": "FuzzParsers",
+              "package": "pkg/scanner",
+              "seeds": 39
+            },
+            {
+              "name": "FuzzPep508Dep",
+              "package": "pkg/scanner",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzPodDeclaration",
+              "package": "pkg/scanner",
+              "seeds": 12
+            },
+            {
+              "name": "FuzzPodspecStatement",
+              "package": "pkg/scanner",
+              "seeds": 10
+            }
+          ]
+        },
+        {
+          "packages": 1,
+          "tests": 223,
+          "fuzz": 24,
+          "benchmarks": 0,
+          "subtests": 221,
+          "passed": 247,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 1.208,
+          "id": "writer",
+          "path": "pkg/writer",
+          "race": false,
+          "fuzzTargets": [
+            {
+              "name": "FuzzLink",
+              "package": "pkg/writer",
+              "seeds": 12
+            },
+            {
+              "name": "FuzzReplaceBytes",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewriteAndroidManifest",
+              "package": "pkg/writer",
+              "seeds": 7
+            },
+            {
+              "name": "FuzzRewriteAquaNeverCommitsInvalidYAML",
+              "package": "pkg/writer",
+              "seeds": 3
+            },
+            {
+              "name": "FuzzRewriteCargo",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewriteCompose",
+              "package": "pkg/writer",
+              "seeds": 9
+            },
+            {
+              "name": "FuzzRewriteComposer",
+              "package": "pkg/writer",
+              "seeds": 6
+            },
+            {
+              "name": "FuzzRewriteCsproj",
+              "package": "pkg/writer",
+              "seeds": 6
+            },
+            {
+              "name": "FuzzRewriteDockerfile",
+              "package": "pkg/writer",
+              "seeds": 9
+            },
+            {
+              "name": "FuzzRewriteGemfile",
+              "package": "pkg/writer",
+              "seeds": 6
+            },
+            {
+              "name": "FuzzRewriteGodotCfg",
+              "package": "pkg/writer",
+              "seeds": 10
+            },
+            {
+              "name": "FuzzRewriteGradleBuild",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewriteGradleCatalog",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewriteMaven",
+              "package": "pkg/writer",
+              "seeds": 7
+            },
+            {
+              "name": "FuzzRewriteNpm",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewriteNuGetLists",
+              "package": "pkg/writer",
+              "seeds": 6
+            },
+            {
+              "name": "FuzzRewriteNuspec",
+              "package": "pkg/writer",
+              "seeds": 6
+            },
+            {
+              "name": "FuzzRewritePlist",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewritePodfile",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewritePubspec",
+              "package": "pkg/writer",
+              "seeds": 6
+            },
+            {
+              "name": "FuzzRewritePyproject",
+              "package": "pkg/writer",
+              "seeds": 9
+            },
+            {
+              "name": "FuzzRewriteUPlugin",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewriteUnityProjectSettings",
+              "package": "pkg/writer",
+              "seeds": 8
+            },
+            {
+              "name": "FuzzRewriteXcodeProj",
+              "package": "pkg/writer",
+              "seeds": 7
+            }
+          ]
+        },
+        {
+          "packages": 20,
+          "tests": 1520,
+          "fuzz": 0,
+          "benchmarks": 0,
+          "subtests": 1393,
+          "passed": 1520,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 28.636999999999997,
+          "id": "dispat",
+          "path": "services/dispat",
+          "race": false,
+          "fuzzTargets": []
+        },
+        {
+          "packages": 2,
+          "tests": 608,
+          "fuzz": 0,
+          "benchmarks": 0,
+          "subtests": 175,
+          "passed": 608,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 88.374,
+          "id": "integration",
+          "path": "tests/integration",
+          "race": false,
+          "fuzzTargets": []
+        },
+        {
+          "packages": 2,
+          "tests": 608,
+          "fuzz": 0,
+          "benchmarks": 0,
+          "subtests": 175,
+          "passed": 608,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 93.54,
+          "id": "integration-race",
+          "path": "tests/integration",
+          "race": true,
+          "fuzzTargets": []
+        },
+        {
+          "packages": 2,
+          "tests": 86,
+          "fuzz": 0,
+          "benchmarks": 0,
+          "subtests": 85,
+          "passed": 86,
+          "failed": 0,
+          "skipped": 0,
+          "elapsed": 8.754,
+          "id": "tools",
+          "path": "tools",
+          "race": false,
+          "fuzzTargets": []
+        }
+      ]
+    },
+    "benchmarks": {
+      "groups": [
+        {
+          "id": "ccme",
+          "path": "pkg/ccme",
+          "goos": "linux",
+          "goarch": "amd64",
+          "cpu": "AMD EPYC 7763 64-Core Processor",
+          "results": [
+            {
+              "name": "BenchmarkNormalizeFastPath",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 17197620,
+              "nsPerOp": 88.57,
+              "bytesPerOp": 0,
+              "allocsPerOp": 0,
+              "mbPerSec": 2449.99
+            },
+            {
+              "name": "BenchmarkNormalizeRewrite",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 1334762,
+              "nsPerOp": 1281,
+              "bytesPerOp": 240,
+              "allocsPerOp": 1,
+              "mbPerSec": 178.76
+            },
+            {
+              "name": "BenchmarkParseCRLF",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 270085,
+              "nsPerOp": 6598,
+              "bytesPerOp": 1216,
+              "allocsPerOp": 5,
+              "mbPerSec": 34.71
+            },
+            {
+              "name": "BenchmarkParseDirectives",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 120102,
+              "nsPerOp": 20560,
+              "bytesPerOp": 2512,
+              "allocsPerOp": 16,
+              "mbPerSec": 18.24
+            },
+            {
+              "name": "BenchmarkParseHistory",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 35462,
+              "nsPerOp": 36559,
+              "bytesPerOp": 9680,
+              "allocsPerOp": 42,
+              "mbPerSec": 29.05
+            },
+            {
+              "name": "BenchmarkParseInvalid",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 209320,
+              "nsPerOp": 9408,
+              "bytesPerOp": 1304,
+              "allocsPerOp": 14,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkParseMultiUnit",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 125811,
+              "nsPerOp": 19181,
+              "bytesPerOp": 3840,
+              "allocsPerOp": 12,
+              "mbPerSec": 9.28
+            },
+            {
+              "name": "BenchmarkParseParallel",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 115122,
+              "nsPerOp": 10784,
+              "bytesPerOp": 2512,
+              "allocsPerOp": 16,
+              "mbPerSec": 34.77
+            },
+            {
+              "name": "BenchmarkParseSimple",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 297460,
+              "nsPerOp": 5740,
+              "bytesPerOp": 1200,
+              "allocsPerOp": 5,
+              "mbPerSec": 37.81
+            },
+            {
+              "name": "BenchmarkParseSubject",
+              "package": "pkg/ccme",
+              "procs": 4,
+              "runs": 822493,
+              "nsPerOp": 3435,
+              "bytesPerOp": 832,
+              "allocsPerOp": 2,
+              "mbPerSec": 18.34
+            }
+          ]
+        },
+        {
+          "id": "config",
+          "path": "pkg/config",
+          "goos": "linux",
+          "goarch": "amd64",
+          "cpu": "AMD EPYC 7763 64-Core Processor",
+          "results": [
+            {
+              "name": "BenchmarkApplyEdits/json",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 1006,
+              "nsPerOp": 1126201,
+              "bytesPerOp": 13765,
+              "allocsPerOp": 118,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkApplyEdits/yaml",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 699,
+              "nsPerOp": 1685548,
+              "bytesPerOp": 413738,
+              "allocsPerOp": 1891,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkDecode/fold-hit",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 10000,
+              "nsPerOp": 145546,
+              "bytesPerOp": 29225,
+              "allocsPerOp": 540,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkDecode/full",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 7704,
+              "nsPerOp": 141051,
+              "bytesPerOp": 29033,
+              "allocsPerOp": 514,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkDecode/small",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 311667,
+              "nsPerOp": 4315,
+              "bytesPerOp": 1056,
+              "allocsPerOp": 22,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkEnvBinding",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 87636,
+              "nsPerOp": 13595,
+              "bytesPerOp": 7040,
+              "allocsPerOp": 135,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkFold/lower",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 172938475,
+              "nsPerOp": 6.797,
+              "bytesPerOp": 0,
+              "allocsPerOp": 0,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkFold/mixed",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 32342378,
+              "nsPerOp": 36.04,
+              "bytesPerOp": 8,
+              "allocsPerOp": 1,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkFold/unicode",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 9456259,
+              "nsPerOp": 122.3,
+              "bytesPerOp": 16,
+              "allocsPerOp": 1,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkLoad",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 39930,
+              "nsPerOp": 32104,
+              "bytesPerOp": 20804,
+              "allocsPerOp": 265,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkOverrides",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 18223,
+              "nsPerOp": 75393,
+              "bytesPerOp": 12476,
+              "allocsPerOp": 72,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkReadTree/json/large",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 543,
+              "nsPerOp": 2205311,
+              "bytesPerOp": 422951,
+              "allocsPerOp": 5635,
+              "mbPerSec": 13
+            },
+            {
+              "name": "BenchmarkReadTree/json/medium",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 7880,
+              "nsPerOp": 225058,
+              "bytesPerOp": 32890,
+              "allocsPerOp": 582,
+              "mbPerSec": 12.22
+            },
+            {
+              "name": "BenchmarkReadTree/json/small",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 28251,
+              "nsPerOp": 38184,
+              "bytesPerOp": 3657,
+              "allocsPerOp": 72,
+              "mbPerSec": 6.99
+            },
+            {
+              "name": "BenchmarkReadTree/toml/large",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 100,
+              "nsPerOp": 11034141,
+              "bytesPerOp": 698098,
+              "allocsPerOp": 8624,
+              "mbPerSec": 2.18
+            },
+            {
+              "name": "BenchmarkReadTree/toml/medium",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 2268,
+              "nsPerOp": 618357,
+              "bytesPerOp": 56025,
+              "allocsPerOp": 882,
+              "mbPerSec": 3.7
+            },
+            {
+              "name": "BenchmarkReadTree/toml/small",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 19596,
+              "nsPerOp": 60088,
+              "bytesPerOp": 6794,
+              "allocsPerOp": 108,
+              "mbPerSec": 3.63
+            },
+            {
+              "name": "BenchmarkReadTree/yaml/large",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 55,
+              "nsPerOp": 23562983,
+              "bytesPerOp": 1137153,
+              "allocsPerOp": 19626,
+              "mbPerSec": 0.89
+            },
+            {
+              "name": "BenchmarkReadTree/yaml/medium",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 1507,
+              "nsPerOp": 1237363,
+              "bytesPerOp": 109426,
+              "allocsPerOp": 1999,
+              "mbPerSec": 1.59
+            },
+            {
+              "name": "BenchmarkReadTree/yaml/small",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 10000,
+              "nsPerOp": 120562,
+              "bytesPerOp": 17237,
+              "allocsPerOp": 244,
+              "mbPerSec": 1.54
+            },
+            {
+              "name": "BenchmarkRefDepth/1",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 28555,
+              "nsPerOp": 59072,
+              "bytesPerOp": 5065,
+              "allocsPerOp": 93,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkRefDepth/32",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 5922,
+              "nsPerOp": 267319,
+              "bytesPerOp": 52088,
+              "allocsPerOp": 692,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkRefDepth/8",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 10000,
+              "nsPerOp": 162334,
+              "bytesPerOp": 15484,
+              "allocsPerOp": 232,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkRefWidth/2",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 62647,
+              "nsPerOp": 20017,
+              "bytesPerOp": 3640,
+              "allocsPerOp": 58,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkRefWidth/32",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 4002,
+              "nsPerOp": 290306,
+              "bytesPerOp": 42848,
+              "allocsPerOp": 635,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkRefWidth/8",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 17696,
+              "nsPerOp": 69226,
+              "bytesPerOp": 11168,
+              "allocsPerOp": 173,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkResolve/1",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 36934,
+              "nsPerOp": 31534,
+              "bytesPerOp": 4888,
+              "allocsPerOp": 52,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkResolve/16",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 6199,
+              "nsPerOp": 171721,
+              "bytesPerOp": 18040,
+              "allocsPerOp": 174,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkResolve/4",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 23402,
+              "nsPerOp": 52321,
+              "bytesPerOp": 7160,
+              "allocsPerOp": 76,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkSettings/dotted",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 8286,
+              "nsPerOp": 307947,
+              "bytesPerOp": 78744,
+              "allocsPerOp": 505,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkSettings/empty-objects",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 17073,
+              "nsPerOp": 64485,
+              "bytesPerOp": 6744,
+              "allocsPerOp": 5,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkSettings/flat",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 18523,
+              "nsPerOp": 54761,
+              "bytesPerOp": 6744,
+              "allocsPerOp": 5,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkSettings/nested",
+              "package": "pkg/config",
+              "procs": 4,
+              "runs": 17509,
+              "nsPerOp": 85738,
+              "bytesPerOp": 11944,
+              "allocsPerOp": 65,
+              "mbPerSec": 0
+            }
+          ]
+        },
+        {
+          "id": "dispat",
+          "path": "services/dispat",
+          "goos": "linux",
+          "goarch": "amd64",
+          "cpu": "AMD EPYC 7763 64-Core Processor",
+          "results": [
+            {
+              "name": "BenchmarkComputeGroup/fixed",
+              "package": "services/dispat/internal/plan",
+              "procs": 4,
+              "runs": 364,
+              "nsPerOp": 3314435,
+              "bytesPerOp": 589791,
+              "allocsPerOp": 3623,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkComputeGroup/fixedMajor",
+              "package": "services/dispat/internal/plan",
+              "procs": 4,
+              "runs": 440,
+              "nsPerOp": 2807826,
+              "bytesPerOp": 592534,
+              "allocsPerOp": 3623,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkComputeGroup/fixedMajorMinor",
+              "package": "services/dispat/internal/plan",
+              "procs": 4,
+              "runs": 352,
+              "nsPerOp": 3219446,
+              "bytesPerOp": 592620,
+              "allocsPerOp": 3624,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkComputeGroup/fixedMajorSparse",
+              "package": "services/dispat/internal/plan",
+              "procs": 4,
+              "runs": 397,
+              "nsPerOp": 2857453,
+              "bytesPerOp": 486668,
+              "allocsPerOp": 2409,
+              "mbPerSec": 0
+            },
+            {
+              "name": "BenchmarkComputeGroup/fixedSparse",
+              "package": "services/dispat/internal/plan",
+              "procs": 4,
+              "runs": 331,
+              "nsPerOp": 3959933,
+              "bytesPerOp": 486689,
+              "allocsPerOp": 2409,
+              "mbPerSec": 0
+            }
+          ]
+        }
+      ]
+    },
+    "experiments": {
+      "version": "1.8.0",
+      "cells": [
+        {
+          "id": "midrelease-clean-changesets",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "changesets",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "commit",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 1
+            },
+            {
+              "step": "rebase",
+              "exit": 0
+            },
+            {
+              "step": "push2",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "publish exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-clean-dispat",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "dispat",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            },
+            {
+              "step": "rerun",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0 and the three consumers at 1.0.1",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent (tag on origin, on main, matching the registry)",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is on origin/main",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main's first-parent chain",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is outside the tagged tree",
+              "ok": true
+            },
+            {
+              "check": "the tag names a release commit, not a merge",
+              "ok": true
+            },
+            {
+              "check": "the clone is level with origin, nothing in progress",
+              "ok": true
+            },
+            {
+              "check": "the release lock was returned",
+              "ok": true
+            },
+            {
+              "check": "the branch was joined, not refused (W242)",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            },
+            {
+              "check": "the next run released the colleague's change from the same clone",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-rerun",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.2",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-clean-lerna",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "lerna",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 1
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "rebase",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "changed",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "version exited 0",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": false
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-clean-nx",
+          "experiment": "midrelease",
+          "scenario": "clean",
+          "tool": "nx",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 1
+            },
+            {
+              "step": "recover",
+              "exit": 0
+            },
+            {
+              "step": "release2",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "next",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": false
+            },
+            {
+              "check": "the release run left a commit and tags behind",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit was pushed by the tool",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent once pushed by hand",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": false
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-changesets",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "changesets",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "commit",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 1
+            },
+            {
+              "step": "rebase",
+              "exit": 1
+            },
+            {
+              "step": "resolve",
+              "exit": 0
+            },
+            {
+              "step": "push2",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "publish exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-dispat",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "dispat",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            },
+            {
+              "step": "rerun",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": true
+            },
+            {
+              "check": "registry serves core 1.1.0 and the three consumers at 1.0.1",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent (tag on origin, on main, matching the registry)",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is on origin/main",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main's first-parent chain",
+              "ok": true
+            },
+            {
+              "check": "the colleague's commit is outside the tagged tree",
+              "ok": true
+            },
+            {
+              "check": "the tag names a release commit, not a merge",
+              "ok": true
+            },
+            {
+              "check": "the clone is level with origin, nothing in progress",
+              "ok": true
+            },
+            {
+              "check": "the release lock was returned",
+              "ok": true
+            },
+            {
+              "check": "the conflict was reported (W243) and the release still landed (W242)",
+              "ok": true
+            },
+            {
+              "check": "the colleague's side is kept on a release-conflicts branch",
+              "ok": true
+            },
+            {
+              "check": "the merge carries the release's side of the conflicted file",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            },
+            {
+              "check": "the next run released the colleague's change from the same clone",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-rerun",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-lerna",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "lerna",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 1
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "rebase",
+              "exit": 1
+            },
+            {
+              "step": "resolve",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "changed",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "version exited 0",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit is on origin/main after recovery",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent after recovery",
+              "ok": false
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "dangling"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "dangling"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "dangling"
+              }
+            ]
+          }
+        },
+        {
+          "id": "midrelease-conflict-nx",
+          "experiment": "midrelease",
+          "scenario": "conflict",
+          "tool": "nx",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release",
+              "exit": 1
+            },
+            {
+              "step": "recover",
+              "exit": 0
+            },
+            {
+              "step": "release2",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "next",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "release exited 0",
+              "ok": false
+            },
+            {
+              "check": "the release run left a commit and tags behind",
+              "ok": false
+            },
+            {
+              "check": "registry serves core 1.1.0",
+              "ok": true
+            },
+            {
+              "check": "the release commit was pushed by the tool",
+              "ok": false
+            },
+            {
+              "check": "every released package is consistent once pushed by hand",
+              "ok": true
+            },
+            {
+              "check": "the next plan is the colleague's change and its dependents alone",
+              "ok": false
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-changesets",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "changesets",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "commit",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 1
+            },
+            {
+              "step": "recovery",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package carries no tag for an unpublished version",
+              "ok": true
+            },
+            {
+              "check": "the recovery published the refused package",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent once pushed",
+              "ok": true
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-dispat",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "dispat",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "release1",
+              "exit": 1
+            },
+            {
+              "step": "release2",
+              "exit": 0
+            },
+            {
+              "step": "status",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package is neither tagged nor on the registry after the refusal",
+              "ok": true
+            },
+            {
+              "check": "the packages that published are consistent after the refusal",
+              "ok": true
+            },
+            {
+              "check": "the failed package rollback left the worktree clean",
+              "ok": true
+            },
+            {
+              "check": "the recovery run exited 0",
+              "ok": true
+            },
+            {
+              "check": "the recovery published the refused package and tagged it",
+              "ok": true
+            },
+            {
+              "check": "the recovery republished nothing",
+              "ok": true
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": true,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-lerna",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "lerna",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 1
+            },
+            {
+              "step": "recovery",
+              "exit": 1
+            },
+            {
+              "step": "cleanup",
+              "exit": 0
+            },
+            {
+              "step": "recovery2",
+              "exit": 0
+            },
+            {
+              "step": "changed",
+              "exit": 1
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package carries no tag for an unpublished version",
+              "ok": false
+            },
+            {
+              "check": "the recovery published the refused package",
+              "ok": true
+            },
+            {
+              "check": "the recovery needed no manual cleanup",
+              "ok": false
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-recovery",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        },
+        {
+          "id": "orphan-nx",
+          "experiment": "orphan",
+          "scenario": "",
+          "tool": "nx",
+          "dispat": "1.8.0",
+          "platform": "linux_amd64",
+          "steps": [
+            {
+              "step": "version",
+              "exit": 0
+            },
+            {
+              "step": "publish",
+              "exit": 1
+            },
+            {
+              "step": "recovery",
+              "exit": 0
+            },
+            {
+              "step": "push",
+              "exit": 0
+            },
+            {
+              "step": "next",
+              "exit": 0
+            }
+          ],
+          "checks": [
+            {
+              "check": "the refused run exited non-zero",
+              "ok": true
+            },
+            {
+              "check": "the refused package carries no tag for an unpublished version",
+              "ok": false
+            },
+            {
+              "check": "the recovery published the refused package",
+              "ok": true
+            },
+            {
+              "check": "every released package is consistent once pushed",
+              "ok": true
+            },
+            {
+              "check": "the next plan is empty",
+              "ok": true
+            }
+          ],
+          "passed": false,
+          "final": {
+            "label": "after-push",
+            "packages": [
+              {
+                "name": "api",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "cli",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "core",
+                "registry": "1.1.0",
+                "state": "consistent"
+              },
+              {
+                "name": "docs",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "theme",
+                "registry": "1.0.1",
+                "state": "consistent"
+              },
+              {
+                "name": "ui",
+                "registry": "1.0.1",
+                "state": "consistent"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

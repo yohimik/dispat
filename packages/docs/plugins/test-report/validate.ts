@@ -17,6 +17,8 @@ import type {
   Report,
   Stats,
   Suite,
+  ArchivedReport,
+  HistoricalEvidence,
 } from './types';
 
 // A shape check over the report before any page reads it.
@@ -256,4 +258,64 @@ export function validateReport(value: unknown): Report {
     benchmarks: benchmarks(o.benchmarks, 'report.benchmarks'),
     experiments: experiments(o.experiments, 'report.experiments'),
   };
+}
+
+/** Validates an archive and refuses a report filed under another docs version. */
+export function validateArchivedReport(value: unknown, expectedVersion: string): ArchivedReport {
+  const o = object(value, 'archive');
+  const docsVersion = string(o.docsVersion, 'archive.docsVersion');
+  if (docsVersion !== expectedVersion) {
+    throw new ReportError('archive.docsVersion', JSON.stringify(expectedVersion), docsVersion);
+  }
+  const report = o.report === undefined ? undefined : validateReport(o.report);
+  const evidence = o.evidence === undefined ? undefined : historicalEvidence(o.evidence);
+  if (!report && !evidence) throw new ReportError('archive', 'a report or recovered evidence', value);
+  return {docsVersion, report, evidence};
+}
+
+function historicalEvidence(value: unknown): HistoricalEvidence {
+  const o = object(value, 'archive.evidence');
+  const c = object(o.coverage, 'archive.evidence.coverage');
+  const s = object(o.suite, 'archive.evidence.suite');
+  const e = o.experiments === undefined ? undefined : object(o.experiments, 'archive.evidence.experiments');
+  const result: HistoricalEvidence = {
+    releaseVersion: string(o.releaseVersion, 'archive.evidence.releaseVersion'),
+    generatedAt: string(o.generatedAt, 'archive.evidence.generatedAt'),
+    commit: string(o.commit, 'archive.evidence.commit'),
+    runUrl: string(o.runUrl, 'archive.evidence.runUrl'),
+    coverageArtifactUrl: string(o.coverageArtifactUrl, 'archive.evidence.coverageArtifactUrl'),
+    coverage: {
+      unitPercent: number(c.unitPercent, 'archive.evidence.coverage.unitPercent'),
+      integrationPercent: number(c.integrationPercent, 'archive.evidence.coverage.integrationPercent'),
+      totalPercent: number(c.totalPercent, 'archive.evidence.coverage.totalPercent'),
+      statements: number(c.statements, 'archive.evidence.coverage.statements'),
+    },
+    suite: {
+      tests: number(s.tests, 'archive.evidence.suite.tests'),
+      fuzz: number(s.fuzz, 'archive.evidence.suite.fuzz'),
+    },
+    benchmarks: number(o.benchmarks, 'archive.evidence.benchmarks'),
+    experiments: e ? {
+      cells: number(e.cells, 'archive.evidence.experiments.cells'),
+      artifactUrl: string(e.artifactUrl, 'archive.evidence.experiments.artifactUrl'),
+    } : undefined,
+    experimentResults: o.experimentResults === undefined
+      ? undefined
+      : experiments(o.experimentResults, 'archive.evidence.experimentResults'),
+  };
+  if (result.experimentResults && result.experimentResults.version !== result.releaseVersion) {
+    throw new ReportError(
+      'archive.evidence.experimentResults.version',
+      JSON.stringify(result.releaseVersion),
+      result.experimentResults.version,
+    );
+  }
+  if (result.experimentResults && result.experiments?.cells !== result.experimentResults.cells.length) {
+    throw new ReportError(
+      'archive.evidence.experiments.cells',
+      String(result.experimentResults.cells.length),
+      result.experiments?.cells,
+    );
+  }
+  return result;
 }

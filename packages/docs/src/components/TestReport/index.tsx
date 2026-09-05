@@ -1,5 +1,7 @@
 import Link from '@docusaurus/Link';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import {usePluginData} from '@docusaurus/useGlobalData';
+import {useDocsVersion} from '@docusaurus/plugin-content-docs/client';
 import {TEST_REPORT_PLUGIN} from '@site/plugins/test-report/name';
 import type {
   BenchGroup,
@@ -8,27 +10,55 @@ import type {
   Group,
   Report,
   ReportData,
+  ArchivedReport,
 } from '@site/plugins/test-report/types';
+import {validateArchivedReport} from '@site/plugins/test-report/validate';
+import {resolveArchivedState, type ArchivedState} from '@site/plugins/test-report/state';
 import Admonition from '@theme/Admonition';
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 
 import styles from './styles.module.css';
 
 // The coverage, test-results, benchmarks and experiments pages, insofar as
 // they are numbers.
 //
-// Everything here comes from one report measured by the release that published
-// this site (tools/testreport). Nothing on either page is a figure someone
-// typed, which is the point: the three copies these replace had already drifted
-// apart from each other and from the badge.
-//
-// When a build carries no report — every local build, and the CI gate that
-// builds the site on an ordinary commit — <ReportStamp/> says so and the data
-// components render nothing. The pages' prose stands on its own either way.
+// Current pages read the report measured by the release build. Frozen versions
+// read their own archive, which can contain a full report or recovered evidence.
+// Missing historical detail is identified rather than filled from a newer run.
 
-/** The report this build was given, or null when it was built without one. */
+const archivedReports = new Map<string, Promise<ArchivedReport | null>>();
+
+function archivedReport(version: string, url: string): Promise<ArchivedReport | null> {
+  const existing = archivedReports.get(version);
+  if (existing) return existing;
+  const request = fetch(url)
+    .then(async (response) => response.ok ? validateArchivedReport(await response.json(), version) : null)
+    .catch(() => null);
+  archivedReports.set(version, request);
+  return request;
+}
+
+function useReportState(): ArchivedState {
+  const data = usePluginData(TEST_REPORT_PLUGIN) as ReportData;
+  const version = useDocsVersion().version;
+  const archiveUrl = useBaseUrl(`/test-reports/${encodeURIComponent(version)}.json`);
+  const isCurrent = data.currentVersions.includes(version);
+  const isArchived = data.archivedVersions.includes(version);
+  const [archive, setArchive] = useState<{version: string; value: ArchivedReport | null} | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    if (!isCurrent && isArchived) {
+      void archivedReport(version, archiveUrl).then((value) => { if (mounted) setArchive({version, value}); });
+    }
+    return () => { mounted = false; };
+  }, [archiveUrl, isArchived, isCurrent, version]);
+  if (isCurrent) return {report: data.report, evidence: null, status: data.report ? 'available' : 'unavailable'};
+  return resolveArchivedState(version, isArchived, archive);
+}
+
+/** The report for the doc version being read, or null when none was archived. */
 export function useReport(): Report | null {
-  return (usePluginData(TEST_REPORT_PLUGIN) as ReportData).report;
+  return useReportState().report;
 }
 
 /** `12345` -> `12,345`, without asking the platform's locale. */
@@ -84,8 +114,52 @@ function outcome(counts: Counts): string {
  * rather than merely stale.
  */
 export function ReportStamp(): React.ReactElement {
-  const report = useReport();
+  const {report, evidence, status} = useReportState();
+  const version = useDocsVersion().version;
+  const {currentVersions} = usePluginData(TEST_REPORT_PLUGIN) as ReportData;
   if (!report) {
+    if (status === 'loading') {
+      return (
+        <Admonition type="note" title={`Loading the ${version} release report`}>
+          <p>The test, coverage, benchmark, and experiment results are loading from this release&apos;s archive.</p>
+        </Admonition>
+      );
+    }
+    if (evidence) {
+      return (
+        <Admonition type="note" title={`Recovered release evidence for ${version}`}>
+          <p>
+            The {evidence.releaseVersion} release recorded {count(evidence.suite.tests)} tests, {count(evidence.suite.fuzz)} fuzz
+            targets, and {count(evidence.benchmarks)} benchmarks. Total coverage was {pct(evidence.coverage.totalPercent)} of{' '}
+            {count(evidence.coverage.statements)} statements (unit {pct(evidence.coverage.unitPercent)}; integration{' '}
+            {pct(evidence.coverage.integrationPercent)}).
+          </p>
+          {evidence.experiments ? (
+            <p>
+              It also recorded {count(evidence.experiments.cells)} experiment cells. Their verdicts, steps, checks, and
+              final states are preserved in the tables below from the exact{' '}
+              <Link to={evidence.experiments.artifactUrl}>experiment artifact</Link>.
+            </p>
+          ) : null}
+          <p>
+            Measured on {day(evidence.generatedAt)} at commit {evidence.commit}. See the{' '}
+            <Link to={evidence.runUrl}>release run</Link> and{' '}
+            <Link to={evidence.coverageArtifactUrl}>coverage artifact</Link>. Per-package suite results and individual benchmark
+            measurements were not retained, so the detailed tables below are left empty.
+          </p>
+        </Admonition>
+      );
+    }
+    if (!currentVersions.includes(version)) {
+      return (
+        <Admonition type="note" title={`No archived report for ${version}`}>
+          <p>
+            This documentation version has no preserved test report. Its figures are unavailable rather than being
+            replaced with results from a newer release.
+          </p>
+        </Admonition>
+      );
+    }
     return (
       <Admonition type="note" title="Measured at release time">
         <p>
@@ -413,11 +487,10 @@ export function FuzzTable(): React.ReactElement | null {
  * wants to disbelieve it has the tag to run it against.
  */
 export function ExperimentsSummary(): React.ReactElement | null {
-  const report = useReport();
-  if (!report) {
-    return null;
-  }
-  const {version, cells} = report.experiments;
+  const {report, evidence} = useReportState();
+  const experiments = report?.experiments ?? evidence?.experimentResults;
+  if (!experiments) return null;
+  const {version, cells} = experiments;
   if (cells.length === 0) {
     return null;
   }
@@ -459,11 +532,8 @@ function cellOutcome(cell: ExperimentCell): string {
  * four answers to one question in four different places.
  */
 export function ExperimentsTable(): React.ReactElement | null {
-  const report = useReport();
-  if (!report) {
-    return null;
-  }
-  const cells = report.experiments.cells;
+  const {report, evidence} = useReportState();
+  const cells = (report?.experiments ?? evidence?.experimentResults)?.cells ?? [];
   if (cells.length === 0) {
     return null;
   }
