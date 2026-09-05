@@ -1,7 +1,7 @@
 github.com/pelletier/go-toml/v2 v2.2.4 h1:mye9XuhQ6gvn5h28+VilKrrPoQVanw5PMw/TB0t5Ec4=
 github.com/pelletier/go-toml/v2 v2.2.4/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
-github.com/yohimik/dispat/pkg/manifest v1.1.1 h1:pEF5Un38v8fL/sSmWuCxo3Owxl6kL67K7O48uTBzZs0=
-github.com/yohimik/dispat/pkg/manifest v1.1.1/go.mod h1:DFkXSrUuECVXTNJPPF0GClKTBdWOpl5/sGjANqR49KU=
+github.com/yohimik/dispat/pkg/manifest v1.2.0 h1:ucmnCxJYATbnia2CU7KDXB2Ofh7zwYyb31TCzp8vzo4=
+github.com/yohimik/dispat/pkg/manifest v1.2.0/go.mod h1:DFkXSrUuECVXTNJPPF0GClKTBdWOpl5/sGjANqR49KU=
 golang.org/x/mod v0.29.0 h1:HV8lRxZC4l2cr3Zq1LvtOsi/ThTgWnUk/y64QSs8GwA=
 golang.org/x/mod v0.29.0/go.mod h1:NyhrlYXJ2H4eJiRy/WDBO6HMqZQ6q9nk4JzS3NuCK+w=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=

@@ -1,5 +1,24 @@
 # Changelog
 
+## pkg/writer/v1.2.0 (2026-09-05)
+
+### Features
+
+- support Aqua manifests ([18f3e2c](https://github.com/yohimik/dispat/commit/18f3e2c2891ad3959a02535f6b6d942a5c0fd326)) (by yohimik)
+
+### Fixes
+
+- reject symlink targets ([2219aa8](https://github.com/yohimik/dispat/commit/2219aa84cfc18b615a22e0351f9fcb0612feea2e)) (by yohimik)
+
+### Dependencies
+
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.0): 1.1.1 -> 1.2.0
+
+### Authors
+
+- yohimik
+
+
 ## pkg/writer/v1.1.1 (2026-08-19)
 
 ### Dependencies
