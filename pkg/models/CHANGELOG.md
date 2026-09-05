@@ -1,5 +1,20 @@
 # Changelog
 
+## pkg/models/v1.8.0 (2026-09-05)
+
+### Fixes
+
+- preserve configuration types (corrects 3e8b58492eea#1) ([f17f6ef](https://github.com/yohimik/dispat/commit/f17f6ef0d490abb150bf456ebb57a266ddcaece9)) (by yohimik)
+
+### Dependencies
+
+- [ccme](https://github.com/yohimik/dispat/releases/tag/pkg/ccme/v2.0.0): 1.0.0 -> 2.0.0
+
+### Authors
+
+- yohimik
+
+
 ## pkg/models/v1.7.0 (2026-09-02)
 
 No changes: a version bump to keep the versioning group on one major and minor version.
