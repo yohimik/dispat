@@ -1,3 +1,7 @@
+---
+description: Read and safely update dependency manifests across the package formats and ecosystems Dispat supports.
+---
+
 # Manifest tools
 
 Every package in a repository carries a file that declares its name, its version, and its dependencies. npm uses

@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
-import {colors, font} from './theme';
+import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, msg, kv, CapSeg} from './components';
 
 // The polyglot claim, shown rather than listed: one manifest after another
@@ -150,9 +150,9 @@ export const Edit: React.FC<{before: string; after: string; b: number; order: nu
     <span
       style={{
         color: colors.fg,
-        background: `rgba(245, 197, 66, ${0.22 * glow})`,
+        background: alpha(colors.yellow, 0.22 * glow),
         borderRadius: 6,
-        boxShadow: glow > 0 ? `0 0 0 2px rgba(245, 197, 66, ${0.5 * glow})` : undefined,
+        boxShadow: glow > 0 ? `0 0 0 2px ${alpha(colors.yellow, 0.5 * glow)}` : undefined,
       }}>
       {before}
     </span>

@@ -8,6 +8,7 @@ import {Glue, GLUE_DURATION} from './Glue';
 import {Hooks, HOOKS_DURATION} from './Hooks';
 import {Lock, LOCK_DURATION} from './Lock';
 import {Math_, MATH_DURATION} from './Math';
+import {Progress, PROGRESS_DURATION} from './Progress';
 import {Order, ORDER_DURATION} from './Order';
 import {Polyglot, POLYGLOT_DURATION} from './Polyglot';
 import {Polyrepo, POLYREPO_DURATION} from './Polyrepo';
@@ -42,6 +43,7 @@ export const Root: React.FC = () => (
     <Composition id="Lock" component={Lock} durationInFrames={LOCK_DURATION} {...SIZE} />
     <Composition id="Glue" component={Glue} durationInFrames={GLUE_DURATION} {...SIZE} />
     <Composition id="Math" component={Math_} durationInFrames={MATH_DURATION} {...SIZE} />
+    <Composition id="Progress" component={Progress} durationInFrames={PROGRESS_DURATION} {...SIZE} />
     <Composition id="Why" component={Why} durationInFrames={WHY_DURATION} {...SIZE} />
     <Composition id="Aqua" component={Aqua} durationInFrames={AQUA_DURATION} {...SIZE} />
     {SCENES.map((s) => (

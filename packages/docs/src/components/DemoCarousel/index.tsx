@@ -3,7 +3,6 @@ import BrowserOnly from '@docusaurus/BrowserOnly';
 import type {PlayerRef} from '@remotion/player';
 import type {Feature} from '@site/plugins/readme/types';
 import Inlines from '@site/src/components/Inline';
-import Heading from '@theme/Heading';
 import React from 'react';
 import aquaFixture from '../../../demo/fixtures/aqua/expected.json';
 import runFixture from '../../../demo/fixtures/run/expected.json';
@@ -33,6 +32,7 @@ const SCENE_COMMANDS: Record<string, string> = {
   'demo-hooks': 'dispat', 'demo-polyrepo': 'dispat', 'demo-math': 'dispat status',
   'demo-glue': 'dispat autowriter --link-local', 'demo-lock': 'dispat release',
   'demo-aqua': aquaFixture.commands.join('\n'),
+  'demo-progress': 'dispat status\n# Check any ambiguous publish at its destination before retrying.\ndispat',
 };
 
 class SceneBoundary extends React.Component<{children: React.ReactNode; fallback: React.ReactNode}, {failed: boolean}> {
@@ -55,6 +55,7 @@ const SCENES: Record<string, () => Promise<LoadedScene>> = {
   'demo-hooks': () => import('../../../demo/illustration/src/Hooks').then((m) => ({component: m.Hooks, duration: m.HOOKS_DURATION})),
   'demo-polyrepo': () => import('../../../demo/illustration/src/Polyrepo').then((m) => ({component: m.Polyrepo, duration: m.POLYREPO_DURATION})),
   'demo-math': () => import('../../../demo/illustration/src/Math').then((m) => ({component: m.Math_, duration: m.MATH_DURATION})),
+  'demo-progress': () => import('../../../demo/illustration/src/Progress').then((m) => ({component: m.Progress, duration: m.PROGRESS_DURATION})),
   'demo-glue': () => import('../../../demo/illustration/src/Glue').then((m) => ({component: m.Glue, duration: m.GLUE_DURATION})),
   'demo-lock': () => import('../../../demo/illustration/src/Lock').then((m) => ({component: m.Lock, duration: m.LOCK_DURATION})),
   'demo-aqua': () => import('../../../demo/illustration/src/Aqua').then((m) => ({component: m.Aqua, duration: m.AQUA_DURATION})),
@@ -137,8 +138,8 @@ const WHY_SLIDE: ExtraSlide = {
   body: (
     <>
       Dispat reads package relationships, plans the affected releases, then builds and publishes each dependency
-      before its consumers. It records completed work so an interrupted release can resume from what the registry
-      confirms. <Link to="/concepts">Concepts</Link> follows that workflow end to end.
+      before its consumers. It records successful publishes with Git tags so the next run can plan unfinished work.
+      <Link to="/concepts"> Concepts</Link> follows that workflow end to end.
     </>
   ),
   media: {
@@ -259,21 +260,38 @@ const EXTRA_SLIDES: ExtraSlide[] = [
     },
   },
   {
-    title: 'Recorded progress and repeatable plans',
-    name: 'Repeatable plans',
+    title: 'Deterministic plans, bounded parsing',
+    name: 'Math',
     body: (
       <>
-        <Link to="/internals/architecture">Planning is deterministic</Link>: the same history, graph, and configuration
-        produce the same plan. During release, tags and registry records let a retry skip work already confirmed.
-        If a publish result is ambiguous, the publisher must make repeating that operation safe.{' '}
-        <Link to="/go/ccme">Commit parsing</Link> remains a bounded left-to-right scan.
+        <Link to="/internals/architecture">Planning is deterministic</Link>: the same history, package graph, and
+        configuration produce the same plan. It needs no persistent release cache or database, and version decisions
+        do not depend on the clock. <Link to="/go/ccme">CCME parsing</Link> reads each commit message from left to right
+        without backtracking.
       </>
     ),
     media: {
       asset: 'demo-math',
-      name: 'Repeatable plans',
+      name: 'Math',
       label:
-        'The same inputs produce the same release plan. A retry checks recorded tags and registry state, skips confirmed work, and treats an ambiguous publish as an operation the publisher must safely repeat. A cursor then shows bounded left-to-right commit parsing.',
+        'Two dispat status runs produce the same plan from the same inputs. The planner needs no persistent release cache or database and does not use the clock for version decisions. A cursor then demonstrates the commit parser moving through the input once, without backtracking.',
+    },
+  },
+  {
+    title: 'Recorded progress and safe retries',
+    name: 'Recorded progress',
+    body: (
+      <>
+        Git tags record completed releases so the next run can skip them. If a publish response is lost before its
+        tag is written, check the destination before rerunning, or use an <strong>idempotent publisher</strong> that
+        safely accepts the same request again. <Link to="/reference/releasing/recovery">Read about recovery and retries</Link>.
+      </>
+    ),
+    media: {
+      asset: 'demo-progress',
+      name: 'Recorded progress',
+      label:
+        'Three cards separate confirmed progress from uncertainty: a tag records a completed release, a lost publish response leaves the outcome unclear, and the operator checks the destination or uses an idempotent publisher before retrying. Recorded versions can be skipped; ambiguous outcomes still need care.',
     },
   },
   {
@@ -369,20 +387,6 @@ function DeckControls({
       <div className={styles.transport}>
         <button
           type="button"
-          className={styles.iconButton}
-          aria-label={playing ? 'Pause the slide' : 'Play the slide'}
-          title={playing ? 'Pause' : 'Play'}
-          onClick={onTogglePlay}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            {playing ? (
-              <path fill="currentColor" d="M6 4h4v16H6zM14 4h4v16h-4z" />
-            ) : (
-              <path fill="currentColor" d="M8 5v14l11-7z" />
-            )}
-          </svg>
-        </button>
-        <button
-          type="button"
           className={loop ? `${styles.iconButton} ${styles.activeIconButton}` : styles.iconButton}
           aria-label="Loop the current slide"
           aria-pressed={loop}
@@ -398,6 +402,20 @@ function DeckControls({
               <text x="12" y="15.4" textAnchor="middle" fontSize="9.5" fontWeight="700" fill="currentColor">
                 1
               </text>
+            )}
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label={playing ? 'Pause the slide' : 'Play the slide'}
+          title={playing ? 'Pause' : 'Play'}
+          onClick={onTogglePlay}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {playing ? (
+              <path fill="currentColor" d="M6 4h4v16H6zM14 4h4v16h-4z" />
+            ) : (
+              <path fill="currentColor" d="M8 5v14l11-7z" />
             )}
           </svg>
         </button>
@@ -465,6 +483,7 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
   // after reading the user's preference, avoiding a moving server fallback.
   const [paused, setPaused] = React.useState(true);
   const [speed, setSpeed] = React.useState(1);
+  const [transcriptOpen, setTranscriptOpen] = React.useState(true);
   const [onscreen, setOnscreen] = React.useState(false);
   const [pageVisible, setPageVisible] = React.useState(true);
   const transportTouched = React.useRef(false);
@@ -526,69 +545,75 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
     <div className={styles.carousel} ref={root} data-demo-id="landing-demos">
       <div className={styles.frame}>
         <div className={styles.stack}>
-          <div key={current.id} className={`${styles.slide} ${styles.activeSlide}`} data-slide-id={current.id}>
-            <div className={styles.video}>
-              <div className={styles.mobilePanHint}>Swipe horizontally to inspect the animation. The full transcript follows.</div>
+          <div className={styles.slide} data-slide-id={current.id}>
+            <h3 id="landing-demo-title" className={styles.slideTitle}>
+              {current.title}
+            </h3>
+            <div key={current.id} className={styles.video}>
+              <div className={styles.mobilePanHint}>Swipe to explore the diagram, or read the transcript below.</div>
               <div
                 className={styles.sceneScroller}
                 data-demo-canvas
                 role="region"
-                aria-label={`Scrollable interactive animation: ${current.media?.label ?? current.title}`}
+                aria-labelledby="landing-demo-title"
+                aria-describedby="landing-demo-description"
                 tabIndex={0}>
-                <div className={styles.sceneViewport}>
-              {scene ? (
-                <BrowserOnly fallback={<div className={styles.loading}>Interactive demo</div>}>
-                  {() => (
-                    <SceneBoundary fallback={<div className={styles.loading}>Demo unavailable. Read the description below.</div>}>
-                      <React.Suspense fallback={<div className={styles.loading}>Loading interactive demo…</div>}>
-                        <LivePlayer
-                          ref={setPlayer}
-                          component={scene.component}
-                          durationInFrames={scene.duration}
-                          compositionWidth={1920}
-                          compositionHeight={1080}
-                          fps={FPS}
-                          loop={loop}
-                          playbackRate={speed}
-                          initialFrame={Math.min(Math.round(scene.duration / 3), scene.duration - 1)}
-                          controls={false}
-                          acknowledgeRemotionLicense
-                          style={{width: '100%', height: '100%'}}
-                        />
-                      </React.Suspense>
-                    </SceneBoundary>
-                  )}
-                </BrowserOnly>
-              ) : <div className={styles.loading}>{sceneFailed ? 'Demo unavailable. Read the description below.' : 'Loading interactive demo…'}</div>}
+                <div className={styles.sceneViewport} aria-hidden="true">
+                  {scene ? (
+                    <BrowserOnly fallback={<div className={styles.loading}>Interactive demo</div>}>
+                      {() => (
+                        <SceneBoundary fallback={<div className={styles.loading}>Demo unavailable. Read the description below.</div>}>
+                          <React.Suspense fallback={<div className={styles.loading}>Loading interactive demo…</div>}>
+                            <LivePlayer
+                              ref={setPlayer}
+                              component={scene.component}
+                              durationInFrames={scene.duration}
+                              compositionWidth={1920}
+                              compositionHeight={800}
+                              sourceHeight={current.media?.asset === 'demo-aqua' ? 800 : 1080}
+                              cropTop={current.media?.asset === 'demo-aqua' ? 0 : 280}
+                              fps={FPS}
+                              loop={loop}
+                              playbackRate={speed}
+                              initialFrame={Math.min(Math.round(scene.duration / 3), scene.duration - 1)}
+                              controls={false}
+                              acknowledgeRemotionLicense
+                              style={{width: '100%', height: '100%'}}
+                            />
+                          </React.Suspense>
+                        </SceneBoundary>
+                      )}
+                    </BrowserOnly>
+                  ) : <div className={styles.loading}>{sceneFailed ? 'Demo unavailable. Read the description below.' : 'Loading interactive demo…'}</div>}
                 </div>
               </div>
             </div>
-            <Heading as="h3" className={styles.slideTitle}>
-              {current.title}
-            </Heading>
+            <DeckControls
+              slides={slides}
+              active={active}
+              onSelect={(next) => { setActive(next); }}
+              loop={loop}
+              onToggleLoop={() => setLoop((l) => !l)}
+              playing={!paused}
+              onTogglePlay={() => { transportTouched.current = true; setPaused((p) => !p); }}
+              speed={speed}
+              onCycleSpeed={() => setSpeed((s) => ({1: 1.5, 1.5: 2, 2: 0.5, 0.5: 1}[s] ?? 1))}
+            />
             <div className={styles.band}>
-              <p className={styles.bandBody}>{current.body}</p>
+              <p id="landing-demo-description" className={styles.bandBody}>{current.body}</p>
               {current.media && (
-                <details className={styles.transcript} open>
+                <details
+                  className={styles.transcript}
+                  open={transcriptOpen}
+                  onToggle={(event) => setTranscriptOpen(event.currentTarget.open)}>
                   <summary>Accessible description and transcript</summary>
-                  <code className={styles.command}>{SCENE_COMMANDS[current.media.asset]}</code>
+                  <pre className={styles.command}><code>{SCENE_COMMANDS[current.media.asset]}</code></pre>
                   <p>{current.media.label}</p>
                 </details>
               )}
             </div>
           </div>
         </div>
-        <DeckControls
-          slides={slides}
-          active={active}
-          onSelect={(next) => { setActive(next); }}
-          loop={loop}
-          onToggleLoop={() => setLoop((l) => !l)}
-          playing={!paused}
-          onTogglePlay={() => { transportTouched.current = true; setPaused((p) => !p); }}
-          speed={speed}
-          onCycleSpeed={() => setSpeed((s) => ({1: 1.5, 1.5: 2, 2: 0.5, 0.5: 1}[s] ?? 1))}
-        />
       </div>
     </div>
   );

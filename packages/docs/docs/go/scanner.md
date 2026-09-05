@@ -1,3 +1,7 @@
+---
+description: Use the standalone Go scanner package to read dependency manifests into one ecosystem-neutral model.
+---
+
 # scanner: the manifest reader
 
 `github.com/yohimik/dispat/pkg/scanner` reads dependency manifests into one ecosystem-neutral shape. You get the

@@ -1,7 +1,7 @@
 import React from 'react';
-import {AbsoluteFill, interpolate, interpolateColors, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {loadFont} from '@remotion/google-fonts/JetBrainsMono';
-import {colors} from './theme';
+import {colors, mix} from './theme';
 import {edges, edgePath, pkgs} from './graph';
 import {NodeView, PkgNode, Wordmark} from './components';
 
@@ -66,7 +66,7 @@ export const Stage: React.FC<{
                 key={i}
                 d={edgePath(e)}
                 fill="none"
-                stroke={interpolateColors(hot, [0, 1], [colors.faint, colors.green])}
+                stroke={mix(colors.faint, colors.green, hot)}
                 strokeWidth={3 + hot * 2}
                 pathLength={1}
                 strokeDasharray={1}

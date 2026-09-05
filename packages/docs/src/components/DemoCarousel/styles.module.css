@@ -1,346 +1,202 @@
-/**
- * The hero's key-feature deck. The width matches the video the carousel
- * replaced: wide, because the clips' lines are the tool's real output.
- */
-
 .carousel {
+  --demo-bg: #101713;
+  --demo-panel: #161d18;
+  --demo-panel-edge: #34463a;
+  --demo-fg: #dce3dd;
+  --demo-dim: #9aaa9f;
+  --demo-faint: #65766b;
+  --demo-green: #4cd98a;
+  --demo-yellow: #f5c542;
+  --demo-red: #ff6b6b;
+  --demo-cyan: #5fc9b8;
+  --demo-blue: #6ea8fe;
+  --demo-control: #26372c;
+  --demo-hover: #354c3e;
+  --demo-active: #8bc7a5;
+  --demo-active-text: #101713;
+  --demo-terminal: #0b100d;
   max-width: 64rem;
+  min-width: 0;
   margin: 0 auto 1.5rem;
 }
 
-/* The slides stack in one grid cell and crossfade; the frame takes the
-   tallest slide's height, so the page never jumps as the deck rotates. The
-   background and the type below come from the animation's own palette
-   (packages/docs/demo/illustration/src/theme.ts), so the band under a clip
-   reads as part of the same canvas in both site themes. container-type lets
-   the band size its type in cqw: like any presentation, the text scales with
-   the slide, so a slide that fits on a desktop fits identically on a
-   phone. */
+:global([data-theme='light']) .carousel {
+  --demo-bg: #f5f9f6;
+  --demo-panel: #fff;
+  --demo-panel-edge: #c7d7cc;
+  --demo-fg: #1c3527;
+  --demo-dim: #52685b;
+  --demo-faint: #8a9e91;
+  --demo-green: #187743;
+  --demo-yellow: #8a6200;
+  --demo-red: #b83038;
+  --demo-cyan: #08796b;
+  --demo-blue: #225fac;
+  --demo-control: #e7efe9;
+  --demo-hover: #d6e5db;
+  --demo-active: #246c43;
+  --demo-active-text: #fff;
+  --demo-terminal: #edf3ef;
+}
+
 .frame {
-  display: flex;
-  flex-direction: column;
-  border-radius: 8px;
+  border: 1px solid var(--demo-panel-edge);
+  border-radius: 12px;
   overflow: hidden;
-  /* The band's surface: the only part of the frame left visible is the
-     strip the controls sit on, and it should read as part of the band. */
-  background: #161d18;
+  background: var(--demo-bg);
   container-type: inline-size;
 }
 
-/* The slides stack in one grid cell and crossfade; the stack takes the
-   tallest slide's height, and the controls live below it in normal flow, so
-   the two can never overlap however deep the nav wraps. */
-.stack {
+.stack,
+.slide { min-width: 0; }
+
+/* Reserve two lines so every scene starts at the same height. */
+.slideTitle {
   display: grid;
-  min-width: 0;
+  place-items: center;
+  height: 5rem;
+  margin: 0;
+  padding: 0.75rem 1.25rem;
+  font: 700 clamp(1rem, 2cqw, 1.3rem)/1.35 'JetBrains Mono', var(--ifm-font-family-monospace);
+  text-align: center;
+  overflow-wrap: anywhere;
+  color: var(--demo-fg);
 }
 
-/* visibility rather than display for the hidden slides: it still fades, it
-   keeps every slide contributing its height to the grid, and it takes the
-   overlay's links out of the tab order while another slide is up. */
-.slide {
-  grid-area: 1 / 1;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.4s ease, visibility 0.4s;
-  min-width: 0;
-}
-
-/* The compound selector is load-bearing: with a bare .activeSlide, the
-   production minifier merges this rule into an earlier Infima navbar rule
-   with the same declarations, which moves it ahead of .slide in the bundle
-   and lets the hidden state win the equal-specificity tie. The extra class
-   outranks .slide whatever order the bundle puts them in. */
-.slide.activeSlide {
-  opacity: 1;
-  visibility: visible;
-}
-
-/* The clips keep an empty strip at the top of their 1920x1080 canvas (the
-   master composition's scene titles type there); the deck crops part of it
-   away, cover anchored to the bottom, keeping enough of the strip for the
-   slide title and clear air between it and the diagram. */
-.video {
-  display: block;
-  width: 100%;
-  /* Explicit auto height: without it the element's height="1080" attribute
-     wins and cover blows the clip up instead of cropping the strip. */
-  height: auto;
-  aspect-ratio: 1920 / 880;
-  object-fit: cover;
-  object-position: bottom;
-  overflow: hidden;
-  min-width: 0;
-  background: #101713;
-}
-
-.sceneScroller {
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.sceneViewport {
-  width: 100%;
-  height: 100%;
-}
-
+.video,
+.sceneScroller { width: 100%; min-width: 0; }
+.video { background: var(--demo-bg); }
+.sceneScroller { overflow: hidden; }
+.sceneViewport { width: 100%; aspect-ratio: 1920 / 800; line-height: 1.2; }
 .mobilePanHint { display: none; }
 
+/* Animation text moves with playback; copyable commands live in the transcript. */
+.slideTitle,
+.sceneViewport,
+.controls { -webkit-user-select: none; user-select: none; }
 .loading {
   display: grid;
   width: 100%;
   height: 100%;
   place-items: center;
-  color: #a9b5ad;
-  font: 600 clamp(0.85rem, 1.4cqw, 1rem) var(--ifm-font-family-base);
+  padding: 1rem;
+  color: var(--demo-dim);
+  font: 600 0.95rem/1.4 var(--ifm-font-family-base);
 }
 
-/* The claim's title, in the clips' own title spot: the strip the crop
-   deliberately leaves at the top of the canvas. */
-.slideTitle {
-  position: absolute;
-  top: 1.5cqw;
-  left: 5cqw;
-  right: 5cqw;
-  margin: 0;
-  text-align: center;
-  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
-  font-size: 1.9cqw;
-  font-weight: 700;
-  color: #dce3dd;
-}
-
-/* The claim's words under the animation that illustrates them, centred in
-   whatever the tallest slide's text leaves over. */
-.band {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 1.7cqw 5.5cqw 1.9cqw;
-  border-top: 1.5px solid #232b26;
-  background: #161d18;
-  text-align: center;
-  min-width: 0;
-}
-
-.bandBody {
-  margin: 0;
-  font-size: 1.45cqw;
-  line-height: 1.6;
-  color: #a9b5ad;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.transcript {
-  margin-top: 0.8rem;
-  color: #a9b5ad;
-  font-size: clamp(0.78rem, 1.05cqw, 0.9rem);
-  text-align: left;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.transcript summary {
-  color: #c3cdc6;
-  cursor: pointer;
-  text-align: center;
-}
-
-.transcript p {
-  max-width: 70ch;
-  margin: 0.65rem auto 0;
-}
-
-.command {
-  display: block;
-  max-width: 78ch;
-  margin: 0.65rem auto 0;
-  padding: 0.5rem 0.7rem;
-  white-space: pre-wrap;
-  color: #dce3dd;
-  background: #0b100d;
-}
-
-.bandBody code {
-  border: none;
-  padding: 0.05em 0.3em;
-  background: rgba(220, 227, 221, 0.09);
-  color: #dce3dd;
-  font-size: 0.95em;
-}
-
-/* The animation's green, not the theme's: the light theme's primary is a
-   deep green that would vanish on this dark canvas. */
-.bandBody a,
-.bandBody a code {
-  color: #4cd98a;
-}
-
-/* The deck's one control surface, a player bar living in the band's lower
-   half: transport on the left, a hairline, then the named slides. Sized in
-   cqw like the rest of the slide, so it wraps the same way at every
-   width. */
+/* Controls precede variable-length descriptions and never move with them. */
 .controls {
-  margin: 0 2.6cqw 1.5cqw;
   display: flex;
   align-items: center;
-  gap: 1cqw;
-  padding: 0.8cqw 1.1cqw;
-  border-radius: 1.4cqw;
-  background: rgba(220, 227, 221, 0.04);
-  border: 1.5px solid #232b26;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-block: 1px solid var(--demo-panel-edge);
+  background: var(--demo-panel);
 }
-
-.transport {
-  display: flex;
-  align-items: center;
-  gap: 0.55cqw;
-}
-
-.divider {
-  align-self: stretch;
-  width: 1.5px;
-  background: #232b26;
-}
-
-.pills {
-  flex: 1;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.55cqw 0.7cqw;
-}
-
+.transport { display: flex; flex: 0 0 auto; align-items: center; gap: 0.35rem; }
+.divider { flex: 0 0 1px; align-self: stretch; background: var(--demo-panel-edge); }
+.pills { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; justify-content: center; gap: 0.3rem; }
 .navButton {
-  padding: 0.32cqw 1.15cqw;
-  border: none;
+  min-height: 2.5rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(220, 227, 221, 0.08);
-  color: #c3cdc6;
-  font-size: 1.28cqw;
-  font-family: var(--ifm-font-family-base);
-  line-height: 1.55;
+  background: var(--demo-control);
+  color: var(--demo-fg);
+  font: 0.8rem/1.3 var(--ifm-font-family-base);
+  white-space: nowrap;
   cursor: pointer;
 }
-
-@media (max-width: 44rem) {
-  .video {
-    width: 100%;
-    height: auto;
-    aspect-ratio: auto;
-    overflow: hidden;
-  }
-  .sceneScroller {
-    height: 33.75rem;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-  }
-  .sceneViewport {
-    width: 60rem;
-    height: 33.75rem;
-    scroll-snap-align: start;
-  }
-  .mobilePanHint {
-    display: block;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 0.35rem 0.55rem;
-    background: #0b100de6;
-    color: #c3cdc6;
-    font-size: 0.75rem;
-    line-height: 1.35;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  .slideTitle {
-    position: static;
-    margin: 0;
-    padding: 0.85rem 1rem 0.25rem;
-    background: #161d18;
-    font-size: 1rem;
-    line-height: 1.35;
-  }
-  .bandBody { font-size: clamp(0.82rem, 3.2cqw, 1rem); }
-  .controls { margin: 0 0.55rem 0.65rem; padding: 0.5rem; gap: 0.45rem; }
-  .pills { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; padding-bottom: 0.2rem; }
-  .navButton { flex: 0 0 auto; padding: 0.3rem 0.65rem; font-size: 0.75rem; }
-  .iconButton { width: 1.9rem; height: 1.9rem; }
-  .iconButton svg { width: 1rem; height: 1rem; }
-  .speedButton { width: 2.9rem; height: 1.9rem; font-size: 0.72rem; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .slide { transition: none; }
-}
-
-.navButton:hover {
-  background: rgba(220, 227, 221, 0.18);
-}
-
-.activeNavButton,
-.activeNavButton:hover {
-  background: #6fae8a;
-  color: #101713;
-}
-
-/* The transport's round buttons, the size of a pill. */
-.iconButton {
+.iconButton,
+.speedButton {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 2.62cqw;
-  height: 2.62cqw;
+  width: 2.75rem;
+  height: 2.75rem;
   padding: 0;
   border: none;
   border-radius: 50%;
-  background: rgba(220, 227, 221, 0.08);
-  color: #c3cdc6;
+  background: var(--demo-control);
+  color: var(--demo-fg);
   cursor: pointer;
 }
-
-.iconButton svg {
-  width: 1.45cqw;
-  height: 1.45cqw;
-}
-
-.iconButton:hover {
-  background: rgba(220, 227, 221, 0.18);
-}
-
+.iconButton svg { width: 1.2rem; height: 1.2rem; }
+.speedButton { width: 3.5rem; border-radius: 999px; font: 600 0.85rem var(--ifm-font-family-monospace); }
+.navButton:hover,
+.iconButton:hover,
+.speedButton:hover { background: var(--demo-hover); }
+.activeNavButton,
+.activeNavButton:hover,
 .activeIconButton,
-.activeIconButton:hover {
-  background: #6fae8a;
-  color: #101713;
-}
+.activeIconButton:hover { background: var(--demo-active); color: var(--demo-active-text); }
+.navButton:focus-visible,
+.iconButton:focus-visible,
+.speedButton:focus-visible,
+.transcript summary:focus-visible,
+.sceneScroller:focus-visible { outline: 2px solid var(--demo-active); outline-offset: -3px; }
 
-/* The speed cycler. Fixed width, sized for "0.5×", the widest label: the
-   pill must not resize as the label changes or the whole row shifts. */
-.speedButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 4.7cqw;
-  height: 2.62cqw;
-  padding: 0;
+.band {
+  min-width: 0;
+  padding: 1.2rem clamp(1rem, 4cqw, 2.5rem);
+  background: var(--demo-panel);
+  color: var(--demo-dim);
+}
+.bandBody {
+  max-width: 78ch;
+  margin: 0 auto;
+  font-size: clamp(0.9rem, 1.45cqw, 1rem);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.bandBody code {
   border: none;
-  border-radius: 999px;
-  background: rgba(220, 227, 221, 0.08);
-  color: #c3cdc6;
-  font-size: 1.28cqw;
-  font-family: var(--ifm-font-family-monospace);
-  font-weight: 600;
-  cursor: pointer;
+  padding: 0.05em 0.3em;
+  background: var(--demo-control);
+  color: var(--demo-fg);
+  font-size: 0.95em;
+  white-space: normal;
+}
+.bandBody a,
+.bandBody a code { color: var(--demo-green); }
+.transcript {
+  max-width: 78ch;
+  min-width: 0;
+  margin: 1rem auto 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.transcript summary { padding: 0.5rem 0; color: var(--demo-fg); cursor: pointer; }
+.transcript p { margin: 0.75rem 0 0; }
+.command {
+  display: block;
+  min-width: 0;
+  margin: 0.65rem 0 0;
+  padding: 0.7rem 0.85rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--demo-fg);
+  background: var(--demo-terminal);
+  font-size: 0.85rem;
 }
 
-.speedButton:hover {
-  background: rgba(220, 227, 221, 0.18);
+.command code { padding: 0; border: 0; background: none; font: inherit; white-space: inherit; overflow-wrap: inherit; }
+
+@media (max-width: 44rem) {
+  .sceneScroller { overflow-x: auto; overscroll-behavior-x: contain; }
+  .sceneViewport { width: 60rem; }
+  .mobilePanHint {
+    display: block;
+    padding: 0.4rem 0.75rem;
+    color: var(--demo-dim);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+  .controls { flex-wrap: wrap; justify-content: center; padding: 0.65rem; gap: 0.5rem; }
+  .divider { display: none; }
+  .pills { flex: 0 1 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; padding: 0.15rem 0 0.35rem; }
+  .navButton { flex: 0 0 auto; min-height: 2.75rem; }
 }

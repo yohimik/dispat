@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
-import {colors, font} from './theme';
+import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
 
 // The control-repository pattern, twenty-two seconds at Root.tsx's twenty
@@ -126,7 +126,7 @@ export const Polyrepo: React.FC = () => {
               borderRadius: 16,
               background: colors.panel,
               border: `2px solid ${active ? v.color : colors.panelEdge}`,
-              boxShadow: active && v.color !== colors.dim ? `0 0 30px ${v.color}33` : 'none',
+              boxShadow: active && v.color !== colors.dim ? `0 0 30px ${alpha(v.color, 0.2)}` : 'none',
               padding: '18px 22px',
               boxSizing: 'border-box',
             }}>
@@ -165,7 +165,7 @@ export const Polyrepo: React.FC = () => {
                   fontSize: 17,
                   color: colors.green,
                   background: colors.bg,
-                  border: `1.5px solid ${colors.green}66`,
+                  border: `1.5px solid ${alpha(colors.green, 0.4)}`,
                   borderRadius: 8,
                   padding: '2px 12px',
                 }}>

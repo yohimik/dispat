@@ -27,7 +27,7 @@
   letter-spacing: -0.045em;
 }
 
-.wordmark { display: flex; align-items: center; justify-content: center; gap: .75rem; font-size: 1.6rem; font-weight: 700; }
+.wordmark { -webkit-user-select: none; user-select: none; display: flex; align-items: center; justify-content: center; gap: .75rem; font-size: 1.6rem; font-weight: 700; }
 .heroNote { color: var(--ifm-color-emphasis-700); font-size: .9rem; margin: 0; }
 .installSection { scroll-margin-top: 5rem; }
 .firstRun { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; max-width: 64rem; margin: 1.5rem auto; }

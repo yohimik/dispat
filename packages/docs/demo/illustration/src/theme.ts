@@ -1,17 +1,28 @@
 // The shared visual system: the documentation site's background, the log
 // palette of the CLI's pretty mode, and one mono typeface throughout.
 export const colors = {
-  bg: '#101713',
-  panel: '#161d18',
-  panelEdge: '#232b26',
-  fg: '#dce3dd',
-  dim: '#5f6a62',
-  faint: '#39443d',
-  green: '#4cd98a',
-  yellow: '#f5c542',
-  red: '#ff6b6b',
-  cyan: '#5fc9b8',
-  blue: '#6ea8fe',
+  bg: 'var(--demo-bg, #101713)',
+  panel: 'var(--demo-panel, #161d18)',
+  panelEdge: 'var(--demo-panel-edge, #34463a)',
+  terminal: 'var(--demo-terminal, #0b100d)',
+  fg: 'var(--demo-fg, #dce3dd)',
+  dim: 'var(--demo-dim, #9aaa9f)',
+  faint: 'var(--demo-faint, #65766b)',
+  green: 'var(--demo-green, #4cd98a)',
+  yellow: 'var(--demo-yellow, #f5c542)',
+  red: 'var(--demo-red, #ff6b6b)',
+  cyan: 'var(--demo-cyan, #5fc9b8)',
+  blue: 'var(--demo-blue, #6ea8fe)',
+};
+
+/** A theme color at an opacity that also works when the color is a CSS variable. */
+export const alpha = (color: string, opacity: number) =>
+  `color-mix(in srgb, ${color} ${Math.max(0, Math.min(1, opacity)) * 100}%, transparent)`;
+
+/** Interpolate two theme colors without parsing their CSS-variable values in JS. */
+export const mix = (from: string, to: string, progress: number) => {
+  const toPercent = Math.max(0, Math.min(1, progress)) * 100;
+  return `color-mix(in srgb, ${from} ${100 - toPercent}%, ${to} ${toPercent}%)`;
 };
 
 export const font = "'JetBrains Mono', 'SFMono-Regular', Menlo, monospace";

@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
-import {colors, font} from './theme';
+import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, WRN, msg, kv} from './components';
 
 // The steps-as-commands claim, twenty-one seconds at Root.tsx's twenty
@@ -122,7 +122,7 @@ export const Terminal: React.FC = () => {
                 marginLeft: 14,
                 fontSize: 17,
                 color: row.ecoColor,
-                border: `1.5px solid ${row.ecoColor}66`,
+                border: `1.5px solid ${alpha(row.ecoColor, 0.4)}`,
                 borderRadius: 999,
                 padding: '1px 12px',
               }}>
@@ -140,7 +140,7 @@ export const Terminal: React.FC = () => {
                     borderRadius: 12,
                     border: `2px ${step.step ? 'dashed' : 'solid'} ${c}`,
                     background: colors.panel,
-                    boxShadow: active ? `0 0 24px ${c}33` : 'none',
+                    boxShadow: active ? `0 0 24px ${alpha(c, 0.2)}` : 'none',
                     padding: '15px 0 13px',
                     textAlign: 'center',
                     fontSize: 22,

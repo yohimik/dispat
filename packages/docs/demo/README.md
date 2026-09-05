@@ -13,10 +13,10 @@ brew install ffmpeg gifsicle
 packages/docs/demo/render.sh
 ```
 
-`render.sh` installs [`illustration/`](./illustration)'s dependencies on first run, renders every
-[Remotion](https://www.remotion.dev) composition to video, and converts them into the committed assets in
-[`imgs/`](../../../imgs): two gifs, and a webm and mp4 pair per key feature that the landing page's carousel plays,
-served at `/dispat/<name>` because `imgs/` is a static directory of the documentation site.
+`render.sh` installs [`illustration/`](./illustration)'s dependencies on first run and renders the
+[Remotion](https://www.remotion.dev) compositions used by the two committed GIFs in
+[`imgs/`](../../../imgs). The landing page plays the React scenes directly with Remotion Player; it does not download
+video exports. The source scenes are shared with the export tooling.
 
 Every composition runs at twenty frames per second (`Root.tsx`), which is what sets the deck's unhurried pace. The
 `Master` composition is the whole release story, forty-five seconds in five scenes; `Heal` is a cut of its timeline
@@ -40,9 +40,10 @@ completes. The landing page's carousel pairs each CLI README key-feature bullet 
 | `Single` | `demo-single` | The single-package example: one standalone entry, a scoped commit, the documentation's own status line, and a release leaving the tag, CHANGELOG.md, and a GitHub release under the card. | the carousel: "One package, no monorepo" |
 | `Hooks` | `demo-hooks` | Three package rows across two spaces, the same stage strip in each, with only that package's configured hooks above it and the libs login visibly shared, while core's print-env hook writes the `DISPAT_*` environment into the terminal. | the carousel: "Stages, hooks, and one environment" |
 | `Polyrepo` | `demo-polyrepo` | The control repository: three cards with git submodule pointers, a sync moving sdk's pointer, and the fleet releasing in dependency order while web stays unchanged. | the carousel: "Many repositories, one release" |
-| `Why` | live scene | A concrete Dispat workflow: read the package graph, plan affected releases, publish providers before consumers, and use confirmed registry records to resume interrupted work. | the carousel: "Build and publish one dependency graph" |
+| `Why` | live scene | A concrete Dispat workflow: read the package graph, plan affected releases, publish providers before consumers, and use Git tags to plan unfinished work. | the carousel: "Build and publish one dependency graph" |
 | `Aqua` | `demo-aqua` | The checked Aqua fixture is scanned through an imported package file, then its literal CLI version is updated while a dynamic private package is safely skipped. | the carousel: "Aqua manifests, read and rewritten directly" |
-| `Math` | live scene | Repeatable planning from stable inputs, recovery based on confirmed tags and registry records, safe publisher repetition after an ambiguous result, and bounded left-to-right commit parsing. | the carousel: "Recorded progress and repeatable plans" |
+| `Math` | live scene | The same explicit inputs produce the same plan, without a persistent release cache, database, or clock-based version decisions. The parser advances through each commit without backtracking. | the carousel: "Deterministic plans, bounded parsing" |
+| `Progress` | live scene | Confirmed tags record completed work. After an ambiguous publish response, the operator checks the destination or uses an idempotent publisher before retrying. | the carousel: "Recorded progress and safe retries" |
 | `Glue` | `demo-glue` | Three acts: `dispat if` branching on `ENV=prod`, `dispat replacer` swapping a Gradle coordinate and a README install line, and the local-link bracket: `autowriter --link-local` writing the go.mod `replace`, tests against the tree, `--unlink-local`, and `scanner --verify-unlinked`. | the carousel: "The glue between the steps" |
 | `Lock` | live scene | Each run pushes a unique lock object with holder metadata; release removes it with an object-ID lease, so cleanup cannot delete another run's lock. A rejected second run plans and publishes nothing. | the carousel: "One release at a time" |
 
@@ -52,6 +53,26 @@ The scenes restate the documentation's claims:
 [recovering from a failed run](https://dispat.dev/reference/releasing/recovery/). The palette and the
 `#101713` background come from the documentation theme, the log captions use the pretty mode's colors, and the type
 is JetBrains Mono throughout, so the animations read as the same product as the site and the terminal.
+
+The live player reserves a fixed 1920×800 canvas beneath the page heading. It crops the unused top 280 pixels from
+1920×1080 scenes; Aqua lays out its content directly in the shorter canvas. Playback and slide controls sit immediately
+below that canvas, before the description, so changing slides or closing the transcript does not move the controls.
+The transcript keeps the reader's open or closed choice across slide changes.
+
+The player follows the site's light or dark theme through scoped `--demo-*` CSS variables. Standalone exports use the
+dark fallback palette. On narrow screens, the canvas scrolls horizontally while controls and descriptions fit the
+page. Reduced motion starts on a still frame, and playback requires an explicit action.
+
+Run the browser checks against a locally served production build:
+
+```sh
+PLAYWRIGHT_RUNTIME=/path/to/node-runtime node packages/docs/demo/playwright-smoke.mjs \
+  http://127.0.0.1:3000/ output/playwright/demos
+```
+
+`PLAYWRIGHT_RUNTIME` must contain a `node_modules/playwright` installation. The checks record desktop and mobile
+playback in both themes and capture each slide. They also verify transcript state, control placement, keyboard
+navigation, and reduced motion.
 
 The README gif is budgeted at 2.5 MiB and `render.sh` fails when a regeneration exceeds it. `pnpm studio` inside
 `illustration/` opens the Remotion studio for editing the scenes.

@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
-import {colors, font} from './theme';
+import {alpha, colors, font} from './theme';
 import {NodeView, PkgNode, SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, ERR, msg, kv} from './components';
 import {Pkg} from './graph';
 
@@ -73,7 +73,7 @@ const Chip: React.FC<{text: string; color?: string}> = ({text, color = colors.gr
       letterSpacing: 3,
       textTransform: 'uppercase',
       color,
-      border: `1.5px solid ${color}66`,
+      border: `1.5px solid ${alpha(color, 0.4)}`,
       borderRadius: 999,
       padding: '5px 22px',
       whiteSpace: 'nowrap',
@@ -155,7 +155,7 @@ export const Why: React.FC = () => {
                 fontWeight: 700,
                 color: c.color,
                 background: colors.panel,
-                border: `2px solid ${c.color}66`,
+                border: `2px solid ${alpha(c.color, 0.4)}`,
                 borderRadius: 14,
                 padding: '16px 28px',
                 whiteSpace: 'nowrap',

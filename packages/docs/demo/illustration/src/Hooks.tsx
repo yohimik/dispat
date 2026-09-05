@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
-import {colors, font} from './theme';
+import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
 
 // The hooks claim, twenty seconds at Root.tsx's twenty frames per second:
@@ -129,7 +129,7 @@ export const Hooks: React.FC = () => {
                 marginLeft: 14,
                 fontSize: 17,
                 color: row.spaceColor,
-                border: `1.5px solid ${row.spaceColor}66`,
+                border: `1.5px solid ${alpha(row.spaceColor, 0.4)}`,
                 borderRadius: 999,
                 padding: '1px 12px',
               }}>
@@ -158,7 +158,7 @@ export const Hooks: React.FC = () => {
                     borderRadius: 12,
                     border: `2px solid ${c}`,
                     background: colors.panel,
-                    boxShadow: active ? `0 0 24px ${c}33` : 'none',
+                    boxShadow: active ? `0 0 24px ${alpha(c, 0.2)}` : 'none',
                     padding: '13px 0 11px',
                     textAlign: 'center',
                     fontSize: 22,

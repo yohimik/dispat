@@ -1,6 +1,6 @@
 import React from 'react';
 import {interpolate} from 'remotion';
-import {colors, font, NodeState, stateColor} from './theme';
+import {alpha, colors, font, NodeState, stateColor} from './theme';
 import {NODE_W, NODE_H, Pkg} from './graph';
 
 // The status line inside a card quotes the CLI's own plan glyphs.
@@ -63,7 +63,7 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
         borderRadius: 14,
         background: colors.panel,
         border: `2px solid ${active ? c : colors.panelEdge}`,
-        boxShadow: active ? `0 0 34px ${c}33` : 'none',
+        boxShadow: active ? `0 0 34px ${alpha(c, 0.2)}` : 'none',
         fontFamily: font,
         color: colors.fg,
         padding: '12px 20px',
@@ -71,20 +71,22 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
         opacity: view.opacity ?? 1,
       }}
     >
-      <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-        <span style={{fontSize: 28, fontWeight: 700}}>{pkg.id}</span>
+      <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 0}}>
+        <span style={{fontSize: 27, lineHeight: '32px', fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere'}}>{pkg.id}</span>
         <span
           style={{
             fontSize: 16,
             color: badge.color,
-            border: `1.5px solid ${badge.color}66`,
+            border: `1.5px solid ${alpha(badge.color, 0.4)}`,
             borderRadius: 999,
             padding: '1px 10px',
+            lineHeight: '24px',
+            flexShrink: 0,
           }}
         >
           {badge.label}
         </span>
-        <span style={{marginLeft: 'auto', fontSize: 19, color: c, fontWeight: 700, whiteSpace: 'nowrap'}}>
+        <span style={{marginLeft: 'auto', fontSize: 18, lineHeight: '24px', color: c, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0}}>
           {stateLabel[view.state]}
         </span>
       </div>
@@ -93,11 +95,13 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
           fontSize: 17,
           color: rewrite > 0.4 && rewrite < 1 ? colors.cyan : colors.dim,
           marginTop: 7,
+          lineHeight: '22px',
+          overflowWrap: 'anywhere',
         }}
       >
         {manifestLine}
       </div>
-      <div style={{fontSize: 20, marginTop: 6}}>
+      <div style={{fontSize: 20, lineHeight: '24px', marginTop: 5}}>
         <span style={{color: view.bumped ? colors.dim : colors.fg}}>{pkg.base}</span>
         {view.bumped ? (
           <>
@@ -107,7 +111,7 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
         ) : null}
       </div>
       {view.note ? (
-        <div style={{fontSize: 15, color: colors.dim, marginTop: 4, textAlign: 'right'}}>{view.note}</div>
+        <div style={{fontSize: view.note.length > 48 ? 12 : 14, lineHeight: view.note.length > 48 ? '15px' : '18px', color: colors.dim, marginTop: 2, textAlign: 'right', overflowWrap: 'anywhere'}}>{view.note}</div>
       ) : null}
       {view.progress !== undefined ? (
         <div
@@ -140,7 +144,7 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
             fontSize: 17,
             color: colors.green,
             background: colors.bg,
-            border: `1.5px solid ${colors.green}66`,
+            border: `1.5px solid ${alpha(colors.green, 0.4)}`,
             borderRadius: 8,
             padding: '2px 12px',
           }}
@@ -245,18 +249,18 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
     <div
       style={{
         position: 'absolute',
-        left: 210,
-        right: 210,
+        left: 150,
+        right: 150,
         bottom: 26,
-        height: lines * 34 + 30,
+        height: lines * 32 + 30,
         boxSizing: 'border-box',
         borderRadius: 12,
         background: colors.panel,
         border: `1.5px solid ${colors.panelEdge}`,
         padding: '15px 26px',
         fontFamily: font,
-        fontSize: 22,
-        lineHeight: '34px',
+        fontSize: 20,
+        lineHeight: '32px',
         whiteSpace: 'pre',
         overflow: 'hidden',
       }}
@@ -267,7 +271,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
           const frac = done ? 1 : Math.max(0, (f - row.start) / (row.typeEnd - row.start));
           const shown = row.text.slice(0, Math.ceil(row.text.length * frac));
           return (
-            <div key={`c${row.start}`} style={{height: 34}}>
+            <div key={`c${row.start}`} style={{height: 32}}>
               <span style={{color: colors.green, fontWeight: 700}}>$ </span>
               <span style={{color: colors.fg}}>{shown}</span>
               {!done && <span style={{color: colors.green}}>█</span>}
@@ -275,7 +279,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
           );
         }
         return (
-          <div key={`o${row.start}`} style={{height: 34}}>
+          <div key={`o${row.start}`} style={{height: 32}}>
             {row.segs.map((s, j) => (
               <span key={j} style={{color: s.color ?? colors.fg, fontWeight: s.weight ?? 400}}>
                 {s.text}
@@ -285,7 +289,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
         );
       })}
       {prompt && roomForPrompt && (
-        <div style={{height: 34}}>
+        <div style={{height: 32}}>
           <span style={{color: colors.green, fontWeight: 700}}>$ </span>
           <span style={{color: colors.fg, opacity: blink ? 1 : 0}}>█</span>
         </div>

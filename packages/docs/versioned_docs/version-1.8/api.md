@@ -34,6 +34,7 @@ They do not require a dispat binary, a git repository, or network access.
 | [`pkg/writer`](./go/writer.md) | Rewrites those manifests in place, preserving every byte it does not change |
 | [`pkg/manifest`](./go/manifest.md) | Provides the vocabulary the reader and the writer share |
 | [`pkg/models`](./go/models.md) | Exposes the typed configuration model so tooling can author config files as values |
+| [`pkg/config`](./go/config.md) | Loads JSON, YAML, and TOML configuration, including local file references |
 
 ## The formats around them
 

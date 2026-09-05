@@ -75,7 +75,7 @@ function Argued({argument, className}: {argument: Argument; className: string}):
  * small uppercase chip naming the territory, and a mono title, the same
  * shapes the hero's slides and the clips' chips use.
  */
-function Section({chip, title, id, children}: {chip: string; title: string; id?: string; children: React.ReactNode}): React.ReactElement {
+function Section({chip, title, id, children}: {chip: string; title: string; id: string; children: React.ReactNode}): React.ReactElement {
   return (
     <section className={styles.section}>
       <div className="container">
@@ -101,7 +101,7 @@ function Hero(): React.ReactElement {
     <header className={styles.hero}>
       <div className="container">
         <div className={styles.wordmark}>
-          <img className={styles.logo} src={useBaseUrl('/logo.svg')} alt="" width={48} height={48} />
+          <img className={styles.logo} draggable={false} src={useBaseUrl('/logo.svg')} alt="" width={48} height={48} />
           <span>dispat</span>
         </div>
         <Heading as="h1" className={styles.title}>
@@ -123,7 +123,7 @@ function Hero(): React.ReactElement {
 function Demos(): React.ReactElement {
   const {cli} = useReadme();
   return (
-    <Section chip="see it work" title="Follow a release from commit to publish">
+    <Section id="demos" chip="see it work" title="Follow a release from commit to publish">
       <p className={styles.sectionLead}>
         Choose an example to see how Dispat selects packages, orders their work, and handles failures.
       </p>
@@ -134,23 +134,23 @@ function Demos(): React.ReactElement {
 
 function Workflows(): React.ReactElement {
   return (
-    <Section chip="built for your project" title="Keep the tools your team already uses">
+    <Section id="workflows" chip="built for your project" title="Keep the tools your team already uses">
       <div className={styles.libraries}>
         <div className={styles.feature}>
-          <Heading as="h3">Release across languages</Heading>
+          <Heading as="h3" id="release-across-languages">Release across languages</Heading>
           <p>Build a Go service, publish an npm library, and push a Docker image in one run. Dispat calls the shell commands you configure for each package.</p>
         </div>
         <div className={styles.feature}>
-          <Heading as="h3">Put dependencies in order</Heading>
+          <Heading as="h3" id="dependency-order">Put dependencies in order</Heading>
           <p>A package waits for the packages it needs. Independent packages can build and publish in parallel. Preview the selected packages and next versions with <code>dispat status</code>.</p>
         </div>
         <div className={styles.feature}>
-          <Heading as="h3">Use one or several repositories</Heading>
+          <Heading as="h3" id="multiple-repositories">Use one or several repositories</Heading>
           <p>Start with a single package or a monorepo. For work spread across repositories, bring them together with Git submodules in a <Link to="/control-repository">control repository</Link>.</p>
         </div>
       </div>
       <div className={styles.recoveryNote}>
-        <Heading as="h3">Know what to do when a release stops</Heading>
+        <Heading as="h3" id="recovery">Know what to do when a release stops</Heading>
         <p>Dispat records successful publishes with Git tags. A later run uses those records to find unfinished work. If a publisher succeeded before its tag was written, check the destination before retrying. <Link to="/reference/releasing/recovery">Read the recovery guide</Link>.</p>
       </div>
     </Section>
@@ -185,7 +185,7 @@ const MANIFESTS: [language: string, files: string][] = [
 // the guarantees are written down; those pages link on to pkg.go.dev.
 function Libraries(): React.ReactElement {
   return (
-    <Section chip="libraries" title="Lightweight libraries, usable on their own">
+    <Section id="libraries" chip="libraries" title="Lightweight libraries, usable on their own">
       <p className={styles.sectionLead}>
         Use Dispat's Go libraries in your own tools. Parse commit messages, inspect dependencies, or update manifest
         versions without running the CLI. The reader and writer share format definitions through{' '}
@@ -193,7 +193,7 @@ function Libraries(): React.ReactElement {
       </p>
       <div className={styles.libraries}>
         <div className={styles.feature}>
-          <Heading as="h3" className={styles.featureTitle}>
+          <Heading as="h3" id="ccme-library" className={styles.featureTitle}>
             <Link to="/go/ccme">
               <code>pkg/ccme</code>
             </Link>
@@ -206,7 +206,7 @@ function Libraries(): React.ReactElement {
           </p>
         </div>
         <div className={styles.feature}>
-          <Heading as="h3" className={styles.featureTitle}>
+          <Heading as="h3" id="scanner-library" className={styles.featureTitle}>
             <Link to="/go/scanner">
               <code>pkg/scanner</code>
             </Link>
@@ -218,7 +218,7 @@ function Libraries(): React.ReactElement {
           </p>
         </div>
         <div className={styles.feature}>
-          <Heading as="h3" className={styles.featureTitle}>
+          <Heading as="h3" id="writer-library" className={styles.featureTitle}>
             <Link to="/go/writer">
               <code>pkg/writer</code>
             </Link>
@@ -231,7 +231,7 @@ function Libraries(): React.ReactElement {
           </p>
         </div>
       </div>
-      <Heading as="h3" className={styles.tableTitle}>
+      <Heading as="h3" id="supported-manifests" className={styles.tableTitle}>
         Languages and manifests the reader and the writer support
       </Heading>
       <div className={styles.manifests}>
@@ -258,7 +258,7 @@ function Libraries(): React.ReactElement {
           Enable <Link to="/configuration/autoversion"><code>autoVersion</code></Link> to update supported declarations during
           a release. Mobile build numbers are separate from package versions; change them explicitly with{' '}
           <Link to="/cli/writer"><code>--set-build</code></Link>.
-          Aqua support is available in the <Link to="/next/editing/manifests#aqua">unreleased version</Link>.
+          See <Link to="/editing/manifests#aqua">Aqua manifest support</Link> for supported imports and version declarations.
         </p>
       </div>
     </Section>
@@ -278,7 +278,7 @@ function Install(): React.ReactElement {
         </div>
         <div className={styles.firstRun}>
           <div>
-            <Heading as="h3">Start in your Git repository</Heading>
+            <Heading as="h3" id="first-release">Start in your Git repository</Heading>
             <p>Generate a starter configuration, edit its package paths and build and publish commands, then inspect the plan. <code>status</code> leaves your project unchanged.</p>
           </div>
           <CodeBlock language="sh" title="Configure and preview">{'dispat init\n# Edit dispat.json for your packages\ndispat status'}</CodeBlock>
@@ -301,7 +301,7 @@ function Projects(): React.ReactElement {
   const {repository} = useReadme();
 
   return (
-    <Section chip="in production" title="Projects using dispat">
+    <Section id="projects" chip="in production" title="Projects using dispat">
       <p className={styles.sectionLead}>
         The first monorepo dispat releases is its own: every tag, changelog, GitHub release and container image of this
         project, and this documentation site, ship through a dispat run.
@@ -321,7 +321,7 @@ function Projects(): React.ReactElement {
 
 function Reference(): React.ReactElement {
   return (
-    <Section chip="read on" title="The documentation">
+    <Section id="documentation" chip="read on" title="The documentation">
       <ul className={styles.reference}>
         <li>
           <Link to="/getting-started">Getting started</Link>: install the binary, write one config file, wire the
@@ -369,7 +369,7 @@ function Inspiration(): React.ReactElement {
   const {repository} = useReadme();
 
   return (
-    <Section chip="lineage" title="Inspiration">
+    <Section id="inspiration" chip="lineage" title="Inspiration">
       {/* The repository README's section of the same name, read at build time
           rather than kept in step by hand. Its relative link to pkg/ccme comes
           back as a GitHub URL; see plugins/readme/inline.ts. */}
@@ -380,7 +380,7 @@ function Inspiration(): React.ReactElement {
 
 function Community(): React.ReactElement {
   return (
-    <Section chip="community" title="Have questions or issues?">
+    <Section id="community" chip="community" title="Have questions or issues?">
       <p className={styles.sectionLead}>
         Want to share a project you release with dispat? Come and say hello on Discord. Bugs and feature requests are
         welcome as GitHub issues too, whichever suits you better.

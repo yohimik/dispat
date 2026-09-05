@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
-import {colors, font} from './theme';
+import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
 
 // The single-package claim, twenty seconds at Root.tsx's twenty frames per
@@ -98,12 +98,12 @@ export const Single: React.FC = () => {
           borderRadius: 18,
           background: colors.panel,
           border: `2px solid ${changed ? s.color : colors.panelEdge}`,
-          boxShadow: changed ? `0 0 34px ${s.color}33` : 'none',
+          boxShadow: changed ? `0 0 34px ${alpha(s.color, 0.2)}` : 'none',
           padding: '26px 36px 30px',
         }}>
         <div style={{display: 'flex', alignItems: 'center', gap: 16}}>
           <span style={{fontSize: 34, fontWeight: 700, color: colors.fg}}>app</span>
-          <span style={{fontSize: 19, color: colors.red, border: `1.5px solid ${colors.red}66`, borderRadius: 999, padding: '1px 12px'}}>
+          <span style={{fontSize: 19, color: colors.red, border: `1.5px solid ${alpha(colors.red, 0.4)}`, borderRadius: 999, padding: '1px 12px'}}>
             npm
           </span>
           <span style={{marginLeft: 'auto', fontSize: 23, fontWeight: 700, color: s.color}}>{s.label}</span>
@@ -133,7 +133,7 @@ export const Single: React.FC = () => {
               fontSize: 21,
               color: colors.green,
               background: colors.bg,
-              border: `1.5px solid ${colors.green}66`,
+              border: `1.5px solid ${alpha(colors.green, 0.4)}`,
               borderRadius: 10,
               padding: '5px 18px',
               opacity: bar(f, r.at, r.at + 6),

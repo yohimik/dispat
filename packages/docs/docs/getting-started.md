@@ -1,3 +1,7 @@
+---
+description: Install Dispat, discover your package graph, and preview an ordered release plan before anything is published.
+---
+
 # Getting started
 
 Your first useful result is a release plan you can review without touching a file or registry. Install the binary, run

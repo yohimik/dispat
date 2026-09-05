@@ -1,3 +1,7 @@
+---
+description: Recover a stopped release safely by using recorded tags and checking any publish whose outcome is ambiguous.
+---
+
 # Recovering from a failed run
 
 Run `dispat` again to recover from a failed release run. Tags written after successful publishes let the next plan

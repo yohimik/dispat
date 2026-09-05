@@ -81,9 +81,16 @@ body {
 }
 
 .navbar__brand {
+  -webkit-user-select: none;
+  user-select: none;
   gap: 0.35rem;
   font-weight: 760;
   letter-spacing: -0.02em;
+}
+
+.navbar__logo img {
+  -webkit-user-drag: none;
+  pointer-events: none;
 }
 
 .navbar__link,
@@ -110,6 +117,27 @@ body {
   margin: 0.08rem 0;
   padding: 0.48rem 0.65rem;
   line-height: 1.35;
+}
+
+/* Linked categories render a separate caret button, while generated nested
+   categories put the caret on the link itself. Give both DOM shapes the same
+   row and caret feedback without changing either control's hit area. */
+.theme-doc-sidebar-menu .menu__list-item-collapsible:hover,
+.theme-doc-sidebar-menu .menu__list-item-collapsible:focus-within {
+  background-color: var(--ifm-menu-color-background-hover);
+}
+
+.theme-doc-sidebar-menu .menu__link--sublist-caret:hover,
+.theme-doc-sidebar-menu .menu__link--sublist-caret:focus-visible {
+  background-color: var(--ifm-menu-color-background-hover);
+}
+
+.theme-doc-sidebar-menu .menu__caret:hover,
+.theme-doc-sidebar-menu .menu__caret:focus-visible,
+.theme-doc-sidebar-menu .menu__link--sublist-caret:hover::after,
+.theme-doc-sidebar-menu .menu__link--sublist-caret:focus-visible::after {
+  border-radius: 0.35rem;
+  background-color: var(--ifm-color-emphasis-200);
 }
 
 .menu__link--active:not(.menu__link--sublist) {
