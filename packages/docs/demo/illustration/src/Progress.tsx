@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO} from './components';
+import {useDemoLayout} from './layout';
 
 // Publishing crosses a network boundary, so this scene carefully separates
 // confirmed progress from an ambiguous response. A durable tag lets a rerun
@@ -29,16 +30,19 @@ const Card: React.FC<{
   title: string;
   body: string;
   color: string;
-}> = ({active, left, label, title, body, color}) => (
+  mobile?: boolean;
+  index?: number;
+}> = ({active, left, label, title, body, color, mobile = false, index = 0}) => (
   <div
     style={{
       position: 'absolute',
-      left,
-      top: 390,
-      width: 470,
-      height: 300,
+      left: mobile ? 30 : left,
+      right: mobile ? 30 : undefined,
+      top: mobile ? 150 + index * 230 : 390,
+      width: mobile ? 'auto' : 470,
+      height: mobile ? 220 : 300,
       boxSizing: 'border-box',
-      padding: '28px 30px',
+      padding: mobile ? '16px 26px' : '28px 30px',
       borderRadius: 18,
       border: `1.5px solid ${alpha(color, 0.55)}`,
       background: colors.panel,
@@ -46,14 +50,15 @@ const Card: React.FC<{
       transform: `translateY(${(1 - active) * 18}px)`,
     }}
   >
-    <div style={{fontSize: 18, letterSpacing: 2.4, textTransform: 'uppercase', color}}>{label}</div>
-    <div style={{marginTop: 17, fontSize: 31, fontWeight: 700, color: colors.fg}}>{title}</div>
-    <div style={{marginTop: 15, fontSize: 22, lineHeight: '33px', color: colors.dim}}>{body}</div>
+    <div style={{fontSize: mobile ? 26 : 18, letterSpacing: 2.4, textTransform: 'uppercase', color}}>{label}</div>
+    <div style={{marginTop: mobile ? 8 : 17, fontSize: 31, fontWeight: 700, color: colors.fg}}>{title}</div>
+    <div style={{marginTop: mobile ? 6 : 15, fontSize: mobile ? 26 : 22, lineHeight: mobile ? '32px' : '33px', color: colors.dim}}>{body}</div>
   </div>
 );
 
 export const Progress: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [PROGRESS_DURATION - 10, PROGRESS_DURATION - 2], [1, 0], {
@@ -68,10 +73,10 @@ export const Progress: React.FC = () => {
         <div
           style={{
             position: 'absolute',
-            left: 960,
-            top: 326,
+            left: mobile ? 360 : 960,
+            top: mobile ? 100 : 326,
             transform: 'translateX(-50%)',
-            fontSize: 21,
+            fontSize: mobile ? 26 : 21,
             letterSpacing: 3,
             textTransform: 'uppercase',
             color: colors.green,
@@ -89,6 +94,7 @@ export const Progress: React.FC = () => {
           title="Tag records completion"
           body="A rerun finds durable evidence and skips work already recorded."
           color={colors.green}
+          mobile={mobile} index={0}
         />
         <Card
           active={bar(f, 118, 140)}
@@ -97,6 +103,7 @@ export const Progress: React.FC = () => {
           title="The response was lost"
           body="Publishing may have succeeded before its tag could be written."
           color={colors.yellow}
+          mobile={mobile} index={1}
         />
         <Card
           active={bar(f, 204, 226)}
@@ -105,15 +112,16 @@ export const Progress: React.FC = () => {
           title="Check before retrying"
           body="Confirm destination state, then use a configured publisher that is safe to repeat."
           color={colors.cyan}
+          mobile={mobile} index={2}
         />
         <div
           style={{
             position: 'absolute',
-            left: 240,
-            right: 240,
-            top: 720,
+            left: mobile ? 36 : 240,
+            right: mobile ? 36 : 240,
+            top: mobile ? 840 : 720,
             textAlign: 'center',
-            fontSize: 24,
+            fontSize: mobile ? 26 : 24,
             lineHeight: '36px',
             color: colors.dim,
             opacity: fadeIO(f, 220, 238, 372, 392),

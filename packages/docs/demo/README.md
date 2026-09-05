@@ -61,8 +61,9 @@ below that canvas, before the description, so changing slides or closing the tra
 The transcript keeps the reader's open or closed choice across slide changes. Selecting a scene loads only that scene’s chunk; the current scene and its caption stay visible until the selection is ready. A failed load keeps the current scene available and offers a retry.
 
 The player follows the site's light or dark theme through scoped `--demo-*` CSS variables. Standalone exports use the
-dark fallback palette. On narrow screens, the canvas scrolls horizontally while controls and descriptions fit the
-page. Reduced motion starts on a still frame, and playback requires an explicit action.
+dark fallback palette. Below 720px, shared scenes use a 720×1280 portrait layout with stacked cards and a wrapped terminal. The whole diagram fits the page without horizontal panning. Reduced motion starts on a still frame, and playback requires an explicit action.
+
+The silent player starts muted and allocates no audio tags or audio context. The shared font loader requests only upright regular and bold Latin faces.
 
 Run the browser checks against a locally served production build:
 
@@ -73,7 +74,7 @@ PLAYWRIGHT_RUNTIME=/path/to/node-runtime node packages/docs/demo/playwright-smok
 
 `PLAYWRIGHT_RUNTIME` must contain a `node_modules/playwright` installation. The checks record desktop and mobile
 playback in both themes and capture each slide. They also verify transcript state, control placement, keyboard
-navigation, and reduced motion. `playwright-navigation.mjs` additionally checks delayed and failed scene loads, rapid selection, retries, and the shared sidebar category controls in both themes and current and historical docs. Run it with the same arguments. `playwright-stories.mjs` records every complete story at 1× and checks terminal text for horizontal overflow throughout playback.
+navigation, and reduced motion. `playwright-navigation.mjs` additionally checks delayed and failed scene loads, rapid selection, retries, and the shared sidebar category controls in both themes and current and historical docs. Run it with the same arguments. `playwright-mobile.mjs` checks every portrait scene at three points in its timeline and its paused still. An optional fourth argument names one feature for a focused recheck. `playwright-resources.mjs` checks silent autoplay, font requests, and audio allocation. `playwright-pages.mjs` checks shared page and code-block widths using `DISPAT_DOCS_URL` and `DISPAT_PAGES_OUTPUT`. `playwright-stories.mjs` records every complete story at 1× and checks terminal text for horizontal overflow throughout playback.
 
 Validate command examples against a built CLI before changing their scenes:
 

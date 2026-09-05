@@ -68,7 +68,9 @@
 .video { background: var(--demo-bg); }
 .sceneScroller { overflow: hidden; }
 .sceneViewport { width: 100%; aspect-ratio: 1920 / 800; line-height: 1.2; }
-.mobilePanHint { display: none; }
+@container (max-width: 719px) {
+  .sceneViewport { aspect-ratio: 720 / 1280; }
+}
 
 /* Animation text moves with playback; copyable commands live in the transcript. */
 .slideTitle,
@@ -186,15 +188,6 @@
 .command code { padding: 0; border: 0; background: none; font: inherit; white-space: inherit; overflow-wrap: inherit; }
 
 @media (max-width: 44rem) {
-  .sceneScroller { overflow-x: auto; overscroll-behavior-x: contain; }
-  .sceneViewport { width: 60rem; }
-  .mobilePanHint {
-    display: block;
-    padding: 0.4rem 0.75rem;
-    color: var(--demo-dim);
-    font-size: 0.8rem;
-    line-height: 1.4;
-  }
   .controls { flex-wrap: wrap; justify-content: center; padding: 0.65rem; gap: 0.5rem; }
   .divider { display: none; }
   .pills { flex: 0 1 100%; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; padding: 0.15rem 0 0.35rem; }

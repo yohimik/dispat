@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, msg, kv} from './components';
+import {useDemoLayout} from './layout';
 
 // The claim that the model is mathematics rather than machinery, twenty-three
 // seconds at Root.tsx's twenty frames per second. Planning is a pure function
@@ -46,6 +47,7 @@ export const MATH_DURATION = 460;
 
 export const Math_: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [MATH_DURATION - 10, MATH_DURATION - 2], [1, 0], {
@@ -117,10 +119,10 @@ export const Math_: React.FC = () => {
             <div
               style={{
                 position: 'absolute',
-                left: 960,
-                top: 390,
+                left: mobile ? 360 : 960,
+                top: mobile ? 240 : 390,
                 transform: 'translateX(-50%)',
-                fontSize: 21,
+                fontSize: mobile ? 26 : 21,
                 letterSpacing: 3,
                 textTransform: 'uppercase',
                 color: colors.green,
@@ -132,7 +134,7 @@ export const Math_: React.FC = () => {
             </div>
             {/* The parser beat sweeps a real commit once, left to right. */}
             {beat.chip === 'linear' && (
-              <div style={{position: 'absolute', left: 0, right: 0, top: 480, textAlign: 'center', fontSize: 40, whiteSpace: 'pre'}}>
+              <div style={{position: 'absolute', left: 24, right: 24, top: mobile ? 350 : 480, textAlign: 'center', fontSize: mobile ? 28 : 40, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>
                 <span style={{color: colors.fg}}>{COMMIT.slice(0, shown)}</span>
                 {sweep > 0 && sweep < 1 && <span style={{color: colors.green}}>█</span>}
                 <span style={{color: colors.faint}}>{COMMIT.slice(shown)}</span>
@@ -143,9 +145,9 @@ export const Math_: React.FC = () => {
                 position: 'absolute',
                 left: 0,
                 right: 0,
-                top: beat.chip === 'linear' ? 580 : 500,
+                top: mobile ? (beat.chip === 'linear' ? 480 : 380) : beat.chip === 'linear' ? 580 : 500,
                 textAlign: 'center',
-                fontSize: 62,
+                fontSize: mobile ? 38 : 62,
                 fontWeight: 700,
               }}>
               {beat.equation}
@@ -153,9 +155,9 @@ export const Math_: React.FC = () => {
             <div
               style={{
                 position: 'absolute',
-                left: 260,
-                right: 260,
-                top: beat.chip === 'linear' ? 690 : 610,
+                left: mobile ? 36 : 260,
+                right: mobile ? 36 : 260,
+                top: mobile ? (beat.chip === 'linear' ? 590 : 500) : beat.chip === 'linear' ? 690 : 610,
                 textAlign: 'center',
                 fontSize: 26,
                 lineHeight: '40px',

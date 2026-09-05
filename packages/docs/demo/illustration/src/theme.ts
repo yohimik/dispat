@@ -1,3 +1,9 @@
+import {loadFont} from '@remotion/google-fonts/JetBrainsMono';
+
+// The demos use upright Latin text in regular and bold. Load these faces once
+// through the shared theme, rather than every available weight and subset.
+loadFont('normal', {weights: ['400', '700'], subsets: ['latin']});
+
 // The shared visual system: the documentation site's background, the log
 // palette of the CLI's pretty mode, and one mono typeface throughout.
 export const colors = {

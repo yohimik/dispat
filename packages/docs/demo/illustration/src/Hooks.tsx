@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, DBG, INF, msg, kv} from './components';
+import {useDemoLayout} from './layout';
 
 // The hooks claim, twenty seconds at Root.tsx's twenty frames per second:
 // the release flow is the same everywhere, version, build, login, publish,
@@ -107,6 +108,7 @@ const BLOCK_W = 246;
 
 export const Hooks: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [HOOKS_DURATION - 10, HOOKS_DURATION - 2], [1, 0], {
@@ -122,12 +124,12 @@ export const Hooks: React.FC = () => {
       {ROWS.map((row) => (
         <div key={row.id}>
           {/* The package this strip belongs to. */}
-          <div style={{position: 'absolute', left: 140, top: row.y + 10, width: 310}}>
+          <div style={{position: 'absolute', left: mobile ? 30 : 140, top: mobile ? 80 + ROWS.indexOf(row) * 275 : row.y + 10, width: mobile ? 650 : 310}}>
             <span style={{fontSize: 30, fontWeight: 700, color: colors.fg}}>{row.id}</span>
             <span
               style={{
                 marginLeft: 14,
-                fontSize: 17,
+                fontSize: mobile ? 26 : 17,
                 color: row.spaceColor,
                 border: `1.5px solid ${alpha(row.spaceColor, 0.4)}`,
                 borderRadius: 999,
@@ -141,17 +143,18 @@ export const Hooks: React.FC = () => {
             const active = lit && f < step.at + step.dur;
             const c = active ? colors.cyan : lit ? colors.green : colors.faint;
             return (
-              <div key={step.name} style={{position: 'absolute', left: BLOCK_X[i], top: row.y - 26, width: BLOCK_W}}>
+              <div key={step.name} data-demo-stage style={{position: 'absolute', left: mobile ? 16 + (i % 3) * 236 : BLOCK_X[i], top: mobile ? 120 + ROWS.indexOf(row) * 275 + Math.floor(i / 3) * 118 : row.y - 26, width: mobile ? 216 : BLOCK_W}}>
                 <div
                   style={{
-                    height: 22,
-                    fontSize: 15,
+                    height: mobile ? 56 : 22,
+                    fontSize: mobile ? 22 : 15,
+                    lineHeight: mobile ? '26px' : undefined,
                     color: colors.dim,
                     textAlign: 'center',
-                    whiteSpace: 'nowrap',
+                    whiteSpace: mobile ? 'normal' : 'nowrap',
                     opacity: step.hook && f >= step.at - 12 ? 1 : 0,
                   }}>
-                  {step.hook ? `${step.hook} ✓` : ''}
+                  {step.hook ? mobile ? step.hook : `${step.hook} ✓` : ''}
                 </div>
                 <div
                   style={{
@@ -161,12 +164,12 @@ export const Hooks: React.FC = () => {
                     boxShadow: active ? `0 0 24px ${alpha(c, 0.2)}` : 'none',
                     padding: '13px 0 11px',
                     textAlign: 'center',
-                    fontSize: 22,
+                    fontSize: mobile ? 26 : 22,
                     fontWeight: 700,
                     color: lit ? colors.fg : colors.dim,
                   }}>
                   {step.name}
-                  <div style={{marginTop: 2, fontSize: 14, fontWeight: 400, color: colors.dim, minHeight: 18}}>
+                  <div style={{display: mobile ? 'none' : 'block', marginTop: 2, fontSize: 14, fontWeight: 400, color: colors.dim, minHeight: 18}}>
                     {step.note && f >= step.at - 12 ? step.note : ''}
                   </div>
                 </div>

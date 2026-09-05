@@ -3,6 +3,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, msg, kv} from './components';
 import {Edit} from './Polyglot';
+import {useDemoLayout} from './layout';
 
 // The glue commands, twenty-eight seconds at Root.tsx's twenty frames per
 // second, in three acts. First `dispat if`: a stage branches on a condition
@@ -66,6 +67,7 @@ export const GLUE_DURATION = 900;
 
 export const Glue: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [GLUE_DURATION - 10, GLUE_DURATION - 2], [1, 0], {
@@ -87,8 +89,8 @@ export const Glue: React.FC = () => {
           <div
             style={{
               position: 'absolute',
-              left: 960,
-              top: 360,
+              left: mobile ? 360 : 960,
+              top: mobile ? 170 : 360,
               transform: 'translateX(-50%)',
               fontSize: 24,
               color: colors.cyan,
@@ -106,13 +108,13 @@ export const Glue: React.FC = () => {
           {[
             {text: "--then 'deploy prod'", x: 640, on: chosen},
             {text: "--else 'deploy stage'", x: 1280, on: false},
-          ].map((branch) => (
+          ].map((branch, branchIndex) => (
             <div
               key={branch.text}
               style={{
                 position: 'absolute',
-                left: branch.x,
-                top: 560,
+                left: mobile ? 360 : branch.x,
+                top: mobile ? 340 + branchIndex * 190 : 560,
                 transform: 'translateX(-50%)',
                 fontSize: 26,
                 fontWeight: branch.on ? 700 : 400,
@@ -138,9 +140,9 @@ export const Glue: React.FC = () => {
             key={panel.file}
             style={{
               position: 'absolute',
-              left: panel.file === 'build.gradle' ? 340 : 990,
-              width: 590,
-              top: 430,
+              left: mobile ? 30 : panel.file === 'build.gradle' ? 340 : 990,
+              width: mobile ? 660 : 590,
+              top: mobile ? 250 + FILES.indexOf(panel) * 300 : 430,
               borderRadius: 16,
               background: colors.panel,
               border: `1.5px solid ${colors.panelEdge}`,
@@ -150,9 +152,9 @@ export const Glue: React.FC = () => {
             <div style={{padding: '14px 26px', borderBottom: `1.5px solid ${colors.panelEdge}`, fontSize: 24, fontWeight: 700, color: colors.fg}}>
               {panel.file}
             </div>
-            <div style={{padding: '20px 28px 24px', fontSize: 24, lineHeight: '40px', whiteSpace: 'pre'}}>
+            <div style={{padding: '20px 28px 24px', fontSize: mobile ? 26 : 24, lineHeight: '40px', whiteSpace: mobile ? 'pre-wrap' : 'pre', overflowWrap: 'anywhere'}}>
               {panel.lines.map((line, li) => (
-                <div key={li} style={{height: 40}}>
+                <div key={li} style={{minHeight: 40, height: mobile ? undefined : 40}}>
                   {line.map((tok, ti) =>
                     tok.edit ? (
                       <Edit key={ti} before={tok.edit[0]} after={tok.edit[1]} b={b} order={0} />
@@ -179,10 +181,11 @@ export const Glue: React.FC = () => {
           <div
             style={{
               position: 'absolute',
-              left: 960,
-              top: 430,
-              transform: 'translateX(-50%)',
-              width: 860,
+              left: mobile ? 30 : 960,
+              right: mobile ? 30 : undefined,
+              top: mobile ? 300 : 430,
+              transform: mobile ? undefined : 'translateX(-50%)',
+              width: mobile ? 'auto' : 860,
               borderRadius: 16,
               background: colors.panel,
               border: `1.5px solid ${colors.panelEdge}`,
@@ -193,7 +196,7 @@ export const Glue: React.FC = () => {
               <span style={{fontWeight: 700}}>go.mod</span>
               <span style={{color: colors.dim}}>  packages/api</span>
             </div>
-            <div style={{padding: '20px 28px 24px', fontSize: 24, lineHeight: '40px', whiteSpace: 'pre'}}>
+            <div style={{padding: '20px 28px 24px', fontSize: mobile ? 26 : 24, lineHeight: '40px', whiteSpace: mobile ? 'pre-wrap' : 'pre', overflowWrap: 'anywhere'}}>
               <div style={{height: 40}}>
                 <span style={{color: colors.cyan}}>module</span>
                 <span style={{color: colors.fg}}> github.com/acme/api</span>

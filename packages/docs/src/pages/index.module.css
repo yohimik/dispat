@@ -31,6 +31,7 @@
 .heroNote { color: var(--ifm-color-emphasis-700); font-size: .9rem; margin: 0; }
 .installSection { scroll-margin-top: 5rem; }
 .firstRun { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; max-width: 64rem; margin: 1.5rem auto; }
+.firstRun > * { min-width: 0; }
 .firstRun p { color: var(--ifm-color-emphasis-800); }
 .firstRun pre { margin-bottom: 0; }
 .installLinks { text-align: center; margin: 1.5rem 0 0; }

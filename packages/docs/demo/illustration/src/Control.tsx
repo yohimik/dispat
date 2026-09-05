@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, typingFrames, INF, msg, kv, CapSeg} from './components';
+import {useDemoLayout} from './layout';
 
 // The release-control claim, one decision per beat: a commit is typed into
 // the scene's terminal and the package card's next release answers it. An
@@ -131,6 +132,7 @@ const rows: TermRow[] = BEATS.flatMap((beat, i) => {
 
 export const Control: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     interpolate(f, [0, 10], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}) *
     interpolate(f, [CONTROL_DURATION - 10, CONTROL_DURATION - 2], [1, 0], {
@@ -152,16 +154,17 @@ export const Control: React.FC = () => {
     <AbsoluteFill style={{background: colors.bg, fontFamily: font}}>
       {/* The fade dims the content onto the canvas, never the canvas itself. */}
       <div style={{position: 'absolute', inset: 0, opacity}}>
-      <div style={{position: 'absolute', left: 48, top: 40, fontSize: 28, fontWeight: 700, color: colors.dim}}>dispat</div>
+      <div style={{position: 'absolute', left: mobile ? 30 : 48, top: mobile ? 28 : 40, fontSize: 28, fontWeight: 700, color: colors.dim}}>dispat</div>
       <SceneTerminal rows={rows} f={f} />
       {/* The one package the decisions are about. */}
       <div
         style={{
           position: 'absolute',
-          left: 960,
-          top: 430,
-          transform: 'translateX(-50%)',
-          width: 700,
+          left: mobile ? 30 : 960,
+          right: mobile ? 30 : undefined,
+          top: mobile ? 245 : 430,
+          transform: mobile ? undefined : 'translateX(-50%)',
+          width: mobile ? 'auto' : 700,
           borderRadius: 18,
           background: colors.panel,
           border: `2px solid ${beat.held && answer > 0.5 ? colors.faint : colors.panelEdge}`,
@@ -172,7 +175,7 @@ export const Control: React.FC = () => {
           <span style={{fontSize: 34, fontWeight: 700, color: colors.fg}}>core</span>
           <span
             style={{
-              fontSize: 19,
+              fontSize: mobile ? 26 : 19,
               color: colors.red,
               border: `1.5px solid ${colors.red}`,
               borderRadius: 999,
@@ -181,7 +184,7 @@ export const Control: React.FC = () => {
             }}>
             npm
           </span>
-          <span style={{marginLeft: 'auto', fontSize: 24, fontWeight: 700, color: beat.state.color, opacity: answer}}>
+          <span style={{marginLeft: 'auto', fontSize: mobile ? 26 : 24, fontWeight: 700, color: beat.state.color, opacity: answer}}>
             {beat.state.text}
           </span>
         </div>
@@ -200,7 +203,7 @@ export const Control: React.FC = () => {
             {beat.to}
           </span>
         </div>
-        <div style={{marginTop: 18, fontSize: 21, color: beat.state.color, opacity: answer}}>{beat.syntax}</div>
+        <div style={{marginTop: 18, fontSize: mobile ? 26 : 21, lineHeight: mobile ? '36px' : undefined, color: beat.state.color, opacity: answer}}>{beat.syntax}</div>
       </div>
       </div>
     </AbsoluteFill>

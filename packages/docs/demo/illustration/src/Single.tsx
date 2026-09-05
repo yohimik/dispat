@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
+import {useDemoLayout} from './layout';
 
 // The single-package claim, nineteen seconds at Root.tsx's twenty frames per
 // second: no monorepo required. One standalone `packages` entry pointing at
@@ -48,6 +49,7 @@ export const SINGLE_DURATION = 380;
 
 export const Single: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const s = state(f);
   const changed = f >= 70;
   const opacity =
@@ -66,10 +68,11 @@ export const Single: React.FC = () => {
       <div
         style={{
           position: 'absolute',
-          left: 960,
-          top: 330,
-          transform: 'translateX(-50%)',
-          fontSize: 24,
+          left: mobile ? 30 : 960,
+          right: mobile ? 30 : undefined,
+          top: mobile ? 160 : 330,
+          transform: mobile ? undefined : 'translateX(-50%)',
+          fontSize: mobile ? 27 : 24,
           lineHeight: '38px',
           whiteSpace: 'pre',
           color: colors.dim,
@@ -91,10 +94,11 @@ export const Single: React.FC = () => {
       <div
         style={{
           position: 'absolute',
-          left: 960,
-          top: 480,
-          transform: 'translateX(-50%)',
-          width: 640,
+          left: mobile ? 30 : 960,
+          right: mobile ? 30 : undefined,
+          top: mobile ? 390 : 480,
+          transform: mobile ? undefined : 'translateX(-50%)',
+          width: mobile ? 'auto' : 640,
           borderRadius: 18,
           background: colors.panel,
           border: `2px solid ${changed ? s.color : colors.panelEdge}`,
@@ -106,7 +110,7 @@ export const Single: React.FC = () => {
           <span style={{fontSize: 19, color: colors.red, border: `1.5px solid ${alpha(colors.red, 0.4)}`, borderRadius: 999, padding: '1px 12px'}}>
             npm
           </span>
-          <span style={{marginLeft: 'auto', fontSize: 23, fontWeight: 700, color: s.color}}>{s.label}</span>
+          <span style={{marginLeft: 'auto', fontSize: mobile ? 26 : 23, fontWeight: 700, color: s.color}}>{s.label}</span>
         </div>
         <div style={{marginTop: 12, fontSize: 21, color: colors.dim}}>src/</div>
         <div style={{marginTop: 10, fontSize: 30}}>
@@ -125,12 +129,12 @@ export const Single: React.FC = () => {
         )}
       </div>
       {/* The records the release leaves behind. */}
-      <div style={{position: 'absolute', left: 0, right: 0, top: 726, display: 'flex', justifyContent: 'center', gap: 22}}>
+      <div style={{position: 'absolute', left: mobile ? 30 : 0, right: mobile ? 30 : 0, top: mobile ? 710 : 726, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 22}}>
         {RECORDS.map((r) => (
           <span
             key={r.text}
             style={{
-              fontSize: 21,
+              fontSize: mobile ? 26 : 21,
               color: colors.green,
               background: colors.bg,
               border: `1.5px solid ${alpha(colors.green, 0.4)}`,

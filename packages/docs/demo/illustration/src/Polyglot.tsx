@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, msg, kv, CapSeg} from './components';
+import {useDemoLayout} from './layout';
 
 // The polyglot claim, shown rather than listed: one manifest after another
 // opens in the same editor panel and the version write happens in place. The
@@ -169,6 +170,7 @@ export const Edit: React.FC<{before: string; after: string; b: number; order: nu
 
 export const Polyglot: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     interpolate(f, [0, 10], [0, 1], {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'}) *
     interpolate(f, [POLYGLOT_DURATION - 10, POLYGLOT_DURATION - 2], [1, 0], {
@@ -193,9 +195,9 @@ export const Polyglot: React.FC = () => {
             <div
               style={{
                 position: 'absolute',
-                left: 340,
-                right: 340,
-                top: 420,
+                left: mobile ? 28 : 340,
+                right: mobile ? 28 : 340,
+                top: mobile ? 245 : 420,
                 borderRadius: 16,
                 background: colors.panel,
                 border: `1.5px solid ${colors.panelEdge}`,
@@ -204,6 +206,7 @@ export const Polyglot: React.FC = () => {
               <div
                 style={{
                   display: 'flex',
+                  flexWrap: mobile ? 'wrap' : 'nowrap',
                   alignItems: 'center',
                   gap: 16,
                   padding: '16px 28px',
@@ -213,7 +216,7 @@ export const Polyglot: React.FC = () => {
                 <span style={{color: colors.fg, fontWeight: 700}}>{beat.file}</span>
                 <span
                   style={{
-                    fontSize: 19,
+                    fontSize: mobile ? 26 : 19,
                     color: beat.badgeColor,
                     border: `1.5px solid ${beat.badgeColor}`,
                     borderRadius: 999,
@@ -222,11 +225,11 @@ export const Polyglot: React.FC = () => {
                   }}>
                   {beat.badge}
                 </span>
-                <span style={{marginLeft: 'auto', fontSize: 19, color: colors.dim}}>{beat.example}</span>
+                <span style={{marginLeft: 'auto', fontSize: mobile ? 26 : 19, color: colors.dim}}>{beat.example}</span>
               </div>
-              <div style={{padding: '24px 34px 28px', fontSize: 26, lineHeight: '42px', whiteSpace: 'pre'}}>
+              <div style={{padding: '24px 34px 28px', fontSize: 26, lineHeight: '42px', whiteSpace: mobile ? 'pre-wrap' : 'pre', overflowWrap: 'anywhere'}}>
                 {beat.lines.map((line, li) => (
-                  <div key={li} style={{height: 42}}>
+                  <div key={li} style={{minHeight: 42, height: mobile ? undefined : 42}}>
                     {line.map((tok, ti) =>
                       'edit' in tok ? (
                         <Edit key={ti} before={tok.edit[0]} after={tok.edit[1]} b={b} order={edits++} />

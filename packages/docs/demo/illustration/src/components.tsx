@@ -2,6 +2,10 @@ import React from 'react';
 import {interpolate} from 'remotion';
 import {alpha, colors, font, NodeState, stateColor} from './theme';
 import {NODE_W, NODE_H, Pkg} from './graph';
+import {useDemoLayout} from './layout';
+
+export const MOBILE_NODE_W = 320;
+export const MOBILE_NODE_H = 200;
 
 // The status line inside a card quotes the CLI's own plan glyphs.
 const stateLabel: Record<NodeState, string> = {
@@ -42,62 +46,65 @@ export type NodeView = {
 };
 
 export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
+  const mobile = useDemoLayout();
   const c = stateColor[view.state];
   const active = view.state !== 'idle';
   const badge = ecoBadge[pkg.eco];
   const rewrite = view.rewrite ?? 0;
   const manifestLine = pkg.manifest;
+  const width = mobile ? MOBILE_NODE_W : NODE_W;
+  const height = mobile ? MOBILE_NODE_H : NODE_H;
   return (
     <div
       style={{
         position: 'absolute',
-        left: pkg.x - NODE_W / 2,
-        top: pkg.y - NODE_H / 2,
-        width: NODE_W,
-        height: NODE_H,
+        left: pkg.x - width / 2,
+        top: pkg.y - height / 2,
+        width,
+        height,
         borderRadius: 14,
         background: colors.panel,
         border: `2px solid ${active ? c : colors.panelEdge}`,
         boxShadow: active ? `0 0 34px ${alpha(c, 0.2)}` : 'none',
         fontFamily: font,
         color: colors.fg,
-        padding: '12px 20px',
+        padding: mobile ? '13px 16px' : '12px 20px',
         boxSizing: 'border-box',
         opacity: view.opacity ?? 1,
       }}
     >
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 0}}>
-        <span style={{fontSize: 27, lineHeight: '32px', fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere'}}>{pkg.id}</span>
+      <div style={{display: 'flex', flexWrap: mobile ? 'wrap' : 'nowrap', alignItems: 'center', gap: mobile ? '4px 10px' : 10, minWidth: 0}}>
+        <span style={{fontSize: mobile ? 30 : 27, lineHeight: mobile ? '34px' : '32px', fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere'}}>{pkg.id}</span>
         <span
           style={{
-            fontSize: 16,
+            fontSize: mobile ? 22 : 16,
             color: badge.color,
             border: `1.5px solid ${alpha(badge.color, 0.4)}`,
             borderRadius: 999,
             padding: '1px 10px',
-            lineHeight: '24px',
+            lineHeight: mobile ? '26px' : '24px',
             flexShrink: 0,
           }}
         >
           {badge.label}
         </span>
-        <span style={{marginLeft: 'auto', fontSize: 18, lineHeight: '24px', color: c, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0}}>
+        <span style={{marginLeft: mobile ? 0 : 'auto', flexBasis: mobile ? '100%' : undefined, fontSize: mobile ? 26 : 18, lineHeight: mobile ? '30px' : '24px', color: c, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0}}>
           {stateLabel[view.state]}
         </span>
       </div>
-      <div
+      {!mobile && <div
         style={{
           fontSize: 17,
           color: rewrite > 0.4 && rewrite < 1 ? colors.cyan : colors.dim,
           marginTop: 7,
           lineHeight: '22px',
           overflowWrap: 'anywhere',
-        wordBreak: 'break-all',
+          wordBreak: 'break-all',
         }}
       >
         {manifestLine}
-      </div>
-      <div style={{fontSize: 20, lineHeight: '24px', marginTop: 5}}>
+      </div>}
+      <div style={{fontSize: mobile ? 26 : 20, lineHeight: mobile ? '29px' : '24px', marginTop: mobile ? 6 : 5}}>
         <span style={{color: view.bumped ? colors.dim : colors.fg}}>{pkg.base}</span>
         {view.bumped ? (
           <>
@@ -107,15 +114,15 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
         ) : null}
       </div>
       {view.note ? (
-        <div style={{fontSize: view.note.length > 48 ? 12 : 14, lineHeight: view.note.length > 48 ? '15px' : '18px', color: colors.dim, marginTop: 2, textAlign: 'right', overflowWrap: 'anywhere'}}>{view.note}</div>
+        <div style={{fontSize: mobile ? 20 : view.note.length > 48 ? 12 : 14, lineHeight: mobile ? '20px' : view.note.length > 48 ? '15px' : '18px', color: colors.dim, marginTop: mobile ? 4 : 2, textAlign: 'right', overflowWrap: 'anywhere'}}>{view.note}</div>
       ) : null}
       {view.progress !== undefined ? (
         <div
           style={{
             position: 'absolute',
-            left: 20,
-            right: 20,
-            bottom: 11,
+            left: mobile ? 16 : 20,
+            right: mobile ? 16 : 20,
+            bottom: mobile ? 9 : 11,
             height: 5,
             borderRadius: 3,
             background: colors.panelEdge,
@@ -135,11 +142,11 @@ export const PkgNode: React.FC<{pkg: Pkg; view: NodeView}> = ({pkg, view}) => {
         <div
           style={{
             position: 'absolute',
-            left: 20,
-            bottom: -21,
-            fontSize: 17,
+            left: mobile ? 16 : 20,
+            bottom: mobile ? 8 : -21,
+            fontSize: mobile ? 22 : 17,
             color: colors.green,
-            background: colors.bg,
+            background: mobile ? colors.panel : colors.bg,
             border: `1.5px solid ${alpha(colors.green, 0.4)}`,
             borderRadius: 8,
             padding: '2px 12px',
@@ -234,16 +241,19 @@ export const outRow = (start: number, segs: CapSeg[]): TermRow => ({kind: 'out',
  * and blinks whenever the session is between commands.
  */
 export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number}> = ({rows, f, lines = 4}) => {
+  const mobile = useDemoLayout();
+  const lineBudget = mobile ? 7 : lines;
+  const columns = mobile ? 40 : 128;
   const available = rows.filter((row) => f >= row.start);
   const shownCount = available.length;
   // Reserve whole physical lines at the fixed monospace canvas width. Drop
   // complete older rows when a command wraps, rather than clipping half a row.
   const visible: TermRow[] = [];
-  let remaining = lines;
+  let remaining = lineBudget;
   for (let index = available.length - 1; index >= 0; index--) {
     const row = available[index];
     const text = row.kind === 'cmd' ? `$ ${row.text}█` : row.segs.map((segment) => segment.text).join('');
-    const physicalLines = text.split('\n').reduce((total, line) => total + Math.max(1, Math.ceil(line.length / 128)), 0);
+    const physicalLines = text.split('\n').reduce((total, line) => total + Math.max(1, Math.ceil(line.length / columns)), 0);
     if (physicalLines > remaining && visible.length) break;
     visible.unshift(row);
     remaining -= physicalLines;
@@ -262,18 +272,18 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
       data-demo-terminal
       style={{
         position: 'absolute',
-        left: 150,
-        right: 150,
-        bottom: 26,
-        height: lines * 32 + 34,
+        left: mobile ? 20 : 150,
+        right: mobile ? 20 : 150,
+        bottom: mobile ? 20 : 26,
+        height: mobile ? 300 : lines * 32 + 34,
         boxSizing: 'border-box',
         borderRadius: 12,
         background: colors.panel,
         border: `1.5px solid ${colors.panelEdge}`,
-        padding: '15px 26px',
+        padding: mobile ? '16px 18px' : '15px 26px',
         fontFamily: font,
-        fontSize: 20,
-        lineHeight: '32px',
+        fontSize: mobile ? 26 : 20,
+        lineHeight: mobile ? '36px' : '32px',
         whiteSpace: 'pre-wrap',
         overflowWrap: 'anywhere',
         wordBreak: 'break-all',
@@ -289,7 +299,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
           const frac = done ? 1 : Math.max(0, (f - row.start) / (row.typeEnd - row.start));
           const shown = row.text.slice(0, Math.ceil(row.text.length * frac));
           return (
-            <div key={`c${row.start}`} style={{minHeight: 32, lineHeight: '32px', flexShrink: 0}}>
+            <div key={`c${row.start}`} style={{minHeight: mobile ? 36 : 32, lineHeight: mobile ? '36px' : '32px', flexShrink: 0}}>
               <span style={{color: colors.green, fontWeight: 700}}>$ </span>
               <span style={{color: colors.fg}}>{shown}</span>
               {!done && <span style={{color: colors.green}}>█</span>}
@@ -297,7 +307,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
           );
         }
         return (
-          <div key={`o${row.start}`} style={{minHeight: 32, lineHeight: '32px', flexShrink: 0}}>
+          <div key={`o${row.start}`} style={{minHeight: mobile ? 36 : 32, lineHeight: mobile ? '36px' : '32px', flexShrink: 0}}>
             {row.segs.map((s, j) => (
               <span key={j} style={{color: s.color ?? colors.fg, fontWeight: s.weight ?? 400}}>
                 {s.text}
@@ -307,7 +317,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
         );
       })}
       {prompt && roomForPrompt && (
-        <div style={{minHeight: 32, lineHeight: '32px', flexShrink: 0}}>
+        <div style={{minHeight: mobile ? 36 : 32, lineHeight: mobile ? '36px' : '32px', flexShrink: 0}}>
           <span style={{color: colors.green, fontWeight: 700}}>$ </span>
           <span style={{color: colors.fg, opacity: blink ? 1 : 0}}>█</span>
         </div>
@@ -317,6 +327,8 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
 };
 
 export const SceneTitle: React.FC<{text: string; progress: number}> = ({text, progress}) => {
+  const mobile = useDemoLayout();
+  if (mobile) return null;
   if (progress <= 0) return null;
   const shown = text.slice(0, Math.ceil(text.length * Math.min(1, progress)));
   return (
@@ -339,8 +351,10 @@ export const SceneTitle: React.FC<{text: string; progress: number}> = ({text, pr
   );
 };
 
-export const Wordmark: React.FC = () => (
-  <div
+export const Wordmark: React.FC = () => {
+  const mobile = useDemoLayout();
+  if (mobile) return null;
+  return <div
     style={{
       position: 'absolute',
       left: 48,
@@ -352,8 +366,8 @@ export const Wordmark: React.FC = () => (
     }}
   >
     dispat
-  </div>
-);
+  </div>;
+};
 
 /** Fade helper: in at [a, b], out at [c, d]. For panels, never for text. */
 export function fadeIO(frame: number, a: number, b: number, c: number, d: number) {

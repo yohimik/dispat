@@ -3,6 +3,7 @@ import {interpolate, useCurrentFrame} from 'remotion';
 import {colors} from './theme';
 import {NodeView, SceneTerminal, TermRow, cmdRow, outRow} from './components';
 import {Stage} from './Stage';
+import {useDemoLayout} from './layout';
 import fixture from '../../fixtures/compute/expected.json';
 import {Edge, Pkg} from './graph';
 
@@ -57,6 +58,7 @@ export const COMPUTE_DURATION = 300;
 
 export const Compute: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   // The cards stand idle the whole time: compute reads, it does not release.
   const views: Record<string, NodeView> = Object.fromEntries(
     fixturePkgs.map(({id}, i) => [
@@ -80,7 +82,7 @@ export const Compute: React.FC = () => {
       graphOpacity={graphOpacity}
       terminal={<SceneTerminal rows={rows} f={f} />}
     >
-      <div style={{position: 'absolute', left: 0, right: 0, top: 300, textAlign: 'center', fontSize: 30, fontWeight: 700, color: colors.cyan}}>
+      <div style={{position: 'absolute', left: mobile ? 24 : 0, right: mobile ? 24 : 0, top: mobile ? 425 : 300, textAlign: 'center', fontSize: 30, fontWeight: 700, color: colors.cyan}}>
         Detect manifest drift, preview evidence, then write
       </div>
     </Stage>

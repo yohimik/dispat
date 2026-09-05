@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, msg, kv} from './components';
+import {useDemoLayout} from './layout';
 
 // The control-repository pattern, twenty-nine and a half seconds at Root.tsx's twenty
 // frames per second: many repositories, one release. A small repository
@@ -69,6 +70,7 @@ export const POLYREPO_DURATION = 590;
 
 export const Polyrepo: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [POLYREPO_DURATION - 10, POLYREPO_DURATION - 2], [1, 0], {
@@ -88,10 +90,10 @@ export const Polyrepo: React.FC = () => {
       <div
         style={{
           position: 'absolute',
-          left: 250,
-          right: 250,
-          top: 360,
-          height: 420,
+          left: mobile ? 24 : 250,
+          right: mobile ? 24 : 250,
+          top: mobile ? 120 : 360,
+          height: mobile ? 820 : 420,
           border: `2px dashed ${colors.faint}`,
           borderRadius: 22,
         }}>
@@ -99,7 +101,7 @@ export const Polyrepo: React.FC = () => {
           platform: the control repository (dispat.yaml lives here)
         </span>
       </div>
-      <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}} viewBox="0 0 1920 1080">
+      {!mobile && <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}} viewBox="0 0 1920 1080">
         <path
           d={`M ${520 + CARD_W / 2} ${CARD_Y} L ${960 - CARD_W / 2} ${CARD_Y}`}
           stroke={f >= 436 ? colors.green : colors.faint}
@@ -112,7 +114,7 @@ export const Polyrepo: React.FC = () => {
           strokeWidth={3}
           fill="none"
         />
-      </svg>
+      </svg>}
       {REPOS.map((repo) => {
         const v = view(repo.id, f);
         const active = v.label !== '';
@@ -121,10 +123,10 @@ export const Polyrepo: React.FC = () => {
             key={repo.id}
             style={{
               position: 'absolute',
-              left: repo.x - CARD_W / 2,
-              top: CARD_Y - 105,
-              width: CARD_W,
-              height: 210,
+              left: mobile ? 50 : repo.x - CARD_W / 2,
+              top: mobile ? 190 + REPOS.indexOf(repo) * 245 : CARD_Y - 105,
+              width: mobile ? 620 : CARD_W,
+              height: mobile ? 220 : 210,
               borderRadius: 16,
               background: colors.panel,
               border: `2px solid ${active ? v.color : colors.panelEdge}`,
@@ -133,14 +135,14 @@ export const Polyrepo: React.FC = () => {
               boxSizing: 'border-box',
             }}>
             <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
-              <span style={{fontSize: 28, fontWeight: 700, color: colors.fg}}>{repo.id}</span>
+              <span style={{fontSize: mobile ? 32 : 28, fontWeight: 700, color: colors.fg}}>{repo.id}</span>
               <span style={{marginLeft: 'auto', fontSize: 19, fontWeight: 700, color: v.color, whiteSpace: 'nowrap'}}>{v.label}</span>
             </div>
-            <div style={{marginTop: 8, fontSize: 16, color: colors.dim}}>
+            <div style={{marginTop: 8, fontSize: mobile ? 26 : 16, color: colors.dim}}>
               src ⟶ {repo.remote}
               {'\n'}
             </div>
-            <div style={{marginTop: 4, fontSize: 16, color: colors.dim}}>
+            <div style={{marginTop: 4, fontSize: mobile ? 26 : 16, color: colors.dim}}>
               submodule @{' '}
               <span style={{color: colors.yellow}}>{repo.id === 'sdk' && synced ? 'b82d47e' : '9f3c2a1'}</span>
             </div>

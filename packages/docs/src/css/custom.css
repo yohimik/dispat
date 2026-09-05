@@ -205,6 +205,22 @@ body {
   box-shadow: var(--doc-panel-shadow);
 }
 
+/* Flex and grid items otherwise inherit the intrinsic width of a fenced
+   command. Keep prose within its column and give the code block itself the
+   horizontal scroll when preserving command whitespace needs more room. */
+.theme-doc-markdown,
+.theme-code-block {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.theme-code-block pre,
+.theme-doc-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
 .theme-doc-markdown table {
   display: table;
   width: 100%;

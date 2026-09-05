@@ -43,7 +43,7 @@ class SceneBoundary extends React.Component<{children: React.ReactNode; fallback
   static getDerivedStateFromError() { return {failed: true}; }
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
-type LoadedScene = {component: React.ComponentType; duration: number};
+type LoadedScene = {component: React.ComponentType; duration: number; stillFrame?: number};
 const SCENES: Record<string, () => Promise<LoadedScene>> = {
   'demo-order': () => import('../../../demo/illustration/src/Order').then((m) => ({component: m.Order, duration: m.ORDER_DURATION})),
   'demo-blast': () => import('../../../demo/illustration/src/Blast').then((m) => ({component: m.Blast, duration: m.BLAST_DURATION})),
@@ -51,7 +51,7 @@ const SCENES: Record<string, () => Promise<LoadedScene>> = {
   'demo-control': () => import('../../../demo/illustration/src/Control').then((m) => ({component: m.Control, duration: m.CONTROL_DURATION})),
   'demo-polyglot': () => import('../../../demo/illustration/src/Polyglot').then((m) => ({component: m.Polyglot, duration: m.POLYGLOT_DURATION})),
   'demo-terminal': () => import('../../../demo/illustration/src/Terminal').then((m) => ({component: m.Terminal, duration: m.TERMINAL_DURATION})),
-  'demo-why': () => import('../../../demo/illustration/src/Why').then((m) => ({component: m.Why, duration: m.WHY_DURATION})),
+  'demo-why': () => import('../../../demo/illustration/src/Why').then((m) => ({component: m.Why, duration: m.WHY_DURATION, stillFrame: 340})),
   'demo-compute': () => import('../../../demo/illustration/src/Compute').then((m) => ({component: m.Compute, duration: m.COMPUTE_DURATION})),
   'demo-run': () => import('../../../demo/illustration/src/Run').then((m) => ({component: m.Run, duration: m.RUN_DURATION})),
   'demo-single': () => import('../../../demo/illustration/src/Single').then((m) => ({component: m.Single, duration: m.SINGLE_DURATION})),
@@ -59,7 +59,7 @@ const SCENES: Record<string, () => Promise<LoadedScene>> = {
   'demo-polyrepo': () => import('../../../demo/illustration/src/Polyrepo').then((m) => ({component: m.Polyrepo, duration: m.POLYREPO_DURATION})),
   'demo-math': () => import('../../../demo/illustration/src/Math').then((m) => ({component: m.Math_, duration: m.MATH_DURATION})),
   'demo-progress': () => import('../../../demo/illustration/src/Progress').then((m) => ({component: m.Progress, duration: m.PROGRESS_DURATION})),
-  'demo-glue': () => import('../../../demo/illustration/src/Glue').then((m) => ({component: m.Glue, duration: m.GLUE_DURATION})),
+  'demo-glue': () => import('../../../demo/illustration/src/Glue').then((m) => ({component: m.Glue, duration: m.GLUE_DURATION, stillFrame: 420})),
   'demo-lock': () => import('../../../demo/illustration/src/Lock').then((m) => ({component: m.Lock, duration: m.LOCK_DURATION})),
   'demo-for': () => import('../../../demo/illustration/src/For').then((m) => ({component: m.For, duration: m.FOR_DURATION})),
   'demo-aqua': () => import('../../../demo/illustration/src/Aqua').then((m) => ({component: m.Aqua, duration: m.AQUA_DURATION})),
@@ -525,9 +525,11 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
   const [speed, setSpeed] = React.useState(1);
   const [transcriptOpen, setTranscriptOpen] = React.useState(true);
   const [onscreen, setOnscreen] = React.useState(false);
+  const [mobile, setMobile] = React.useState(false);
   const [pageVisible, setPageVisible] = React.useState(true);
   const transportTouched = React.useRef(false);
   const root = React.useRef<HTMLDivElement>(null);
+  const frame = React.useRef<HTMLDivElement>(null);
   const [player, setPlayer] = React.useState<PlayerRef | null>(null);
   const current = slides[active];
   const requestedAsset = slides[requested.index]?.media?.asset;
@@ -547,6 +549,13 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
     return () => { currentLoad = false; };
   }, [requested, requestedAsset]);
 
+  React.useEffect(() => {
+    const node = frame.current;
+    if (!node) return undefined;
+    const observer = new ResizeObserver(([entry]) => setMobile(entry.contentRect.width < 720));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   React.useEffect(() => {
     const node = root.current;
     if (!node) return undefined;
@@ -595,14 +604,13 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
 
   return (
     <div className={styles.carousel} ref={root} data-demo-id="landing-demos">
-      <div className={styles.frame}>
+      <div className={styles.frame} ref={frame}>
         <div className={styles.stack}>
           <div className={styles.slide} data-slide-id={current.id}>
             <h3 id="landing-demo-title" className={styles.slideTitle}>
               {current.title}
             </h3>
             <div key={current.id} className={styles.video}>
-              <div className={styles.mobilePanHint}>Swipe to explore the diagram, or read the transcript below.</div>
               <div
                 className={styles.sceneScroller}
                 data-demo-canvas
@@ -610,7 +618,7 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                 aria-labelledby="landing-demo-title"
                 aria-describedby="landing-demo-description"
                 tabIndex={0}>
-                <div className={styles.sceneViewport} data-demo-duration={scene?.duration} data-demo-fps={FPS} aria-hidden="true">
+                <div className={styles.sceneViewport} data-demo-layout={mobile ? 'portrait' : 'landscape'} data-demo-duration={scene?.duration} data-demo-fps={FPS} aria-hidden="true">
                   {scene ? (
                     <BrowserOnly fallback={<div className={styles.loading}>Interactive demo</div>}>
                       {() => (
@@ -620,14 +628,13 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                               ref={setPlayer}
                               component={scene.component}
                               durationInFrames={scene.duration}
-                              compositionWidth={1920}
-                              compositionHeight={800}
+                              mobile={mobile}
                               sourceHeight={current.media?.asset === 'demo-aqua' ? 800 : 1080}
                               cropTop={current.media?.asset === 'demo-aqua' ? 0 : 280}
                               fps={FPS}
                               loop={loop}
                               playbackRate={speed}
-                              initialFrame={paused ? Math.min(Math.round(scene.duration / 3), scene.duration - 1) : 0}
+                              initialFrame={paused ? Math.min(scene.stillFrame ?? Math.round(scene.duration / 3), scene.duration - 1) : 0}
                               controls={false}
                               acknowledgeRemotionLicense
                               style={{width: '100%', height: '100%'}}

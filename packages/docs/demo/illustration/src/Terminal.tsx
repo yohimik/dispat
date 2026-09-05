@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, WRN, msg, kv} from './components';
+import {useDemoLayout} from './layout';
 
 // The steps-as-commands claim, twenty-two seconds at Root.tsx's twenty
 // frames per second: the release flow is the same everywhere, but each
@@ -100,6 +101,7 @@ const BLOCK_W = 246;
 
 export const Terminal: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [TERMINAL_DURATION - 10, TERMINAL_DURATION - 2], [1, 0], {
@@ -115,12 +117,12 @@ export const Terminal: React.FC = () => {
       {ROWS.map((row) => (
         <div key={row.id}>
           {/* The package this strip belongs to. */}
-          <div style={{position: 'absolute', left: 140, top: row.y + 4, width: 310}}>
+          <div style={{position: 'absolute', left: mobile ? 30 : 140, top: mobile ? 150 + ROWS.indexOf(row) * 270 : row.y + 4, width: mobile ? 650 : 310}}>
             <span style={{fontSize: 30, fontWeight: 700, color: colors.fg}}>{row.id}</span>
             <span
               style={{
                 marginLeft: 14,
-                fontSize: 17,
+                fontSize: mobile ? 26 : 17,
                 color: row.ecoColor,
                 border: `1.5px solid ${alpha(row.ecoColor, 0.4)}`,
                 borderRadius: 999,
@@ -134,7 +136,7 @@ export const Terminal: React.FC = () => {
             const active = lit && f < step.at + step.dur;
             const c = active ? colors.cyan : lit ? colors.green : colors.faint;
             return (
-              <div key={step.name} style={{position: 'absolute', left: 470 + i * 266, top: row.y - 4, width: BLOCK_W}}>
+              <div key={step.name} style={{position: 'absolute', left: mobile ? 30 + (i % 3) * 220 : 470 + i * 266, top: mobile ? 215 + ROWS.indexOf(row) * 270 + Math.floor(i / 3) * 76 : row.y - 4, width: mobile ? 200 : BLOCK_W}}>
                 <div
                   style={{
                     borderRadius: 12,
@@ -143,20 +145,21 @@ export const Terminal: React.FC = () => {
                     boxShadow: active ? `0 0 24px ${alpha(c, 0.2)}` : 'none',
                     padding: '15px 0 13px',
                     textAlign: 'center',
-                    fontSize: 22,
+                    fontSize: mobile ? 26 : 22,
+                    whiteSpace: 'nowrap',
                     fontWeight: 700,
                     color: lit ? colors.fg : colors.dim,
                   }}>
                   {step.name}
                   {/* A dashed border marks a step command among the stages. */}
-                  <div style={{marginTop: 2, fontSize: 14, fontWeight: 400, color: colors.dim, minHeight: 18}}>
+                  <div style={{display: mobile ? 'none' : 'block', marginTop: 2, fontSize: 14, fontWeight: 400, color: colors.dim, minHeight: 18}}>
                     {step.step ? 'step command' : 'stage'}
                   </div>
                 </div>
               </div>
             );
           })}
-          <div style={{position: 'absolute', left: 470, right: 120, top: row.y + 88, fontSize: 17, color: colors.dim}}>
+          <div style={{position: 'absolute', left: mobile ? 30 : 470, right: mobile ? 30 : 120, top: mobile ? 355 + ROWS.indexOf(row) * 270 : row.y + 88, fontSize: mobile ? 22 : 17, lineHeight: mobile ? '29px' : undefined, color: colors.dim}}>
             {row.note}
           </div>
         </div>

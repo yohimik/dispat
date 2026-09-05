@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {colors, font} from './theme';
 import {SceneTerminal, TermRow, cmdRow, outRow, INF, ERR, msg, kv} from './components';
+import {useDemoLayout} from './layout';
 
 // The release-lock claim, twenty seconds at Root.tsx's twenty frames per
 // second: one release at a time, enforced by git itself. ci-runner-7 claims
@@ -43,21 +44,24 @@ const Runner: React.FC<{
   name: string;
   x: number;
   state: {text: string; color: string};
-}> = ({name, x, state}) => (
+  mobile?: boolean;
+  index?: number;
+}> = ({name, x, state, mobile = false, index = 0}) => (
   <div
     style={{
       position: 'absolute',
-      left: x - 210,
-      top: 560,
-      width: 420,
+      left: mobile ? 30 : x - 210,
+      right: mobile ? 30 : undefined,
+      top: mobile ? 440 + index * 230 : 560,
+      width: mobile ? 'auto' : 420,
       borderRadius: 16,
       background: colors.panel,
       border: `2px solid ${state.color === colors.faint ? colors.panelEdge : state.color}`,
       padding: '20px 26px',
       boxSizing: 'border-box',
     }}>
-    <div style={{fontSize: 26, fontWeight: 700, color: colors.fg}}>{name}</div>
-    <div style={{marginTop: 10, fontSize: 20, fontWeight: 700, color: state.color, minHeight: 28}}>
+    <div style={{fontSize: mobile ? 30 : 26, fontWeight: 700, color: colors.fg}}>{name}</div>
+    <div style={{marginTop: 10, fontSize: mobile ? 26 : 20, lineHeight: mobile ? '36px' : undefined, fontWeight: 700, color: state.color, minHeight: 28}}>
       {state.color === colors.faint ? '' : state.text}
     </div>
   </div>
@@ -65,6 +69,7 @@ const Runner: React.FC<{
 
 export const Lock: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
     bar(f, 0, 10) *
     interpolate(f, [LOCK_DURATION - 10, LOCK_DURATION - 2], [1, 0], {
@@ -100,22 +105,23 @@ export const Lock: React.FC = () => {
       <div
         style={{
           position: 'absolute',
-          left: 960,
-          top: 350,
-          transform: 'translateX(-50%)',
-          width: 560,
+          left: mobile ? 30 : 960,
+          right: mobile ? 30 : undefined,
+          top: mobile ? 130 : 350,
+          transform: mobile ? undefined : 'translateX(-50%)',
+          width: mobile ? 'auto' : 560,
           borderRadius: 16,
           background: colors.panel,
           border: `1.5px solid ${colors.panelEdge}`,
           padding: '20px 30px 24px',
           textAlign: 'center',
         }}>
-        <div style={{fontSize: 23, color: colors.dim}}>origin</div>
+        <div style={{fontSize: mobile ? 28 : 23, color: colors.dim}}>origin</div>
         <div
           style={{
             marginTop: 14,
             display: 'inline-block',
-            fontSize: 23,
+            fontSize: mobile ? 26 : 23,
             fontWeight: 700,
             color: holder ? colors.yellow : colors.faint,
             border: `2px ${holder ? 'solid' : 'dashed'} ${holder ? colors.yellow : colors.faint}`,
@@ -124,12 +130,12 @@ export const Lock: React.FC = () => {
           }}>
           dispat-release-lock · unique attempt
         </div>
-        <div style={{marginTop: 10, fontSize: 19, color: colors.dim, minHeight: 26}}>
+        <div style={{marginTop: 10, fontSize: mobile ? 26 : 19, lineHeight: mobile ? '36px' : undefined, color: colors.dim, minHeight: 26}}>
           {holder ? `held by ${holder}; release guarded by object-id lease` : 'free'}
         </div>
       </div>
-      <Runner name="ci-runner-7" x={560} state={aState} />
-      <Runner name="laptop" x={1360} state={bState} />
+      <Runner name="ci-runner-7" x={560} state={aState} mobile={mobile} index={0} />
+      <Runner name="laptop" x={1360} state={bState} mobile={mobile} index={1} />
       <SceneTerminal rows={rows} f={f} />
       </div>
     </AbsoluteFill>

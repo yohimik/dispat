@@ -3,6 +3,7 @@ import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 import {alpha, colors, font} from './theme';
 import {NodeView, PkgNode, SceneTerminal, TermRow, cmdRow, outRow, fadeIO, INF, ERR, msg, kv} from './components';
 import {Pkg} from './graph';
+import {useDemoLayout} from './layout';
 
 // The repository README's "why one more monorepo tool?" argument, drawn:
 // every major tool can topologically sort a build, but the split is always
@@ -65,21 +66,24 @@ function beat3Views(f: number): [NodeView, NodeView] {
   return [core, api];
 }
 
-const Chip: React.FC<{text: string; color?: string}> = ({text, color = colors.green}) => (
+const Chip: React.FC<{text: string; color?: string; mobile?: boolean}> = ({text, color = colors.green, mobile = false}) => (
   <div
     style={{
       position: 'absolute',
-      left: 960,
-      top: 380,
+      left: mobile ? 360 : 960,
+      top: mobile ? 180 : 380,
       transform: 'translateX(-50%)',
-      fontSize: 21,
+      fontSize: mobile ? 26 : 21,
       letterSpacing: 3,
       textTransform: 'uppercase',
       color,
       border: `1.5px solid ${alpha(color, 0.4)}`,
       borderRadius: 999,
       padding: '5px 22px',
-      whiteSpace: 'nowrap',
+      whiteSpace: mobile ? 'normal' : 'nowrap',
+      width: mobile ? 610 : undefined,
+      boxSizing: 'border-box',
+      textAlign: 'center',
     }}>
     {text}
   </div>
@@ -112,17 +116,20 @@ export const WHY_DURATION = 680;
 
 export const Why: React.FC = () => {
   const f = useCurrentFrame();
+  const mobile = useDemoLayout();
   const opacity =
-    bar(f, 0, 10) *
+    (mobile ? 1 : bar(f, 0, 10)) *
     interpolate(f, [WHY_DURATION - 10, WHY_DURATION - 2], [1, 0], {
       extrapolateLeft: 'clamp',
       extrapolateRight: 'clamp',
     });
-  const b1 = fadeIO(f, 14, 22, 210, 218);
+  const b1 = mobile ? fadeIO(f, -8, 0, 210, 218) : fadeIO(f, 0, 8, 210, 218);
   const b2 = fadeIO(f, 218, 226, 410, 418);
   const b3 = fadeIO(f, 418, 426, WHY_DURATION - 16, WHY_DURATION - 8);
   const [b1core, b1api] = beat1Views(f);
   const [b3core, b3api] = beat3Views(f);
+  const corePkg = mobile ? {...CORE, x: 360, y: 500} : CORE;
+  const apiPkg = mobile ? {...API, x: 360, y: 720} : API;
 
   return (
     <AbsoluteFill style={{background: colors.bg, fontFamily: font}}>
@@ -131,16 +138,15 @@ export const Why: React.FC = () => {
       <div style={{position: 'absolute', left: 48, top: 40, fontSize: 28, fontWeight: 700, color: colors.dim}}>dispat</div>
       {b1 > 0 && (
         <div style={{opacity: b1, position: 'absolute', inset: 0}}>
-          <Chip text="every other tool: build all, then publish all" color={colors.yellow} />
-          <Phase text="build all" x={640} state={f < 100 ? 'active' : 'dead'} />
-          <Phase text="publish all" x={1280} state={f < 100 ? 'idle' : 'dead'} />
-          <PkgNode pkg={CORE} view={b1core} />
-          <PkgNode pkg={API} view={b1api} />
+          <Chip text="assumed workflow: build all, then publish all" color={colors.yellow} mobile={mobile} />
+          {!mobile && <><Phase text="build all" x={640} state={f < 100 ? 'active' : 'dead'} /><Phase text="publish all" x={1280} state={f < 100 ? 'idle' : 'dead'} /></>}
+          <PkgNode pkg={corePkg} view={b1core} />
+          <PkgNode pkg={apiPkg} view={b1api} />
         </div>
       )}
       {b2 > 0 && (
         <div style={{opacity: b2, position: 'absolute', inset: 0}}>
-          <Chip text="an error in the middle of a run" color={colors.red} />
+          <Chip text="an error in the middle of a run" color={colors.red} mobile={mobile} />
           {[
             {text: '✓ core published', color: colors.green, x: 460},
             {text: '✓ utils published', color: colors.green, x: 800},
@@ -151,8 +157,8 @@ export const Why: React.FC = () => {
               key={c.text}
               style={{
                 position: 'absolute',
-                left: c.x,
-                top: 500,
+                left: mobile ? 360 : c.x,
+                top: mobile ? 260 + [460, 800, 1130, 1400].indexOf(c.x) * 150 : 500,
                 transform: 'translateX(-50%)',
                 fontSize: 27,
                 fontWeight: 700,
@@ -170,9 +176,9 @@ export const Why: React.FC = () => {
           <div
             style={{
               position: 'absolute',
-              left: 260,
-              right: 260,
-              top: 620,
+              left: mobile ? 35 : 260,
+              right: mobile ? 35 : 260,
+              top: mobile ? 800 : 620,
               textAlign: 'center',
               fontSize: 26,
               lineHeight: '40px',
@@ -185,17 +191,17 @@ export const Why: React.FC = () => {
       )}
       {b3 > 0 && (
         <div style={{opacity: b3, position: 'absolute', inset: 0}}>
-          <Chip text="dispat: build and publish are legs of one graph" />
-          <svg width="1920" height="1080" style={{position: 'absolute', inset: 0}} viewBox="0 0 1920 1080">
+          <Chip text="dispat: build and publish are legs of one graph" mobile={mobile} />
+          <svg width={mobile ? 720 : 1920} height={mobile ? 1280 : 1080} style={{position: 'absolute', inset: 0}} viewBox={mobile ? '0 0 720 1280' : '0 0 1920 1080'}>
             <path
-              d="M 815 660 L 1105 660"
+              d={mobile ? 'M 360 600 L 360 620' : 'M 815 660 L 1105 660'}
               stroke={f >= 530 ? colors.green : colors.faint}
               strokeWidth={f >= 530 ? 5 : 3}
               fill="none"
             />
           </svg>
-          <PkgNode pkg={CORE} view={b3core} />
-          <PkgNode pkg={API} view={b3api} />
+          <PkgNode pkg={corePkg} view={b3core} />
+          <PkgNode pkg={apiPkg} view={b3api} />
         </div>
       )}
       <SceneTerminal rows={rows} f={f} />
