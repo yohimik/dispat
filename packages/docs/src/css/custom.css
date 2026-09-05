@@ -119,25 +119,37 @@ body {
   line-height: 1.35;
 }
 
-/* Linked categories render a separate caret button, while generated nested
-   categories put the caret on the link itself. Give both DOM shapes the same
-   row and caret feedback without changing either control's hit area. */
+/* Every category uses the shared theme component's separate caret button.
+   Paint the button, never its filtered arrow, so both themes share feedback. */
 .theme-doc-sidebar-menu .menu__list-item-collapsible:hover,
 .theme-doc-sidebar-menu .menu__list-item-collapsible:focus-within {
   background-color: var(--ifm-menu-color-background-hover);
 }
 
-.theme-doc-sidebar-menu .menu__link--sublist-caret:hover,
-.theme-doc-sidebar-menu .menu__link--sublist-caret:focus-visible {
-  background-color: var(--ifm-menu-color-background-hover);
+.theme-doc-sidebar-menu .menu__list-item-collapsible {
+  border-radius: 0.35rem;
+}
+
+.theme-doc-sidebar-menu .menu__list-item-collapsible:hover > .menu__link,
+.theme-doc-sidebar-menu .menu__list-item-collapsible:focus-within > .menu__link {
+  background-color: transparent;
+}
+
+.theme-doc-sidebar-menu .menu__caret {
+  flex: 0 0 2.75rem;
+  width: 2.75rem;
+  min-height: 2.75rem;
+  border-radius: 0.35rem;
 }
 
 .theme-doc-sidebar-menu .menu__caret:hover,
-.theme-doc-sidebar-menu .menu__caret:focus-visible,
-.theme-doc-sidebar-menu .menu__link--sublist-caret:hover::after,
-.theme-doc-sidebar-menu .menu__link--sublist-caret:focus-visible::after {
-  border-radius: 0.35rem;
+.theme-doc-sidebar-menu .menu__caret:focus-visible {
   background-color: var(--ifm-color-emphasis-200);
+}
+
+.theme-doc-sidebar-menu .menu__caret:focus-visible {
+  outline: 2px solid var(--ifm-color-primary);
+  outline-offset: -2px;
 }
 
 .menu__link--active:not(.menu__link--sublist) {
