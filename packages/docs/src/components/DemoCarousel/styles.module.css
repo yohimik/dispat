@@ -65,7 +65,7 @@
 
 .video,
 .sceneScroller { width: 100%; min-width: 0; }
-.video { background: var(--demo-bg); }
+.video { position: relative; background: var(--demo-bg); }
 .sceneScroller { overflow: hidden; }
 .sceneViewport { width: 100%; aspect-ratio: 1920 / 800; line-height: 1.2; }
 @container (max-width: 719px) {
@@ -84,6 +84,22 @@
   padding: 1rem;
   color: var(--demo-dim);
   font: 600 0.95rem/1.4 var(--ifm-font-family-base);
+}
+.loadOverlay {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 0.75rem;
+  width: min(92%, 42rem);
+  transform: translateX(-50%);
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--demo-panel-edge);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--demo-panel) 94%, transparent);
+  box-shadow: var(--doc-panel-shadow);
+  color: var(--demo-cyan);
+  text-align: center;
+  font-size: 0.9rem;
 }
 
 /* Controls precede variable-length descriptions and never move with them. */
@@ -146,11 +162,25 @@
   background: var(--demo-panel);
   color: var(--demo-dim);
 }
-.loadStatus { margin: 0 auto 0.8rem; max-width: 78ch; color: var(--demo-cyan); }
-.loadStatus button { margin-left: 0.25rem; }
-.bandBody {
+.loadOverlay button { margin-left: 0.25rem; }
+.bandContent {
+  width: 100%;
   max-width: 78ch;
-  margin: 0 auto;
+  margin-inline: auto;
+  font-size: 1rem;
+}
+.captionStack,
+.transcriptStack {
+  display: grid;
+  width: 100%;
+}
+.captionStack > *,
+.transcriptStack > * { grid-area: 1 / 1; min-width: 0; }
+.activeLayer { visibility: visible; }
+.inactiveLayer { visibility: hidden; pointer-events: none; }
+.bandBody {
+  max-width: none;
+  margin: 0;
   font-size: clamp(0.9rem, 1.45cqw, 1rem);
   line-height: 1.6;
   overflow-wrap: anywhere;
@@ -166,13 +196,15 @@
 .bandBody a,
 .bandBody a code { color: var(--demo-green); }
 .transcript {
-  max-width: 78ch;
+  width: 100%;
+  max-width: none;
   min-width: 0;
   margin: 1rem auto 0;
   font-size: 0.875rem;
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
+.transcriptStack p { margin: 0.75rem 0 0; }
 .transcript summary { padding: 0.5rem 0; color: var(--demo-fg); cursor: pointer; }
 .transcript p { margin: 0.75rem 0 0; }
 .command {

@@ -686,6 +686,17 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
                   ) : <div className={styles.loading}>{sceneFailed ? 'Demo unavailable. Read the description below.' : pending ? 'Loading interactive demo…' : 'Choose a demo to play.'}</div>}
                 </div>
               </div>
+              {(pending || sceneFailed) && (
+                <div className={styles.loadOverlay} role="status" data-demo-load-status>
+                  {pending ? <>
+                    Loading {slides[pending.index].name}…{scene ? ' The current demo remains available. ' : ' '}
+                    <button type="button" onClick={cancelPending}>Cancel</button>
+                  </> : <>
+                    {scene ? 'The next demo could not load. The current demo is still available. ' : 'This demo could not load. Choose another scene or try again. '}
+                    <button type="button" onClick={() => { if (failedRequest !== null) selectSlide(failedRequest); }}>Try again</button>
+                  </>}
+                </div>
+              )}
             </div>
             <DeckControls
               slides={slides}
@@ -698,29 +709,34 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
               speed={speed}
               onCycleSpeed={() => setSpeed((s) => ({1: 1.5, 1.5: 2, 2: 0.5, 0.5: 1}[s] ?? 1))}
             />
-            <div className={styles.band}>
-              {pending && (
-                <p className={styles.loadStatus} role="status">
-                  Loading {slides[pending.index].name}…{scene ? ' The current demo remains available. ' : ' '}
-                  <button type="button" onClick={cancelPending}>Cancel</button>
-                </p>
-              )}
-              {sceneFailed && scene && (
-                <p role="status">The next demo could not load. The current demo is still available.{' '}
-                  <button type="button" onClick={() => { if (failedRequest !== null) selectSlide(failedRequest); }}>Try again</button>
-                </p>
-              )}
-              <p id="landing-demo-description" className={styles.bandBody}>{current.body}</p>
-              {current.media && (
-                <details
-                  className={styles.transcript}
-                  open={transcriptOpen}
-                  onToggle={(event) => setTranscriptOpen(event.currentTarget.open)}>
-                  <summary>Accessible description and transcript</summary>
-                  <pre className={styles.command}><code>{SCENE_COMMANDS[current.media.asset]}</code></pre>
-                  <p>{current.media.label}</p>
-                </details>
-              )}
+            <div className={styles.band} data-demo-description-band>
+              <div className={styles.bandContent}>
+              <div className={styles.captionStack} data-demo-caption-stack>
+                {slides.map((slide, index) => {
+                  const selected = index === active;
+                  return <div key={slide.id} data-demo-caption-layer className={selected ? styles.activeLayer : styles.inactiveLayer} aria-hidden={!selected} inert={!selected ? true : undefined}>
+                    <p id={selected ? 'landing-demo-description' : undefined} className={styles.bandBody}>{slide.body}</p>
+                  </div>;
+                })}
+              </div>
+              <details
+                className={styles.transcript}
+                open={transcriptOpen}
+                onToggle={(event) => setTranscriptOpen(event.currentTarget.open)}>
+                <summary>Accessible description and transcript</summary>
+                <div className={styles.transcriptStack} data-demo-transcript-stack>
+                  {slides.map((slide, index) => {
+                    const selected = index === active;
+                    return <div key={slide.id} data-demo-transcript-layer className={selected ? styles.activeLayer : styles.inactiveLayer} aria-hidden={!selected} inert={!selected ? true : undefined}>
+                      {slide.media && <>
+                        <pre className={styles.command}><code>{SCENE_COMMANDS[slide.media.asset]}</code></pre>
+                        <p>{slide.media.label}</p>
+                      </>}
+                    </div>;
+                  })}
+                </div>
+              </details>
+              </div>
             </div>
           </div>
         </div>

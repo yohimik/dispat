@@ -289,9 +289,7 @@ function Install(): React.ReactElement {
 }
 
 // The repository README's `## Projects using dispat` list, read at build time
-// like every other README extraction. It sits right after Install on purpose:
-// a reader who just saw how to get the binary is deciding whether to trust it,
-// and "it releases itself, and a four-level docker chain" is the answer.
+// like every other README extraction.
 function Projects(): React.ReactElement {
   const {repository} = useReadme();
 
@@ -399,12 +397,12 @@ export default function Home(): React.ReactElement {
       description="Dispat turns conventional commits into versions, changelogs, and ordered releases. Automate publishing across languages in one repository or several.">
       <Hero />
       <main>
-        <Install />
         <Demos />
         <Workflows />
-        <Libraries />
         <Projects />
+        <Install />
         <Reference />
+        <Libraries />
         <Inspiration />
         <Community />
       </main>
