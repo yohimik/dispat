@@ -1,15 +1,15 @@
 go 1.26
 
 use (
-	pkg/ccme
-	pkg/config
-	pkg/manifest
-	pkg/models
-	pkg/scanner
-	pkg/writer
-	services/dispat
-	tests/integration
-	tools
+	./pkg/ccme
+	./pkg/config
+	./pkg/manifest
+	./pkg/models
+	./pkg/scanner
+	./pkg/writer
+	./services/dispat
+	./tests/integration
+	./tools
 )
 
 // The v2 modules have no remote tags until this release publishes them. Keep every

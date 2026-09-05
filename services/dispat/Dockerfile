@@ -53,8 +53,8 @@ COPY services/dispat ./services/dispat
 
 WORKDIR /src/services/dispat
 
-# go.work is deliberately not part of the build context, and this says so out
-# loud. A workspace build would paper over a gap in this module's own go.mod or
+# The release binary is deliberately built without a workspace. A workspace
+# build would paper over a gap in this module's own go.mod or
 # go.sum with another module's requires; the published module has no workspace,
 # so neither does its build.
 ENV GOWORK=off
@@ -209,14 +209,11 @@ COPY tests/integration /src/tests/integration
 # The suite resolves the pkg/* modules through a workspace, exactly as the
 # checkout does: the pins in tests/integration/go.mod are only as fresh as the
 # last release, so a harness field added beside a new feature would not
-# compile against the published copies. The workspace is written rather than
-# copied because the checkout's go.work also names modules this context
-# deliberately leaves out, and it is scoped to the test invocation below:
-# GOWORK stays off for the binaries' own build, whose whole point is the
-# published module's workspace-less environment.
-ARG GO_VERSION
-RUN printf 'go %s\n\nuse (\n\t./tests/integration\n\t./pkg/ccme\n\t./pkg/manifest\n\t./pkg/models\n\t./pkg/scanner\n\t./pkg/writer\n)\n' \
-      "$GO_VERSION" > /src/go.work
+# compile against the published copies. Keep the checkout's exact replacement
+# rules and remove only modules this test context does not use. GOWORK stays
+# off for the binaries' own build and is enabled for the test invocation below.
+COPY go.work /src/go.work
+RUN cd /src && go work edit -dropuse=./pkg/config -dropuse=./services/dispat -dropuse=./tools go.work
 
 # The same bypass the workflows use: the pkg/* modules this suite pins are
 # fetched from their tags directly, not from a proxy that may not have seen a
@@ -293,10 +290,9 @@ COPY --from=staged /out /
 # environment — and it stays unstamped: an un-stamped build reports `dev`,
 # which is the honest answer for a gate binary that is not a release.
 #
-# The workspace is written rather than copied because the checkout's go.work
-# also names modules this context deliberately leaves out. Dependencies
-# download in a layer keyed on the manifests alone, so the CI cache carries
-# them across runs and a source edit re-runs only the compile.
+# Copy the workspace so its local module replacements also apply before new
+# major-version tags exist. Remove the test and tools modules this context
+# leaves out. Dependencies remain cached separately from the source files.
 FROM golang:${GO_VERSION}-alpine AS bootstrap-deps
 WORKDIR /src
 # ccme and manifest carry no go.sum: they have no module dependencies to sum,
@@ -308,9 +304,8 @@ COPY pkg/models/go.mod pkg/models/go.sum pkg/models/
 COPY pkg/scanner/go.mod pkg/scanner/go.sum pkg/scanner/
 COPY pkg/writer/go.mod pkg/writer/go.sum pkg/writer/
 COPY services/dispat/go.mod services/dispat/go.sum services/dispat/
-ARG GO_VERSION
-RUN printf 'go %s\n\nuse (\n\t./services/dispat\n\t./pkg/ccme\n\t./pkg/config\n\t./pkg/manifest\n\t./pkg/models\n\t./pkg/scanner\n\t./pkg/writer\n)\n' \
-      "$GO_VERSION" > /src/go.work
+COPY go.work /src/go.work
+RUN go work edit -dropuse=./tests/integration -dropuse=./tools /src/go.work
 RUN go mod download
 
 FROM bootstrap-deps AS bootstrap

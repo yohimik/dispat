@@ -1,6 +1,5 @@
 # dispat <img alt="dispat logo" align="right" width="128" height="128" src="./imgs/logo.png" />
 
-[![tests](https://github.com/yohimik/dispat/actions/workflows/tests.yml/badge.svg)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 [![coverage](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 
 **dispat** reads your conventional commits, works out the next versions, and builds and publishes changed packages in
