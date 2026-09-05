@@ -1,5 +1,50 @@
 # Changelog
 
+## services/dispat/v1.8.0 (2026-09-05)
+
+### Features
+
+- support Aqua manifests ([18f3e2c](https://github.com/yohimik/dispat/commit/18f3e2c2891ad3959a02535f6b6d942a5c0fd326)) (by yohimik)
+
+### Fixes
+
+- retain parser type identities ([f17f6ef](https://github.com/yohimik/dispat/commit/f17f6ef0d490abb150bf456ebb57a266ddcaece9)) (by yohimik)
+
+- preserve bootstrap workspace ([48c55c6](https://github.com/yohimik/dispat/commit/48c55c6e1e38a48dd5f4fa9a9e4c202709553ee3)) (by yohimik)
+
+- share baseline commit windows ([d7ca8be](https://github.com/yohimik/dispat/commit/d7ca8befd185f7da3ea3fddd240de340f53c6f3f)) (by yohimik)
+
+- share release tag inventory ([7c5d5da](https://github.com/yohimik/dispat/commit/7c5d5da7990a780506da962d3ac3100f1497462c)) (by yohimik)
+
+- announce in one command ([c8b8123](https://github.com/yohimik/dispat/commit/c8b812398136a6d5709b74d259f5925fc3af6558)) (by yohimik)
+
+- post photo announcements ([26d2223](https://github.com/yohimik/dispat/commit/26d222364f2a8459b9b84fb2575b3726db54574b)) (by yohimik)
+
+- retain distinct authors ([d949e3d](https://github.com/yohimik/dispat/commit/d949e3de59e4b2e5264461e1cf7c934719aa0650)) (by yohimik)
+
+- share commit windows ([06e5890](https://github.com/yohimik/dispat/commit/06e5890b9c0b4a2928e8bfaf41d5a9832640a54c)) (by yohimik)
+
+- keep locks TinyGo compatible ([42ab519](https://github.com/yohimik/dispat/commit/42ab5198483896c4ef48a289f5c687bddf7b4756)) (by yohimik)
+
+- harden install checks and logs ([23cf03d](https://github.com/yohimik/dispat/commit/23cf03d3d5524459fdf1b8d912778482d16fc7c1)) (by yohimik)
+
+- protect release ownership ([c4e6c62](https://github.com/yohimik/dispat/commit/c4e6c6299967d1fd8a2e33aa14d8fb44584df9e6)) (by yohimik)
+
+- bound release HTTP work ([b743446](https://github.com/yohimik/dispat/commit/b7434468680a2468539f4821ffff305ba4ca6c6b)) (by yohimik)
+
+### Dependencies
+
+- [ccme](https://github.com/yohimik/dispat/releases/tag/pkg/ccme/v2.0.0): 1.0.0 -> 2.0.0
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.0): 1.1.1 -> 1.2.0
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.8.0): 1.7.0 -> 1.8.0
+- [scanner](https://github.com/yohimik/dispat/releases/tag/pkg/scanner/v1.2.0): 1.1.1 -> 1.2.0
+- [writer](https://github.com/yohimik/dispat/releases/tag/pkg/writer/v1.2.0): 1.1.1 -> 1.2.0
+
+### Authors
+
+- yohimik
+
+
 ## services/dispat/v1.7.2 (2026-09-03)
 
 ### Fixes

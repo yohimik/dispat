@@ -10,10 +10,10 @@ require (
 	github.com/subosito/gotenv v1.6.0
 	github.com/yohimik/dispat/pkg/ccme v1.0.0
 	github.com/yohimik/dispat/pkg/config v1.0.0
-	github.com/yohimik/dispat/pkg/manifest v1.1.1
-	github.com/yohimik/dispat/pkg/models v1.7.0
-	github.com/yohimik/dispat/pkg/scanner v1.1.1
-	github.com/yohimik/dispat/pkg/writer v1.1.1
+	github.com/yohimik/dispat/pkg/manifest v1.2.0
+	github.com/yohimik/dispat/pkg/models v1.8.0
+	github.com/yohimik/dispat/pkg/scanner v1.2.0
+	github.com/yohimik/dispat/pkg/writer v1.2.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
