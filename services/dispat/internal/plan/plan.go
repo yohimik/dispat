@@ -1719,9 +1719,10 @@ func (cp *computation) loadTagsAndWindows() error {
 		wg.Wait()
 	}
 
-	// Windows are one `git log` per DISTINCT starting tag: packages that
-	// share a window origin (every never-stably-released package shares the
-	// whole history) share the listing instead of re-reading it.
+	// Windows are one `git log` per DISTINCT starting commit: packages whose
+	// differently named stable tags point at the same commit share the listing
+	// and immutable membership set. The tag name remains the query argument for
+	// Git implementations whose Commits API accepts a ref rather than an OID.
 	commitsBySince := make(map[string][]gitx.Commit)
 	windowsBySince := make(map[string]map[string]bool)
 
@@ -1799,20 +1800,36 @@ func (cp *computation) loadTagsAndWindows() error {
 		}
 		cp.rel[p.Name] = rel
 
-		commits, ok := commitsBySince[since]
+		cacheKey := commitWindowCacheKey(rel.StableCommit, since)
+		commits, ok := commitsBySince[cacheKey]
 		if !ok {
 			commits, err = cp.git.Commits(cp.ctx, since)
 			if err != nil {
 				return fmt.Errorf("plan: %s: %w", p.Name, err)
 			}
-			commitsBySince[since] = commits
+			commitsBySince[cacheKey] = commits
 			lists = append(lists, commits)
 		}
-		cp.window[p.Name] = sharedCommitWindow(windowsBySince, since, commits)
+		cp.window[p.Name] = sharedCommitWindow(windowsBySince, cacheKey, commits)
 	}
 
 	cp.buildUnion(lists)
 	return nil
+}
+
+// commitWindowCacheKey identifies the history boundary independently of the
+// spelling of the tag that names it. Some lightweight Git implementations do
+// not provide peeled commit IDs; retaining the tag in that case is safe and
+// avoids conflating two unknown boundaries. Prefixes keep an OID, a tag name,
+// and the root history in separate namespaces.
+func commitWindowCacheKey(commit, tag string) string {
+	if commit != "" {
+		return "commit:" + commit
+	}
+	if tag != "" {
+		return "tag:" + tag
+	}
+	return "root:"
 }
 
 // sharedCommitWindow returns the immutable membership set for one stable

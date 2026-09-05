@@ -421,17 +421,17 @@ func syncedLog(buf *bytes.Buffer) zerolog.Logger {
 }
 
 func TestAutoVersionRewriteFailureFailsTheVersionStage(t *testing.T) {
-	// The manifest's folder is read-only, so the writer cannot create its
-	// temp file: the native step's error must fail the package at the version
-	// stage, and with revertOnFail set the reverter must be asked to roll the
-	// folder back.
+	// A symlink manifest is refused before any write: the native step's error
+	// must fail the package at the version stage, and with revertOnFail set the
+	// reverter must be asked to roll the folder back. This remains effective
+	// when the test process has root privileges.
 	root := t.TempDir()
 	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true})
 	space.RevertOnFail = true
-	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
+	seedFile(t, root, "target.json", `{"name": "@acme/a", "version": "1.0.0"}`)
 	dir := filepath.Join(root, "a")
-	require.NoError(t, os.Chmod(dir, 0o555))
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(root, "target.json"), filepath.Join(dir, "package.json")))
 
 	rv := &fakeReverter{}
 	e := newExecutor(execSpec{Runner: &fakeRunner{}, Build: 1, Publish: 1})
@@ -442,6 +442,8 @@ func TestAutoVersionRewriteFailureFailsTheVersionStage(t *testing.T) {
 	assert.Equal(t, "version", res["a"].FailedStage, "auto-versioning fails the version stage")
 	require.Error(t, res["a"].Err)
 	assert.Equal(t, []string{dir}, rv.dirs, "revertOnFail rolls the failing folder back")
+	assert.Equal(t, `{"name": "@acme/a", "version": "1.0.0"}`, fileText(t, root, "target.json"),
+		"the symlink target is preserved")
 }
 
 func TestAutoVersionConverges(t *testing.T) {

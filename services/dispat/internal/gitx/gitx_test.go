@@ -945,6 +945,57 @@ func TestTagsForPackagesHonoursCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestTagsForPackagesExcludesUnreachableTagsAndReservedRefs(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	run := func(args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+
+	run("tag", "core@1.0.0")
+	run("tag", "v1.0.0") // a moving/version alias shape remains visible to alias filtering
+	run("tag", LockTagName)
+	branch, err := exec.Command("git", "-C", root, "branch", "--show-current").Output()
+	require.NoError(t, err)
+	run("checkout", "-qb", "divergent")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "side.txt"), []byte("side"), 0o644))
+	run("add", "side.txt")
+	run("commit", "-qm", "feat(core): divergent")
+	run("tag", "core@9.0.0")
+	run("checkout", "-q", strings.TrimSpace(string(branch)))
+
+	formats := map[string]TagFormat{
+		"core": DefaultTagFormat,
+		"wide": "{version}", // matches aliases and reserved refs before filtering
+	}
+	got, err := cli.TagsForPackages(ctx, formats)
+	require.NoError(t, err)
+	for pkg, format := range formats {
+		want, tagsErr := cli.Tags(ctx, pkg, format)
+		require.NoError(t, tagsErr)
+		assert.Equal(t, want, got[pkg], pkg)
+	}
+	require.Len(t, got["core"], 1)
+	assert.Equal(t, "core@1.0.0", got["core"][0].Name,
+		"the higher tag on a divergent branch is not reachable from HEAD")
+	assert.Contains(t, tagNames(got["wide"]), "v1.0.0", "alias-shaped tags remain in the inventory")
+	for _, tags := range got {
+		for _, tag := range tags {
+			assert.NotEqual(t, LockTagName, tag.Name)
+		}
+	}
+}
+
+func tagNames(tags Tags) []string {
+	names := make([]string, len(tags))
+	for i := range tags {
+		names[i] = tags[i].Name
+	}
+	return names
+}
+
 func TestCommitDirsNothingStaged(t *testing.T) {
 	root, cli := initRepo(t)
 	committed, err := cli.CommitDirs(context.Background(),

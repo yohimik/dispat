@@ -242,6 +242,55 @@ func TestPlanningUsesBulkTagInventoryWhenAvailable(t *testing.T) {
 	assert.Empty(t, git.tagQueries, "bulk inventory must replace per-package tag calls")
 }
 
+func TestPlanningSharesHistoryForDifferentTagsAtTheSameCommit(t *testing.T) {
+	git := counted(newFakeGit(
+		commit{sha: "c1", message: "chore: shared release"},
+		commit{sha: "c2", message: "fix(a,b): pending"},
+	).tag("a", "1.0.0", "c1").tag("b", "2.0.0", "c1"))
+	pkgs := []*model.Package{{Name: "a", Dir: "/r/a"}, {Name: "b", Dir: "/r/b"}}
+
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	assertVersion(t, v(1, 0, 1), p.Releases["a"].Next)
+	assertVersion(t, v(2, 0, 1), p.Releases["b"].Next)
+	assert.Equal(t, 1, git.logQueries["a@1.0.0"]+git.logQueries["b@2.0.0"],
+		"different tag names at one peeled commit share a history query")
+
+	cache := make(map[string]map[string]bool)
+	first := sharedCommitWindow(cache, commitWindowCacheKey("c1", "a@1.0.0"), []gitx.Commit{{SHA: "c2"}})
+	second := sharedCommitWindow(cache, commitWindowCacheKey("c1", "b@2.0.0"), []gitx.Commit{{SHA: "ignored"}})
+	assert.Equal(t, reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
+		"the same peeled boundary shares immutable membership storage")
+	assert.False(t, second["ignored"])
+}
+
+func TestPlanningDoesNotShareHistoryForDistinctStableCommits(t *testing.T) {
+	git := counted(newFakeGit(
+		commit{sha: "c1", message: "chore: a release"},
+		commit{sha: "c2", message: "chore: b release"},
+		commit{sha: "c3", message: "fix(a,b): pending"},
+	).tag("a", "1.0.0", "c1").tag("b", "1.0.0", "c2"))
+	pkgs := []*model.Package{{Name: "a", Dir: "/r/a"}, {Name: "b", Dir: "/r/b"}}
+
+	_, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, git.logQueries["a@1.0.0"])
+	assert.Equal(t, 1, git.logQueries["b@1.0.0"])
+}
+
+func TestPlanningDoesNotConflateUnknownStableCommitIDs(t *testing.T) {
+	git := counted(newFakeGit(
+		commit{sha: "c1", message: "fix(a,b): pending"},
+	).tag("a", "1.0.0", "").tag("b", "1.0.0", ""))
+	pkgs := []*model.Package{{Name: "a", Dir: "/r/a"}, {Name: "b", Dir: "/r/b"}}
+
+	_, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, git.logQueries["a@1.0.0"])
+	assert.Equal(t, 1, git.logQueries["b@1.0.0"],
+		"unknown peeled IDs fall back to distinct tag identities")
+}
+
 func TestPlanningReturnsBulkTagInventoryError(t *testing.T) {
 	want := context.Canceled
 	git := &bulkCountingGit{countingGit: counted(newFakeGit()), bulkErr: want}

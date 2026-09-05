@@ -311,8 +311,11 @@ func TestReplaceRunsAfterTheManifestStrategy(t *testing.T) {
 }
 
 func TestReplaceRuleFailureFailsTheVersionStage(t *testing.T) {
-	// The folder is read-only, so the replacement cannot write its temp
-	// file: the native step's error fails the package at the version stage.
+	// The folder is read-only, so the replacement cannot write its temp file:
+	// the native step's error fails the package at the version stage.
+	if os.Getuid() == 0 {
+		t.Skip("permission checks are meaningless as root")
+	}
 	root := t.TempDir()
 	space := avReplaceSpace(model.ReplaceRule{
 		Files: []string{"notes.txt"},
