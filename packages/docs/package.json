@@ -10,7 +10,7 @@
     "clear": "docusaurus clear",
     "serve": "docusaurus serve",
     "typecheck": "tsc",
-    "test": "node --experimental-strip-types --test plugins/test-report/*.test.mjs plugins/historical-links/*.test.mjs"
+    "test": "node --experimental-strip-types --test plugins/test-report/*.test.mjs plugins/historical-links/*.test.mjs demo/title-timing.test.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",
