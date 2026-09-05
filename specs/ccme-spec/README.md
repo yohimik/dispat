@@ -14,6 +14,6 @@ The check requires one valid semantic version in `VERSION`, verifies that the no
 
 `sh test.sh` runs the package's regression suite with Dispat from `PATH`, or an executable selected through `DISPAT_BIN`. The root release graph exposes it as the package's `tests` script, so changes under this folder are selected by the ordinary CI test sweep.
 
-During a release, `version.sh` stages copies of `VERSION` and `SPEC.md`, uses `dispat replacer` to update their normative declarations, validates the staged package, and installs both files with rollback on an ordinary write failure. If restoration fails, it reports and preserves the original files in the staging directory. The two-file update is not atomic across a machine crash.
+During a release, the `beforeBuild` hook runs `version.sh` before the build verifier. This hook also runs when the specification has no dependency updates. The script stages copies of `VERSION` and `SPEC.md`, uses `dispat replacer` to update their normative declarations, validates the staged package, and installs both files with rollback on an ordinary write failure. If restoration fails, it reports and preserves the original files in the staging directory. The two-file update is not atomic across a machine crash.
 
 Version classification follows §17.3 of `SPEC.md`: editorial corrections that cannot change a plan are patches; forward-compatible additions are minor releases; any change to the plan for an already-valid input requires a major release.

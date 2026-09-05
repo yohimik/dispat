@@ -12,6 +12,10 @@ scripts:
 # written. The shared changelog and commit scripts create the immutable tag;
 # the run's final GitHub stage creates the release page after all legs finish.
 flow:
-  version: version-spec
+  # A standalone specification has no provider manifests to update, so the
+  # executor does not create a native version task for it. Run the stamp as a
+  # gating build hook instead; beforeBuild always runs immediately before the
+  # verifier and carries the planned DISPAT_NEW_VERSION.
+  beforeBuild: [version-spec]
   build: verify-spec
   publish: [changelog, commit]
