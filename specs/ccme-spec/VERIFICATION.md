@@ -75,3 +75,18 @@ Additional verification completed before CI dispatch:
 The final `test(*)` commit requests the complete affected-package test sweep. CI and the release workflow must still
 pass on the pushed revision. The release workflow computes fresh combined coverage and requires an unrounded ratio
 of at least 95%; this document does not substitute earlier coverage measurements for that gate.
+
+## License boundary verification
+
+Commit `da2695d2` distinguishes MIT grants for official compiled binaries from GPL-3.0-or-later source files that
+reference the specification. The CCME parser remains MIT and has no changes in that commit. Other source files
+remain MIT unless separately licensed. Earlier distributed copies retain their original grants.
+
+The coordinator and an independent reviewer checked all 59 source and test files receiving SPDX notices. Removing
+the newly added notices reproduces each file's previous contents exactly. The MIT license text is unchanged, and
+the GPL copies in the published CLI and models modules match the specification's GPL text byte for byte. Module
+notices, READMEs, the architecture page, and site metadata distinguish the source and binary grants consistently.
+
+Docusaurus typechecking and production build, the specification verifier and version-hook tests, and test-plan
+reference validation passed after the notice changes. The preceding CI revision passed Tests and Format and vet;
+the new `test(*)` commit requests fresh CI for this complete revision before release dispatch.
