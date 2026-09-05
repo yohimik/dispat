@@ -220,15 +220,14 @@ suits you better.
 
 ## License
 
-Two licenses live in this repository: the MIT License ([LICENSE](./LICENSE)) covers the project, and the CCME
-specification, [pkg/ccme/SPEC.md](./pkg/ccme/SPEC.md), is licensed under GPL-3.0-or-later
-([pkg/ccme/LICENSE-SPEC](./pkg/ccme/LICENSE-SPEC)). Which one applies to you depends on what you use:
+The implementation, including the CLI, Go packages, container definitions and GitHub action, is licensed under
+[MIT](./LICENSE). The Go parser in [pkg/ccme](./pkg/ccme) has its own [MIT licence](./pkg/ccme/LICENSE).
 
-1. **The officially released program.** Using dispat as released, the binaries on the GitHub releases, the container
-   images and the GitHub action, falls fully under the MIT License. Running it, in CI or anywhere else, carries no GPL
-   obligations.
-2. **Source referencing GPL-licensed material.** Using any source that references the GPL-licensed CCME specification
-   falls under GPL-3.0-or-later.
-3. **Source without a GPL reference.** Using any source that carries no GPL reference falls under the MIT License. The
-   parser implementing the specification, meaning all Go source in [pkg/ccme](./pkg/ccme), is such source and stays
-   under MIT along with the rest of the project.
+The normative CCME specification is a separate, independently versioned package at
+[specs/ccme-spec](./specs/ccme-spec). Its text and accompanying material are licensed under
+[GPL-3.0-or-later](./specs/ccme-spec/LICENSE). Copies or adaptations of that material retain the applicable GPL terms.
+A link or section reference identifies the specification; it does not itself change the licence of the referring file.
+
+These are separate grants for separate materials, not a choice of two licences for every file. Moving the
+specification out of the parser module preserves the existing grants and keeps the GPL document out of future Go
+module archives. Third-party fonts and other assets retain their own licence notices.

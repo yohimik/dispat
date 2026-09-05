@@ -134,11 +134,19 @@ spaces:
   docker:
     path: docker
 
-# The workspace folders that are repository tooling rather than something
-# dispat ships: never versioned, never tagged, never published — but swept by
+# The normative CCME document is released independently from the Go library
+# that implements it. Its version is stored in the document itself and its
+# package-local release stage keeps those copies in lockstep.
+initials:
+  ccme-spec: 1.0.0
+
+# Standalone packages include the separately released specification below.
+# The remaining entries are repository tooling: never versioned, tagged or published, but swept by
 # `dispat run vet`, `tests` and `build` like every real package, so the lint
 # and test gates need no hand-kept module list beside the sweep.
 packages:
+  ccme-spec:
+    path: specs/ccme-spec
   tools:
     path: tools
     versioning: none

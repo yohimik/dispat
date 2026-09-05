@@ -26,6 +26,12 @@ services/dispat/dist
 !install.sh
 !install.ps1
 !docker
+!specs
+specs/*
+!specs/ccme-spec
+!specs/ccme-spec/SPEC.md
+!specs/ccme-spec/*.sh
+specs/ccme-spec/.ccme-version.*
 !packages
 packages/*
 !packages/docs

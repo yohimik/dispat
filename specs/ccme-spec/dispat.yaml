@@ -1,0 +1,16 @@
+# CCME is a specification package, independent from the Go implementation.
+# Its tag path is stable even if the implementation later moves modules.
+tagFormat: specs/ccme-spec/v{version}
+
+scripts:
+  version-spec: sh version.sh
+  verify-spec: sh verify.sh
+  tests: sh test.sh
+
+# Version substitution and validation happen before any release record is
+# written. The shared changelog and commit scripts create the immutable tag;
+# the run's final GitHub stage creates the release page after all legs finish.
+flow:
+  version: version-spec
+  build: verify-spec
+  publish: [changelog, commit]

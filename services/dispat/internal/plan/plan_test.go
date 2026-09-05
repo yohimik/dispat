@@ -2034,7 +2034,7 @@ func TestDiagnosticCodesAreDocumented(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
 	require.NoError(t, err)
 
-	spec, err := os.ReadFile(filepath.Join(root, "pkg", "ccme", "SPEC.md"))
+	spec, err := os.ReadFile(filepath.Join(root, "specs", "ccme-spec", "SPEC.md"))
 	require.NoError(t, err)
 	source, err := os.ReadFile(filepath.Join(root, "services", "dispat", "internal", "plan", "plan.go"))
 	require.NoError(t, err)

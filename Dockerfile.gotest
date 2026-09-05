@@ -294,7 +294,7 @@ ARG MODULE
 ENV GOWORK=off
 COPY --chown=gopher:gopher install.sh install.ps1 /src/
 COPY --chown=gopher:gopher docker /src/docker
-COPY --chown=gopher:gopher pkg/ccme/SPEC.md /src/pkg/ccme/SPEC.md
+COPY --chown=gopher:gopher specs/ccme-spec/SPEC.md /src/specs/ccme-spec/SPEC.md
 COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md /src/packages/docs/docs/internals/architecture.md
 COPY --chown=gopher:gopher ${MODULE}/go.mod ${MODULE}/go.su[m] /src/${MODULE}/
 RUN cd /src/${MODULE} && go mod download
@@ -527,6 +527,7 @@ WORKDIR /src
 COPY install.sh ./
 COPY script[s] ./scripts
 COPY announc[e] ./announce
+COPY specs/ccme-spec/*.sh ./specs/ccme-spec/
 COPY tests/experiments/run.sh tests/experiments/
 COPY tests/experiments/lib/common.sh tests/experiments/lib/
 RUN <<'EOF'
@@ -540,7 +541,7 @@ set -eu
 # left alone, because one log line per probe is the shape its logs are read in.
 sh -n install.sh
 set -- install.sh
-for f in scripts/*.sh announce/*.sh; do
+for f in scripts/*.sh announce/*.sh specs/ccme-spec/*.sh; do
   [ -f "$f" ] || continue
   case "$f" in scripts/tinygo-spike-darwin.sh) continue ;; esac
   set -- "$@" "$f"

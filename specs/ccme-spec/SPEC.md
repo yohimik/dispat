@@ -1,10 +1,10 @@
 # Conventional Commits: Monorepo Extension (CCME)
 
-**Version:** 1.0.0 **Status:** Normative specification, stable and ready for implementation **Extends:** Conventional
+**Version:** 2.0.0 **Status:** Normative specification, stable and ready for implementation **Extends:** Conventional
 Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** git tags of the form
 `<package>@<version>`
 **Conformance:** §17 · **Security considerations:** §18 · **Test vectors:** Appendix B
-**License:** GPL-3.0-or-later. See [LICENSE-SPEC](./LICENSE-SPEC).
+**License:** GPL-3.0-or-later. See [LICENSE](./LICENSE).
 
 Requirement levels follow RFC 2119 (§2). This specification is itself versioned under SemVer; see §17.3 for what
 constitutes a patch, minor, and major revision of the document.
@@ -105,7 +105,7 @@ to be interpreted as described in RFC 2119.
 | **Release tag**          | A git tag `<package>@<version>` marking a published version.                                                            |
 | **Baseline**             | The highest-precedence release tag for a package that is reachable from `HEAD`.                                         |
 | **Stable baseline**      | The highest-precedence *non-prerelease* release tag reachable from `HEAD`.                                              |
-| **Pending window**       | The set of commits used to compute a package's next version (§13.3). Written `W(P)`.                                    |
+| **Pending window**       | The stable-to-`HEAD` train window used for aggregate version computation (§13.3). Written `W(P)`; fresh admission uses `Wfresh(P)`.                                    |
 | **Release engine**       | The tool implementing this specification.                                                                               |
 | **Inert**                | Syntactically valid but resolving to zero packages; produces a warning, never an error.                                 |
 | **Run**                  | One execution of the engine against a fixed `HEAD`: compute a plan (§13), then publish it (§19).                        |
@@ -1360,7 +1360,7 @@ propagate(units, graph, held, W):
         pscope = resolve(u.propagateChannelScope)                 # §8.5a: resolved once,
         for (d, level) in reach(edges, sources, u.channelDepth):  #   never per target
             if d not in pscope:                           continue
-            if c not in W(d):                             continue # admission, §13.4a
+            if c not in Wfresh(d):                             continue # admission, §13.4a
             if cancelledFor(c, d):                        continue # §13.5a
             v = propagatedChannelFor(u, d)                         # §9.3
             if v is NONE:                                 continue
@@ -1385,7 +1385,7 @@ propagate(units, graph, held, W):
         anyStable = 'stable' in srcChan
         for (d, level) in reach(edges, sources, u.depth):
             if d not in pscope:                           continue
-            if c not in W(d):                             continue
+            if c not in Wfresh(d):                             continue
             if cancelledFor(c, d):                        continue
             if not (anyStable or channel[d] in srcChan):  continue # §9.3a, W208
             prop[d] = max(prop[d], b)
@@ -1508,19 +1508,16 @@ them. It is nonetheless a real widening of blast radius and is bounded by `maxPa
 2. otherwise `channelOf(baseline(origin))`, the channel the origin was last published on;
 3. if a unit's source packages disagree, the value from the byte-wise least package name, with `W160`.
 
-Every input is read from the unit and from tags at `HEAD`, so the result is deterministic, does not depend on which
-earlier run published the origin, and (importantly) does not depend on any other unit. The practical effect is the
+Every input is read from the unit and from tags at `HEAD`, so the result is deterministic, is independent of run order only while those baseline tags are unchanged, and does not depend on any other unit. The practical effect is the
 intended one: a consumer dragged along by a dependency that shipped on `beta` also ships on `beta`, and the prerelease
 train stays installable as a set.
 
-**Convergence of the channel axis.** The bump axis discharges through the window: once `d` releases, the commit leaves
-`W(d)` and the contribution is gone (§13.7c G4). The channel axis discharges differently, and it matters that it does:
-`W(d)` is measured from the last *stable* tag (§13.3), so a dependent that has just been moved onto `beta` still has the
-commit in its window on the next run. What stops it re-releasing for ever is the final test in `propagatedChannelFor`,
-`target == cur`, evaluated against the dependent's new baseline. Having arrived on `beta`, it is already there, `W199`
-fires, and no channel change is proposed. Transitions converge by the same argument one step earlier: having graduated,
-the dependent no longer matches `<from>`. This is stated as a guarantee in §13.7c (G7) and is the property an
-implementation is most likely to get wrong by comparing against the *proposed* channel instead of the baseline.
+**Discharge of the channel axis.** Both axes use the same fresh-work gate: once `d` releases, the commit leaves
+`Wfresh(d)`, so neither its bump nor its channel can be re-admitted (§13.7c G4). The final
+`propagatedChannelFor` comparison against `channelOf(baseline(d))` remains independently necessary while work is fresh:
+`target == cur` produces `W199`, and a transition whose `<from>` no longer matches proposes nothing. That comparison
+prevents a no-op channel proposal; it is not the ledger-discharge mechanism and MUST NOT be used in place of
+`C ∈ Wfresh(d)`.
 
 ### 9.3a Propagation follows resolvability
 
@@ -2031,9 +2028,11 @@ Enumerate tags reachable from `HEAD`, parse per §12.1, and compute `baseline`, 
 
 ```
 pendingWindow(P) = { c : c reachable from HEAD } - { c : c reachable from stableCommit(P) }
+freshWindow(P)   = pendingWindow(P) - { c : c reachable from tagCommit(baseline(P)) }
 ```
 
-If `P` has no stable baseline, `pendingWindow(P)` is every commit reachable from `HEAD`.
+If `P` has no stable baseline, `pendingWindow(P)` is every commit reachable from `HEAD`. If `P` has no baseline tag
+at all, the subtracted reach in `freshWindow(P)` is empty, so `Wfresh(P) = W(P)`.
 
 The window is measured from the last **stable** tag, not the last tag of any kind. This single definition serves both
 cases:
@@ -2044,17 +2043,18 @@ cases:
 
 Traversal MUST visit each commit exactly once (a commit reachable by two paths contributes its units once).
 
-The window answers exactly one question (*what has package `P` not yet released?*) and it is used for two different
-purposes that must not be conflated:
+`pendingWindow(P)`, abbreviated `W(P)`, is the **train window**. It deliberately retains commits already delivered on
+the current prerelease train so that §11.4 can aggregate the train's target from its stable base. `freshWindow(P)`,
+abbreviated `Wfresh(P)`, is the **undelivered window**: work after `P`'s highest-precedence baseline tag. For a stable
+baseline the two windows coincide. These roles MUST NOT be conflated:
 
-| Purpose                                  | Window consulted               | Section |
-|------------------------------------------|--------------------------------|---------|
-| Does this unit bump `P` itself?          | `W(P)`, the unit's own package | §13.6   |
-| Does this unit set `P`'s own channel?    | `W(P)`, the unit's own package | §13.8   |
-| Does this unit bump dependent `D`?       | `W(D)`, the **dependent's**    | §13.7   |
-| Does this unit re-channel dependent `D`? | `W(D)`, the **dependent's**    | §13.7   |
+| Purpose                                   | Window consulted                 | Section     |
+|-------------------------------------------|----------------------------------|-------------|
+| Compute `P`'s aggregate train bump/target | `W(P)`, the unit's own package   | §11.4, §13.6 |
+| Admit a fresh direct bump or channel      | `Wfresh(P)`                      | §13.6, §13.8 |
+| Admit a bump or channel for dependent `D` | `Wfresh(D)`, the **dependent's** | §13.7       |
 
-Reading the second row against the source's window silently loses releases; §13.7a is about exactly that.
+Reading the dependent-admission row against the source's window silently loses releases; §13.7a is about exactly that.
 
 ### 13.4 Parse and resolve
 
@@ -2064,7 +2064,7 @@ For every commit in the union of all pending windows: parse into units (§20), r
 Retention is **purpose-dependent**. A single retention rule serving both purposes cannot be correct, for the reason
 given in §13.7a. A tuple `(P, C, i, u)` is retained:
 
-* for the **direct** computation of §13.6, only if `C ∈ W(P)`;
+* for fresh **direct admission** in §13.6/§13.8, only if `C ∈ Wfresh(P)`; the full `W(P)` remains available to §11.4 for aggregate train targets;
 * for the **propagation-source** computation of §13.7, regardless of `W(P)`, per §13.4a.
 
 ### 13.4a Source packages
@@ -2074,7 +2074,7 @@ contribution has been **suppressed**. There are two suppressors (cancellation (�
 **window-scoped** in exactly the same way:
 
 ```
-discharged(P, C) =  C not in W(P)          # P has already released the work in C
+discharged(P, C) =  C not in Wfresh(P)     # P has already released the work in C
 
 sourcePackages(u) =
     { P in resolve(u) :  discharged(P, C)
@@ -2101,8 +2101,9 @@ destroy an obligation the stronger one leaves intact.
 Suppressing a catch-up that is genuinely unwanted is done where the pending contribution actually lives, in the
 consumer's ledger, with `cancel(<consumer>)` or a hold on the consumer. §13.7d is the operator-facing summary.
 
-Every operand is computed from tags and ancestry at `HEAD`, so the rule is deterministic (§17.2) and independent of
-which run published what.
+Every operand is computed from tags and ancestry at `HEAD`, so the rule is deterministic for a fixed tag state
+(§17.2). A later source release can change `sourcePackages(u)` by discharging a previously suppressed source; that
+state transition is intentional and is not replay independence.
 
 ### 13.4b Apply corrections
 
@@ -2152,7 +2153,7 @@ applyCorrections(tuples, units):
                 if nothing was dropped for any P:      warn W209
                 continue
             for P in live ∩ resolve(t):
-                if commitOf(t) not in W(P):            warn W209; continue   # discharged
+                if commitOf(t) not in Wfresh(P):       warn W209; continue   # discharged
                 if (t) already corrected by a newer u'
                    for P:                              warn W210; continue
                 drop the tuple (P, commitOf(t), t.index, t)                  # -> dropped
@@ -2211,11 +2212,15 @@ reaches a published tag (§10.3).
 ### 13.6 Direct bumps
 
 ```
-direct(P) = max over surviving tuples for P of bumpOf(unit)
+direct(P) = max over surviving tuples for P whose commit is in Wfresh(P) of bumpOf(unit)
 ```
 
 `bumpOf(unit)` comes from the type mapping (§7.1) and `!` alone. No footer overrides it; `Release-As` acts on the
 release, not on the bump (§8.6).
+
+Consequently historical train records alone cannot create a new plan entry. They are consulted only after fresh direct
+or propagated work, a fresh channel move, or an exact `Release-As` has admitted `P`; §11.4 then uses the full `W(P)` to
+compute that admitted prerelease's aggregate target.
 
 ### 13.6a Holds
 
@@ -2302,8 +2307,9 @@ question a human asks after a failed run:
 
 ```
 staleSources(D):
-    W     = pendingWindow(D)                              # §13.3: the *target's* window
+    W     = freshWindow(D)                                # §13.3: the *target's* undelivered window
     edges = graph.restrictedTo(config.propagation.kinds)  # §8.4: the same edges as §9.2
+    channel = resolveChannelsForAudit()                    # same phase-2 result as §9.2
     dist  = shortestPathsUp(D, edges)   # P -> edge count of the shortest path P → … → D
     out   = {}
     for u in unitsIn(W):
@@ -2315,6 +2321,7 @@ staleSources(D):
         if D in sources:                                  continue   # §9.2 seeds seen = sources
         reaching = { P in sources : P in dist }
         if reaching is empty:                             continue
+        if not resolvableBy(sources, D, channel):     continue   # §9.3a
         level = min({ dist[P] for P in reaching })        # measured from the whole source set
         if level > u.depth:                               continue
         if D not in resolve(u.propagateScope):            continue
@@ -2333,6 +2340,8 @@ Three details carry the duality, and all three are places an implementation drif
   so a dependent reachable at depth 1 from one source and depth 3 from another is at depth 1 (§9.2, "depth is
   shortest-path", "depth is measured from the originating source set, always"). Taking `dist[P]` per ancestor instead of
   the minimum over `reaching` under-reports exactly the diamond cases.
+* **Resolvability is the same admission predicate as §9.3a.** Reachability alone is insufficient: a prerelease source
+  on a different line is not installable by `D`, so the downward and upward formulations MUST both reject it.
 * **`b` is the effective propagated bump**, computed the same way as in §9.2: `inherit` resolves to the unit's own
   bump, and a unit whose propagation resolves to `none`, or whose depth is `0`, is not a source at all (§8.3). Such a
   unit warns (`W152` where it asked for nothing, `W201` where it named a value the depth then discarded (§8.3b)) but
@@ -2366,42 +2375,43 @@ detected, by publishing in dependency order (§19.2).
 ### 13.7c Guarantees
 
 For a fixed `HEAD` and configuration, an implementation conforming to §13.4a, §9.2, and §19 satisfies the following.
-These are normative and testable; Appendix B.7 exercises G1–G6 and Appendix B.9 exercises G7 and G8.
+The cross-run claims name two recurring hypotheses: **H1 (stable inherited-channel state)** means every baseline channel
+read by `Propagate-Channel: inherit` remains unchanged during the run sequence; **H2 (no suppressed source release)**
+means no package whose contribution to a unit is initially suppressed by cancellation, hold, or correction is
+nevertheless released at `HEAD` during that sequence. They are components, not by themselves a complete proof premise.
+Where a guarantee says **retry invariant**, it additionally requires the corrected tuple stream, source sets, graph,
+scope/depth predicates, target baselines, and resolved source/target channel admission for every outstanding unit to
+remain unchanged except for baseline tags written for packages that successfully released. Neither H1 nor H2 is needed
+for one invocation's deterministic computation.
+These guarantees are normative and testable; Appendix B.7 exercises G1–G6 and Appendix B.9 exercises G7 and G8.
 
 **G1, termination.** Propagation halts. Each unit traverses a BFS that marks every package `seen` at most once, so it
 performs at most `|V|` expansions regardless of depth, cycles, or `+*`; the outer loop is over a finite set of units.
 
-**G2, completeness (no orphans).** If unit `u` in commit `C` admits dependent `D`, then `D` receives at least `u`'s
-propagated bump in **every** run until `D` releases at a commit containing `C`. Proof: admission is
-`C ∈ W(D) = reach(HEAD) − reach(stableCommit(D))`, and the only operation that removes `C` from that set is advancing
-`stableCommit(D)` to a commit whose ancestry includes `C`, that is, `D` releasing. Nothing else can drop the
-contribution, and in particular the source's own release cannot.
+**G2, completeness (no orphans).** Under the retry invariant, if unit `u` in commit `C` admits dependent `D`, then `D` receives
+at least `u`'s propagated bump in every run until `D` releases at a commit containing `C`. Admission is
+`C ∈ Wfresh(D)`; only a baseline tag for `D` at such a commit discharges it. A release by the source alone cannot.
 
-**G3, version stability.** A package caught up in run *k* receives the same version it was planned at in run 1,
-provided `HEAD` has not moved. Proof: its version is `applyBump(stableBaseline(D), effective(D))`; the failed run wrote
-no tag for `D`, so `stableBaseline(D)` is unchanged, and `effective(D)` is a `max()` over the same surviving tuples. A
-re-run after a partial failure therefore publishes the *same numbers* the operator already reviewed, an operational
-property as much as a formal one.
+**G3, version stability.** Under the retry invariant, a package caught up in run *k* receives the same version it was
+planned at in run 1. `effective(D)` is the same `max()` and the failed run wrote no tag for `D`. A source
+graduation can change an `inherit` channel, and discharge of a suppressed source can add a tuple; either change requires
+a newly surfaced plan rather than a claim that the old number is preserved.
 
-**G4, no double release.** Once `D` is tagged at commit `T` with `C ∈ reach(T)`, `C ∉ W(D)`, so the contribution is not
-re-admitted. Combined with G2 this makes the propagated bump **exactly-once**: it survives until it is discharged, and
-does not survive discharge.
+**G4, no double ledger delivery.** Once `D` is tagged at commit `T` with `C ∈ reach(T)`, `C ∉ Wfresh(D)`, so the
+contribution is not re-admitted. Combined with G2 this is exactly-once **in CCME's tag ledger**. It does not promise an
+exactly-once registry operation: §19.4 explicitly reconciles interruption between external publication and tagging.
 
-**G5, no blast-radius widening.** For every unit, the set of targets admitted in any later run is a **subset** of the
-set admitted in the first. Proof: the traversal is identical (same sources, same depth, same graph at `HEAD`), and
-admission only ever removes targets as their windows advance. A failed publish can therefore never enlarge what a commit
-releases, which is the property §18.1 depends on, since the alternative would let an attacker widen a blast radius by inducing a
-publish failure.
+**G5, no blast-radius widening under the retry invariant.** Each unit's later target set is a subset of its initial set:
+the source, traversal, and channel-admission predicates stay fixed while `Wfresh` only loses commits. Outside the
+invariant, publishing a suppressed source (the failure of H2) or changing resolved channel admission may expose finite
+catch-up targets. Such widening MUST be surfaced for review (§18.1).
 
-**G6, convergence.** Repeated running at a fixed `HEAD` reaches an empty plan in at most `n` runs, where `n` is the
-number of publishable packages in the first plan, provided each run publishes at least one package. Proof: by G4 a
-published package leaves the plan; by G5 no package enters it; so the plan strictly shrinks. If a run publishes nothing,
-the failure is not partial and is a hard error to be surfaced, not retried.
-
-G6 is **unconditional** for packages that are not held. Every released package is tagged, whatever its publish target
-(§13.10a), so every released package's window advances and it leaves the plan. The only packages that persist across
-runs are those held by `Release-As: none`, which are excluded from publication by §13.6a and are expected to persist
-until the hold lifts.
+**G6, restricted convergence.** Under the retry invariant, repeated running at
+a fixed `HEAD` reaches an empty non-held plan in at most `n` successful-progress runs, where `n` is the number of
+publishable packages in the first plan: G4 removes a published package and G5 admits no new one. Without H2, a source
+release may expose a finite follow-up obligation; other failures of the invariant may also change admission. §19.6
+therefore classifies the post-run replan; it does not claim
+global convergence outside the retry invariant.
 
 **Why tagging is universal.** It is tempting to version a private or artefact-less package in the plan but not tag it;
 there is, after all, nothing in a registry for the tag to correspond to. Such a package can never converge: its window
@@ -2410,20 +2420,18 @@ which in turn blunts the one check that detects the failure of §13.7a, and blun
 packages where nobody is watching a registry. A permanent exception to convergence is not a caveat worth documenting; it
 is a defect. Hence §13.10a: tag whatever is released.
 
-**G7, channel discharge.** A propagated channel is proposed for `d` at most until `d` is released on it. Proof: the
-final test of `propagatedChannelFor` (§9.3) compares the proposed channel to `channelOf(baseline(d))`, and `d`'s
-baseline advances to the released version on success; a non-transition value then equals the baseline channel and
-returns `NONE` (`W199`), and a transition no longer matches its `<from>`. This is what makes the channel axis converge
-even though `W(d)`, which is measured from the last *stable* tag (§13.3), still contains the commit. An implementation that
-compares against the channel it computed earlier in the same run, rather than against the baseline, loses this property
-and re-releases the package on every run for ever.
+**G7, channel discharge.** A propagated channel contribution from commit `C` is admitted for `d` only while
+`C ∈ Wfresh(d)`. Once `d` releases at a commit containing `C`, its baseline tag removes `C` and the contribution cannot
+reappear. While `C` is fresh, `propagatedChannelFor` (§9.3) separately rejects a value equal to
+`channelOf(baseline(d))` (`W199`) and a transition whose `<from>` does not match. Implementations MUST apply both the
+fresh-work admission gate and these no-op checks.
 
-G7 is why the channel axis needs no window bookkeeping of its own. The bump axis discharges through `W(d)` and the
-channel axis discharges through `d`'s baseline channel; both are read from tags at `HEAD`, so both are deterministic and
-both survive a partial failure unchanged.
+The no-op checks complement G7's common `Wfresh(d)` discharge gate. Both inputs are read from tags at `HEAD`, so
+the result is deterministic. Across a partial failure it remains unchanged under the retry invariant; otherwise the
+recomputed plan exposes the change.
 
-**G8, axis independence.** Suppressing a bump under §9.3a never suppresses a channel, and vice versa. Proof: the two
-passes share only `channel(P)`, which phase 3 reads and never writes. Two operational consequences: a `W208` in a plan
+**G8, one-way axis independence.** Suppressing a bump under §9.3a never suppresses a channel. The converse is false:
+resolved channels are an input to bump admission under §9.3a. Two operational consequences: a `W208` in a plan
 means a caret did not reach, not that a channel directive failed; and a package may legitimately appear in a plan with a
 channel change and no bump (`W202`), or with a bump and no channel change, and neither shape indicates a defect.
 
@@ -2470,7 +2478,7 @@ resolveChannels(chan, units):                   # chan from §9.2 phase 1
     for u in units in §11.6 order where u sets Channel:
         c = commitOf(u)
         for P in resolve(u.scopeSet):           # §13.4 has already resolved this scope-set
-            if c not in W(P):   continue        # §13.4a
+            if c not in Wfresh(P): continue       # §13.3
             cands[P].append(u)
 
     # ---- pass 2: read, once per package ----
@@ -2502,7 +2510,7 @@ a comprehension over `W(P)` evaluated inside a loop over every package, it resca
 which is `O(P · U)`, and it does that work for the great majority of packages that no `Channel` directive names at all.
 Pushing from units costs one pass over the units plus the scope-set resolutions §13.4 has already paid for, and one flat
 pass over the packages: `O(U + P)` on top of work the run does anyway. The two agree row for row, because a package
-appears in `cands[P]` under the inverted form exactly when `u sets Channel and P in resolve(u) and commitOf(u) in W(P)`,
+appears in `cands[P]` under the inverted form exactly when `u sets Channel and P in resolve(u) and commitOf(u) in Wfresh(P)`,
 which is the comprehension's condition read in the other direction.
 
 Two obligations come with the inversion. The push MUST visit units in §11.6 order, or `cands[P]` arrives unordered and
@@ -2685,12 +2693,14 @@ the repositories where the channel pass is skipped entirely, the factor is `1`.
 > but a package that is a source of one unit may legitimately be a *target* of another unit in the same bucket, and
 > subtracting the merged source set silently withholds those bumps. The symptom is a package that should have taken a
 > propagated `major` releasing as its own `patch`, with no diagnostic. Admit any node reached across **at least one
-> edge** within the depth bound, rather than subtracting the merged sources. Implementations SHOULD test a bucketed
+> edge** within the depth bound **from a unit for which that node is not a source**. Re-evaluate the per-unit
+> self-source predicate for every reached node in the merged source set, or exclude such units from bucketing. Merely
+> finding some edge over-admits a source of another unit. Implementations SHOULD test a bucketed
 > propagation against a literal per-unit one over randomised workspaces; the two MUST agree exactly.
 
 **Per-target predicates: hoist everything that does not read the target.** Inside the target loop of §9.2, three things
 are loop-invariant and one is not. `commitOf(u)`, `resolve(u.propagateScope)`, and the source-channel set of §9.3a
-depend only on the unit; only `W(d)`, `cancelledFor(·, d)` and the final `channel[d]` membership read the target. A
+depend only on the unit; only `Wfresh(d)`, `cancelledFor(·, d)` and the final `channel[d]` membership read the target. A
 transcription that resolves the scope-set and re-scans the source set once per target turns an `O(D + S + Σ)` unit into
 an `O(D · (S + Σ))` one, and the unit where that bites is precisely the one an author reaches for when they mean it: a
 `^^` across a wide scope-set has a large `D`, and re-deriving a two-element channel set thousands of times to answer a
@@ -2759,7 +2769,7 @@ Defaults are chosen so that an unconfigured repository behaves conservatively an
 | `publish.blockingKinds`     | `["dependencies","peerDependencies"]`                        | Edges over which a failed publish blocks dependents (§19.3).                              |
 | `publish.onFailure`         | `"skip-dependents"`                                          | `"skip-dependents"` or `"abort"`; what a failed publish does to the rest.                |
 | `publish.adoptPublished`    | `true`                                                       | Tag a version the registry already holds, when identity is verified (§19.4).              |
-| `publish.verifyConvergence` | `true`                                                       | Re-plan after a fully successful run and assert it is empty (§19.6).                      |
+| `publish.verifyConvergence` | `true`                                                       | Classify one post-success re-plan under §19.6.                                           |
 | `registries`                | `{}`                                                         | Registry name → URL/credentials handle, referenced by `publishTargets` (§13.10a).         |
 | `publishTargets`            | `{}`                                                         | Package glob → registry name or `none`. Highest-precedence target source.                 |
 
@@ -2992,8 +3002,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 80  | Two packages, one on `beta` and one stable, in one commit              | Independent; channel is per package.                                                                                                                      |
 | 81  | `feat!` and a `revert` of it in one window                             | Still `major`; `max()` of `major` and `patch`. Pair with `cancel` to drop the signal (§7.3).                                                             |
 | 82  | Engine run twice with no new commits                                   | Identical plan (§17.2).                                                                                                                                   |
-| 83  | Engine run again after a successful publish                            | Empty plan; the new tags moved `stableCommit` forward.                                                                                                    |
-| 84  | Run fails after publishing 3 of 7 packages                             | The 3 are tagged; re-running publishes exactly the remaining 4, at the same versions (§13.7c G3, §19.3).                                                  |
+| 83  | Engine run again after a successful publish                            | Empty plan; new baseline tags emptied `Wfresh`, including on a prerelease train.                                                                                                    |
+| 84  | Run fails after publishing 3 of 7 packages                             | Under the §13.7c retry invariant, the 3 are tagged and re-running publishes the remaining 4 at the same versions (§13.7c G3, §19.3).                                 |
 | 85  | Bot commit rewriting dependent manifests                               | MUST use a type mapping to `none`, or be excluded from the window, or the release loops (§19.5).                                                          |
 | 86  | Message exceeding `limits.*`                                           | `E158`, message-scoped; never a crash (§18.3).                                                                                                            |
 
@@ -3003,8 +3013,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 |-----|--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 87  | Provider published, consumer's publish failed                            | Consumer is released on the next run at the **same** version (§13.7c G3), marked `W193`. The case §13.7a exists for.                                                                                |
 | 88a | Scheduled staleness audit over a workspace that has never run the engine | Reports every package behind a dependency as `W195` (§13.7b). Reporting only; it never blocks and never releases.                                                                                  |
-| 88  | The same, five runs later, with no new commits                           | Still released, still at the same version. Admission depends on the consumer's window, which has not moved (G2).                                                                                    |
-| 89  | Provider published, consumer succeeded, run re-run                       | Empty plan. The contribution is discharged exactly once (G4).                                                                                                                                       |
+| 88  | The same, five runs later, with no new commits                           | Still released at the same version while the §13.7c retry invariant holds. Admission depends on the consumer's unchanged `Wfresh` (G2).                                                                                   |
+| 89  | Provider published, consumer succeeded, run re-run                       | Empty plan. The contribution is discharged once in the tag ledger (G4).                                                                                                                                       |
 | 90  | Consumer released in the interim for its own `feat`                      | No catch-up: its window no longer contains the commit, and its own release already picked up the dependency. Its range for that dependency is reconciled at publish time and reports `W197` (§9.4). |
 | 91  | Mid-chain failure under `^^` (`core`→`ui`→`theme`, `ui` fails)           | `theme` is **blocked**, not published (`W194`). On resume, `ui` then `theme`, both at their originally planned versions.                                                                            |
 | 92  | The same, but with `+1` instead of `^^`                                  | `theme` was never in the plan and never enters it. Catch-up cannot widen depth (G5).                                                                                                                |
@@ -3013,7 +3023,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 95  | `cancel(consumer)` after the provider released                           | The pending propagated contribution is discarded (§13.5a); the consumer is not released.                                                                                                            |
 | 96  | `cancel(provider)` after the provider released                           | No-op for the provider (`W170`); the consumer still catches up (§13.4a). Cancel never reaches a published release.                                                                                  |
 | 97  | Consumer held by `Release-As: none` when its provider releases           | Recorded, not released (`W154`). Catches up on the run that lifts the hold, at the then-current `max()`.                                                                                            |
-| 98  | Private package in the plan, run fully successful                        | Plan is empty. Private packages are tagged like any other (§13.10a), so they converge; `E199` is unconditional.                                                                                     |
+| 98  | Private package in the plan, run fully successful                        | Plan is empty. Private packages are tagged like any other (§13.10a), so their ledger entries discharge; §19.6 still performs its post-success re-plan.                                                                    |
 | 99  | Dependency cycle over runtime edges, anywhere in the workspace           | `E200`, repository-scoped. The run aborts before planning, whether or not the cycle is in this run's plan (§13.1).                                                                                  |
 | 99a | Cycle existing only through `devDependencies`                            | Not a cycle for this purpose; those edges are in neither `propagation.kinds` nor `publish.orderKinds` (§13.1). Common and legitimate.                                                              |
 | 99b | A cycle among packages none of which have a bump this run                | Still `E200`. Acyclicity is a property of the workspace, checked at load, not of the plan.                                                                                                          |
@@ -3056,6 +3066,12 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 130 | `Edits: U` where `U` is itself a correction                              | `U`'s record is restated and `U` is void, so `U`'s target returns. To restate the original again, target the original: a newer `Edits` of the same target supersedes directly (`W210`).                |
 | 131 | `Deletes: R` where `R` is a revert unit suppressing entries via `W212`   | `R`'s record is discarded and its changelog suppression is void: the reverted entry returns (§7.4.2, §7.3).                                                                                            |
 | 132 | Partial delete of a correction's own record, then the correction's turn  | Void only for the deleted packages (`W215` per package); the correction still applies for the rest (§13.4b).                                                                                           |
+| 133 | `P@1.1.0-beta.1` at `HEAD` already carries commit `C`; rerun with no new commits | `C` remains in train `W(P)` for aggregate target calculation but is absent from `Wfresh(P)` and cannot re-admit `P` (G4/G6). |
+| 134 | A cancelled source is nevertheless published before its consumer resumes | Its suppression may discharge and expose the consumer as a finite follow-up; this is permitted widening outside H2 and requires renewed review (G5, §18.1). |
+| 135 | `staleSources(D)` reaches a provider on `beta` while `D` is on another prerelease line | No stale row: §9.3a resolvability rejects it, matching downward propagation. |
+| 136 | A bump is rejected by §9.3a but the same unit carries an admissible propagated channel | The channel still applies; reversing this implication is forbidden (G8). |
+| 137 | `Propagate-Channel: inherit`; the source baseline graduates between retries | The inherited channel and planned version may change; G3 applies only while the relevant baseline channels remain fixed. |
+| 138 | Two bucketed units share target `cli`, but `cli` is a source of one unit only | Admit `cli` only for the other unit after a per-unit self-source check; “reached by some edge” alone over-admits. |
 
 ---
 
@@ -3127,7 +3143,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `E196` | Repository is shallow or grafted; history is incomplete.                                                                                                                                                  |
 | `E197` | Publish order violation: a package was published before a workspace dependency also in this run's plan (§19.2). Run-scoped.                                                                               |
 | `E198` | The registry already holds this version and its identity could not be verified as this run's artefact (§19.4). Run-scoped.                                                                                |
-| `E199` | Convergence check failed: a package remains stale after a fully successful run (§19.6). Run-scoped.                                                                                                       |
+| `E199` | Fixed-point exhaustion failed: a non-held plan repeated without discharge or has no permitted state-change explanation (§19.6). Run-scoped.                                                                                                       |
 | `E200` | The dependency graph contains a cycle over runtime edge kinds (§13.1). Repository-scoped; names the members.                                                                                              |
 | `E210` | A correction targets a commit that is unknown, unreachable, or not a proper ancestor of the correction's own commit (§7.4.2).                                                                             |
 | `E211` | A correction's unit selector is out of range, or a bare sha names a multi-unit commit (§7.4.1).                                                                                                           |
@@ -3199,7 +3215,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 
 ### 17.1 What a conforming implementation must do
 
-An implementation conforms to CCME 1.0.0 if and only if it:
+An implementation conforms to CCME 2.0.0 if and only if it:
 
 1. Parses messages per §4 and §5, producing exactly the units, scopes, and directives those sections define.
 2. Resolves scopes per §6, including file-derived resolution (§6.2).
@@ -3214,7 +3230,7 @@ An implementation conforms to CCME 1.0.0 if and only if it:
 8. Reproduces every vector in Appendix B.
 9. Emits every diagnostic in §16 under the stated conditions, with `W155`, `W156`, `W172`, `W193`, `W194`, `W202`,
    `W208`, and `W209` non-suppressible.
-10. Admits propagation per §13.4a (against the **dependent's** window) and therefore satisfies G1–G8 of §13.7c.
+10. Admits propagation per §13.4a (against the **dependent's** undelivered window) and satisfies G1–G8 under their stated hypotheses of §13.7c.
 11. Publishes per §19: dependency-first order, tag-after-publish, dependents blocked on failure, ranges reconciled
     against current versions.
 12. Produces the plan of §13 exactly, whatever internal representation or optimisation it uses (§13.11).
@@ -3236,12 +3252,13 @@ Both are normative, and both are testable:
 * **Determinism.** For a fixed (repository state at `HEAD`, configuration), the release plan MUST be byte-identical
   across runs, machines, and implementations. Nothing may depend on wall-clock time, commit dates, tag creation order,
   filesystem iteration order, hash-map iteration order, or locale.
-* **Idempotency.** Running the engine twice with no intervening commits MUST produce the same plan the second time.
-  Running it after a successful publish MUST produce an empty plan, because the tags written by the first run move each
-  package's `stableCommit` forward (§13.3).
-* **Convergence.** Running the engine after a *partially* successful publish MUST produce a plan containing exactly the
-  packages that did not publish, at the versions they were originally planned at (§13.7c G2–G4, G6). Both idempotency
-  and convergence are scoped to packages that are not held (§13.7c); no other exclusion exists.
+* **Idempotency.** Running the engine twice from the same repository and tag state MUST produce the same plan.
+  After a successful publish, each package's new baseline tag empties its `Wfresh`; train-wide `W` may remain non-empty
+  solely to retain aggregate prerelease history (§13.3).
+* **Resumption.** After a partial publish, implementations MUST recompute from tags. Under G3's hypotheses, the plan
+  contains the unpublished packages at their reviewed versions. A changed inherited source channel or discharge of a
+  suppressed source may produce a finite, newly surfaced follow-up plan; it MUST be reviewed rather than described as
+  byte-identical resumption. Held packages remain excluded from publication (§13.6a).
 
 Idempotency is the special case of convergence in which nothing failed. Stating only the special case is what leaves the
 general one unimplemented, so both are required here explicitly.
@@ -3252,13 +3269,17 @@ container MUST NOT be observable.
 
 ### 17.3 Versioning of this specification
 
-This document is CCME **1.0.0** and is itself versioned under SemVer:
+This document is CCME **2.0.0** and is itself versioned under SemVer:
 
 * **Patch**: clarifications and editorial fixes that cannot change any release plan.
 * **Minor**: new types, footers, or inline sigils; new diagnostics; new configuration keys. A 1.x implementation MUST
   ignore unknown footer keys (`W150`) and MAY ignore unknown types (`W140`), so minor additions are forward-compatible
   by construction.
 * **Major**: any change that alters the release plan for a message that was already valid.
+
+CCME 2.0.0 preserves the 1.0.0 message grammar. It corrects the pending-ledger algorithm and revises the
+hypotheses of guarantees whose unconditional 1.0.0 wording admitted counterexamples; conforming plans can therefore
+differ for inputs that were valid under 1.0.0.
 
 The escape hatches that make minor versions safe are `W140` and `W150`. Implementations MUST NOT convert either into an
 error by default; `strictTypes` is opt-in for exactly this reason.
@@ -3288,7 +3309,7 @@ engine.
 | **Forced graduation**          | `%%*>stable++*` on a widely-depended package                          | Ends every dependent's prerelease train at once, publishing versions consumers resolve by default. Irreversible, since the stable versions cannot be recalled. Requires an explicit transition to write, which is why `W200` blocks every implicit route (§9.3). |
 | **Blast-radius amplification** | `^^inherit` on a leaf package                                         | Turns a one-package change into a workspace-wide major release. Bounded by propagation being opt-in (§8.3): the reach is always written in the message.                                                                                                          |
 | **Resource exhaustion**        | Pathological scope globs or very large depths across a huge workspace | CPU/memory pressure in CI. Bounded by §18.3.                                                                                                                                                                                                                     |
-| **Induced-failure widening**   | Causing one publish to fail, hoping the retry releases more           | **Not possible.** §13.7c G5: a later run's target set is a subset of the first's. A retry can only discharge work already planned and reviewed.                                                                                                                  |
+| **Induced-failure widening**   | Causing one publish to fail, hoping the retry releases more           | Under the §13.7c retry invariant, G5 makes later targets a subset. Otherwise changed source or channel admission can expose a finite catch-up; the recomputed plan and limits MUST be reviewed again before publication.                                             |
 | **Stale-consumer wedge**       | A hold left in place on a widely-depended package                     | Consumers accumulate unreleased propagation indefinitely. Visible as `W154` plus a growing `W193` set; surfaced by the audit of §13.7b.                                                                                                                          |
 | **Artefact adoption**          | Pre-publishing a version the engine is about to publish               | Blocked by the identity check of §19.4: an unverifiable pre-existing version is `E198`, never silently tagged.                                                                                                                                                   |
 | **Record falsification**       | `fix: x` + `Edits: <sha>` targeting someone's `feat!`                 | Downgrades a pending breaking change to a patch, shipping it under a compatible number. Confined to undischarged work (§7.4.2) and to matching scopes (`E213`); the plan marks every corrected entry (§13.10), and `requireCodeownerFor` can gate the footer.     |
@@ -3312,9 +3333,9 @@ Implementations MUST:
    already succeeded (§16). Rolling back a published version is impossible; pretending otherwise would corrupt the tag
    state that the next run reads.
 
-The blast-radius review of mitigation 2 is what makes G5 useful in practice: because the target set can only shrink
-across runs, the plan a reviewer approves before the first attempt is an upper bound on everything every subsequent
-retry can publish. A reviewer never has to re-approve a resume.
+Under the §13.7c retry invariant, G5 makes the initially reviewed target set an upper bound for a resume. If the
+invariant changes, implementations MUST show the recomputed target set, reapply the configured safety limits, and
+require the repository's ordinary plan approval before publishing it.
 
 Implementations SHOULD additionally offer, and repositories accepting external contributions SHOULD enable:
 
@@ -3432,7 +3453,8 @@ A run that publishes several packages MAY fail partway. Implementations MUST:
   failure;
 * report a completion summary naming what published, what failed, and what was blocked, and exit non-zero;
 * on re-run, recompute from tags. Packages already tagged fall out of the plan by §13.6; packages that failed or were
-  blocked remain in it by §13.4a, at their original versions (§13.7c G3).
+  blocked remain candidates by §13.4a. Their versions remain unchanged only under G3's stated hypotheses; channel or
+  source-set changes MUST appear in the recomputed plan.
 
 ```
 run(plan):
@@ -3502,23 +3524,22 @@ repositories SHOULD exclude the bot's commits from the pending window by convent
 
 ### 19.6 Convergence verification
 
-After a run in which **nothing** failed or was blocked, implementations SHOULD re-plan and assert that the resulting
-plan is empty. A non-empty result means some package remains stale despite a fully successful run, which can only be an
-implementation defect, most likely admission tested against the wrong window (§13.4a). It MUST be reported as
-`E199`.
+After a run in which nothing failed or was blocked, implementations SHOULD re-plan once. An empty non-held plan proves
+exhaustion for that observed state. Under the §13.7c retry invariant, any non-empty result is `E199`, because G4
+discharged every published package and G5 admitted no new one.
 
-Exactly one exclusion applies: **held packages**, which are excluded from publication by `Release-As: none` (§13.6a)
-and are expected to persist until the hold lifts. There is no exclusion for private, internal, or artefact-less
-packages, because §13.10a tags all of them.
+Outside that invariant, publishing a previously suppressed source can legitimately expose a finite follow-up
+obligation, and a source baseline move can change channel admission. Such a plan is not `E199` merely for being
+non-empty. The implementation MUST stop before publishing it, report it with available `W193`/`W199` provenance,
+reapply §14 safety limits, and require §18.2 review. A later explicitly approved invocation may publish it and perform
+its own post-run check. This protocol does not promise that arbitrary changing states reach a global fixed point.
 
-That the check is unconditional is the point. If any class of package could legitimately linger in the plan for ever,
-"the plan is not empty" could not be treated as an error at all, and the check would be worthless precisely where it is
-needed most.
+`E199` MUST be raised when a non-empty result occurs despite the retry invariant, or when a follow-up cannot be
+explained by an observed source-set, baseline, or channel-admission change. Held packages are omitted from this comparison.
+Private, internal, and artefact-less packages are not omitted, because §13.10a tags them.
 
-The check is cheap (one extra planning pass, no registry traffic) and it converts the failure mode of §13.7a from a
-silent one into a loud one. Repositories running the engine on a schedule SHOULD also run the staleness audit of §13.7b
-and surface `W195`, which catches the same class of problem in a workspace whose packages were already behind their
-dependencies before CCME was adopted.
+The check uses no registry traffic. Repositories running the engine on a schedule SHOULD also run §13.7b and surface
+`W195`, which detects pre-existing stale consumers.
 
 ### 19.7 Adopting CCME where packages are already stale
 

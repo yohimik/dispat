@@ -7,8 +7,8 @@ It uses no regular expressions. The parser executes the single left-to-right ind
 one byte of lookahead, no backtracking, no recursion, O (n) time, and O (1) working space. This design ensures safe
 execution when parsing untrusted commit messages in CI.
 
-The specification is vendored as [SPEC.md](SPEC.md), and every `§n.m` reference in the code and documentation points to
-it. Chapter §20 covers parsing, while §17 covers Conformance.
+The separately versioned specification is [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md), and every `§n.m` reference in the code and
+documentation points to it. Chapter §20 covers parsing, while §17 covers Conformance.
 
 ## Install
 
@@ -351,4 +351,5 @@ Go 1.21 or later. No dependencies.
 
 The parser, meaning all Go source in this package, is licensed under MIT. See [LICENSE](./LICENSE).
 
-The CCME specification, [SPEC.md](./SPEC.md), is licensed under GPL-3.0-or-later. See [LICENSE-SPEC](./LICENSE-SPEC).
+The separate CCME specification, [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md), is licensed under
+GPL-3.0-or-later. See its [LICENSE](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/LICENSE).
