@@ -99,7 +99,6 @@ body {
 
   .navbar-sidebar__items {
     min-height: 0;
-    overflow: hidden;
   }
 
   .navbar-sidebar__item {

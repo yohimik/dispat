@@ -113,8 +113,9 @@ exists because a platform can refuse a post for reasons of its own, and re-runni
 again is not an option once the tags exist. A replay that fails exits non-zero, unlike a release: a person asked for
 one thing, and a green run would hide that it did not happen.
 
-`ANNOUNCE_CRIER_BIN` names the binary to use, for a machine where crier is not on `PATH`. Everywhere else it comes from
-the [install manifest](../reference/ci.md#the-other-tools-a-job-needs), which installs its newest release.
+`ANNOUNCE_CRIER_BIN` names the binary to use, for a machine where crier is not on `PATH`. Everywhere else
+[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh) installs the version
+recorded in the repository's [Aqua manifest](../reference/ci.md#the-other-tools-a-job-needs).
 
 The replay itself is a dispatch rather than a laptop holding the repository's secrets:
 [`announce.yml`](https://github.com/yohimik/dispat/blob/main/.github/workflows/announce.yml) takes the name of a script

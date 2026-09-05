@@ -97,25 +97,22 @@ measurement.
 
 [`github.com/yohimik/tinygo`](https://github.com/yohimik/tinygo) closes the gap the verdict rests on, a real
 `crypto/tls` with a real certificate verifier, over a netdev that speaks to the host's sockets on linux and darwin
-both. The spike fetches it with dispat's own [install command](../cli/install.md), which is also how you would install
-it:
+both. The spike installs the fork through the repository's shared Aqua configuration:
 
 ```sh
-dispat install yohimik/tinygo --prerelease \
-  --asset 'tinygo{version}.{os}-{arch}.tar.gz' --bin-dir ~/.local --pipe 'tar -xz'
+sh scripts/install-tools.sh tinygo ~/.local
 ```
 
-The line names no version on purpose: it installs the fork's newest release, which is what the release's
-`tiny-toolchain` stage in `services/dispat/Dockerfile`, the spike's `tinygo-spike-fork` stage and the darwin half of
-the spike all run, each with its own `--bin-dir`, so a new fork release is what every one of them asks about next. The
-same line without a folder is one of the two in
-[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh), the repository's
-[install manifest](../cli/install.md#install-manifests-as-shell-scripts) for a runner; a build that must hold one
-particular fork adds `--release`.
+The script first installs the newest Aqua executable with dispat, then Aqua installs the version recorded in
+`.aqua/aqua.yaml`: 0.43.0-net.1 here. The release's `tiny-toolchain` stage, the `tinygo-spike-fork` stage and the darwin
+half of the spike all use that same manifest. Aqua verifies the archive against `.aqua/aqua-checksums.json` and keeps
+the whole extracted tree in its cache; the destination's `tinygo` link points to that tree so `lib` and `src` remain
+beside `bin/tinygo`.
 
-A `--pipe` install unpacks a tree rather than writing one file, so there is no destination for dispat to compare a
-checksum against: every run fetches the tarball again, and the darwin spike keeps the tree it unpacked in its cache
-until `TINYGO_REFRESH=1` asks for the newest one.
+To advance the fork, follow the
+[tool update instructions](https://github.com/yohimik/dispat/blob/main/.aqua/README.md), choosing a published prerelease
+explicitly. Review and commit the manifest and checksums together. The explicit version avoids selecting an unreleased
+draft tag. The darwin spike checks the recorded version on every run and reuses Aqua’s verified downloads.
 
 The base image is upstream 0.42.0 and every stage up to `tinygo-spike-net` measures it, so the verdict above keeps
 its evidence. The two fork stages are the re-asking.

@@ -282,11 +282,18 @@ installs it onto a folder on `PATH`, so a setup step needs no package manager an
 Pin the version with `--release` for a reproducible job, and put `--check` in front of it on a cached runner: it exits
 `1` only when the destination does not already hold that exact file, so a warm cache costs no transfer.
 
-Collect those lines into an [install manifest](../cli/install.md#install-manifests-as-shell-scripts) once more than one
-job needs them, so the list lives in one file rather than in each workflow: dispat's own is
-[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh), two lines that
-install the newest crier and the newest TinyGo fork for the release job. A job that needs one of them, or needs it in a
-particular folder, runs that tool's `dispat install` line directly.
+Dispat itself uses Aqua for the tools shared by its workflows and build probes. `.aqua/aqua.yaml` records crier 1.1.0
+and the `yohimik/tinygo` fork at 0.43.0-net.1, `.aqua/registry.yaml` describes their release assets, and
+`.aqua/aqua-checksums.json` records the GitHub release digests. `.aqua/aqua-policy.yaml` admits that local registry.
+[`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh) bootstraps the newest
+Aqua with `dispat install`, then accepts `[all|crier|tinygo] [destination]`. It writes the Aqua executable and the selected tools
+into the destination. Crier is a standalone binary; TinyGo remains a complete `tinygo/` tree, linked from Aqua's cache
+so its `lib` and `src` directories stay beside `bin/tinygo`.
+
+CI, Docker builds, and the spikes use the same recorded versions. The
+[tool configuration README](https://github.com/yohimik/dispat/blob/main/.aqua/README.md) lists the update commands,
+including the required local registry policy. Choose the fork's prerelease explicitly, refresh the checksums, and
+review and commit both files together. Explicit selection prevents an unreleased draft tag from becoming a toolchain.
 
 A private repository works too, with a token that may read its contents. dispat uses the same credential for the
 releases listing and for the download, taking the asset from its API endpoint rather than from the public URL. On
