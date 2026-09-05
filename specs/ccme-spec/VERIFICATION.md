@@ -92,3 +92,20 @@ notices, READMEs, the architecture page, and site metadata distinguish the sourc
 Docusaurus typechecking and production build, the specification verifier and version-hook tests, and test-plan
 reference validation passed after the notice changes. The preceding CI revision passed Tests and Format and vet;
 the new `test(*)` commit requests fresh CI for this complete revision before release dispatch.
+
+## Corrected release plan after rollback
+
+The corrected planner output selects models, Dispat, all four images and docs at 1.8.0. Models shares the CLI
+`fixedMajorMinor` group. Only CCME and its specification advance to 2.0.0; manifest, scanner and writer advance to
+1.2.0. The checked-in specification version and its Markdown declarations remain 1.0.0 until the release hook
+stamps 2.0.0. No additional major-version policy gate was added.
+
+All models and CLI Go tests passed after restoring the original module imports, and the integration harness
+compiled against those same types. The specification verifier and version-hook suite passed. The repaired orphan
+experiment passed all eight checks against the published 1.8.0 image before that image was withdrawn: the failed
+package explicitly enables rollback, previously published packages are not republished, and the next plan is empty.
+
+The rollback removed all eleven publications from the failed run, including the erroneous models 2.0.0 release.
+Docker rollback run 33947918048 verified the four image repositories: stable aliases again resolve to 1.7.2 and the
+1.8/1.8.0 tags are absent. Discord deletion was verified through its API; the owner confirmed LinkedIn and Instagram
+cleanup. The corrected main revision requires fresh CI and the complete release gates before publication.
