@@ -1,0 +1,13 @@
+# Repository tooling is tested and vetted but is never released.
+versioning: none
+scripts:
+  vet: >-
+    docker buildx build --file ../Dockerfile.gotest --target vet-tools
+    $(sh ../scripts/buildx-cache.sh vet-tools) --output type=cacheonly ..
+  build: >-
+    docker buildx build --file ../Dockerfile.gotest --target vet-tools
+    $(sh ../scripts/buildx-cache.sh vet-tools) --output type=cacheonly ..
+  tests: >-
+    docker buildx build --file ../Dockerfile.gotest --target export-tools
+    $(sh ../scripts/buildx-cache.sh gotest-tools)
+    --output type=local,dest=../coverage ..

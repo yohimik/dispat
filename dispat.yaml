@@ -1,14 +1,10 @@
-# The monorepo's shared configuration: what every space needs, and nothing any
-# one of them owns. Each space carries its own dispat.yaml in its folder, and
-# the packages with exceptions of their own (packages/docs, services/dispat
-# and infra) carry a package file beside their code — see
+# The monorepo's shared configuration: repository-wide policy plus paths that
+# let dispat discover each space and standalone package. Spaces and packages
+# carry their behavior in their own dispat.yaml files — see
 # https://dispat.dev/examples/layout/.
 scripts:
-  # The lock syncs run as builds of the shared Dockerfiles and export the
-  # regenerated files back over the working tree's, so neither needs a host
-  # toolchain. Package scripts run inside the releasing package's folder,
-  # which is why the repository root and the module's path under it are read
-  # from git rather than assumed.
+  # Go lock sync is shared by both Go spaces. It runs as a build of the shared
+  # Dockerfile and exports the regenerated files over the working tree.
   go-mod-tidy: |
     set -eu
     ROOT=$(git rev-parse --show-toplevel)
@@ -17,12 +13,6 @@ scripts:
       --build-arg MODULE="$MODULE" \
       $(sh "$ROOT/scripts/buildx-cache.sh" "tidy-$DISPAT_PACKAGE") \
       --output type=local,dest=. "$ROOT"
-  pnpm-install: |
-    set -eu
-    ROOT=$(git rev-parse --show-toplevel)
-    docker buildx build --file "$ROOT/packages/docs/Dockerfile" --target lockfile-export \
-      $(sh "$ROOT/scripts/buildx-cache.sh" docs-lockfile) \
-      --output "type=local,dest=$ROOT" "$ROOT"
   changelog: dispat changelog
   commit: dispat commit --tag --push
   github: dispat github
@@ -134,180 +124,21 @@ spaces:
   docker:
     path: docker
 
-# The normative CCME document is released independently from the Go library
-# that implements it. Its version is stored in the document itself and its
-# package-local release stage keeps those copies in lockstep.
+# The initial baseline applies until the specification has its first tag.
 initials:
   ccme-spec: 1.0.0
 
-# Standalone packages include the separately released specification below.
-# The remaining entries are repository tooling: never versioned, tagged or published, but swept by
-# `dispat run vet`, `tests` and `build` like every real package, so the lint
-# and test gates need no hand-kept module list beside the sweep.
+# Standalone paths are registered here; their behavior lives in each folder's
+# dispat.yaml.
 packages:
   ccme-spec:
     path: specs/ccme-spec
   tools:
     path: tools
-    versioning: none
-    # One folder deep rather than a space's two, hence the shorter relative
-    # paths. vet doubles as the build gate: it compiles what it analyses,
-    # and a compile gate must leave no artifact in the checkout, which a
-    # cacheonly build never does.
-    scripts:
-      vet: >-
-        docker buildx build --file ../Dockerfile.gotest --target vet-tools
-        $(sh ../scripts/buildx-cache.sh vet-tools) --output type=cacheonly ..
-      build: >-
-        docker buildx build --file ../Dockerfile.gotest --target vet-tools
-        $(sh ../scripts/buildx-cache.sh vet-tools) --output type=cacheonly ..
-      # Through `testreport test` (inside the target) like every Go suite, so
-      # the repository tooling's own runs land in the site's test-results
-      # page too.
-      tests: >-
-        docker buildx build --file ../Dockerfile.gotest --target export-tools
-        $(sh ../scripts/buildx-cache.sh gotest-tools)
-        --output type=local,dest=../coverage ..
   integration:
     path: tests/integration
-    versioning: none
-    # The module requires models and drives the CLI. Owning its test script
-    # makes an integration-only change a real gate; the dispat dependency
-    # makes --consumers select it after a CLI change, exactly once.
-    dependencies: [models, dispat]
-    scripts:
-      vet: >-
-        docker buildx build --file ../../Dockerfile.gotest --target vet-integration
-        $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
-      build: >-
-        docker buildx build --file ../../Dockerfile.gotest --target vet-integration
-        $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
-      tests: >-
-        docker buildx build --file ../../Dockerfile.gotest --target export-integration
-        $(sh ../../scripts/buildx-cache.sh gotest-integration)
-        --output type=local,dest=../../coverage ../..
-  # The release experiments (tests/experiments): the image a release just
-  # published, put through the faults a unit test never reaches, beside
-  # lerna, nx and changesets in the same fixture. Script-only like tools:
-  # never versioned, never tagged, never published. `build` is what the
-  # build gate reaches when the folder changes; the docs package's
-  # beforeBuild hook runs `experiments` and `summary` inside every release,
-  # and the Experiments workflow runs the same scripts by hand.
-  #
-  # The records land in the repository's coverage/ folder beside the test
-  # profiles, never under tests/experiments: a run is reproduced rather than
-  # kept, and what a release measured travels to the site through the report
-  # rather than through the checkout.
   experiments:
     path: tests/experiments
-    versioning: none
-    scripts:
-      # The version under test is the one the caller names, else the newest
-      # published image: an experiment runs the bytes a release shipped,
-      # never a build of the checkout, so a planned version nobody published
-      # is never a candidate, and the prerelease tags are not either.
-      build: |
-        set -eu
-        version=${EXPERIMENTS_DISPAT_VERSION:-$(git tag -l 'docker/dispat-alpine/v*' --sort=-v:refname | sed 's|.*/v||; /-/d' | head -n 1)}
-        : "${version:?no published dispat-alpine image to build the experiments on}"
-        echo "building the experiments on yohimik/dispat-alpine:$version"
-        docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
-          $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
-      # One cell, named the way run.sh takes it: EXPERIMENT and TOOL, and
-      # SCENARIO where the experiment has more than one. The image is assumed
-      # built, so a sweep pays for it once; `experiment` below is the form
-      # that builds first.
-      #
-      # The console goes to <cell>.log rather than to the terminal, because
-      # twelve of these run at once and interleaved transcripts are a record
-      # of nothing. The exit code is the harness verdict: the cell's own file
-      # says what happened, and the caller only needs to know whether it held.
-      cell: |
-        set -eu
-        : "${EXPERIMENT:?EXPERIMENT is required (orphan, midrelease)}"
-        : "${TOOL:?TOOL is required (lerna, nx, changesets, dispat)}"
-        ROOT=$(git rev-parse --show-toplevel)
-        RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
-        cell=$EXPERIMENT${SCENARIO:+-$SCENARIO}-$TOOL
-        mkdir -p "$RESULTS"
-        rc=0
-        docker run --rm -v "$RESULTS:/results" \
-          -e "EXPECT=${EXPERIMENTS_EXPECT:-1}" \
-          dispat-experiments "$EXPERIMENT" "$TOOL" ${SCENARIO:-} > "$RESULTS/$cell.log" 2>&1 || rc=$?
-        echo "$cell: exit $rc"
-        exit "$rc"
-      # One cell, built first: the by-hand form, for re-recording a single
-      # protocol without paying for the other eleven.
-      experiment: |
-        set -eu
-        dispat exec build --for pkg:experiments --in pkg:experiments
-        dispat exec cell --for pkg:experiments --in pkg:experiments
-      # The campaign, as lines: one cell per line, `<experiment> <tool>` and a
-      # scenario where the experiment has more than one, which is the argument
-      # order `cell` and run.sh take.
-      #
-      # This is the only place the twelve are enumerated. The sweep below pipes
-      # it into xargs and the Experiments workflow turns it into its matrix, so
-      # a cell added here is a cell both runs, and neither can drift into
-      # measuring a different campaign than the other.
-      cells: |
-        set -eu
-        for tool in dispat lerna nx changesets; do
-          echo "orphan $tool"
-        done
-        for scenario in clean conflict; do
-          for tool in dispat lerna nx changesets; do
-            echo "midrelease $tool $scenario"
-          done
-        done
-      # Every cell of the campaign, four at a time. The folder is wiped
-      # through the image rather than by the host's rm, because the container
-      # writes it as root and a host rm of root-owned files needs a password
-      # nobody has in CI.
-      #
-      # xargs runs each cell and remembers whether any exited non-zero (123),
-      # so a release fails on a dispat cell whose expectations did not hold
-      # while every other cell still gets its record.
-      experiments: |
-        set -eu
-        ROOT=$(git rev-parse --show-toplevel)
-        RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
-        dispat exec build --for pkg:experiments --in pkg:experiments
-        mkdir -p "$RESULTS"
-        docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
-          /results -mindepth 1 -delete
-        echo "running twelve cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
-        dispat exec cells --for pkg:experiments --in pkg:experiments \
-        | EXPERIMENTS_RESULTS="$RESULTS" xargs -P "${EXPERIMENTS_JOBS:-4}" -L 1 sh -c \
-            'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments'
-      # The table over whatever the cells recorded, through the same verb the
-      # site's report reads them with, so a job summary and the published page
-      # are one renderer over one set of records.
-      #
-      # A build of Dockerfile.gotest like every other gate, which means it
-      # reads the repository's own coverage/experiments through the build
-      # context: EXPERIMENTS_RESULTS moves where the cells write, and a
-      # summary of a folder outside the checkout is a `testreport experiments`
-      # away rather than this script's business.
-      summary: |
-        set -eu
-        ROOT=$(git rev-parse --show-toplevel)
-        docker buildx build --file "$ROOT/Dockerfile.gotest" --target experiments-summary-export \
-          $(sh "$ROOT/scripts/buildx-cache.sh" experiments-summary) \
-          --output "type=local,dest=$ROOT/coverage" "$ROOT"
-        cat "$ROOT/coverage/experiments.md"
-        # The heading is the step summary's alone: a terminal already knows
-        # what it just asked for, and a summary page is a wall of other
-        # sections.
-        {
-          echo "### Release experiments"
-          echo
-          cat "$ROOT/coverage/experiments.md"
-        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-  # The Google Cloud footprint that serves dispat.dev, released like code.
-  # Only the existence and the folder live here; everything the package says
-  # about itself lives in infra/dispat.yaml, beside the Terraform it
-  # configures.
   infra:
     path: infra
 
@@ -386,37 +217,3 @@ github:
     - line:
         - "---"
         - ""
-    - package: [dispat]
-      # The same three install variants the README offers, pinned to this
-      # release's own installer via its v{version} alias tag. The PowerShell
-      # line passes -Version rather than setting $env:DISPAT_VERSION, because
-      # these lines run through the ${VAR} expansion and a literal $env would
-      # be read as a variable named "env".
-      line:
-        - "**Install this version:**"
-        - ""
-        - "```sh"
-        - "# Linux and macOS"
-        - "curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.sh | DISPAT_VERSION=${DISPAT_NEW_VERSION} sh"
-        - "```"
-        - ""
-        - "```sh"
-        - "# ...or with wget"
-        - "wget -qO- https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.sh | DISPAT_VERSION=${DISPAT_NEW_VERSION} sh"
-        - "```"
-        - ""
-        - "```powershell"
-        - "# Windows, in PowerShell"
-        - "irm https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.ps1 -OutFile install.ps1; ./install.ps1 -Version ${DISPAT_NEW_VERSION}"
-        - "```"
-        - ""
-        - "[Documentation](https://dispat.dev/) · [dispat in CI](https://dispat.dev/reference/ci/) · [Container images](https://hub.docker.com/u/yohimik)"
-    - space: [docker]
-      line:
-        - "`docker pull yohimik/${DISPAT_PACKAGE}:${DISPAT_NEW_VERSION}` · [Docker Hub](https://hub.docker.com/r/yohimik/${DISPAT_PACKAGE}) · [The dispat images](https://dispat.dev/reference/ci/#the-container-images)"
-    - space: [pkg]
-      line:
-        - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/${DISPAT_PACKAGE}@v${DISPAT_NEW_VERSION}) · [Documentation](https://dispat.dev/)"
-    - package: [docs]
-      line:
-        - "[The documentation site](https://dispat.dev/) this release deploys."

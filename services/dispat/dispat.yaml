@@ -142,3 +142,28 @@ flow:
   build: build
   announce: announce
   onFail: unlink
+
+# Package-specific release footer. A nearer footer replaces the shared list,
+# so repeat the common separator before the CLI installation instructions.
+github:
+  footer:
+    - line: ["---", ""]
+    - line:
+        - "**Install this version:**"
+        - ""
+        - "```sh"
+        - "# Linux and macOS"
+        - "curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.sh | DISPAT_VERSION=${DISPAT_NEW_VERSION} sh"
+        - "```"
+        - ""
+        - "```sh"
+        - "# ...or with wget"
+        - "wget -qO- https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.sh | DISPAT_VERSION=${DISPAT_NEW_VERSION} sh"
+        - "```"
+        - ""
+        - "```powershell"
+        - "# Windows, in PowerShell"
+        - "irm https://raw.githubusercontent.com/yohimik/dispat/v${DISPAT_NEW_VERSION}/install.ps1 -OutFile install.ps1; ./install.ps1 -Version ${DISPAT_NEW_VERSION}"
+        - "```"
+        - ""
+        - "[Documentation](https://dispat.dev/) · [dispat in CI](https://dispat.dev/reference/ci/) · [Container images](https://hub.docker.com/u/yohimik)"

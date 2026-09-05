@@ -1,5 +1,5 @@
-# The pkg space: the six published Go libraries. This file is the space's own
-# configuration; the space itself, and its path, are declared at the root.
+# The pkg space: shared release and CI behavior for the six published Go
+# libraries. Package grouping and dependencies live beside each library.
 tagFormat: pkg/{name}/v{version}
 isBuildWaitingPublish: true
 autoVersion:
@@ -57,15 +57,10 @@ scripts:
 flow:
   publish: [changelog, commit]
   beforeBuild: [tests:release]
-packages:
-  manifest:
-    versionGroup: manifests
-  scanner:
-    versionGroup: manifests
-    dependencies: [manifest]
-  writer:
-    versionGroup: manifests
-    dependencies: [manifest]
-  models:
-    versionGroup: cli
-    dependencies: [ccme]
+
+# All Go-library release pages end with the package's API documentation.
+github:
+  footer:
+    - line: ["---", ""]
+    - line:
+        - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/${DISPAT_PACKAGE}@v${DISPAT_NEW_VERSION}) · [Documentation](https://dispat.dev/)"

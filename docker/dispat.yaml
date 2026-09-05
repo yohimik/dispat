@@ -21,6 +21,10 @@ changelog:
   noChangesText: "The image ships the dispat release it installs; what changed is in https://github.com/yohimik/dispat/blob/main/services/dispat/CHANGELOG.md"
 github:
   noChangesText: "The image ships the dispat release it installs; what changed is in [the dispat release notes](https://github.com/yohimik/dispat/releases/tag/services/dispat/v${DISPAT_NEW_VERSION})."
+  footer:
+    - line: ["---", ""]
+    - line:
+        - "`docker pull yohimik/${DISPAT_PACKAGE}:${DISPAT_NEW_VERSION}` · [Docker Hub](https://hub.docker.com/r/yohimik/${DISPAT_PACKAGE}) · [The dispat images](https://dispat.dev/reference/ci/#the-container-images)"
 # `tests` validates the manifest rather than building it: it proves the
 # DISPAT_WORKSPACE_DISPAT_VERSION interpolation and the channel overlay
 # still resolve — the breakage that would otherwise surface first at

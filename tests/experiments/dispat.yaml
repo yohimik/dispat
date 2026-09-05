@@ -1,0 +1,105 @@
+# Release experiment harness: script-only and never released.
+versioning: none
+scripts:
+  # The version under test is the one the caller names, else the newest
+  # published image: an experiment runs the bytes a release shipped,
+  # never a build of the checkout, so a planned version nobody published
+  # is never a candidate, and the prerelease tags are not either.
+  build: |
+    set -eu
+    version=${EXPERIMENTS_DISPAT_VERSION:-$(git tag -l 'docker/dispat-alpine/v*' --sort=-v:refname | sed 's|.*/v||; /-/d' | head -n 1)}
+    : "${version:?no published dispat-alpine image to build the experiments on}"
+    echo "building the experiments on yohimik/dispat-alpine:$version"
+    docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
+      $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
+  # One cell, named the way run.sh takes it: EXPERIMENT and TOOL, and
+  # SCENARIO where the experiment has more than one. The image is assumed
+  # built, so a sweep pays for it once; `experiment` below is the form
+  # that builds first.
+  #
+  # The console goes to <cell>.log rather than to the terminal, because
+  # twelve of these run at once and interleaved transcripts are a record
+  # of nothing. The exit code is the harness verdict: the cell's own file
+  # says what happened, and the caller only needs to know whether it held.
+  cell: |
+    set -eu
+    : "${EXPERIMENT:?EXPERIMENT is required (orphan, midrelease)}"
+    : "${TOOL:?TOOL is required (lerna, nx, changesets, dispat)}"
+    ROOT=$(git rev-parse --show-toplevel)
+    RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+    cell=$EXPERIMENT${SCENARIO:+-$SCENARIO}-$TOOL
+    mkdir -p "$RESULTS"
+    rc=0
+    docker run --rm -v "$RESULTS:/results" \
+      -e "EXPECT=${EXPERIMENTS_EXPECT:-1}" \
+      dispat-experiments "$EXPERIMENT" "$TOOL" ${SCENARIO:-} > "$RESULTS/$cell.log" 2>&1 || rc=$?
+    echo "$cell: exit $rc"
+    exit "$rc"
+  # One cell, built first: the by-hand form, for re-recording a single
+  # protocol without paying for the other eleven.
+  experiment: |
+    set -eu
+    dispat exec build --for pkg:experiments --in pkg:experiments
+    dispat exec cell --for pkg:experiments --in pkg:experiments
+  # The campaign, as lines: one cell per line, `<experiment> <tool>` and a
+  # scenario where the experiment has more than one, which is the argument
+  # order `cell` and run.sh take.
+  #
+  # This is the only place the twelve are enumerated. The sweep below pipes
+  # it into xargs and the Experiments workflow turns it into its matrix, so
+  # a cell added here is a cell both runs, and neither can drift into
+  # measuring a different campaign than the other.
+  cells: |
+    set -eu
+    for tool in dispat lerna nx changesets; do
+      echo "orphan $tool"
+    done
+    for scenario in clean conflict; do
+      for tool in dispat lerna nx changesets; do
+        echo "midrelease $tool $scenario"
+      done
+    done
+  # Every cell of the campaign, four at a time. The folder is wiped
+  # through the image rather than by the host's rm, because the container
+  # writes it as root and a host rm of root-owned files needs a password
+  # nobody has in CI.
+  #
+  # xargs runs each cell and remembers whether any exited non-zero (123),
+  # so a release fails on a dispat cell whose expectations did not hold
+  # while every other cell still gets its record.
+  experiments: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+    dispat exec build --for pkg:experiments --in pkg:experiments
+    mkdir -p "$RESULTS"
+    docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
+      /results -mindepth 1 -delete
+    echo "running twelve cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
+    dispat exec cells --for pkg:experiments --in pkg:experiments \
+    | EXPERIMENTS_RESULTS="$RESULTS" xargs -P "${EXPERIMENTS_JOBS:-4}" -L 1 sh -c \
+        'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments'
+  # The table over whatever the cells recorded, through the same verb the
+  # site's report reads them with, so a job summary and the published page
+  # are one renderer over one set of records.
+  #
+  # A build of Dockerfile.gotest like every other gate, which means it
+  # reads the repository's own coverage/experiments through the build
+  # context: EXPERIMENTS_RESULTS moves where the cells write, and a
+  # summary of a folder outside the checkout is a `testreport experiments`
+  # away rather than this script's business.
+  summary: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    docker buildx build --file "$ROOT/Dockerfile.gotest" --target experiments-summary-export \
+      $(sh "$ROOT/scripts/buildx-cache.sh" experiments-summary) \
+      --output "type=local,dest=$ROOT/coverage" "$ROOT"
+    cat "$ROOT/coverage/experiments.md"
+    # The heading is the step summary's alone: a terminal already knows
+    # what it just asked for, and a summary page is a wall of other
+    # sections.
+    {
+      echo "### Release experiments"
+      echo
+      cat "$ROOT/coverage/experiments.md"
+    } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

@@ -1,0 +1,2 @@
+versionGroup: manifests
+dependencies: [manifest]

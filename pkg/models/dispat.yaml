@@ -1,0 +1,3 @@
+# Models moves with the CLI surface and parses CCME units.
+versionGroup: cli
+dependencies: [ccme]

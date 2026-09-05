@@ -1,0 +1,14 @@
+# The black-box suite follows CLI changes and is never released itself.
+versioning: none
+dependencies: [models, dispat]
+scripts:
+  vet: >-
+    docker buildx build --file ../../Dockerfile.gotest --target vet-integration
+    $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
+  build: >-
+    docker buildx build --file ../../Dockerfile.gotest --target vet-integration
+    $(sh ../../scripts/buildx-cache.sh vet-integration) --output type=cacheonly ../..
+  tests: >-
+    docker buildx build --file ../../Dockerfile.gotest --target export-integration
+    $(sh ../../scripts/buildx-cache.sh gotest-integration)
+    --output type=local,dest=../../coverage ../..
