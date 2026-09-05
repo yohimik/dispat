@@ -114,3 +114,22 @@ An isolated copy of the checked-in specification passed the real release hook fr
 updated `VERSION` and all three normative Markdown declarations, and the resulting specification passed validation.
 The version-hook regression suite also passed. README wording distinguishes the unchanged 1.0.0 message grammar
 from the separately versioned specification, so publishing 2.0.0 does not leave a stale current-version claim.
+
+## Specification lifecycle correction
+
+Release run 33949163997 passed its full suite at 18,867 of 19,853 statements covered (95.03349620%). Inspection of
+the new specification tag found that its files still declared 1.0.0. The standalone script test had not exercised
+the scheduler: `flow.version` only runs for provider updates or configured native `autoVersion`, as documented in
+`packages/docs/docs/configuration/spaces.md`. The standalone specification has neither.
+
+The corrected configuration runs the stamping script through the documented `beforeBuild` hook. Its regression
+uses the production package configuration in a disposable Git repository, runs the actual release command, and
+checks both working files and the committed tag for version 2.0.0. It fails with the previous configuration and
+passes with the correction. Shellcheck and the existing script regression suite passed too.
+
+The run was cancelled before CLI, images, docs or announcements published. At the owner's request, all six release
+pages and tags from this attempt were removed, including the five correctly built Go modules, so the complete
+release can run together. Remote checks confirmed that all intended release tags and all four images' 1.8 and
+1.8.0 tags are absent. Main was rebuilt from the pre-release revision with the verified lifecycle correction.
+Further configuration changes require reading the relevant project documentation before editing and validating
+the configured behavior through the CLI before release.

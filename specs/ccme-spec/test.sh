@@ -87,4 +87,51 @@ fi
 test "$before" = "$(cksum "$rollback/VERSION" "$rollback/SPEC.md")"
 test -z "$(find "$rollback" -maxdepth 1 -type d -name '.ccme-version.*' -print -quit)"
 
+# Exercise the release scheduler, not only version.sh in isolation. A
+# standalone package has no provider updates, so it has no native version
+# task; its beforeBuild hook must still stamp the exact planned version before
+# the build verifier runs.
+release=$tmp/release
+mkdir -p "$release/specs/ccme-spec"
+fixture "$release/specs/ccme-spec" 1.0.0
+cp "$here/dispat.yaml" "$release/specs/ccme-spec/dispat.yaml"
+cat > "$release/dispat.yaml" <<'EOF'
+unsafeDisableLock: true
+changelog:
+  enabled: false
+github:
+  enabled: false
+commit:
+  enabled: true
+  push: false
+scripts:
+  changelog: 'true'
+  commit: '"$DISPAT_BIN" commit --tag'
+versionGroups:
+  ccme:
+    versioning: fixedMajorMinor
+initials:
+  ccme-spec: 1.0.0
+packages:
+  ccme-spec:
+    path: specs/ccme-spec
+EOF
+(
+  cd "$release"
+  git init -q -b main
+  git config user.name 'CCME specification test'
+  git config user.email 'ccme-spec-test@example.invalid'
+  git add .
+  git commit -qm 'chore(ccme-spec): establish baseline'
+  printf '%s\n' 'breaking specification revision' > specs/ccme-spec/change.txt
+  git add specs/ccme-spec/change.txt
+  git commit -qm 'feat(ccme-spec)!: revise normative algorithm'
+  DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec --require-release
+  test "$(cat specs/ccme-spec/VERSION)" = 2.0.0
+  grep -Fq '**Version:** 2.0.0 **Status:**' specs/ccme-spec/SPEC.md
+  test "$(git show specs/ccme-spec/v2.0.0:specs/ccme-spec/VERSION)" = 2.0.0
+  git show specs/ccme-spec/v2.0.0:specs/ccme-spec/SPEC.md |
+    grep -Fq '**Version:** 2.0.0 **Status:**'
+)
+
 echo "CCME specification release tests passed"
