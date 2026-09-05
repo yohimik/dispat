@@ -216,17 +216,13 @@ async function assertMobileLayout(page, carousel) {
   });
   if (widths.page.scroll !== widths.page.client) fail('page overflows mobile viewport', widths);
   for (const [name, width] of Object.entries(widths)) {
-    if (name !== 'canvas' && width.scroll !== width.client) fail(`${name} overflows mobile viewport`, widths);
+    if (width.scroll !== width.client) fail(`${name} overflows mobile viewport`, widths);
   }
-  if (widths.canvas.scroll <= widths.canvas.client) fail('canvas is not independently scrollable', widths);
+  const viewport = carousel.locator('[data-demo-layout="portrait"]');
+  if (await viewport.count() !== 1) fail('mobile scene did not use portrait layout');
+  const box = await viewport.boundingBox();
+  if (!box || Math.abs(box.width / box.height - 720 / 1280) > 0.002) fail('portrait aspect ratio changed', box);
 
-  const canvas = carousel.locator('[data-demo-canvas]');
-  await canvas.focus();
-  const beforeArrow = await canvas.evaluate((node) => node.scrollLeft);
-  await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(150);
-  const afterArrow = await canvas.evaluate((node) => node.scrollLeft);
-  if (afterArrow <= beforeArrow) fail('ArrowRight did not scroll the focused canvas', {beforeArrow, afterArrow});
 }
 
 async function dragSelection(page, locator) {
