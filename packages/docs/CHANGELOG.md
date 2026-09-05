@@ -1,5 +1,32 @@
 # Changelog
 
+## packages/docs/v1.8.2 (2026-09-05)
+
+### Fixes
+
+- stabilize captions and page flow ([d3235f0](https://github.com/yohimik/dispat/commit/d3235f000ee83df92a29df9a6e6325fb916ec6cc)) (by yohimik)
+
+- refine demos and navigation ([33f88c1](https://github.com/yohimik/dispat/commit/33f88c12de7c5cdd2de67d1440ddc438c038cd84)) (by yohimik)
+
+- remove hero logo row ([0a34d3b](https://github.com/yohimik/dispat/commit/0a34d3baf94b797023d1b2d0c0b52530ee19bee3)) (by yohimik)
+
+- align demos and mobile menus ([2c71b52](https://github.com/yohimik/dispat/commit/2c71b520b46552e8df1bb7ccaf8ab52b7593c483)) (by yohimik)
+
+- keep progress heading clear ([45a1fd6](https://github.com/yohimik/dispat/commit/45a1fd680de782869f52ed4441ba163ab2296076)) (by yohimik)
+
+- fit silent mobile demos ([f770220](https://github.com/yohimik/dispat/commit/f770220f5746ce3322c93f9de37bee1ed1f12568)) (by yohimik)
+
+- keep terminal rows intact ([7d3e018](https://github.com/yohimik/dispat/commit/7d3e018df77fe88c1685953267877f6cfbdc0578)) (by yohimik)
+
+- clarify live demo stories ([984e461](https://github.com/yohimik/dispat/commit/984e461d5b5b2ec344ff018e6b22a65eadd79b49)) (by yohimik)
+
+- unify sidebar categories ([0e5482f](https://github.com/yohimik/dispat/commit/0e5482f3ff87afd9d76a8d06a5f9c898246fa556)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.8.1 (2026-09-05)
 
 ### Fixes
