@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.8.3 (2026-09-05)
+
+### Fixes
+
+- quiet scene loading ([2ee1d10](https://github.com/yohimik/dispat/commit/2ee1d10680769997510ab451b96b685e7a8ef0e7)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.8.2 (2026-09-05)
 
 ### Fixes
