@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yohimik/dispat/pkg/models/v2"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"

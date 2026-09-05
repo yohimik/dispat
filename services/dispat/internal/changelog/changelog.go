@@ -17,8 +17,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/yohimik/dispat/pkg/ccme/v2"
-	models "github.com/yohimik/dispat/pkg/models/v2"
+	"github.com/yohimik/dispat/pkg/ccme"
+	models "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/fsx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"

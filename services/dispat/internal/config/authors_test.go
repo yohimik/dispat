@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/dispat/pkg/models/v2"
+	"github.com/yohimik/dispat/pkg/models"
 )
 
 // Unit tests of the authors entry-format object: the ladder that folds it, the

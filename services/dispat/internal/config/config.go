@@ -25,10 +25,10 @@ import (
 	"strings"
 
 	"github.com/spf13/pflag"
-	"github.com/yohimik/dispat/pkg/ccme/v2"
+	"github.com/yohimik/dispat/pkg/ccme"
 	lib "github.com/yohimik/dispat/pkg/config"
 
-	public "github.com/yohimik/dispat/pkg/models/v2"
+	public "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/cond"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"

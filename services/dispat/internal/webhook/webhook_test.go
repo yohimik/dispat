@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	public "github.com/yohimik/dispat/pkg/models/v2"
+	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 

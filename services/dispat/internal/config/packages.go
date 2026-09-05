@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	public "github.com/yohimik/dispat/pkg/models/v2"
+	public "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"

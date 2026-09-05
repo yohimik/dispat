@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yohimik/dispat/pkg/ccme/v2"
+	"github.com/yohimik/dispat/pkg/ccme"
 )
 
 // CheckTimeout bounds the background check. It is short on purpose: the

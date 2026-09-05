@@ -1,6 +1,7 @@
 # The registry refuses one package mid-release. dispat tags after it
-# publishes, so a refused publish leaves no tag to lie about; the next run
-# picks up the package that did not go out and nothing else.
+# publishes, so a refused publish leaves no tag to lie about. This fixture opts
+# the refused package into revertOnFail, leaving a clean worktree where the next
+# run picks up the package that did not go out and nothing else.
 
 run_experiment() {
   fixture dispat --feature
@@ -27,6 +28,8 @@ run_experiment() {
     observed after-refusal '.packages.cli.registry == "1.0.0" and (.packages.cli.tags | keys == ["1.0.0"])'
   assert "the packages that published are consistent after the refusal" \
     observed after-refusal '[.packages.core, .packages.ui, .packages.api] | all(.state == "consistent")'
+  assert "the failed package rollback left the worktree clean" \
+    observed after-refusal '.local.dirty == false'
   assert "the recovery run exited 0" [ "${STEP_RC[release2]}" = 0 ]
   assert "the recovery published the refused package and tagged it" \
     observed after-recovery '.packages.cli.registry == "1.0.1" and .packages.cli.state == "consistent"'

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yohimik/dispat/pkg/ccme/v2"
-	public "github.com/yohimik/dispat/pkg/models/v2"
+	"github.com/yohimik/dispat/pkg/ccme"
+	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/ignore"
 )
 

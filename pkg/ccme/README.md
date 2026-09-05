@@ -1,6 +1,6 @@
 # ccme
 
-A Go parser for **Conventional Commits, Monorepo Extension (CCME) 2.0.0**, a strict superset of Conventional Commits
+A Go parser for **Conventional Commits, Monorepo Extension (CCME) 1.0.0**, a strict superset of Conventional Commits
 1.0.0.
 
 It uses no regular expressions. The parser executes the single left-to-right index scan from §20 of the specification:

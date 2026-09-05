@@ -1,6 +1,6 @@
 # Conventional Commits: Monorepo Extension (CCME)
 
-**Version:** 2.0.0 **Status:** Normative specification, stable and ready for implementation **Extends:** Conventional
+**Version:** 1.0.0 **Status:** Normative specification, stable and ready for implementation **Extends:** Conventional
 Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** git tags of the form
 `<package>@<version>`
 **Conformance:** §17 · **Security considerations:** §18 · **Test vectors:** Appendix B
@@ -3220,7 +3220,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 
 ### 17.1 What a conforming implementation must do
 
-An implementation conforms to CCME 2.0.0 if and only if it:
+An implementation conforms to CCME 1.0.0 if and only if it:
 
 1. Parses messages per §4 and §5, producing exactly the units, scopes, and directives those sections define.
 2. Resolves scopes per §6, including file-derived resolution (§6.2).
@@ -3274,7 +3274,7 @@ container MUST NOT be observable.
 
 ### 17.3 Versioning of this specification
 
-This document is CCME **2.0.0** and is itself versioned under SemVer:
+This document is CCME **1.0.0** and is itself versioned under SemVer:
 
 * **Patch**: clarifications and editorial fixes that cannot change any release plan.
 * **Minor**: new types, footers, or inline sigils; new diagnostics; new configuration keys. A 1.x implementation MUST
@@ -3282,7 +3282,7 @@ This document is CCME **2.0.0** and is itself versioned under SemVer:
   by construction.
 * **Major**: any change that alters the release plan for a message that was already valid.
 
-CCME 2.0.0 preserves the 1.0.0 message grammar. It corrects the pending-ledger algorithm and revises the
+This revision preserves the 1.0.0 message grammar. It corrects the pending-ledger algorithm and revises the
 hypotheses of guarantees whose unconditional 1.0.0 wording admitted counterexamples; conforming plans can therefore
 differ for inputs that were valid under 1.0.0.
 

@@ -1,12 +1,12 @@
 # models: the configuration model
 
-The `github.com/yohimik/dispat/pkg/models/v2` package holds the typed structs that a `dispat.json`, `dispat.yaml`, or
+The `github.com/yohimik/dispat/pkg/models` package holds the typed structs that a `dispat.json`, `dispat.yaml`, or
 `dispat.toml` file decodes into. You can use it to write generators, migration scripts, and test suites. It lets you
 author configurations as typed Go values and marshal them to loadable files, so you avoid assembling config text by
 hand.
 
 ```sh
-go get github.com/yohimik/dispat/pkg/models/v2
+go get github.com/yohimik/dispat/pkg/models
 ```
 
 ## Writing a configuration in Go
@@ -74,5 +74,5 @@ describing the file exactly as the CLI reads it.
 ## Further reading
 
 - [Configuration reference](../configuration/README.md) documents every key these structs carry.
-- Read the full API on [pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/models/v2) or view the source
+- Read the full API on [pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/models) or view the source
   [on GitHub](https://github.com/yohimik/dispat/tree/main/pkg/models).

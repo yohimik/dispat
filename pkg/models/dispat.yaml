@@ -1,10 +1,9 @@
-# The public Go model follows its own API compatibility.
-# CLI releases can adopt a model major without changing the CLI major.
-versioning: independent
+# The public Go model and CLI share major and minor versions.
+versionGroup: cli
 dependencies: [ccme]
 
 github:
   footer:
     - line: ["---", ""]
     - line:
-        - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/models/v2@v${DISPAT_NEW_VERSION}) · [Documentation](https://dispat.dev/)"
+        - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/models@v${DISPAT_NEW_VERSION}) · [Documentation](https://dispat.dev/)"

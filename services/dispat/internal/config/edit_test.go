@@ -10,7 +10,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	public "github.com/yohimik/dispat/pkg/models/v2"
+	public "github.com/yohimik/dispat/pkg/models"
 )
 
 // The write-back contract: only the top-level dependencies key changes, every

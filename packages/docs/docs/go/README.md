@@ -16,7 +16,7 @@ The six packages below are the whole of the importable surface.
 | [scanner](./scanner.md) | `github.com/yohimik/dispat/pkg/scanner` | Reads dependency manifests into one ecosystem-neutral shape |
 | [writer](./writer.md) | `github.com/yohimik/dispat/pkg/writer` | Rewrites those manifests in place, byte for byte |
 | [manifest](./manifest.md) | `github.com/yohimik/dispat/pkg/manifest` | The vocabulary the reader and the writer share |
-| [models](./models.md) | `github.com/yohimik/dispat/pkg/models/v2` | The typed model of the configuration file |
+| [models](./models.md) | `github.com/yohimik/dispat/pkg/models` | The typed model of the configuration file |
 
 ## How they fit together
 
@@ -43,7 +43,7 @@ go get github.com/yohimik/dispat/pkg/config
 go get github.com/yohimik/dispat/pkg/scanner
 go get github.com/yohimik/dispat/pkg/writer
 go get github.com/yohimik/dispat/pkg/manifest
-go get github.com/yohimik/dispat/pkg/models/v2
+go get github.com/yohimik/dispat/pkg/models
 ```
 
 Taking one package does not pull the others in unless it needs them. None of them pulls in the CLI.

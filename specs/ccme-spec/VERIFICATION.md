@@ -44,16 +44,18 @@ The paper explicitly analyzes the historical 1.0.0 specification at `713f1a0b`. 
 
 ## Coordinated 1.8.0 release verification
 
-The CLI remains at 1.8.0. CCME and its specification share `fixedMajorMinor` versioning and both plan 2.0.0.
-Models also plans 2.0.0 because its public fields expose CCME types. Its API version is independent from the CLI
-version group, so this Go API change does not force a CLI major release. The manifest, scanner, and writer libraries
-plan 1.2.0; all four container images and the documentation site plan 1.8.0. The real status command selects these
-12 packages in one release plan. Config and infra remain unchanged.
+The first coordinated run published CLI 1.8.0, the four images at 1.8.0, CCME and its specification at 2.0.0,
+and manifest, scanner and writer at 1.2.0. The docs package stopped at its experiment gate. Models 2.0.0 was an
+incorrect release: commit `3e8b5849` had introduced unnecessary `/v2` imports and separated models from the CLI
+version group. At the owner's request, all artifacts and tags from that coordinated run were withdrawn and main was restored
+to the pre-publication history before applying the repair.
 
-The module migration is implemented in `3e8b5849`. Workspace-only `v2.0.0-0` requirements have exact local replacements
-until the new tags exist. AutoVersion rewrites releasing consumers to `v2.0.0` after their providers publish. The
-post-version checksum gate refuses remaining placeholders and checks the actual versioned module paths. Parser
-execution is unchanged; its package documentation now names CCME 2.0 and distinguishes parsing from release planning.
+Moving the specification did not change any parser production type or function. The recovery restores the original
+models module path, its existing CCME v1 type identities, and membership in the CLI `fixedMajorMinor` group. CCME's
+separately versioned module and specification remain in their own shared group. Models source matches its pre-migration contents
+exactly apart from the license notice. The incorrect breaking release record is corrected with CCME metadata,
+without rewriting commit history. The owner explicitly authorized replacing the withdrawn release with a corrected 1.8.0 run. GitHub and Docker
+references can be removed, but copies already downloaded or cached by Go module proxies cannot be recalled.
 
 Additional verification completed before CI dispatch:
 

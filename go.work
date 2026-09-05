@@ -11,10 +11,3 @@ use (
 	./tests/integration
 	./tools
 )
-
-// The v2 modules have no remote tags until this release publishes them. Keep every
-// workspace module on the checked-out source while their go.mod files carry a
-// release-rewritable v2 requirement.
-replace github.com/yohimik/dispat/pkg/ccme/v2 v2.0.0-0 => ./pkg/ccme
-
-replace github.com/yohimik/dispat/pkg/models/v2 v2.0.0-0 => ./pkg/models

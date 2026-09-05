@@ -23,7 +23,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/yohimik/dispat/pkg/ccme/v2"
+	"github.com/yohimik/dispat/pkg/ccme"
 )
 
 // Tag is a "pkg@version" release tag. When the newest tag's version is not

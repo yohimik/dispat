@@ -4,8 +4,9 @@ This package provides the public configuration model for the dispat CLI. It cont
 `dispat.json`, `dispat.yaml`, and `dispat.toml` decode into. External tools like generators, migration scripts, and
 test suites can build configurations as typed Go values and marshal them directly to valid config files.
 
-Import it as `github.com/yohimik/dispat/pkg/models/v2`. Version 2 follows the CCME 2 public types used by resolved
-parser configuration; it remains independently versioned from the Dispat CLI.
+Import it as `github.com/yohimik/dispat/pkg/models`. Models shares the Dispat CLI major and minor version
+through the `cli` version group. Its public configuration fields keep their existing CCME v1 Go types; moving or
+versioning the specification does not change those types.
 
 ```go
 cfg := models.File{

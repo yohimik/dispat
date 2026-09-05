@@ -57,6 +57,11 @@ After the tool's run, the experiment performs the recovery an operator is left w
 then asks each tool what it would release next: `lerna changed`, `nx release --dry-run`, `changeset status`,
 `dispat status`. For dispat it then runs the release again from the same clone.
 
+Dispat's orphan fixture opts `cli` into `revertOnFail`. The protocol verifies that the refused package's version
+rewrite is rolled back and the worktree is clean before retrying. This exercises the configured automatic recovery
+path; without that opt-in, Dispat deliberately preserves the failed rewrite for inspection and its dirty-path safety
+check requires an operator to resolve it before another release.
+
 ### What is observed
 
 After every step, `lib/observe.py` reads the clone, the origin and the registry and joins them into one state per

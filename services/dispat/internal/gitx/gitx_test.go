@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/yohimik/dispat/pkg/ccme/v2"
+	"github.com/yohimik/dispat/pkg/ccme"
 )
 
 // initRepo creates a git repo with one committed package file.

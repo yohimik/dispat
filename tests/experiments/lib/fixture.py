@@ -140,7 +140,9 @@ spaces:
     flow:
       publish: publish
 packages:
-""" + "".join(f"  {p}:\n    dependencies: [{', '.join(d)}]\n"
+""" + "".join(f"  {p}:\n    dependencies: [{', '.join(d)}]\n" +
+              ("    revertOnFail: true\n"
+               if p == "cli" and os.environ.get("EXPERIMENT") == "orphan" else "")
               for p, d in DEPS.items()) + """\
 autoVersion:
   enabled: true

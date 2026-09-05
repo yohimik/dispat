@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	public "github.com/yohimik/dispat/pkg/models/v2"
+	public "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
