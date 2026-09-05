@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -642,6 +643,41 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 	if err != nil {
 		return nil, err
 	}
+	return parseTags(out, pkg, format), nil
+}
+
+// TagsForPackages returns the reachable tags for several packages from one
+// ref inventory. Planning needs every package's tags at the same repository
+// state; asking git to enumerate the same ref namespace once per package adds
+// process and ref-walk overhead without adding information.
+//
+// The result is identical to calling Tags for each entry: each package still
+// applies its own format matcher and parser, including custom formats whose
+// globs overlap. Tags itself remains uncached and observes tags created after
+// an earlier call, which callers outside one planning snapshot rely on.
+func (c *CLI) TagsForPackages(ctx context.Context, formats map[string]TagFormat) (map[string]Tags, error) {
+	result := make(map[string]Tags, len(formats))
+	if len(formats) == 0 {
+		return result, nil
+	}
+	out, err := c.run(ctx, "tag", "--list", "--merged", "HEAD",
+		"--sort=-v:refname", "--sort=-creatordate",
+		"--format=%(refname:short)\t%(objectname)\t%(*objectname)")
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(formats))
+	for name := range formats {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		result[name] = parseTags(out, name, formats[name].WithDefault())
+	}
+	return result, nil
+}
+
+func parseTags(out, pkg string, format TagFormat) Tags {
 	var tags Tags
 	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -680,7 +716,7 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 		}
 		tags = append(tags, t)
 	}
-	return tags, nil
+	return tags
 }
 
 // IsAncestor reports whether commit a is an ancestor-or-self of commit b.

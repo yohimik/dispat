@@ -166,6 +166,24 @@ type countingGit struct {
 	logQueries map[string]int
 }
 
+type bulkCountingGit struct {
+	*countingGit
+	bulkQueries int
+	bulkErr     error
+}
+
+func (b *bulkCountingGit) TagsForPackages(ctx context.Context, formats map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
+	b.bulkQueries++
+	if b.bulkErr != nil {
+		return nil, b.bulkErr
+	}
+	out := make(map[string]gitx.Tags, len(formats))
+	for name, format := range formats {
+		out[name], _ = b.fakeGit.Tags(ctx, name, format)
+	}
+	return out, nil
+}
+
 func counted(f *fakeGit) *countingGit {
 	return &countingGit{fakeGit: f, tagQueries: map[string]int{}, logQueries: map[string]int{}}
 }
@@ -210,6 +228,27 @@ func TestPlanningQueriesGitOncePerPackage(t *testing.T) {
 	for since, n := range git.logQueries {
 		assert.Equal(t, 1, n, "log range %q must be walked once", since)
 	}
+}
+
+func TestPlanningUsesBulkTagInventoryWhenAvailable(t *testing.T) {
+	base := counted(newFakeGit(
+		commit{sha: "c1", message: "feat(core): streaming"},
+	).tag("core", "1.2.3", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", ""))
+	git := &bulkCountingGit{countingGit: base}
+	pkgs, deps := testPackages()
+	_, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, git.bulkQueries)
+	assert.Empty(t, git.tagQueries, "bulk inventory must replace per-package tag calls")
+}
+
+func TestPlanningReturnsBulkTagInventoryError(t *testing.T) {
+	want := context.Canceled
+	git := &bulkCountingGit{countingGit: counted(newFakeGit()), bulkErr: want}
+	pkgs, deps := testPackages()
+	_, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.ErrorIs(t, err, want)
+	assert.Contains(t, err.Error(), "loading tags")
 }
 
 func TestCommitWindowsShareStorageOnlyForTheSameBaseline(t *testing.T) {

@@ -1421,9 +1421,10 @@ type computation struct {
 //	§13.9  versions
 //	§13.10 emit
 //
-// Graph work is O((V+E) log V) per propagation phase. Git is queried exactly
-// twice per package — one tag listing and one bounded log range — and never
-// over the whole history.
+// Graph work is O((V+E) log V) per propagation phase. The CLI inventories
+// reachable tags once for the workspace, then reads one bounded log range per
+// distinct window origin. Git implementations without bulk tag support retain
+// the per-package tag-query fallback.
 func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	pkgs := opts.Packages
 	cp := &computation{
@@ -1676,30 +1677,47 @@ func (cp *computation) loadTagsAndWindows() error {
 	// Per-package commit lists, kept so the union can be ranked afterwards.
 	lists := make([][]gitx.Commit, 0, len(cp.pkgs))
 
-	// The tag queries are independent per-package git reads, so they are
-	// fetched concurrently (bounded, for monorepos with hundreds of
-	// packages) and then assembled strictly in package order below — the
-	// diagnostics, windows and union ranking stay deterministic because
-	// nothing after this block runs concurrently.
+	// The real CLI can inventory all reachable tags in one git process and
+	// partition them with each package's own format. Other Git implementations
+	// keep the bounded concurrent per-package fallback, so the public Git
+	// interface and lightweight integrations do not need a bulk operation.
 	tagsFor := make([]gitx.Tags, len(cp.pkgs))
 	tagsErr := make([]error, len(cp.pkgs))
-	sem := make(chan struct{}, 16)
-	var wg sync.WaitGroup
-	for i, p := range cp.pkgs {
-		// A versioning-none package is never tagged, so there is nothing to
-		// query: its tags stay empty and its window is the whole history.
-		if !(&Release{Pkg: p}).Releasable() {
-			continue
+	if bulk, ok := cp.git.(interface {
+		TagsForPackages(context.Context, map[string]gitx.TagFormat) (map[string]gitx.Tags, error)
+	}); ok {
+		formats := make(map[string]gitx.TagFormat, len(cp.pkgs))
+		for _, p := range cp.pkgs {
+			if (&Release{Pkg: p}).Releasable() {
+				formats[p.Name] = (&Release{Pkg: p}).TagFormat()
+			}
 		}
-		wg.Add(1)
-		go func(i int, p *model.Package) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			tagsFor[i], tagsErr[i] = cp.git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
-		}(i, p)
+		all, err := bulk.TagsForPackages(cp.ctx, formats)
+		if err != nil {
+			return fmt.Errorf("plan: loading tags: %w", err)
+		}
+		for i, p := range cp.pkgs {
+			tagsFor[i] = all[p.Name]
+		}
+	} else {
+		sem := make(chan struct{}, 16)
+		var wg sync.WaitGroup
+		for i, p := range cp.pkgs {
+			// A versioning-none package is never tagged, so there is nothing to
+			// query: its tags stay empty and its window is the whole history.
+			if !(&Release{Pkg: p}).Releasable() {
+				continue
+			}
+			wg.Add(1)
+			go func(i int, p *model.Package) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				tagsFor[i], tagsErr[i] = cp.git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
+			}(i, p)
+		}
+		wg.Wait()
 	}
-	wg.Wait()
 
 	// Windows are one `git log` per DISTINCT starting tag: packages that
 	// share a window origin (every never-stably-released package shares the
@@ -1715,9 +1733,8 @@ func (cp *computation) loadTagsAndWindows() error {
 	for i, p := range cp.pkgs {
 		rel := &Release{Pkg: p}
 
-		// One tag query per package. Both baselines of §12.3 are selections
-		// over the same list, so asking for them separately would double the
-		// tag work for an answer that comes from identical output.
+		// Both baselines of §12.3 are selections over the same per-package
+		// list, whether it came from the bulk inventory or the fallback.
 		tags, err := tagsFor[i], tagsErr[i]
 		if err != nil {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)

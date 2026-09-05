@@ -903,6 +903,48 @@ func TestTagsOutsideRepo(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestTagsForPackagesMatchesIndividualQueries(t *testing.T) {
+	root, cli := initRepo(t)
+	tagAt(t, root, "core@0.1.0", "2025-01-01T00:00:00Z")
+	tagAt(t, root, "core@0.2.0", "2025-01-02T00:00:00Z")
+	tagAt(t, root, "services/api/v1.4.0", "2025-01-03T00:00:00Z")
+	tagAt(t, root, "core-utils@9.9.9", "2025-01-04T00:00:00Z")
+
+	formats := map[string]TagFormat{
+		"core": DefaultTagFormat,
+		"api":  "services/{name}/v{version}",
+	}
+	got, err := cli.TagsForPackages(context.Background(), formats)
+	require.NoError(t, err)
+	for pkg, format := range formats {
+		want, tagsErr := cli.Tags(context.Background(), pkg, format)
+		require.NoError(t, tagsErr)
+		assert.Equal(t, want, got[pkg], pkg)
+	}
+	assert.Len(t, got["core"], 2, "an overlapping package-name prefix must not leak into core")
+}
+
+func TestTagsForPackagesDoesNotCacheTags(t *testing.T) {
+	_, cli := initRepo(t)
+	ctx := context.Background()
+	before, err := cli.TagsForPackages(ctx, map[string]TagFormat{"core": DefaultTagFormat})
+	require.NoError(t, err)
+	assert.Empty(t, before["core"])
+
+	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
+	after, err := cli.TagsForPackages(ctx, map[string]TagFormat{"core": DefaultTagFormat})
+	require.NoError(t, err)
+	assert.Len(t, after["core"], 1)
+}
+
+func TestTagsForPackagesHonoursCancellation(t *testing.T) {
+	_, cli := initRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := cli.TagsForPackages(ctx, map[string]TagFormat{"core": DefaultTagFormat})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestCommitDirsNothingStaged(t *testing.T) {
 	root, cli := initRepo(t)
 	committed, err := cli.CommitDirs(context.Background(),
