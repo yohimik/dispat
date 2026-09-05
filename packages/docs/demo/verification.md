@@ -1,3 +1,18 @@
+# Docs 1.8.3 verification
+
+This patch removes loading feedback and the cancel button from the landing demos. A scene remains mounted until its replacement is ready; selecting another scene supersedes the pending request. Initial loading is silent, and a genuine load failure still offers retry.
+
+## Checks for this patch
+
+- TypeScript, all 19 documentation tests, and the production build pass.
+- Playwright delayed-import checks verify silent loading, a mounted current scene, unchanged caption geometry, responsive controls, replacement selections, ignored stale completions, and failure/retry without changing manual pause.
+- Initial JavaScript requests held in Playwright display no loading text or cancel button at 390px and 1440px; both pages hydrate into the scene when released.
+- The Terraform fixture passes against the official 1.8.0 binary: application builds overlap apply, deployments wait for apply, versions and tags match, and an unchanged rerun executes no stages. Marker waits are bounded and fail the fixture on timeout.
+- The corrected Terraform animation passes full 24-second 1× recordings in both themes and mobile geometry checks at 320px and 390px. Scene transitions match terminal log frames. Current and served 1.8 examples use the same default build policy.
+- Recordings and screenshots are kept outside Git under `output/playwright/docs-1.8.3/`.
+
+The preceding release's broader checks are preserved below as historical evidence.
+
 # Docs 1.8.2 verification
 
 Verified on 5 September 2026 before the documentation patch release. The CLI and Go libraries are unchanged.
