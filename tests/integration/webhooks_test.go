@@ -401,9 +401,29 @@ func TestWebhookScriptProgressTrigger(t *testing.T) {
 	// delivery attributes itself to the package and stage that raised it —
 	// and its exit code is 0 whatever the endpoints think of it.
 	sink := newWebhookSink(t)
+	// Hold the parent's first queued delivery until a child trigger arrives.
+	// Independent processes have independent delivery lanes, so this makes
+	// their permitted interleaving deterministic instead of scheduler-dependent.
+	progressDelivered := make(chan struct{})
+	var progressOnce sync.Once
+	gate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		event := req.Header.Get("X-Dispat-Event")
+		if event == "release.started" {
+			select {
+			case <-progressDelivered:
+			case <-time.After(5 * time.Second):
+				t.Error("the parent delivery blocked the child progress trigger")
+			}
+		}
+		sink.srv.Config.Handler.ServeHTTP(w, req)
+		if event == "script.progress" {
+			progressOnce.Do(func() { close(progressDelivered) })
+		}
+	}))
+	t.Cleanup(gate.Close)
 	bin, _ := harness.Build(t)
 	r := harness.New(t)
-	cfg := webhooksConfig("", models.WebhookConfig{URL: sink.srv.URL})
+	cfg := webhooksConfig("", models.WebhookConfig{URL: gate.URL})
 	cfg.Scripts["build"] = models.Script{
 		bin + " trigger progress 0",
 		bin + " trigger progress 60 compiling assets",
@@ -413,15 +433,26 @@ func TestWebhookScriptProgressTrigger(t *testing.T) {
 	r.Commit("feat(core): bootstrap")
 	r.ReleaseOK()
 
-	// Both progress reports land between the build's own bracket events, in
-	// the order the script raised them.
+	// Parent lifecycle events retain their order, and sequential child
+	// triggers retain theirs. HTTP arrival order across processes is not a
+	// shared queue: the first progress event intentionally arrives first.
 	var seen []string
 	for _, p := range sink.payloads(t) {
 		if p["package"] == "core" && str(p["stage"]) == "build" {
 			seen = append(seen, p["event"].(string))
 		}
 	}
-	assert.Equal(t, []string{"stage.started", "script.progress", "script.progress", "stage.succeeded"}, seen)
+	assert.ElementsMatch(t, []string{"stage.started", "script.progress", "script.progress", "stage.succeeded"}, seen)
+	require.Len(t, seen, 4)
+	assert.Equal(t, "script.progress", seen[0], "the child can deliver before the parent's queued stage.started")
+	assert.Equal(t, "stage.succeeded", seen[len(seen)-1], "the stage ends after its triggers finish")
+	var lifecycle []string
+	for _, event := range seen {
+		if event != "script.progress" {
+			lifecycle = append(lifecycle, event)
+		}
+	}
+	assert.Equal(t, []string{"stage.started", "stage.succeeded"}, lifecycle)
 
 	progress := sink.find(t, "script.progress")
 	assert.Equal(t, "core", progress["package"])
