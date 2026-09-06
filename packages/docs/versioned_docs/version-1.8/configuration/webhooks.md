@@ -177,9 +177,14 @@ that is unique per delivery and stable across its retries, so a receiver can ded
 
 ## Delivery semantics
 
-**Order.** Each webhook has its own delivery lane: its deliveries arrive in the order the events happened, and a slow
-endpoint never delays another webhook's deliveries. Events of different packages interleave the way the concurrent run
-produced them.
+**Order.** Within one Dispat process, each webhook has its own delivery lane. Events sent through that lane retain
+their order, and a slow endpoint never delays another endpoint. Events from concurrently running packages can
+interleave.
+
+A `dispat trigger` command runs in a separate process with its own delivery lane. Its progress event can arrive before
+the parent process's queued `stage.started` event. Sequential trigger commands finish their bounded delivery flush
+before returning, but there is no global HTTP arrival order across processes. Use the event's package, stage, and
+payload to associate it with the work it describes.
 
 **Retries.** A transport error, a `429`, or a `5xx` answer is retried up to three attempts with a short growing delay.
 Any other non-2xx answer is not: a `404` or a `401` will not improve on a second attempt. Each attempt is bounded by

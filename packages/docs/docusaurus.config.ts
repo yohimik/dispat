@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import readme from './plugins/readme';
 import testReport from './plugins/test-report';
+import binarySizes from './plugins/binary-sizes';
 import historicalLinks from './plugins/historical-links';
 import remarkHistoricalLinks from './plugins/historical-links/remark';
 
@@ -172,6 +173,7 @@ const config: Config = {
     // loader and type-checked by `pnpm typecheck` along with everything else.
     readme,
     testReport,
+    binarySizes,
     historicalLinks,
     [
       // Installable, and readable offline once installed. The plugin emits

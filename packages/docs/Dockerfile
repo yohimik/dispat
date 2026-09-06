@@ -90,9 +90,13 @@ ARG DOCS_BENCH_PACKAGES=""
 ARG DOCS_EXPERIMENTS=""
 ARG DOCS_REPORT_COMMIT=""
 ARG DOCS_MODULE_VERSIONS=""
+ARG DOCS_BINARY_SIZES_VERSION=""
+ARG DOCS_BINARY_SIZES_ARCHIVE=""
 ENV DISPAT_DOCS_REQUIRE_REPORT=${DOCS_REQUIRE_REPORT}
 ENV DISPAT_DOCS_MODULE_VERSIONS=${DOCS_MODULE_VERSIONS}
 ENV GITHUB_SHA=${DOCS_REPORT_COMMIT}
+ENV DISPAT_DOCS_BINARY_SIZES_VERSION=${DOCS_BINARY_SIZES_VERSION}
+ENV DISPAT_DOCS_BINARY_SIZES_ARCHIVE=${DOCS_BINARY_SIZES_ARCHIVE}
 # The per-package freshness check, before anything is built.
 #
 # The release's beforeBuild hook measured a set of modules and said which; the
@@ -158,6 +162,7 @@ RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-
 #   versioned_sidebars/   commit that follows the build
 #   versions.json
 #   static/test-reports/   preserved release measurements, committed with the docs
+#   static/binary-sizes/   exact CLI release sizes, committed with the docs
 #   plugins/historical-links/refs.json   source commits for each documentation line
 #
 # They are staged together because `--output type=local` writes a stage's whole
@@ -172,6 +177,10 @@ RUN mkdir -p /out \
  && if [ -d packages/docs/static/test-reports ]; then \
       mkdir -p /out/static \
       && cp -R packages/docs/static/test-reports /out/static/test-reports; \
+    fi \
+ && if [ -d packages/docs/static/binary-sizes ]; then \
+      mkdir -p /out/static \
+      && cp -R packages/docs/static/binary-sizes /out/static/binary-sizes; \
     fi \
  && mkdir -p /out/plugins/historical-links \
  && cp packages/docs/plugins/historical-links/refs.json /out/plugins/historical-links/refs.json \

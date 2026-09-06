@@ -19,6 +19,18 @@ dependencies:
   - provider: infra
     keep: true
 scripts:
+  # Fetch the size manifest from the exact CLI release this docs build names.
+  # The site plugin validates its schema and complete asset set, then archives
+  # it under the docs major/minor. A release must never fall back to an older
+  # archive: docs-only patches keep naming the same exact CLI release asset.
+  binary-sizes: |
+    set -eu
+    version=${DISPAT_WORKSPACE_DISPAT_VERSION:?DISPAT_WORKSPACE_DISPAT_VERSION is required}
+    mkdir -p data
+    rm -f data/binary-sizes.json
+    docker run --rm -v "$PWD:/docs" node:22-alpine \
+      node /docs/plugins/binary-sizes/download.mjs "$version" /docs/data/binary-sizes.json
+    echo "downloaded binary sizes for dispat $version"
   # The docs package is the only pnpm package. Export its regenerated lockfile
   # from the container used by its build so release runners need no Node.
   pnpm-install: |
@@ -182,11 +194,17 @@ scripts:
       DOCS_REQUIRE_REPORT="1"
     fi
     DOCS_MODULE_VERSIONS=""
+    DOCS_BINARY_SIZES_VERSION=""
+    DOCS_BINARY_SIZES_ARCHIVE=""
     if [ "$DOCS_REQUIRE_REPORT" = "1" ] && [ -n "$DOCS_VERSION" ]; then
       DOCS_MODULE_VERSIONS=$(printf '{"ccme":"v%s","config":"v%s","manifest":"v%s","models":"v%s","scanner":"v%s","writer":"v%s"}' \
         "${DISPAT_WORKSPACE_CCME_VERSION:?}" "${DISPAT_WORKSPACE_CONFIG_VERSION:?}" \
         "${DISPAT_WORKSPACE_MANIFEST_VERSION:?}" "${DISPAT_WORKSPACE_MODELS_VERSION:?}" \
         "${DISPAT_WORKSPACE_SCANNER_VERSION:?}" "${DISPAT_WORKSPACE_WRITER_VERSION:?}")
+    fi
+    if [ "$DOCS_REQUIRE_REPORT" = "1" ]; then
+      DOCS_BINARY_SIZES_VERSION=${DISPAT_WORKSPACE_DISPAT_VERSION:?DISPAT_WORKSPACE_DISPAT_VERSION is required}
+      DOCS_BINARY_SIZES_ARCHIVE=$DOCS_VERSION
     fi
     docker buildx build --file Dockerfile --target export \
       --build-arg DOCS_VERSION="$DOCS_VERSION" \
@@ -195,17 +213,18 @@ scripts:
       --build-arg DOCS_MODULE_VERSIONS="$DOCS_MODULE_VERSIONS" \
       --build-arg DOCS_BENCH_PACKAGES="${DISPAT_OUTPUT_REPORT_BENCHMARKS:-}" \
       --build-arg DOCS_EXPERIMENTS="${DISPAT_OUTPUT_REPORT_EXPERIMENTS:-}" \
+      --build-arg DOCS_BINARY_SIZES_VERSION="$DOCS_BINARY_SIZES_VERSION" \
+      --build-arg DOCS_BINARY_SIZES_ARCHIVE="$DOCS_BINARY_SIZES_ARCHIVE" \
       $(sh ../../scripts/buildx-cache.sh docs) \
       --output "type=local,dest=$PWD" ../..
 # No record steps: the docs package's changelog, tag and GitHub release are
 # the finalize phase's. The site deploy is the publish; the records follow at
 # the end of the run.
 #
-# Two beforeBuild hooks, in order: the experiments run first because the
-# report the second one builds reads what they recorded, and a report built
-# before them would carry an empty section.
+# Fetch the exact CLI size manifest first, then run experiments before the
+# report that reads their measurements. Each input is required by the site build.
 flow:
-  beforeBuild: [experiments, test-report]
+  beforeBuild: [binary-sizes, experiments, test-report]
   build: build
   publish: deploy-docs
 

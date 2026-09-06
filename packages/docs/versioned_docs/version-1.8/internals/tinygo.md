@@ -1,11 +1,12 @@
 # The TinyGo spike
 
-Read this page to understand why dispat's six release binaries are built with the Go compiler, and why a release also
-carries two linux binaries built by a TinyGo fork at roughly 60% of the size. It describes a spike: an experiment kept
+Read this page to understand why dispat's six standard release binaries are built with the Go compiler, and why a
+release also carries two Linux binaries built by a TinyGo fork. It describes a spike: an experiment kept
 in the repository because its answer is a version number away from changing, not a gate any job runs.
 
-TinyGo produces much smaller binaries than gc for the same source. A CLI distributed as six platform binaries has an
-obvious interest in that, so the question was asked properly, with the whole answer written down.
+The historical measurements below found smaller TinyGo binaries than gc for the same source. A CLI distributed as
+six standard platform binaries has an obvious interest in that, so the question was asked properly, with the whole
+answer written down. Current Linux release sizes come from the generated table in [Sizes](#sizes).
 
 ## What the spike is
 
@@ -131,6 +132,15 @@ so a run served from a cached failure reports upstream rather than silently pass
 
 ## Sizes
 
+The release pipeline now measures all eight published binaries directly after building them. It emits a checksummed
+manifest only after the TinyGo integration gate passes; the documentation release fetches the manifest for its exact
+Dispat version and archives it with the matching documentation minor.
+
+<BinarySizes />
+
+The tables below remain as dated spike evidence. They compare experiments built before TinyGo became part of the
+release pipeline and must not be read as sizes for the current release.
+
 The size question is what made the network worth proving, so it is measured the same way every time: the same source,
 the same four unix targets, both toolchains in one environment, and both stamped. The gc column is the release
 pipeline's exact line (`-trimpath -s -w`), the TinyGo column the line a release would replace it with (`-opt=z
@@ -156,8 +166,8 @@ darwin/amd64          6872520       11027408      0.623
 darwin/arm64          5912768       10031666      0.589
 ```
 
-The fork's binaries are the larger of the two TinyGo columns by 1.3 to 1.6 MB, which is what a real TLS stack and a
-real certificate verifier weigh. They are still around 60% of their gc twins. The linux pair the container builds with
+In that dated Darwin measurement, the fork's binaries are larger than the upstream TinyGo results by 1.3 to 1.6 MB,
+which is what a real TLS stack and certificate verifier added there. The linux pair the container builds with
 the fork is measured for the self-update matrix rather than for size, so the fork's table is the darwin one.
 
 ## The self-update matrix
