@@ -1,5 +1,15 @@
 # Commit message reference
 
+:::note Specification and implementation versions
+
+The [CCME 3.0.0 specification](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md) describes future
+VCS adapters and explicit artifact rollback. Dispat 1.8.x and its CCME 2 parser do not implement those additions.
+This page documents the installed behavior; use the [CCME 2.0.0 reference](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
+when checking its syntax. A `rollback(scope)` message is not a rollback command in this release.
+
+:::
+
+
 Write your commit messages in a strict superset of Conventional Commits that adds the monorepo dimension. This format
 tells dispat which packages a change releases, how far it reaches, and which channel it lands on.
 

@@ -1,21 +1,29 @@
 # CCME specification
 
-This package contains the normative Conventional Commits: Monorepo Extension specification. `SPEC.md` defines the format and its conformance requirements. `LICENSE` carries the unchanged GPL-3.0 license text that applies to the specification.
+This package contains the Conventional Commits: Monorepo Extension specification under GPL-3.0-or-later. [SPEC.md](./SPEC.md) defines its grammar, release computation and conformance obligations.
 
-The specification and Go parser share the `ccme` version group with `fixedMajorMinor` versioning. Their major and minor versions move together, while patch versions remain package-specific. Each package keeps its own release tags. Specification releases use tags such as `specs/ccme-spec/v1.0.0`. When no tag exists, Dispat uses the repository's `ccme-spec: 1.0.0` initial baseline. Native `autoVersion` stamps `VERSION` and the three normative declarations in `SPEC.md` with the planned version. Version 2.0.0 is a major revision because its corrected release algorithm changes plans for inputs that were valid under 1.0.0. The commit-message grammar is unchanged.
+## CCME 3.0.0 specification release
 
-Run the package check from this directory:
+This revision adds two contracts for future release engines:
+
+- [VCS adapters](./VCS-PROTOCOL.md): Git by default, or trusted shareable shell commands with defined JSON input/output, complete history snapshots, immutable records and conditional locks.
+- [Explicit rollback](./ROLLBACK.md): an exact-version `rollback(scope)` request, package/space handlers, consumer-first withdrawal and durable receipts. A missing handler fails preflight. Published version identities and release tags are retained.
+
+**Dispat 1.8.x and the CCME 2 parser do not implement these additions.** Existing users should read the immutable [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md). The [dated design history](./DESIGN-HISTORY.md) records this disclosure separately from implementation and experimental validation.
+
+The specification and parser retain the `ccme` major/minor version group. An explicit `release(ccme)` / `Release-As: none` commit holds the parser while this specification releases at 3.0.0. That deliberate hold is not a claim of parser compatibility with CCME 3. Do not lift it without reviewing the resulting group plan and implemented behavior.
+
+## Distribution and verification
+
+Each package keeps its own tags. This specification uses `specs/ccme-spec/v{version}`. The `VERSION` file and the three normative declarations in `SPEC.md` retain the published baseline until native `autoVersion` stamps the planned release. The additional protocol files are included in the same specification package, not independently versioned packages.
 
 ```sh
 sh verify.sh
+sh test.sh
 ```
 
-The check requires one valid semantic version in `VERSION`, verifies that the normative version declarations in `SPEC.md` match it, and checks the local GPL license link and license text. During the release build, it also requires that version to match `DISPAT_NEW_VERSION`. It has no language runtime dependency.
+The verifier checks version declarations, required normative files, local links and license material, and refuses symlinked inputs. During the build it also checks `DISPAT_NEW_VERSION`. The lifecycle suite uses an executable `DISPAT_BIN` or Dispat on `PATH`, disposable repositories, and local-only release records. It verifies packaging and version substitution, not implementation of CCME 3's new protocols. Their conformance vectors state expected outcomes for future implementations; they are not passing Dispat tests.
 
-`sh test.sh` runs the package's regression suite with Dispat from `PATH`, or an executable selected through `DISPAT_BIN`. The root release graph exposes it as the package's `tests` script, so changes under this folder are selected by the ordinary CI test sweep.
+The package uses the documented [replacing strategy](../../packages/docs/docs/editing/replacer.md#replacing-during-a-release): `autoVersion.manifests: none` disables manifest scanning, and four explicit rules update `VERSION` and the declarations in `SPEC.md`. Examples and unrelated files are preserved. [dispat.yaml](./dispat.yaml) contains the configuration.
 
-The package uses the documented [replacing strategy](../../packages/docs/docs/editing/replacer.md#replacing-during-a-release): `autoVersion.manifests: none` disables manifest scanning, and four `replace` rules explicitly select `VERSION` or `SPEC.md`. Each rule finds the previous version in its exact declaration and writes the planned version. Examples and unrelated files remain unchanged. The configuration lives in [dispat.yaml](./dispat.yaml); no custom stamping script is needed.
-
-The `beforeVersion` verifier rejects malformed declarations and symlinked targets before replacement. The build verifier checks the result before publication. Writes across both files are not a single atomic transaction; a failed release does not publish the specification, and retained local edits can be inspected before retrying.
-
-Version classification follows §17.3 of `SPEC.md`: editorial corrections that cannot change a plan are patches; forward-compatible additions are minor releases; any change to the plan for an already-valid input requires a major release.
+Validation brackets replacement through `beforeVersion` and `build`. Multi-file writes are not one atomic transaction; a failed release retains local edits for inspection and must not publish an invalid specification. Version classification follows SPEC.md §17.3. CCME 3 is major because previously inert rollback units gain operational semantics under explicit activation, and full-engine conformance now includes the new contracts.

@@ -1,13 +1,19 @@
 # Conventional Commits: Monorepo Extension (CCME)
 
-**Version:** 2.0.0 **Status:** Normative specification, stable and ready for implementation **Extends:** Conventional
-Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** git tags of the form
-`<package>@<version>`
+**Version:** 2.0.0 **Status:** Normative specification; new protocol implementation pending **Extends:** Conventional
+Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** immutable VCS release records;
+Git tags of the form `<package>@<version>` by default
 **Conformance:** §17 · **Security considerations:** §18 · **Test vectors:** Appendix B
 **License:** GPL-3.0-or-later. See [LICENSE](./LICENSE).
 
 Requirement levels follow RFC 2119 (§2). This specification is itself versioned under SemVer; see §17.3 for what
 constitutes a patch, minor, and major revision of the document.
+
+**Implementation boundary.** This revision specifies CCME 3.0.0 VCS adapters and explicit rollback. Dispat
+1.8.x and its CCME 2 parser do not implement them. The version markers are stamped by the specification release process. Publishing a specification does not implement its behavior. The immutable
+[CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
+remains the reference for existing CCME 2 consumers. New protocol examples MUST NOT be presented as runnable Dispat
+configuration. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
 
 ---
 
@@ -37,12 +43,14 @@ constitutes a patch, minor, and major revision of the document.
 22. [Appendix B: Conformance test vectors](#22-appendix-b-conformance-test-vectors)
 23. [Appendix C: Formal grammar (ABNF)](#23-appendix-c-formal-grammar-abnf)
 24. [Appendix D: Worked examples](#24-appendix-d-worked-examples)
+25. [VCS adapters](#25-vcs-adapters)
+26. [Explicit rollback](#26-explicit-rollback)
 
 ---
 
 ## 1. Summary
 
-CCME adds six capabilities to Conventional Commits, chosen so that a single commit can fully describe its release
+CCME adds eight capabilities to Conventional Commits, chosen so that a single commit can fully describe its release
 intent across a workspace of many packages:
 
 | # | Capability                                                                                                     | Syntax                                                         |
@@ -53,6 +61,8 @@ intent across a workspace of many packages:
 | 4 | **Explicit or derived targeting**: scope names a package, or is omitted to derive packages from changed files | `feat(api,web)` / `feat`                                       |
 | 5 | **Prerelease channels**: enter, iterate on, graduate, and carry consumers along, each under its own depth     | `%beta`, `%%beta++1`, `%beta>stable`                           |
 | 6 | **Corrections**: restate or discard a past commit's pending release record                                    | `Edits: <sha>`, `Deletes: <sha>`, `Deletes: *`                 |
+| 7 | **VCS adapters**: use trusted shell commands behind a fixed snapshot and immutable-record contract | `vcs` configuration; Git remains the default (§25) |
+| 8 | **Explicit rollback**: withdraw an identified published artifact while retaining its release history | `rollback(api)` + `Rollback-Version: 1.4.2` (§26) |
 
 Capabilities 2 and 5 are two **independent axes** of the same idea. A commit says separately how far a *version bump*
 travels (`^`, `^^`, `+N`) and how far a *channel* travels (`%%`, `++N`), because the answers differ: a change usually
@@ -62,13 +72,14 @@ needs its consumers rebuilt, and much less often needs them moved onto a prerele
 Everything is designed so that a conforming parser can be written with a linear index scan and no regular-expression
 engine (§20). Appendix A gives regular expressions for implementers who prefer them.
 
-Alongside these six sits one guarantee that is not syntax: **a release is durable under partial failure.** Publishing
+Alongside these capabilities sits one guarantee that is not syntax: **a release is durable under partial failure.** Publishing
 is a sequence of independent, individually-fallible registry operations, and any of them may fail. The engine therefore
 computes propagation against the *consumer's* release position rather than the provider's (§13.7a), publishes in
 dependency order and skips the dependents of anything that failed (§19), and converges to an empty plan by re-running
-(§13.7c). A half-finished release is a resumable state, not a lost one.
+(§13.7c). A half-finished release is a resumable state, not a lost one. Explicit rollback adds a separate withdrawal ledger;
+its activation and external-availability limits are specified in §26. Ordinary publish failure never requests rollback.
 
-**Example carrying five of the six:**
+**Example combining the original commit directives:**
 
 ```
 feat(@acme/core)^^minor%beta++*: streaming reader
@@ -127,9 +138,25 @@ to be interpreted as described in RFC 2119.
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
 
+**Storage terminology in CCME 3.** In §§4–24, `HEAD`, commit, ancestry, history and release tag denote the corresponding
+fixed-head revision, revision node, reachability relation, complete DAG and immutable `release/version` record of §25.
+Git remains the concrete default. Git-specific shell commands are examples for that backend. An external adapter
+MUST preserve native parent order, exact messages, changed paths and record identity; a linear history that discards
+merge parents is not a conforming substitute. SHA operands retain their existing meaning under Git; §25 defines
+canonical operands for other backends. Rollback intent/completion records are never release baselines.
+
+A **withdrawn artifact** has a verified rollback-completion record but retains its immutable published-version identity.
+A **rollback request** is an explicitly scoped, version-bound operational unit with no bump. Neither changes the
+meaning of pending ordinary release metadata or a package's version high-water mark.
+
 ---
 
 ## 3. Relationship to Conventional Commits 1.0.0
+
+CCME 3 reserves `rollback` as an operational control type. Older engines can treat that spelling as an unknown type
+with `W140` (or `E140` under strict types) and do no rollback. The change is not a forward-compatible execution
+extension. An explicit activation revision and trusted execution enablement prevent historical inert messages from
+becoming destructive operations merely because an engine was upgraded (§26).
 
 CCME is a superset of Conventional Commits 1.0.0 **over the conforming subset described below**. Every message that is
 valid under the base spec and stays inside that subset is valid under CCME and MUST produce the same release outcome,
@@ -164,7 +191,7 @@ be renamed, and a `---` in a body must be escaped or the separator reconfigured.
 Base-spec elements retained without modification: `type` (modulo casing), `(scope)`, `!`, `description`, body,
 footer/trailer form, `BREAKING CHANGE:` and `BREAKING-CHANGE:` footers, and the `revert` convention.
 
-CCME adds: the `---` separator, multi-term scope-sets, inline directives, the types `cancel` and `release`, and the
+CCME adds: the `---` separator, multi-term scope-sets, inline directives, the types `cancel`, `release`, and `rollback`, and the
 footer keys listed in §8.1, including the correction footers `Edits` and `Deletes` (§7.4).
 
 ---
@@ -600,9 +627,12 @@ than all units carry an explicit scope-set. Authors SHOULD scope every unit in a
 | `build`                                     | `none`              |                                         |
 | `ci`                                        | `none`              |                                         |
 | `chore`                                     | `none`              |                                         |
-| **any type** with `!` or `BREAKING CHANGE:` | `major`             | Overrides the row above.                |
+| **ordinary type** with `!` or `BREAKING CHANGE:` | `major`             | Overrides the row above.                |
 | `cancel`                                    | *control*           | §10. Never produces a bump.             |
 | `release`                                   | *control*           | §7.2. Never produces a bump on its own. |
+| `rollback` | *control* | §26. Explicit withdrawal; never produces a bump. |
+
+The control types `cancel`, `release`, and `rollback` cannot be remapped into ordinary bump types. `rollback` requires explicit literal package scopes and forbids breaking/propagation/channel directives (§26).
 
 The mapping is configurable via `types` (§14). Unknown types are accepted and default to `none` with `W140`, unless
 `strictTypes` is enabled, in which case they are `E140`.
@@ -730,8 +760,7 @@ Deletes: <sha>[#<n>]  |  Deletes: *
 Rules for the unit around the footer:
 
 * Any type from §7.1 may carry the footers, including a type mapping to `none`, which is how a pure deletion is
-  written. The two **control** types may not: a correction footer on a `cancel` unit falls under `E171`, and on a
-  `release` unit it is `E173`, because neither carries a record that could restate anything.
+  written. The three **control** types may not: a correction footer on `cancel` is `E171`, on `release` is `E173`, and on `rollback` is `E301`; none carries an ordinary record that could restate anything.
 * A unit MAY carry several correction footers, `Edits` and `Deletes` mixed freely. Several `Edits` targets collapse
   into the one carrying record: the unit restates all of them at once.
 * Everything else about the unit is ordinary. Its scope-set resolves per §6, its directives mean what they always
@@ -864,12 +893,18 @@ does not). **`BREAKING CHANGE` is the sole exception and is case-sensitive**; se
 | `Reverts`                             | none                 | commit sha                                                 | none                            | unit; changelog (§7.3)      |
 | `Edits`                               | none                 | `<sha>[#<n>]` \| `*`                                       | none                            | targeted records (§7.4)     |
 | `Deletes`                             | none                 | `<sha>[#<n>]` \| `*`                                       | none                            | targeted records (§7.4)     |
+| `Rollback-Version` | none | exact SemVer | required on rollback | explicit rollback target (§26) |
+| `Rollback-Cancel` | none | full revision plus `#` and one-based unit index | none | pre-intent cancellation (§26) |
 
 Unknown footer keys are ignored with `W150`, which keeps CCME compatible with organisation-specific trailers.
 
 A footer value MAY span multiple lines: a continuation line is any line in the footer block that is not itself a footer
 start (§20.5). Multi-line values are only meaningful for `BREAKING CHANGE`; for other keys the continuation is joined
 with a single space before parsing, and a resulting invalid value is `E151`.
+
+`Rollback-Version` is an additional CCME 3 footer: exactly one complete SemVer value is REQUIRED on a rollback unit
+and forbidden on other types (`E301`). It has no inline shorthand and is not a version bump or `Release-As` alias.
+`Rollback-Cancel` is valid only with `Rollback-Version` on an explicitly scoped rollback cancellation and names a full revision plus unit index; §26 defines its pre-intent-only semantics. Rollback units reject the other release directives listed above; see §26 for the complete validation rule.
 
 ### 8.1.1 `BREAKING CHANGE`: the exception to four rules
 
@@ -907,7 +942,7 @@ and never validated: an empty value is legal, though `W157` notes that a breakin
 unhelpful to consumers.
 
 **Bump.** `major`, overriding whatever the type would have produced, subject to §12.6 for `0.y.z` packages. A
-`BREAKING CHANGE` footer on a `cancel` unit is `E171`; on a `release` unit it is `E141`.
+`BREAKING CHANGE` footer on `cancel` is `E171`; on `release` it is `E141`; on `rollback` it is `E301`.
 
 ### 8.2 `Propagate`
 
@@ -1968,6 +2003,10 @@ reachable-from-HEAD, which makes them the only state that survives rebasing, for
 Implementations SHOULD warn (`W192`) when a manifest version disagrees with the baseline, and MUST write the computed
 version into the manifest as part of publishing.
 
+A verified rollback withdraws an external artifact, not its tag. Its version remains in baseline/high-water
+computation permanently. Rollback receipts are separate immutable records, ignored by tag selection. Removing or
+reusing the tag would re-admit already discharged metadata and is forbidden (§26).
+
 ### 12.5 Unreleased packages
 
 A package with no reachable tag has no baseline. Its first computed version is `initialVersion` (default `0.1.0`),
@@ -1994,8 +2033,15 @@ ordinary way.
 
 ## 13. Release computation algorithm
 
-The complete, normative procedure. It is a pure function of (repository history, workspace graph, configuration) and
+The complete ordinary-release procedure. It is a pure function of (repository history, immutable release records, workspace graph, configuration) and
 MUST be deterministic.
+
+The procedure below computes the **ordinary forward-release projection**. Before applying it, a CCME 3 engine parses
+and validates rollback units under §26, collects their separate operational requests, and excludes them from ordinary
+cancellation, correction, channel, propagation and bump tuples. A rollback unit never enters `W` or `Wfresh` as work
+that a subsequent release tag can discharge. The complete plan includes both projections and must satisfy the combined
+preflight restrictions of §26 before any artifact mutation. Publication cannot start while requested rollback is
+incomplete. Withdrawal receipts are an additional availability input, never a replacement baseline.
 
 ### 13.1 Load the workspace
 
@@ -2116,7 +2162,7 @@ applyCorrections(tuples, units):
     # ---- resolve each correction unit ----
     corr = []
     for u in units where u carries Edits or Deletes footers:
-        if u.type in {cancel, release}:   already E171 / E173 at parse; skip
+        if u.type in {cancel, release, rollback}:   already E171 / E173 / E301 at parse; skip
         targets = []
         for f in u.correctionFooters:                  # in written order
             if f.value == '*':  targets.append(WILDCARD(f.kind)); continue
@@ -2383,6 +2429,9 @@ Where a guarantee says **retry invariant**, it additionally requires the correct
 scope/depth predicates, target baselines, and resolved source/target channel admission for every outstanding unit to
 remain unchanged except for baseline tags written for packages that successfully released. Neither H1 nor H2 is needed
 for one invocation's deterministic computation.
+For CCME 3 these are claims about the forward-publish projection. The retry invariant also fixes rollback activation,
+withdrawal inventories and completion state. They do not promise artifact availability after explicit withdrawal.
+The separate rollback progress argument is in §26 and requires durable receipts and successful idempotent operations.
 These guarantees are normative and testable; Appendix B.7 exercises G1–G6 and Appendix B.9 exercises G7 and G8.
 
 **G1, termination.** Propagation halts. Each unit traverses a BFS that marks every package `seen` at most once, so it
@@ -2748,6 +2797,10 @@ name is still the implementer's to justify.
 
 ## 14. Configuration
 
+CCME 3 additionally defines `vcs` (§25) and explicit rollback activation plus package/space handler declarations (§26).
+These are future engine configuration contracts, not currently accepted Dispat configuration keys. Omitting `vcs`
+selects Git. Omitting rollback execution enablement never authorizes withdrawal.
+
 Defaults are chosen so that an unconfigured repository behaves conservatively and predictably.
 
 | Key                         | Default                                                      | Meaning                                                                                   |
@@ -3056,7 +3109,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 115 | `chore(core): x` + `Deletes: *`                                          | Every pending record for `core` is discarded; `chore` maps to `none`, so nothing replaces them. The pure-deletion form.                                                                               |
 | 116 | `Deletes: T`, then a newer commit `Edits: T`                             | The restatement is in force: the newest correction of a target wins, and the superseded delete reports `W210` (§7.4.2).                                                                               |
 | 117 | Correction naming its own commit, or a descendant                        | `E210`. A correction reaches proper ancestors only, which is what lets one commit delete old records and restate them together.                                                                        |
-| 118 | Correction naming a `cancel` or `release` unit                           | `E212`.                                                                                                                                                                                               |
+| 118 | Correction naming a `cancel`, `release`, or `rollback` unit                           | `E212`.                                                                                                                                                                                               |
 | 119 | `cancel` barrier covering a correction's commit                          | The restatement record is discarded like any pending unit; a later correction of a cancelled target has nothing to act on and reports `W209` (§13.4b).                                                |
 | 120 | `Edits: T` where the carrying unit equals `T` in type, `!`, and text     | Applied, and `W211` reports that it changes nothing.                                                                                                                                                  |
 | 121 | Two `Edits` footers in one unit                                          | Both targets are discarded and both are restated by the one carrying record (§7.4.1).                                                                                                                 |
@@ -3082,6 +3135,27 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 
 ## 16. Diagnostics registry
 
+CCME 3 adds the following operational diagnostics. They are specification requirements for future engines, not
+claims about codes emitted by Dispat 1.8. `E300`–`E309` fail the combined run; preflight failures prevent artifact mutation, while execution failures retain prior progress;
+`E320`–`E329` have the scopes and recovery rules specified in §25. Existing message diagnostics retain their scope.
+
+| Code | Condition |
+| --- | --- |
+| `E300` | Pending rollback execution is not explicitly enabled. |
+| `E301` | Invalid rollback syntax, target version or incompatible directive. |
+| `E302` | Missing, ambiguous, unreachable or later-introduced target release identity. |
+| `E303` | Missing, disabled or unsupported rollback handler. |
+| `E304` | Incomplete consumer inventory, unsafe omission, cyclic withdrawal order or overlapping ordinary release. |
+| `E305` | Rollback handler protocol, output, process or timeout failure. |
+| `E306` | Ambiguous rollback outcome, unverifiable absence or mismatched artifact identity. |
+| `E307` | Rollback intent/completion conflict or durable recording failure. |
+| `E308` | Ordinary release or adoption requires a withdrawn artifact identity. |
+| `E309` | Invalid rollback cancellation or cancellation after a durable intent exists. |
+| `W300` | Historical rollback directive predates explicit activation and cannot execute. |
+
+The VCS adapter diagnostics `E320`–`E329`, `W320` and `W321` are defined in the incorporated
+[VCS protocol registry](./VCS-PROTOCOL.md#7-diagnostics). No operational warning may be used to mark incomplete rollback as successful.
+
 Errors (`E`) MUST be reported. Their blast radius depends on the code:
 
 * **Unit-scoped** (`E100`–`E181` except `E158`, and `E210`–`E213`): the offending unit contributes nothing; other
@@ -3089,7 +3163,7 @@ Errors (`E`) MUST be reported. Their blast radius depends on the code:
 * **Message-scoped** (`E001`, `E002`, `E158`): the commit contributes nothing.
 * **Repository-scoped** (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`): the run cannot produce a correct plan and
   MUST abort. These are integrity failures, not authoring mistakes, and no partial release may be emitted.
-* **Run-scoped** (`E197`, `E198`, `E199`): the run's *publication* cannot be completed or trusted. Packages already
+* **Run-scoped** (`E197`, `E198`, `E199`, `E300`–`E309`, `E320`–`E329`): the run's *publication* cannot be completed or trusted. Packages already
   published and tagged before the error remain published and tagged; the run MUST stop, report what was completed, and
   exit non-zero. These are recoverable by a later run, unlike repository-scoped errors.
 
@@ -3214,6 +3288,12 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `W214` | A `Reverts` value is not a well-formed commit sha; the footer is informational for this unit (§7.3).                                                                                                                                                                                                       |
 | `W215` | A correction is void for a package: its own record there was discarded by a newer correction, so none of its effects apply for that package (§7.4.2, §13.4b).                                                                                                                                              |
 
+**CCME 3 operational buckets.** The rollback codes `E300`–`E309` and adapter codes `E320`–`E329` are run-scoped,
+unlike a malformed ordinary commit which can be discarded under message policy. A preflight finding stops all
+artifact changes; a finding after a side effect preserves recorded progress, blocks unsafe subsequent work and makes
+the run fail. They cannot be downgraded to warnings by lenient commit parsing. `W300`, `W320` and `W321` belong to
+the warning bucket and never discharge an incomplete operation.
+
 ---
 
 ## 17. Conformance
@@ -3227,7 +3307,7 @@ An implementation conforms to CCME 2.0.0 if and only if it:
 3. Applies the bump mapping of §7.1 and the `max()` combination rule of §9.1.
 4. Implements `cancel` per §10, **including the ancestor-or-self rule of §10.3**.
 5. Implements holds per §8.6.1 and §13.6a.
-6. Computes versions per §11 and §13, reading state exclusively from git tags (§12.4), including the channel-entry patch
+6. Computes versions per §11 and §13, reading version state exclusively from immutable release records (§12.4, §25), including the channel-entry patch
    of §11.4.
 7. Computes the two propagation axes independently and in the phase order of §9.2, with both defaulting to depth `0`;
    graduates a dependent only through an explicit transition (§9.3); and suppresses a propagated bump the target cannot
@@ -3242,6 +3322,14 @@ An implementation conforms to CCME 2.0.0 if and only if it:
 13. Applies corrections per §7.4 and §13.4b (strict-ancestor reach, scope containment, newest-wins precedence,
     voiding of discarded corrections, confinement to undischarged work), and suppresses reverted changelog entries
     per §7.3.
+14. Implements the Git-default VCS record model and the configurable external adapter contract of §25, including
+    fixed snapshots, complete history, immutable records, ownership-safe locking, and its conformance vectors.
+15. Recognizes and separately plans rollback per §26, requires explicit activation, executes its identity-bound
+    handlers and receipts, refuses unsafe or incomplete withdrawal, and satisfies its conformance vectors.
+
+A CCME 2 parser or an engine implementing only the ordinary forward-release projection MUST identify that narrower
+support and MUST NOT claim full CCME 3 conformance. Specification publication, prose examples, and static protocol
+vectors are not implementation or experimental evidence.
 
 An implementation that computes correct plans but publishes them in an arbitrary order does **not** conform. The
 guarantees of §13.7c are joint properties of the computation and the publish protocol; either alone is insufficient,
@@ -3254,10 +3342,10 @@ which affect conformance, provided §14's final paragraph is respected.
 
 Both are normative, and both are testable:
 
-* **Determinism.** For a fixed (repository state at `HEAD`, configuration), the release plan MUST be byte-identical
-  across runs, machines, and implementations. Nothing may depend on wall-clock time, commit dates, tag creation order,
+* **Determinism.** For a fixed (repository state at `HEAD`, configuration, withdrawal inventory and receipts), the release plan MUST be byte-identical
+  across runs, machines, and implementations. Plan contents may not depend on wall-clock time, commit dates, tag creation order,
   filesystem iteration order, hash-map iteration order, or locale.
-* **Idempotency.** Running the engine twice from the same repository and tag state MUST produce the same plan.
+* **Idempotency.** Running the engine twice from the same repository, release records, rollback records, configuration and fixed verified inventory MUST produce the same plan. A new completion or cancellation changes that state and discharges its request.
   After a successful publish, each package's new baseline tag empties its `Wfresh`; train-wide `W` may remain non-empty
   solely to retain aggregate prerelease history (§13.3).
 * **Resumption.** After a partial publish, implementations MUST recompute from tags. Under G3's hypotheses, the plan
@@ -3277,14 +3365,16 @@ container MUST NOT be observable.
 This document is CCME **2.0.0** and is itself versioned under SemVer:
 
 * **Patch**: clarifications and editorial fixes that cannot change any release plan.
-* **Minor**: new types, footers, or inline sigils; new diagnostics; new configuration keys. A 1.x implementation MUST
+* **Minor**: backward-compatible types, footers, inline sigils, diagnostics or configuration keys that preserve existing execution semantics. A 1.x implementation MUST
   ignore unknown footer keys (`W150`) and MAY ignore unknown types (`W140`), so minor additions are forward-compatible
   by construction.
 * **Major**: any change that alters the release plan for a message that was already valid.
 
-This revision preserves the 1.0.0 message grammar. It corrects the pending-ledger algorithm and revises the
-hypotheses of guarantees whose unconditional 1.0.0 wording admitted counterexamples; conforming plans can therefore
-differ for inputs that were valid under 1.0.0.
+The 2.0.0 revision preserved the 1.0.0 message grammar while correcting pending-ledger computation and proof premises.
+The 3.0.0 revision reserves previously inert `rollback` units for explicitly activated artifact withdrawal and adds
+VCS-dependent canonical revision operands. It also expands full-engine conformance to the adapter and rollback
+protocols. These semantic and conformance changes require a major revision. A new optional key alone would not.
+The activation boundary prevents an engine upgrade from silently executing old rollback-shaped messages.
 
 The escape hatches that make minor versions safe are `W140` and `W150`. Implementations MUST NOT convert either into an
 error by default; `strictTypes` is opt-in for exactly this reason.
@@ -3292,6 +3382,11 @@ error by default; `strictTypes` is opt-in for exactly this reason.
 ---
 
 ## 18. Security considerations
+
+CCME 3 adapters and rollback handlers are trusted executable configuration. Request data MUST be JSON encoded, never
+interpolated into shell source. An untrusted commit cannot select a command or authorize removal. Missing atomic lock
+semantics, durable records or artifact identity is a refusal, not a reason to weaken safety. Rollback cannot revoke
+external copies or prove the absence of external consumers; the plan must surface that limitation (§26).
 
 Commit messages are **untrusted input**. In any repository that accepts contributions, the message text is
 attacker-controlled, and under CCME that text directs version numbers, release scope, and publication. This section is
@@ -3394,6 +3489,10 @@ and the publish protocol, and do not survive an implementation that gets this se
 
 The model throughout is that **every publish can fail independently**, and that a run which fails partway leaves a state
 that is consistent, inspectable, and resumable without operator intervention.
+
+CCME 3 runs execute explicitly requested rollback under §26 before ordinary publication; a rollback failure prevents
+ordinary publication in that attempt. No rollback is inferred from failure below. Existing tags remain immutable,
+including tags whose external artifacts have been withdrawn. §19.4 adoption cannot revive a withdrawn identity.
 
 ### 19.1 Tagging
 
@@ -3565,6 +3664,12 @@ to publish at all), the supported way to drop it is `cancel(<consumer>)` (§13.5
 `cancel(*)` as the first commit after adoption (§10.6) drops all of them at once.
 
 ## 20. Parsing without regular expressions
+
+For CCME 3, the scanner still accepts a lowercase `type` token. Semantic validation MUST classify `rollback` before
+ordinary bump processing, validate its explicit scopes and `Rollback-Version` under §26, and exclude the resulting
+operational request from ordinary correction/cancellation/propagation tuples. The pseudocode below describes that
+ordinary projection; it is not sufficient by itself to implement the new operational type. External VCS revision
+operands follow §25 rather than Git-specific SHA validation.
 
 The grammar is designed so that a conforming parser is a single left-to-right index scan with a fixed lookahead of one
 character. No backtracking, no regular-expression engine, no recursion. This section is normative for behaviour and
@@ -4066,6 +4171,10 @@ A prerelease tag that does not match this pattern but is otherwise valid SemVer 
 ---
 
 ## 22. Appendix B: Conformance test vectors
+
+The vectors below retain their original Git/forward-release fixtures. Full CCME 3 conformance additionally requires
+all vectors in [VCS-PROTOCOL.md §6](./VCS-PROTOCOL.md#6-conformance-vectors) and
+[ROLLBACK.md §8](./ROLLBACK.md#8-conformance-vectors). They are normative expected outcomes, not measured Dispat results.
 
 Each vector is `input → expected`. An implementation is conforming if it reproduces every one. Workspace for all
 vectors:
@@ -4860,6 +4969,11 @@ restatement should have written `Edits: <A>` again, which supersedes `B` directl
 
 ## 23. Appendix C: Formal grammar (ABNF)
 
+The SHA productions below describe the default Git profile. External revision operands use the exact-token/quoted-string
+profile in §25. `rollback` fits the existing `type` production; its footer names fit the general footer-key production,
+but §26 imposes additional semantic constraints. `Rollback-Version` uses exact SemVer; `Rollback-Cancel` combines a
+full revision operand and the existing one-based `unit-no` selector. Neither is an ordinary bump or correction.
+
 Blank lines adjacent to a separator are discarded before this grammar applies (§4.2), and the input is normalised per
 §4.1.
 
@@ -5234,3 +5348,20 @@ plan:
 Had `HEAD` moved between the runs, say because someone merged a `fix(ui)`, run 2 would plan `ui` at `0.9.2` still, since `max()`
 of a propagated patch and a direct patch is a patch, and the changelog would carry both entries. G3 fixes the version
 only against a fixed `HEAD`; new commits legitimately change the outcome.
+
+
+---
+
+## 25. VCS adapters
+
+[VCS-PROTOCOL.md](./VCS-PROTOCOL.md) is an integral normative part of this specification. It defines Git as the default,
+shareable trusted command configuration, exact input/output envelopes, fixed history snapshots, revision operands,
+immutable records, conditional locks, failure handling and conformance vectors. Its backend-specific revision operand
+rule refines the Git-only SHA operands in §§7, 20–23; the ordinary Git grammar remains unchanged.
+
+## 26. Explicit rollback
+
+[ROLLBACK.md](./ROLLBACK.md) is an integral normative part of this specification. It defines `rollback(scope)`, the
+required `Rollback-Version` footer, activation, package/space handlers, consumer-first withdrawal, durable intent and
+completion receipts, retries, version non-reuse, and conformance vectors. Missing handlers are preflight errors.
+No part of this protocol is implemented by the current Dispat release merely because it is documented here.

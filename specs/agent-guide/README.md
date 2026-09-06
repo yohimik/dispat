@@ -203,7 +203,11 @@ Dispat uses Conventional Commits: Monorepo Extension (CCME). Read the repository
 
 Explicit scopes name configured packages. With no scope, ownership can derive from changed files. Propagation and channel syntax change release intent; do not add them as decorative prose. Accurate scopes matter for both releases and `--since` script sweeps.
 
-Manifest versions alone do not determine the next release. Tags, commits, dependency propagation, channels, groups, and parser policy contribute to the plan. Use `status` for the computed result. The normative syntax lives in the repository's [CCME specification](../ccme-spec/SPEC.md).
+Manifest versions alone do not determine the next release. Tags, commits, dependency propagation, channels, groups, and parser policy contribute to the plan. Use `status` for the computed result. The implemented syntax is described by the [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md).
+
+CCME 3.0.0 specifies external VCS adapters and explicit rollback ahead of implementation. Dispat 1.8.x does not
+execute `rollback(scope)` or accept the new adapter/rollback configuration. Do not use specification-only examples as
+runtime commands; an older parser can treat the directive as an unknown type without withdrawing anything.
 
 ## Know the gating boundary
 
@@ -301,7 +305,7 @@ Do not describe a repository-wide release as rolled back merely because one pack
 - [Release lock](https://dispat.dev/reference/releasing/release-lock/)
 - [Recovery](https://dispat.dev/reference/releasing/recovery/)
 - [Diagnostic codes](https://dispat.dev/reference/plan-errors/)
-- [CCME specification](../ccme-spec/SPEC.md)
+- [CCME specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
 
 ## Distribution
 

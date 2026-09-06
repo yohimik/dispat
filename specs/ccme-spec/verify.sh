@@ -5,10 +5,12 @@ set -eu
 
 cd "$(dirname "$0")"
 
-if [ -L VERSION ] || [ -L SPEC.md ]; then
-  echo "refusing to verify a symlinked VERSION or SPEC.md" >&2
-  exit 1
-fi
+for file in VERSION SPEC.md LICENSE VCS-PROTOCOL.md ROLLBACK.md DESIGN-HISTORY.md; do
+  if [ -L "$file" ] || [ ! -f "$file" ]; then
+    echo "refusing to verify symlinked or non-regular $file" >&2
+    exit 1
+  fi
+done
 
 version=$(cat VERSION)
 if [ "${DISPAT_STAGE:-}" = build ] && [ -n "${DISPAT_NEW_VERSION:-}" ] && [ "$version" != "$DISPAT_NEW_VERSION" ]; then
@@ -55,5 +57,11 @@ require_once "local license link" "**License:** GPL-3.0-or-later. See [LICENSE](
 grep -Fq 'GNU GENERAL PUBLIC LICENSE' LICENSE
 grep -Fq 'Version 3, 29 June 2007' LICENSE
 grep -Fq 'changing it is not allowed.' LICENSE
+
+grep -Fq '## 25. VCS adapters' SPEC.md
+grep -Fq '## 26. Explicit rollback' SPEC.md
+grep -Fq '(./VCS-PROTOCOL.md)' SPEC.md
+grep -Fq '(./ROLLBACK.md)' SPEC.md
+grep -Fq '(./DESIGN-HISTORY.md)' SPEC.md
 
 echo "CCME specification $version is internally consistent"
