@@ -20,6 +20,17 @@ Dispat can execute arbitrary configured scripts and can publish packages, write 
 8. Treat publishing as non-atomic. Some packages can publish before another package fails.
 9. Respect the release lock and verify ambiguous remote outcomes before retrying.
 10. Report what ran, what published, what failed or was skipped, and what remains uncertain.
+11. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
+
+## Release through CI/CD
+
+Set up or repair the repository's CI/CD release workflow when that work is authorized. Put the Dispat invocation, package selection, credentials, checks, artifact validation, publication, and recording in that workflow. Keep its configuration in version control so reviewers can inspect the release path before it runs.
+
+Do not run a production release from an agent's local shell, publish directly to a registry, create release tags by hand, or upload release assets outside the workflow. Do not use standalone Dispat commands or another tool to bypass this rule. A request to release authorizes using the established pipeline; it does not authorize inventing a manual publication path.
+
+If the repository has no release workflow, configure and validate one first. When a release is authorized, trigger that workflow for the intended revision, wait for its required gates, and verify its published artifacts and records. A manual workflow dispatch is acceptable: the pipeline still performs the release. Local read-only planning and tests in disposable repositories remain useful preparation.
+
+If the pipeline fails, inspect the failure, fix the cause in version control, and retry through the pipeline after resolving any ambiguous publication. Do not finish the release manually to make a failed run appear successful. Exceptional destructive recovery requires a documented procedure and specific authorization; it must not become an alternative publication path. See [Dispat in CI](https://dispat.dev/reference/ci/).
 
 ## Establish the installed contract
 
@@ -257,7 +268,7 @@ After a failure:
 3. Inspect local and remote release records.
 4. For any publish whose response was lost or whose record is missing, query the registry or destination directly.
 5. Repair the cause and rerun status with the same configuration and environment.
-6. Retry the release only after resolving ambiguous publications and any stale lock.
+6. Retry through the CI/CD release workflow only after resolving ambiguous publications and any stale lock.
 
 Before a retry that can create release commits or revert failed package edits, inspect the selected package folders and configured `commit.include` paths for pre-existing work. Commit or stash only the intended owner's changes through the repository's normal workflow; never let an automatic release commit capture unrelated files.
 
@@ -269,7 +280,7 @@ Do not manually rewrite tags, force a push, reset files, or invoke standalone re
 
 ## External approval and optional policy tools
 
-Dispat itself does not define who may authorize a release. Follow the repository's governance, CI environment protections, branch rules, registry controls, and the user's established authorization. An inspection request does not authorize publishing. A clear request to perform a scoped release remains valid through ordinary retries and necessary implementation steps unless the scope or consequences materially change.
+Dispat itself does not define who may authorize a release. Follow the repository's governance, CI environment protections, branch rules, registry controls, and the user's established authorization. An inspection request does not authorize publishing. A clear request to perform a scoped release remains valid through ordinary pipeline retries and necessary implementation steps unless the scope or consequences materially change. Keep those retries within the CI/CD release path described above.
 
 Some environments add a policy tool that reviews shell commands, including [HOL Guard](https://github.com/hashgraph-online/hol-guard). If one is installed, follow its actual local policy and approval results. Do not assume it exists, claim that it is integrated with Dispat, or use helper and standalone commands to route around it. Policy enforcement supplements Dispat's release lock and pipeline gates; it does not replace them.
 
