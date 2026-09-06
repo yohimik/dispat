@@ -1,4 +1,5 @@
-# This guide is versioned independently of the CLI and the CCME specification.
+# The guide shares Dispat's major/minor line and carries its own patches.
+versionGroup: cli
 tagFormat: specs/agent-guide/v{version}
 
 scripts:

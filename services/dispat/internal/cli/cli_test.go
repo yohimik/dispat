@@ -70,8 +70,31 @@ func TestHelpFlag(t *testing.T) {
 	assert.Contains(t, out, `run "dispat <command> --help"`)
 	assert.Contains(t, out, "If you are an agent, read the common guide:")
 	assert.Contains(t, out, "https://github.com/yohimik/dispat/blob/main/specs/agent-guide/README.md")
-	assert.Contains(t, out, "Configuration reference: https://dispat.dev/configuration/")
-	assert.Contains(t, out, "API reference:           https://dispat.dev/api/")
+	assert.Contains(t, out, "Configuration reference: https://github.com/yohimik/dispat/blob/main/packages/docs/docs/configuration/README.md")
+	assert.Contains(t, out, "API reference:           https://github.com/yohimik/dispat/blob/main/packages/docs/docs/api.md")
+}
+
+func TestHelpPinsReleaseReferences(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	for _, version := range []string{"1.8.2", "1.9.0-rc.2", "v1.8.2"} {
+		t.Run(version, func(t *testing.T) {
+			Version = version
+			var stdout, stderr bytes.Buffer
+			require.Equal(t, 0, Run([]string{"--help"}, &stdout, &stderr))
+			ref := strings.TrimPrefix(version, "v")
+			out := stderr.String()
+			assert.Contains(t, out, "https://github.com/yohimik/dispat/blob/services/dispat/v"+ref+"/specs/agent-guide/README.md")
+			assert.Contains(t, out, "https://github.com/yohimik/dispat/blob/services/dispat/v"+ref+"/packages/docs/docs/configuration/README.md")
+			assert.Contains(t, out, "https://github.com/yohimik/dispat/blob/services/dispat/v"+ref+"/packages/docs/docs/api.md")
+			assert.NotContains(t, out, "/blob/main/")
+			assert.NotContains(t, out, "Development build")
+		})
+	}
+	Version = "dev"
+	var stdout, stderr bytes.Buffer
+	require.Equal(t, 0, Run([]string{"--help"}, &stdout, &stderr))
+	assert.Contains(t, stderr.String(), "Development build: references point to upcoming documentation.")
 }
 
 func TestHelpIsScopedToTheCommand(t *testing.T) {

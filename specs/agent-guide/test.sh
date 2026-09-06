@@ -50,6 +50,9 @@ commit:
 scripts:
   changelog: 'true'
   commit: '"$DISPAT_BIN" commit --tag'
+versionGroups:
+  cli:
+    versioning: fixedMajorMinor
 initials:
   agent-guide: 0.0.0
 packages:
@@ -94,6 +97,46 @@ repository "$release"
   sh specs/agent-guide/verify.sh
   test -z "$(git tag -l 'unrelated*')"
   test "$(cat unrelated/README.md)" = keep
+)
+
+# Joining the existing CLI major/minor group aligns the guide's line without
+# coupling patch releases. Exercise the production guide config with real tags.
+group=$tmp/group
+repository "$group"
+fixture "$group/specs/agent-guide" 1.0.0
+cat >> "$group/dispat.yaml" <<'EOF'
+  dispat:
+    path: cli
+    versionGroup: cli
+    flow:
+      publish: commit
+EOF
+(
+  cd "$group"
+  mkdir cli
+  printf '%s\n' cli > cli/README.md
+  git add .
+  git commit -qm 'chore: establish group baselines'
+  git tag -a specs/agent-guide/v1.0.0 -m baseline
+  git tag -a dispat@1.8.1 -m baseline
+  git commit --allow-empty -qm 'fix(dispat)^^: pin release references'
+  DISPAT_BIN="$dispat" "$dispat" release --require-release
+  test "$(cat specs/agent-guide/VERSION)" = 1.8.0
+  git rev-parse --verify refs/tags/dispat@1.8.2 >/dev/null
+  git rev-parse --verify refs/tags/specs/agent-guide/v1.8.0 >/dev/null
+  cli_record=$(git rev-parse refs/tags/dispat@1.8.2)
+  git commit --allow-empty -qm 'fix(agent-guide): clarify guidance'
+  DISPAT_BIN="$dispat" "$dispat" release --require-release
+  test "$(cat specs/agent-guide/VERSION)" = 1.8.1
+  test "$(git rev-parse refs/tags/dispat@1.8.2)" = "$cli_record"
+  test -z "$(git tag -l dispat@1.8.3)"
+  guide_record=$(git rev-parse refs/tags/specs/agent-guide/v1.8.1)
+  git commit --allow-empty -qm 'fix(dispat): correct help'
+  DISPAT_BIN="$dispat" "$dispat" release --require-release
+  git rev-parse --verify refs/tags/dispat@1.8.3 >/dev/null
+  test "$(cat specs/agent-guide/VERSION)" = 1.8.1
+  test "$(git rev-parse refs/tags/specs/agent-guide/v1.8.1)" = "$guide_record"
+  test -z "$(git tag -l specs/agent-guide/v1.8.2)"
 )
 
 # Bad source declarations and symlinks must fail before replacement. A fully

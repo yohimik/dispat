@@ -4,9 +4,17 @@
 
 **License:** MIT. See [LICENSE](./LICENSE).
 
-This guide explains how a coding agent should inspect, test, release, and recover a repository managed by Dispat. It complements the [Dispat documentation](https://dispat.dev/) and the repository's own instructions. It does not replace either one.
+The guide shares Dispat’s major/minor release line and can receive its own patches. Released `dispat --help` links to the guide and reference documents captured by that CLI’s immutable release tag. Relative documentation links in this guide preserve the same snapshot.
+
+This guide explains how a coding agent should inspect, test, release, and recover a repository managed by Dispat. It complements the [Dispat documentation](../../packages/docs/docs/getting-started.md) and the repository's own instructions. It does not replace either one.
 
 Dispat can execute arbitrary configured scripts and can publish packages, write files, create commits and tags, push branches, and call external services. Treat the repository configuration as executable release policy.
+
+## Choose the guide patch
+
+Start with the guide linked by `dispat --help`. Check the repository's published `specs/agent-guide/v*` releases for a newer guide patch on the installed CLI's major/minor line, and use the latest available patch on that line. For example, a Dispat 1.8.2 installation can use guide 1.8.3: guide patches carry their own version and need not match the CLI's patch number. Do not move to a different major/minor line or a prerelease guide for a stable CLI.
+
+Keep the configuration and API references from the installed binary's help pinned to that CLI release. A newer guide may link to a newer documentation snapshot, so it does not establish that the older binary supports a feature. If you cannot check published guide releases, use the pinned guide and report that the latest patch could not be verified.
 
 ## Working rules
 
@@ -30,7 +38,7 @@ Do not run a production release from an agent's local shell, publish directly to
 
 If the repository has no release workflow, configure and validate one first. When a release is authorized, trigger that workflow for the intended revision, wait for its required gates, and verify its published artifacts and records. A manual workflow dispatch is acceptable: the pipeline still performs the release. Local read-only planning and tests in disposable repositories remain useful preparation.
 
-If the pipeline fails, inspect the failure, fix the cause in version control, and retry through the pipeline after resolving any ambiguous publication. Do not finish the release manually to make a failed run appear successful. Exceptional destructive recovery requires a documented procedure and specific authorization; it must not become an alternative publication path. See [Dispat in CI](https://dispat.dev/reference/ci/).
+If the pipeline fails, inspect the failure, fix the cause in version control, and retry through the pipeline after resolving any ambiguous publication. Do not finish the release manually to make a failed run appear successful. Exceptional destructive recovery requires a documented procedure and specific authorization; it must not become an alternative publication path. See [Dispat in CI](../../packages/docs/docs/reference/ci.md).
 
 ## Establish the installed contract
 
@@ -56,7 +64,7 @@ If they disagree, stop relying on the disputed behavior. Record the binary versi
 
 Use `status --require-release` for a lock-free CI plan gate. A release invocation acquires the release lock before planning, including when `--require-release` eventually reports no work.
 
-Useful references are the [CLI reference](https://dispat.dev/cli/), [configuration reference](https://dispat.dev/configuration/), [Go API](https://dispat.dev/api/), and [diagnostic codes](https://dispat.dev/reference/plan-errors/).
+Useful references are the [CLI reference](../../packages/docs/docs/cli/README.md), [configuration reference](../../packages/docs/docs/configuration/README.md), [Go API](../../packages/docs/docs/api.md), and [diagnostic codes](../../packages/docs/docs/reference/plan-errors.md).
 
 ## Resolve the effective repository
 
@@ -166,7 +174,7 @@ test -x "$binary" || exit 1
 
 Printing the assignment to stdout or exporting a shell variable does not populate the next sequence. Outputs are captured after the whole sequence completes, so a value appended during one command is not immediately available as `DISPAT_OUTPUT_*` to the next command in that same sequence. Use a shell variable within one script or consume the captured value in a later hook.
 
-An output's presence does not prove its producing sequence succeeded. Preserve the original failure and require the smoke gate to pass. Output values are paths or strings, not transported file contents; files must remain accessible to later scripts and containers. See [script outputs](https://dispat.dev/reference/environment/#script-outputs).
+An output's presence does not prove its producing sequence succeeded. Preserve the original failure and require the smoke gate to pass. Output values are paths or strings, not transported file contents; files must remain accessible to later scripts and containers. See [script outputs](../../packages/docs/docs/reference/environment.md#script-outputs).
 
 ## Select script work deliberately
 
@@ -197,11 +205,11 @@ dispat exec tests --for pkg:core --in pkg:core --fallback
 
 All helpers can run mutating or publishing scripts. They are execution tools, not previews. Their `--on-failure` handlers can replace the original exit status, so a successful notification handler must not hide a failed gate.
 
-See [`run`](https://dispat.dev/cli/run/), [`exec`](https://dispat.dev/cli/exec/), [`if`](https://dispat.dev/cli/if/), and [`for`](https://dispat.dev/cli/for/).
+See [`run`](../../packages/docs/docs/cli/run.md), [`exec`](../../packages/docs/docs/cli/exec.md), [`if`](../../packages/docs/docs/cli/if.md), and [`for`](../../packages/docs/docs/cli/for.md).
 
 ## Understand release intent
 
-Dispat uses Conventional Commits: Monorepo Extension (CCME). Read the repository's parser settings and the [commit reference](https://dispat.dev/reference/commits/) before predicting versions.
+Dispat uses Conventional Commits: Monorepo Extension (CCME). Read the repository's parser settings and the [commit reference](../../packages/docs/docs/reference/commits.md) before predicting versions.
 
 | Commit | Default intent |
 | --- | --- |
@@ -239,7 +247,7 @@ Independent graph branches can continue after a package fails. Consumers may be 
 
 Publish scripts must be safe to retry for the same package, version, and artifact. Return success for an existing version only after verifying that it is the exact intended artifact. Never turn every "already exists" response into success: publication may have completed remotely just before a local error or lost response.
 
-After `publish` succeeds, failure to write a tag, changelog, GitHub record, release commit, or push does not make the package unpublished. Treat the result as published with incomplete recording. See [release steps](https://dispat.dev/reference/releasing/steps/) and [recovery](https://dispat.dev/reference/releasing/recovery/).
+After `publish` succeeds, failure to write a tag, changelog, GitHub record, release commit, or push does not make the package unpublished. Treat the result as published with incomplete recording. See [release steps](../../packages/docs/docs/reference/releasing/steps.md) and [recovery](../../packages/docs/docs/reference/releasing/recovery.md).
 
 ## Respect the release lock
 
@@ -253,7 +261,7 @@ git ls-remote --refs origin refs/tags/dispat-release-lock
 
 A returned ref can be active or abandoned. An empty result is only a point-in-time observation, and a lookup error proves nothing. Dispat's lock acquisition resolves the race.
 
-If a lock appears abandoned, inspect its annotated tag and confirm that the owning process or CI job has ended. Delete it only with authorization for that cleanup. Lock deletion can admit a concurrent publisher and is not routine recovery. See [release locking](https://dispat.dev/reference/releasing/release-lock/).
+If a lock appears abandoned, inspect its annotated tag and confirm that the owning process or CI job has ended. Delete it only with authorization for that cleanup. Lock deletion can admit a concurrent publisher and is not routine recovery. See [release locking](../../packages/docs/docs/reference/releasing/release-lock.md).
 
 The lock covers Dispat releases, not ordinary Git pushes or other deployment tools. Dispat may recover a push that arrives during release by merging it (`W242`) or preserve conflicts on a `release-conflicts/...` branch (`W243`). Review either outcome even if the command exits successfully. If the remote already contains a release tag that the run would overwrite, recovery refuses; update the checkout and plan again.
 
@@ -306,16 +314,16 @@ Do not describe a repository-wide release as rolled back merely because one pack
 
 ## Reference map
 
-- [CLI reference](https://dispat.dev/cli/)
-- [Configuration](https://dispat.dev/configuration/)
-- [Go API](https://dispat.dev/api/)
-- [Packages](https://dispat.dev/configuration/packages/), [spaces](https://dispat.dev/configuration/spaces/), and [dependencies](https://dispat.dev/configuration/dependencies/)
-- [Scripts](https://dispat.dev/configuration/scripts/) and [run hooks](https://dispat.dev/configuration/run-hooks/)
-- [Environment and script outputs](https://dispat.dev/reference/environment/)
-- [Partial releases](https://dispat.dev/reference/releasing/partial-releases/)
-- [Release lock](https://dispat.dev/reference/releasing/release-lock/)
-- [Recovery](https://dispat.dev/reference/releasing/recovery/)
-- [Diagnostic codes](https://dispat.dev/reference/plan-errors/)
+- [CLI reference](../../packages/docs/docs/cli/README.md)
+- [Configuration](../../packages/docs/docs/configuration/README.md)
+- [Go API](../../packages/docs/docs/api.md)
+- [Packages](../../packages/docs/docs/configuration/packages.md), [spaces](../../packages/docs/docs/configuration/spaces.md), and [dependencies](../../packages/docs/docs/configuration/dependencies.md)
+- [Scripts](../../packages/docs/docs/configuration/scripts.md) and [run hooks](../../packages/docs/docs/configuration/run-hooks.md)
+- [Environment and script outputs](../../packages/docs/docs/reference/environment.md)
+- [Partial releases](../../packages/docs/docs/reference/releasing/partial-releases.md)
+- [Release lock](../../packages/docs/docs/reference/releasing/release-lock.md)
+- [Recovery](../../packages/docs/docs/reference/releasing/recovery.md)
+- [Diagnostic codes](../../packages/docs/docs/reference/plan-errors.md)
 - [CCME specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
 
 ## Distribution

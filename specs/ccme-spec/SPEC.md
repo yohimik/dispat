@@ -2557,8 +2557,8 @@ directChannelFor(P, cands, base):               # cands already in §11.6 order
 The precedence body is unchanged; only the way `cands` is obtained has been inverted. Written the other way, with `cands` as
 a comprehension over `W(P)` evaluated inside a loop over every package, it rescans the union window once per package,
 which is `O(P · U)`, and it does that work for the great majority of packages that no `Channel` directive names at all.
-Pushing from units costs one pass over the units plus the scope-set resolutions §13.4 has already paid for, and one flat
-pass over the packages: `O(U + P)` on top of work the run does anyway. The two agree row for row, because a package
+Pushing from units costs one pass over the units and their already-resolved incidences, plus one flat pass over the
+packages: `O(U + I + P)`. The two agree row for row, because a package
 appears in `cands[P]` under the inverted form exactly when `u sets Channel and P in resolve(u) and commitOf(u) in Wfresh(P)`,
 which is the comprehension's condition read in the other direction.
 
@@ -2678,71 +2678,99 @@ removed are exactly what a reviewer of the plan needs to see.
 
 ### 13.11 Complexity and scale
 
-This section is **normative for cost bounds and informative for technique**. A conforming implementation MUST produce
-the plan §13 defines; it is free to compute it any way that yields an identical result (§17.2). The bounds below exist
-because the algorithm is specified in the clearest form rather than the fastest one, and a literal transcription does
-not survive a large workspace.
+This section is **normative for semantic equivalence and informative for cost and technique**. A conforming
+implementation MUST produce the plan §13 defines; it need not use or attain any implementation bound below (§17.2).
+The table accounts for indexed, in-memory phase work after input decoding and validation. It assumes package and record
+identifiers are fixed-width or interned and adjacency and precedence inputs are already in their specified order.
+Otherwise comparisons, decoding, sorting, allocation, adapter calls, record matching and emitted bytes add their
+ordinary input/output costs. The symbols make those costs visible where they dominate; the table is not an
+unqualified end-to-end upper bound.
 
-Notation: `P` packages, `E` graph edges, `C` commits in the union of all pending windows, `U` units in those commits,
-`T` reachable tags, `k` **distinct** commits carrying a stable baseline, `G` distinct directive combinations in use. In
-the per-target row, and there only, `D` is the number of targets one unit reaches, `S` its source-set size, and `Σ`
-its resolved scope-set size. (`T` is already tags; the per-unit quantities are deliberately given separate letters
-because they are bounded by the *unit*, not by the run.)
+Notation: `P` packages, `E` workspace dependency edges, `H` commits and `A` parent edges in the history reachable from
+the fixed `HEAD`, `C` commits in the union of all pending windows, `U` units in those commits, `N` total bytes of their
+messages and changed paths, `T` reachable tags, and `M` tag-record/package-format matches examined while partitioning
+the inventory (at worst `P · T`). `k` is the number of **distinct** commits carrying a stable baseline. `R` is the
+actual work of resolving scopes and changed paths against the workspace, including candidates examined when the result
+is empty. `I` is the number of resulting unit-to-package incidences (and can be `P · U`). `Z` is the number of
+unit/source/target contribution or provenance incidences retained or emitted. `F` is the number of publish failures,
+and `Oout` is the size of diagnostics and other emitted output.
+In the per-target row, and there only, `D` is the number of targets one unit reaches, `S` its source-set size, and `Σ`
+its resolved scope-set size.
 
 | Phase                      | Literal transcription | Achievable            | Note                                        |
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
 | Load workspace (§13.1)     | `O(P + E)`            | `O(P + E)`            |                                             |
-| Load tags (§13.2)          | `O(T log T)`          | `O(T log T)`          |                                             |
-| Pending windows (§13.3)    | **`O(P · C)`**        | `O(k · C)`            | `k ≪ P`; see below                         |
-| Parse and resolve (§13.4)  | `O(U)` + file lookup  | `O(U)` amortised      | Parse results are cacheable by commit SHA   |
-| Cancellation (§13.5)       | `O(cancels · C)`      | `O(cancels · C)`      | `cancels` is tiny; precompute ancestor sets |
-| Direct bumps (§13.6)       | `O(U)`                | `O(U)`                |                                             |
-| Holds (§13.6a)             | `O(U)`                | `O(U)`                |                                             |
-| Propagation (§13.7)        | **`O(2U · (P + E))`** | `O(2k · G · (P + E))` | The dominant cost; two passes, see below    |
+| Load tags (§13.2)          | `O(T log T + M)`      | `O(T log T + M)`      | One inventory can still require many matches |
+| Pending windows (§13.3)    | **`O(P · (H + A))`**  | `O((k + 1) · (H + A) + Iw)` | Includes no-baseline class       |
+| Parse and resolve (§13.4)  | `O(N + R + I)`        | `O(N + R + I)`        | Lexing and resolution have different cache keys |
+| Cancellation (§13.5)       | `O(cancels · (H + A))`| input-dependent       | Cache ancestry answers or closures          |
+| Direct bumps (§13.6)       | `O(U + I)`            | `O(U + I)`            | Consume resolved incidences                 |
+| Holds (§13.6a)             | `O(U + I)`            | `O(U + I)`            | Consume resolved incidences                 |
+| Propagation (§13.7) graph walks | **`O(U · (P + E))`** | input-dependent    | Reuse walks only when full inputs match     |
+| Propagation materialisation| `O(Z)`                | `O(Z)`                | Required contribution/provenance output     |
 | per-target predicates      | **`O(D · (S + Σ))`**  | `O(D + S + Σ)`        | Per unit. Hoist `resolvableBy`, `resolve()` |
-| Channel resolution (§13.8) | **`O(P · U)`**        | `O(U + P)`            | Invert: push from units, do not scan `W(P)` |
-| Versions (§13.9)           | `O(P)`                | `O(P)`                |                                             |
-| Publish order (§19.2)      | `O(P + E)`            | `O(P + E)`            | Topological sort over the full graph        |
-| Blocking closure (§19.3)   | `O(P + E)`            | `O(P + E)`            | One reverse traversal per failure           |
+| Channel resolution (§13.8) | **`O(P · U)`**        | `O(U + I + P)`        | Invert unit-to-package incidences           |
+| Versions/plan (§13.9–10)   | `O(P + I + Z + Oout)` | `O(P + I + Z + Oout)` | Includes aggregates, provenance, diagnostics |
+| Publish order (§19.2)      | `O(P + E)` unordered  | `O(E + P log P)`      | Comparison heap for byte-wise ties           |
+| Blocking closure (§19.3)   | `O(F · (P + E))`      | `O(P + E)` per run    | One multi-source reverse traversal          |
 
-The bold rows are the ones that matter. Each is a product of two large quantities, and on a workspace with thousands of
-packages and a long history a literal implementation becomes the bottleneck for the whole run. The first two are
-structural and want the bucketing described below; the last two are ordinary loop-invariant and loop-inversion mistakes,
-and cost nothing to avoid if the code is written the right way round the first time.
+The bold rows are the ones that matter. Each contains quantities that can be large in a workspace with thousands of
+packages and a long history. Window classes safely share history reachability work. Propagation traversal is reusable
+only under the stricter conditions below; predicate hoisting and channel incidence inversion remain safe independently.
 
 **Windows: group by distinct baseline commit.** For a fixed `HEAD`, `W(P)` is determined by
 `stableCommit(P)`. Different package tags that resolve to the same commit therefore share a window. A release MAY
 record packages at different commits; `k` counts distinct baseline commits, not release runs, and can be as large as
-`P`. Computing `reach(s)` once per distinct `s` and testing membership by lookup replaces `P` traversals with `k`.
+`P`. Computing reachability once per distinct `s`, plus once for packages with no baseline, and testing membership by
+lookup replaces `P` traversals with at most `k + 1`.
+The traversals range over the reachable history, so their safe bound is in `H + A`, not `C`: proving that a commit is
+outside a pending window may require walking commits that never enter the union. `Iw` is the number of stored or emitted
+package/window memberships and is `P · C` in the worst case.
+
+**Inventory once, partition explicitly.** An adapter may return one complete release-record inventory for the fixed
+snapshot and let the planner match package formats in memory. This reduces adapter queries from one per package to one;
+it does not erase the `M` matches or their byte costs. The response MUST be complete for the namespace and snapshot,
+and implementations SHOULD validate any advertised metadata-object count before trusting it as a complete inventory.
+An incomplete bulk response cannot be repaired by treating missing packages as unreleased.
+
+Window storage may likewise be shared only inside one plan and fixed history snapshot, between packages whose stable
+boundary identity is equal (with a separate no-baseline class). The shared membership set MUST be immutable. `Wfresh(P)`
+also depends on `P`'s newest baseline of any channel: two packages can share `W(P)` because their stable baseline commit
+is equal while having different prerelease `baselineCommit(P)`, so fresh/contained membership MUST remain per package
+or be keyed by that second boundary too.
 
 Commit-graph generation numbers can reject some ancestry candidates and bound a graph walk. They do not establish
 ancestry by a constant-time comparison: commits on different branches can have ordered generation numbers without
 an ancestor relationship. A positive answer still requires a reachability query or a previously computed index.
 See Git's [commit-graph design](https://git-scm.com/docs/commit-graph).
 
-Storing `W(P)` as an explicit set per package costs `O(P · C)` **memory**. Representing each distinct window as a bitset
-over commit indices (one bit per commit in `reach(HEAD)`, `k` bitsets in total) bounds the membership storage at
-`O(k · C)` bits and makes the admission test of §13.4a a single bit lookup. Building those windows still requires
-computing reachability.
+Storing `W(P)` as an explicit set per package costs `O(P · C)` **memory**. A dense representation over every reachable
+history index uses `k + 1` bitsets of `H` bits: one for each distinct stable baseline plus the no-baseline window class.
+Alternatively, after the pending union is known, a representation indexed only by its `C` commits uses
+`O((k + 1) · C)` bits, but computing that union and each membership still requires reachability over `H + A`. A sparse
+representation costs in `Iw`, the actual membership incidences. Each makes §13.4a admission a membership lookup; none
+turns the history traversal itself into `O(C)`.
 
-**Propagation: bucket by (window class, directive).** Admission depends on the target's window, and there are only `k`
-distinct windows; traversal depends only on the directive tuple: `(bump, depth, Propagate-Scope)` for the bump pass and
-`(Propagate-Channel, channelDepth, Propagate-Channel-Scope)` for the channel pass, and real repositories use a handful
-of combinations because most commits carry no directives at all. Units sharing both can be traversed together from the
-union of their source packages: BFS depth is shortest-path *from the source set*, so a merged traversal admits exactly
-what the individual ones admit between them. This replaces `U` traversals with `k · G` **per pass**.
+**Propagation: cache traversal, preserve unit identity.** A graph walk may be reused when its source set, depth and edge
+kinds are identical. Its reached nodes and distances are then the same. The remaining work MUST still be evaluated per
+unit and target: admission uses that unit's commit in `Wfresh(d)`; cancellation uses the `(commit, d)` pair; scope
+filters are unit-specific; inherited channel is derived from that unit and its sources; and provenance and diagnostics
+identify the contributing unit and sources. Thus `(window class, directive)` is not a sufficient cache key, and taking
+the union of source sets is not generally semantics-preserving. A safe implementation caches walks and hoisted per-unit
+predicates, or uses indexes that retain the contributing unit for every reached target. No sublinear bound in
+`U · (P + E)` follows merely from there being few directive spellings or window classes.
 
-The two passes bucket separately and usually very differently: the channel pass sees only the units that carry a channel
-directive at all, which in a repository not running a train is none of them, and it can be skipped outright when no unit
-in the union window sets `Propagate-Channel-Depth` above `0` and `propagation.channelDepth` is `0`. Skipping it is
-observationally equivalent, because §13.8 then assigns every package its baseline channel.
+The channel **propagation walk** can be skipped when no unit can propagate a channel. Direct channel resolution (§13.8)
+must still run: a depth-zero `%beta` or `Channel: beta` names its own package without any propagation walk, and phase 3
+must see the resulting channel. Only when there are neither propagated nor direct channel candidates may an
+implementation initialize every package from its baseline and omit the rest of channel resolution.
 
-The `2` in that row is the phase split, and it does not factor out: phase 3 reads what phase 2 produced, so the passes
-are genuinely sequential and MUST NOT be fused (§9.2). What the factor buys is §9.3a, and what it costs is a second walk
-of the unit list and the graph, **not** a second walk of history, which is shared and paid once before §9.2 begins. On
-the repositories where the channel pass is skipped entirely, the factor is `1`.
+The channel and bump phases are sequential because phase 3 reads the channels phase 2 produced, and they MUST NOT be
+fused (§9.2). This phase ordering does not add a factor to asymptotic big-O notation. The phases share the history load;
+their graph walks and contribution incidences are counted in the propagation rows above.
 
-> **A correctness trap in that optimisation.** Merging source sets is sound for reachability but **not** for the
+> **A correctness trap in traversal reuse.** Merging source sets is sound only for the question "is some source within
+> this depth?" and **not** for the
 > per-unit self-exclusion of §9.2. A single unit never propagates to its own source packages, per `seen = set(sources)`,
 > but a package that is a source of one unit may legitimately be a *target* of another unit in the same bucket, and
 > subtracting the merged source set silently withholds those bumps. The symptom is a package that should have taken a
@@ -2761,25 +2789,35 @@ an `O(D · (S + Σ))` one, and the unit where that bites is precisely the one an
 question whose inputs never changed is pure waste. Hoisting is not an optimisation to be justified by profiling; it is
 what the predicate's own dependency structure already says (§9.3a).
 
-The saving compounds with bucketing rather than competing with it. Bucketed traversal reduces the *number* of target
-loops; hoisting reduces the cost of each iteration of the ones that remain. Neither subsumes the other, and the wide-
-`^^`
-unit is the case where both apply at once.
+The saving compounds with safe traversal caching: caching can reduce the number of graph walks, while hoisting reduces
+the work in each unit's target loop. Neither subsumes the other, and a wide `^^` unit is the case where both can help.
 
 **Channel resolution: push from units, do not pull from packages.** `directChannelFor(P)` reads naturally as "find the
 directives in `P`'s window that name `P`", and written that way it scans the union window once per package: `O(P · U)`,
 almost all of it spent confirming that no directive names the package at all. Inverting it (one pass over the units in
-§11.6 order, appending each to the packages its scope-set resolves to) costs `O(U + P)` on top of the scope resolution
+§11.6 order, appending each to the packages its scope-set resolves to) costs `O(U + I + P)` on top of the scope resolution
 §13.4 has already performed, and touches only the packages some directive actually names. This is the same shape as
 §13.4, which resolves units to packages for exactly the same reason, and an implementation that has already built that
 mapping can often reuse it directly rather than rebuilding it here. The ordering and `W186` obligations that come with
 the inversion are stated in §13.8 and are not optional.
 
-**Parsing: cache by commit SHA.** The union window spans all history whenever any package is unreleased (§13.3), so a
-workspace that has just gained a new package re-parses every commit on that run. Commits are immutable and parsing is a
-pure function of the message and the parsing configuration, so results are safely cacheable keyed on
-`(commit SHA, digest of separator + types + limits)`. Steady-state runs then cost `O(new commits)`. The cache MUST be
-keyed on the configuration digest as well as the SHA, or a configuration change will be read through a stale cache.
+**Cache lexical parsing separately from resolution.** The union window spans all history whenever any package is
+unreleased (§13.3), so a workspace that has just gained a package may revisit every record. Lexical parsing is a pure
+function of message bytes, parser implementation/schema, and all configuration that affects parsing. It may be cached
+by `(repository identity, immutable record identity, parser/schema identity, parsing-configuration digest)`. Under Git
+the record identity is the commit SHA; other adapters' opaque identifiers are meaningful only within their repository.
+Scope and changed-path resolution additionally depends on the current workspace package/path index, graph and relevant
+resolution configuration. It MUST use a digest of those inputs or be recomputed. A cache hit for lexing therefore saves
+`N` work but does not imply that `R` or `I` is cached, and no whole-plan cache follows from record immutability alone.
+
+**Deterministic order and failure closure.** Kahn's topological sort is `O(P + E)` if any available zero-indegree node
+may be chosen. CCME requires the byte-wise least available package, so a comparison heap gives `O(E + P log P)`.
+Another data structure may improve that bound only if it provably returns the same least element at every step.
+During publish, testing each package by a fresh transitive walk gives `O(F · (P + E))` in the worst case. For blocked
+membership alone, add failures to an incremental multi-source reverse traversal and mark each newly reached consumer
+once; total traversal work is `O(P + E)` per run. If output records every failed ancestor or path, its additional cost
+is the size of that provenance. The first cause and `W194` ordering MUST still follow deterministic publish/failure
+order rather than queue or hash iteration order.
 
 **What none of this may change.** These are all internal representations. The plan, the diagnostics, and their order
 MUST be identical to the literal reading (§17.2), and an implementation that trades a different plan for speed does not
@@ -3453,8 +3491,8 @@ Implementations SHOULD additionally offer, and repositories accepting external c
 
 ### 18.3 Parser hardening
 
-The parser is a bounded, single-pass scan by construction (§20.7): O (n) time, O (1) working space, no backtracking, no
-recursion. A hostile message cannot induce superlinear parsing, which is the concrete reason §20 exists alongside
+The parser uses a bounded number of scans (§20.7): `O(n)` time in message bytes, `O(1)` scanner state beyond the
+`O(n)` parsed result, no backtracking, and no recursion. A hostile message cannot induce superlinear parsing, which is the concrete reason §20 exists alongside
 Appendix A, since a careless regex implementation reintroduces the risk it was designed to remove.
 
 Remaining bounds implementations MUST enforce:
@@ -3464,7 +3502,9 @@ Remaining bounds implementations MUST enforce:
   `limits.*` (§14.1): these are the parser bounds, they are on without configuration, and they cannot be disabled. An
   operator may raise or lower the numbers; setting them to `null` or to zero is not conforming. Exceeding a cap is a
   diagnostic (`E158`), never a crash.
-* Glob evaluation MUST be linear in workspace size; patterns are matched, never compiled to a backtracking engine.
+* Each glob/candidate match MUST be linear in the pattern and candidate bytes; patterns are never compiled to a
+  backtracking engine. Whole-run scope cost also includes every candidate examined, including zero-match patterns, as
+  `R` in §13.11.
 
 Parser hardening bounds one message. It says nothing about the cost of the run as a whole, which is bounded in §13.11; a
 workspace large enough for that section to matter is also a workspace where a hostile commit has more leverage, and
@@ -4021,11 +4061,14 @@ Each step is `readWhile(isDigit)` or `readUntilAny('.-+')`.
 
 ### 20.7 Complexity and determinism
 
-* Time: O (n) in message length, one pass, no backtracking.
-* Space: O (1) beyond the parsed result.
+* Time: `O(n)` in message bytes. The procedures use a bounded number of forward or reverse scans and no backtracking;
+  they need not be fused into one physical pass.
+* Space: `O(n)` for the parsed result in the worst case, plus `O(1)` scanner state when slices may refer to the input.
+  An implementation that copies tokens still remains `O(n)` total space.
 * No input can cause superlinear behaviour, the property that motivates avoiding regular expressions in code that runs
   over untrusted commit messages in CI.
-* Every error is raised at a known index, so implementations can render a caret pointing at the offending character.
+* A scanner can retain the byte offset at which each error is detected, so implementations can render a caret pointing
+  at the offending character without changing the accepted language or diagnostic code.
 
 ---
 
@@ -4691,6 +4734,28 @@ window sets `Propagate-Channel-Depth` above `0` and `propagation.channelDepth` i
 → Identical plan whether phase 1 runs or is skipped, because §13.8 then assigns every package its baseline channel and
 §9.3a reads those baselines. An implementation whose skip path also skips §13.8, leaving `channel(P)` unset rather than
 set to the baseline, suppresses every propagated bump under §9.3a and produces an empty plan.
+
+**Vector 82h**: skipping channel propagation must retain direct channel resolution. `core` is on `stable`; one pending
+unit is `feat(core)^%beta: x`; `cli → core`; channel depth is `0` everywhere.
+
+→ `core` releases on `beta`, while the propagated bump to stable `cli` is suppressed with `W208`. A fast path that
+skips all of §13.8 because channel propagation depth is zero leaves `core` on `stable` and incorrectly bumps `cli`.
+
+**Vector 82i**: units with the same directive and target window cannot be merged by unioning their sources. `alpha` is
+on `stable`, `beta` is on `rc`, the pending units are `feat(alpha)^%%inherit++1: a` and
+`feat(beta)^%%inherit++1: b`, and stable `app` depends on both.
+
+→ The `alpha` unit proposes no channel change to `app`; the `beta` unit moves `app` to `rc`, and the contributions retain
+their own origins and diagnostics. A merged source walk whose single inherited channel is chosen from `alpha` proposes
+no move and is wrong; choosing `beta` happens to preserve the final channel but still loses per-unit diagnostics and
+provenance. Inherited channel, admission and provenance remain per unit even when graph traversal is shared.
+
+**Vector 82j**: equal directives do not imply equal admission. Two `feat(provider)^` units are at commits `C1` and
+`C2`; consumer `app` depends on `provider`, and `C1 ∈ Wfresh(app)` while `C2 ∉ Wfresh(app)` because the histories
+diverge around `app`'s stable baseline.
+
+→ Only `C1` contributes to `app`. A bucket that admits the union once by window class and directive over-admits `C2`;
+admission remains the per-unit test `commitOf(u) ∈ Wfresh(app)`.
 
 ### B.8 Workspace graph constraints
 

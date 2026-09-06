@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"github.com/spf13/pflag"
+
+	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
 )
 
 // The help system. Every command word appears exactly once, in the table
@@ -613,9 +616,17 @@ func printUsage(out io.Writer, master *pflag.FlagSet) {
 	b.WriteString("\nglobal flags:\n")
 	b.WriteString(flagBlock(master, globalFlags))
 	b.WriteString("\nrun \"dispat <command> --help\" for a command's own flags.\n")
-	b.WriteString("\nIf you are an agent, read the common guide:\n  https://github.com/yohimik/dispat/blob/main/specs/agent-guide/README.md\n")
-	b.WriteString("\nConfiguration reference: https://dispat.dev/configuration/\n")
-	b.WriteString("API reference:           https://dispat.dev/api/\n")
+	version := strings.TrimPrefix(selfupdate.Describe(Version).Version, "v")
+	ref := "main"
+	if _, err := ccme.ParseVersion(version); err == nil {
+		ref = "services/dispat/v" + version
+	} else {
+		b.WriteString("\nDevelopment build: references point to upcoming documentation.\n")
+	}
+	const repository = "https://github.com/yohimik/dispat/blob/"
+	fmt.Fprintf(&b, "\nIf you are an agent, read the common guide:\n  %s%s/specs/agent-guide/README.md\n", repository, ref)
+	fmt.Fprintf(&b, "\nConfiguration reference: %s%s/packages/docs/docs/configuration/README.md\n", repository, ref)
+	fmt.Fprintf(&b, "API reference:           %s%s/packages/docs/docs/api.md\n", repository, ref)
 	fmt.Fprint(out, b.String())
 }
 
