@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "version": "1.8.1",
+  "sourceCommit": "40c5823673c9f7811397adeaf51c9e96a0be0905",
+  "toolchains": {
+    "go": "go version go1.26.8 linux/amd64",
+    "tinygo": "tinygo version 0.43.0-net.2 linux/amd64 (using go version go1.26.8 and LLVM version 22.1.4)"
+  },
+  "binaries": [
+    {
+      "name": "dispat-linux-amd64",
+      "os": "linux",
+      "arch": "amd64",
+      "compiler": "go",
+      "bytes": 10895522,
+      "sha256": "8a55edf7a25c5b57ff2c5a0c78bdab4635cbc49ebe6f80b0fd823e62e6263a10"
+    },
+    {
+      "name": "dispat-linux-arm64",
+      "os": "linux",
+      "arch": "arm64",
+      "compiler": "go",
+      "bytes": 9896098,
+      "sha256": "7b78c0d809cbc1c6218b65a7884028e95e5d479df54378edcaf47810f0366637"
+    },
+    {
+      "name": "dispat-darwin-amd64",
+      "os": "darwin",
+      "arch": "amd64",
+      "compiler": "go",
+      "bytes": 11097424,
+      "sha256": "225750dac416952bde23fff7668317acf93cbb0889744a699a59375f3cb61faf"
+    },
+    {
+      "name": "dispat-darwin-arm64",
+      "os": "darwin",
+      "arch": "arm64",
+      "compiler": "go",
+      "bytes": 10098098,
+      "sha256": "70e3bd7bf3e3350afece47f8fc14e136de155ef22abfcccb87c3e511710545c4"
+    },
+    {
+      "name": "dispat-windows-amd64.exe",
+      "os": "windows",
+      "arch": "amd64",
+      "compiler": "go",
+      "bytes": 11296256,
+      "sha256": "10091fe51a4ab5d06776a6c3f9499e4b05383024bb660bb8845c2c7118df78cb"
+    },
+    {
+      "name": "dispat-windows-arm64.exe",
+      "os": "windows",
+      "arch": "arm64",
+      "compiler": "go",
+      "bytes": 10097152,
+      "sha256": "94670e09ac89a2159c5ffc521635baa0e699b3044af8bfbc27b3c47deb62d1e6"
+    },
+    {
+      "name": "dispat-tiny-linux-amd64",
+      "os": "linux",
+      "arch": "amd64",
+      "compiler": "tinygo",
+      "bytes": 6697528,
+      "sha256": "b30dee4ac91afbb88c15c98e1f4d9ead49a2d0e717f23cda5f6fbfb223df8dfd"
+    },
+    {
+      "name": "dispat-tiny-linux-arm64",
+      "os": "linux",
+      "arch": "arm64",
+      "compiler": "tinygo",
+      "bytes": 6299032,
+      "sha256": "d39ea76c429cef416057c7722d1a93cf0796f207da8ffd1034b298b96b795d7c"
+    }
+  ]
+}
