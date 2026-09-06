@@ -225,3 +225,65 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: dispat run build --since "$(sh scripts/ci-base.sh)"
+
+      # tests/integration is copied into the CLI export but is a standalone
+      # package in dispat's graph. Run only that missing CLI edge: when the
+      # two bases agree, the ordinary build above already covered it.
+      - name: Build the AMD64 CLI export for integration changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          base=$(sh scripts/ci-base.sh)
+          build_base=$(sh scripts/ci-base.sh --build)
+          if [ "$base" != "$build_base" ]; then
+            dispat if --changed --since "$base" -p dispat \
+              --then 'echo "CLI export already covered by the changed-package build"' \
+              --else 'dispat run build --since all -p dispat'
+          fi
+
+  native-arm64:
+    name: Native ARM64 export
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0      # dispat and ci-base.sh both inspect history
+
+      # The export smoke executes both Linux binaries, so binfmt supplies the
+      # foreign amd64 leg. The builder itself remains native arm64 (asserted
+      # below), which keeps TARGETARCH=arm64 for the full TinyGo suite.
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
+
+      - name: Verify the native builder architecture
+        run: |
+          test "$(uname -m)" = aarch64
+          test "$(docker info --format '{{.Architecture}}')" = aarch64
+
+      - name: Set up dispat
+        uses: ./
+
+      - name: Build dispat from the checkout
+        run: |
+          # buildx-cache emits separate CLI arguments by design.
+          # shellcheck disable=SC2046
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap-arm64) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
+
+      # Intersect the ordinary, history-validated CI window with the CLI: a
+      # package-only change elsewhere is a no-op, while an untrustworthy base
+      # or shared .aqua, workflow, Dockerfile, integration input, workspace,
+      # or script change makes ci-base.sh return `all` and runs this gate.
+      # The package's build is the release export target itself; its dependency
+      # on tiny-test means success proves the exact native TinyGo binary passed
+      # the complete integration suite with the release compiler and no skips.
+      - name: Build the ARM64 CLI export when affected
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: dispat run build --since "$(sh scripts/ci-base.sh --build)" -p dispat

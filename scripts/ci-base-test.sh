@@ -56,6 +56,17 @@ printf '# diagnostic registry\n' > specs/ccme-spec/SPEC.md
 git add specs/ccme-spec/SPEC.md && git commit -qm specification
 got=$(GITHUB_EVENT_NAME=push GITHUB_EVENT_BEFORE=HEAD^ CI_REPOSITORY=$tmp sh "$helper")
 assert "$got" all 'specification changes run the CLI diagnostic-reference test'
+mkdir -p tests/integration
+printf 'package integration\n' > tests/integration/integration_test.go
+git add tests/integration/integration_test.go && git commit -qm integration
+got=$(GITHUB_EVENT_NAME=push GITHUB_EVENT_BEFORE=HEAD^ CI_REPOSITORY=$tmp sh "$helper")
+assert "$got" 'HEAD^' 'integration changes keep the package-aware test window'
+got=$(GITHUB_EVENT_NAME=push GITHUB_EVENT_BEFORE=HEAD^ CI_REPOSITORY=$tmp sh "$helper" --build)
+assert "$got" all 'integration changes run both native CLI export gates'
+if sh "$helper" --unknown >/dev/null 2>&1; then
+  echo 'unknown ci-base mode unexpectedly succeeded' >&2
+  exit 1
+fi
 mkdir -p .aqua
 printf 'packages: []\n' > .aqua/aqua.yaml
 git add .aqua/aqua.yaml && git commit -qm tool-manifest

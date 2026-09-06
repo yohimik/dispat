@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+case $#:$* in
+  0:) mode=default ;;
+  1:--build) mode=build ;;
+  *) echo "usage: $0 [--build]" >&2; exit 2 ;;
+esac
+
 root=${CI_REPOSITORY:-$(git rev-parse --show-toplevel)}
 cd "$root"
 
@@ -29,6 +35,13 @@ fi
 # pushed commits rather than HEAD itself.
 if git diff --name-only "$candidate" HEAD | grep -Eq \
   '^(\.aqua/|README\.md$|\.github/workflows/|Dockerfile\.gotest($|\.)|\.dockerignore$|go\.work(\.sum)?$|dispat\.yaml$|scripts/|tools/testreport/|packages/docs/demo/fixtures/|specs/ccme-spec/SPEC\.md$)'; then
+  echo all
+elif [ "$mode" = build ] && git diff --name-only "$candidate" HEAD |
+  grep -Eq '^tests/integration/'; then
+  # The integration package is a direct Docker build input for dispat's
+  # export, though it is not a dependency in the package graph. Build gates
+  # must therefore select the CLI on a harness-only change; the ordinary test
+  # sweep keeps its package-aware window and does not rerun every unit suite.
   echo all
 else
   echo "$candidate"
