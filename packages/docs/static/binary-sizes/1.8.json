@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "1.8.1",
-  "sourceCommit": "40c5823673c9f7811397adeaf51c9e96a0be0905",
+  "version": "1.8.2",
+  "sourceCommit": "d88a25e24c2bf508646cefe6d188c232360aed78",
   "toolchains": {
     "go": "go version go1.26.8 linux/amd64",
     "tinygo": "tinygo version 0.43.0-net.2 linux/amd64 (using go version go1.26.8 and LLVM version 22.1.4)"
@@ -13,7 +13,7 @@
       "arch": "amd64",
       "compiler": "go",
       "bytes": 10895522,
-      "sha256": "8a55edf7a25c5b57ff2c5a0c78bdab4635cbc49ebe6f80b0fd823e62e6263a10"
+      "sha256": "1ece344884579371a6b0ff3f594f2633d52c89df4e71d1651cb817a39fe898e1"
     },
     {
       "name": "dispat-linux-arm64",
@@ -21,7 +21,7 @@
       "arch": "arm64",
       "compiler": "go",
       "bytes": 9896098,
-      "sha256": "7b78c0d809cbc1c6218b65a7884028e95e5d479df54378edcaf47810f0366637"
+      "sha256": "78b0b37b4b74ed393f366ff4d36a98aa69a48fa781cc6a704ad17a0160107a68"
     },
     {
       "name": "dispat-darwin-amd64",
@@ -29,7 +29,7 @@
       "arch": "amd64",
       "compiler": "go",
       "bytes": 11097424,
-      "sha256": "225750dac416952bde23fff7668317acf93cbb0889744a699a59375f3cb61faf"
+      "sha256": "6cbe9c2b925383058135d9bb18a7bcebb3552e4f6cbb91b4d18bd00f21c8d163"
     },
     {
       "name": "dispat-darwin-arm64",
@@ -37,39 +37,39 @@
       "arch": "arm64",
       "compiler": "go",
       "bytes": 10098098,
-      "sha256": "70e3bd7bf3e3350afece47f8fc14e136de155ef22abfcccb87c3e511710545c4"
+      "sha256": "33cc5af84b7b76fa464e1290df8aa6817036612c691f285839ed38b2da156614"
     },
     {
       "name": "dispat-windows-amd64.exe",
       "os": "windows",
       "arch": "amd64",
       "compiler": "go",
-      "bytes": 11296256,
-      "sha256": "10091fe51a4ab5d06776a6c3f9499e4b05383024bb660bb8845c2c7118df78cb"
+      "bytes": 11296768,
+      "sha256": "500a073d04029f5dbeca8627ccdbd4c1b7f88767ec11cacdbafd4de2ebec1cf7"
     },
     {
       "name": "dispat-windows-arm64.exe",
       "os": "windows",
       "arch": "arm64",
       "compiler": "go",
-      "bytes": 10097152,
-      "sha256": "94670e09ac89a2159c5ffc521635baa0e699b3044af8bfbc27b3c47deb62d1e6"
+      "bytes": 10098176,
+      "sha256": "bf6f8fbba3a9be262c58da32d343c2133805cbaea5af0d2813fef8e5102a993e"
     },
     {
       "name": "dispat-tiny-linux-amd64",
       "os": "linux",
       "arch": "amd64",
       "compiler": "tinygo",
-      "bytes": 6697528,
-      "sha256": "b30dee4ac91afbb88c15c98e1f4d9ead49a2d0e717f23cda5f6fbfb223df8dfd"
+      "bytes": 6698360,
+      "sha256": "abb7ba3c80e8bbcf19d7792c5dcd76b508ba4b7a0c9b360029619b1e12fdc1e4"
     },
     {
       "name": "dispat-tiny-linux-arm64",
       "os": "linux",
       "arch": "arm64",
       "compiler": "tinygo",
-      "bytes": 6299032,
-      "sha256": "d39ea76c429cef416057c7722d1a93cf0796f207da8ffd1034b298b96b795d7c"
+      "bytes": 6299624,
+      "sha256": "10660821f5e8ece305c9cf7cdb65992e8648419396202c81629386f587e8a5c9"
     }
   ]
 }
