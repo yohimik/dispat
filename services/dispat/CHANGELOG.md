@@ -1,5 +1,19 @@
 # Changelog
 
+## services/dispat/v1.8.2 (2026-09-06)
+
+### Fixes
+
+- pin release references ([8ac4766](https://github.com/yohimik/dispat/commit/8ac47666e4de3213f06727c7dda88cd520c39fa5)) (by yohimik)
+  Pin help to the installed CLI's documentation snapshot. Keep agent guides on
+  the CLI major/minor line with independent patches and same-line update advice.
+  Correct CCME algorithm cost bounds and unsafe optimization guidance.
+
+### Authors
+
+- yohimik
+
+
 ## services/dispat/v1.8.1 (2026-09-06)
 
 ### Fixes
