@@ -1376,11 +1376,22 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsPrereleaseFreshWindow`         | Attribution narrows exactly as the notes do: each prerelease credits its own changeset, and the stable graduation collecting the train credits the whole train.                                                                             |
 | `TestAuthorsPreviewRendersTheBlocks`       | `dispat preview` prints the record bodies a release would write, so it gains both blocks by construction.                                                                                                                                    |
 
-### Goal 49: integration harness integrity (`internal/harness/race_test.go`)
+### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`)
 
 | Test | Claim proven |
 | --- | --- |
 | `TestCheckRaceReports` | Any recorded subprocess race fails the suite, even when a behavioral scenario accepts a nonzero exit. Unconfigured normal runs and empty report directories pass; unrelated files do not count as race reports. |
+
+Compiler selection and version-stamped fixtures have separate checks:
+
+| Test | Claim proven |
+| --- | --- |
+| `TestCompilerSelection` | Explicit TinyGo selection supplies the expected compiler and build flags. |
+| `TestUsesTinyGoRequiresExplicitCompiler` | An opaque prebuilt binary path does not establish its compiler. |
+| `TestBuildSelectionRejectsMixedToolchains` | Incompatible prebuilt, compiler, race, and coverage settings fail before the suite builds. |
+| `TestVersionedPrebuiltName` | Version-stamped fixtures select the exact prebuilt filename. |
+| `TestPrebuiltWithSelectedCompilerBuildsVersionedFixtures` | A selected compiler builds stamped fixtures even when the ordinary binary is prebuilt. |
+| `TestVersionedBuildRejectsPrebuiltOnlySelection` | A prebuilt binary alone cannot silently substitute for a version-stamped fixture. |
 
 ## Regression fences
 
