@@ -126,13 +126,16 @@ spaces:
   docker:
     path: docker
 
-# The initial baseline applies until the specification has its first tag.
+# These baselines apply until each document package has its first tag.
 initials:
   ccme-spec: 1.0.0
+  agent-guide: 0.0.0
 
 # Standalone paths are registered here; their behavior lives in each folder's
 # dispat.yaml.
 packages:
+  agent-guide:
+    path: specs/agent-guide
   ccme-spec:
     path: specs/ccme-spec
   tools:

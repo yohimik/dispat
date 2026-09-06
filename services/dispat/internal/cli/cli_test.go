@@ -68,6 +68,10 @@ func TestHelpFlag(t *testing.T) {
 	}
 	assert.NotContains(t, out, "--set-version", "a command's own flags are one --help away")
 	assert.Contains(t, out, `run "dispat <command> --help"`)
+	assert.Contains(t, out, "If you are an agent, read the common guide:")
+	assert.Contains(t, out, "https://github.com/yohimik/dispat/blob/main/specs/agent-guide/README.md")
+	assert.Contains(t, out, "Configuration reference: https://dispat.dev/configuration/")
+	assert.Contains(t, out, "API reference:           https://dispat.dev/api/")
 }
 
 func TestHelpIsScopedToTheCommand(t *testing.T) {

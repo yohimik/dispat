@@ -116,10 +116,9 @@ one is running is refused rather than raced. unsafeDisableLock in the config,
 or DISPAT_UNSAFE_DISABLE_LOCK=true in the environment, switches it off for
 repositories with no remote to coordinate through.
 
---require-release refuses a run that would publish nothing, before the lock is
-taken, for the CI stage whose point is that this run releases something. The
-refusal exits 3, apart from exit 1's failures, so a pipeline can tell "nothing
-to do" from "something is wrong".
+--require-release refuses a run that would publish nothing after acquiring the
+release lock and planning. The refusal exits 3, apart from exit 1's failures.
+Use "dispat status --require-release" for a lock-free CI plan gate.
 
 This is what a bare "dispat" does.`,
 		flags: append([]string{"strict", "require-release"}, selectionFlags...),
@@ -614,6 +613,9 @@ func printUsage(out io.Writer, master *pflag.FlagSet) {
 	b.WriteString("\nglobal flags:\n")
 	b.WriteString(flagBlock(master, globalFlags))
 	b.WriteString("\nrun \"dispat <command> --help\" for a command's own flags.\n")
+	b.WriteString("\nIf you are an agent, read the common guide:\n  https://github.com/yohimik/dispat/blob/main/specs/agent-guide/README.md\n")
+	b.WriteString("\nConfiguration reference: https://dispat.dev/configuration/\n")
+	b.WriteString("API reference:           https://dispat.dev/api/\n")
 	fmt.Fprint(out, b.String())
 }
 

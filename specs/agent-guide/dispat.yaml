@@ -1,0 +1,21 @@
+# This guide is versioned independently of the CLI and the CCME specification.
+tagFormat: specs/agent-guide/v{version}
+
+scripts:
+  verify-guide: sh verify.sh
+  tests: sh test.sh
+
+autoVersion:
+  manifests: none
+  replace:
+    - files: [VERSION]
+      find: '{previous}'
+      write: '{version}'
+    - files: [README.md]
+      find: '**Version:** {previous}'
+      write: '**Version:** {version}'
+
+flow:
+  beforeVersion: [verify-guide]
+  build: verify-guide
+  publish: [changelog, commit]

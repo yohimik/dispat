@@ -32,6 +32,9 @@ specs/*
 !specs/ccme-spec/SPEC.md
 !specs/ccme-spec/*.sh
 specs/ccme-spec/.ccme-version.*
+!specs/agent-guide
+specs/agent-guide/*
+!specs/agent-guide/*.sh
 !packages
 packages/*
 !packages/docs

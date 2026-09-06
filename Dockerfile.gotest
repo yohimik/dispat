@@ -529,6 +529,7 @@ COPY install.sh ./
 COPY script[s] ./scripts
 COPY announc[e] ./announce
 COPY specs/ccme-spec/*.sh ./specs/ccme-spec/
+COPY specs/agent-guide/*.sh ./specs/agent-guide/
 COPY tests/experiments/run.sh tests/experiments/
 COPY tests/experiments/lib/common.sh tests/experiments/lib/
 RUN <<'EOF'
@@ -542,7 +543,7 @@ set -eu
 # left alone, because one log line per probe is the shape its logs are read in.
 sh -n install.sh
 set -- install.sh
-for f in scripts/*.sh announce/*.sh specs/ccme-spec/*.sh; do
+for f in scripts/*.sh announce/*.sh specs/*/*.sh; do
   [ -f "$f" ] || continue
   case "$f" in scripts/tinygo-spike-darwin.sh) continue ;; esac
   set -- "$@" "$f"
