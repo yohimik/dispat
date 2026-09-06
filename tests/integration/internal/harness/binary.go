@@ -72,12 +72,80 @@ func coverDir() string { return os.Getenv("DISPAT_COVERDIR") }
 // means the suite builds its own, as it always has.
 func prebuiltBin() string { return os.Getenv("DISPAT_TEST_BINARY") }
 
+// prebuiltVersionedDir is the value of DISPAT_TEST_VERSIONED_BINARY_DIR. Its
+// files are named dispat-<version>, one for every BuildVersioned request. It
+// accompanies DISPAT_TEST_BINARY so self-update tests exercise binaries made
+// by the same toolchain instead of quietly compiling their candidates with Go.
+func prebuiltVersionedDir() string { return os.Getenv("DISPAT_TEST_VERSIONED_BINARY_DIR") }
+
+// compiler is the tool used for every from-source dispat build. Empty selects
+// Go; an explicit value such as tinygo selects that compiler for both the plain
+// binary and every version-stamped self-update binary. The test runner and
+// tsmark helper still build with Go.
+func compiler() string {
+	if name := os.Getenv("DISPAT_TEST_COMPILER"); name != "" {
+		return name
+	}
+	return "go"
+}
+
+func compilerKind() (string, error) {
+	name := filepath.Base(compiler())
+	switch name {
+	case "go", "tinygo":
+		return name, nil
+	default:
+		return "", fmt.Errorf("DISPAT_TEST_COMPILER must name go or tinygo, got %q", compiler())
+	}
+}
+
+// UsesTinyGo reports whether the harness was explicitly told to build Dispat
+// with TinyGo. Callers use this for platform expectations that differ between
+// the Go and TinyGo runtimes. A prebuilt binary alone is deliberately opaque;
+// set DISPAT_TEST_COMPILER=tinygo alongside it when its runtime matters.
+func UsesTinyGo() bool {
+	kind, err := compilerKind()
+	return err == nil && kind == "tinygo"
+}
+
+func compilerBuildArgs() []string {
+	if UsesTinyGo() {
+		return []string{"-opt=z", "-no-debug", "-p", "2"}
+	}
+	return nil
+}
+
 // go test -race instruments the test process, but not subprocesses built by
 // this harness. The race pass sets this flag so every dispat binary it drives
 // is instrumented too.
 func raceBuild() bool { return os.Getenv("DISPAT_TEST_RACE") == "1" }
 
+func validateBuildSelection() error {
+	prebuilt := prebuiltBin() != ""
+	versioned := prebuiltVersionedDir() != ""
+	kind, err := compilerKind()
+	if err != nil {
+		return err
+	}
+	if versioned && !prebuilt {
+		return errors.New("DISPAT_TEST_VERSIONED_BINARY_DIR requires DISPAT_TEST_BINARY")
+	}
+	if versioned && os.Getenv("DISPAT_TEST_COMPILER") != "" {
+		return errors.New("DISPAT_TEST_VERSIONED_BINARY_DIR and DISPAT_TEST_COMPILER are mutually exclusive")
+	}
+	if (prebuilt || kind == "tinygo") && coverDir() != "" {
+		return errors.New("TinyGo/prebuilt dispat tests and DISPAT_COVERDIR are mutually exclusive: the selected binaries have no Go coverage instrumentation")
+	}
+	if (prebuilt || kind == "tinygo") && raceBuild() {
+		return errors.New("TinyGo/prebuilt dispat tests and DISPAT_TEST_RACE=1 are mutually exclusive: the selected binaries have no Go race instrumentation")
+	}
+	return nil
+}
+
 func build() (dispat, tsmark string, err error) {
+	if err := validateBuildSelection(); err != nil {
+		return "", "", err
+	}
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		return "", "", fmt.Errorf("go toolchain not found on PATH: %w", err)
@@ -98,13 +166,6 @@ func build() (dispat, tsmark string, err error) {
 		coverArgs = append(coverArgs, "-race")
 	}
 	if pre := prebuiltBin(); pre != "" {
-		// A prebuilt binary carries no instrumentation, so counters asked for
-		// here would silently never arrive and the coverage profile would
-		// shrink with nothing failing. Refusing the combination keeps that a
-		// loud configuration error instead.
-		if coverDir() != "" {
-			return "", "", fmt.Errorf("DISPAT_TEST_BINARY and DISPAT_COVERDIR are mutually exclusive: a prebuilt binary has no coverage instrumentation")
-		}
 		dispat, err = filepath.Abs(pre)
 		if err != nil {
 			return "", "", fmt.Errorf("resolving DISPAT_TEST_BINARY: %w", err)
@@ -121,8 +182,13 @@ func build() (dispat, tsmark string, err error) {
 		if rootErr != nil {
 			return "", "", rootErr
 		}
+		compilerBin, lookupErr := exec.LookPath(compiler())
+		if lookupErr != nil {
+			return "", "", fmt.Errorf("dispat compiler %q not found on PATH: %w", compiler(), lookupErr)
+		}
 		dispat = filepath.Join(dir, "dispat")
-		if err := goBuild(goBin, dispat, filepath.Join(root, "services", "dispat"), coverArgs...); err != nil {
+		coverArgs = append(coverArgs, compilerBuildArgs()...)
+		if err := goBuild(compilerBin, dispat, filepath.Join(root, "services", "dispat"), coverArgs...); err != nil {
 			return "", "", fmt.Errorf("building dispat: %w", err)
 		}
 	}
@@ -168,9 +234,16 @@ func BuildVersioned(t testing.TB, version string) string {
 	if path, ok := stamped.byVersion[version]; ok {
 		return path
 	}
-	goBin, err := exec.LookPath("go")
+	prebuilt, compilerBin, err := versionedBuildSelection(version)
 	if err != nil {
-		t.Fatalf("go toolchain not found on PATH: %v", err)
+		t.Fatal(err)
+	}
+	if prebuilt != "" {
+		if stamped.byVersion == nil {
+			stamped.byVersion = map[string]string{}
+		}
+		stamped.byVersion[version] = prebuilt
+		return prebuilt
 	}
 	root, err := monorepoRoot()
 	if err != nil {
@@ -179,13 +252,14 @@ func BuildVersioned(t testing.TB, version string) string {
 	out := filepath.Join(binaries.dir, "dispat-"+version)
 	args := []string{"-ldflags",
 		"-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=" + version}
+	args = append(args, compilerBuildArgs()...)
 	if coverDir() != "" {
 		args = append(args, "-cover", "-covermode=atomic", "-coverpkg=./...")
 	}
 	if raceBuild() {
 		args = append(args, "-race")
 	}
-	if err := goBuild(goBin, out, filepath.Join(root, "services", "dispat"), args...); err != nil {
+	if err := goBuild(compilerBin, out, filepath.Join(root, "services", "dispat"), args...); err != nil {
 		t.Fatalf("building dispat %s: %v", version, err)
 	}
 	if stamped.byVersion == nil {
@@ -195,12 +269,33 @@ func BuildVersioned(t testing.TB, version string) string {
 	return out
 }
 
-func goBuild(goBin, out, dir string, extraArgs ...string) error {
+func versionedBuildSelection(version string) (prebuilt, compilerBin string, err error) {
+	if dir := prebuiltVersionedDir(); dir != "" {
+		out := filepath.Join(dir, "dispat-"+version)
+		if info, statErr := os.Stat(out); statErr != nil || info.IsDir() {
+			return "", "", fmt.Errorf("DISPAT_TEST_VERSIONED_BINARY_DIR has no runnable dispat-%s: %s", version, out)
+		}
+		return out, "", nil
+	}
+	if prebuiltBin() != "" && os.Getenv("DISPAT_TEST_COMPILER") == "" {
+		return "", "", errors.New("BuildVersioned requires DISPAT_TEST_COMPILER or DISPAT_TEST_VERSIONED_BINARY_DIR when DISPAT_TEST_BINARY is set")
+	}
+	compilerBin, err = exec.LookPath(compiler())
+	if err != nil {
+		return "", "", fmt.Errorf("dispat compiler %q not found on PATH: %w", compiler(), err)
+	}
+	return "", compilerBin, nil
+}
+
+func goBuild(compilerBin, out, dir string, extraArgs ...string) error {
 	args := append(append([]string{"build"}, extraArgs...), "-o", out, ".")
-	cmd := exec.Command(goBin, args...)
+	cmd := exec.Command(compilerBin, args...)
 	cmd.Dir = dir
+	if filepath.Base(compilerBin) == "tinygo" {
+		cmd.Env = append(os.Environ(), "GOMAXPROCS=2", "GOMEMLIMIT=6GiB")
+	}
 	if b, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("go build in %s: %w\n%s", dir, err, b)
+		return fmt.Errorf("%s build in %s: %w\n%s", compilerBin, dir, err, b)
 	}
 	return nil
 }

@@ -573,7 +573,7 @@ func TestSelfUpdateOverTLS(t *testing.T) {
 	args := []string{"self-update", "--check", "--api-url", r.api, "--owner", "o", "--repo", "r"}
 
 	t.Run("trusting the authority", func(t *testing.T) {
-		if runtime.GOOS == "darwin" {
+		if runtime.GOOS == "darwin" && !harness.UsesTinyGo() {
 			// Stock Go on darwin verifies through the platform's own verifier,
 			// which reads the system trust store and ignores SSL_CERT_FILE, so
 			// there is no way to make a test authority trusted for the child
@@ -587,6 +587,22 @@ func TestSelfUpdateOverTLS(t *testing.T) {
 		assert.Contains(t, res.Stdout, "available dispat "+suNew,
 			"the release was read off an https response")
 		assert.Equal(t, suOld, r.version(r.exe), "--check over TLS installs nothing either")
+
+		original, err := os.ReadFile(r.exe)
+		require.NoError(t, err)
+		res = r.CommandBinEnv(r.exe, []string{"SSL_CERT_FILE=" + ca},
+			"self-update", "--api-url", r.api, "--owner", "o", "--repo", "r")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Equal(t, suNew, r.version(r.exe), "the TLS download replaces the executable")
+		backup, err := os.ReadFile(r.backup)
+		require.NoError(t, err)
+		assert.Equal(t, sha256.Sum256(original), sha256.Sum256(backup), "the backup is the original executable")
+		res = r.CommandBin(r.exe, "self-update", "--rollback", "--api-url", "http://127.0.0.1:1")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Equal(t, suOld, r.version(r.exe), "rollback works without a release server")
+		restored, err := os.ReadFile(r.exe)
+		require.NoError(t, err)
+		assert.Equal(t, sha256.Sum256(original), sha256.Sum256(restored), "rollback restores the exact original bytes")
 	})
 
 	// Verifier-independent, and so this half runs everywhere: with no authority

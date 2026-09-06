@@ -28,11 +28,20 @@ The harness compiles the dispat and tsmark binaries **once per `go test` invocat
 across all tests. Each test builds its repository in a fresh `t.TempDir()`, so you can run tests in any order or select
 any subset safely.
 
-Setting `DISPAT_TEST_BINARY=<path>` makes the harness drive that prebuilt binary instead of compiling one — this is how
-the release build's test stage (see [`services/dispat/Dockerfile`](../../services/dispat/Dockerfile)) runs the smoke
-walks (`-run 'TestSmoke'`) against the exact cross-compiled binaries it is about to export. The variable is mutually
-exclusive with `DISPAT_COVERDIR`: a prebuilt binary carries no coverage instrumentation, and the harness refuses the
-combination rather than silently contributing nothing.
+`DISPAT_TEST_COMPILER=<go-or-tinygo-path>` selects the compiler for every Dispat binary the harness builds, including
+the version-stamped candidates used by the self-update tests. TinyGo builds use the release flags `-opt=z -no-debug`,
+compile with `-p 2`, and run with `GOMAXPROCS=2` and a 6 GiB Go heap limit. The test runner and the `tsmark` timing
+helper still use Go.
+
+`DISPAT_TEST_BINARY=<path>` makes the harness drive an already-built ordinary binary. It may be paired with
+`DISPAT_TEST_COMPILER=tinygo` so version-stamped fixtures use the same compiler, or with
+`DISPAT_TEST_VERSIONED_BINARY_DIR=<dir>`, whose matching files are named `dispat-<version>`. A self-update test that
+asks for a versioned binary rejects an incomplete prebuilt selection instead of silently building that fixture with
+Go. This is how a release gate can test the exact artifact it will export while keeping every candidate on TinyGo.
+
+Prebuilt and TinyGo modes reject `DISPAT_COVERDIR` and `DISPAT_TEST_RACE=1`: those settings promise Go coverage or race
+instrumentation that the selected binaries do not carry. Ordinary Go coverage and race runs retain their existing
+behavior.
 
 ## Running
 
