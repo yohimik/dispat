@@ -9,6 +9,6 @@ packages:
   - name: yohimik/crier@v1.1.0
     registry: local
     tags: [crier]
-  - name: yohimik/tinygo@v0.43.0-net.1
+  - name: yohimik/tinygo@v0.43.0-net.2
     registry: local
     tags: [tinygo]

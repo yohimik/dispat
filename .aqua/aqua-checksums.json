@@ -39,6 +39,26 @@
       "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.1/tinygo0.43.0-net.1.linux-arm64.tar.gz",
       "checksum": "46CD832D1C90076B3B5A4DD85E720034831769CCFF1621D76EA92BA556C44A81",
       "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.2/tinygo0.43.0-net.2.darwin-amd64.tar.gz",
+      "checksum": "9AED9CE4477B2F7D83642A53D5DC65C17C3BD1146B641EF1AE33F17D91FD9BC1",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.2/tinygo0.43.0-net.2.darwin-arm64.tar.gz",
+      "checksum": "A56AD832C6314E21BCEFE8E3D75525BC9644D2B42E84CC1BDDE325F4496B9FF6",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.2/tinygo0.43.0-net.2.linux-amd64.tar.gz",
+      "checksum": "E94FCAB3ACAD305FC2B7EB729578AA911AF153A3750038CF54B4C11DE6CFFA6D",
+      "algorithm": "sha256"
+    },
+    {
+      "id": "github_release/github.com/yohimik/tinygo/v0.43.0-net.2/tinygo0.43.0-net.2.linux-arm64.tar.gz",
+      "checksum": "AF96DC321B172C1418DFFD877063CD830F01C685AE4DBC10E6846C8B5FD62C16",
+      "algorithm": "sha256"
     }
   ]
 }
