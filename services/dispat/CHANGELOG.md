@@ -1,5 +1,20 @@
 # Changelog
 
+## services/dispat/v1.8.1 (2026-09-06)
+
+### Fixes
+
+- link agent and reference guides ([a90fcb7](https://github.com/yohimik/dispat/commit/a90fcb723b53345857fabb1dd127f61b602f1f57)) (by yohimik)
+  Add common agent guidance and configuration/API links to root help.
+  Correct the release lock ordering described by --require-release help.
+
+- update TinyGo toolchain ([4bb91d6](https://github.com/yohimik/dispat/commit/4bb91d6506173f05946013b809e6bc8ccacdd0ca)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## services/dispat/v1.8.0 (2026-09-05)
 
 ### Features
