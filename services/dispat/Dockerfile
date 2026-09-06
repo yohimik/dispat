@@ -13,7 +13,8 @@
 # change.
 #
 # Two more linux binaries ride along, built from the same source by the
-# TinyGo fork at roughly half the size and named `dispat-tiny-linux-<arch>`.
+# TinyGo fork and named `dispat-tiny-linux-<arch>`. Their measured sizes ship
+# in dispat-binary-sizes.json with the compiler versions and source revision.
 # They are additive: the six names above are what self-update and install.sh
 # resolve, and nothing about them changes. See internals/tinygo.md.
 #
@@ -23,8 +24,10 @@
 # the tiny pair is proven by running it instead. All four linux binaries are
 # run — the foreign architecture through binfmt, which the workflows'
 # setup-qemu step and Docker Desktop both provide. The builder's own gc linux
-# binary then carries the e2e smoke suite (tests/integration, -run
-# 'TestSmoke'). The darwin and windows binaries cannot run here at all;
+# binary carries the e2e smoke suite (tests/integration, -run 'TestSmoke').
+# The native TinyGo binary separately carries the entire integration suite,
+# including same-compiler versioned self-update fixtures, before export.
+# The darwin and windows binaries cannot run here at all;
 # executing those falls to the release's post-release matrix, which installs
 # the published binary on all three runner operating systems.
 #
@@ -96,8 +99,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # ships a glibc-linked LLVM beside its own binary, and musl does not run it.
 # TinyGo's linux targets link its bundled musl statically, so what comes out
 # is a static binary either way — see internals/tinygo.md for what those
-# binaries can do, which as of the fork is everything the gc ones can.
+# binaries can do and the limits of the historical compatibility probes.
 FROM golang:${GO_VERSION} AS tiny-toolchain
+# The unprivileged integration runner must be able to read the toolchain tree.
+ENV AQUA_ROOT_DIR=/opt/aqua
 ARG TARGETARCH
 COPY --from=build /out/dispat-linux-${TARGETARCH} /usr/local/bin/dispat
 # A stamped binary otherwise checks the GitHub API for a newer dispat while it
@@ -106,7 +111,7 @@ ENV DISPAT_UPDATE_CHECK=false
 COPY .aqua /opt/dispat-tools/.aqua
 COPY scripts/install-tools.sh /opt/dispat-tools/scripts/install-tools.sh
 # GITHUB_TOKEN as a build secret rather than a build arg, so it never reaches
-# the image's history: the releases listing is one API call, and a runner
+# the image's history: installation uses the GitHub API, and a runner
 # sharing its IP with the rest of a cloud region meets the unauthenticated
 # rate limit on a busy day. Optional, because a hand build on a laptop has no
 # token and does not need one. The mount is present either way, and the file
@@ -144,6 +149,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     set -eu; \
     mkdir -p /out; \
+    tinygo version > /tmp/tinygo-version.txt; \
     for arch in amd64 arm64; do \
       name="dispat-tiny-linux-${arch}"; \
       if GOOS=linux GOARCH="$arch" tinygo build -opt=z -no-debug \
@@ -162,6 +168,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # stage below joins paths onto; the tiny names go last, so the six the
 # contract names keep the order they were built in.
 FROM build AS tiny
+ARG DISPAT_COMMIT=0000000000000000000000000000000000000000
+RUN apk add --no-cache jq
+COPY scripts/binary-sizes.sh /opt/dispat-tools/scripts/binary-sizes.sh
+COPY --from=tiny-build /tmp/tinygo-version.txt /tmp/tinygo-version.txt
 COPY --from=tiny-build /out/dispat-tiny-linux-amd64 /out/dispat-tiny-linux-arm64 /out/
 RUN set -eu; \
     assets="$(sed -n 's/^DISPAT_EXPORT_GITHUB=//p' /out/dispat-output)"; \
@@ -169,8 +179,37 @@ RUN set -eu; \
       [ -s "/out/$name" ] || { echo "$name did not come out of the fork build" >&2; exit 1; }; \
       assets="$assets $name"; \
     done; \
-    echo "DISPAT_EXPORT_GITHUB=$assets" > /out/dispat-output; \
+    sh /opt/dispat-tools/scripts/binary-sizes.sh /out "$DISPAT_VERSION" "$DISPAT_COMMIT" \
+      "$(go version)" "$(cat /tmp/tinygo-version.txt)" > /out/dispat-binary-sizes.json; \
+    echo "DISPAT_EXPORT_GITHUB=$assets dispat-binary-sizes.json" > /out/dispat-output; \
     cat /out/dispat-output
+
+# Full TinyGo acceptance uses the exact native release binary and the same
+# compiler for version-stamped fixtures. Keep the Go runner and helper, and
+# run unprivileged so permission regressions cannot disappear into skips.
+FROM tiny-build AS tiny-test
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends git jq \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --create-home --uid 1001 gopher
+COPY tests/integration /src/tests/integration
+COPY packages/docs/demo/fixtures /src/packages/docs/demo/fixtures
+COPY go.work /src/go.work
+RUN cd /src && go work edit -dropuse=./tools go.work \
+ && mkdir -p /gate && chown -R gopher:gopher /src /gate
+USER gopher
+ENV GOWORK=/src/go.work GOPATH=/home/gopher/go GOMAXPROCS=2 GOMEMLIMIT=6GiB
+ENV DISPAT_TEST_COMPILER=/usr/local/tinygo/bin/tinygo
+RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
+    --mount=type=cache,target=/home/gopher/go/pkg/mod,uid=1001,gid=1001 \
+    set -eu; \
+    git --version; \
+    DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
+      go test -C /src/tests/integration -json -count=1 -timeout 60m ./... > /gate/integration.json \
+      || { cat /gate/integration.json; exit 1; }; \
+    jq -s -e 'any(.[]; .Action == "pass" and .Package == "github.com/yohimik/dispat/tests/integration" and (has("Test") | not)) and all(.[]; .Action != "skip")' /gate/integration.json; \
+    jq -s '{passed:([.[] | select(.Action == "pass" and has("Test"))] | length),failed:([.[] | select(.Action == "fail")] | length),skipped:([.[] | select(.Action == "skip")] | length)}' /gate/integration.json; \
+    touch /gate/passed
 
 # The smoke gate: the binaries above, proven to work before anything exports
 # them. Tests run against /out's exact bytes — a fresh native build passing
@@ -182,6 +221,8 @@ RUN set -eu; \
 # installed and then asserted: without it the harness skips every test, and a
 # gate that passes by skipping is worse than no gate.
 FROM tiny AS test
+# This dependency prevents export if full TinyGo integration acceptance fails.
+COPY --from=tiny-test /gate/passed /tmp/tinygo-integration-passed
 
 # The builder's own architecture — which of the six binaries can carry the
 # test suite natively.

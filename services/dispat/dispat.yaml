@@ -54,14 +54,15 @@ scripts:
     # binary that merely compiled never comes out.
     #
     # The token rides in as a build secret, and only when there is one:
-    # the tiny-toolchain stage installs the TinyGo fork with one
-    # `dispat install` line, whose API call meets the
+    # the tiny-toolchain stage installs the TinyGo fork through Aqua,
+    # bootstrapped by Dispat; its API requests meet the
     # unauthenticated rate limit on a runner sharing its IP. The
     # ${VAR:+...} form passes no flag at all outside CI, where an empty
     # env=GITHUB_TOKEN would fail the build for want of a variable.
     - >-
       docker buildx build --file Dockerfile --target export
       --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
+      --build-arg DISPAT_COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD)}"
       --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
       ${GITHUB_TOKEN:+--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN}
       --output "type=local,dest=$PWD/dist" ../..
