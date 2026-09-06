@@ -1,5 +1,10 @@
 # Changelog
 
+## specs/ccme-spec/v3.0.0 (2026-09-06)
+
+No changes: a version set by Release-As.
+
+
 ## specs/ccme-spec/v2.0.0 (2026-09-05)
 
 ### Breaking Changes
