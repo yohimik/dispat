@@ -105,7 +105,7 @@ sh scripts/install-tools.sh tinygo ~/.local
 ```
 
 The script first installs the newest Aqua executable with dispat, then Aqua installs the version recorded in
-`.aqua/aqua.yaml`: 0.43.0-net.1 here. The release's `tiny-toolchain` stage, the `tinygo-spike-fork` stage and the darwin
+`.aqua/aqua.yaml`: 0.43.0-net.2 here. The release's `tiny-toolchain` stage, the `tinygo-spike-fork` stage and the darwin
 half of the spike all use that same manifest. Aqua verifies the archive against `.aqua/aqua-checksums.json` and keeps
 the whole extracted tree in its cache; the destination's `tinygo` link points to that tree so `lib` and `src` remain
 beside `bin/tinygo`.
@@ -114,6 +114,10 @@ To advance the fork, follow the
 [tool update instructions](https://github.com/yohimik/dispat/blob/main/.aqua/README.md), choosing a published prerelease
 explicitly. Review and commit the manifest and checksums together. The explicit version avoids selecting an unreleased
 draft tag. The darwin spike checks the recorded version on every run and reuses Aqua’s verified downloads.
+
+The release export gate runs the complete integration suite against the exact native TinyGo binary it will export.
+Version-stamped self-update fixtures use the same compiler, including trusted TLS update and offline rollback checks.
+Any failed or skipped test blocks export. CI exercises this gate on native Linux AMD64 and ARM64 builders.
 
 The base image is upstream 0.42.0 and every stage up to `tinygo-spike-net` measures it, so the verdict above keeps
 its evidence. The two fork stages are the re-asking.
@@ -207,10 +211,11 @@ control with the fork row to tell a verifier's refusal from a toolchain's failur
 ## What 0.42.0-net.4 answered
 
 The fork's releases are numbered after the upstream they sit on: `X.Y.Z-net.N` is the fork's Nth release rebased on
-upstream `X.Y.Z`, and while one is published upstream has not released `X.Y.Z`. The pinned 0.43.0-net.1 is net.4's
-content rebased on upstream 0.42.0, with no change of its own, and the matrix below is what it reports at that pin:
-`fork.log` names it, `darwin-net.log` is byte for byte what net.4 wrote, and every self-update row on linux and darwin
-lands where it landed. The narrative keeps net.4's name because that is where the answers were found.
+upstream `X.Y.Z`, and while one is published upstream has not released `X.Y.Z`. The earlier 0.43.0-net.1 pin carried
+net.4's content rebased on upstream 0.42.0. The matrix below records that earlier spike: `fork.log` names its compiler,
+`darwin-net.log` matches the net.4 result, and the self-update rows retain their original measurements.
+The narrative keeps net.4's name because that is where those answers were found. These results are historical evidence,
+not a substitute for testing the current 0.43.0-net.2 compiler.
 
 The matrix passes at 0.42.0-net.4, as it first did at 0.42.0-net.2: the fork implements `os.StartProcess` over
 `posix_spawn`, so C downloads the release, executes the new binary as its own smoke check, swaps it in and keeps the
