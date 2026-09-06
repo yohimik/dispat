@@ -187,6 +187,8 @@ RUN set -eu; \
 # Full TinyGo acceptance uses the exact native release binary and the same
 # compiler for version-stamped fixtures. Keep the Go runner and helper, and
 # run unprivileged so permission regressions cannot disappear into skips.
+# Go reports a package-level skip for cmd/tsmark, which has no test files;
+# reject skipped test cases while requiring the integration package to pass.
 FROM tiny-build AS tiny-test
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends git jq \
@@ -207,8 +209,8 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
       go test -C /src/tests/integration -json -count=1 -timeout 60m ./... > /gate/integration.json \
       || { cat /gate/integration.json; exit 1; }; \
-    jq -s -e 'any(.[]; .Action == "pass" and .Package == "github.com/yohimik/dispat/tests/integration" and (has("Test") | not)) and all(.[]; .Action != "skip")' /gate/integration.json; \
-    jq -s '{passed:([.[] | select(.Action == "pass" and has("Test"))] | length),failed:([.[] | select(.Action == "fail")] | length),skipped:([.[] | select(.Action == "skip")] | length)}' /gate/integration.json; \
+    jq -s -e 'any(.[]; .Action == "pass" and .Package == "github.com/yohimik/dispat/tests/integration" and (has("Test") | not)) and all(.[]; .Action != "fail" and (.Action != "skip" or (has("Test") | not)))' /gate/integration.json; \
+    jq -s '{passed:([.[] | select(.Action == "pass" and has("Test"))] | length),failed:([.[] | select(.Action == "fail")] | length),skipped:([.[] | select(.Action == "skip" and has("Test"))] | length)}' /gate/integration.json; \
     touch /gate/passed
 
 # The smoke gate: the binaries above, proven to work before anything exports
