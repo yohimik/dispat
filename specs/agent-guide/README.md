@@ -2,7 +2,7 @@
 
 **Version:** 0.0.0
 
-**License:** GPL-3.0-or-later. See [LICENSE](./LICENSE).
+**License:** MIT. See [LICENSE](./LICENSE).
 
 This guide explains how a coding agent should inspect, test, release, and recover a repository managed by Dispat. It complements the [Dispat documentation](https://dispat.dev/) and the repository's own instructions. It does not replace either one.
 
@@ -320,4 +320,4 @@ Do not describe a repository-wide release as rolled back merely because one pack
 
 ## Distribution
 
-This guide is versioned independently from the Dispat binary. Version `0.0.0` is the unreleased baseline; its first release is `1.0.0` and uses the independent tag `specs/agent-guide/v1.0.0`. Later guide versions do not imply a matching Dispat CLI version. The guide is distributed under [GPL-3.0-or-later](LICENSE).
+This guide is versioned independently from the Dispat binary. Version `0.0.0` is the unreleased baseline; its first release is `1.0.0` and uses the independent tag `specs/agent-guide/v1.0.0`. Later guide versions do not imply a matching Dispat CLI version. The guide is distributed under [MIT](LICENSE).

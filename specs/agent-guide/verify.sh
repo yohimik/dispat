@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (c) 2026 yohimik
 set -eu
 
@@ -50,8 +50,9 @@ require_once() {
 }
 
 require_once "version header" "**Version:** $version"
-require_once "local license link" "**License:** GPL-3.0-or-later. See [LICENSE](./LICENSE)."
+require_once "local license link" "**License:** MIT. See [LICENSE](./LICENSE)."
 # Reject an extra version header even if it names a different version.
 [ "$(grep -c '^\*\*Version:\*\* ' README.md)" -eq 1 ]
-grep -Fq 'GNU GENERAL PUBLIC LICENSE' LICENSE
+grep -Fxq 'MIT License' LICENSE
+grep -Fq 'Permission is hereby granted, free of charge' LICENSE
 echo "Agent guide $version is internally consistent"

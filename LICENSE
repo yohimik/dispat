@@ -29,6 +29,10 @@ or calling that MIT parser does not designate another source file as GPL.
 License notices and navigation links alone are not substantive specification
 references under this policy.
 
+The agent guide and its packaging scripts in specs/agent-guide/ are also
+expressly MIT-licensed, including their specification references. Their
+license is in specs/agent-guide/LICENSE.
+
 3. Other source: MIT
 
 Dispat source files without GPL-covered material or substantive references to

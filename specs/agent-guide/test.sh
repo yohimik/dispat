@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (c) 2026 yohimik
 set -eu
 
@@ -27,7 +27,7 @@ fixture() {
   printf '%s\n' "$version" > "$dir/VERSION"
   cat > "$dir/README.md" <<EOF
 **Version:** $version
-**License:** GPL-3.0-or-later. See [LICENSE](./LICENSE).
+**License:** MIT. See [LICENSE](./LICENSE).
 Example version 1.0.0 is not a release declaration.
 EOF
 }
