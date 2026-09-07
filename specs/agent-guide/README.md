@@ -1,6 +1,6 @@
 # Using Dispat as a coding agent
 
-**Version:** 1.8.0
+**Version:** 1.8.1
 
 **License:** MIT. See [LICENSE](./LICENSE).
 
