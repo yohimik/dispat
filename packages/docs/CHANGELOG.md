@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.8.7 (2026-09-07)
+
+### Fixes
+
+- credit CLI and database influences ([8db82c6](https://github.com/yohimik/dispat/commit/8db82c612c59fd7849ecc6895c941aabd2658456)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.8.6 (2026-09-06)
 
 ### Dependencies
