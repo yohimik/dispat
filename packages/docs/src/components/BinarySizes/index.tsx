@@ -22,6 +22,6 @@ export default function BinarySizes(): React.ReactElement {
     <table><thead><tr><th>Linux target</th><th>Go</th><th>TinyGo</th><th>TinyGo / Go</th></tr></thead><tbody>
       {rows.map(({arch, go, tinygo}) => <tr key={arch}><td>{arch}</td><td>{mib(go.bytes)}</td><td>{mib(tinygo.bytes)}</td><td>{(tinygo.bytes / go.bytes * 100).toFixed(1)}%</td></tr>)}
     </tbody></table>
-    <p><em>Measured from the published assets for <a href={`https://github.com/yohimik/dispat/releases/tag/services/dispat/v${manifest.version}`}>release {manifest.version}</a>, at <a href={`https://github.com/yohimik/dispat/commit/${manifest.sourceCommit}`}>source commit {manifest.sourceCommit.slice(0, 12)}</a>. Toolchains: {manifest.toolchains.go}; {manifest.toolchains.tinygo}.</em></p>
+    <p><em>Measured from the published assets for <a href={`https://github.com/yohimik/dispat/releases/tag/services/dispat/v${manifest.version}`}>release {manifest.version}</a>{manifest.schemaVersion === 1 && <>, at <a href={`https://github.com/yohimik/dispat/commit/${manifest.sourceCommit}`}>source commit {manifest.sourceCommit.slice(0, 12)}</a>. Toolchains: {manifest.toolchains.go}; {manifest.toolchains.tinygo}</> }.</em></p>
   </>;
 }

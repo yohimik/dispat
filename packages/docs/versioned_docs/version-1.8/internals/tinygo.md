@@ -136,9 +136,9 @@ so a run served from a cached failure reports upstream rather than silently pass
 
 ## Sizes
 
-The release pipeline now measures all eight published binaries directly after building them. It emits a checksummed
-manifest only after the TinyGo integration gate passes; the documentation release fetches the manifest for its exact
-Dispat version and archives it with the matching documentation minor.
+The documentation build reads the sizes and SHA-256 digests of all eight binaries from GitHub release metadata
+for its exact Dispat version. It archives those figures with the matching documentation minor.
+No separate size file is attached to the release.
 
 <BinarySizes />
 

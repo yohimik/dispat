@@ -13,8 +13,8 @@
 # change.
 #
 # Two more linux binaries ride along, built from the same source by the
-# TinyGo fork and named `dispat-tiny-linux-<arch>`. Their measured sizes ship
-# in dispat-binary-sizes.json with the compiler versions and source revision.
+# TinyGo fork and named `dispat-tiny-linux-<arch>`. Documentation reads their
+# sizes from GitHub release asset metadata.
 # They are additive: the six names above are what self-update and install.sh
 # resolve, and nothing about them changes. See internals/tinygo.md.
 #
@@ -149,7 +149,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     set -eu; \
     mkdir -p /out; \
-    tinygo version > /tmp/tinygo-version.txt; \
+    tinygo version; \
     for arch in amd64 arm64; do \
       name="dispat-tiny-linux-${arch}"; \
       if GOOS=linux GOARCH="$arch" tinygo build -opt=z -no-debug \
@@ -168,10 +168,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # stage below joins paths onto; the tiny names go last, so the six the
 # contract names keep the order they were built in.
 FROM build AS tiny
-ARG DISPAT_COMMIT=0000000000000000000000000000000000000000
-RUN apk add --no-cache jq
-COPY scripts/binary-sizes.sh /opt/dispat-tools/scripts/binary-sizes.sh
-COPY --from=tiny-build /tmp/tinygo-version.txt /tmp/tinygo-version.txt
 COPY --from=tiny-build /out/dispat-tiny-linux-amd64 /out/dispat-tiny-linux-arm64 /out/
 RUN set -eu; \
     assets="$(sed -n 's/^DISPAT_EXPORT_GITHUB=//p' /out/dispat-output)"; \
@@ -179,9 +175,7 @@ RUN set -eu; \
       [ -s "/out/$name" ] || { echo "$name did not come out of the fork build" >&2; exit 1; }; \
       assets="$assets $name"; \
     done; \
-    sh /opt/dispat-tools/scripts/binary-sizes.sh /out "$DISPAT_VERSION" "$DISPAT_COMMIT" \
-      "$(go version)" "$(cat /tmp/tinygo-version.txt)" > /out/dispat-binary-sizes.json; \
-    echo "DISPAT_EXPORT_GITHUB=$assets dispat-binary-sizes.json" > /out/dispat-output; \
+    echo "DISPAT_EXPORT_GITHUB=$assets" > /out/dispat-output; \
     cat /out/dispat-output
 
 # Full TinyGo acceptance uses the exact native release binary and the same

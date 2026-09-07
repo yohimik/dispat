@@ -27,7 +27,6 @@ services/dispat/dist
 !scripts
 scripts/*
 !scripts/install-tools.sh
-!scripts/binary-sizes.sh
 
 # Full integration tests validate the same fixtures used by the landing demos.
 !packages

@@ -19,17 +19,17 @@ dependencies:
   - provider: infra
     keep: true
 scripts:
-  # Fetch the size manifest from the exact CLI release this docs build names.
+  # Read binary sizes from GitHub metadata for the exact CLI release.
   # The site plugin validates its schema and complete asset set, then archives
   # it under the docs major/minor. A release must never fall back to an older
-  # archive: docs-only patches keep naming the same exact CLI release asset.
+  # archive: docs-only patches keep naming the same exact CLI release.
   binary-sizes: |
     set -eu
     version=${DISPAT_WORKSPACE_DISPAT_VERSION:?DISPAT_WORKSPACE_DISPAT_VERSION is required}
     mkdir -p data
     rm -f data/binary-sizes.json
-    docker run --rm -v "$PWD:/docs" node:22-alpine \
-      node /docs/plugins/binary-sizes/download.mjs "$version" /docs/data/binary-sizes.json
+    docker run --rm -e GITHUB_TOKEN -v "$PWD:/docs" node:22-alpine \
+      node --experimental-strip-types /docs/plugins/binary-sizes/download.mjs "$version" /docs/data/binary-sizes.json
     echo "downloaded binary sizes for dispat $version"
   # The docs package is the only pnpm package. Export its regenerated lockfile
   # from the container used by its build so release runners need no Node.

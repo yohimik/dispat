@@ -9,13 +9,19 @@ export interface BinarySize {
   sha256: string;
 }
 
-export interface BinarySizesManifest {
+interface BuildBinarySizes {
   schemaVersion: 1;
   version: string;
   sourceCommit: string;
   toolchains: {go: string; tinygo: string};
   binaries: BinarySize[];
 }
+
+export type BinarySizesManifest = BuildBinarySizes | {
+  schemaVersion: 2;
+  version: string;
+  binaries: BinarySize[];
+};
 
 export interface BinarySizesData {
   manifest: BinarySizesManifest | null;

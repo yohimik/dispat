@@ -62,7 +62,6 @@ scripts:
     - >-
       docker buildx build --file Dockerfile --target export
       --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
-      --build-arg DISPAT_COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD)}"
       --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
       ${GITHUB_TOKEN:+--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN}
       --output "type=local,dest=$PWD/dist" ../..

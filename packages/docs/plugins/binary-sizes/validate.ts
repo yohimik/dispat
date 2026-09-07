@@ -1,6 +1,6 @@
 import type {BinarySize, BinarySizesManifest, Compiler} from './types';
 
-const expected = new Map<string, [string, string, Compiler]>([
+export const expected = new Map<string, [string, string, Compiler]>([
   ['dispat-linux-amd64', ['linux', 'amd64', 'go']],
   ['dispat-linux-arm64', ['linux', 'arm64', 'go']],
   ['dispat-darwin-amd64', ['darwin', 'amd64', 'go']],
@@ -23,20 +23,11 @@ function text(value: unknown, at: string): string {
 
 export function validateBinarySizes(value: unknown, expectedVersion?: string): BinarySizesManifest {
   const root = record(value, 'binary sizes');
-  if (root.schemaVersion !== 1) throw new Error('binary sizes.schemaVersion: expected 1');
+  if (root.schemaVersion !== 1 && root.schemaVersion !== 2) throw new Error('binary sizes.schemaVersion: expected 1 or 2');
   const version = text(root.version, 'binary sizes.version');
   if (expectedVersion && version !== expectedVersion) {
     throw new Error(`binary sizes.version: expected ${expectedVersion}, got ${version}`);
   }
-  const sourceCommit = text(root.sourceCommit, 'binary sizes.sourceCommit');
-  if (!/^[0-9a-f]{40}$/.test(sourceCommit) || /^0{40}$/.test(sourceCommit)) {
-    throw new Error('binary sizes.sourceCommit: expected a nonzero 40-character lowercase hex commit');
-  }
-  const toolchains = record(root.toolchains, 'binary sizes.toolchains');
-  const parsedToolchains = {
-    go: text(toolchains.go, 'binary sizes.toolchains.go'),
-    tinygo: text(toolchains.tinygo, 'binary sizes.toolchains.tinygo'),
-  };
   if (!Array.isArray(root.binaries) || root.binaries.length !== expected.size) {
     throw new Error(`binary sizes.binaries: expected exactly ${expected.size} release assets`);
   }
@@ -56,5 +47,15 @@ export function validateBinarySizes(value: unknown, expectedVersion?: string): B
     if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error(`${name}.sha256: expected 64 lowercase hex characters`);
     return {name, os, arch, compiler, bytes: binary.bytes as number, sha256};
   });
+  if (root.schemaVersion === 2) return {schemaVersion: 2, version, binaries};
+  const sourceCommit = text(root.sourceCommit, 'binary sizes.sourceCommit');
+  if (!/^[0-9a-f]{40}$/.test(sourceCommit) || /^0{40}$/.test(sourceCommit)) {
+    throw new Error('binary sizes.sourceCommit: expected a nonzero 40-character lowercase hex commit');
+  }
+  const toolchains = record(root.toolchains, 'binary sizes.toolchains');
+  const parsedToolchains = {
+    go: text(toolchains.go, 'binary sizes.toolchains.go'),
+    tinygo: text(toolchains.tinygo, 'binary sizes.toolchains.tinygo'),
+  };
   return {schemaVersion: 1, version, sourceCommit, toolchains: parsedToolchains, binaries};
 }
