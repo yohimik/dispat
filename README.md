@@ -127,20 +127,21 @@ the ordering, the orchestration, and the failure semantics.
 
 ## Inspiration
 
-dispat stands on the shoulders of three things:
+Dispat draws on tools and ideas that make complex work easier to inspect, compose, and recover:
 
-- **The saga pattern**, from Garcia-Molina and Salem's *Sagas* (1987), which models a long transaction as a sequence of
-  steps that each commit independently and recover forwards. A release is that shape exactly, so dispat recovers by
-  completing the legs a run still owes rather than by rolling back the ones that succeeded, which no registry would
-  allow anyway. The [saga's ledger](https://dispat.dev/comparison/) is the release tags themselves, each written
-  strictly after the artefact it names exists, so the record never claims more than was delivered. The plan is a pure
-  function of git history and the graph, so a re-run can plan the work that recorded tags still leave pending without
-  querying a registry. A publisher can succeed before its tag is written, so a hard interruption in that small gap
-  still needs an operator to check the destination before retrying. Mutual exclusion is compare-and-swap on the
-  [release lock](https://dispat.dev/reference/releasing/release-lock/) tag, whose unforced push the remote accepts from
-  one run and rejects for every other, so there is no lock service to operate. The legs themselves are
-  [ordered topologically](https://dispat.dev/concepts/) and execute in parallel wherever the graph leaves them
-  independent.
+- **Linux and Git** guided the CLI design: focused commands, explicit inputs, useful exit codes, and tools that work
+  together. The shell tools used on [Linux](https://www.kernel.org/) inspired
+  [`dispat if`](https://dispat.dev/cli/if/) and [`dispat for`](https://dispat.dev/cli/for/), which expose familiar
+  conditional and looping control flow as commands. [Git](https://git-scm.com/) also supplies the history and release
+  records that let you inspect how a release was planned and what it completed.
+- **Database recovery and sagas** inspired the approach to reliable releases: record completed work, coordinate
+  concurrent runs, and recover after partial failure. Garcia-Molina and Salem's
+  [*Sagas* (1987)](https://www.cs.princeton.edu/research/techreps/598) describes long transactions made of smaller,
+  independently committed steps. Dispat applies that structure to publishing: it writes a Git tag after each
+  successful publish and uses those records to plan unfinished work. A
+  [release lock](https://dispat.dev/reference/releasing/release-lock/) coordinates concurrent runs, without a separate
+  release database or lock service. If a publisher succeeds before its tag is written, check the destination before
+  retrying. See [recovery behavior](https://dispat.dev/concepts/#failure-and-recovery).
 - **[Lerna](https://lerna.js.org/)**, and the workspaces of [npm](https://docs.npmjs.com/cli/using-npm/workspaces) and
   [pnpm](https://pnpm.io/workspaces) it grew up beside. Between them they proved that many packages in one repository
   can share a dependency graph. They also proved that versioning and publishing all of them can be one command. dispat
