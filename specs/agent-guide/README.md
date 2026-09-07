@@ -76,6 +76,49 @@ The default `.env` is resolved from the invocation directory rather than `--root
 
 Read-only inspection does not authorize configuration repair. Change configuration only when the requested task includes that change. This includes `dispat init`, `dispat compute --write`, release hooks, publish commands, channels, credentials, record settings, and lock settings. Once the user has authorized a particular scoped change, carry it through without unnecessary reconfirmation. Ask again only if new evidence materially changes the target or effect.
 
+## Share configuration across Windows and Linux
+
+A developer can work on Windows while CI releases on Linux. Keep the shared graph, scripts, and lifecycle in `global.yaml`. Give each platform a small configuration that references it and overrides the shell:
+
+```yaml
+# global.yaml (repository root)
+scripts:
+  build: cmake --build build
+flow:
+  build: [build]
+packages:
+  app:
+    path: app
+```
+
+```yaml
+# linux.yaml (repository root)
+$ref: ./global.yaml
+shell: ["/bin/sh", "-c"]
+```
+
+```yaml
+# windows.yaml (repository root)
+$ref: ./global.yaml
+shell: ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
+```
+
+This example assumes CMake is available and `app/build` has already been configured. The shared build command works in either shell; platform-specific commands may need separate referenced script files. Configure the project's actual test and publish stages before using this as a release configuration.
+
+`$ref` paths are relative to the file containing the reference. Keys beside `$ref` replace whole keys from the referenced object. This is not a deep merge: adding a `scripts` map to `windows.yaml` replaces the entire shared scripts map. Reference and override at the level you intend to change. See [configuration references](../../packages/docs/docs/configuration/refs.md).
+
+Preview locally with `dispat --config windows.yaml status`. On the Linux runner, use `dispat --config linux.yaml status`, then use that same configuration for every gate and the authorized release. The release workflow invokes `dispat --config linux.yaml` after its gates; do not run that production release locally.
+
+Where `/bin/sh` is available, a shared preview wrapper can select the file:
+
+```sh
+dispat if OS=Windows_NT \
+  --then 'dispat --config windows.yaml status' \
+  --else 'dispat --config linux.yaml status'
+```
+
+`OS=Windows_NT` compares an environment value; it does not detect the host operating system. The `else` branch here assumes Linux. In Dispat 1.8.2, `if` starts the selected command through `/bin/sh -c` without loading a configuration. Only the child Dispat invocation reads `windows.yaml` or `linux.yaml`. Setting a PowerShell shell in the Windows file does not remove the outer wrapper's `/bin/sh` requirement. On native Windows without that executable, invoke `dispat --config windows.yaml status` directly. Do not claim Windows execution was tested based on a Linux run with `OS=Windows_NT`.
+
 ## Preview the exact release
 
 `status` computes a release plan without running release stages or acquiring the release lock. `preview` renders pending release notes.
