@@ -151,6 +151,11 @@ dispat stands on the shoulders of three things:
 
 ## Where to go
 
+- **[Agent work guide](./specs/agent-guide/README.md)**: if you are a coding agent working with Dispat, start with
+  `dispat --version` and read the versioned guide linked by `dispat --help`. Use the latest published guide patch
+  on that CLI's major/minor release line, not the guide from another release line or the default branch. If you
+  cannot check for newer patches, use the pinned guide from help. Keep configuration and API references pinned
+  to the installed CLI release, and follow the guide's CI/CD release workflow.
 - **[dispat](./services/dispat)**: the CLI itself. Read a terminal tour, the key features, and the full documentation.
   This includes getting started, an example per package manager, concepts, CLI, configuration, commit messages, script
   environment, architecture, and coverage.
