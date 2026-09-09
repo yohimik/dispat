@@ -1,5 +1,12 @@
 # Changelog
 
+## docker/dispat-debian/v1.9.0 (2026-09-09)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.9.0): 1.8.2 -> 1.9.0
+
+
 ## docker/dispat-debian/v1.8.2 (2026-09-06)
 
 ### Dependencies
