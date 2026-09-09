@@ -1,0 +1,114 @@
+import {ExperimentsSummary, ExperimentsTable, ReportStamp} from '@site/src/components/TestReport';
+
+# Release experiments
+
+What the released binary does when a release goes wrong halfway through, as opposed to
+[what the suite reaches](./coverage.mdx), [what it did](./test-results.mdx) and
+[what the code costs](./benchmarks.mdx).
+
+<ReportStamp />
+
+<ExperimentsSummary />
+
+Two things can go wrong in the middle of a monorepo release that no unit test reaches. The registry refuses one package
+after others have gone out, leaving a version that is tagged but not published, or published but not tagged. And a
+colleague pushes to the branch while the release runs, so the branch the release means to push has moved underneath it.
+Both are ordinary. Neither is reachable from a test that stubs the registry or the remote, because what is under
+test is precisely what the tool does when the real ones refuse.
+
+The fixture is six npm packages: `core`, with `cli`, `ui` and `api` depending on it, and `theme` and `docs` depending
+on `ui`. All six start at 1.0.0, tagged and published. One change is pending, a minor to `core`, told to each tool the
+way that tool reads: a conventional commit, or a changeset file. Dependencies are tilde ranges, so the minor reaches
+`core`'s consumers under every tool and each of them has a reason to release something.
+
+The binary under test is the published image. Each cell copies `dispat` out of `yohimik/dispat-alpine:<version>`, so
+what runs is the exact bytes a release shipped, fetched through the channel it shipped by, and never a build of the
+checkout. The registry is a verdaccio that starts inside the container, behind a proxy the experiment is allowed to
+break: it answers 502 to the upload of one named package and forwards everything else untouched. Nothing here talks to
+a public registry, and no run shares a registry with another.
+
+## Records first, verdicts second
+
+A cell records what a tool left behind in the three places a release writes: the local clone, the origin, and the
+registry. After every step of the protocol, those three are read and joined into one state per package.
+
+For dispat, some of those readings are expectations, and a cell that misses one fails the release that ran it. For
+lerna, nx and changesets the same readings are recorded either way. A row below that reads 3/5 is a description of that
+tool under this fault, not a failure of the run and not a claim that the tool is broken: the expectations are dispat's
+own, written from what dispat promises, and holding another tool to a promise it never made would be a comparison of
+nothing.
+
+## By experiment
+
+<ExperimentsTable />
+
+The final state column is the answer per package at the end of the run, in this vocabulary:
+
+| State        | Meaning                                                                         |
+|--------------|---------------------------------------------------------------------------------|
+| `consistent` | the registry's version is tagged on origin and the tag is reachable from `main` |
+| `orphan`     | a tag names a version the registry does not hold                                |
+| `unpushed`   | the tag exists in the local clone only                                          |
+| `dangling`   | the tag is on origin but outside `main`'s ancestry                              |
+| `unrecorded` | the registry serves a version no tag names                                      |
+| `baseline`   | nothing beyond the fixture's 1.0.0, so the row is left out                      |
+
+`dangling` is what a rebase after a refused push produces: the release commit is rewritten, the tags stay on the
+original, and the next plan of a tag-driven tool sees everything as changed again. `orphan` is what tagging before
+publishing produces: the tag says a version shipped that nobody can install.
+
+The colleague's push lands at a point in the tool's own sequence rather than on a timer. A shim placed first on `PATH`
+for the duration of the release command records every git call the tool makes and fires the colleague's commit and push
+once, right before the first `git push` that is neither the release lock's nor a commit. The interleaving is therefore
+the same every time and the same for every tool, and where in the release it falls is part of the record: lerna commits
+and tags and then pushes both, nx pushes before it commits or tags, changesets makes no push of its own so the push is
+the operator's, and dispat publishes first and pushes last.
+
+The comparison this measures against the documented behaviour of each tool is in
+[beside other release tools](/comparison#the-experiments).
+
+## Reproducing
+
+Every cell is one container, and the whole campaign is one command from the repository root:
+
+```sh
+EXPERIMENTS_DISPAT_VERSION=1.7.1 dispat exec experiments --for pkg:experiments --in pkg:experiments
+dispat exec summary --for pkg:experiments --in pkg:experiments
+```
+
+One cell at a time, for re-recording a single protocol:
+
+```sh
+EXPERIMENT=midrelease TOOL=dispat SCENARIO=conflict \
+  dispat exec experiment --for pkg:experiments --in pkg:experiments
+```
+
+| Variable                      | What it does                                                                    |
+|-------------------------------|---------------------------------------------------------------------------------|
+| `EXPERIMENTS_DISPAT_VERSION`  | the released version to run against; the newest published image when unset      |
+| `EXPERIMENTS_RESULTS`         | where the records land; `coverage/experiments` at the repository root by default |
+| `EXPERIMENTS_JOBS`            | how many cells run at once, four by default                                     |
+| `EXPERIMENTS_EXPECT`          | `0` records a dispat cell without gating on its verdict                         |
+
+Each cell leaves a folder with the transcript, every step's output, one observation per step, every failed
+expectation's own output, the registry's logs, the git calls the tool made, and `verdict.json`. The harness itself, the
+fixture, the observer and the fault proxy are documented in
+[`tests/experiments/README.md`](https://github.com/yohimik/dispat/blob/main/tests/experiments/README.md).
+
+Every release reruns every cell. The docs package's `beforeBuild` hook runs the campaign against the image the run has
+just published, and this page is built from what it recorded, which is why the version in the sentence above is always
+the release that published the page. The
+[Experiments workflow](https://github.com/yohimik/dispat/actions/workflows/experiments.yml) is the same twelve cells on
+demand, for any released version.
+
+## What this is for
+
+These are not benchmarks and they are not a scoreboard. They exist because the claims dispat makes about recovery are
+claims about failure, and a claim about failure that has only ever been tested against a stub is a claim about the
+stub. Publishing before tagging, re-running rather than querying a registry, joining a branch that moved instead of
+refusing it: each of those is a sentence in the documentation, and each of these cells is that sentence executed
+against a registry and a remote that really do refuse.
+
+The compared tools are here for the same reason a control is: a result that only ever ran against one tool cannot say
+whether what it measured was the tool or the fixture. Running four tools through one fixture with one fault says which
+differences are the tools'.

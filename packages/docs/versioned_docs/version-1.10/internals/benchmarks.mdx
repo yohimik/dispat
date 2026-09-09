@@ -1,0 +1,78 @@
+import {BenchmarkSummary, BenchmarkTable, FuzzTable, ReportStamp} from '@site/src/components/TestReport';
+
+# Benchmarks
+
+What the code costs, as opposed to [what it does](./test-results.mdx) and [what the suite reached](./coverage.mdx).
+
+<ReportStamp />
+
+<BenchmarkSummary />
+
+Every number on this page is measured rather than written. A benchmark pass runs `go test -run '^$' -bench . -benchmem`
+per module, in a stage of its own, and the release folds the stream into the same report the coverage and test-results
+pages read. Nothing here is a figure someone typed into a document, which matters more for a performance claim than for
+almost any other kind: a benchmark number written by hand is a number about a machine that no longer exists.
+
+`-run '^$'` is not optional. Without it every test runs again alongside the benchmarks, and the timings become numbers
+about a machine that was busy doing something else. `-benchtime` is left at Go's own default, because a measurement
+taken over fewer iterations than the tool chose is a measurement nobody can compare.
+
+## By module
+
+<BenchmarkTable />
+
+A row is one benchmark function, or one case of a table-driven one, named as its source names it. The iteration count
+is a column rather than a footnote because it is what says how much to trust the row beside it: a benchmark the tool
+ran ten times and one it ran ten million times are not the same kind of number. The machine is stated per module for
+the same reason. A nanosecond figure without the CPU that produced it is a number nobody can compare anything to, and
+a release runner is not a workstation.
+
+Allocations are the figure to read first. A time depends on the machine, the toolchain and whatever else was running;
+an allocation count is a property of the code, and it moves only when someone changes what the code does. That is why
+several of these packages pin their allocation counts as tests, with a budget that has one allocation of headroom, so a
+toolchain change does not fail a build for a rounding difference while a reintroduced copy fails it immediately.
+
+## Fuzz targets
+
+<FuzzTable />
+
+A fuzz target under a plain `go test` runs its corpus rather than fuzzing: the seeds the test declares with `f.Add`,
+plus whatever `testdata/fuzz` holds for it: inputs earlier fuzzing sessions found interesting and kept as regression
+cases. The corpus column is what every suite run exercises, and it is the honest half of the number. It is not a claim
+that a fuzzing session ran here, because none did.
+
+Fuzzing itself is a thing somebody does on purpose, for as long as they have:
+
+```sh
+go test ./... -run '^$' -fuzz FuzzParse -fuzztime 10m
+```
+
+A crash it finds is written into `testdata/fuzz` as a new corpus entry, committed, and from then on every run of the
+ordinary suite replays it. That is why the corpus grows and why the count above is worth reading: it is the number of
+inputs the suite is holding the parsers to, not the number of inputs anyone has tried.
+
+## Reproducing
+
+The whole measurement is one command per module from the monorepo root, and it is the one the release runs:
+
+```sh
+go run github.com/yohimik/dispat/tools/testreport bench config -- ./... -run '^$' -bench . -benchmem
+go run github.com/yohimik/dispat/tools/testreport build   # writes packages/docs/data/report.json, read by this page
+```
+
+The stream lands in `coverage/benchlog/<module>.json`, beside the `go test -json` logs the suites leave in
+`coverage/testlog/`. A module measured by a run replaces whatever it had; a module the run did not measure keeps it, so
+a release that rebuilt only part of the monorepo does not blank a page. Rebuilding this site with
+`packages/docs/data/report.json` in place is what puts the figures back; without one, the prose stays and the tables
+are left out.
+
+## What a benchmark here is for
+
+These are regression gates, not marketing. A benchmark exists in this repository when there is a specific mistake it
+would catch: a second deep copy of a parsed document, a flat intermediate map materialised only to be rebuilt, a
+per-element allocation in a loop that could have hoisted it. The corresponding allocation budget is what turns the
+benchmark into a gate. The benchmark says what it costs, and the budget fails the build when the cost changes for a
+reason nobody intended.
+
+What none of them are is a comparison against another library. A benchmark measuring two things measures the harness
+between them, and this repository has no honest way to run somebody else's code on the same terms.
