@@ -1399,7 +1399,7 @@ This goal owns authoring a source commit through Git with the existing CCME pars
 
 | Test | Invariant |
 | --- | --- |
-| `TestCommitValidationNaturalMessageAndDefaultParser` | A staged source change commits through natural `-m` without a Dispat configuration file. |
+| `TestCommitValidationNaturalMessageAndDefaultParser` | A staged source change commits through natural `-m` without a dispat configuration file. |
 | `TestCommitValidationBlocksInvalidMessageBeforeCommit` | Invalid syntax leaves HEAD and the staged diff unchanged and reports validation failure. |
 | `TestCommitValidationUsesConfiguredParserAndFinalCleanup` | Configured types are used and cleanup produces the exact bytes stored in the commit object. |
 | `TestCommitValidationRunsExistingCommitMessageHookOnceThenValidates` | The original hook runs once, retains access to adjacent helper files, and its replacement message is validated. |

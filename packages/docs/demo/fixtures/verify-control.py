@@ -47,7 +47,7 @@ def main() -> None:
         repo.mkdir()
         run(["git", "init", "--bare", str(remote)], root, env)
         run(["git", "init", "-b", "main"], repo, env)
-        run(["git", "config", "user.name", "Dispat demo"], repo, env)
+        run(["git", "config", "user.name", "dispat demo"], repo, env)
         run(["git", "config", "user.email", "demo@example.invalid"], repo, env)
         (repo / "core").mkdir()
         (repo / "core/package.json").write_text('{"name":"core","version":"1.4.2"}\n')

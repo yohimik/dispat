@@ -1,6 +1,6 @@
 # CCME rollback protocol
 
-This document is normative for CCME 3.0.0 and is incorporated by [SPEC.md §26](./SPEC.md#26-explicit-rollback). Requirement words have the meaning defined there. It specifies a future release-engine capability. **Dispat 1.8.x and the CCME 2 parser do not implement this directive or the configuration below.**
+This document is normative for CCME 3.0.0 and is incorporated by [SPEC.md §26](./SPEC.md#26-explicit-rollback). Requirement words have the meaning defined there. It specifies a future release-engine capability. **dispat 1.8.x and the CCME 2 parser do not implement this directive or the configuration below.**
 
 ## 1. Purpose and activation
 
@@ -10,7 +10,7 @@ A conforming engine MUST recognize rollback units and show them separately in it
 
 The engine MUST reject a pending post-activation rollback when execution is disabled (`E300`). It MUST NOT silently turn it into an ordinary no-op release. An invocation that only previews MUST never call the mutating handler. Existing branch protection and release authorization remain applicable; a commit message does not grant credentials or authority to delete an artifact.
 
-Conceptual configuration, not accepted by current Dispat:
+Conceptual configuration, not accepted by current dispat:
 
 ```json
 {
@@ -221,7 +221,7 @@ G1–G8 apply to the forward-publish projection under their existing hypotheses,
 
 ## 8. Conformance vectors
 
-These are protocol requirements for future implementations, not results of Dispat tests.
+These are protocol requirements for future implementations, not results of dispat tests.
 
 | ID | Input or condition | Required outcome |
 | --- | --- | --- |

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Bootstrap the latest Aqua with Dispat, then install the repository's tool pins.
+# Bootstrap the latest Aqua with dispat, then install the repository's tool pins.
 # Usage: install-tools.sh [all|crier|tinygo] [destination]
 # Crier is copied as a standalone executable. TinyGo links to Aqua's complete
 # toolchain tree, retaining the lib/ and src/ siblings its compiler requires.

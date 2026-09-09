@@ -1,10 +1,10 @@
-Dispat licensing
+dispat licensing
 
 1. Official release binaries: MIT
 
 The copyright holder grants the MIT license printed below for the compiled
-Dispat binaries published in this project's official releases, including the
-Dispat executables in its official container images. For this binary grant,
+dispat binaries published in this project's official releases, including the
+dispat executables in its official container images. For this binary grant,
 "Software" means those executables in compiled form. It does not include the
 corresponding source files, the CCME specification, or other GPL material in
 source or document form. This grant does not change third-party license terms
@@ -12,7 +12,7 @@ for dependencies or other contents of a container image.
 
 2. Source referencing GPL material: GPL-3.0-or-later
 
-Dispat source files that reference or incorporate GPL-covered specification
+dispat source files that reference or incorporate GPL-covered specification
 text, algorithms or proofs are licensed under GPL-3.0-or-later. This includes
 source references to sections of the CCME specification. These files carry
 SPDX-License-Identifier: GPL-3.0-or-later notices. The MIT grant below does not
@@ -35,7 +35,7 @@ license is in specs/agent-guide/LICENSE.
 
 3. Other source: MIT
 
-Dispat source files without GPL-covered material or substantive references to
+dispat source files without GPL-covered material or substantive references to
 it remain under the MIT license below. File-level GPL notices take precedence
 over a package's default MIT grant. Third-party code, fonts and other material
 retain their own license notices and terms.

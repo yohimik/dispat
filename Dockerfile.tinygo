@@ -76,7 +76,7 @@
 ARG TINYGO_VERSION=0.42.0
 
 # The fork stages use .aqua/aqua.yaml, just like the release toolchain stage.
-# Dispat bootstraps Aqua, and Aqua downloads the recorded custom fork release.
+# dispat bootstraps Aqua, and Aqua downloads the recorded custom fork release.
 FROM tinygo/tinygo:${TINYGO_VERSION} AS base
 
 # The same uid-1001 gopher the gc gates run as, for the same reason: the

@@ -157,7 +157,7 @@ const WHY_SLIDE: ExtraSlide = {
   name: 'How it works',
   body: (
     <>
-      Dispat reads package relationships, plans the affected releases, then builds and publishes each dependency
+      dispat reads package relationships, plans the affected releases, then builds and publishes each dependency
       before its consumers. It records successful publishes with Git tags so the next run can plan unfinished work.
       <Link to="/concepts"> Concepts</Link> follows that workflow end to end.
     </>

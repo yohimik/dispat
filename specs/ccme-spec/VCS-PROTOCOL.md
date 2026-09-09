@@ -1,6 +1,6 @@
 # CCME 3.0.0 VCS adapter protocol
 
-**Status:** Proposed normative extension for CCME 3.0.0. **Implementation status:** Dispat 1.8 implements only its
+**Status:** Proposed normative extension for CCME 3.0.0. **Implementation status:** dispat 1.8 implements only its
 built-in Git backend. It does not read the configuration in this document and MUST NOT claim external-adapter
 conformance.
 
@@ -272,9 +272,9 @@ rollback receipts, and tag-after-publish rule. Package discovery and manifest re
 the engine MUST verify that it represents the adapter snapshot before planning. Editing manifests and changelogs,
 running package scripts, forming a release commit, pushing source revisions, and registry publication are release-engine
 operations outside this adapter protocol. Consequently implementing this document alone is not a complete replacement
-for every Git command used by Dispat. A product offering a non-Git end-to-end release MUST separately define those
+for every Git command used by dispat. A product offering a non-Git end-to-end release MUST separately define those
 workspace and publication operations and MUST preserve the snapshot, dependency ordering, and partial-failure rules in
-SPEC.md §19. Dispat 1.8 offers no such external path.
+SPEC.md §19. dispat 1.8 offers no such external path.
 
 ## 6. Conformance vectors
 
@@ -301,7 +301,7 @@ SPEC.md §19. Dispat 1.8 offers no such external path.
 
 ## 7. Diagnostics
 
-These codes extend the CCME 3.0 diagnostic registry. They are specification identifiers; Dispat 1.8 does not emit them.
+These codes extend the CCME 3.0 diagnostic registry. They are specification identifiers; dispat 1.8 does not emit them.
 
 | Code | Condition |
 |---|---|

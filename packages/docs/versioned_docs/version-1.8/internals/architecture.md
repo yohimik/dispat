@@ -254,7 +254,7 @@ where.
 The `internal/graph.TopoSort` function uses Kahn's algorithm over package names with one refinement. The zero-in-degree
 frontier is a **min-heap**. Ties always break alphabetically, so the same graph yields the same order on every machine
 (§17.2). The heap makes the sort O (V log V + E): every package enters and leaves the heap once, and every edge is
-relaxed once. Dispat also reads reachable tags once and shares each history window between packages whose stable
+relaxed once. dispat also reads reachable tags once and shares each history window between packages whose stable
 tags point to the same commit. A package without a stable baseline requires the full reachable history.
 
 ```
@@ -474,7 +474,7 @@ each successful publish. A recorder error is a critical (`E222`), and the remain
 Other choices:
 
 - Versions live in git tags only, so you have no version files to commit.
-- Dispat reads reachable tags once and runs one `git log` per distinct stable baseline commit. Packages without a
+- dispat reads reachable tags once and runs one `git log` per distinct stable baseline commit. Packages without a
   stable baseline share a full-history read. Different tags on the same commit share the same window.
 - It shells out to the git binary to match CI byte-for-byte.
 - Script output streams line-by-line into the structured logger, keeping parallel package logs attributable.

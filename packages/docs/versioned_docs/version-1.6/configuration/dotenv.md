@@ -50,7 +50,7 @@ dispat release --env-file .env.shared --env-file .env.ci
 Naming a file turns the default off, so dispat skips `./.env`. A missing named file stops the run. This works the same
 way a misspelled `--config` does. Asking for a file and silently getting nothing is worse than stopping.
 
-## Dispat's own variables
+## dispat's own variables
 
 The file reaches the variables dispat reads for itself. You can set the GitHub token for
 [`github`](./records.md#github), `DISPAT_UPDATE_CHECK`, `DISPAT_UNSAFE_DISABLE_LOCK`,

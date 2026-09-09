@@ -2,7 +2,7 @@
 
 Reviewed on 5 September 2026. Implementation: `1c96acda`; documentation: `4a6a789a`.
 
-The specification now has a standalone release package, an initial baseline of 1.0.0, and tags of the form `specs/ccme-spec/v{version}`. Dispat's real planner selects a major release to 2.0.0. The message grammar is unchanged. The GPL license text is byte-for-byte identical to the previous `pkg/ccme/LICENSE-SPEC`; the Go parser retains its MIT license.
+The specification now has a standalone release package, an initial baseline of 1.0.0, and tags of the form `specs/ccme-spec/v{version}`. dispat's real planner selects a major release to 2.0.0. The message grammar is unchanged. The GPL license text is byte-for-byte identical to the previous `pkg/ccme/LICENSE-SPEC`; the Go parser retains its MIT license.
 
 ## Findings and disposition
 
@@ -21,7 +21,7 @@ The specification now has a standalone release package, an initial baseline of 1
 ## Verification
 
 - The complete `services/dispat/internal/plan` test package passed in Go 1.27. Five new regression tests exercise specification vectors 134–138. Existing tests cover fresh prerelease discharge, including vector 133.
-- The version-hook regression suite passed against a real Dispat executable: version replacement, replay, build metadata, malformed declarations, symlink refusal, and rollback after the second installation write fails.
+- The version-hook regression suite passed against a real dispat executable: version replacement, replay, build metadata, malformed declarations, symlink refusal, and rollback after the second installation write fails.
 - The Docker shell gate passed, including the new specification scripts and the announcement regressions.
 - CI baseline scenarios and the test-plan reference validator passed during this review. The specification and parser
   are members of the shared `ccme` version group, so their major and minor release lines remain aligned while their
@@ -95,7 +95,7 @@ the new `test(*)` commit requests fresh CI for this complete revision before rel
 
 ## Corrected release plan after rollback
 
-The corrected planner output selects models, Dispat, all four images and docs at 1.8.0. Models shares the CLI
+The corrected planner output selects models, dispat, all four images and docs at 1.8.0. Models shares the CLI
 `fixedMajorMinor` group. Only CCME and its specification advance to 2.0.0; manifest, scanner and writer advance to
 1.2.0. The checked-in specification version and its Markdown declarations remain 1.0.0 until the release hook
 stamps 2.0.0. No additional major-version policy gate was added.

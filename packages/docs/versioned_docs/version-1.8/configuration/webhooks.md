@@ -177,7 +177,7 @@ that is unique per delivery and stable across its retries, so a receiver can ded
 
 ## Delivery semantics
 
-**Order.** Within one Dispat process, each webhook has its own delivery lane. Events sent through that lane retain
+**Order.** Within one dispat process, each webhook has its own delivery lane. Events sent through that lane retain
 their order, and a slow endpoint never delays another endpoint. Events from concurrently running packages can
 interleave.
 

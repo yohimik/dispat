@@ -1,5 +1,5 @@
 ---
-description: Install Dispat, discover your package graph, and preview an ordered release plan before anything is published.
+description: Install dispat, discover your package graph, and preview an ordered release plan before anything is published.
 ---
 
 # Getting started

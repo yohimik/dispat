@@ -3,7 +3,7 @@
 One config file describes the whole monorepo, and in a big repository that file gets long. `$ref` lets you move any
 part of it into a file of its own.
 
-Anywhere a value belongs, you can write an object holding a single `$ref` key that names another file. Dispat reads
+Anywhere a value belongs, you can write an object holding a single `$ref` key that names another file. dispat reads
 that file and uses its content as the value:
 
 ```yaml
@@ -61,7 +61,7 @@ mistake rather than an intention.
 
 ## Merging several files
 
-A `$ref` can name a list of files instead of one. Dispat reads them in the order they are written and combines them
+A `$ref` can name a list of files instead of one. dispat reads them in the order they are written and combines them
 into a single value. This is how a block that several places need is written once and adjusted where it has to be:
 
 ```yaml

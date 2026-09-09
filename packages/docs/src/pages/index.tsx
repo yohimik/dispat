@@ -106,7 +106,7 @@ function Hero(): React.ReactElement {
           <p className={styles.lead} key={i}><Inlines tokens={paragraph} /></p>
         ))}
         <div className={styles.buttons}>
-          <Link className="button button--primary button--lg" to="#install">Install Dispat</Link>
+          <Link className="button button--primary button--lg" to="#install">Install dispat</Link>
           <Link className="button button--secondary button--lg" to="/getting-started">Start your first release</Link>
         </div>
         <p className={styles.heroNote}>One binary. Your build commands. A release plan you can inspect first.</p>
@@ -120,7 +120,7 @@ function Demos(): React.ReactElement {
   return (
     <Section id="demos" chip="see it work" title="Follow a release from commit to publish">
       <p className={styles.sectionLead}>
-        Choose an example to see how Dispat selects packages, orders their work, and handles failures.
+        Choose an example to see how dispat selects packages, orders their work, and handles failures.
       </p>
       <DemoCarousel features={cli.features} />
     </Section>
@@ -133,7 +133,7 @@ function Workflows(): React.ReactElement {
       <div className={styles.libraries}>
         <div className={styles.feature}>
           <Heading as="h3" id="release-across-languages">Release across languages</Heading>
-          <p>Build a Go service, publish an npm library, and push a Docker image in one run. Dispat calls the shell commands you configure for each package.</p>
+          <p>Build a Go service, publish an npm library, and push a Docker image in one run. dispat calls the shell commands you configure for each package.</p>
         </div>
         <div className={styles.feature}>
           <Heading as="h3" id="dependency-order">Put dependencies in order</Heading>
@@ -146,7 +146,7 @@ function Workflows(): React.ReactElement {
       </div>
       <div className={styles.recoveryNote}>
         <Heading as="h3" id="recovery">Know what to do when a release stops</Heading>
-        <p>Dispat records successful publishes with Git tags. A later run uses those records to find unfinished work. If a publisher succeeded before its tag was written, check the destination before retrying. <Link to="/reference/releasing/recovery">Read the recovery guide</Link>.</p>
+        <p>dispat records successful publishes with Git tags. A later run uses those records to find unfinished work. If a publisher succeeded before its tag was written, check the destination before retrying. <Link to="/reference/releasing/recovery">Read the recovery guide</Link>.</p>
       </div>
     </Section>
   );
@@ -182,7 +182,7 @@ function Libraries(): React.ReactElement {
   return (
     <Section id="libraries" chip="libraries" title="Lightweight libraries, usable on their own">
       <p className={styles.sectionLead}>
-        Use Dispat's Go libraries in your own tools. Parse commit messages, inspect dependencies, or update manifest
+        Use dispat's Go libraries in your own tools. Parse commit messages, inspect dependencies, or update manifest
         versions without running the CLI. The reader and writer share format definitions through{' '}
         <Link to="/go/manifest"><code>pkg/manifest</code></Link>.
       </p>
@@ -195,7 +195,7 @@ function Libraries(): React.ReactElement {
             : the commit parser
           </Heading>
           <p>
-            Parse Conventional Commits and Dispat's package scopes, dependency propagation, and prerelease channels.
+            Parse Conventional Commits and dispat's package scopes, dependency propagation, and prerelease channels.
             The parser scans the input once. Its formal rules live in{' '}
             <Link to={`${GITHUB}/blob/main/specs/ccme-spec/SPEC.md`}><code>SPEC.md</code></Link>.
           </p>
@@ -394,7 +394,7 @@ export default function Home(): React.ReactElement {
   return (
     <Layout
       title="Release automation across languages and repositories"
-      description="Dispat turns conventional commits into versions, changelogs, and ordered releases. Automate publishing across languages in one repository or several.">
+      description="dispat turns conventional commits into versions, changelogs, and ordered releases. Automate publishing across languages in one repository or several.">
       <Hero />
       <main>
         <Demos />

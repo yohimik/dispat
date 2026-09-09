@@ -4,9 +4,9 @@ Status: implementation and fresh independent verification complete; CI-gated rel
 
 ## Scope and compatibility
 
-Add a Git-backed authoring entry point that validates the complete proposed commit message with the repository's existing CCME parser settings. Preserve parser code, grammar, release computation and unrelated commands. Dispat 1.8.2 already provides a native release-step `commit` command, used by this repository's publishing flow. The author selected natural message flags for authoring and rejected a Git-named mode flag. `-m`/`--message`, `-F`/`--file`, `--edit`, `--amend`, `-C`/`--reuse-message` and `-c`/`--reedit-message` select validated authoring; release-step options keep their meaning. Do not silently replace the release default or alter release configuration.
+Add a Git-backed authoring entry point that validates the complete proposed commit message with the repository's existing CCME parser settings. Preserve parser code, grammar, release computation and unrelated commands. dispat 1.8.2 already provides a native release-step `commit` command, used by this repository's publishing flow. The author selected natural message flags for authoring and rejected a Git-named mode flag. `-m`/`--message`, `-F`/`--file`, `--edit`, `--amend`, `-C`/`--reuse-message` and `-c`/`--reedit-message` select validated authoring; release-step options keep their meaning. Do not silently replace the release default or alter release configuration.
 
-CCME 3 already specifies external VCS adapters. Clarify that its existing adapter operations concern release snapshots, records and locks, not Git CLI argument forwarding or source-commit creation. Describe optional authoring validation without pretending Dispat implements external adapters or CCME 3 rollback. Keep specification version markers at their baseline until normal release versioning.
+CCME 3 already specifies external VCS adapters. Clarify that its existing adapter operations concern release snapshots, records and locks, not Git CLI argument forwarding or source-commit creation. Describe optional authoring validation without pretending dispat implements external adapters or CCME 3 rollback. Keep specification version markers at their baseline until normal release versioning.
 
 The implementation agent is Sol, replacing the originally requested Opus. The coordinating agent independently reviews the implementation, reproduces the critical boundaries and owns final local commits.
 
@@ -43,7 +43,7 @@ Record each newly discovered bug separately here with its reproducer, regression
 
 - **CV-DOC-01:** The first docs build rejected a new link from the historical 1.8 command page to `/next/cli/commit/`. Removed the cross-version link and retained a version-specific availability note. The existing historical-links build gate owns this regression; no duplicate test was added.
 
-- **CV-02:** An initial black-box run exposed harness/global `--root` being forwarded to Git. The CLI now extracts supported Dispat global flags while preserving Git argument values.
+- **CV-02:** An initial black-box run exposed harness/global `--root` being forwarded to Git. The CLI now extracts supported dispat global flags while preserving Git argument values.
 - **CV-03:** The first no-config run checked the wrong error sentinel. The default parser is now used only for `pkg/config.ErrNoConfig`; malformed configuration still fails.
 - **CV-04:** Independent review after the first test pass found that default cleanup guessed editor use. An invocation-private editor marker now selects cleanup from actual editor execution; explicit whitespace stays explicit. Goal 50 owns the editor regressions.
 - **CV-05:** Review found bypass flags and `--` could be misread inside message arguments. Option-aware scanning now respects values and path boundaries, rejects bypass clusters and unsupported abbreviations, and is covered by argument-boundary tests plus native probes.
@@ -69,7 +69,7 @@ Record each newly discovered bug separately here with its reproducer, regression
 After CV-10, the fresh Docker measurement of the production source passed the strict,
 unrounded combined gate: **19,305 / 20,317 statements (95.01895%)**. The report
 contains 2,996 tests and 37 fuzz targets. All 641 integration cases passed both
-the ordinary run and the run with the separately built Dispat subprocess
+the ordinary run and the run with the separately built dispat subprocess
 instrumented for races. This is a local working-tree measurement; CI must
 produce its own commit-stamped report before release.
 
@@ -101,7 +101,7 @@ measurement subsequently passed every integration case under its normal
 and an invalid fixture configuration; both test fixtures were corrected before
 final acceptance. These were test defects, not evidence of product corruption.
 
-The disposable release-plan check selected Dispat 1.9.0, models 1.9.0, the agent
+The disposable release-plan check selected dispat 1.9.0, models 1.9.0, the agent
 guide 1.9.0, docs 1.9.0, all four Docker images 1.9.0, and specification 3.0.2.
 The parser remains at 2.0.0 with its existing hold. The feature multi-unit commit
 carries the feature's transitive-consumer intent and the specification's patch

@@ -9,10 +9,10 @@ Git tags of the form `<package>@<version>` by default
 Requirement levels follow RFC 2119 (§2). This specification is itself versioned under SemVer; see §17.3 for what
 constitutes a patch, minor, and major revision of the document.
 
-**Implementation boundary.** This revision specifies CCME 3.0.0 VCS adapters and explicit rollback. Dispat
+**Implementation boundary.** This revision specifies CCME 3.0.0 VCS adapters and explicit rollback. dispat
 1.8.x and its CCME 2 parser do not implement them. The version markers are stamped by the specification release process. Publishing a specification does not implement its behavior. The immutable
 [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
-remains the reference for existing CCME 2 consumers. New protocol examples MUST NOT be presented as runnable Dispat
+remains the reference for existing CCME 2 consumers. New protocol examples MUST NOT be presented as runnable dispat
 configuration. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
 
 ---
@@ -2836,7 +2836,7 @@ name is still the implementer's to justify.
 ## 14. Configuration
 
 CCME 3 additionally defines `vcs` (§25) and explicit rollback activation plus package/space handler declarations (§26).
-These are future engine configuration contracts, not currently accepted Dispat configuration keys. Omitting `vcs`
+These are future engine configuration contracts, not currently accepted dispat configuration keys. Omitting `vcs`
 selects Git. Omitting rollback execution enablement never authorizes withdrawal.
 
 Defaults are chosen so that an unconfigured repository behaves conservatively and predictably.
@@ -3174,7 +3174,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 ## 16. Diagnostics registry
 
 CCME 3 adds the following operational diagnostics. They are specification requirements for future engines, not
-claims about codes emitted by Dispat 1.8. `E300`–`E309` fail the combined run; preflight failures prevent artifact mutation, while execution failures retain prior progress;
+claims about codes emitted by dispat 1.8. `E300`–`E309` fail the combined run; preflight failures prevent artifact mutation, while execution failures retain prior progress;
 `E320`–`E329` have the scopes and recovery rules specified in §25. Existing message diagnostics retain their scope.
 
 | Code | Condition |
@@ -4217,7 +4217,7 @@ A prerelease tag that does not match this pattern but is otherwise valid SemVer 
 
 The vectors below retain their original Git/forward-release fixtures. Full CCME 3 conformance additionally requires
 all vectors in [VCS-PROTOCOL.md §6](./VCS-PROTOCOL.md#6-conformance-vectors) and
-[ROLLBACK.md §8](./ROLLBACK.md#8-conformance-vectors). They are normative expected outcomes, not measured Dispat results.
+[ROLLBACK.md §8](./ROLLBACK.md#8-conformance-vectors). They are normative expected outcomes, not measured dispat results.
 
 Each vector is `input → expected`. An implementation is conforming if it reproduces every one. Workspace for all
 vectors:
@@ -5433,4 +5433,4 @@ Git CLI arguments are not portable adapter requests. This clarification changes 
 [ROLLBACK.md](./ROLLBACK.md) is an integral normative part of this specification. It defines `rollback(scope)`, the
 required `Rollback-Version` footer, activation, package/space handlers, consumer-first withdrawal, durable intent and
 completion receipts, retries, version non-reuse, and conformance vectors. Missing handlers are preflight errors.
-No part of this protocol is implemented by the current Dispat release merely because it is documented here.
+No part of this protocol is implemented by the current dispat release merely because it is documented here.

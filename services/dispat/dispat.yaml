@@ -55,7 +55,7 @@ scripts:
     #
     # The token rides in as a build secret, and only when there is one:
     # the tiny-toolchain stage installs the TinyGo fork through Aqua,
-    # bootstrapped by Dispat; its API requests meet the
+    # bootstrapped by dispat; its API requests meet the
     # unauthenticated rate limit on a runner sharing its IP. The
     # ${VAR:+...} form passes no flag at all outside CI, where an empty
     # env=GITHUB_TOKEN would fail the build for want of a variable.

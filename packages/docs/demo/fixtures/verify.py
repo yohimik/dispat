@@ -16,7 +16,7 @@ def dispat(repo: Path, *args: str) -> str: return call(repo, [str(DISPAT), *args
 
 def init(repo: Path) -> None:
     git(repo, "init", "-q"); git(repo, "config", "user.email", "demo@example.test")
-    git(repo, "config", "user.name", "Dispat demo")
+    git(repo, "config", "user.name", "dispat demo")
 
 def verify_compute(root: Path) -> None:
     expected = json.loads((HERE / "compute/expected.json").read_text())

@@ -56,7 +56,7 @@ def main() -> None:
         repo.mkdir()
         run(["git", "init", "--bare", str(remote)], base)
         git(repo, "init", "-b", "main")
-        git(repo, "config", "user.name", "Dispat demo")
+        git(repo, "config", "user.name", "dispat demo")
         git(repo, "config", "user.email", "demo@example.invalid")
 
         fixtures = Path(__file__).resolve().parent / "release"

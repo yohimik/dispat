@@ -57,7 +57,7 @@ test('builds docs data from exact release metadata and preserves it on invalid r
   await assert.rejects(download('1.9.0', destination, base), /exceeds 262144 bytes/);
   status = 404;
   await assert.rejects(download('1.9.0', destination, base), /HTTP 404/);
-  await assert.rejects(download('../latest', destination, base), /invalid Dispat version/);
+  await assert.rejects(download('../latest', destination, base), /invalid dispat version/);
   assert.equal(await fs.readFile(destination, 'utf8'), saved);
   assert.deepEqual(await fs.readdir(directory), ['manifest.json']);
 });

@@ -99,7 +99,7 @@ func compilerKind() (string, error) {
 	}
 }
 
-// UsesTinyGo reports whether the harness was explicitly told to build Dispat
+// UsesTinyGo reports whether the harness was explicitly told to build dispat
 // with TinyGo. Callers use this for platform expectations that differ between
 // the Go and TinyGo runtimes. A prebuilt binary alone is deliberately opaque;
 // set DISPAT_TEST_COMPILER=tinygo alongside it when its runtime matters.

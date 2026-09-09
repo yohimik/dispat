@@ -131,7 +131,7 @@ export const Progress: React.FC = () => {
             opacity: fadeIO(f, 220, 238, 372, 392),
           }}
         >
-          Dispat does not infer an ambiguous destination result. Check it before rerunning with an idempotent publisher.
+          dispat does not infer an ambiguous destination result. Check it before rerunning with an idempotent publisher.
         </div>
         <SceneTerminal rows={rows} f={f} />
       </div>

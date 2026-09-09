@@ -1,5 +1,5 @@
 ---
-description: Read and safely update dependency manifests across the package formats and ecosystems Dispat supports.
+description: Read and safely update dependency manifests across the package formats and ecosystems dispat supports.
 ---
 
 # Manifest tools
@@ -317,7 +317,7 @@ packages:
 dispat writer aqua.yaml --set cli/cli=v2.70.0
 ```
 
-To connect a tool to a package in your Dispat graph, add its exact Aqua identity to that package's `manifestNames`.
+To connect a tool to a package in your dispat graph, add its exact Aqua identity to that package's `manifestNames`.
 For a custom registry, include the registry prefix, such as `internal:acme/tool`. Automatic versioning writes exact
 pins while retaining a configured version prefix such as `v`.
 

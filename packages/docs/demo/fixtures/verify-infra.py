@@ -69,7 +69,7 @@ def main() -> None:
         repo.mkdir()
         run(["git", "init", "--bare", str(remote)], base)
         git(repo, "init", "-b", "main")
-        git(repo, "config", "user.name", "Dispat demo")
+        git(repo, "config", "user.name", "dispat demo")
         git(repo, "config", "user.email", "demo@example.invalid")
         shutil.copytree(fixture_root, repo, dirs_exist_ok=True)
         (repo / "dispat.yaml").write_text(
@@ -116,7 +116,7 @@ github: {enabled: false}
         assert_before(events, "terraform-apply-end", "publish-start backend")
         assert_before(events, "terraform-apply-end", "publish-start frontend")
         if (repo / ".dispat").exists():
-            raise AssertionError("fixture unexpectedly created a Dispat progress directory")
+            raise AssertionError("fixture unexpectedly created a dispat progress directory")
 
         first_items = reports(first_path)
         first_summary = summary(first_items)

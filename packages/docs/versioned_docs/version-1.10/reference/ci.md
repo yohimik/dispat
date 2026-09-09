@@ -282,7 +282,7 @@ installs it onto a folder on `PATH`, so a setup step needs no package manager an
 Pin the version with `--release` for a reproducible job, and put `--check` in front of it on a cached runner: it exits
 `1` only when the destination does not already hold that exact file, so a warm cache costs no transfer.
 
-Dispat itself uses Aqua for the tools shared by its workflows and build probes. `.aqua/aqua.yaml` records crier 1.1.0
+dispat itself uses Aqua for the tools shared by its workflows and build probes. `.aqua/aqua.yaml` records crier 1.1.0
 and the `yohimik/tinygo` fork at 0.43.0-net.1, `.aqua/registry.yaml` describes their release assets, and
 `.aqua/aqua-checksums.json` records the GitHub release digests. `.aqua/aqua-policy.yaml` admits that local registry.
 [`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh) bootstraps the newest

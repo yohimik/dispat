@@ -10,7 +10,7 @@ Other source files in this module are licensed under the MIT license below,
 except material with its own third-party license notice. Merely importing or
 calling the MIT-licensed CCME parser does not designate a file as GPL.
 
-The copyright holder separately grants MIT for Dispat executables in compiled
+The copyright holder separately grants MIT for dispat executables in compiled
 form distributed through the project's official releases and container
 images. That binary grant does not include corresponding GPL source files or
 specification documents, or change third-party license terms. See the root

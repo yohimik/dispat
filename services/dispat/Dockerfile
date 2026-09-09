@@ -90,7 +90,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # `dispat-<os>-<arch>`, which is a contract nothing here touches — so a
 # release carries them beside the six rather than instead of any of them.
 #
-# Dispat bootstraps the latest Aqua; Aqua installs the custom TinyGo version
+# dispat bootstraps the latest Aqua; Aqua installs the custom TinyGo version
 # and GitHub asset checksums recorded in .aqua/. The complete toolchain stays
 # in Aqua's package cache, with /usr/local/tinygo linked to its root.
 # Manifest changes invalidate this stage without duplicating download policy.

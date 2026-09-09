@@ -10,7 +10,7 @@ import {Pulse, Stage} from './Stage';
 // A versioned infrastructure change is planned before application builds and
 // applied before either application deploy starts. Terraform still uses state:
 // this repository's tf-plan script reconstructs it, saves tfplan, and tf-apply applies exactly
-// that saved plan. Dispat supplies release ordering around those scripts.
+// that saved plan. dispat supplies release ordering around those scripts.
 
 const bar = (frame: number, from: number, to: number) =>
   interpolate(frame, [from, to], [0, 1], {

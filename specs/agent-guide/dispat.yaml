@@ -1,4 +1,4 @@
-# The guide shares Dispat's major/minor line and carries its own patches.
+# The guide shares dispat's major/minor line and carries its own patches.
 versionGroup: cli
 tagFormat: specs/agent-guide/v{version}
 

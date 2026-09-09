@@ -15,10 +15,10 @@ const DISCORD = 'https://discord.gg/83PwVSCCmk';
 const SITE = 'https://dispat.dev';
 
 // Shared metadata for search results and social previews.
-const TITLE = 'Dispat: release automation across languages and repositories';
+const TITLE = 'dispat: release automation across languages and repositories';
 const TAGLINE = 'Release your packages together, across languages';
 const DESCRIPTION =
-  'Dispat turns conventional commits into versions, changelogs, and ordered releases. ' +
+  'dispat turns conventional commits into versions, changelogs, and ordered releases. ' +
   'Automate publishing across languages in one repository or several.';
 
 // What a reader types into a search engine when they are looking for this tool,

@@ -354,7 +354,7 @@ jobs:
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
-      # Bootstrap the latest Aqua through Dispat, then install the pinned
+      # Bootstrap the latest Aqua through dispat, then install the pinned
       # Crier executable. TinyGo is installed by Aqua inside its Docker stage.
       - name: Install the tools the release needs
         env:

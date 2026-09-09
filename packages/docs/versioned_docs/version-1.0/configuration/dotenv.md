@@ -51,7 +51,7 @@ Naming files turns the default off, so `./.env` is not read as well. And a file 
 run, the same way a misspelled `--config` does: asking for a file and silently getting none of it is worse than
 stopping.
 
-## Dispat's own variables
+## dispat's own variables
 
 Because the file is read into the environment, it also reaches the variables dispat reads for itself: the GitHub token
 of [`github`](./records.md#github), `DISPAT_UPDATE_CHECK`, `DISPAT_UNSAFE_DISABLE_LOCK`, and any variable a record

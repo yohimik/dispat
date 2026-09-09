@@ -6,20 +6,20 @@ Check a commit-message string without creating a commit:
 dispat diagnostics 'feat(core): add streaming'
 ```
 
-No Git repository or configuration file is required. Without `--config`, Dispat uses the CCME parser defaults and ignores nearby configuration files.
+No Git repository or configuration file is required. Without `--config`, dispat uses the CCME parser defaults and ignores nearby configuration files.
 
 ## Use project rules
 
-Pass a Dispat configuration file to apply its [parser settings](../configuration/parser.md):
+Pass a dispat configuration file to apply its [parser settings](../configuration/parser.md):
 
 ```sh
 dispat diagnostics --config dispat.yaml 'feat(core): add streaming'
 dispat diagnostics --root ../project --config settings/dispat.yaml 'fix(api): close the stream'
 ```
 
-Pass a complete Dispat configuration, including its package or space declarations. A parser fragment can be included through `$ref`, but is not a standalone Dispat configuration.
+Pass a complete dispat configuration, including its package or space declarations. A parser fragment can be included through `$ref`, but is not a standalone dispat configuration.
 
-A relative configuration path starts at `--root`, which defaults to the current directory. Configuration references resolve as usual. A missing or invalid explicit file is an error; Dispat does not fall back to defaults.
+A relative configuration path starts at `--root`, which defaults to the current directory. Configuration references resolve as usual. A missing or invalid explicit file is an error; dispat does not fall back to defaults.
 
 This command checks message syntax. It does not check whether a scope names an existing package, calculate versions, scan manifests, run scripts, or change Git history. Use [`status`](./status.md) to inspect the release plan and [`commit`](./commit.md) to create a validated source commit.
 

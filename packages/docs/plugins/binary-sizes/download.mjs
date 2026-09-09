@@ -8,7 +8,7 @@ const MAX_BYTES = 256 * 1024;
 const TIMEOUT_MS = 60_000;
 
 export async function download(version, destination, base = 'https://api.github.com/repos/yohimik/dispat') {
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`invalid Dispat version: ${version}`);
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`invalid dispat version: ${version}`);
   const tag = encodeURIComponent(`services/dispat/v${version}`);
   const url = `${base}/releases/tags/${tag}`;
   const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;

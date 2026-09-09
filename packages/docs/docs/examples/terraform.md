@@ -13,7 +13,7 @@ Its publish stage applies that saved plan in CI:
 terraform apply -input=false tfplan
 ```
 
-The commands are defined in [`infra/dispat.yaml`](https://github.com/yohimik/dispat/blob/main/infra/dispat.yaml); the address-to-resource import mapping is explicit in [`rebuild.sh`](https://github.com/yohimik/dispat/blob/main/infra/rebuild.sh). The temporary `terraform.tfstate` and `tfplan` are Terraform files, not Dispat release state, and disappear with the runner. Dispat creates no separate progress database, cache, or state bucket. After a successful apply, the package's `infra/v*` Git tag is its durable release record.
+The commands are defined in [`infra/dispat.yaml`](https://github.com/yohimik/dispat/blob/main/infra/dispat.yaml); the address-to-resource import mapping is explicit in [`rebuild.sh`](https://github.com/yohimik/dispat/blob/main/infra/rebuild.sh). The temporary `terraform.tfstate` and `tfplan` are Terraform files, not dispat release state, and disappear with the runner. dispat creates no separate progress database, cache, or state bucket. After a successful apply, the package's `infra/v*` Git tag is its durable release record.
 
 This bounded approach fits an existing, known footprint whose resources can all be imported deterministically. It does not make Terraform stateless. A team using a persistent remote backend should keep doing so; if that backend needs a bucket or table, bootstrap it before the stack that consumes it.
 
