@@ -1,5 +1,20 @@
 # Changelog
 
+## services/dispat/v1.10.0 (2026-09-09)
+
+### Features
+
+- diagnose messages ([1bb3b39](https://github.com/yohimik/dispat/commit/1bb3b397e4749461c1102869a56b1ceb600636ae)) (by yohimik)
+
+### Dependencies
+
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.10.0): 1.9.0 -> 1.10.0
+
+### Authors
+
+- yohimik
+
+
 ## services/dispat/v1.9.0 (2026-09-09)
 
 ### Features

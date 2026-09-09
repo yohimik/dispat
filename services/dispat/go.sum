@@ -29,8 +29,8 @@ github.com/yohimik/dispat/pkg/config v1.0.0 h1:GjbLd3rJuWz+5LpAqC0XKn9NclWFmTp/r
 github.com/yohimik/dispat/pkg/config v1.0.0/go.mod h1:4w8sekc42s1RxWGmWULbfD8Gm33pYh2zwOfa3dNk4a8=
 github.com/yohimik/dispat/pkg/manifest v1.2.0 h1:ucmnCxJYATbnia2CU7KDXB2Ofh7zwYyb31TCzp8vzo4=
 github.com/yohimik/dispat/pkg/manifest v1.2.0/go.mod h1:DFkXSrUuECVXTNJPPF0GClKTBdWOpl5/sGjANqR49KU=
-github.com/yohimik/dispat/pkg/models v1.9.0 h1:cxYjFMgw4ASti4peToG4jhSDSqzZZL1Twy65F5qz9b4=
-github.com/yohimik/dispat/pkg/models v1.9.0/go.mod h1:hZ5ww4R0SOA5zZqIFMGgG6qn/0j4/mIaPBJbkq05YiI=
+github.com/yohimik/dispat/pkg/models v1.10.0 h1:OL1xY9mMd2GkYEpU8l4TyNuFhxJpEn/Jlu6AANpX/bM=
+github.com/yohimik/dispat/pkg/models v1.10.0/go.mod h1:hZ5ww4R0SOA5zZqIFMGgG6qn/0j4/mIaPBJbkq05YiI=
 github.com/yohimik/dispat/pkg/scanner v1.2.0 h1:eKitxOANmyatFHmtYsIojs7TzrN6INngenwuKirpTaM=
 github.com/yohimik/dispat/pkg/scanner v1.2.0/go.mod h1:qk3WvA/X2+K1RfyuI7g1/9Are7QMox42rUW5Xrejpzk=
 github.com/yohimik/dispat/pkg/writer v1.2.0 h1:gWzZw+UUueWxctyh0nu1NPcTV4Xc5+06aK1iJf+ctAg=
