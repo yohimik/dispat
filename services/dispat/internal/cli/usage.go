@@ -254,18 +254,18 @@ nothing in any covered package.`,
 	},
 	{
 		name:  cmdCommit,
-		short: "create the per-package release commit",
-		long: `Create each covered package's release commit: the package folder staged
-plus the commit.include paths, the message rendered per commit.messageFormat.
---tag also creates the annotated release tag at the resulting commit, and
---push pushes the branch and, with --tag, the tags. A tag that already
-exists at that commit is skipped (W223); one at a different commit is left
-alone and reported (E221). Tags are written and pushed with force by default,
-so a ref the remote already carries is replaced rather than skipped forever;
---no-force turns that off for this invocation. The branch is never force
-pushed. --tag-name names the tag instead of
-computing it, which a command running inside a release stage needs when a
-shared version has moved under it; it covers one package only.`,
+		short: "create a validated Git commit or per-package release commits",
+		long: `Without authoring options, create each covered package's release commit:
+the package folder staged plus commit.include paths. --tag creates annotated
+release tags and --push pushes the branch and tags. The release-step flags
+below retain their existing behavior.
+
+With -m/--message, -F/--file, -C/--reuse-message, -c/--reedit-message,
+-e/--edit or --amend, delegate one ordinary commit to Git and validate Git's
+final cleaned message with this repository's configured parser. Supported Git commit options are forwarded as argv; spell
+long options in full so the validation gate can classify them safely. Parser
+warnings are visible and non-blocking; parser errors prevent the commit.
+--no-verify and -n are refused because they bypass validation.`,
 		flags: append([]string{"tag", "push", "no-force", "name", "email", "remote", "tag-name",
 			"message-format", "include"}, windowFlags...),
 	},

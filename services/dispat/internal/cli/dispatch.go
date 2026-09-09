@@ -14,6 +14,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
+	configlib "github.com/yohimik/dispat/pkg/config"
 
 	"github.com/yohimik/dispat/pkg/manifest"
 	"github.com/yohimik/dispat/pkg/writer"
@@ -52,16 +53,18 @@ type runner struct {
 	update   *notice
 
 	// What the flag-only phase parsed for the commands that asked for it.
-	repository install.Repository
-	write      writeRequest
-	reps       []writer.Replacement
-	execOpts   app.ExecOptions
-	ifBranches []app.Branch
-	ifIn       *app.Location
-	ifFile     *fileTest
-	forOpts    app.ForOptions
-	forDomain  app.ForDomain
-	forIn      *app.Location
+	repository    install.Repository
+	write         writeRequest
+	reps          []writer.Replacement
+	execOpts      app.ExecOptions
+	ifBranches    []app.Branch
+	ifIn          *app.Location
+	ifFile        *fileTest
+	forOpts       app.ForOptions
+	forDomain     app.ForDomain
+	forIn         *app.Location
+	gitCommitArgs []string
+	gitAuthoring  bool
 }
 
 // fileTest is an if invocation whose leading condition is --file or --dir. The
@@ -859,6 +862,22 @@ func (r *runner) runConfigured() int {
 	config.UseLogger(r.boot)
 	cfgPath, resolvedRoot, err := config.ResolveFile(*r.o.root, *r.o.cfgName, r.fs.Changed("config"))
 	if err != nil {
+		if r.gitAuthoring && !r.fs.Changed("config") && errors.Is(err, configlib.ErrNoConfig) {
+			root, rootErr := filepath.Abs(*r.o.root)
+			if rootErr != nil {
+				r.boot.Error().Err(rootErr).Msg("cannot resolve repository root")
+				return 1
+			}
+			ctx, stop := signalCtx()
+			defer stop()
+			log := newLogger(orDefault(*r.o.logLevel, "info"), orDefault(*r.o.logFormat, "pretty"), r.stdout)
+			defaults := &config.File{LogLevel: orDefault(*r.o.logLevel, "info"), LogFormat: orDefault(*r.o.logFormat, "pretty")}
+			if authorErr := app.New(root, defaults, log).AuthorCommit(ctx, r.gitCommitArgs, r.stdout, r.stderr); authorErr != nil {
+				log.Error().Err(authorErr).Msg("git commit failed")
+				return 1
+			}
+			return 0
+		}
 		r.boot.Error().Err(err).Msg("config file not found")
 		return 1
 	}
@@ -1020,6 +1039,18 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 	window := app.WindowOptions{Filter: sel, Since: *o.since, Consumers: *o.consumers}
 
 	a := app.New(root, cfg, log)
+	if r.inv.cmd == cmdCommit && r.gitAuthoring {
+		gitDir, err := filepath.Abs(*o.root)
+		if err != nil {
+			log.Error().Err(err).Msg("cannot resolve git working directory")
+			return 1
+		}
+		if err := app.New(gitDir, cfg, log).AuthorCommit(ctx, r.gitCommitArgs, r.stdout, r.stderr); err != nil {
+			log.Error().Err(err).Msg("git commit failed")
+			return 1
+		}
+		return 0
+	}
 	// The release's own options, shared by the command that performs it and
 	// the command that shows it in advance.
 	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict, RequireRelease: *o.requireRelease}

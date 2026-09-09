@@ -5424,6 +5424,10 @@ shareable trusted command configuration, exact input/output envelopes, fixed his
 immutable records, conditional locks, failure handling and conformance vectors. Its backend-specific revision operand
 rule refines the Git-only SHA operands in §§7, 20–23; the ordinary Git grammar remains unchanged.
 
+The [commit-authoring clarification](./VCS-PROTOCOL.md#8-commit-authoring-and-message-validation-informative) distinguishes
+optional native message validation from this protocol: source-commit creation is not a `createRecord` operation, and
+Git CLI arguments are not portable adapter requests. This clarification changes no release plan or conformance requirement.
+
 ## 26. Explicit rollback
 
 [ROLLBACK.md](./ROLLBACK.md) is an integral normative part of this specification. It defines `rollback(scope)`, the

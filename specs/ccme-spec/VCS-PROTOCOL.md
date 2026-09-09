@@ -322,3 +322,47 @@ These codes extend the CCME 3.0 diagnostic registry. They are specification iden
 bound is `E324`. After any external publish side effect, it MUST be treated as `E324` and resumed from immutable records
 under SPEC.md §19; the engine MUST NOT reuse the stale plan. All `E32x` diagnostics are run-scoped and prevent
 further writes in that attempt.
+
+
+## 8. Commit authoring and message validation (informative)
+
+This protocol reads existing source revisions and writes release records and lock state. It does not define an operation
+for creating an ordinary source revision. In particular, `createRecord` creates a release or audit record at an existing
+revision; it is not a substitute for a native source commit. This distinction applies equally to the built-in Git backend
+and external adapters.
+
+An implementation may provide a separate authoring utility that checks a proposed message before asking its native VCS
+to create a revision. Such a utility is outside full-engine conformance: it does not add an adapter capability, request
+field, diagnostic code, configuration key, or release-planning rule. A Git-backed utility may accept Git commit arguments;
+those arguments are not portable requests to the adapters in this document. Supporting another backend requires a native
+authoring integration, rather than forwarding Git flags to an arbitrary configured command.
+
+The useful validation boundary is the message that will be recorded, including native editor, hook and cleanup effects.
+Checking an earlier command-line string does not establish that the eventual revision has a valid message. A utility
+should either validate that final message before revision creation or refuse a mode for which it cannot establish this
+boundary. It should preserve native argument boundaries, existing hooks, signing and exit behavior within its documented
+support, and report any restrictions before mutation. Validation is not permission to stage additional files, rewrite
+history, publish artifacts, or write release records.
+
+Validation uses the parser version and effective settings implemented by the utility. An error in any unit can reject
+creation of the whole proposed source commit, while warnings remain nonblocking unless an existing explicit strict
+policy makes the condition an error. This authoring policy does not change the specification's treatment of invalid
+units when reading history that already exists. Passing the implemented parser also does not establish conformance to
+newer grammar or operational contracts that the implementation does not support.
+
+Finally, valid syntax does not prove that a scope matches an existing package, that propagation selects the intended
+consumers, or that a release is safe to publish. Those checks need workspace-aware planning and the normal release gates.
+Users can author history through other clients; a local authoring utility is not a repository-wide enforcement boundary.
+
+### Boundary examples
+
+- A native hook changes a valid message to an invalid one: validation must consider the changed message, not the original
+  `-m` value. For Git, `commit-msg` runs before final message cleanup, so a utility must also account for that cleanup.
+- One commit contains a valid unit and an error-bearing unit: an authoring utility may refuse the whole commit without
+  changing how a later history reader projects individual units.
+- A message has an unknown type that produces `W140`: the warning does not become an error merely because validation
+  occurs while authoring. The existing `strictTypes` setting remains the explicit policy choice.
+- An external adapter supports every release operation in sections 2–4: that does not imply support for Git arguments or
+  source-commit creation. No `createRecord` request should be invented to fill that gap.
+
+These examples illustrate the boundary; they are not additional CCME 3 conformance vectors.

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -125,6 +126,14 @@ func versionLine() string {
 // line's phases are runner's, in dispatch.go, each one running only once
 // everything before it has agreed there is a command to run.
 func Run(args []string, stdout, stderr io.Writer) int {
+	if os.Getenv("DISPAT_INTERNAL_COMMIT_VALIDATE") != "" {
+		return runCommitMessageValidator(args, stderr)
+	}
+	args, gitCommitArgs, gitAuthoring, err := splitGitCommitArgs(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "dispat: %v\n", err)
+		return 2
+	}
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
 	o := declareFlags(fs)
@@ -162,6 +171,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		// stays stderr — these are diagnostics, not command output.
 		boot: newLogger(orDefault(*o.logLevel, "info"), orDefault(*o.logFormat, "pretty"), stderr),
 	}
+	r.gitCommitArgs, r.gitAuthoring = gitCommitArgs, gitAuthoring
 
 	// The environment files come before every phase below, because dispat's
 	// own variables are in them too: the update check reads DISPAT_UPDATE_CHECK
@@ -208,6 +218,174 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return r.runConfigured()
+}
+
+// splitGitCommitArgs keeps Git's flag grammar out of pflag. A message source,
+// editor request or amend request after the commit command selects authoring;
+// the complete suffix is then Git's argv and is preserved byte-for-byte.
+func splitGitCommitArgs(args []string) ([]string, []string, bool, error) {
+	command := commandArgumentIndex(args, cmdCommit)
+	if command < 0 {
+		return args, nil, false, nil
+	}
+	suffix := args[command+1:]
+	authoring := false
+	for i := 0; i < len(suffix); i++ {
+		arg := suffix[i]
+		if arg == "--" {
+			break
+		}
+		selects, takesValue := gitAuthorOption(arg)
+		if selects {
+			authoring = true
+		}
+		if takesValue && !strings.Contains(arg, "=") && i+1 < len(suffix) {
+			i++
+			continue
+		}
+		if dispatCommitOptionTakesValue(arg) && i+1 < len(suffix) {
+			i++
+		}
+	}
+	if !authoring {
+		return args, nil, false, nil
+	}
+	var gitArgs, globals []string
+	for i := 0; i < len(suffix); i++ {
+		arg := suffix[i]
+		if arg == "--" {
+			gitArgs = append(gitArgs, suffix[i:]...)
+			break
+		}
+		_, gitValue := gitAuthorOption(arg)
+		if gitValue {
+			gitArgs = append(gitArgs, arg)
+			if !strings.Contains(arg, "=") && i+1 < len(suffix) {
+				gitArgs = append(gitArgs, suffix[i+1])
+				i++
+			}
+			continue
+		}
+		if globalFlagTakesValue(arg) && i+1 < len(suffix) {
+			globals = append(globals, arg, suffix[i+1])
+			i++
+			continue
+		}
+		if globalFlagInline(arg) {
+			globals = append(globals, arg)
+			continue
+		}
+		switch arg {
+		case "--tag", "--push", "--no-force", "--tag-name", "--message-format", "--include",
+			"--remote", "--on-error", "--since", "--consumers", "--package", "-p", "--space", "-s", "--group", "-g":
+			return nil, nil, false, fmt.Errorf("release-step flag %s cannot be combined with an authoring commit", arg)
+		}
+		gitArgs = append(gitArgs, arg)
+		if shortGitOptionTakesFollowingValue(arg) && i+1 < len(suffix) {
+			gitArgs = append(gitArgs, suffix[i+1])
+			i++
+		}
+	}
+	parsed := append([]string{}, args[:command+1]...)
+	parsed = append(parsed, globals...)
+	return parsed, gitArgs, true, nil
+}
+
+func dispatCommitOptionTakesValue(arg string) bool {
+	switch arg {
+	case "--name", "--email", "--remote", "--tag-name", "--message-format", "--include",
+		"--on-error", "--since", "--package", "-p", "--space", "-s", "--group", "-g":
+		return true
+	}
+	return false
+}
+
+func gitAuthorOption(arg string) (selects, takesValue bool) {
+	if strings.HasPrefix(arg, "--") {
+		name := strings.TrimPrefix(strings.SplitN(arg, "=", 2)[0], "--")
+		switch name {
+		case "message", "file", "reuse-message", "reedit-message":
+			return true, true
+		case "edit", "amend":
+			return true, false
+		case "author", "date", "template", "cleanup", "trailer", "fixup", "squash", "pathspec-from-file":
+			return false, true
+		}
+		return false, false
+	}
+	if len(arg) < 2 || arg[0] != '-' {
+		return false, false
+	}
+	for i := 1; i < len(arg); i++ {
+		switch arg[i] {
+		case 'm', 'F', 'C', 'c':
+			return true, i == len(arg)-1
+		case 't':
+			return selects, i == len(arg)-1
+		case 'e':
+			selects = true
+		case 'S', 'u':
+			return selects, false
+		}
+	}
+	return selects, false
+}
+
+func shortGitOptionTakesFollowingValue(arg string) bool {
+	if len(arg) < 2 || arg[0] != '-' || arg[1] == '-' {
+		return false
+	}
+	for i := 1; i < len(arg); i++ {
+		if strings.ContainsRune("mFCct", rune(arg[i])) {
+			return i == len(arg)-1
+		}
+		if arg[i] == 'S' || arg[i] == 'u' {
+			return false
+		}
+	}
+	return false
+}
+
+func globalFlagTakesValue(arg string) bool {
+	switch arg {
+	case "--root", "--config", "--env-file", "--concurrency", "--log-level", "--log-format":
+		return true
+	}
+	return false
+}
+
+func globalFlagInline(arg string) bool {
+	for _, name := range []string{"--root=", "--config=", "--env-file=", "--concurrency=", "--log-level=", "--log-format=", "--quiet-parser="} {
+		if strings.HasPrefix(arg, name) {
+			return true
+		}
+	}
+	return arg == "--help" || arg == "--version" || arg == "--quiet-parser"
+}
+
+func commandArgumentIndex(args []string, wanted string) int {
+	value := false
+	for i, arg := range args {
+		if value {
+			value = false
+			continue
+		}
+		switch arg {
+		case "--root", "--config", "--env-file", "--concurrency", "--log-level", "--log-format":
+			value = true
+			continue
+		}
+		if strings.Contains(arg, "=") && strings.HasPrefix(arg, "--") {
+			continue
+		}
+		if !strings.HasPrefix(arg, "-") {
+			if arg == wanted {
+				return i
+			}
+			return -1
+		}
+	}
+	return -1
 }
 
 // invocation is the parsed command line: which command runs and its

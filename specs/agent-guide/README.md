@@ -271,6 +271,18 @@ CCME 3.0.0 specifies external VCS adapters and explicit rollback ahead of implem
 execute `rollback(scope)` or accept the new adapter/rollback configuration. Do not use specification-only examples as
 runtime commands; an older parser can treat the directive as an unknown type without withdrawing anything.
 
+## Check source commit messages
+
+When the installed `dispat commit --help` lists authoring flags, stage only the intended files and use
+`dispat commit -m "fix(core): close the stream"` to validate the proposed message before Git creates the commit.
+A file or editor can supply the message instead. Read the [command reference](../../packages/docs/docs/cli/commit.md)
+for supported options. Older Dispat versions provide only the per-package release-step command under this name.
+
+Parser errors in any unit reject the source commit; warnings follow the repository's parser policy. Successful syntax
+validation does not prove that scopes identify the intended packages or that the release has approval. Inspect the
+plan with `dispat status` and keep the CI gates. Do not add `--tag` or `--push` to a source-authoring invocation, and do
+not use a standalone release-step command to bypass CI/CD.
+
 ## Know the gating boundary
 
 Planning chooses versions before package work starts. Native `autoVersion` reconciliation, an optional `flow.version`, and lockfile synchronization prepare inputs. Build produces artifacts. Login authenticates once per configured space. Publish performs external publication. Native records then create the configured tags, changelog, GitHub release, commit, and push. Announce happens after publication.

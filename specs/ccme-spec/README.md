@@ -13,6 +13,13 @@ This revision adds two contracts for future release engines:
 
 The specification and parser retain the `ccme` major/minor version group. An explicit `release(ccme)` / `Release-As: none` commit holds the parser while this specification releases at 3.0.0. That deliberate hold is not a claim of parser compatibility with CCME 3. Do not lift it without reviewing the resulting group plan and implemented behavior.
 
+## Optional authoring tools
+
+[VCS-PROTOCOL.md §8](./VCS-PROTOCOL.md#8-commit-authoring-and-message-validation-informative) explains how an optional
+commit-message validator relates to the adapter contract. A native source commit is different from a release record.
+Git argument forwarding does not implement external adapters, and validating messages does not implement newer CCME
+features or prove a release plan is correct. This clarification leaves the existing grammar and release algorithm unchanged.
+
 ## Distribution and verification
 
 Each package keeps its own tags. This specification uses `specs/ccme-spec/v{version}`. The `VERSION` file and the three normative declarations in `SPEC.md` retain the published baseline until native `autoVersion` stamps the planned release. The additional protocol files are included in the same specification package, not independently versioned packages.

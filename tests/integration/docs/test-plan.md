@@ -1393,6 +1393,38 @@ Compiler selection and version-stamped fixtures have separate checks:
 | `TestPrebuiltWithSelectedCompilerBuildsVersionedFixtures` | A selected compiler builds stamped fixtures even when the ordinary binary is prebuilt. |
 | `TestVersionedBuildRejectsPrebuiltOnlySelection` | A prebuilt binary alone cannot silently substitute for a version-stamped fixture. |
 
+### Goal 50: validated source commits (`commit_validation_test.go`)
+
+This goal owns authoring a source commit through Git with the existing CCME parser. Goal 19 continues to own per-package release commits; its release/tag/push cases are not duplicated here. Parser grammar itself remains owned by `pkg/ccme`.
+
+| Test | Invariant |
+| --- | --- |
+| `TestCommitValidationNaturalMessageAndDefaultParser` | A staged source change commits through natural `-m` without a Dispat configuration file. |
+| `TestCommitValidationBlocksInvalidMessageBeforeCommit` | Invalid syntax leaves HEAD and the staged diff unchanged and reports validation failure. |
+| `TestCommitValidationUsesConfiguredParserAndFinalCleanup` | Configured types are used and cleanup produces the exact bytes stored in the commit object. |
+| `TestCommitValidationRunsExistingCommitMessageHookOnceThenValidates` | The original hook runs once, retains access to adjacent helper files, and its replacement message is validated. |
+| `TestCommitValidationRefusesNoVerifyBeforeMutation` | A request to bypass the mandatory gate fails before creating a commit. |
+| `TestCommitValidationWarningIsVisibleAndDoesNotBlock` | A warning is visible and does not reject an otherwise accepted message. |
+| `TestCommitValidationHonorsCommitCleanupConfiguration` | Repository cleanup configuration is honored when no command-line override exists. |
+| `TestCommitValidationReadsMessageFromStdin` | `-F -` reads the message supplied on stdin through the actual Git command. |
+| `TestCommitValidationForwardsSupportedGitOptions` | Git's supported `--allow-empty` option retains its native meaning. |
+| `TestCommitValidationAmendsThroughGit` | An explicit amend replaces the source commit with the checked message. |
+| `TestCommitValidationUsesActualEditorForDefaultCleanup` | An editor invocation triggers Git's default comment-stripping behavior. |
+| `TestCommitValidationExplicitWhitespaceKeepsEditorComments` | An explicit cleanup mode overrides the editor-dependent default. |
+| `TestCommitValidationClusteredMessageFlag` | Git's common `-am` spelling selects authoring and preserves the message argument. |
+| `TestCommitValidationKeepsNestedWorkingDirectorySemantics` | Ancestor configuration discovery does not change the meaning of relative Git message files and pathspecs. |
+| `TestCommitValidationBlocksOneInvalidUnitInCompleteMessage` | Any invalid unit rejects the whole proposed source message; release-history per-unit recovery rules are not silently reused. |
+| `TestCommitValidationShowsWarningsWhenParserHistoryIsQuiet` | Authoring warnings remain visible when the repository suppresses historical parser diagnostics. |
+| `TestCommitValidationPreservesOriginalHookFailure` | A failing original hook keeps its failure and prevents commit creation. |
+| `TestCommitValidationUsesCommonHooksFromLinkedWorktree` | Linked worktrees retain their common hook configuration. |
+| `TestCommitValidationDryRunDoesNotCommitOrClaimValidation` | Git dry-run output neither creates a commit nor claims that message validation ran. |
+| `TestCommitValidationStrictTypesErrorIsVisibleAndBlocking` | A configured strict type error is visible and blocks source creation. |
+| `TestCommitValidationMalformedConfigNeverFallsBackToDefaults` | Malformed configuration is not mistaken for absent configuration. |
+| `TestCommitValidationBoundsMessageFileBeforeCommit` | Oversized input is refused before commit creation. |
+| `TestCommitValidationTreatsDoubleDashAsMessageValue` | A literal message value of `--` is not reinterpreted as the path boundary. |
+| `TestCommitValidationBlocksMessageMadeInvalidByOriginalHook` | Validation observes an invalid message written by the original hook rather than trusting the original valid argument. |
+| `TestCommitValidationCancellationStopsEditorProcessTree` | Cancellation stops the editor and its child process, preserves HEAD, and removes invocation-private hook files. |
+
 ## Regression fences
 
 Dedicated guard tests pin subtle planner properties so regressions fail exactly one distinct test:

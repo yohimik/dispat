@@ -1,5 +1,44 @@
 # The commit command
 
+Use `dispat commit -m` to write a source commit with a checked CCME message. Use `dispat commit` without authoring flags to run the existing per-package release step.
+
+## Write a source commit
+
+Stage the files you intend to commit, then pass a message:
+
+```sh
+git add packages/core/api.go
+dispat commit -m "feat(core): add streaming"
+```
+
+Dispat uses the repository's [parser settings](../configuration/parser.md) to check the message before Git creates the commit. An error in any unit rejects the whole message. Warnings are shown but do not block creation unless an existing parser option makes them errors. This check validates syntax; use `dispat status` afterwards to inspect scopes, versions, and the release plan.
+
+A message can also come from a file or Git's editor:
+
+```sh
+dispat commit --file message.txt
+dispat commit --edit
+dispat commit --amend -m "fix(core): close the stream"
+```
+
+`-C`/`--reuse-message` and `-c`/`--reedit-message` can reuse a named commit's message; the latter opens the editor before validation.
+
+Authoring mode uses Git's commit operation. It does not run package release scripts, select releasing packages, create release tags, or push. Git controls staging, identity, signing, and hooks. As with `git commit --amend`, an explicit amend request replaces the current commit. Review your index before running it.
+
+Dispat validates after an existing `commit-msg` hook has run and after applying the selected cleanup policy. `--no-verify` and `-n` are refused because they would skip this check. Calling Git directly still bypasses Dispat, so keep required history validation in CI.
+
+Use full long-option names. Supported Git options cover message sources, editing and amending, identity and signing, staging and pathspecs, trailers, cleanup, and dry-run output. Unknown options and abbreviated long options are refused before Git runs. A dry run displays Git's proposed changes but does not validate or create a commit.
+
+For comment cleanup, set an explicit `core.commentChar`; `auto` is not supported by the validation wrapper. The raw message file is limited to 16 MiB, and the parser's configured message limit applies to the cleaned text. Temporary hook wrappers and parser settings are removed when the command finishes. Existing hooks remain repository-trusted executable code.
+
+Do not combine authoring flags with release-step flags such as `--tag`, `--push`, `--package`, or `--message-format`. Put Dispat's global options before `commit` to distinguish them from Git options:
+
+```sh
+dispat --config dispat.yaml commit -m "fix(core): close the stream"
+```
+
+## Create release commits
+
 Run `dispat commit` to create a release commit for each covered package. dispat stages the package folder along with
 any `commit.include` paths, then writes a commit message using `commit.messageFormat` to insert the package's name and
 tag.

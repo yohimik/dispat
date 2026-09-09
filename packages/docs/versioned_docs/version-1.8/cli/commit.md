@@ -1,5 +1,7 @@
 # The commit command
 
+This page describes the 1.8 release-step command. Source-commit authoring with `-m` is not available in this version.
+
 Run `dispat commit` to create a release commit for each covered package. dispat stages the package folder along with
 any `commit.include` paths, then writes a commit message using `commit.messageFormat` to insert the package's name and
 tag.

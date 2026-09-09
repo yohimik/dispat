@@ -41,6 +41,11 @@ non-zero, and the next run releases `api` at the exact version it was owed.
 Recorded publishes recover forward on the next run. If a publish process was killed before dispat wrote its tag,
 check that destination before retrying. [Concepts](https://dispat.dev/concepts/) explains the full failure model.
 
+To check a source commit's message before Git creates it, stage the intended files and run
+`dispat commit -m "feat(core): add streaming"`. Dispat reports CCME diagnostics using the repository's parser settings.
+Use `dispat status` afterwards to inspect the release plan. The existing `dispat commit --tag --push` release step keeps
+its separate purpose. See [the commit reference](../../packages/docs/docs/cli/commit.md) for input modes and limits.
+
 Run these commands for common daily tasks:
 
 ```sh
