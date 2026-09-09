@@ -1,5 +1,16 @@
 # Changelog
 
+## specs/ccme-spec/v3.0.2 (2026-09-09)
+
+### Fixes
+
+- clarify commit validation ([4c22611](https://github.com/yohimik/dispat/commit/4c22611dc02c6a88e39fae48f9b3184cdb3ae2fe)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## specs/ccme-spec/v3.0.1 (2026-09-06)
 
 No changes: a version set by Release-As.

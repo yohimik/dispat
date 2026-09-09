@@ -1,6 +1,6 @@
 # Conventional Commits: Monorepo Extension (CCME)
 
-**Version:** 3.0.1 **Status:** Normative specification; new protocol implementation pending **Extends:** Conventional
+**Version:** 3.0.2 **Status:** Normative specification; new protocol implementation pending **Extends:** Conventional
 Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** immutable VCS release records;
 Git tags of the form `<package>@<version>` by default
 **Conformance:** §17 · **Security considerations:** §18 · **Test vectors:** Appendix B
@@ -3338,7 +3338,7 @@ the warning bucket and never discharge an incomplete operation.
 
 ### 17.1 What a conforming implementation must do
 
-An implementation conforms to CCME 3.0.1 if and only if it:
+An implementation conforms to CCME 3.0.2 if and only if it:
 
 1. Parses messages per §4 and §5, producing exactly the units, scopes, and directives those sections define.
 2. Resolves scopes per §6, including file-derived resolution (§6.2).
@@ -3400,7 +3400,7 @@ container MUST NOT be observable.
 
 ### 17.3 Versioning of this specification
 
-This document is CCME **3.0.1** and is itself versioned under SemVer:
+This document is CCME **3.0.2** and is itself versioned under SemVer:
 
 * **Patch**: clarifications and editorial fixes that cannot change any release plan.
 * **Minor**: backward-compatible types, footers, inline sigils, diagnostics or configuration keys that preserve existing execution semantics. A 1.x implementation MUST
