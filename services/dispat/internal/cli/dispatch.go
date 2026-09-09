@@ -623,7 +623,9 @@ func (r *runner) prepareExec() (int, bool) {
 // runPreConfig performs the commands that read no config file: init, because
 // it is what creates one; self-update, because it is about the binary rather
 // than any repository it might be standing in; and the three manifest
-// commands, which read nothing but the files named on the command line.
+// commands, which read nothing but the files named on the command line. The
+// diagnostics command likewise avoids repository discovery, but may load the
+// one configuration file the caller explicitly names.
 func (r *runner) runPreConfig() (int, bool) {
 	cmd := r.inv.cmd
 	if cmd == cmdInit || cmd == cmdInstall || manifestCommand(cmd) {
@@ -639,10 +641,60 @@ func (r *runner) runPreConfig() (int, bool) {
 		return r.runSelfUpdate(), true
 	case cmd == cmdInstall:
 		return r.runInstall(), true
+	case cmd == cmdDiagnostics:
+		return r.runDiagnostics(), true
 	case manifestCommand(cmd):
 		return r.runManifests(), true
 	}
 	return 0, false
+}
+
+// runDiagnostics validates the literal positional message without consulting
+// Git, discovering a config, scanning manifests, running scripts or starting
+// the update check. A config participates only when the caller explicitly
+// named it; ResolveFile's explicit path rule makes a relative name relative to
+// --root, and Load retains normal reference resolution and validation.
+func (r *runner) runDiagnostics() int {
+	requestedLevel := orDefault(*r.o.logLevel, "info")
+	if requestedLevel != "trace" && requestedLevel != "debug" && requestedLevel != "info" &&
+		requestedLevel != "warn" && requestedLevel != "error" {
+		r.boot.Error().Str("log-level", *r.o.logLevel).
+			Msg("unknown --log-level value (want trace, debug, info, warn or error)")
+		return 2
+	}
+	if format := orDefault(*r.o.logFormat, "pretty"); format != "pretty" && format != "json" {
+		r.boot.Error().Str("log-format", *r.o.logFormat).
+			Msg("unknown --log-format value (want pretty or json)")
+		return 2
+	}
+	cfg := &config.File{}
+	format := orDefault(*r.o.logFormat, "pretty")
+	level := requestedLevel
+	if r.fs.Changed("config") {
+		config.UseLogger(r.boot)
+		cfgPath, _, err := config.ResolveFile(*r.o.root, *r.o.cfgName, true)
+		if err != nil {
+			r.boot.Error().Err(err).Msg("config file not found")
+			return 1
+		}
+		cfg, err = config.Load(cfgPath, r.fs)
+		if err != nil {
+			r.boot.Error().Err(err).Msg("invalid configuration")
+			return 1
+		}
+		format = cfg.LogFormat
+		level = cfg.LogLevel
+	}
+	// Diagnostics are the requested output. Clamp only levels quieter than a
+	// warning; trace and debug retain the validator's successful summary.
+	if level == "error" {
+		level = "warn"
+	}
+	log := newLogger(level, format, r.stdout)
+	if err := app.New(*r.o.root, cfg, log).ValidateCommitMessage([]byte(r.inv.diagnosticMessage)); err != nil {
+		return 1
+	}
+	return 0
 }
 
 func (r *runner) runInit() int {

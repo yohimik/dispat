@@ -2,6 +2,8 @@
 
 Use `dispat commit -m` to write a source commit with a checked CCME message. Use `dispat commit` without authoring flags to run the existing per-package release step.
 
+To check a string without staging files or creating a commit, use [`dispat diagnostics`](./diagnostics.md).
+
 ## Write a source commit
 
 Stage the files you intend to commit, then pass a message:

@@ -162,6 +162,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'cli/autowriter', label: 'autowriter'},
         {type: 'doc', id: 'cli/autoreplacer', label: 'autoreplacer'},
         {type: 'doc', id: 'cli/commit', label: 'commit'},
+        {type: 'doc', id: 'cli/diagnostics', label: 'diagnostics'},
         {type: 'doc', id: 'cli/github', label: 'github'},
         {type: 'doc', id: 'cli/trigger', label: 'trigger'},
         {type: 'doc', id: 'cli/compute', label: 'compute'},

@@ -23,6 +23,7 @@ From Dispat 1.8.2, `dispat --help` links to the agent guide, configuration refer
 | `autowriter`             | Apply one set of manifest edits to every covered package; see [The autowriter command](./autowriter.md). |
 | `autoreplacer`         | Replace literal text across every covered package; see [The autoreplacer command](./autoreplacer.md). |
 | `commit`                  | Write a validated source commit with `-m`, or create per-package release commits; see [The commit command](./commit.md).                               |
+| `diagnostics <message>` | Check a literal commit message with optional project parser settings; see [The diagnostics command](./diagnostics.md). |
 | `github`                  | Create the per-package GitHub release immediately; see [The github command](./github.md).                           |
 | `trigger <event>`         | Deliver one script-raised `script.<event>` webhook event, from inside a stage script; see [The trigger command](./trigger.md). |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
@@ -72,7 +73,7 @@ The default comes from config. Override the log format. Choose `pretty` or `json
 
 The default comes from config. Override `parser.quiet` to hide the commit-message parser's own diagnostics. Pass
 `--quiet-parser=false` to show them again when your config sets `quiet: true`; see
-[the parser options](../configuration/parser.md#quiet). Source-commit authoring always shows its validation diagnostics so the author can correct the proposed message.
+[the parser options](../configuration/parser.md#quiet). Standalone diagnostics and source-commit authoring always show its validation diagnostics so the author can correct the proposed message.
 
 ### `--version`
 

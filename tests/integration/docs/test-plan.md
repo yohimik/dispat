@@ -1427,6 +1427,18 @@ This goal owns authoring a source commit through Git with the existing CCME pars
 | `TestCommitValidationNeverUsesFlagValueAsCommand` | A package flag value named commit cannot select authoring; rejection preserves HEAD and the staged index. |
 | `TestCommitValidationRejectsPrefixedReleaseFlagsBeforeMutation` | Release selectors before an actual authoring command fail without modifying HEAD or the staged index. |
 
+### Goal 51: standalone message diagnostics (`diagnostics_test.go`)
+
+This goal owns checking supplied text without a commit operation. Goal 50 owns Git authoring; parser grammar remains owned by `pkg/ccme`.
+
+| Test | Invariant |
+| --- | --- |
+| `TestDiagnosticsDefaultsNeedNeitherGitNorConfig` | Default validation ignores local config and needs no Git executable or repository. |
+| `TestDiagnosticsExplicitConfigResolvesParserReferences` | An explicitly selected config resolves relative parser references without Git. |
+| `TestDiagnosticsWarningsRemainVisibleAsJSON` | Structured warning diagnostics remain visible despite history-quiet and error-only logging settings. |
+| `TestDiagnosticsChecksLiteralWholeMessage` | Literal and multiline arguments reach the parser without Git cleanup; any invalid unit rejects the message. |
+| `TestDiagnosticsSeparatesUsageAndConfigErrors` | Arity and foreign flags exit 2; unreadable or malformed explicit configuration exits 1. |
+
 ## Regression fences
 
 Dedicated guard tests pin subtle planner properties so regressions fail exactly one distinct test:

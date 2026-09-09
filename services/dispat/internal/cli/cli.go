@@ -24,12 +24,13 @@ import (
 
 // Commands accepted by Run.
 const (
-	cmdRelease = "release" // build and publish changed packages (default)
-	cmdStatus  = "status"  // only print the graph and new versions
-	cmdRun     = "run"     // run a script inside each changed package that has it
-	cmdInit    = "init"    // write a starter config file; needs no config or git
-	cmdPreview = "preview" // print one package's pending release notes
-	cmdCompute = "compute" // derive the graph and the baselines from manifests
+	cmdRelease     = "release"     // build and publish changed packages (default)
+	cmdStatus      = "status"      // only print the graph and new versions
+	cmdRun         = "run"         // run a script inside each changed package that has it
+	cmdInit        = "init"        // write a starter config file; needs no config or git
+	cmdPreview     = "preview"     // print one package's pending release notes
+	cmdCompute     = "compute"     // derive the graph and the baselines from manifests
+	cmdDiagnostics = "diagnostics" // diagnose one commit message, without repository discovery
 
 	// The shell helpers, which run one script rather than sweeping a
 	// selection: a condition picks the script for one, the configuration
@@ -425,9 +426,10 @@ type invocation struct {
 	args       []string // run and exec: what followed `--`, for the script
 	// trigger: the raised event name, the progress value when the event is
 	// progress, and the optional free-text message.
-	event    string
-	progress *int
-	message  string
+	event             string
+	progress          *int
+	message           string
+	diagnosticMessage string // diagnostics: the commit message, preserved byte-for-byte
 }
 
 // parseInvocation maps the positional arguments onto a command, validating
@@ -437,8 +439,8 @@ type invocation struct {
 //
 // dash is pflag's ArgsLenAtDash: -1 when no `--` was typed, otherwise the
 // index in rest where the arguments after it begin. Only `run` and `exec`
-// forward those to their script; for every other command a `--` is a mistake
-// worth naming rather than a list to ignore.
+// forward those to their script. Diagnostics uses them as literal input;
+// other commands reject a nonempty suffix rather than silently ignoring it.
 //
 // Splitting on the dash before the arity checks is what lets both rules hold
 // at once. The checks below still see positional arguments alone, so
@@ -461,6 +463,13 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		return inv, false
 	}
 	inv.cmd = rest[0]
+	// Diagnostics takes one literal value rather than forwarding arguments.
+	// `--` is still useful there when the message begins with a dash, so fold
+	// its suffix back into the positional input before the general refusal.
+	if inv.cmd == cmdDiagnostics && dash >= 0 {
+		rest = append(rest, forwarded...)
+		forwarded = nil
+	}
 	if len(forwarded) > 0 && !forwardsArgs(inv.cmd) {
 		log.Error().Strs("args", forwarded).
 			Msgf("%s does not forward arguments; only run and exec pass what follows `--` to a script", inv.cmd)
@@ -474,6 +483,13 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			return inv, true
 		}
+	case cmdDiagnostics:
+		if len(rest) != 2 {
+			log.Error().Msg("diagnostics requires exactly one commit-message argument")
+			usage(inv.cmd)
+			return inv, true
+		}
+		inv.diagnosticMessage = rest[1]
 	case cmdInstall:
 		// One repository, or none: a rollback restores what is already
 		// installed and has no releases to read, so it takes --as instead.

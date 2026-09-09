@@ -366,6 +366,7 @@ func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
 		cmdRun:          {"run", "lint"},
 		cmdInit:         {"init"},
 		cmdPreview:      {"preview"},
+		cmdDiagnostics:  {"diagnostics", "feat: accepted"},
 		cmdChangelog:    {"changelog"},
 		cmdAutoversion:  {"autoversion"},
 		cmdAutowriter:   {"autowriter", "--set-version", "1.0.0"},

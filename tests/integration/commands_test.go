@@ -210,7 +210,7 @@ func TestCommandsHelpIsScopedToTheCommand(t *testing.T) {
 	require.Equal(t, 0, program.Code, "stderr:\n%s", program.Stderr)
 	assert.Contains(t, program.Stderr, "usage: dispat [command] [flags]")
 	for _, word := range []string{"release", "status", "run", "init", "preview", "changelog",
-		"autoversion", "autowriter", "commit", "github", "compute", "scanner", "writer", "replacer"} {
+		"autoversion", "autowriter", "commit", "diagnostics", "github", "compute", "scanner", "writer", "replacer"} {
 		assert.Contains(t, program.Stderr, word, "the command list names every command")
 	}
 	assert.Contains(t, program.Stderr, "global flags:")

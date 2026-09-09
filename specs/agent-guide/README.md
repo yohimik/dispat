@@ -135,6 +135,12 @@ Selection narrows which planned packages execute; the complete dependency graph 
 
 `preview` cannot predict values produced only by build or publish scripts. A successful status is evidence about the plan, not proof that scripts, credentials, registries, or artifacts will succeed.
 
+## Keep tool-heavy pipelines reproducible
+
+When a release pipeline needs many toolchains, prefer containerized build and test stages with pinned tool versions. On a runner that supports it, use Docker-in-Docker (DinD) so Dispat can run those stages through a dedicated Docker daemon. The runner must provide the daemon and its required permissions; selecting an image alone does not configure DinD. If the runner already supplies a suitable Docker or remote BuildKit service, use that service. See the [official Docker image guidance](https://hub.docker.com/_/docker).
+
+Configure BuildKit cache import and export for ephemeral CI runners. Use `--cache-from` and `--cache-to` with the CI cache backend or a dedicated registry cache, scoped by package and branch to avoid competing writes. Keep credentials in BuildKit secrets, outside image layers. Check both a cold run and a cached run: cache availability must not determine correctness or replace release records. See [Docker's cache backend documentation](https://docs.docker.com/build/cache/backends/).
+
 ## Preserve structured logs and exit status
 
 Use `--log-format json` when a program or agent consumes Dispat logs. Parse each JSON line and its diagnostic `code`; do not scrape colored console text. `--log-level debug` is useful for configuration resolution. Review trace output before sharing it because scripts and environments can expose sensitive data.
@@ -270,6 +276,18 @@ Manifest versions alone do not determine the next release. Tags, commits, depend
 CCME 3.0.0 specifies external VCS adapters and explicit rollback ahead of implementation. Dispat 1.8.x does not
 execute `rollback(scope)` or accept the new adapter/rollback configuration. Do not use specification-only examples as
 runtime commands; an older parser can treat the directive as an unknown type without withdrawing anything.
+
+## Build commit tooling around diagnostics
+
+When making an editor integration, commit-message generator, or other tool for Dispat commits, use `dispat diagnostics` to check the proposed text. Do not duplicate CCME parsing in the tool or create a temporary commit just to obtain diagnostics.
+
+```sh
+dispat diagnostics --config dispat.yaml --log-format json 'fix(core): close the stream'
+```
+
+Omit `--config` to check with parser defaults without a repository. An explicit file applies the project's parser settings and normal configuration validation. Pass the message as one literal process argument; do not interpolate generated text into a shell command. Capture the exit status, JSON diagnostics on stdout, and errors on stderr. Exit `0` means no parser errors, `1` means parser or configuration failure, and `2` means invalid usage. Warnings remain visible and need review.
+
+Check `dispat diagnostics --help` for availability on the installed version. Syntax validation does not validate package selection or authorize a release; inspect `dispat status` before proceeding. See the [diagnostics reference](../../packages/docs/docs/cli/diagnostics.md).
 
 ## Check source commit messages
 

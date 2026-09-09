@@ -408,6 +408,11 @@
         },
         {
           "type": "doc",
+          "id": "cli/diagnostics",
+          "label": "diagnostics"
+        },
+        {
+          "type": "doc",
           "id": "cli/github",
           "label": "github"
         },

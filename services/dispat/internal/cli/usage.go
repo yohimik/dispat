@@ -185,6 +185,20 @@ labelled. Naming neither prints the changelog entry.`,
 		flags: append([]string{"changelog", "github"}, selectionFlags...),
 	},
 	{
+		name:  cmdDiagnostics,
+		args:  "<message>",
+		short: "diagnose one commit message",
+		long: `Parse exactly one commit message and report every warning and error.
+The message is used exactly as supplied, including an empty string or embedded
+newlines. Warnings exit 0; parser errors exit 1.
+
+Without --config, the CCME parser defaults are used and no repository is
+searched. An explicit --config loads that file and its references, relative to
+--root, but does not require Git or scan manifests. --log-format json emits one
+JSON event per diagnostic.`,
+		flags: nil,
+	},
+	{
 		name:  cmdChangelog,
 		short: "write the pending changelog entry now",
 		long: `Write each covered package's pending changelog entry now, so a custom
