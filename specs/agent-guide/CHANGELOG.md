@@ -1,5 +1,10 @@
 # Changelog
 
+## specs/agent-guide/v1.9.0 (2026-09-09)
+
+No changes: a version bump to keep the versioning group on one major and minor version.
+
+
 ## specs/agent-guide/v1.8.1 (2026-09-07)
 
 ### Fixes
