@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.10.1 (2026-09-09)
+
+### Fixes
+
+- lowercase dispat branding ([bb4fe1f](https://github.com/yohimik/dispat/commit/bb4fe1fe36b6f813a25f2a87fd48cc2326148b20)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.0 (2026-09-09)
 
 ### Dependencies
