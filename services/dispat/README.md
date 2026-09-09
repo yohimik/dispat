@@ -46,7 +46,7 @@ To check a message string without Git or a configuration file, run
 see [the diagnostics reference](../../packages/docs/docs/cli/diagnostics.md).
 
 To check a source commit's message before Git creates it, stage the intended files and run
-`dispat commit -m "feat(core): add streaming"`. Dispat reports CCME diagnostics using the repository's parser settings.
+`dispat commit -m "feat(core): add streaming"`. dispat reports CCME diagnostics using the repository's parser settings.
 Use `dispat status` afterwards to inspect the release plan. The existing `dispat commit --tag --push` release step keeps
 its separate purpose. See [the commit reference](../../packages/docs/docs/cli/commit.md) for input modes and limits.
 
@@ -70,7 +70,7 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 
 ## Key features
 
-- **Build and publish in dependency order.** Dispat schedules each package after the packages it needs. A package that
+- **Build and publish in dependency order.** dispat schedules each package after the packages it needs. A package that
   uses another is its consumer; the package it needs is its provider. Independent work runs in parallel, with separate
   limits for builds and publishes. Set `isBuildWaitingPublish: true` on the provider package or space when consumers need its published artifact.
   For example, a Docker image using `FROM acme/api` must wait for that API image to reach the registry.
@@ -78,7 +78,7 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
 - **Choose which packages release.** A `feat(core):` commit releases `core`. Add `^` to include direct consumers,
   `^^` to include every downstream consumer, or `+N` to reach up to N dependency edges away. The commit records your
   choice for review alongside the code.
-- **Recover unfinished releases.** Dispat writes a Git tag after a successful publish. If a package fails, independent
+- **Recover unfinished releases.** dispat writes a Git tag after a successful publish. If a package fails, independent
   packages can still finish. The next run uses those tags to plan unfinished work. A successful publish whose tag was
   never written remains ambiguous: check its destination before retrying, or use a publisher that safely accepts
   repeated requests. See [recovery behavior](https://dispat.dev/reference/releasing/recovery/).
@@ -86,7 +86,7 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   Use `%beta` to start one and `%beta>stable` to graduate it. `Release-As: none` holds a package, `Release-As: auto`
   resumes releases, and `Release-As: 2.0.0` selects an exact version. See
   [release controls](https://dispat.dev/reference/commits/#release-control) for the full syntax.
-- **Keep your existing tools.** Configure shell commands for each package's build and publish stages. Dispat reads
+- **Keep your existing tools.** Configure shell commands for each package's build and publish stages. dispat reads
   dependency manifests across Go, npm, Python, Cargo, Docker, mobile, and game projects. `dispat compute` can derive
   the graph and starting versions from these files. Your existing build caches continue to work inside those commands.
   [Aqua tool pins](https://dispat.dev/next/editing/manifests/#aqua) are supported in the unreleased version.

@@ -5,7 +5,7 @@
 **dispat** reads your conventional commits, works out the next versions, and builds and publishes changed packages in
 dependency order. Preview the release with `dispat status` before running it.
 
-Use your existing build and publish commands across Go, npm, Cargo, Python, Docker, and other tools. Dispat works with
+Use your existing build and publish commands across Go, npm, Cargo, Python, Docker, and other tools. dispat works with
 one package, a [monorepo](https://dispat.dev/monorepo/), or several repositories joined through a
 [control repository](https://dispat.dev/control-repository/).
 
@@ -85,7 +85,7 @@ $ dispat
   Android) and game engines (Unity, Godot, Unreal, Defold, and O3DE), which keep their versions in files no package
   manager understands. Set `isBuildWaitingPublish: true` on a provider package or [space](https://dispat.dev/configuration/spaces/)
   when its consumers need the published artifact. A local npm workspace can build from source, while a Docker
-  `FROM` instruction needs its base image available in the registry. Dispat schedules those requirements in the same graph.
+  `FROM` instruction needs its base image available in the registry. dispat schedules those requirements in the same graph.
 - **No task cache, because there is nothing to cache.** Most monorepo tools make unchanged work cheap by running it and
   short-circuiting on a cache hit. This buys you cache keys, a remote cache to operate, invalidation rules, and a
   command to clear the cache when it gets one wrong. dispat computes which packages changed from git history and tags.
@@ -127,7 +127,7 @@ the ordering, the orchestration, and the failure semantics.
 
 ## Inspiration
 
-Dispat draws on tools and ideas that make complex work easier to inspect, compose, and recover:
+dispat draws on tools and ideas that make complex work easier to inspect, compose, and recover:
 
 - **Linux and Git** guided the CLI design: focused commands, explicit inputs, useful exit codes, and tools that work
   together. The shell tools used on [Linux](https://www.kernel.org/) inspired
@@ -137,7 +137,7 @@ Dispat draws on tools and ideas that make complex work easier to inspect, compos
 - **Database recovery and sagas** inspired the approach to reliable releases: record completed work, coordinate
   concurrent runs, and recover after partial failure. Garcia-Molina and Salem's
   [*Sagas* (1987)](https://www.cs.princeton.edu/research/techreps/598) describes long transactions made of smaller,
-  independently committed steps. Dispat applies that structure to publishing: it writes a Git tag after each
+  independently committed steps. dispat applies that structure to publishing: it writes a Git tag after each
   successful publish and uses those records to plan unfinished work. A
   [release lock](https://dispat.dev/reference/releasing/release-lock/) coordinates concurrent runs, without a separate
   release database or lock service. If a publisher succeeds before its tag is written, check the destination before
@@ -152,7 +152,7 @@ Dispat draws on tools and ideas that make complex work easier to inspect, compos
 
 ## Where to go
 
-- **[Agent work guide](./specs/agent-guide/README.md)**: if you are a coding agent working with Dispat, start with
+- **[Agent work guide](./specs/agent-guide/README.md)**: if you are a coding agent working with dispat, start with
   `dispat --version` and read the versioned guide linked by `dispat --help`. Use the latest published guide patch
   on that CLI's major/minor release line, not the guide from another release line or the default branch. If you
   cannot check for newer patches, use the pinned guide from help. Keep configuration and API references pinned
@@ -225,7 +225,7 @@ suits you better.
 
 ## License
 
-Official Dispat release binaries are available under [MIT](./LICENSE), including the Dispat executable in the
+Official dispat release binaries are available under [MIT](./LICENSE), including the dispat executable in the
 official container images. Third-party components retain their own license terms.
 
 Source files that reference or incorporate the GPL-covered CCME specification, algorithms or proofs are licensed

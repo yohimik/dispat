@@ -13,7 +13,7 @@ documentation points to it. Chapter §20 covers parsing, while §17 covers Confo
 The parser and specification share major and minor versions through the `ccme` version group. Patch versions remain
 package-specific. Version 2 uses the same message grammar and parser behavior as version 1; Go callers must use the
 `/v2` import path. This package handles message syntax and message-local diagnostics. Git history, dependency graphs,
-fresh admission, propagation, and release planning belong to Dispat's release engine.
+fresh admission, propagation, and release planning belong to dispat's release engine.
 
 ## Install
 

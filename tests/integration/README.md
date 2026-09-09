@@ -28,7 +28,7 @@ The harness compiles the dispat and tsmark binaries **once per `go test` invocat
 across all tests. Each test builds its repository in a fresh `t.TempDir()`, so you can run tests in any order or select
 any subset safely.
 
-`DISPAT_TEST_COMPILER=<go-or-tinygo-path>` selects the compiler for every Dispat binary the harness builds, including
+`DISPAT_TEST_COMPILER=<go-or-tinygo-path>` selects the compiler for every dispat binary the harness builds, including
 the version-stamped candidates used by the self-update tests. TinyGo builds use the release flags `-opt=z -no-debug`,
 compile with `-p 2`, and run with `GOMAXPROCS=2` and a 6 GiB Go heap limit. The test runner and the `tsmark` timing
 helper still use Go.

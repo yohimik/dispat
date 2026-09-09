@@ -4,7 +4,7 @@ This package provides the public configuration model for the dispat CLI. It cont
 `dispat.json`, `dispat.yaml`, and `dispat.toml` decode into. External tools like generators, migration scripts, and
 test suites can build configurations as typed Go values and marshal them directly to valid config files.
 
-Import it as `github.com/yohimik/dispat/pkg/models`. Models shares the Dispat CLI major and minor version
+Import it as `github.com/yohimik/dispat/pkg/models`. Models shares the dispat CLI major and minor version
 through the `cli` version group. Its public configuration fields keep their existing CCME v1 Go types; moving or
 versioning the specification does not change those types.
 
@@ -55,5 +55,5 @@ dependency: [`pkg/ccme`](../ccme), used for resolved parser configuration types.
 
 `models.go` references the CCME specification and is licensed under GPL-3.0-or-later, as its SPDX notice states.
 Other source files remain MIT unless separately licensed. See [LICENSE](./LICENSE) for the scope of each grant and
-[LICENSE.GPL-3.0](./LICENSE.GPL-3.0) for the GPL text. The MIT grant for official Dispat binaries does not relicense
+[LICENSE.GPL-3.0](./LICENSE.GPL-3.0) for the GPL text. The MIT grant for official dispat binaries does not relicense
 this module's GPL source files.
