@@ -1,5 +1,24 @@
 # Changelog
 
+## services/dispat/v1.9.0 (2026-09-09)
+
+### Features
+
+- validate source commits ([4c22611](https://github.com/yohimik/dispat/commit/4c22611dc02c6a88e39fae48f9b3184cdb3ae2fe)) (by yohimik)
+
+### Fixes
+
+- distinguish command arguments ([8402051](https://github.com/yohimik/dispat/commit/8402051e3842fec1ab3604d31d396c051778da1b)) (by yohimik)
+
+### Dependencies
+
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.9.0): 1.8.0 -> 1.9.0
+
+### Authors
+
+- yohimik
+
+
 ## services/dispat/v1.8.2 (2026-09-06)
 
 ### Fixes
