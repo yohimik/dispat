@@ -1,6 +1,6 @@
 # Validated commit authoring: implementation and review plan
 
-Status: implementation and local independent verification complete; CI-gated release pending. The author subsequently requested shipping the feature and explicitly confirmed that docs and Docker images must release with it. Release follows successful verification; research reruns use the resulting published binary.
+Status: implementation and fresh independent verification complete; CI-gated release pending. The author subsequently requested shipping the feature and explicitly confirmed that docs and Docker images must release with it. Release follows successful verification; research reruns use the resulting published binary.
 
 ## Scope and compatibility
 
@@ -53,6 +53,8 @@ Record each newly discovered bug separately here with its reproducer, regression
 
 - **CV-09:** Final static platform review found that Unix executable-bit checks would omit ordinary Git for Windows hooks and its `.exe` fallback. Hook discovery now follows the platform rules, keeps extensionless-hook precedence, and normalizes fallback proxies while invoking the original file. Platform-policy and fallback tests run on Linux; Windows packages also cross-compile. Native Windows execution remains unverified. The source reference is [Git's Windows access implementation](https://github.com/git/git/blob/master/compat/mingw.c) and its hook lookup in `hook.c`.
 
+- **CV-10 (post-push, before release):** An independent disposable-repository probe found that `dispat --package commit -m "feat(core): x"` treated the package value as a command and created a source commit. The pending CI run was cancelled; no release had started. Command discovery now uses the actual pflag declarations, and authoring rejects release selectors before as well as after the command. `TestCommitValidationNeverUsesFlagValueAsCommand` and `TestCommitValidationRejectsPrefixedReleaseFlagsBeforeMutation` verify unchanged HEAD and staged contents. A focused correction follows the feature commit without rewriting history.
+
 ## Follow-ups and disposition
 
 - Existing release-command name conflicts with authoring: resolved through natural authoring flags while preserving release-step invocations. Git is not named in a new mode flag.
@@ -64,9 +66,9 @@ Record each newly discovered bug separately here with its reproducer, regression
 
 ## Verification evidence (9 September 2026)
 
-The fresh Docker measurement of the final production source passed the strict,
-unrounded combined gate: **19,291 / 20,305 statements (95.00616%)**. The report
-contains 2,992 tests and 37 fuzz targets. All 639 integration cases passed both
+After CV-10, the fresh Docker measurement of the production source passed the strict,
+unrounded combined gate: **19,305 / 20,317 statements (95.01895%)**. The report
+contains 2,996 tests and 37 fuzz targets. All 641 integration cases passed both
 the ordinary run and the run with the separately built Dispat subprocess
 instrumented for races. This is a local working-tree measurement; CI must
 produce its own commit-stamped report before release.
@@ -74,20 +76,21 @@ produce its own commit-stamped report before release.
 The three new production files cover **303 / 317 statements (95.58%)** when
 unit and real-CLI integration profiles are combined by source block. That
 figure is not integration-only coverage or the denominator of every edited
-function in existing files. The 25 authoring integration cases own the
+function in existing files. The 27 authoring integration cases own the
 end-to-end invariants; policy and filesystem failure tests cover narrower
 boundaries. Remaining uncovered blocks are defensive metadata/input I/O and
 private-file write/close failures, rather than untested normal authoring flows.
 
 Independent macOS probes compared the resulting commit object's exact message
 bytes against native Git for all five cleanup modes, with and without an
-editor, and rejected three bypass spellings. All 13 probes passed. Application
+editor. All 18 probes passed, including three bypass spellings and five routing
+rejections that preserve HEAD and staged contents. Application
 and CLI vet, the full service tests, specification/guide lifecycle tests, docs
 typecheck and production build, and test-plan reference checks passed. Windows
 packages cross-compiled; a native Windows runtime was not available, so runtime
 parity there is not established by this review.
 
-The final TinyGo 0.43.0-net.2 build passed all 821 integration tests and
+After CV-10, the TinyGo 0.43.0-net.2 build passed all 823 integration tests and
 subtests with zero failures and zero skips against its native ARM64 release
 binary. Both Linux architectures compiled.
 
@@ -100,7 +103,7 @@ final acceptance. These were test defects, not evidence of product corruption.
 
 The disposable release-plan check selected Dispat 1.9.0, models 1.9.0, the agent
 guide 1.9.0, docs 1.9.0, all four Docker images 1.9.0, and specification 3.0.2.
-The parser remains at 2.0.0 with its existing hold. One final multi-unit commit
+The parser remains at 2.0.0 with its existing hold. The feature multi-unit commit
 carries the feature's transitive-consumer intent and the specification's patch
 intent. Changing `specs/ccme-spec/SPEC.md` selects all CI test modules through
-`scripts/ci-base.sh`; the final committed plan must be checked again before push.
+`scripts/ci-base.sh`; the focused CV-10 correction carries only `fix(dispat)^^` and its tests. Its committed CI selection and release plan are checked before the follow-up push.

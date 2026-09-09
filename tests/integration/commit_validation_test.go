@@ -376,3 +376,30 @@ exit 0`)
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, before, r.Git("rev-parse", "HEAD"))
 }
+
+func TestCommitValidationNeverUsesFlagValueAsCommand(t *testing.T) {
+	r := authoringRepo(t)
+	before := r.Git("rev-parse", "HEAD")
+	r.WriteFile("tracked.txt", "changed\n")
+	r.Git("add", "tracked.txt")
+	staged := r.Git("diff", "--cached")
+
+	res := r.Shell("dispat --package commit -m 'feat(core): must not commit'")
+	assert.NotEqual(t, 0, res.Code)
+	assert.Equal(t, before, r.Git("rev-parse", "HEAD"))
+	assert.Equal(t, staged, r.Git("diff", "--cached"))
+}
+
+func TestCommitValidationRejectsPrefixedReleaseFlagsBeforeMutation(t *testing.T) {
+	r := authoringRepo(t)
+	before := r.Git("rev-parse", "HEAD")
+	r.WriteFile("tracked.txt", "changed\n")
+	r.Git("add", "tracked.txt")
+	staged := r.Git("diff", "--cached")
+
+	res := r.Shell("dispat --package core commit -m 'feat(core): must not commit'")
+	assert.NotEqual(t, 0, res.Code)
+	assert.Equal(t, before, r.Git("rev-parse", "HEAD"))
+	assert.Equal(t, staged, r.Git("diff", "--cached"))
+	assert.Contains(t, res.Stderr, "cannot be combined with an authoring commit")
+}

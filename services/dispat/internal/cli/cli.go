@@ -250,6 +250,9 @@ func splitGitCommitArgs(args []string) ([]string, []string, bool, error) {
 	if !authoring {
 		return args, nil, false, nil
 	}
+	if err := validateAuthoringPrefix(args[:command]); err != nil {
+		return nil, nil, false, err
+	}
 	var gitArgs, globals []string
 	for i := 0; i < len(suffix); i++ {
 		arg := suffix[i]
@@ -289,6 +292,29 @@ func splitGitCommitArgs(args []string) ([]string, []string, bool, error) {
 	parsed := append([]string{}, args[:command+1]...)
 	parsed = append(parsed, globals...)
 	return parsed, gitArgs, true, nil
+}
+
+func validateAuthoringPrefix(prefix []string) error {
+	fs := pflag.NewFlagSet("dispat-authoring-prefix", pflag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	declareFlags(fs)
+	if err := fs.Parse(prefix); err != nil {
+		return err
+	}
+	allowed := make(map[string]bool, len(globalFlags)+len(updateCheckFlags))
+	for _, name := range append(append([]string{}, globalFlags...), updateCheckFlags...) {
+		allowed[name] = true
+	}
+	var invalid string
+	fs.Visit(func(flag *pflag.Flag) {
+		if invalid == "" && !allowed[flag.Name] {
+			invalid = "--" + flag.Name
+		}
+	})
+	if invalid != "" {
+		return fmt.Errorf("release-step flag %s cannot be combined with an authoring commit", invalid)
+	}
+	return nil
 }
 
 func dispatCommitOptionTakesValue(arg string) bool {
@@ -364,26 +390,18 @@ func globalFlagInline(arg string) bool {
 }
 
 func commandArgumentIndex(args []string, wanted string) int {
-	value := false
-	for i, arg := range args {
-		if value {
-			value = false
-			continue
-		}
-		switch arg {
-		case "--root", "--config", "--env-file", "--concurrency", "--log-level", "--log-format":
-			value = true
-			continue
-		}
-		if strings.Contains(arg, "=") && strings.HasPrefix(arg, "--") {
-			continue
-		}
-		if !strings.HasPrefix(arg, "-") {
-			if arg == wanted {
-				return i
-			}
-			return -1
-		}
+	fs := pflag.NewFlagSet("dispat-command", pflag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	declareFlags(fs)
+	fs.SetInterspersed(false)
+	if err := fs.Parse(args); err != nil {
+		// The real parse reports the malformed prefix. Treating a token from
+		// that prefix as a command here would be the dangerous alternative.
+		return -1
+	}
+	rest := fs.Args()
+	if len(rest) > 0 && rest[0] == wanted {
+		return len(args) - len(rest)
 	}
 	return -1
 }

@@ -1424,6 +1424,8 @@ This goal owns authoring a source commit through Git with the existing CCME pars
 | `TestCommitValidationTreatsDoubleDashAsMessageValue` | A literal message value of `--` is not reinterpreted as the path boundary. |
 | `TestCommitValidationBlocksMessageMadeInvalidByOriginalHook` | Validation observes an invalid message written by the original hook rather than trusting the original valid argument. |
 | `TestCommitValidationCancellationStopsEditorProcessTree` | Cancellation stops the editor and its child process, preserves HEAD, and removes invocation-private hook files. |
+| `TestCommitValidationNeverUsesFlagValueAsCommand` | A package flag value named commit cannot select authoring; rejection preserves HEAD and the staged index. |
+| `TestCommitValidationRejectsPrefixedReleaseFlagsBeforeMutation` | Release selectors before an actual authoring command fail without modifying HEAD or the staged index. |
 
 ## Regression fences
 

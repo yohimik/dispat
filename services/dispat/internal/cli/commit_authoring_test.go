@@ -68,6 +68,31 @@ func TestSplitGitCommitArgsLeavesLegacyCommitUntouched(t *testing.T) {
 	assert.Equal(t, args, parsed)
 }
 
+func TestSplitGitCommitArgsNeverTreatsAFlagValueAsTheCommand(t *testing.T) {
+	for _, flag := range []string{"--package", "--space", "--group", "--name", "--config", "--root"} {
+		args := []string{flag, "commit", "-m", "feat(core): must not run"}
+		parsed, gitArgs, authoring, err := splitGitCommitArgs(args)
+		require.NoError(t, err, flag)
+		assert.False(t, authoring, flag)
+		assert.Nil(t, gitArgs, flag)
+		assert.Equal(t, args, parsed, flag)
+	}
+}
+
+func TestSplitGitCommitArgsRejectsReleaseFlagsBeforeAuthoringCommand(t *testing.T) {
+	for _, args := range [][]string{
+		{"--package", "core", "commit", "-m", "feat(core): x"},
+		{"--name", "Ada", "commit", "-m", "feat(core): x"},
+	} {
+		_, _, _, err := splitGitCommitArgs(args)
+		assert.ErrorContains(t, err, "cannot be combined with an authoring commit")
+	}
+	_, gitArgs, authoring, err := splitGitCommitArgs([]string{"--log-format", "json", "commit", "-m", "feat(core): x"})
+	require.NoError(t, err)
+	assert.True(t, authoring)
+	assert.Equal(t, []string{"-m", "feat(core): x"}, gitArgs)
+}
+
 func TestSplitGitCommitArgsRecognizesClusterAndPreservesPathBoundary(t *testing.T) {
 	parsed, gitArgs, authoring, err := splitGitCommitArgs([]string{
 		"commit", "-am", "feat(core): clustered", "--", "--root", "-m",
