@@ -122,6 +122,38 @@ Run the same release script on the operating systems it supports. Shared
 [referenced configuration](../configuration/refs.md) can hold the graph while platform files select shells and commands.
 This avoids duplicating the release policy; it does not translate Bash into PowerShell or replace Windows testing.
 
+## Prioritize failures that affect consumers
+
+A GitHub release appearing before npm is not sufficient evidence of a broken release. Check the intended publication
+order and maintainer responses first. Missing optional assets, an unused version constant and an old release page
+are different from a package that fails to compile or an artifact that corrupts a supported workload.
+
+Useful acceptance checks come from demonstrated failures:
+
+- [release-please's component parsing report](https://github.com/googleapis/release-please/issues/2801#issuecomment-5611677658) and
+  [related crash](https://github.com/googleapis/release-please/issues/2884) were reproduced with its published 17.11.2
+  parser. Inline code containing `<path>` dropped a component from parsed release data; `<details>` caused a
+  `TypeError`. Escaped controls passed. Compare the intended component set with the parsed plan and final records;
+  rendered notes must not silently become a smaller release plan. The reproduction exercised parsing, not publication.
+- [Firebase Auth's dependency report](https://github.com/firebase/firebase-android-sdk/issues/8557) includes a maintainer
+  reproduction of Kotlin compilation failure. The published AAR references an annotation missing from its POM.
+  Test a clean consumer of the packaged API; another dependency in a large development checkout can hide the omission.
+- [VMAF's backpressure regression](https://github.com/Netflix/vmaf/issues/1587) has a confirmed single-commit correction
+  outside the latest release. A bounded queue probe corroborated the mechanism without repeating the reporter's
+  memory-exhausting video workload. Verify that the artifact delivered to users contains the tested correction,
+  rather than treating corrected mainline source as a completed release.
+
+Put project-specific checks in the configured build or publish script, where a failure stops that package's stage.
+dispat orders those scripts and records their outcome; it does not supply a video-quality, Kotlin or platform-specific
+acceptance suite. The [npm](./npm.md), [Gradle](./gradle.md), [pnpm](./pnpm.md), [Cargo](./rust.md),
+[Apple](./apple.md) and [binary](./binaries.md) examples describe the corresponding consumer boundaries.
+
+A harmful published artifact may call for a maintenance release, a downstream backport or explicit withdrawal.
+Those choices differ from retrying an interrupted publish. [CCME 3's rollback specification](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/ROLLBACK.md)
+describes a version-bound request and withdrawal receipts while preserving release history. It does not turn an
+ordinary failure into an automatic rollback; dispat's current parser still implements CCME 2. See
+[release recovery](../reference/releasing/recovery.md) for the implemented retry boundary.
+
 ## Version documentation and agent instructions too
 
 Give a guide, protocol schema or specification its own package when consumers need a versioned contract. Choose

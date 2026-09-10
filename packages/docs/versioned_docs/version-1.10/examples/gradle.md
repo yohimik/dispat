@@ -175,3 +175,19 @@ main, core and clustering coordinates on Central, and its release workflow runs 
 GitHub release is published. Verify every included publishable module from a clean Gradle consumer. Directories that
 are not included in `settings.gradle` are not missing artifacts, and dispat cannot infer that publication intent from
 a dormant `build.gradle` file.
+
+### Compile against the published POM and AAR
+
+Artifact presence alone does not prove that its declared dependencies are sufficient. Google Maven listed
+[`firebase-auth` 24.2.0](https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-auth/maven-metadata.xml)
+as its current release on 10 September 2026. Its published
+[POM](https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-auth/24.2.0/firebase-auth-24.2.0.pom)
+does not declare a Checker Framework dependency, while its
+[AAR](https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-auth/24.2.0/firebase-auth-24.2.0.aar)
+contains references to `UnknownInitialization` and `MonotonicNonNull`. A Firebase maintainer
+[reproduced the resulting Kotlin consumer failure](https://github.com/firebase/firebase-android-sdk/issues/8557#issuecomment-5443253358).
+
+dispat can order Gradle builds and publish commands and reconcile literal coordinates, but it does not inspect JVM
+bytecode or compare an AAR with its POM. Add a clean Kotlin consumer compile for the exact remote coordinate to the
+release gate. A bytecode-to-metadata scan can catch the missing annotation dependency before publication; the clean
+consumer build verifies the resolver behavior that users receive.

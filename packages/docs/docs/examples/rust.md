@@ -150,3 +150,16 @@ it was not evidence that the Rust crates were absent. The current
 [`tauri-v2.11.5`](https://github.com/tauri-apps/tauri/releases/tag/tauri-v2.11.5) and
 [`tauri` 2.11.5](https://crates.io/crates/tauri/2.11.5) align. dispat can coordinate the crate and native-package
 stages, but it does not build missing native bindings or roll back a crate already accepted by crates.io.
+
+## Verify the crate that consumers receive
+
+A repository fix does not update a crate that crates.io already accepted. Download and unpack the exact `.crate`
+after publication, then run the relevant target build against those bytes. In
+[`serde_bser` 0.4.0](https://crates.io/crates/serde_bser/0.4.0), four big-endian calls remain invalid even though the
+current [Watchman source](https://github.com/facebook/watchman/blob/3cc641d24f8c6fa6fdee2a8cf65d94604af3dd17/watchman/rust/serde_bser/src/ser.rs)
+contains all four corrections. Downstream jj and operating-system packagers therefore carry patches while waiting
+for a new crate release.
+
+Keep `cargo package` before `cargo publish`, and add a clean consumer or cross-target build where platform-specific
+code can differ. dispat orders and versions the publish step; the post-publish check establishes that the registry
+artifact contains the source you meant to deliver.

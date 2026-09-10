@@ -123,3 +123,17 @@ produce every asset by itself. Use one of these two approaches:
 - Read [Release records](../configuration/records.md#github) for the GitHub recorder's options.
 - Read [Script environment variables](../reference/environment.md#script-outputs) for outputs and the export directive.
 - Read [dispat in CI](../reference/ci.md) for the job that runs this.
+
+## Bound producer queues before release
+
+Performance changes can make an existing pipeline accept work faster than it completes it. Add a probe that blocks a
+worker, drives the producer beyond the intended capacity, and fails unless enqueue applies backpressure. In
+[VMAF 3.2.0](https://github.com/Netflix/vmaf/issues/1587#issuecomment-5611669720), the shipped thread pool accepted 1,000 additional jobs while
+one worker was held; the source correction in
+[`8fc71e3`](https://github.com/Netflix/vmaf/commit/8fc71e3006f0b21e8e31d6e5d1b904332149ad9e) accepted one and then
+blocked until the worker resumed. The reporter's same-input comparison confirmed bounded memory and identical scores
+after applying only that commit.
+
+Run the small queue probe in `build`, then exercise the produced library or binary in a representative consumer before
+exporting it. A successful GitHub upload proves that the asset exists. It does not prove that a source fix reached the
+asset or that long-running memory remains bounded.

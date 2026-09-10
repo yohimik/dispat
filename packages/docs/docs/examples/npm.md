@@ -63,6 +63,21 @@ npm version "$DISPAT_NEW_VERSION" --no-git-tag-version && npm ci && npm run buil
 
 Treat publication of an exact version and an npm dist-tag update as distinct operations. If a later destination fails, verify the already-published version before retrying it. See the [JupyterLab release case](./release-integration.md#make-success-mean-available-to-the-next-stage).
 
+### Compare the planned components with the parsed release record
+
+In release-please, [issue #2801](https://github.com/googleapis/release-please/issues/2801) reports that a raw
+`<path>` token inside inline code can make release-PR reparsing silently omit one component, while
+[issue #2884](https://github.com/googleapis/release-please/issues/2884) reports that a raw `<details>` token can crash
+later runs. Calling only `PullRequestBody.parse()` from the published
+[`release-please@17.11.2`](https://www.npmjs.com/package/release-please/v/17.11.2) reproduced the omission and crash;
+it did not exercise a complete release. [PR #2885](https://github.com/googleapis/release-please/pull/2885) proposes a
+guard for the missing-summary crash and was still open when checked.
+
+dispat computes its package plan from Git and does not parse or validate release-please PR bodies. When a release
+script emits a multi-component release record, add a native gate that compares the intended component names with the
+names parsed back from that record. After publishing, compare that same set with the exact registry versions rather
+than treating a successful parser call or workflow as proof that every component shipped.
+
 ## Moving release intent out of Changeset files
 
 Changesets maintains a separate release-intent file for each submitted change, then generates versions and changelogs.

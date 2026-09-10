@@ -45,6 +45,11 @@ A source-tree Gradle build does not prove that an external Android project can r
 and declared publishable modules. Keep a clean consumer check for required ABIs, metadata and transitive dependencies
 inside the release gates.
 
+The [`firebase-auth` 24.2.0 case](./gradle.md#compile-against-the-published-pom-and-aar) illustrates this failure: its POM
+omits a dependency for Checker Framework annotations referenced by the AAR, and a Firebase maintainer reproduced the
+Kotlin consumer failure. dispat does not compare AAR bytecode with Maven metadata, so add a clean compilation against
+the exact published coordinate to the native release checks.
+
 Read the project's publication policy before treating an absent coordinate as a failure. For example,
 [AndroidX explains that `media3-effect-ndk` is not published to Google Maven](https://github.com/androidx/media/issues/3363).
 Set the provider's `isBuildWaitingPublish` only when the consumer really fetches that provider from a registry;

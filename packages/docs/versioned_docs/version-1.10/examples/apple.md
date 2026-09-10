@@ -157,3 +157,16 @@ maintainer confirmed the omitted setting and planned 5.12.2. Conversely,
 [Firebase 12.19.1](https://github.com/firebase/firebase-ios-sdk/releases/tag/12.19.1) explicitly fixes GitHub ZIP naming
 without a new CocoaPods SDK release. An integration check must understand that release policy before requiring every
 destination to advance.
+
+## Pin the vendored source behind a Swift tag
+
+A Swift Package Manager tag identifies the wrapper repository, including the submodule commits and generated native
+sources it contains. Check that source identity when a release delivers a vendor fix. The
+[`mlx-swift` 0.31.6 tag](https://github.com/ml-explore/mlx-swift/tree/0.31.6) pins MLX commit `ce45c525`; that vendored
+source passes the output buffer's dtype to the NAX split-K template. Upstream
+[MLX PR #3810](https://github.com/ml-explore/mlx/pull/3810) changes it to the input dtype after an M5 workload produced
+invalid results. The correction appeared in mlx-swift's later mainline vendor bump; at the 10 September 2026 check, no released Swift tag contained it.
+
+Before recording delivery, resolve every submodule at the proposed tag and test the packaged Swift consumer on the
+affected hardware path. dispat can create the wrapper tag after the build succeeds; it does not infer whether a
+vendored commit contains a native fix.

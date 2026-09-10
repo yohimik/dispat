@@ -54,3 +54,24 @@ the `workspace:` protocol, and `pnpm publish` checks your git tree state.
   shipped.
 
 Yarn workspaces work the same way. Put `yarn.lock` in `commit.include` and use `yarn npm publish` in the publish slot.
+
+## Keep publisher trust consistent across release lines
+
+pnpm's `trustPolicy: no-downgrade` rejects a package version when an earlier-published version had stronger publisher
+evidence. This is conditional: token publishing does not fail by itself, but switching one release to npm trusted
+publishing and later returning to a token can make installs of later versions fail under that policy. A provenance
+attestation does not satisfy pnpm's trusted-publisher check.
+
+This matters when one npm package has several maintained release lines. Before migrating any line, confirm that every
+publishing workflow can use the package's trusted-publisher configuration. Keep the authentication method consistent
+across the lines, and exercise the consumer policy in an isolated verification project with scripts disabled:
+
+```sh
+pnpm add --ignore-scripts --trust-policy no-downgrade your-package@the-published-version
+```
+
+The [`jsii` release discussion](https://github.com/aws/jsii-compiler/issues/2662) documents the concrete failure: the
+project published one version with trusted publishing, returned to token-based workflows because one package served
+multiple release lines, and pnpm then rejected later versions with `ERR_PNPM_TRUST_DOWNGRADE`. Restoring consistent
+publisher evidence is the release-side fix; weakening the consumer trust policy would hide the downgrade. dispat can
+run each line's native publish command, but npm owns the publisher configuration and authorization constraint.
