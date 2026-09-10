@@ -41,89 +41,50 @@ Pull container images for any other CI system: `yohimik/dispat-alpine`, `-ubuntu
        alt="An animated dependency graph of four packages across npm, Go, and Docker: commits decide the blast radius, builds and publishes run in dependency order in parallel, a failed build stays contained while its consumer is skipped, and a re-run finishes exactly what the first run still owed">
 </p>
 
-## Why one more monorepo tool?
+## Why one more release tool?
 
-Every major monorepo tool can topologically sort a dependency graph to build everything in order. Turborepo, Nx, Bazel,
-Pants, Buck2, and moon schedule work across such a graph. Lerna, changesets, Rush, Melos, cargo-release,
-semantic-release, the npm, pnpm, and yarn workspace commands, and the Maven and Gradle reactors turn one into a
-release.
+dispat brings version planning, builds, publication, and recovery into one dependency graph. It is especially useful
+when a release crosses toolchains or destinations, and completing it requires more than running a build in order.
 
-As of dispat 1.0.0 in August 2026, the split is always the same. The language-agnostic tools stop before the release,
-and the tools that publish are built around a single ecosystem. Only nx release and release-please reach further, but
-neither goes all the way.
-
-Two situations break that model in practice:
-
-1. **An error in the middle of a run.** Half the packages are published and half are not. Most tools either abort the
-   whole run or carry on and leave you to reconstruct what shipped. Where recovery exists, it is a registry query like
-   `lerna publish from-package`. A registry answers only whether a version is already there, never what the run still
-   owes. This is also only one ecosystem's answer. There is no equivalent for a Docker tag, a GitHub release, or a
-   Maven deploy that simply rejects the version it has. Recovery ends up being a script you write.
-2. **A consumer that can only be *built* once its provider is *published*.** A Node package can be built before its
-   providers publish. A Docker image is often buildable only by pulling its base image from a registry, which means the
-   provider has to be published first. Building everything and then publishing everything assumes every ecosystem
-   behaves like npm, and mixed graphs break it.
-
-Modern projects are exactly that mix. You wire many packages on different infrastructure into one dependency graph,
-placing npm next to Docker next to Go. dispat is built for that case.
+- **Deep dependency chains across toolchains.** Release `base image → runtime image → application image`, or
+  `Go module → Go module → binary → Docker image → derived image`, with the same scheduler. Each provider can require
+  its consumers to wait for publication before building: set `isBuildWaitingPublish: true` when a consumer needs a
+  version fetched from a registry. Local workspace builds can instead use the provider's build output. The graph
+  carries these requirements through every level. See the [Go](https://dispat.dev/examples/go/) and
+  [Docker](https://dispat.dev/examples/docker/) examples.
+- **Saga-style release recovery.** Publication consists of separate external writes. dispat records each successful
+  package publication with a Git tag and uses those records to plan unfinished work on a rerun. A package failure
+  leaves completed publications in place while unaffected graph branches can continue. If an upload succeeds before
+  its record exists, inspect that destination before retrying. Publish scripts must reconcile their own partial
+  writes; there is no automatic rollback across registries. See the
+  [recovery experiments](https://dispat.dev/internals/experiments/).
+- **Useful for a single-package project.** One package can still ship a binary, a container, release notes, and a
+  website. Use the same versioning, channels, and recovery model without introducing a monorepo. Give independently
+  recoverable deliverables their own package records, or make a multi-destination publish script resume each pending
+  destination. See [single-package releases](https://dispat.dev/examples/single-package/).
+- **Monorepos and polyrepos use the same release model.** A monorepo declares packages and their dependencies in one
+  checkout. A [control repository](https://dispat.dev/control-repository/) can assemble separate repositories through
+  pinned Git submodules and coordinate them with one graph. Its pointer-update commits carry release intent, and its
+  history holds the release records; the linked repositories keep their own histories.
+- **Your manifests and commands remain the inputs.** dispat reads supported project manifests, can derive dependency
+  edges with `dispat compute`, and reconciles versions through `autoVersion`. Build and publish stages use your shell
+  commands across Go, npm, Cargo, Python, Docker, mobile projects, and game engines. Configure the toolchain's checks,
+  credentials, and artifact validation in those stages. [Commit messages](https://dispat.dev/reference/commits/)
+  provide version intent and release notes.
+- **Plan only the work the release needs.** Git history and release tags determine the changed packages and affected
+  consumers. Unchanged packages stay outside the release plan. BuildKit layers, Go's build cache, and other existing
+  caches can speed up the selected stages; dispat does not require a separate task-cache service. Preview the package
+  versions and scope with `dispat status` before releasing through CI.
 
 ```console
-$ dispat
+$ dispat status
 12:04:05 INF ● changed bump=minor package=core version="1.2.3 -> 1.3.0"
 12:04:05 INF ● changed bump=patch package=app dueToProviders=[core] version="0.8.1 -> 0.8.2"
 12:04:05 INF release plan ready packages=3 releasing=2
-12:04:05 INF published package=core tag=core@1.3.0
-12:04:05 INF published package=app tag=app@0.8.2
-12:04:05 INF done published=2 failed=0 skipped=0
 ```
 
-- **Polyglot by construction.** Packages are folders and stages are plain shell commands. This means any language,
-  build system, registry, CI, or cache plugs in with no integration work. On top of that, dispat reads and rewrites
-  thirty-five manifest formats across twenty ecosystems. It supports npm, Go, Cargo, Python, Composer, Maven, the .NET
-  project and nuspec family, Dart, Ruby, Dockerfiles, and compose files. It also supports mobile platforms (Info.plist,
-  project.pbxproj, Podfile, and .podspec on iOS; AndroidManifest.xml, Gradle build scripts, and version catalogs on
-  Android) and game engines (Unity, Godot, Unreal, Defold, and O3DE), which keep their versions in files no package
-  manager understands. Set `isBuildWaitingPublish: true` on a provider package or [space](https://dispat.dev/configuration/spaces/)
-  when its consumers need the published artifact. A local npm workspace can build from source, while a Docker
-  `FROM` instruction needs its base image available in the registry. dispat schedules those requirements in the same graph.
-- **No task cache, because there is nothing to cache.** Most monorepo tools make unchanged work cheap by running it and
-  short-circuiting on a cache hit. This buys you cache keys, a remote cache to operate, invalidation rules, and a
-  command to clear the cache when it gets one wrong. dispat computes which packages changed from git history and tags.
-  Packages that did not change are absent from the plan, so their scripts never start. Skipping work you never
-  scheduled needs no cache, no state file, and no daemon, and it cannot go stale. This approach also composes. Because
-  dispat caches nothing itself, whatever you already cache keeps working untouched inside the stage. This includes
-  BuildKit layers, an Nx, Turborepo or Bazel cache, ccache, or the Gradle build cache. None of it can affect which
-  versions get computed, in what order things publish, or what gets tagged.
-- **Built around an error model, not a happy path.** A failure never aborts the run. dispat skips the broken package's
-  consumers unless they have changes of their own, and every unaffected subgraph keeps releasing. Failed and skipped
-  consumers are not lost. The next run catches them up automatically at the version they were originally owed, using
-  release tags rather than a state file. A publish interrupted before its tag is the ambiguous case; check the registry
-  before retrying it. Recovery for recorded work is re-running.
-- **The graph can come from the manifests themselves.** Run `dispat compute` to read the packages' project files
-  (package.json, go.mod, Cargo.toml, pyproject.toml, composer.json, pom.xml, .csproj, pubspec.yaml, requirements files,
-  Dockerfiles, and compose files). dispat derives the consumer and provider graph from them, including an image chain
-  read straight off the `FROM` lines. You can preview suggestions, confirm them one by one, or apply them wholesale.
-  Pass `--check` to gate CI on a graph that has drifted. Set `keep: true` to mark deliberate relations no manifest
-  declares. A space with an `autoVersion` block goes further. dispat rewrites its manifests at the version stage,
-  reconciling declared ranges to end-of-run versions without disturbing their formatting. Run `syncLock` scripts like
-  `npm install` to regenerate lock files between version and build. Both libraries are commands of their own too. Run
-  `dispat scanner` to print what a folder's manifests declare, and run `dispat writer` to edit one in place. Neither
-  needs a config file or a git repository.
-- **A release is treated as what it really is: a distributed transaction.** Publishing a graph of packages means
-  irreversible writes across independent services (an npm registry, a Docker registry, GitHub) with no rollback to fall
-  back on. dispat handles this the way distributed systems do. Each package's leg commits by durably recording its own
-  completion as an annotated git tag, written only after the publish succeeds. There are no state files or registry
-  queries. A re-run recomputes the plan from history, graph, configuration, and those tags, then continues the work
-  whose record is missing. If a publish succeeds and the process stops before its tag is written, inspect the registry
-  before retrying because dispat cannot prove whether that shell command completed.
-
-You could probably wire the same thing up in a general-purpose task scheduler with enough YAML and glue. dispat
-deliberately does less. It handles release logic only, meaning build and publish to a registry with versioning,
-tagging, and changelogs around them.
-
-That focus is what keeps it easy to configure. You write one file and fill a fixed set of script slots (`version`,
-`build`, `publish`, `announce`, `login`, per-stage hooks, `onFail`, and `onSkip`) with shell commands. dispat supplies
-the ordering, the orchestration, and the failure semantics.
+The same configuration supplies version, build, publish, and announcement stages, with hooks for project-specific
+work. dispat coordinates their order and release records; your existing tools produce and publish the artifacts.
 
 ## Inspiration
 
