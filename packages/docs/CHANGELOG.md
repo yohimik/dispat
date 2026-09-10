@@ -1,5 +1,19 @@
 # Changelog
 
+## packages/docs/v1.10.6 (2026-09-10)
+
+### Fixes
+
+- share Android native library checks across game engines ([9a48f92](https://github.com/yohimik/dispat/commit/9a48f929deb4ad0cf1601443822d7241c302dad9)) (by yohimik)
+  Link engine integrations to the shared packaged-library alignment check.
+  Keep the verified FMOD wrapper finding separate from claims about other
+  engines, and update the current and 1.10 documentation together.
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.5 (2026-09-10)
 
 ### Fixes
