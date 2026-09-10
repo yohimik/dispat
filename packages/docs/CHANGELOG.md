@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.10.7 (2026-09-10)
+
+### Fixes
+
+- verify public ecosystem examples and generalize package growth ([4b9aefd](https://github.com/yohimik/dispat/commit/4b9aefd95155865c630c44752586eda1579034d8)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.6 (2026-09-10)
 
 ### Fixes
