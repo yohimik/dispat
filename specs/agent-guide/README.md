@@ -10,11 +10,13 @@ This guide explains how a coding agent should inspect, test, release, and recove
 
 dispat can execute arbitrary configured scripts and can publish packages, write files, create commits and tags, push branches, and call external services. Treat the repository configuration as executable release policy.
 
-## Choose the guide patch
+## Choose compatible guide and documentation patches
 
 Start with the guide linked by `dispat --help`. Check the repository's published `specs/agent-guide/v*` releases for a newer guide patch on the installed CLI's major/minor line, and use the latest available patch on that line. For example, a dispat 1.8.2 installation can use guide 1.8.3: guide patches carry their own version and need not match the CLI's patch number. Do not move to a different major/minor line or a prerelease guide for a stable CLI.
 
-Keep the configuration and API references from the installed binary's help pinned to that CLI release. A newer guide may link to a newer documentation snapshot, so it does not establish that the older binary supports a feature. If you cannot check published guide releases, use the pinned guide and report that the latest patch could not be verified.
+Apply the same versioning rule to documentation: check published `packages/docs/v*` releases and use the latest stable documentation patch on the installed CLI's major/minor line. The CLI, guide and documentation have independent patch numbers; none needs a release merely to match another's patch. On the website, select that major/minor documentation version rather than Next or another line.
+
+Keep the configuration and API references from the installed binary's help pinned to that CLI release when checking its implemented contract. Newer guide and documentation patches can correct advice without adding binary capabilities. If published patches cannot be checked, use the pinned references and report which latest patches could not be verified.
 
 ## Working rules
 
@@ -294,6 +296,13 @@ dispat uses Conventional Commits: Monorepo Extension (CCME). Read the repository
 Explicit scopes name configured packages. With no scope, ownership can derive from changed files. Propagation and channel syntax change release intent; do not add them as decorative prose. Accurate scopes matter for both releases and `--since` script sweeps.
 
 ### Write commits for the task
+
+Apply the repository's versioning policy to documentation and guide commits too. In this repository, corrections and
+new explanations of existing behavior use patch intent (`fix:`), preserving the shared major/minor line and each
+document package's independent patch counter. Do not use `feat:` merely because a page or section is new: that would
+request a minor release for the version group. Do not hand-edit version declarations to match the CLI. Update the
+targeted `versioned_docs/version-MAJOR.MINOR` pages alongside their current copies when the correction applies to
+that line, then inspect the plan to confirm the intended document patches and any required consumer releases.
 
 When the edited files share the same release record (the same change description, type, and directives), omit the
 scope. This applies whether the files belong to one package or several: let file ownership select the packages.

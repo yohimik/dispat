@@ -162,7 +162,6 @@ The reviewed [UniTask 2.5.11 release](https://github.com/Cysharp/UniTask/release
 [NuGetForUnity 4.5.0](https://github.com/GlitchEnzo/NuGetForUnity/releases/tag/v4.5.0) instead supplies its UPM/source and
 Unity-package distribution; being a NuGet integration tool does not imply it must itself publish to NuGet.
 
-Native middleware wrappers need their own checks even when the core SDK passes. Steam Audio 4.8.1's Android arm64
-core is 16 KB-aligned while its FMOD wrapper is still 4 KB-aligned. Inspect every library that the Unity artifact
-imports, then run the final app on the target page size; the [Android example](./android.md#inspect-every-native-wrapper-for-16-kb-alignment)
-keeps the ELF, APK, and runtime checks separate.
+Android exports can include native libraries from packages, plugins and middleware. Apply the engine-independent
+[Android alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment) to every 64-bit `.so` in the
+final artifact, including wrappers. The linked Unity/FMOD evidence keeps ELF, APK ZIP and device checks separate.

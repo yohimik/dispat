@@ -141,6 +141,10 @@ archives; [gdUnit4 6.2.1](https://github.com/godot-gdunit-labs/gdUnit4/releases/
 Those are different artifact promises. Neither proves a missing marketplace upload.
 
 Keep Godot/ABI/platform checks in the native build scripts, and test a clean project using the distributed addon.
+For Android exports, inspect every bundled 64-bit `.so` with the shared
+[alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment), including addon and middleware
+wrappers.
+
 For a GitHub asset publisher, preserve completed files on retry and propagate each failed upload. The
 [Godot release-script reproduction](https://github.com/godotengine/godot-builds/issues/18) illustrates why a script that
 starts by creating its already-existing commit and tag may not reach the unfinished uploads on a second invocation.

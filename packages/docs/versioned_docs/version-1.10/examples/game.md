@@ -146,6 +146,10 @@ $ dispat
 Unreal is the same again, with its version in `Config/DefaultGame.ini`. Read the specific page for your engine to get
 the details: [Unity](./unity.md), [Godot](./godot.md), or [Unreal](./unreal.md).
 
+For Android 16 KB targets, apply the shared
+[native-library alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment) to every bundled
+64-bit `.so`, including middleware and plugin wrappers.
+
 If dispat does not read your engine, the [replace strategy](../configuration/autoversion.md) still works. Point a rule
 at the line that holds the number. Everything else on this page stays exactly the same.
 

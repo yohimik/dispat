@@ -57,16 +57,22 @@ local Gradle project dependencies can build from the checkout.
 
 ## Inspect every native wrapper for 16 KB alignment
 
-Check every 64-bit `.so` in the produced SDK or app, not only its core library. Steam Audio
-[`v4.8.1`](https://github.com/ValveSoftware/steam-audio/releases/tag/v4.8.1) demonstrates the boundary: the Android
-arm64 `libphonon.so` in its FMOD archive has three `PT_LOAD` alignments of `0x4000`, while `libphonon_fmod.so` has
-three of `0x1000`. That confirms the wrapper still fails Android's documented
-[16 KB ELF alignment check](https://developer.android.com/guide/practices/page-sizes), as reported in
-[#548](https://github.com/ValveSoftware/steam-audio/issues/548#issuecomment-5612174680), even though the core passes it.
+The criterion is independent of the engine that produced the app: inspect every 64-bit `.so` that reaches the SDK or
+final package, including middleware and plugin wrappers. To pass Android's documented ELF check, every `PT_LOAD` segment needs `p_align`
+of at least `0x4000`; a passing core library says nothing about the wrappers beside it.
 
-ELF segment alignment and APK ZIP alignment are separate checks. Run both, then exercise the packaged app on a 16 KB
-device or emulator. A 4 KB-aligned library may enter a platform compatibility mode, so the static result alone does
-not establish a universal crash or store rejection.
+The reviewed
+[`v4.8.1` FMOD archive](https://github.com/ValveSoftware/steam-audio/releases/download/v4.8.1/steamaudio_fmod_4.8.1.zip)
+demonstrates that boundary. Its Android arm64 `libphonon.so` has three `PT_LOAD` alignments of `0x4000`, while
+`libphonon_fmod.so` has three of `0x1000`. The latter fails Android's documented
+[16 KB ELF alignment check](https://developer.android.com/guide/practices/page-sizes), as recorded with the exact
+archive and program headers in [#548](https://github.com/ValveSoftware/steam-audio/issues/548#issuecomment-5612174680).
+The report came through a Unity integration, but the ELF criterion applies to any build that packages the library.
+
+This proves only the alignment of those released arm64 binaries. It does not identify the build setting that caused
+the difference or test the final app. ELF segment alignment and APK ZIP alignment are separate checks. Run both, then
+exercise the packaged app on a 16 KB device or emulator. A 4 KB-aligned library may enter a platform compatibility
+mode, so the static result alone does not establish a universal crash or store rejection.
 
 Put the static checks and packaged consumer test in the configured build scripts so failure prevents publication.
 A manifest version update does not inspect or rebuild a precompiled native wrapper.

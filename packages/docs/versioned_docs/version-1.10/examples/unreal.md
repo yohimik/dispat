@@ -160,6 +160,10 @@ Check the native library inventory inside each engine/platform archive, then ins
 project. Source-tree builds can pass while the distributed ZIP lacks a library. See the
 [Cesium packaging case](./release-integration.md#test-the-distributed-artifact).
 
+For Android packages, run every bundled 64-bit `.so` through the shared
+[alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment), including middleware and plugin
+wrappers.
+
 Treat the source tag and a precompiled plugin archive as different distribution promises. `VersionName` can match the
 tag while an archive filename and `EngineVersion` limit that binary to one Unreal release. Verify those values and the
 native library inventory together; source compatibility with other engine versions does not prove that a packaged
