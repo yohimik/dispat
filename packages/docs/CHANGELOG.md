@@ -1,5 +1,24 @@
 # Changelog
 
+## packages/docs/v1.10.3 (2026-09-10)
+
+### Fixes
+
+- add consumer checks from verified release failures ([d9b34b6](https://github.com/yohimik/dispat/commit/d9b34b64989fd992479b81ecb5c3a2598a98c905)) (by yohimik)
+  Document release-plan completeness, publisher trust across maintained lines,
+  published POM/AAR dependencies, crate contents, vendored fixes and bounded
+  queue regressions. Link reproducible upstream evidence and distinguish
+  consumer failures from planned publication ordering.
+
+  Update the current examples and the served 1.10 snapshot together. Preserve
+  native publisher constraints and distinguish implemented release recovery
+  from CCME 3 explicit rollback requirements.
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.2 (2026-09-10)
 
 ### Fixes
