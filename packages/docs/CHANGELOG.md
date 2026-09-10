@@ -1,5 +1,24 @@
 # Changelog
 
+## packages/docs/v1.10.2 (2026-09-10)
+
+### Fixes
+
+- document release integration across all 21 ecosystems ([a67d844](https://github.com/yohimik/dispat/commit/a67d8441757d027db67ec2bd082e5d1e2cc069e8)) (by yohimik)
+  Add verified release and registry findings with practical integration checks
+  for native packages, mobile and game engines, Docker chains and Aqua pins.
+  Explain single-package recovery, Changesets authoring and pending-record
+  corrections without rebasing shared history. Cover complete skill trees,
+  versioned specifications and TeX documentation as release artifacts.
+
+  Update the current examples and the served 1.10 snapshot together, preserving
+  native publishers, deliberate version policies and documented recovery limits.
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.1 (2026-09-09)
 
 ### Fixes
