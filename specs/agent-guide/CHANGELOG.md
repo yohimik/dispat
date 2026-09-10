@@ -1,5 +1,19 @@
 # Changelog
 
+## specs/agent-guide/v1.10.2 (2026-09-10)
+
+### Fixes
+
+- clarify independent documentation patch versions ([9a48f92](https://github.com/yohimik/dispat/commit/9a48f929deb4ad0cf1601443822d7241c302dad9)) (by yohimik)
+  Use the latest compatible documentation and guide patches without matching
+  the CLI patch. Keep explanations of existing behavior on the current
+  major/minor line and verify document package intent before releasing.
+
+### Authors
+
+- yohimik
+
+
 ## specs/agent-guide/v1.10.1 (2026-09-10)
 
 ### Fixes
