@@ -27,6 +27,30 @@ A Docker build that uses BuildKit shared contexts can consume local output witho
 `FROM registry.example.com/base:1.2.3` needs that exact remote image and its required platform manifest. Ordering does
 not make a mutable `latest` tag reproducible. Keep the version or digest tied to the reviewed release plan.
 
+## Pin a runtime snapshot before downloading
+
+A mutable directory alias can change between requests, including during a resumed download. In
+[Steam Runtime #842](https://github.com/ValveSoftware/steam-runtime/issues/842), different responses for the same
+`latest` archive had different lengths and ETags, breaking downloads and a downstream package build. The maintainer
+explained that the alias design permits inconsistent reads and documented the supported pinning procedure.
+
+Resolve the runtime's `latest-*.txt` pointer once, such as scout's
+[general-availability pointer](https://repo.steampowered.com/steamrt1/images/latest-steam-client-general-availability.txt),
+then fetch the archive and its checksum manifest from the resulting
+immutable snapshot directory. Retain that snapshot and checksum in your downloader's receipt so a retry resumes the
+same object. Re-reading the mutable pointer for each file can mix releases even when every individual request succeeds.
+The publisher or download script owns this check; stage ordering alone does not make a mutable URL reproducible.
+
+For a distribution package, also retain its source descriptor and applied patch series. The
+[Sniper/PipeWire report](https://github.com/ValveSoftware/steam-runtime/issues/853#issuecomment-5612189158) prompted a check of the exact
+published source, not just its upstream version: the checked downstream patches do not carry the cited IO-buffer
+synchronization fixes. That establishes source contents; reproducing the reported Bluetooth-triggered crash remains
+a separate consumer test. A version comparison alone cannot tell whether a distribution backported a fix.
+
+Validate compatibility at the other end too: the [Steam example](./steam.md#validate-the-host-and-plugin-together)
+checks an installed host/plugin combination, while the [Android example](./android.md#inspect-every-native-wrapper-for-16-kb-alignment)
+checks each native wrapper even when the core SDK passes. These require different consumer tests.
+
 ## Make success mean available to the next stage
 
 A publisher must return failure when any required upload or finalization step fails. Check the files built in this

@@ -54,3 +54,19 @@ Read the project's publication policy before treating an absent coordinate as a 
 [AndroidX explains that `media3-effect-ndk` is not published to Google Maven](https://github.com/androidx/media/issues/3363).
 Set the provider's `isBuildWaitingPublish` only when the consumer really fetches that provider from a registry;
 local Gradle project dependencies can build from the checkout.
+
+## Inspect every native wrapper for 16 KB alignment
+
+Check every 64-bit `.so` in the produced SDK or app, not only its core library. Steam Audio
+[`v4.8.1`](https://github.com/ValveSoftware/steam-audio/releases/tag/v4.8.1) demonstrates the boundary: the Android
+arm64 `libphonon.so` in its FMOD archive has three `PT_LOAD` alignments of `0x4000`, while `libphonon_fmod.so` has
+three of `0x1000`. That confirms the wrapper still fails Android's documented
+[16 KB ELF alignment check](https://developer.android.com/guide/practices/page-sizes), as reported in
+[#548](https://github.com/ValveSoftware/steam-audio/issues/548#issuecomment-5612174680), even though the core passes it.
+
+ELF segment alignment and APK ZIP alignment are separate checks. Run both, then exercise the packaged app on a 16 KB
+device or emulator. A 4 KB-aligned library may enter a platform compatibility mode, so the static result alone does
+not establish a universal crash or store rejection.
+
+Put the static checks and packaged consumer test in the configured build scripts so failure prevents publication.
+A manifest version update does not inspect or rebuild a precompiled native wrapper.

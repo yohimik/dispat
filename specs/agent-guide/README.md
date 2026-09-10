@@ -212,6 +212,17 @@ For binaries, invoke the newly built artifact by its explicit path. Check its ve
 
 Publish the same artifact that passed. If signing, packing, or another transform changes the delivered artifact, validate the result of that transform. A rebuild inside `publish` breaks the evidence from an earlier smoke test.
 
+Use these checks when integrating an existing release pipeline. The linked examples distinguish reproduced artifact findings from reported failures and historical incidents.
+
+| Release risk | Integration check | Reference |
+| --- | --- | --- |
+| A native core passes while its wrapper fails platform requirements. | Inspect every shipped native library; test archive packaging and an actual consumer separately before publication. | [Android native libraries](../../packages/docs/docs/examples/android.md) |
+| An SDK requires a newer engine than its advertised minimum. | Compile the delivered plugin against the oldest supported engine in a required build check. | [Engine compatibility](../../packages/docs/docs/examples/unreal.md) |
+| Independently released host and plugin versions become incompatible. | Exercise and record the exact consumer pair before promotion; ordering releases alone does not prove compatibility. | [Host and plugin checks](../../packages/docs/docs/examples/steam.md) |
+| A mutable download alias changes during a retry. | Resolve the version pointer once and retain its immutable URL and verified checksum for retries. | [Pinned release inputs](../../packages/docs/docs/examples/release-integration.md) |
+| A downstream version string hides which fixes are present. | Inspect the exact source package and patch series before selecting a dependency or claiming a backport is missing. | [Source patch evidence](../../packages/docs/docs/examples/release-integration.md) |
+| Publication succeeds but recording fails. | Verify the destination and artifact identity before retrying through CI/CD; preserve completed publication receipts. | [Recovery](../../packages/docs/docs/reference/releasing/recovery.md) |
+
 ## Pass artifacts through script outputs
 
 Scripts in a stage sequence can append `NAME=value` lines to the file named by `DISPAT_OUTPUT`. dispat injects accumulated values into later sequences as `DISPAT_OUTPUT_<NAME>`.

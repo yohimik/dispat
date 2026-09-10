@@ -138,6 +138,21 @@ every depot in the same run, which keeps the platforms on one build number.
 Give the build stage a [list of scripts](../configuration/scripts.md) instead of one command to see each export as its
 own line in the log.
 
+## Validate the host and plugin together
+
+A plugin and its host can share a private protocol while arriving through different distribution systems. In the
+historical [gamescope #1239 incident](https://github.com/ValveSoftware/gamescope/issues/1239), a Flathub layer update
+to 3.14.3 reached Steam Decks whose SteamOS stable host was still 3.13.16.8-1. Flatpak games and apps crashed or froze;
+removing the layer restored launches but lost HDR. A collaborator identified the versioned IPC coupling, and the
+thread later records a working combination.
+
+Record the host version, layer commit and target runtime channel alongside the build. Test that installed combination
+on a private branch before the publishing script promotes it with `SetLive`. Keep the upload receipt and consumer-test
+result separately: successful publication does not establish host compatibility.
+
+dispat orders the configured stages. Your native scripts must enforce the compatibility check and retain those
+receipts; dispat does not infer compatible versions or coordinate independently owned repositories.
+
 ## Authentication in CI
 
 Steam Guard makes a plain password login impossible on a fresh runner. Log in once on a machine you control. Carry the

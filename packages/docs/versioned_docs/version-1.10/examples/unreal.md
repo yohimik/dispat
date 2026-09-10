@@ -169,3 +169,14 @@ For example, [SocketIOClient-Unreal 2.11.0](https://github.com/getnamo/SocketIOC
 lists a UE 5.7 archive, while [UEGitPlugin 3.16](https://github.com/ProjectBorealis/UEGitPlugin/releases/tag/3.16)
 provides a source release. Validate the project's declared destination, then retain any required Unreal build,
 licensing and marketplace steps in the configured scripts.
+
+## Test the oldest supported engine
+
+Build the packaged plugin against the oldest engine version its guide claims to support. Steam Audio 4.8.1's
+[released guide](https://github.com/ValveSoftware/steam-audio/blob/v4.8.1/unreal/doc/getting-started.rst)
+says Unreal Engine 4.27 or later, while [issue #573](https://github.com/ValveSoftware/steam-audio/issues/573)
+reports a 4.27.2 build stopping at a missing `EditorAssetSubsystem.h`. The official plugin archive contains that
+include; a build on a newer engine does not validate the stated minimum.
+
+Keep this compatibility build in the native scripts before publishing each plugin archive. dispat can update its
+version fields and order the stages; engine API compatibility still needs the actual engine/compiler check.
