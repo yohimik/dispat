@@ -316,6 +316,48 @@ CCME 3.0.0 specifies external VCS adapters and explicit rollback ahead of implem
 execute `rollback(scope)` or accept the new adapter/rollback configuration. Do not use specification-only examples as
 runtime commands; an older parser can treat the directive as an unknown type without withdrawing anything.
 
+### Choose when dependents release
+
+Releasing a package often also requires releasing the packages that depend on it, especially when they bundle its
+code, embed its binary, or ship an application built from it. Determine that project's policy before authoring the
+commit. A package scope selects the starting package; propagation describes which dependents (consumers) also need
+a release. It follows edges toward consumers, not toward the starting package's own dependencies (providers).
+
+Before choosing `^`, `^^`, or `^+N`:
+
+1. Read recent Git history, including full commit bodies and release records, for comparable changes to the package
+   and its consumers. Use `git log --format=full` and path-specific history together: an explicitly scoped release
+   directive can address a package without changing files in its folder. Check how prior releases handled consumers.
+2. Read the effective dispat configuration, including referenced files, package dependencies, version groups, and
+   `parser.propagation.depth`, `bump`, and `kinds`. Check manifests for the actual consumer graph. A configured depth
+   can already propagate a commit without a caret, and excluded dependency kinds are not traversed.
+3. Read repository instructions, package READMEs, release documentation, and CI/CD workflows for requirements to
+   rebuild, republish, or deploy dependents after a provider changes. Use history as evidence; reconcile it with the
+   current configuration and documented policy instead of copying an old directive blindly.
+
+| Directive | Reach | Use when |
+| --- | --- | --- |
+| `^` | Direct consumers, one dependency edge away. | The changed package and its immediate consumers need releases, but consumers further away do not. |
+| `^^` | All transitive consumers along eligible dependency edges. | Project policy requires dependent releases through the whole chain, such as a library change that must reach shipped applications. |
+| `^+N` (or `+N`) | Consumers up to `N` edges away; replace `N` with a number, for example `^+2`. | The project has a deliberate release boundary after a known number of dependency layers. |
+| No directive | The configured default depth; `0` if unset. | That default matches the task's required reach. With depth `0`, this unit adds no consumer releases. |
+
+For a chain where `sdk` depends on `core`, `cli` depends on `sdk`, and `image` depends on `cli`, a change to `core`
+with `^` reaches `sdk`; `^+2` reaches `sdk` and `cli`; `^^` reaches all three. In `^+2`, the explicit depth replaces
+the caret's implied depth of one. Do not combine `^^` with a finite depth: `^^+2` contradicts its all-consumers intent.
+The consumer bump defaults to patch and can be configured or stated separately, for example `^minor+2`.
+
+Keep the scope rule above: use `fix^^: refresh bundled dependency` when file ownership identifies the starting
+packages and they share a release record. Use scoped units when the task needs different records or propagation
+policies for different packages. If the project normally releases dependents with a provider, preserve that reach
+unless the task or documented policy justifies a narrower release.
+
+Validate the message with `dispat diagnostics`, then inspect `dispat status` after the source commit. Check the
+whole plan and the exact CI/CD selection: `--package core` does not automatically select every consumer reached by
+`^^`. Include the required consumers or use the appropriate space, group, or full-workspace selection. Review holds,
+channel constraints, and version-group effects; a directive alone does not guarantee every intended package will
+publish. Run the authorized release through CI/CD with the verified selection.
+
 ## Build commit tooling around diagnostics
 
 When making an editor integration, commit-message generator, or other tool for dispat commits, use `dispat diagnostics` to check the proposed text. Do not duplicate CCME parsing in the tool or create a temporary commit just to obtain diagnostics.
