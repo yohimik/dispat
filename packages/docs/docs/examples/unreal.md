@@ -153,3 +153,19 @@ dispat never descends into any of them.
 - Read [Games](./game.md) for a repository that grows past one project.
 - Check [Unity](./unity.md) and [Godot](./godot.md) for other game engines.
 - Use [compute](../cli/compute.md) to turn the plugin graph into configuration.
+
+## Test the packaged plugin
+
+Check the native library inventory inside each engine/platform archive, then install that archive into a clean test
+project. Source-tree builds can pass while the distributed ZIP lacks a library. See the
+[Cesium packaging case](./release-integration.md#test-the-distributed-artifact).
+
+Treat the source tag and a precompiled plugin archive as different distribution promises. `VersionName` can match the
+tag while an archive filename and `EngineVersion` limit that binary to one Unreal release. Verify those values and the
+native library inventory together; source compatibility with other engine versions does not prove that a packaged
+archive exists for them.
+
+For example, [SocketIOClient-Unreal 2.11.0](https://github.com/getnamo/SocketIOClient-Unreal/releases/tag/v2.11.0)
+lists a UE 5.7 archive, while [UEGitPlugin 3.16](https://github.com/ProjectBorealis/UEGitPlugin/releases/tag/3.16)
+provides a source release. Validate the project's declared destination, then retain any required Unreal build,
+licensing and marketplace steps in the configured scripts.

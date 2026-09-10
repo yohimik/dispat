@@ -3,9 +3,9 @@
 You can version a Docker monorepo with dispat. Images that depend on images are released in order. A consumer's build
 waits for its base image to be published, and `FROM` lines follow the released versions.
 
-Docker breaks the rule of building everything before publishing anything. An image that starts `FROM` your base image
-can only be *built* after the base image is *pushed* to the registry. Set the per-space `isBuildWaitingPublish` flag to
-tell dispat this.
+For a registry-backed chain, a consumer that pulls your base image needs it *pushed* before it can build. Set
+`isBuildWaitingPublish` on the provider space to express that boundary. Local BuildKit contexts can instead share
+build output without publishing it first.
 
 ```json
 {
@@ -56,7 +56,7 @@ $ dispat
 ```
 
 Look at the printed order. The `app` build starts only after the `docker push` of `base` finishes, because the flag
-tells the scheduler that consumers in this space need their providers *published*, not merely built. Without the flag,
+tells the scheduler that consumers of providers in this space need them *published*, not merely built. Without the flag,
 the `app` build runs in parallel with the `base` push (the right setting for npm, where a consumer builds against the
 local workspace).
 
@@ -83,7 +83,7 @@ the first is usually the one you want.
 FROM registry.example.com/base:0.1.0
 ```
 
-After the run above, that line reads `registry.example.com/base:0.2.0` and every other byte of the file is untouched.
+In a later run that releases base 0.2.0, that literal becomes `registry.example.com/base:0.2.0`.
 The base package must answer to the repository name for the two to connect
 (`"packages": {"base": {"manifestNames": ["registry.example.com/base"]}}`), because an image is called
 `registry.example.com/base` while the folder is called `base`. With that in place, `dispat compute` proposes the
@@ -107,3 +107,20 @@ for dispat are four packages set up this way, and they go one step further. Each
 manifest, so the version lives there and the build and publish stages are `docker compose build` and
 `docker compose push`. The same file shows both halves of this section: a rewritten literal (`image:`) beside an
 interpolated reference dispat leaves alone (the channel tag).
+
+## Verify the registry boundary
+
+Set the waiting flag on the provider whose image must be pushed before a consumer builds. Before that publish is
+complete, resolve the exact tag to a digest, check the required platforms, and retain the source revision in the
+release result. A consumer build that uses a moving tag can otherwise receive different bytes during a retry.
+
+The historical [Pulsar 3.0.0 child image](https://github.com/apache/pulsar/issues/20420) used
+`FROM apachepulsar/pulsar:latest` and contained 2.11.0; 3.0.1 repaired it. Bazzite shows the complementary identity
+problem: its [`testing-44.20260610` report](https://github.com/ublue-os/bazzite/issues/5113) compares a Git tag at one
+commit with an image label naming another. Current checks are healthy: Pulsar's 4.2.4 parent and child indexes expose
+amd64 and arm64, and Bazzite's 44.20260908 tag and image label both name `8e5aa39`. Publication order alone fixes
+neither historical cause. Use an immutable provider reference, validate its provenance, and carry that identity
+through partial retries.
+
+Shared BuildKit contexts can avoid the registry hop, so they do not need this wait. See
+[integration findings](./release-integration.md#choose-the-build-boundary) for both build boundaries.

@@ -129,3 +129,17 @@ way never to have that conversation.
 - [An Android app](./android.md) for the Gradle side of a mobile release.
 - [An iOS app and a CocoaPods library](./apple.md) for the Apple side.
 - [autoVersion](../configuration/autoversion.md) for what the version stage reconciles.
+
+## Check compatible published dependencies
+
+An older published version may satisfy a dependency even when the newest version does not. Check the whole version
+list against the constraint, then solve a clean consumer project to verify SDK and transitive constraints. The
+[Dartway report](https://github.com/dartway/dartway/issues/143) is the concrete edge case: `^0.11.0` remained
+installable after 0.12.1 became latest, so comparing only `latest.version` would report a false failure.
+
+Keep source reconciliation after publication as its own stage. Flutter's package repository [now creates its sync-back
+pull request only after the release succeeds](https://github.com/flutter/packages/pull/12581), while Flame's
+[`flame_svg` 2.0.0 hotfix](https://github.com/flame-engine/flame/pull/4029) needed an explicit main-branch version and
+constraint update before the next automated version calculation. A pub.dev upload cannot be replaced; when its result
+is unknown, inspect the registry before changing source or retrying. See
+[integration findings](./release-integration.md#test-the-distributed-artifact).

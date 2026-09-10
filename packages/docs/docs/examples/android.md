@@ -37,3 +37,15 @@ Attach the built bundle to the GitHub release by exporting it as an asset from t
 ```sh
 echo "DISPAT_EXPORT_GITHUB=$PWD/app/build/outputs/bundle/release/app-release.aab" >> "$DISPAT_OUTPUT"
 ```
+
+## Check the published library set
+
+A source-tree Gradle build does not prove that an external Android project can resolve the published AARs. The
+[MapLibre and android-maps-utils audit](./gradle.md#audit-android-coordinates-and-aars) checks exact Maven coordinates
+and declared publishable modules. Keep a clean consumer check for required ABIs, metadata and transitive dependencies
+inside the release gates.
+
+Read the project's publication policy before treating an absent coordinate as a failure. For example,
+[AndroidX explains that `media3-effect-ndk` is not published to Google Maven](https://github.com/androidx/media/issues/3363).
+Set the provider's `isBuildWaitingPublish` only when the consumer really fetches that provider from a registry;
+local Gradle project dependencies can build from the checkout.

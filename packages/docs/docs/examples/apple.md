@@ -139,3 +139,21 @@ than a version. dispat never rewrites them.
 - Check [A Flutter app and its packages](./flutter.md) if the app is built from Dart.
 - Read [An Android app](./android.md) for the same shape on the other platform.
 - See [Manifest tools](../editing/manifests.md#writing-the-build-counter) for `--set-build` on its own.
+
+## Validate fresh packaged frameworks
+
+Create framework outputs in a clean directory and propagate every build and signing failure. Test the resulting
+XCFramework in a clean consumer project; stale output can otherwise hide a failed build. See the
+[RxSwift reproduction and integration lessons](./release-integration.md#make-success-mean-available-to-the-next-stage).
+
+Compare the release tag with every file that supplies shipped metadata. A podspec can say `5.12.1` while an Xcode
+project still gives the built framework `MARKETING_VERSION = 5.12.0`; an `Info.plist` that contains
+`$(MARKETING_VERSION)` inherits that mismatch. Check the resolved build setting, not just the placeholder in the
+plist. Keep intentionally separate releases separate too: a ZIP-only packaging correction can use a new GitHub tag
+while leaving the CocoaPods version unchanged.
+
+The [Alamofire 5.12.1 report](https://github.com/Alamofire/Alamofire/issues/4053) demonstrates that mismatch; its
+maintainer confirmed the omitted setting and planned 5.12.2. Conversely,
+[Firebase 12.19.1](https://github.com/firebase/firebase-ios-sdk/releases/tag/12.19.1) explicitly fixes GitHub ZIP naming
+without a new CocoaPods SDK release. An integration check must understand that release policy before requiring every
+destination to advance.

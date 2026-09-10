@@ -32,6 +32,16 @@
           "label": "An npm monorepo"
         },
         {
+          "type": "doc",
+          "id": "examples/release-integration",
+          "label": "Release integration findings"
+        },
+        {
+          "type": "doc",
+          "id": "examples/document-artifacts",
+          "label": "Skills, specifications and TeX"
+        },
+        {
           "type": "category",
           "label": "Ecosystem by ecosystem",
           "collapsed": true,
@@ -100,6 +110,11 @@
               "type": "doc",
               "id": "examples/docker",
               "label": "A Docker image chain"
+            },
+            {
+              "type": "doc",
+              "id": "examples/aqua",
+              "label": "Aqua tool pins"
             },
             {
               "type": "doc",

@@ -34,6 +34,8 @@ const sidebars: SidebarsConfig = {
       link: {type: 'doc', id: 'examples/README'},
       items: [
         {type: 'doc', id: 'examples/npm', label: 'An npm monorepo'},
+        {type: 'doc', id: 'examples/release-integration', label: 'Release integration findings'},
+        {type: 'doc', id: 'examples/document-artifacts', label: 'Skills, specifications and TeX'},
         {
           type: 'category',
           label: 'Ecosystem by ecosystem',
@@ -52,6 +54,7 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'examples/apple', label: 'iOS and CocoaPods'},
             {type: 'doc', id: 'examples/android', label: 'An Android app'},
             {type: 'doc', id: 'examples/docker', label: 'A Docker image chain'},
+            {type: 'doc', id: 'examples/aqua', label: 'Aqua tool pins'},
             {type: 'doc', id: 'examples/unity', label: 'Unity'},
             {type: 'doc', id: 'examples/godot', label: 'Godot'},
             {type: 'doc', id: 'examples/unreal', label: 'Unreal Engine'},

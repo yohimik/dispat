@@ -26,6 +26,10 @@ complete setup and the best first read, because every other page uses the same f
 After that, go to the page for your own ecosystem below. Read [Adopting dispat](./adopting.md) second instead if you
 are bringing dispat to a repository that already ships versions.
 
+Read [Integrating an existing release pipeline](./release-integration.md) for findings from public release incidents,
+artifact checks, and the limits of orchestration.
+[Skills, specifications and TeX documentation](./document-artifacts.md) covers versioned non-code deliverables.
+
 ## Ecosystem by ecosystem
 
 These pages cover one package manager each. They include a config you can copy, the scripts its stages run, and a real
@@ -47,6 +51,7 @@ run.
 | [An iOS app and a CocoaPods library](./apple.md) | `Info.plist`, `project.pbxproj`, Podfiles and podspecs. |
 | [An Android app](./android.md) | Gradle, a monotonic `versionCode`, and a bundle on the GitHub release. |
 | [A Docker image chain](./docker.md) | Images depending on images, where a build needs its base *published*. |
+| [Aqua tool pins](./aqua.md) | Imported tool pins, asset selectors and the provider publication boundary. |
 
 ## Game development
 

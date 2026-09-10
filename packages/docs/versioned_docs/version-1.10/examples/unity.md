@@ -145,3 +145,19 @@ Rename any source folder called `Library` or `Builds`. dispat will not find mani
 - Read [Games](./game.md) when your repository grows past one project.
 - See [Godot](./godot.md) and [Unreal](./unreal.md) for the other engines.
 - Read [Auto-versioning](../configuration/autoversion.md) to see what `manifests` and `range` do in full.
+
+## Validate every distribution format
+
+A UPM package, a Unity package export, and a NuGet package can carry the same source but have different publication
+steps. Keep the native UPM manifest, test each artifact as a consumer would, and reconcile successful destinations
+before retrying. See [integration findings](./release-integration.md).
+
+Check identity at all three boundaries: the `package.json` version, the release tag, and the version embedded in each
+download name or registry record. Projects such as UniTask publish one source version as a Git-installable UPM package,
+a `.unitypackage`, and a NuGet package. Success at one destination says nothing about the others, so record each
+completed publication before a retry and install each fresh artifact in a clean consumer project.
+
+The reviewed [UniTask 2.5.11 release](https://github.com/Cysharp/UniTask/releases/tag/2.5.11) and
+[NuGet version index](https://api.nuget.org/v3-flatcontainer/unitask/index.json) contain that version.
+[NuGetForUnity 4.5.0](https://github.com/GlitchEnzo/NuGetForUnity/releases/tag/v4.5.0) instead supplies its UPM/source and
+Unity-package distribution; being a NuGet integration tool does not imply it must itself publish to NuGet.

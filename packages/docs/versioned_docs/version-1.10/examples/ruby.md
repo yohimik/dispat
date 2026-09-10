@@ -123,3 +123,15 @@ reader reports what the file says rather than following the constant.
 - [The replacer](../editing/replacer.md) explains the find-and-write strategy in full.
 - [autoVersion](../configuration/autoversion.md) covers `range` templates and the two strategies together.
 - [An iOS app and a CocoaPods library](./apple.md) shows the other ecosystem built on Ruby files.
+
+## Recover each publication destination
+
+Treat the gem, an npm companion, the GitHub release, and release notes as separate destinations. A failure after
+`gem push` must not hide that irreversible upload, and a retry should query RubyGems before deciding what remains.
+[Shakapacker 10.3.1](https://github.com/shakacode/shakapacker/issues/1236) is a useful repaired case: the gem and npm
+package exist, while the project separately hardened the checks and finalization around release publication.
+
+For a native gem, the expected destination is a set of platform variants rather than one version number. Record each
+accepted platform and digest, then reconcile missing variants without claiming the release complete. Authentication,
+signing and registry ownership remain publisher constraints. See
+[integration findings](./release-integration.md#make-success-mean-available-to-the-next-stage).

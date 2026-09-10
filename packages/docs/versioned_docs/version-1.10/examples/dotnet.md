@@ -168,3 +168,16 @@ publish. That ordering is the only reason the versions it just wrote resolve.
 - [Run-level hooks](../configuration/run-hooks.md) for the seam the central pin uses.
 - [Script environment variables](../reference/environment.md#workspace-data) for the workspace listing.
 - [Manifest tools](../editing/manifests.md) for the scanner and writer on their own.
+
+## Keep publication destinations explicit
+
+NuGet, native runtime packages and an editor marketplace are separate destinations. Check every publisher result and
+record the package ID, version and returned artifact identity. A later successful command must not overwrite an
+earlier failure: [Stride's NuGet loop](https://github.com/stride3d/stride/issues/3416) demonstrates how an unchecked
+native exit code can otherwise leave the step green.
+
+[MonoGame 3.8.5.1](https://github.com/MonoGame/MonoGame/issues/8763) also separates the NuGet packages and GitHub VSIX
+from Visual Studio Marketplace publication. Installing a `.nupkg` does not verify the editor destination, and logging
+an HTTP error does not fail a release task. Preserve `--skip-duplicate` for recovery, but query the feed before a
+retry when the previous push result is unknown. See
+[integration findings](./release-integration.md#test-the-distributed-artifact).

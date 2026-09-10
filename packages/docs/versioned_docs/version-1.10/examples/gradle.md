@@ -146,3 +146,32 @@ above, which is exactly why `manifestNames` is in the configuration.
 - [An Android app](./android.md) covers the app side. This includes `versionCode` and a bundle on the GitHub release.
 - [Maven modules](./java.md) covers the other JVM build tool.
 - [Replacing text across the monorepo](../editing/autoreplacer.md) explains how to handle versions no parser owns.
+
+## Test repository resolution
+
+Keep a clean consumer check for the published coordinates, Gradle metadata and catalog. A build using local project dependencies does not establish that a separate checkout can resolve the same release. See [integration findings](./release-integration.md#apply-the-pattern-to-your-ecosystem).
+
+Kotlin multiplatform releases show why the check needs an artifact inventory. In the historical
+[`kotlinx-serialization-hocon` 1.7.0 incident](https://github.com/Kotlin/kotlinx.serialization/issues/2717), other
+modules shipped but the HOCON POM was absent because its publish task was omitted. The repaired
+[`1.11.0` HOCON POM](https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-hocon/1.11.0/kotlinx-serialization-hocon-1.11.0.pom)
+is now available. Check the BOM, JVM artifacts and required platform variants before marking a release complete;
+one successful coordinate is not the whole publication set.
+
+Point versioning at the input the publisher actually uses. The `kotlinx.coroutines` 1.11.0 tag retains a snapshot
+value in `gradle.properties`, while its build accepts a `DeployVersion` property and both
+[`kotlinx-coroutines-core-jvm` 1.11.0](https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.11.0/)
+and the [`1.11.0` BOM](https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-bom/1.11.0/) are present.
+That source value is intentional build input, not evidence of a bad registry release. Use a version-stage script for
+the release property when appropriate; do not add an `autoVersion.replace` rule merely to make the tag look aligned.
+
+### Audit Android coordinates and AARs
+
+Android libraries published by Gradle need the same remote-consumer boundary. MapLibre's
+[`android-v13.6.1`](https://github.com/maplibre/maplibre-native/releases/tag/android-v13.6.1) has matching
+[`org.maplibre.gl:android-sdk:13.6.1`](https://repo1.maven.org/maven2/org/maplibre/gl/android-sdk/13.6.1/) POM and AAR.
+Google's android-maps-utils [`v5.2.0`](https://github.com/googlemaps/android-maps-utils/releases/tag/v5.2.0) has its
+main, core and clustering coordinates on Central, and its release workflow runs `publishToMavenCentral` after the
+GitHub release is published. Verify every included publishable module from a clean Gradle consumer. Directories that
+are not included in `settings.gradle` are not missing artifacts, and dispat cannot infer that publication intent from
+a dormant `build.gradle` file.

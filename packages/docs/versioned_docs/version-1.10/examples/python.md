@@ -138,3 +138,19 @@ dispat scanner --verify-unlinked               # E215 if one survived
 - Read [autoVersion](../configuration/autoversion.md) for `manifests`, `match` and `syncLock` in full.
 - Read [An npm monorepo](./npm.md) for the same shape in a different ecosystem.
 - Read [A Docker image chain](./docker.md) if the requirements file exists to feed an image.
+
+## Check the release file set
+
+Define completion as the expected set of files, not as one successful upload command. Record the filename and digest of
+each sdist and wheel that PyPI accepted. If an upload may have succeeded before the release job recorded it, query the
+index before retrying: an accepted PyPI filename cannot be reused. A release can still need additional wheel files;
+compare the expected inventory rather than skipping the whole version because one file exists.
+
+This distinction showed up in two public releases. [JupyterLab 4.6.3](https://pypi.org/project/jupyterlab/4.6.3/)
+already had its wheel and sdist when a later npm channel update failed, while
+[PyArrow 24.0.0](https://pypi.org/project/pyarrow/24.0.0/) completed a much larger platform wheel matrix after the
+release hit a PyPI project quota. The latest [25.0.1 release](https://pypi.org/project/pyarrow/25.0.1/) currently has
+42 wheels and an sdist, so that incident is recovery evidence rather than a current missing-artifact report. The
+publisher must reconcile files within the package; dispat records completion at the package boundary. It can order and
+retry that publisher, but cannot raise a quota or repair credentials. See
+[integration findings](./release-integration.md#make-success-mean-available-to-the-next-stage).

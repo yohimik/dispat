@@ -103,3 +103,19 @@ Look at the identity line. It carries no `@version` because this manifest declar
 - [A Go module workspace](./go.md) shows the other ecosystem where the tag is the whole publish.
 - [Release records](../configuration/records.md) explains pushing tags and writing the changelog.
 - [Commit message reference](../reference/commits.md) covers scopes, propagation, and channels.
+
+## Track generated documentation separately
+
+Component tags, Packagist visibility and API documentation deployment are different outputs. Give a separately deployed documentation site an explicit package or verify its revision inside the publisher. See [integration findings](./release-integration.md#apply-the-pattern-to-your-ecosystem).
+
+Also verify every split package that a new component requires. In
+[Symfony 8.1.1](https://github.com/symfony/symfony/issues/64735), FrameworkBundle required Service Contracts 3.7.1,
+but the split component was not tagged. The maintainers traced this to the split tool's change-detection strategy and
+[fixed it](https://github.com/symfony/symfony/pull/64744); current [`symfony/symfony` 8.1.6](https://packagist.org/packages/symfony/symfony#v8.1.6)
+is visible on Packagist. A root-tag check alone would have missed the broken dependency edge.
+
+CakePHP provides the complementary healthy case: the [`5.4.2` release](https://github.com/cakephp/cakephp/releases/tag/5.4.2)
+and [`cakephp/cakephp` 5.4.2](https://packagist.org/packages/cakephp/cakephp#5.4.2) agree, while its root manifest uses
+`self.version` for component dependencies. dispat can order component release commands and run a configured Packagist visibility check, but
+the external splitter or webhook still owns tag creation and indexing. Treat a propagation delay as pending evidence,
+not as a failed release.

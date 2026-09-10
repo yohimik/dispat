@@ -134,3 +134,25 @@ shipping.
 - Read [Manifest tools](../editing/manifests.md) to use the scanner and writer on their own.
 - Run [`dispat compute`](../cli/compute.md) to derive the graph and the starting versions.
 - Check [Pipeline patterns](../reference/pipelines.md) for the working-tree link bracket in a CI job.
+
+## Verify the published module
+
+Use a clean consumer without local replacement directives to verify the exact module path and tag. Multi-module release notes and GitHub release pages are additional outputs; a tag alone does not prove every output was finalized. See [integration findings](./release-integration.md#apply-the-pattern-to-your-ecosystem).
+
+## Audit each module namespace
+
+Treat every `go.mod` as its own version namespace. For example, gRPC Go's root
+[`v1.83.2`](https://github.com/grpc/grpc-go/releases/tag/v1.83.2) is available from the
+[Go proxy](https://proxy.golang.org/google.golang.org/grpc/@v/v1.83.2.info), while
+`cmd/protoc-gen-go-grpc` uses prefixed tags such as `cmd/protoc-gen-go-grpc/v1.6.2` and a separate
+[proxy path](https://proxy.golang.org/google.golang.org/grpc/cmd/protoc-gen-go-grpc/@v/v1.6.2.info).
+The prefix is part of the publication identity; a repository-wide tag is not a substitute.
+
+A nested manifest is not proof that maintainers intend to release it independently. Prometheus
+client_golang's root [`v1.24.1`](https://github.com/prometheus/client_golang/releases/tag/v1.24.1) is
+[available](https://proxy.golang.org/github.com/prometheus/client_golang/@v/v1.24.1.info), while the
+repository also contains `exp/go.mod` without a corresponding release in the audited tag set. Record the declared
+release policy before treating that absence as a failure. For a coordinated multi-module workflow, the
+[OpenTelemetry Go release proposal](https://github.com/open-telemetry/opentelemetry-go/issues/8414) is a useful
+recovery-test pattern: reconcile drafts, assets and already-published module releases by exact tag OID. dispat can
+order those module records, but it cannot infer release intent from the directory tree.

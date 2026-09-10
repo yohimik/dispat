@@ -133,3 +133,20 @@ dispat scanner --verify-unlinked               # fails with E215 if one is left 
 - Read [autoVersion](../configuration/autoversion.md) for the rewriting policy and `syncLock`.
 - Read [Manifest tools](../editing/manifests.md) for the scanner and the writer used on their own.
 - Read [Shared versions](../reference/releasing/versioning.md) if the crates should move as one version.
+
+## Recover a partial crate release
+
+Keep the provider order, but also verify the exact versions already accepted by the registry before retrying a partially published workspace. Do not blindly skip every duplicate-version error. A clean consumer checks the packaged dependency graph outside local path overrides. See [integration findings](./release-integration.md).
+
+The [LiveKit Rust SDK incident](https://github.com/livekit/rust-sdks/issues/1216) is a concrete example: some crates
+were accepted before the release stopped, so a retry had to account for already-published versions. The repaired line now has
+matching [`webrtc-sys/v0.3.45`](https://github.com/livekit/rust-sdks/releases/tag/webrtc-sys%2Fv0.3.45) source and
+[`webrtc-sys` 0.3.45](https://crates.io/crates/webrtc-sys/0.3.45) registry entries. Record completion only after
+checking crates.io, and keep a clean `cargo package` dependency check before publication.
+
+Audit each destination separately in a mixed release. Tauri's historical
+[CLI 2.7.0 incident](https://github.com/tauri-apps/tauri/issues/13866) involved npm and missing Windows native input;
+it was not evidence that the Rust crates were absent. The current
+[`tauri-v2.11.5`](https://github.com/tauri-apps/tauri/releases/tag/tauri-v2.11.5) and
+[`tauri` 2.11.5](https://crates.io/crates/tauri/2.11.5) align. dispat can coordinate the crate and native-package
+stages, but it does not build missing native bindings or roll back a crate already accepted by crates.io.

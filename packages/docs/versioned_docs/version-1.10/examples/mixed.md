@@ -29,6 +29,9 @@ edges connect them into one graph.
       }
     }
   },
+  "packages": {
+    "service": {"isBuildWaitingPublish": true}
+  },
   "dependencies": {
     "service": ["sdk"],
     "service-image": ["service"]

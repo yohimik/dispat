@@ -257,3 +257,19 @@ share one flow instead of repeating it. That is a tidying step, not a migration.
 - Read [Publishing to itch.io](./itch.md) for `butler` and per-platform channels.
 - Read [A Docker image chain](./docker.md) for the dedicated server image.
 - Read [A single package, no monorepo](./single-package.md) for the general form of part one.
+
+## Keep installers and upload results consistent
+
+Tie installer payload URLs to the exact build, preserve completed uploads on retry, and fail when a required asset
+cannot be published. These checks complement the graph; they belong in the packaging and publishing scripts. See the
+[Defold and O3DE findings](./release-integration.md).
+
+Do not assume every version-looking field is the release identity. A Defold extension can use a GitHub tag as its
+installable version while `game.project` describes only the example project. An O3DE release-train tag such as
+`2605.0` can intentionally contain a gem and engine compatibility version such as `4.2.0`. Give dispat the package
+whose identity you intend to release, and leave consumer, demo, and engine compatibility versions under their native
+tooling unless they are deliberately part of the same version policy.
+
+These distinctions are visible in [extension-webview 1.5.1's demo manifest](https://github.com/defold/extension-webview/blob/1.5.1/game.project)
+and [o3de-extras 2605.0's ROS2 gem](https://github.com/o3de/o3de-extras/blob/2605.0/Gems/ROS2/gem.json).
+Do not count an intentional compatibility version as an unpublished release or silently rewrite it to match the tag.
