@@ -32,6 +32,17 @@ Keep the configuration and API references from the installed binary's help pinne
 
 ## Release through CI/CD
 
+Choose the command by the job it performs:
+
+| Command | Effect | Release lock | Where to use it |
+| --- | --- | --- | --- |
+| `dispat status` | Compute and display the plan; no release stages, publication, or release records. | Never acquires the lock. | Local inspection and CI/CD plan gates; add `--require-release` to distinguish an empty plan. |
+| `dispat` or `dispat release` | Execute the same release lifecycle, including configured version edits, checks, builds, publication, and records. | Acquires the remote `dispat-release-lock` before planning, unless locking is explicitly disabled by the unsafe setting. | The CI/CD release job, after its required gates pass. |
+
+Bare `dispat` is an alias for `dispat release`, not a status check. Even `dispat release --require-release` takes the
+lock before it can discover that there is nothing to release. Use `dispat status --require-release` for that CI gate.
+A status check does not reserve the repository: the release job acquires its own lock and recomputes the plan.
+
 Set up or repair the repository's CI/CD release workflow when that work is authorized. Put the dispat invocation, package selection, credentials, checks, artifact validation, publication, and recording in that workflow. Keep its configuration in version control so reviewers can inspect the release path before it runs.
 
 Do not run a production release from an agent's local shell, publish directly to a registry, create release tags by hand, or upload release assets outside the workflow. Do not use standalone dispat commands or another tool to bypass this rule. A request to release authorizes using the established pipeline; it does not authorize inventing a manual publication path.
@@ -270,6 +281,34 @@ dispat uses Conventional Commits: Monorepo Extension (CCME). Read the repository
 | `feat(api)%beta: introduce an endpoint` | Put the addressed package on beta. |
 
 Explicit scopes name configured packages. With no scope, ownership can derive from changed files. Propagation and channel syntax change release intent; do not add them as decorative prose. Accurate scopes matter for both releases and `--since` script sweeps.
+
+### Write commits for the task
+
+When the edited files share the same release record (the same change description, type, and directives), omit the
+scope. This applies whether the files belong to one package or several: let file ownership select the packages.
+For example, use `fix: handle an empty response` when that record describes the change in every affected package.
+Check the configured package paths and `src` boundaries so the intended files resolve to their owners.
+
+When the task requires different release records for different packages, write explicitly scoped CCME units, one
+per distinct record, separated by a line containing `---`. One Git commit can carry all of them:
+
+```text
+fix(api): handle an empty response
+
+---
+
+feat(web): show an empty-state message
+```
+
+Here `api` receives the fix record and `web` receives the feature record. Use configured package names in the scopes;
+do not assign every package the same record when the task requires different release intent or notes.
+
+Add a separate test commit only when the push task contains more than one commit. For a single-commit push task,
+include the test changes with the implementation and describe the task's main change in the commit message. Do not
+split out a test commit merely to turn a single-commit task into a multi-commit push. In a multi-commit task, a
+separate test commit may describe actual test changes using the repository's configured type (normally `test:`).
+This is a commit organization rule; required tests still run for every task. A `---` separator adds a CCME unit,
+not another Git commit, so multiple records in one commit do not satisfy the multi-commit condition.
 
 Manifest versions alone do not determine the next release. Tags, commits, dependency propagation, channels, groups, and parser policy contribute to the plan. Use `status` for the computed result. The implemented syntax is described by the [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md).
 
