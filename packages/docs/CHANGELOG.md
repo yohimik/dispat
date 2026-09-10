@@ -1,5 +1,19 @@
 # Changelog
 
+## packages/docs/v1.10.4 (2026-09-10)
+
+### Fixes
+
+- strengthen release integration checks ([fb422ca](https://github.com/yohimik/dispat/commit/fb422ca45b15247e03f32dec71dad27e33921ca6)) (by yohimik)
+  Document native wrapper validation, minimum engine compatibility, host and
+  plugin checks, immutable download inputs, and downstream patch evidence.
+  Add a short integration checklist with references to the agent guide.
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.3 (2026-09-10)
 
 ### Fixes
