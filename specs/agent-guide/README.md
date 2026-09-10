@@ -26,7 +26,7 @@ Keep the configuration and API references from the installed binary's help pinne
 6. Run the repository's required full suite before starting a release, then retain release-time checks for rewritten inputs and built artifacts.
 7. Preserve command exit codes and inspect diagnostics, including warnings.
 8. Treat publishing as non-atomic. Some packages can publish before another package fails.
-9. Respect the release lock and verify ambiguous remote outcomes before retrying.
+9. Serialize normal releases, but interrupt a release immediately when an urgent correction invalidates its contents. The lock must not delay cancellation or local repairs. Verify remote outcomes before retrying.
 10. Report what ran, what published, what failed or was skipped, and what remains uncertain.
 11. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
 
@@ -212,16 +212,16 @@ For binaries, invoke the newly built artifact by its explicit path. Check its ve
 
 Publish the same artifact that passed. If signing, packing, or another transform changes the delivered artifact, validate the result of that transform. A rebuild inside `publish` breaks the evidence from an earlier smoke test.
 
-Use these checks when integrating an existing release pipeline. The linked examples distinguish reproduced artifact findings from reported failures and historical incidents.
+Recurring findings from the ecosystem review suggest these integration checks. Follow the references for evidence and case-specific limits.
 
-| Release risk | Integration check | Reference |
+| Finding | Integration check | References |
 | --- | --- | --- |
-| A native core passes while its wrapper fails platform requirements. | Inspect every shipped native library; test archive packaging and an actual consumer separately before publication. | [Android native libraries](../../packages/docs/docs/examples/android.md) |
-| An SDK requires a newer engine than its advertised minimum. | Compile the delivered plugin against the oldest supported engine in a required build check. | [Engine compatibility](../../packages/docs/docs/examples/unreal.md) |
-| Independently released host and plugin versions become incompatible. | Exercise and record the exact consumer pair before promotion; ordering releases alone does not prove compatibility. | [Host and plugin checks](../../packages/docs/docs/examples/steam.md) |
-| A mutable download alias changes during a retry. | Resolve the version pointer once and retain its immutable URL and verified checksum for retries. | [Pinned release inputs](../../packages/docs/docs/examples/release-integration.md) |
-| A downstream version string hides which fixes are present. | Inspect the exact source package and patch series before selecting a dependency or claiming a backport is missing. | [Source patch evidence](../../packages/docs/docs/examples/release-integration.md) |
-| Publication succeeds but recording fails. | Verify the destination and artifact identity before retrying through CI/CD; preserve completed publication receipts. | [Recovery](../../packages/docs/docs/reference/releasing/recovery.md) |
+| Local builds can hide missing packaged files or published dependencies. | Test the final archive in a clean consumer across supported runtimes; keep native checks in build scripts. | [Artifact tests](../../packages/docs/docs/examples/release-integration.md#test-the-distributed-artifact) |
+| Consumers may need a provider’s published artifact rather than its local build. | Set the provider’s publication boundary from what consumers actually fetch; verify the exact version and platform. | [Build boundaries](../../packages/docs/docs/examples/release-integration.md#choose-the-build-boundary) |
+| One package can partially publish across registries, assets and channels. | Declare the required destinations and file/platform set; propagate failures and reconcile receipts and artifact identity before retrying. | [Partial release](../../packages/docs/docs/examples/single-package.md#one-package-can-still-have-a-partial-release) |
+| Mutable tags, download pointers and workflow searches can select different inputs on retry. | Retain the planned version, source revision, artifact digest and exact workflow invocation; preserve published tags. | [Release identity](../../packages/docs/docs/examples/release-integration.md#keep-the-release-tied-to-its-input-commit), [workflow completion](../../packages/docs/docs/examples/release-integration.md#make-success-mean-available-to-the-next-stage) |
+| Generated release output and editable release intent are separate records. | Preserve pending notes and dependency policy during migration; review merge text and use `Edits:` for unreleased corrections. | [Authoring](../../packages/docs/docs/examples/npm.md#moving-release-intent-out-of-changeset-files), [corrections](../../packages/docs/docs/examples/npm.md#edit-pending-notes-without-rewriting-shared-history) |
+| A skill, specification or manual includes more than its root document. | Validate referenced files and the delivered artifact; preserve native revision schemes, compatibility policy and publication tools. | [Document artifacts](../../packages/docs/docs/examples/document-artifacts.md) |
 
 ## Pass artifacts through script outputs
 
@@ -416,7 +416,7 @@ After `publish` succeeds, failure to write a tag, changelog, GitHub record, rele
 
 ## Respect the release lock
 
-`dispat release` and bare `dispat` use a remote `dispat-release-lock` tag to serialize releases for the repository. Do not start a second release, push unrelated commits to the release branch, move release tags, delete the lock, or disable locking while a run may be active.
+`dispat release` and bare `dispat` use a remote `dispat-release-lock` tag to serialize releases for the repository. During normal work, do not start a second release, push unrelated commits to the release branch, move release tags, delete the lock, or disable locking while a run may be active. Urgent corrections follow the interruption procedure below; the lock is not a reason to let a known-invalid release finish.
 
 Check the configured release remote. For a repository using `origin`:
 
@@ -429,6 +429,18 @@ A returned ref can be active or abandoned. An empty result is only a point-in-ti
 If a lock appears abandoned, inspect its annotated tag and confirm that the owning process or CI job has ended. Delete it only with authorization for that cleanup. Lock deletion can admit a concurrent publisher and is not routine recovery. See [release locking](../../packages/docs/docs/reference/releasing/release-lock.md).
 
 The lock covers dispat releases, not ordinary Git pushes or other deployment tools. dispat may recover a push that arrives during release by merging it (`W242`) or preserve conflicts on a `release-conflicts/...` branch (`W243`). Review either outcome even if the command exits successfully. If the remote already contains a release tag that the run would overwrite, recovery refuses; update the checkout and plan again.
+
+### Interrupt a release for an urgent correction
+
+If the user identifies incorrect release content, corrects the required scope, requests removal, or otherwise invalidates the revision being released, stop that release immediately. Do not wait for normal completion, defer the correction to a later patch, or treat earlier release authorization as permission to ship the rejected revision. A passing test suite does not override the corrected requirements.
+
+Warn the user when the correction requires interrupting an actual queued or running release: identify the run, explain why it must stop, and note that some outputs may already be published and need reconciliation. Give this brief warning before cancellation when possible; do not delay an urgent stop or turn the warning into another approval request. Local edits or changes that do not invalidate the active release do not by themselves require interruption or a warning.
+
+1. Cancel the exact queued or running workflow through its CI controls immediately. Cancellation and local preparation of the fix do not require the release lock to disappear or another confirmation of the user's instruction.
+2. Confirm that the publishing process has stopped, including cancellation finalization. If cancellation is not taking effect, use the CI provider's supported force-cancellation control and report what remains active. Pushing a fix alone does not change the checkout an existing publisher is using.
+3. Inspect the destinations, tags, release records and branch. Cancellation can still finish records for an already-published package. Report what shipped; never infer that cancellation undid publication.
+4. Apply the urgent correction and any explicitly requested deletion or history repair once the publisher has stopped. Preserve unrelated work and verify remote outcomes. Reuse the user's existing authorization for the specified cleanup. Clear a leftover lock only after verifying its owner has stopped and cleanup is authorized; deleting an active lock does not stop its publisher.
+5. Validate the corrected content and recompute the release plan before considering a new CI run. Respect any instruction to stop publishing or keep changes local. Do not automatically restart the cancelled revision or ship an incomplete intermediate patch.
 
 ## Recover from failure or interruption
 
