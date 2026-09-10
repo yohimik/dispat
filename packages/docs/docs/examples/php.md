@@ -119,3 +119,9 @@ and [`cakephp/cakephp` 5.4.2](https://packagist.org/packages/cakephp/cakephp#5.4
 `self.version` for component dependencies. dispat can order component release commands and run a configured Packagist visibility check, but
 the external splitter or webhook still owns tag creation and indexing. Treat a propagation delay as pending evidence,
 not as a failed release.
+
+## A public repository to compare
+
+[Symfony HttpFoundation at `3d554bb`](https://github.com/symfony/http-foundation/blob/3d554bb228167df47c29dd55dba5c3d50a324ec7/composer.json): The manifest has no package version field. Rewriting `symfony/polyfill-mbstring` worked without adding one. Retain tag-based package versions and the existing Composer release process; absence of `version` is not an integration failure.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

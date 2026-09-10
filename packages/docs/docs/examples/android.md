@@ -76,3 +76,11 @@ mode, so the static result alone does not establish a universal crash or store r
 
 Put the static checks and packaged consumer test in the configured build scripts so failure prevents publication.
 A manifest version update does not inspect or rebuild a precompiled native wrapper.
+
+## A public repository to compare
+
+[Termux at `3b66f87`](https://github.com/termux/termux-app/blob/3b66f8799635a4dba4a206563048ff0e6792c487/app/src/main/AndroidManifest.xml): The app manifest contains neither a literal package version nor a build number for this writer to change. `--set-version` left it byte-for-byte unchanged. Keep the version source in the build configuration; manifest recognition alone does not establish that `versionName` or `versionCode` was updated.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

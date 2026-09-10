@@ -290,8 +290,8 @@ same set:
 | Unity | `Packages/manifest.json`, `ProjectSettings/ProjectSettings.asset` | [Unity](../examples/unity.md) |
 | Godot | `project.godot`, `plugin.cfg`, `export_presets.cfg` | [Godot](../examples/godot.md) |
 | Unreal | `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` | [Unreal](../examples/unreal.md) |
-| Defold | `game.project` | [Games](../examples/game.md) |
-| O3DE | `project.json`, `gem.json` | [Games](../examples/game.md) |
+| Defold | `game.project` | [Defold](../examples/defold.md) |
+| O3DE | `project.json`, `gem.json` | [O3DE](../examples/o3de.md) |
 | Aqua | `aqua.yaml`, `aqua.yml`, hidden and `aqua/` variants | This page |
 
 ### Aqua

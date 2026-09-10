@@ -143,3 +143,11 @@ pull request only after the release succeeds](https://github.com/flutter/package
 constraint update before the next automated version calculation. A pub.dev upload cannot be replaced; when its result
 is unknown, inspect the registry before changing source or retrying. See
 [integration findings](./release-integration.md#test-the-distributed-artifact).
+
+## A public repository to compare
+
+[Flutter path_provider at `8a35b16`](https://github.com/flutter/packages/blob/8a35b1611d677ac0cbbaf26f058a5ac12afa550c/packages/path_provider/path_provider/pubspec.yaml): The federated plugin declares separate Android, Foundation, Linux and Windows packages. Its literal version rewrite preserved those dependency ranges. Map the components you actually release into the graph and retain Flutter’s platform tests; the manifest check did not run any device or emulator.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

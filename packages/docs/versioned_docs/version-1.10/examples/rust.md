@@ -163,3 +163,11 @@ for a new crate release.
 Keep `cargo package` before `cargo publish`, and add a clean consumer or cross-target build where platform-specific
 code can differ. dispat orders and versions the publish step; the post-publish check establishes that the registry
 artifact contains the source you meant to deliver.
+
+## A public repository to compare
+
+[Serde at `a874a1b`](https://github.com/serde-rs/serde/blob/a874a1b1bb1cc16cf5ee3b1b7b527af5705742bb/serde/Cargo.toml): The crate declares both a version requirement and a local path for `serde_core`. The version edit preserved both dependency declarations. Preserve Cargo workspace policy and validate the packaged crate: a working path dependency alone does not establish that its registry version is available.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

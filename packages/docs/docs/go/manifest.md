@@ -14,7 +14,7 @@ go get github.com/yohimik/dispat/pkg/manifest
 
 ## The surface, by concern
 
-**Formats.** The `Format` type names each of the thirty-five recognised manifest formats, and `Formats` provides the
+**Formats.** The `Format` type names each of the thirty-six recognised manifest formats, and `Formats` provides the
 canonical list both halves prove they cover. `FormatOf` maps a file name onto its format. `IsRequirementsFile` matches
 requirements files by whole words, and `IsDockerfile` matches `Dockerfile`, `Dockerfile.dev`, `api.Dockerfile`, and
 `Containerfile` while excluding prose extensions.

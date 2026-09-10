@@ -83,7 +83,7 @@ mistakes.
 ## Which languages and package managers does it work with?
 
 dispat works with any language, because a package is a folder and a stage is a shell command, so Go, npm, pnpm, Cargo,
-Maven, Python, Docker, and the rest all sit in one dependency graph. Native manifest rewriting covers all thirty-five
+Maven, Python, Docker, and the rest all sit in one dependency graph. Native manifest rewriting covers all thirty-six
 formats dispat reads, from `package.json`, `go.mod`, `pom.xml`, `Cargo.toml`, `*.csproj`, `pubspec.yaml`, and compose
 files to the project files Unity, Godot, Unreal, Defold, and O3DE keep a version in. The
 [replace strategy](./configuration/autoversion.md) covers a version living somewhere no parser owns, such as a Gradle
@@ -94,7 +94,7 @@ coordinate or a Helm chart, and the [examples](./examples/README.md) show one se
 A repository with one deliverable declares one standalone [`packages` entry](./examples/single-package.md) and no
 spaces, and nothing has to be restructured when you add more later. Adding a landing page, a docs site, or an SDK is
 one more entry each, plus an edge if they depend on one another. The tags already published stay the baselines
-everything counts from, as shown in [A game, from one package to many](./examples/game.md).
+everything counts from, as shown in [From one package to many](./examples/one-to-many.md).
 
 ## Do I have to use GitHub?
 

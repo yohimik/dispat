@@ -110,3 +110,9 @@ have succeeded.
 - [Manifest tools](../editing/manifests.md#aqua) lists every accepted Aqua filename and safe YAML shape.
 - [A Docker image chain](./docker.md) explains the same provider-publication boundary for registry-backed images.
 - [Integrating an existing release pipeline](./release-integration.md) covers per-destination completion and recovery.
+
+## A public repository to compare
+
+[Aqua minisign checks at `759a4a4`](https://github.com/aquaproj/aqua/blob/759a4a4a564922351cb2912ed17519adfb1c2860/pkg/minisign/aqua.yaml): The configuration contains two pins for `jedisct1/minisign`, one inline and one in a separate version field. The local dependency edit updated both pins. The standard-registry revision and checksum policy stayed unchanged; installation and checksum regeneration remain Aqua’s job.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

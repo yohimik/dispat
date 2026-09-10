@@ -191,3 +191,9 @@ dispat can order Gradle builds and publish commands and reconcile literal coordi
 bytecode or compare an AAR with its POM. Add a clean Kotlin consumer compile for the exact remote coordinate to the
 release gate. A bytecode-to-metadata scan can catch the missing annotation dependency before publication; the clean
 consumer build verifies the resolver behavior that users receive.
+
+## A public repository to compare
+
+[OkHttp at `1f04bf8`](https://github.com/square/okhttp/blob/1f04bf8028b0fd9471ba9a77eba0ad913f86705a/gradle/libs.versions.toml): The version catalog maps library coordinates through version references. A local edit of `androidx.activity:activity-ktx` changed the referenced version and read it back without flattening the catalog. Keep Gradle’s dependency resolution and wrapper; the scanner does not execute build logic.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

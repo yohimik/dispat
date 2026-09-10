@@ -124,3 +124,11 @@ through partial retries.
 
 Shared BuildKit contexts can avoid the registry hop, so they do not need this wait. See
 [integration findings](./release-integration.md#choose-the-build-boundary) for both build boundaries.
+
+## A public repository to compare
+
+[Docker awesome-compose at `30f4b7f`](https://github.com/docker/awesome-compose/blob/30f4b7f6a6c3b0c0ecf4d4efb0de203c48d11562/nginx-flask-mysql/compose.yaml): The nginx/flask/mysql Compose sample is deployment wiring. The scanner selected the literal `mariadb:10-focal` image as its identity, and a package-version write changed that third-party image tag. Do not enable automatic own-version rewriting on an arbitrary deployment Compose file. Inspect the detected identity first and use explicit dependency edits or a dedicated manifest for the image you publish.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

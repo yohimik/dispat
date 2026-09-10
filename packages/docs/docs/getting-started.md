@@ -319,3 +319,5 @@ Learn four things about that job.
   versions twice. Read [The release lock](./reference/releasing/release-lock.md).
 - The exit code is non-zero when any package fails. The job fails visibly while unaffected packages still release. Run
   `dispat status` on pull requests to review the plan before it becomes a release.
+
+See [From one package to many](./examples/one-to-many.md) to add deliverables while preserving existing package identities and release history.

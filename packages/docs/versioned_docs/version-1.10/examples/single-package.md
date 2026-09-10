@@ -39,7 +39,7 @@ and declare the edge between them.
 ## When it grows
 
 Add new packages without breaking your history. Nothing moves or gets renamed, and your published tags remain the
-baselines that future versions count from. Read [A game, from one package to many](./game.md) to watch a single
+baselines that future versions count from. Read [From one package to many](./one-to-many.md) to watch a single
 deliverable grow into a landing page, a docs site, an SDK, and a server in the same configuration file.
 
 ## One package can still have a partial release

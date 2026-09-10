@@ -150,7 +150,7 @@ dispat never descends into any of them.
 
 ## Where to go next
 
-- Read [Games](./game.md) for a repository that grows past one project.
+- Read [From one package to many](./one-to-many.md) for a repository that grows past one project.
 - Check [Unity](./unity.md) and [Godot](./godot.md) for other game engines.
 - Use [compute](../cli/compute.md) to turn the plugin graph into configuration.
 
@@ -184,3 +184,9 @@ include; a build on a newer engine does not validate the stated minimum.
 
 Keep this compatibility build in the native scripts before publishing each plugin archive. dispat can update its
 version fields and order the stages; engine API compatibility still needs the actual engine/compiler check.
+
+## A public repository to compare
+
+[SocketIOClient Unreal plugin at `f3e63dc`](https://github.com/getnamo/SocketIOClient-Unreal/blob/f3e63dcf578095f897c977d991c3fbb9aa501b94/SocketIOClient.uplugin): The plugin declares a literal `VersionName` and a separate integer `Version`. The local check changed `VersionName` while preserving the integer. Decide the build-counter policy separately, and retain Unreal’s native plugin packaging and target validation.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

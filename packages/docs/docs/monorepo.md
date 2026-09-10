@@ -125,7 +125,7 @@ These questions decide the shape faster than a general argument:
 
 ## Where to go next
 
-- [A game, from one package to many](./examples/game.md) walks through growth in one repository. You start with one
+- [From one package to many](./examples/one-to-many.md) walks through growth in one repository. You start with one
   deliverable today and add four more later without restructuring.
 - [Examples](./examples/README.md) provides a complete setup per ecosystem. Most of them are a handful of lines.
 - [Concepts](./concepts.md) explains versions, propagation, and channels. The rest of the documentation uses this

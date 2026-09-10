@@ -99,4 +99,4 @@ your tags.
 
 - [`dispat if`](../cli/if.md) for the guard, including file tests and `--changed`.
 - [dispat in CI](../reference/ci.md) for the job around this.
-- [A game, from one package to many](./game.md), where the landing page is one of the packages.
+- [From one package to many](./one-to-many.md), where the landing page is one of the packages.

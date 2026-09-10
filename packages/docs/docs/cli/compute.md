@@ -18,7 +18,7 @@ packages' own declarations. Detection still reads every package's manifests whic
 name index resolves a declared dependency onto a provider, so an edge onto a package outside the selection stays
 recognised rather than being proposed for removal.
 
-**What it reads.** The command scans every package folder for manifests. It reads the same twenty ecosystems
+**What it reads.** The command scans every package folder for manifests. It reads the same twenty-one ecosystems
 `dispat scanner` reads: npm (`package.json`), Go (`go.mod`), Cargo (`Cargo.toml`), Python (`pyproject.toml`,
 requirements files), Composer (`composer.json`), Maven (`pom.xml`), NuGet (`*.csproj` and the flat lists), pub
 (`pubspec.yaml`), Ruby (`Gemfile`, `*.gemspec`), CocoaPods (`Podfile`, `*.podspec`), Xcode (`project.pbxproj`), Apple

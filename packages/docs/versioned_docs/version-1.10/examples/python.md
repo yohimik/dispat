@@ -1,7 +1,11 @@
 # A Python monorepo
 
-Keep your distributions in one repository. Build and upload them with `uv`. Let dispat keep `pyproject.toml` and the
-`requirements.txt` beside it current.
+Keep your distributions in one repository and retain the Python tools that build and publish them. dispat can keep
+`pyproject.toml` and `requirements.txt` current; the first walkthrough below uses uv.
+
+For pip, PyPA build/Twine or a historical Pants monorepo, start with
+[Python without uv, including Pants](./python-pants.md). It covers StackStorm and Backend.AI source layouts, a
+locally exercised Pants 2.17.0 adapter, and the boundaries of that verification.
 
 ## The layout
 
@@ -154,3 +158,5 @@ release hit a PyPI project quota. The latest [25.0.1 release](https://pypi.org/p
 publisher must reconcile files within the package; dispat records completion at the package boundary. It can order and
 retry that publisher, but cannot raise a quota or repair credentials. See
 [integration findings](./release-integration.md#make-success-mean-available-to-the-next-stage).
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

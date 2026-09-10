@@ -238,3 +238,5 @@ record is held.
 That is a skip rather than an overwrite because the alternative is rewriting a line a person wrote, and from inside the
 file the two cases look the same. Only the colliding version is ever ambiguous, so the next release writes its entry
 normally.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

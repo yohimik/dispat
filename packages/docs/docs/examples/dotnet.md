@@ -181,3 +181,11 @@ from Visual Studio Marketplace publication. Installing a `.nupkg` does not verif
 an HTTP error does not fail a release task. Preserve `--skip-duplicate` for recovery, but query the feed before a
 retry when the previous push result is unknown. See
 [integration findings](./release-integration.md#test-the-distributed-artifact).
+
+## A public repository to compare
+
+[Newtonsoft.Json at `09bb545`](https://github.com/JamesNK/Newtonsoft.Json/blob/09bb545d72969ad7fb4ea07db0d5c34f4fc07877/Src/Newtonsoft.Json/Newtonsoft.Json.csproj): The project uses `VersionPrefix` and `VersionSuffix`, rather than `<Version>`, and a `$(MicrosoftSourceLinkGitHubPackageVersion)` dependency. The local writer left the file byte-for-byte unchanged, even with `--strict`: the dependency edit was reported as skipped. Keep its build-time version injection or add a targeted version script; do not infer a successful version update from exit zero.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

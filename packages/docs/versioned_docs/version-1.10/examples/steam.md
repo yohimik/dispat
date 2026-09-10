@@ -189,5 +189,5 @@ session.
 ## See also
 
 - [Publishing to itch.io](./itch.md) to send the same build to a second store.
-- [A game, from one package to many](./game.md) for the repository around this.
+- [From one package to many](./one-to-many.md) for the repository around this.
 - [Prerelease branches](../reference/releasing/prerelease-branches.md) to map git branches onto channels.

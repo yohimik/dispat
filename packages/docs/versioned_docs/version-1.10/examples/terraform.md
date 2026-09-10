@@ -66,3 +66,5 @@ dispat
 The verified fixture plans `infra` from `1.2.0` to `1.3.0`, applies its saved plan, and records `infra/v1.3.0`. With the default `isBuildWaitingPublish: false`, both application builds wait for the infrastructure plan and then overlap the apply. Backend and frontend are independent consumers, so their builds may run in parallel. Their deploys wait until the infrastructure apply succeeds, releasing `0.8.3` and `2.1.1` respectively. An unchanged rerun executes no stages and leaves the three tags unchanged.
 
 The fixture at [`packages/docs/demo/fixtures/infra`](https://github.com/yohimik/dispat/tree/main/packages/docs/demo/fixtures/infra) uses local marker files, not Terraform or a cloud account, to verify that ordering. The repository's production Terraform is in [`infra/`](https://github.com/yohimik/dispat/tree/main/infra), where the CI guard on `tf-apply` prevents an accidental local apply.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

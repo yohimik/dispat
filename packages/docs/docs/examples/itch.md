@@ -112,5 +112,5 @@ must not land on a channel they are subscribed to.
 ## See also
 
 - [Publishing to Steam](./steam.md) to send the same build to a second store.
-- [A game, from one package to many](./game.md) for the repository around this setup.
+- [From one package to many](./one-to-many.md) for the repository around this setup.
 - [Script environment variables](../reference/environment.md) to see everything a stage can read.

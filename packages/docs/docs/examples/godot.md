@@ -129,7 +129,7 @@ bracket could read as a section header on the next parse. A semicolon would comm
 
 ## Where to go next
 
-- [Games](./game.md) for a repository that grows past one project.
+- [From one package to many](./one-to-many.md) for a repository that grows past one project.
 - [Unity](./unity.md) and [Unreal](./unreal.md) for the other engines.
 - [Auto-versioning](../configuration/autoversion.md) for what the `autoVersion` block does in full.
 
@@ -149,3 +149,9 @@ For a GitHub asset publisher, preserve completed files on retry and propagate ea
 [Godot release-script reproduction](https://github.com/godotengine/godot-builds/issues/18) illustrates why a script that
 starts by creating its already-existing commit and tag may not reach the unfinished uploads on a second invocation.
 This is a reproduced script boundary, not a claim that the current Godot release lacks assets.
+
+## A public repository to compare
+
+[Godot Platformer 2D demo at `a3b5c11`](https://github.com/godotengine/godot-demo-projects/blob/a3b5c113112f77291d5f3d1360f33a882fdc52f7/2d/platformer/project.godot): The project declares a name but no `config/version`. A version write left it byte-for-byte unchanged. Set that field deliberately before adopting manifest versioning, or retain a tag-based version source; dispat does not invent the field.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

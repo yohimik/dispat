@@ -158,3 +158,11 @@ Use the real SHA and the original package scope. An empty correction commit is a
 release: the old Git commit remains unchanged, while the pending version plan and notes use the correction. This
 was verified with dispat 1.10.0 in the disposable authoring fixture. Corrections reach only unreleased ancestor
 records; they cannot revise an already-published release. See [correcting release records](../reference/corrections.md).
+
+## A public repository to compare
+
+[JupyterLab at `bf8d11f`](https://github.com/jupyterlab/jupyterlab/blob/bf8d11fe21ed78f1f4c4a23851f3e538c22731bb/packages/services/package.json): The services package has a literal version and internal `@jupyterlab/*` ranges. The local edit changed its version and preserved every dependency. Keep the repository’s Yarn build and publication tooling; selecting an npm-format manifest does not require switching package managers.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

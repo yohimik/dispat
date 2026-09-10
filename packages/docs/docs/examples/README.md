@@ -1,7 +1,8 @@
 # Examples
 
-These pages give you complete, copy-ready release setups. You get one page per ecosystem and one per delivery target.
-Each page shows the config, the scripts its stages run, and the terminal output of a real run.
+These pages cover release setups by ecosystem and delivery target, plus verified integrations with public projects.
+Release walkthroughs show their configuration, scripts and terminal output. The public-repository audit and
+manifest-focused guides state the narrower checks they actually ran.
 
 Every dispat transcript comes from a real run against a throwaway repository, with only timestamps and durations
 normalized. Lines printed by your own commands, like `npm`, `docker`, or `butler`, come directly from those tools. Your
@@ -10,18 +11,17 @@ output will look different.
 You do not need a monorepo to start. One folder, one package, one publish is a valid setup. Growing into a graph later
 is additive, so you avoid restructuring and keep your already published versions as baselines.
 
-This matters because a repository holding one deliverable rarely stops there. A game gains a landing page, a docs site,
-an SDK, and a server, while a library gains a CLI and a demo. Each addition becomes one more block in the same file
-rather than another release script nobody maintains.
+A library can gain a CLI and documentation; an application can gain a container, SDK and website. Each deliverable
+can join the same release graph while retaining its own build and publication tools.
 
 Read [A single package](./single-package.md) to see the smallest form. Then read
-[A game, from one package to many](./game.md) to walk through the growth step by step.
+[From one package to many](./one-to-many.md) to walk through the growth step by step.
 
 Check [Concepts](../concepts.md) if a term is new. It defines all of them in a few minutes of reading. Read
 [One repository or many](../monorepo.md) to decide your shape before you commit to it.
 
-**Read one page, then one more.** Start with [An npm monorepo](./npm.md) whatever you build. It is the shortest
-complete setup and the best first read, because every other page uses the same four pieces with different commands.
+Start with [From one package to many](./one-to-many.md) for the general pattern, then choose the ecosystem whose
+commands match your project. [An npm monorepo](./npm.md) provides a compact complete release setup.
 
 After that, go to the page for your own ecosystem below. Read [Adopting dispat](./adopting.md) second instead if you
 are bringing dispat to a repository that already ships versions.
@@ -30,10 +30,13 @@ Read [Integrating an existing release pipeline](./release-integration.md) for fi
 artifact checks, and the limits of orchestration.
 [Skills, specifications and TeX documentation](./document-artifacts.md) covers versioned non-code deliverables.
 
+Read [Open source integration checks](./open-source.md) for all 21 ecosystems, pinned public inputs, and locally
+verified edits and limitations. [Python without uv and with Pants](./python-pants.md) covers historical build setups.
+
 ## Ecosystem by ecosystem
 
-These pages cover one package manager each. They include a config you can copy, the scripts its stages run, and a real
-run.
+Choose your ecosystem below. Each page distinguishes release walkthroughs from narrower manifest and integration
+checks, and explains what still belongs to the native toolchain.
 
 | Example | What it covers |
 |---------|----------------|
@@ -51,13 +54,15 @@ run.
 | [An iOS app and a CocoaPods library](./apple.md) | `Info.plist`, `project.pbxproj`, Podfiles and podspecs. |
 | [An Android app](./android.md) | Gradle, a monotonic `versionCode`, and a bundle on the GitHub release. |
 | [A Docker image chain](./docker.md) | Images depending on images, where a build needs its base *published*. |
+| [Defold projects](./defold.md) | Monarch: project versions and archive-URL dependencies. |
+| [O3DE projects and gems](./o3de.md) | Atom: gem versions and explicit dependency constraints. |
 | [Aqua tool pins](./aqua.md) | Imported tool pins, asset selectors and the provider publication boundary. |
 
 ## Game development
 
 | Example | What it covers |
 |---------|----------------|
-| [A game, from one package to many](./game.md) | One game today; a landing page, docs, an SDK and a server later. Godot and Unity. |
+| [Game development](./game.md) | Engine and store integration, with a link to the general one-to-many guide. |
 | [Publishing to Steam](./steam.md) | `steamcmd`, depots, and release channels mapped onto Steam branches. |
 | [Publishing to itch.io](./itch.md) | `butler`, one channel per platform, and the version players see. |
 
@@ -85,7 +90,7 @@ whatever you build.
 
 ## Which example covers my manifest
 
-dispat reads and writes thirty-five manifest formats. You will find every one of them worked through on these pages.
+dispat reads and writes thirty-six manifest formats. You will find every one of them worked through on these pages.
 
 | Manifest | Example |
 |----------|---------|
@@ -105,7 +110,8 @@ dispat reads and writes thirty-five manifest formats. You will find every one of
 | `Packages/manifest.json`, `ProjectSettings/ProjectSettings.asset` | [Unity](./unity.md) |
 | `project.godot`, `plugin.cfg`, `export_presets.cfg` | [Godot](./godot.md) |
 | `*.uproject`, `*.uplugin`, `Config/DefaultGame.ini`, `Config/DefaultEngine.ini` | [Unreal](./unreal.md) |
-| `game.project`, `project.json`, `gem.json` | [Games](./game.md) |
+| `game.project` | [Defold](./defold.md) |
+| `project.json`, `gem.json` | [O3DE](./o3de.md) |
 
 You might have a version that lives outside these formats, like a Helm `Chart.yaml`, a README install line, or a plain
 text file. The [replace strategy](../configuration/autoversion.md) handles those. Read the [Helm](./helm.md) page to

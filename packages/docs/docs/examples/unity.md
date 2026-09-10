@@ -142,7 +142,7 @@ Rename any source folder called `Library` or `Builds`. dispat will not find mani
 
 ## Where to go next
 
-- Read [Games](./game.md) when your repository grows past one project.
+- Read [From one package to many](./one-to-many.md) when your repository grows past one project.
 - See [Godot](./godot.md) and [Unreal](./unreal.md) for the other engines.
 - Read [Auto-versioning](../configuration/autoversion.md) to see what `manifests` and `range` do in full.
 
@@ -165,3 +165,9 @@ Unity-package distribution; being a NuGet integration tool does not imply it mus
 Android exports can include native libraries from packages, plugins and middleware. Apply the engine-independent
 [Android alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment) to every 64-bit `.so` in the
 final artifact, including wrappers. The linked Unity/FMOD evidence keeps ELF, APK ZIP and device checks separate.
+
+## A public repository to compare
+
+[Unity Entity Component System samples at `6786a74`](https://github.com/Unity-Technologies/EntityComponentSystemSamples/blob/6786a741ee1f118ed14cecfa02beae8e926937b0/EntitiesSamples/Packages/manifest.json): The package list mixes engine modules and editor packages. The local check rewrote `com.unity.2d.sprite` and preserved all other declarations. This file has no application version: keep that in ProjectSettings, and retain the project’s editor, export and licensing setup.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

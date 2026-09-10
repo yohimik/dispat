@@ -6,7 +6,7 @@ description: Use the standalone Go scanner package to read dependency manifests 
 
 `github.com/yohimik/dispat/pkg/scanner` reads dependency manifests into one ecosystem-neutral shape. You get the
 package's declared identity, its declared dependencies, their ranges, and any local-path signals. It is a dependency
-manifest parser for Go covering thirty-five formats across twenty ecosystems.
+manifest parser for Go covering thirty-six formats across twenty-one ecosystems.
 
 It only reads. Rewriting is [the writer's](./writer.md) job. This package has no SBOM machinery, no lockfile
 resolution, and no network access.

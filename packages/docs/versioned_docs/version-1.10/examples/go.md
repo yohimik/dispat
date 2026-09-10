@@ -156,3 +156,11 @@ release policy before treating that absence as a failure. For a coordinated mult
 [OpenTelemetry Go release proposal](https://github.com/open-telemetry/opentelemetry-go/issues/8414) is a useful
 recovery-test pattern: reconcile drafts, assets and already-published module releases by exact tag OID. dispat can
 order those module records, but it cannot infer release intent from the directory tree.
+
+## A public repository to compare
+
+[Cobra at `adbc881`](https://github.com/spf13/cobra/blob/adbc8813901bba65827259daa8e22ff94ec1f30e/go.mod): The module has no package version field. The local check rewrote the `pflag` requirement and read it back. Release identity still comes from Go-compatible Git tags; keep module tidying and consumer checks in the existing workflow.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

@@ -33,6 +33,8 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       link: {type: 'doc', id: 'examples/README'},
       items: [
+        {type: 'doc', id: 'examples/one-to-many', label: 'From one package to many'},
+        {type: 'doc', id: 'examples/open-source', label: 'Open source integration checks'},
         {type: 'doc', id: 'examples/npm', label: 'An npm monorepo'},
         {type: 'doc', id: 'examples/release-integration', label: 'Release integration findings'},
         {type: 'doc', id: 'examples/document-artifacts', label: 'Skills, specifications and TeX'},
@@ -45,6 +47,7 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'examples/go', label: 'Go modules'},
             {type: 'doc', id: 'examples/rust', label: 'A Cargo workspace'},
             {type: 'doc', id: 'examples/python', label: 'A Python monorepo'},
+            {type: 'doc', id: 'examples/python-pants', label: 'Python without uv, including Pants'},
             {type: 'doc', id: 'examples/java', label: 'Maven modules'},
             {type: 'doc', id: 'examples/gradle', label: 'Gradle and its catalog'},
             {type: 'doc', id: 'examples/dotnet', label: '.NET packages'},
@@ -58,6 +61,8 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'examples/unity', label: 'Unity'},
             {type: 'doc', id: 'examples/godot', label: 'Godot'},
             {type: 'doc', id: 'examples/unreal', label: 'Unreal Engine'},
+            {type: 'doc', id: 'examples/defold', label: 'Defold'},
+            {type: 'doc', id: 'examples/o3de', label: 'O3DE'},
           ],
         },
         {
@@ -65,7 +70,7 @@ const sidebars: SidebarsConfig = {
           label: 'Game development',
           collapsed: true,
           items: [
-            {type: 'doc', id: 'examples/game', label: 'One package to many'},
+            {type: 'doc', id: 'examples/game', label: 'Game development'},
             {type: 'doc', id: 'examples/steam', label: 'Publishing to Steam'},
             {type: 'doc', id: 'examples/itch', label: 'Publishing to itch.io'},
           ],

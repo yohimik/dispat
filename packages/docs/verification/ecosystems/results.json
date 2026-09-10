@@ -1,0 +1,211 @@
+{
+  "verifiedAt": "2026-09-10T12:34:36.508593+00:00",
+  "binary": "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n\u2588\u2588        \u2588\u2588\n\u2588\u2588        \u2588\u2588\n\u2588\u2588    \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n\u2588\u2588    \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n      \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n      \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n      \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\n\ndispat 1.10.0 (darwin_arm64)",
+  "scope": "manifest scan/write/readback only",
+  "cases": [
+    {
+      "ecosystem": "npm",
+      "source": "https://raw.githubusercontent.com/jupyterlab/jupyterlab/bf8d11fe21ed78f1f4c4a23851f3e538c22731bb/packages/services/package.json",
+      "sha256": "ada79a2231e916a8113b48915e61017c32a2a6ea8a9e7be859a0c96227bb4403",
+      "afterSha256": "bf1f7c039eeb55b54a3fd5f931230495fd4a9f1d011ff6d3fb3424933b534cd8",
+      "passed": true
+    },
+    {
+      "ecosystem": "gomod",
+      "source": "https://raw.githubusercontent.com/spf13/cobra/adbc8813901bba65827259daa8e22ff94ec1f30e/go.mod",
+      "sha256": "cc6098fd1118fb3bb349c72bcd6e9c665d3a1b2a516ea9807ee24521ad2ddf8c",
+      "afterSha256": "f88b9a7a2727281ef7361fea0257b9300cb21261e99bed9bbaa069a68dd818b5",
+      "passed": true
+    },
+    {
+      "ecosystem": "cargo",
+      "source": "https://raw.githubusercontent.com/serde-rs/serde/a874a1b1bb1cc16cf5ee3b1b7b527af5705742bb/serde/Cargo.toml",
+      "sha256": "137d4b56580e6b18d0cad4a86aea12a8b83b8f985a931b089de553161c35af56",
+      "afterSha256": "d5450ee67c485f95bfe6f5c964f80ced324e7dd859e7dfb3dd6701d7c3f16d8c",
+      "passed": true
+    },
+    {
+      "ecosystem": "python",
+      "source": "https://raw.githubusercontent.com/pypa/sampleproject/621e4974ca25ce531773def586ba3ed8e736b3fc/pyproject.toml",
+      "sha256": "e4ce3af8b9396db683e4f967f09562cd2b61017f3c9b31ef7eb810cb24c6d206",
+      "afterSha256": "efb05f0c0d1d556cad1a83e409f939764ec4a9763bda94726cdfb5285cefaa0a",
+      "passed": true
+    },
+    {
+      "ecosystem": "composer",
+      "source": "https://raw.githubusercontent.com/symfony/http-foundation/3d554bb228167df47c29dd55dba5c3d50a324ec7/composer.json",
+      "sha256": "483c2c5b0827df87d45d0e3a0ad3c2261ed4a544123336926f8e01228170971d",
+      "afterSha256": "4d29588c9929526964d50b7f5fac53c565cd345c607b0914f1e09c5d64dd0249",
+      "passed": true
+    },
+    {
+      "ecosystem": "maven",
+      "source": "https://raw.githubusercontent.com/apache/commons-lang/62620f371b9c6ed337854e066d8916e56942d9af/pom.xml",
+      "sha256": "198479a63f7b813661c0901cd4f7c74d0ebaf6fb41ee7efa4dabb20b72dc2062",
+      "afterSha256": "812ca47b3c3ddbee33df509241ae91e11f51563ee70c1a42500dea6075514a67",
+      "passed": true
+    },
+    {
+      "ecosystem": "nuget",
+      "source": "https://raw.githubusercontent.com/JamesNK/Newtonsoft.Json/09bb545d72969ad7fb4ea07db0d5c34f4fc07877/Src/Newtonsoft.Json/Newtonsoft.Json.csproj",
+      "sha256": "111369887700ce148910ed9f2c2254dd74dad80125ff6895a8f49af4b422de0e",
+      "afterSha256": "111369887700ce148910ed9f2c2254dd74dad80125ff6895a8f49af4b422de0e",
+      "passed": true
+    },
+    {
+      "ecosystem": "pub",
+      "source": "https://raw.githubusercontent.com/flutter/packages/8a35b1611d677ac0cbbaf26f058a5ac12afa550c/packages/path_provider/path_provider/pubspec.yaml",
+      "sha256": "653f8baad631cd8819b024f08b016bfb16820b460812460655d195a9b5d56a7d",
+      "afterSha256": "fc9bfcb3fb12bd49bebe0fdfa68fd87e6bf805f41527ead6036f475eb401d5bd",
+      "passed": true
+    },
+    {
+      "ecosystem": "plist",
+      "source": "https://raw.githubusercontent.com/Alamofire/Alamofire/bda9ed57d72988a3a2ada33d824583541f86eac6/Source/Info.plist",
+      "sha256": "5d8cd4251979dda6ca2867e00fef6d8fbe84a4e11645818522d5f7fa747eb49c",
+      "afterSha256": "5d8cd4251979dda6ca2867e00fef6d8fbe84a4e11645818522d5f7fa747eb49c",
+      "passed": true
+    },
+    {
+      "ecosystem": "cocoapods",
+      "source": "https://raw.githubusercontent.com/Alamofire/Alamofire/bda9ed57d72988a3a2ada33d824583541f86eac6/Alamofire.podspec",
+      "sha256": "a9acf4274d896ae2205213dba1a059364c1becac5e89932e58156c19c34e7bea",
+      "afterSha256": "e3cdffc5f81bb0a20600b0449998fa21bb394405661d4efd8ee4502b735ecc6c",
+      "passed": true
+    },
+    {
+      "ecosystem": "xcode",
+      "source": "https://raw.githubusercontent.com/Alamofire/Alamofire/bda9ed57d72988a3a2ada33d824583541f86eac6/Alamofire.xcodeproj/project.pbxproj",
+      "sha256": "06999fc34fbbcfda7fc2e1b8afd9e4af4d162d9a2b29cbb9634b4ec95e524267",
+      "afterSha256": "47ff68b2262f82a2b9ca214a43d988efe3740d59bd39c1c08bbfa573cf04cd5d",
+      "passed": true
+    },
+    {
+      "ecosystem": "android",
+      "source": "https://raw.githubusercontent.com/termux/termux-app/3b66f8799635a4dba4a206563048ff0e6792c487/app/src/main/AndroidManifest.xml",
+      "sha256": "261e07622d9183739677c82e3ada9f513e267f72b30145fe456528cbdf687081",
+      "afterSha256": "261e07622d9183739677c82e3ada9f513e267f72b30145fe456528cbdf687081",
+      "passed": true
+    },
+    {
+      "ecosystem": "gradle",
+      "source": "https://raw.githubusercontent.com/square/okhttp/1f04bf8028b0fd9471ba9a77eba0ad913f86705a/gradle/libs.versions.toml",
+      "sha256": "ae80b0d94181838e9e9b015a7c699c95319510b68d850ba49ffd2970ddf0b6fc",
+      "afterSha256": "3811dc71c526b39664ee5f890bd3debddc5ad7811cdee8eeb84eb92ef58d25a4",
+      "passed": true
+    },
+    {
+      "ecosystem": "rubygems",
+      "source": "https://raw.githubusercontent.com/rails/rails/9380b46cd448fa3dc6a0ab050c82bfedbfda0d88/activesupport/activesupport.gemspec",
+      "sha256": "d6efce34dcebeac92f3b5ba9e55d755dc6d0e4b373f8410ef8e867c5cbc2d77c",
+      "afterSha256": "e71e74777f016a4aef9e2acc1e855cd9cadc9df77ca544918234db4f22c96270",
+      "passed": true
+    },
+    {
+      "ecosystem": "docker",
+      "source": "https://raw.githubusercontent.com/docker/awesome-compose/30f4b7f6a6c3b0c0ecf4d4efb0de203c48d11562/nginx-flask-mysql/compose.yaml",
+      "sha256": "9243a613ba323bbe1994cb5a1d33a519c94affc261ad0d5d00c8afa0b5559cbe",
+      "afterSha256": "18cfba1733914d42215f47a45263435c4bff34884fbe71bd221233ce28e0e189",
+      "passed": true
+    },
+    {
+      "ecosystem": "aqua",
+      "source": "https://raw.githubusercontent.com/aquaproj/aqua/759a4a4a564922351cb2912ed17519adfb1c2860/pkg/minisign/aqua.yaml",
+      "sha256": "0e1fc2ab3c817f6efe7578eef6237011f2ef781c993a5b2afd4a78cd35053988",
+      "afterSha256": "74a8cdc49332cef18ef84877d650832caf19e42f72f81652ea4a4b374d2a65fd",
+      "passed": true
+    },
+    {
+      "ecosystem": "unity",
+      "source": "https://raw.githubusercontent.com/Unity-Technologies/EntityComponentSystemSamples/6786a741ee1f118ed14cecfa02beae8e926937b0/EntitiesSamples/Packages/manifest.json",
+      "sha256": "7baf954748cb636de460d43390d9b9dc2f4ccb19e8f644f27ec2b1e0529cc6b8",
+      "afterSha256": "7bb2adf0a65c1c78f92de4acade429fb5813ff48d3b356fc448b67c181613a2f",
+      "passed": true
+    },
+    {
+      "ecosystem": "godot",
+      "source": "https://raw.githubusercontent.com/godotengine/godot-demo-projects/a3b5c113112f77291d5f3d1360f33a882fdc52f7/2d/platformer/project.godot",
+      "sha256": "46b02143b3cd454c0bd5f00e5baf9856ef4dfe18dfc2fd34475be14bb6804f3c",
+      "afterSha256": "46b02143b3cd454c0bd5f00e5baf9856ef4dfe18dfc2fd34475be14bb6804f3c",
+      "passed": true
+    },
+    {
+      "ecosystem": "unreal",
+      "source": "https://raw.githubusercontent.com/getnamo/SocketIOClient-Unreal/f3e63dcf578095f897c977d991c3fbb9aa501b94/SocketIOClient.uplugin",
+      "sha256": "688032dfd74a6e933cf21cfc8dd7a06b8b5586c92f2fc11a966298d28bbce277",
+      "afterSha256": "9690a7113b6e71804750d7fca0ad9eb02ac0460c18bae83d9726e3061038458b",
+      "passed": true
+    },
+    {
+      "ecosystem": "defold",
+      "source": "https://raw.githubusercontent.com/britzl/monarch/954097522e7c2d4a710464dd9e8b48fb309685ab/game.project",
+      "sha256": "4edc87fba379bd70d49bd1ae364da4598e69cabad9e7f577c695c8b6b4c56053",
+      "afterSha256": "bcad9891140eb3de38cb3043a2cdc983ea56f6b82e3bb074c71782cdf402932c",
+      "passed": true
+    },
+    {
+      "ecosystem": "o3de",
+      "source": "https://raw.githubusercontent.com/o3de/o3de/80f47141642496748de7313c6c475a0b564ea060/Gems/Atom/gem.json",
+      "sha256": "c23e252a1dea6a2f69c3f12cb2e51c6e37c06bcca9707fc2a1d94bddc5f4dc6f",
+      "afterSha256": "d472b6730a9b7cd6036f7016f31c93f8b131ea8f050dae1d7959f8f17d26f18f",
+      "passed": true
+    }
+  ],
+  "pants": {
+    "version": "2.17.0",
+    "python": "3.9",
+    "platform": "linux/amd64",
+    "dispat": "1.10.0",
+    "checks": [
+      "status: both packages 1.0.0 -> 1.0.1",
+      "autoversion: both BUILD literals updated",
+      "dispat run build --since all: core then app, ran=2 failed=0",
+      "app metadata: Requires-Dist: example-core (==1.0.1)",
+      "clean local wheel install and app.main() == 42"
+    ],
+    "artifacts": [
+      {
+        "file": "example-app-1.0.1.tar.gz",
+        "sha256": "b391343ce19da5017b01d1cc1ecff9593437ad242e48fe5f272eded9e4eb9e14"
+      },
+      {
+        "file": "example-core-1.0.1.tar.gz",
+        "sha256": "79bfb5eace4e33067e823a5d7cb8f46d66e0cd442d7504c199c4ac21e87042db"
+      },
+      {
+        "file": "example_app-1.0.1-py3-none-any.whl",
+        "sha256": "0629f4fb9b0a9a423617b84bbd5f81b82d871cec0a0159f77e29457484e3d665"
+      },
+      {
+        "file": "example_core-1.0.1-py3-none-any.whl",
+        "sha256": "9737133bab17badf801230383d3e7e26198490d4525608504397753fb71772a7"
+      }
+    ],
+    "limits": "Small authored fixture; no upstream custom Pants plugins, publication, or performance benchmark."
+  },
+  "pypa": {
+    "repo": "pypa/sampleproject",
+    "revision": "621e4974ca25ce531773def586ba3ed8e736b3fc",
+    "python": "3.12",
+    "platform": "linux/arm64",
+    "build": "1.3.0",
+    "twine": "6.2.0",
+    "checks": [
+      "dispat autoversion: 4.0.0 -> 4.0.1",
+      "python -m build: wheel and sdist",
+      "python -m twine check --strict: both passed",
+      "clean wheel install: version 4.0.1 and add_one(41) == 42"
+    ],
+    "artifacts": [
+      {
+        "file": "sampleproject-4.0.1-py3-none-any.whl",
+        "sha256": "f08e63f0d7b10d2bb3bc2b00962d5ce195dbedfd003e2753c4654684cc7718dc"
+      },
+      {
+        "file": "sampleproject-4.0.1.tar.gz",
+        "sha256": "098b0bf844c79d700b13e39a02500a52a00dd537868dd367bdac6bc4f319c56f"
+      }
+    ],
+    "limits": "No upload. Source nested under a temporary parent repository."
+  }
+}

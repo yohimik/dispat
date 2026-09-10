@@ -639,3 +639,5 @@ The identity lines are not optional. A runner has no git user configured, and th
   space and per package files.
 - [dependencies](./configuration/dependencies.md) and [the compute command](./cli/compute.md) for the edges.
 - [Examples](./examples/README.md) for the build and publish commands of your ecosystem, all of which apply unchanged.
+
+See [From one package to many](./examples/one-to-many.md) to add deliverables while preserving existing package identities and release history.

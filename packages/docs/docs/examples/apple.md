@@ -172,3 +172,15 @@ invalid results. The correction appeared in mlx-swift's later mainline vendor bu
 Before recording delivery, resolve every submodule at the proposed tag and test the packaged Swift consumer on the
 affected hardware path. dispat can create the wrapper tag after the build succeeds; it does not infer whether a
 vendored commit contains a native fix.
+
+## A public repository to compare
+
+[Alamofire Info.plist at `bda9ed5`](https://github.com/Alamofire/Alamofire/blob/bda9ed57d72988a3a2ada33d824583541f86eac6/Source/Info.plist): `CFBundleShortVersionString` points to `$(MARKETING_VERSION)` and the build number points to `$(CURRENT_PROJECT_VERSION)`. A version write left this plist byte-for-byte unchanged. Update the owning Xcode settings and validate the built bundle instead of replacing the substitutions.
+
+[Alamofire podspec at `bda9ed5`](https://github.com/Alamofire/Alamofire/blob/bda9ed57d72988a3a2ada33d824583541f86eac6/Alamofire.podspec): The podspec’s literal version rewrote successfully. This is independent of its plist and Xcode settings: keep all published metadata consistent, and retain pod validation and publication in the existing Apple workflow.
+
+[Alamofire Xcode project at `bda9ed5`](https://github.com/Alamofire/Alamofire/blob/bda9ed57d72988a3a2ada33d824583541f86eac6/Alamofire.xcodeproj/project.pbxproj): The local writer updated the project’s literal marketing versions and read the new version back. This check did not build or sign any Apple artifact. Preserve target-specific settings and inspect the final archive before publication.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+
+See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

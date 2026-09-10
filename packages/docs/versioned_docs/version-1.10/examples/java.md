@@ -154,3 +154,9 @@ example is [Dubbo 3.2.20](https://github.com/apache/dubbo/releases/tag/dubbo-3.2
 property matches its [Central POM and JAR](https://repo1.maven.org/maven2/org/apache/dubbo/dubbo/3.2.20/). Preserve
 property-based versioning and verify the generated POM; a literal-value writer is not a substitute for evaluating
 the publisher's version inputs.
+
+## A public repository to compare
+
+[Apache Commons Lang at `62620f3`](https://github.com/apache/commons-lang/blob/62620f371b9c6ed337854e066d8916e56942d9af/pom.xml): The project version is literal, while several dependency versions are `${...}` properties. The local check rewrote the project version and preserved those properties. Keep the parent/property version source and Maven’s existing release checks; scanning this POM does not evaluate an effective POM.
+
+See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

@@ -28,6 +28,16 @@
       "items": [
         {
           "type": "doc",
+          "id": "examples/one-to-many",
+          "label": "From one package to many"
+        },
+        {
+          "type": "doc",
+          "id": "examples/open-source",
+          "label": "Open source integration checks"
+        },
+        {
+          "type": "doc",
           "id": "examples/npm",
           "label": "An npm monorepo"
         },
@@ -65,6 +75,11 @@
               "type": "doc",
               "id": "examples/python",
               "label": "A Python monorepo"
+            },
+            {
+              "type": "doc",
+              "id": "examples/python-pants",
+              "label": "Python without uv, including Pants"
             },
             {
               "type": "doc",
@@ -130,6 +145,16 @@
               "type": "doc",
               "id": "examples/unreal",
               "label": "Unreal Engine"
+            },
+            {
+              "type": "doc",
+              "id": "examples/defold",
+              "label": "Defold"
+            },
+            {
+              "type": "doc",
+              "id": "examples/o3de",
+              "label": "O3DE"
             }
           ]
         },
@@ -141,7 +166,7 @@
             {
               "type": "doc",
               "id": "examples/game",
-              "label": "One package to many"
+              "label": "Game development"
             },
             {
               "type": "doc",
