@@ -1,5 +1,20 @@
 # Changelog
 
+## packages/docs/v1.10.5 (2026-09-10)
+
+### Fixes
+
+- clarify verified release recovery and metadata checks ([65566d9](https://github.com/yohimik/dispat/commit/65566d927ba0e048c07baa5c65275cfab5add17f)) (by yohimik)
+  Explain pending destination recovery, independent tag verification, and
+  Changesets publication gating with linked reproductions and CI evidence.
+  Distinguish reused successful jobs from repeated execution, and record
+  the corrected Apple framework metadata case in the 1.10 documentation.
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.4 (2026-09-10)
 
 ### Fixes
