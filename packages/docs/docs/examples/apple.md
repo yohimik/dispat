@@ -152,8 +152,10 @@ project still gives the built framework `MARKETING_VERSION = 5.12.0`; an `Info.p
 plist. Keep intentionally separate releases separate too: a ZIP-only packaging correction can use a new GitHub tag
 while leaving the CocoaPods version unchanged.
 
-The [Alamofire 5.12.1 report](https://github.com/Alamofire/Alamofire/issues/4053) demonstrates that mismatch; its
-maintainer confirmed the omitted setting and planned 5.12.2. Conversely,
+The [Alamofire 5.12.1 report](https://github.com/Alamofire/Alamofire/issues/4053) demonstrates that historical mismatch;
+the maintainer confirmed the omitted setting, and
+[5.12.2](https://github.com/Alamofire/Alamofire/blob/5.12.2/Alamofire.xcodeproj/project.pbxproj) corrected both project
+values. Keep the check as a regression case rather than a current defect. Conversely,
 [Firebase 12.19.1](https://github.com/firebase/firebase-ios-sdk/releases/tag/12.19.1) explicitly fixes GitHub ZIP naming
 without a new CocoaPods SDK release. An integration check must understand that release policy before requiring every
 destination to advance.

@@ -81,8 +81,11 @@ artifact identity and recovery after a rejected push protect different boundarie
 
 [SvelteKit's concurrency fix](https://github.com/sveltejs/kit/pull/15160) documents overlapping release jobs that could
 leave a release unpublished. Its workflow now serializes those jobs. [SWC's misc npm tagging change](https://github.com/swc-project/swc/pull/12173)
-ties tags to the checked-out commit and tests conflicting and concurrent tag creation. Preserve existing protections
-when integrating dispat; these examples do not establish an unresolved race in those projects.
+ties tags to the checked-out commit and tests conflicting and concurrent tag creation. Its
+[release-recovery discussion](https://github.com/swc-project/swc/issues/12338) also shows why a green rerun is not proof
+that every matrix leg ran again: GitHub can carry successful jobs from an earlier attempt. Retain each leg's run and
+attempt identity. Preserve existing protections when integrating dispat; these examples do not establish an unresolved
+race in those projects.
 
 For a regression test, start a release from commit A, then push unrelated commit B while publishing is paused. After
 the release finishes, verify that its package versions, artifacts, tags and changelog describe the intended input.
@@ -90,10 +93,12 @@ A later branch tip must not silently become the identity of an earlier build. In
 before Git finalization, and check that completed artifacts are retained.
 
 This matters for one-package repositories too. A single package can have several destinations, platform assets,
-release notes and a notification step. The [Astro retry report](https://github.com/withastro/astro/issues/17956) illustrates
-why npm completion does not prove marketplace completion. Its cited failure is a post-publication recovery case,
-not evidence that a concurrent commit caused it. See [recovery](../reference/releasing/recovery.md) for dispat's
-recording boundary and the limits of retrying external publishers.
+release notes and a notification step. In the [Astro retry report](https://github.com/withastro/astro/issues/17956),
+one attempt published four npm packages and then failed before either marketplace publisher ran; its green retry found
+no unpublished npm versions and skipped both marketplaces. Record those destinations separately so a retry can resume
+them without another npm version. This is a post-publication recovery case, not evidence that a concurrent commit
+caused it. See [recovery](../reference/releasing/recovery.md) for dispat's recording boundary and the limits of retrying
+external publishers.
 
 ## Apply the pattern to your ecosystem
 

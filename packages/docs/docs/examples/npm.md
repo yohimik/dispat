@@ -63,6 +63,20 @@ npm version "$DISPAT_NEW_VERSION" --no-git-tag-version && npm ci && npm run buil
 
 Treat publication of an exact version and an npm dist-tag update as distinct operations. If a later destination fails, verify the already-published version before retrying it. See the [JupyterLab release case](./release-integration.md#make-success-mean-available-to-the-next-stage).
 
+Do not use the presence of `.changeset/*.md` as a proxy for publication readiness. A
+[local CLI 3.0.2 fixture](https://github.com/changesets/action/issues/241#issuecomment-5613060030) versioned one
+releasable package and retained an ignored package's Changeset file. Separate inspection of Action v2.1.2's source
+shows that its raw-file gate then chooses version handling instead of publishing; the Action itself was not executed
+in that fixture. If it remains the native coordinator, compare every
+already-versioned package with the registry and allow reconciliation while other release intent is pending. dispat
+does not read Changesets' `ignore` policy or make two coordinators share completion state.
+
+Verify Git records independently too. In
+[Changesets CLI #1621](https://github.com/changesets/changesets/issues/1621#issuecomment-5612991733), CLI 3.0.2
+suppressed a deterministic signing failure, exited zero and emitted a `git-tag` event although no tag existed. After
+a configured script creates tags, verify each expected ref and its push before treating recording as complete. dispat
+sees the script's process status; it cannot correct a third-party command that reports a false success receipt.
+
 ### Compare the planned components with the parsed release record
 
 In release-please, [issue #2801](https://github.com/googleapis/release-please/issues/2801) reports that a raw
