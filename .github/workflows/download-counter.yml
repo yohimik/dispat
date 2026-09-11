@@ -41,8 +41,18 @@ jobs:
       - name: Publish the snapshot
         env:
           DOCS_BUCKET: ${{ vars.DOCS_BUCKET }}
+          DOCS_URL_MAP: ${{ vars.DOCS_URL_MAP }}
         run: |
           set -eu
           : "${DOCS_BUCKET:?DOCS_BUCKET is required (see infra/README.md)}"
+          : "${DOCS_URL_MAP:?DOCS_URL_MAP is required (see infra/README.md)}"
           gcloud storage cp --cache-control="public, max-age=300, must-revalidate" \
             downloads.json "gs://${DOCS_BUCKET}/downloads.json"
+          # Uploading the object does not evict a cached response, including
+          # a 404 from before the first snapshot. Wait for exact-path eviction.
+          gcloud compute url-maps invalidate-cdn-cache "${DOCS_URL_MAP}" \
+            --path="/downloads.json" --quiet
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            --retry-delay 2 --connect-timeout 10 --max-time 20 \
+            https://dispat.dev/downloads.json --output served-downloads.json
+          cmp downloads.json served-downloads.json
