@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.10.9 (2026-09-11)
+
+### Fixes
+
+- distribute the CLI through npm ([597e106](https://github.com/yohimik/dispat/commit/597e1064a2651f93132e678f4f4ed33c1d5bfc13)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.8 (2026-09-11)
 
 ### Fixes
