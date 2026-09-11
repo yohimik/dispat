@@ -1,5 +1,23 @@
 # Changelog
 
+## packages/docs/v1.10.11 (2026-09-11)
+
+### Fixes
+
+- clarify npm installation and recovery ([8dc9f82](https://github.com/yohimik/dispat/commit/8dc9f82d7a11d3aa8078d809792c3ddfd30693fb)) (by yohimik, Codex (gpt-5.6-sol))
+  Keep README and current and 1.10 documentation aligned with script approvals
+  and global repair. Explain saga recovery and link the agent work guide.
+
+### Dependencies
+
+- [cli](https://github.com/yohimik/dispat/releases/tag/packages/cli/v1.10.2): 1.10.1 -> 1.10.2
+
+### Authors
+
+- yohimik
+- Codex (gpt-5.6-sol)
+
+
 ## packages/docs/v1.10.10 (2026-09-11)
 
 ### Fixes

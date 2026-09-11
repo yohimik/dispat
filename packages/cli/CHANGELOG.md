@@ -1,5 +1,20 @@
 # Changelog
 
+## packages/cli/v1.10.2 (2026-09-11)
+
+### Fixes
+
+- repair blocked global installs ([8dc9f82](https://github.com/yohimik/dispat/commit/8dc9f82d7a11d3aa8078d809792c3ddfd30693fb)) (by yohimik, Codex (gpt-5.6-sol))
+  Print exact, shell-safe repair commands and retain script approval on global
+  updates. Cover blocked and approved packed installs with npm 12 gates. Add
+  saga and orchestration keywords to the npm distribution.
+
+### Authors
+
+- yohimik
+- Codex (gpt-5.6-sol)
+
+
 ## packages/cli/v1.10.1 (2026-09-11)
 
 ### Fixes
