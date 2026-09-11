@@ -1,0 +1,16 @@
+.counter { margin: 1.75rem auto 0; text-align: center; }
+.screenReaderOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.digits { --digit-height: clamp(2.75rem, 6vw, 3.4rem); display: flex; justify-content: center; gap: min(.18rem, .5vw); max-width: 100%; font-variant-numeric: tabular-nums; }
+.digit { display: block; width: min(2.35rem, calc((100vw - 3rem) / var(--digits))); height: var(--digit-height); overflow: hidden; border: 1px solid var(--ifm-color-emphasis-300); border-radius: .35rem; background: var(--ifm-background-surface-color); box-shadow: var(--doc-panel-shadow); font: 600 clamp(.8rem, calc((100vw - 4rem) / var(--digits) * .8), 2rem)/var(--digit-height) var(--ifm-font-family-monospace); }
+.reel { display: flex; flex-direction: column; }
+.separator { align-self: center; flex: 0 0 .25rem; font: 600 1.25rem/1 var(--ifm-font-family-monospace); }
+.reel > span { display: block; flex: 0 0 var(--digit-height); }
+.settled { transform: translateY(calc(var(--digit) * -5%)); animation: settle 520ms ease-out; }
+.loading { animation: spin 900ms linear infinite; color: var(--ifm-color-emphasis-600); }
+.digit:nth-child(2n) .loading { animation-delay: -180ms; }
+.digit:nth-child(3n) .loading { animation-delay: -360ms; }
+.label { margin: .65rem 0 0; font-size: .78rem; color: var(--ifm-color-emphasis-800); }
+.freshness { margin: .2rem 0 0; font-size: .72rem; color: var(--ifm-color-emphasis-600); }
+@keyframes spin { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+@keyframes settle { from { transform: translateY(calc((var(--digit) + 10) * -5%)); } to { transform: translateY(calc(var(--digit) * -5%)); } }
+@media (prefers-reduced-motion: reduce) { .reel, .loading, .settled { animation: none; } }

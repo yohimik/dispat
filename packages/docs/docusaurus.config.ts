@@ -7,6 +7,7 @@ import path from 'node:path';
 import readme from './plugins/readme';
 import testReport from './plugins/test-report';
 import binarySizes from './plugins/binary-sizes';
+import downloadCounter from './plugins/download-counter';
 import historicalLinks from './plugins/historical-links';
 import remarkHistoricalLinks from './plugins/historical-links/remark';
 
@@ -155,6 +156,7 @@ const config: Config = {
   staticDirectories: ['static', '../../imgs'],
 
   plugins: [
+    downloadCounter,
     (context) => ({
       name: 'single-react-remotion-runtime',
       configureWebpack: () => ({

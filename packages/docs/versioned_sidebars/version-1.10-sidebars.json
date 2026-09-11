@@ -364,6 +364,11 @@
         },
         {
           "type": "doc",
+          "id": "internals/download-counter",
+          "label": "The distribution counter"
+        },
+        {
+          "type": "doc",
           "id": "internals/coverage",
           "label": "Test coverage"
         },

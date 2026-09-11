@@ -64,6 +64,12 @@
   margin-bottom: 2rem;
 }
 
+.buttons > :global(.button) {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
 /* Each section opens like a slide: a hairline, the territory chip, and a
    mono title, so the page below the deck speaks the deck's language. */
 .section {

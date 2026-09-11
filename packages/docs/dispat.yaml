@@ -85,6 +85,7 @@ scripts:
       dispat-release-tools sh -euc '
         gcloud storage rsync --recursive --delete-unmatched-destination-objects \
           --checksums-only \
+          --exclude="^downloads\\.json$" \
           --cache-control="public, max-age=300, must-revalidate" \
           build "gs://${DOCS_BUCKET}"
         gcloud storage objects update --recursive \

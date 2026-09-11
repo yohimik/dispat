@@ -24,6 +24,19 @@ pnpm docs:build                         # production build into packages/docs/bu
 pnpm --filter dispat-docs typecheck     # tsc, no emit
 ```
 
+The landing-page distribution counter reads `/downloads.json`. Production refreshes it through the scheduled workflow;
+both the job and the visible browser refresh every 15 minutes, and the browser receives no GitHub or Google Cloud credential. For a local value, run:
+
+```sh
+pnpm --filter dispat-docs downloads:refresh
+```
+
+The script runs the Go collector in Docker and uses `GITHUB_TOKEN` when exported, otherwise the token from an existing
+authenticated `gh` CLI session. It writes a gitignored development snapshot. Docker Hub needs no token. A normal local
+site start works without this optional step and shows the unavailable state until a snapshot exists. Repeat the refresh
+command for a newer local measurement. The development server serves the generated file; a production build and
+`pnpm serve` exclude it. See [the counter reference](./docs/internals/download-counter.md) for counting semantics.
+
 Node comes from [`.nvmrc`](./.nvmrc). The root `package.json` sets pnpm in its `packageManager` field, and CI pins both
 tools from these two files. You can also run any pnpm command like `pnpm start` or `pnpm build` from inside this
 folder, because pnpm finds the workspace root automatically.
@@ -154,7 +167,10 @@ Install Node 20 or later and pnpm from the root `packageManager` field. The cont
 no global installs, because `corepack enable` or `pnpm/action-setup` is enough.
 
 Run `pnpm --filter dispat-docs typecheck` and `pnpm --filter dispat-docs test` before building. The Docker
-`typecheck` target runs both gates, including the historical report and link regressions.
+`typecheck` target runs both gates, including the historical report and link regressions. It also runs the collector’s
+format, race, vet and coverage checks through `download-counter/test.sh`, with a 95% statement floor. The Node test
+command enforces 95% line and branch coverage for the browser counter model; it does not change coverage requirements
+for unrelated plugins.
 
 ## Licence
 

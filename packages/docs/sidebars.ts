@@ -145,6 +145,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'internals/architecture', label: 'Architecture'},
         {type: 'doc', id: 'internals/tinygo', label: 'The TinyGo spike'},
         {type: 'doc', id: 'internals/announce', label: 'The release announcement'},
+        {type: 'doc', id: 'internals/download-counter', label: 'The distribution counter'},
         {type: 'doc', id: 'internals/coverage', label: 'Test coverage'},
         {type: 'doc', id: 'internals/test-results', label: 'Test results'},
         {type: 'doc', id: 'internals/benchmarks', label: 'Benchmarks'},

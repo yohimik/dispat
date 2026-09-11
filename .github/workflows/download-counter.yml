@@ -1,0 +1,48 @@
+name: Refresh download counter
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: download-counter
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Test and collect a complete snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm -e GITHUB_TOKEN -v "$PWD:/workspace" \
+            -w /workspace/packages/docs/download-counter golang:1.26-bookworm \
+            sh -euc 'sh test.sh && GOWORK=off go run . -output /workspace/downloads.json'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_RELEASER_SA }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Publish the snapshot
+        env:
+          DOCS_BUCKET: ${{ vars.DOCS_BUCKET }}
+        run: |
+          set -eu
+          : "${DOCS_BUCKET:?DOCS_BUCKET is required (see infra/README.md)}"
+          gcloud storage cp --cache-control="public, max-age=300, must-revalidate" \
+            downloads.json "gs://${DOCS_BUCKET}/downloads.json"

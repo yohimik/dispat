@@ -3,6 +3,7 @@ import {usePluginData} from '@docusaurus/useGlobalData';
 import {README_PLUGIN} from '@site/plugins/readme/name';
 import type {Argument, ReadmeData} from '@site/plugins/readme/types';
 import DemoCarousel from '@site/src/components/DemoCarousel';
+import DownloadCounter from '@site/src/components/DownloadCounter';
 import Inlines from '@site/src/components/Inline';
 import CodeBlock from '@theme/CodeBlock';
 import Heading from '@theme/Heading';
@@ -110,6 +111,7 @@ function Hero(): React.ReactElement {
           <Link className="button button--secondary button--lg" to="/getting-started">Start your first release</Link>
         </div>
         <p className={styles.heroNote}>One binary. Your build commands. A release plan you can inspect first.</p>
+        <DownloadCounter />
       </div>
     </header>
   );

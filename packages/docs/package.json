@@ -10,7 +10,8 @@
     "clear": "docusaurus clear",
     "serve": "docusaurus serve",
     "typecheck": "tsc",
-    "test": "node --experimental-strip-types --test plugins/test-report/*.test.mjs plugins/historical-links/*.test.mjs plugins/binary-sizes/*.test.mjs demo/title-timing.test.mjs"
+    "test": "node --experimental-strip-types --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=95 --test-coverage-include=src/components/DownloadCounter/model.ts --test plugins/test-report/*.test.mjs plugins/historical-links/*.test.mjs plugins/binary-sizes/*.test.mjs plugins/download-counter/*.test.mjs src/components/DownloadCounter/*.test.mjs demo/title-timing.test.mjs verification/*.test.mjs",
+    "downloads:refresh": "node plugins/download-counter/refresh.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",

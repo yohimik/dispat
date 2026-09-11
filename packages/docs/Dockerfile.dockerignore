@@ -20,6 +20,11 @@ packages/*
 # services/, so every level is spelled out, as above: an exception cannot reach
 # into a folder the line before it excluded.
 !README.md
+!.github
+.github/*
+!.github/workflows
+.github/workflows/*
+!.github/workflows/download-counter.yml
 !services
 services/*
 !services/dispat

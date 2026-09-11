@@ -11,6 +11,13 @@
 # either.
 ARG NODE_VERSION=22
 
+FROM golang:1.26-bookworm AS counter-test
+WORKDIR /src
+COPY packages/docs/download-counter ./packages/docs/download-counter
+RUN cd packages/docs/download-counter \
+ && sh test.sh \
+ && touch /counter-test-ok
+
 FROM node:${NODE_VERSION}-alpine AS deps
 
 # corepack takes the pnpm version from packageManager in the root package.json,
@@ -57,11 +64,13 @@ COPY imgs ./imgs
 # resolves them from the site folder as ../../.
 COPY README.md ./README.md
 COPY services/dispat/README.md ./services/dispat/README.md
+COPY .github/workflows/download-counter.yml ./.github/workflows/download-counter.yml
 COPY packages/docs ./packages/docs
 COPY .git ./.git
 
 # One gate that is not the build, so it can be asked for on its own.
 FROM source AS typecheck
+COPY --from=counter-test /counter-test-ok /counter-test-ok
 RUN pnpm --filter dispat-docs typecheck \
  && pnpm --filter dispat-docs test
 
