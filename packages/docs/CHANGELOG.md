@@ -1,5 +1,31 @@
 # Changelog
 
+## packages/docs/v1.10.10 (2026-09-11)
+
+### Fixes
+
+- document @dispat/bin installation and recovery ([40c8500](https://github.com/yohimik/dispat/commit/40c850094c95c5447827bd10213cb373a1f78d1c)) (by yohimik, Codex (gpt-6-astra))
+  Update npm installation and repair examples in current and 1.10 documentation.
+  Distinguish metadata propagation from the package removal waiting period.
+
+- document npm installation and recovery ([f56f86e](https://github.com/yohimik/dispat/commit/f56f86e056e6cb5895b33618d3a1e37d29700cba)) (by yohimik)
+  Explain installation and recovery after an unrecorded npm publication in
+  current and 1.10 documentation.
+
+- document npm installation ([a2895ab](https://github.com/yohimik/dispat/commit/a2895ab364abbe93bb52fd7c0cbe57ef917b36bd)) (by yohimik)
+  Explain npm installation, verified native downloads, script approval,
+  repair, and npm-managed updates in current and 1.10 documentation.
+
+### Dependencies
+
+- [cli](https://github.com/yohimik/dispat/releases/tag/packages/cli/v1.10.0): 0.0.0 -> 1.10.0
+
+### Authors
+
+- yohimik
+- Codex (gpt-6-astra)
+
+
 ## packages/docs/v1.10.9 (2026-09-11)
 
 ### Fixes
