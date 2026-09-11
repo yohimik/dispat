@@ -31,14 +31,6 @@ scripts:
     docker run --rm -e GITHUB_TOKEN -v "$PWD:/docs" node:22-alpine \
       node --experimental-strip-types /docs/plugins/binary-sizes/download.mjs "$version" /docs/data/binary-sizes.json
     echo "downloaded binary sizes for dispat $version"
-  # The docs package is the only pnpm package. Export its regenerated lockfile
-  # from the container used by its build so release runners need no Node.
-  pnpm-install: |
-    set -eu
-    ROOT=$(git rev-parse --show-toplevel)
-    docker buildx build --file "$ROOT/packages/docs/Dockerfile" --target lockfile-export \
-      $(sh "$ROOT/scripts/buildx-cache.sh" docs-lockfile) \
-      --output "type=local,dest=$ROOT" "$ROOT"
   # Publish stage: sync the built site into the bucket behind dispat.dev.
   #
   # The workflow authenticates the run to Google Cloud through Workload

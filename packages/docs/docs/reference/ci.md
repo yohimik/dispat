@@ -1,15 +1,16 @@
 # dispat in CI
 
-dispat is a release tool. You will nearly always run it on a CI runner. Choose one of three ways to install it based on
+dispat is a release tool. You will nearly always run it on a CI runner. Choose an installation method based on
 where your pipeline runs:
 
 | You are on | Use |
 |---|---|
+| A Node project with a lockfile | [npm](#npm-in-node-pipelines) |
 | GitHub Actions | [the composite action](#the-github-action) |
 | GitLab CI, Jenkins, Buildkite, anything with a job image | [a container image](#the-container-images) |
 | anything else, or a custom image | [the install script](#the-install-script) |
 
-All three methods install the same binary. The container images use the install script internally.
+These methods install the same native CLI. The container images use the install script internally.
 
 This page covers installing the binary on a runner. Read [Pipeline patterns](./pipelines.md) to learn what to run next.
 That guide covers everything from per-commit test windows to a fully gated release pipeline.
@@ -311,3 +312,33 @@ rather than set by a flag, so `GITHUB_TOKEN` alone is deliberately not sent to i
 
 Read [The release job on other providers](./ci-providers.md) for full release jobs on GitLab CI, CircleCI, Jenkins,
 Buildkite and Azure Pipelines. That guide includes the clone settings and tokens each provider needs.
+
+## npm in Node pipelines
+
+Add `@dispat/cli` to the project's development dependencies and commit its lockfile. Set up a supported Node
+version (`^20.17.0 || >=22.9.0`), then install and run the locked tool:
+
+```sh
+npm ci
+npm exec -- dispat status
+# In the reviewed release job:
+npm exec -- dispat --log-format json
+```
+
+The install step needs HTTPS access to GitHub release assets in addition to the npm registry. The package carries
+an exact native version and digest, so installation does not resolve `latest` or call the GitHub API. An npm-only
+patch can carry the same binary as its predecessor. Keep npm upgrades in the dependency-update workflow.
+
+If CI disables installation scripts, or npm 12 has no project approval for this package, invoke the installer
+explicitly before running the CLI:
+
+```sh
+npm ci --ignore-scripts
+npm explore @dispat/cli -- node build/bin/postinstall.js
+npm exec -- dispat status
+```
+
+For pnpm, retain the workspace's script-approval policy or invoke the same packaged installer after installation.
+Do not enable every dependency's scripts just to repair this package. Keep registry credentials in the CI secret
+store; installing the public binary requires no GitHub token. See [the npm monorepo example](../examples/npm.md)
+for build and publication stages.

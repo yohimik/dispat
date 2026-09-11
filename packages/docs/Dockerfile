@@ -33,20 +33,16 @@ WORKDIR /src
 # root owns the lockfile, so the install runs there and reaches the one member.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/docs/package.json ./packages/docs/
+COPY packages/cli/package.json ./packages/cli/
 RUN --mount=type=cache,target=/pnpm-store \
     pnpm config set store-dir /pnpm-store \
- && pnpm install --frozen-lockfile
+ && pnpm install --frozen-lockfile --ignore-scripts
 
 # The lockfile sync the packages space runs after autoVersion rewrites a
 # package.json: pnpm regenerates the lockfile in here, and the export hands
 # it back over the working tree's. No host Node is involved, and no
 # node_modules leaves the build — the site build installs inside this
 # Dockerfile already.
-FROM deps AS lockfile
-RUN --mount=type=cache,target=/pnpm-store pnpm install --lockfile-only
-FROM scratch AS lockfile-export
-COPY --from=lockfile /src/pnpm-lock.yaml /
-
 FROM deps AS source
 
 # docusaurus.config.ts sets showLastUpdateTime, which reads the git history of

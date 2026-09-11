@@ -1,0 +1,12 @@
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!packages
+packages/*
+!packages/docs
+packages/docs/*
+!packages/docs/package.json
+!packages/cli
+packages/cli/*
+!packages/cli/package.json

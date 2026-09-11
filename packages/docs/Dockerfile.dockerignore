@@ -14,6 +14,9 @@
 !packages
 packages/*
 !packages/docs
+!packages/cli
+packages/cli/*
+!packages/cli/package.json
 
 # The landing page is built from the repository README and the CLI one
 # (plugins/readme). The second is the only thing this build wants from

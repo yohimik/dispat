@@ -8,7 +8,7 @@
   "type": "module",
   "imports": { "#root/*": "./build/*" },
   "bin": { "dispat": "build/bin/dispat.js" },
-  "files": ["build/", "release.json", "README.md", "TESTING.md", "LICENSE"],
+  "files": ["build/", "release.json", "README.md", "LICENSE"],
   "scripts": {
     "compile": "node --input-type=module -e \"import{rmSync}from'node:fs';rmSync('build',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "build": "pnpm compile && node build/scripts/package-release.js",

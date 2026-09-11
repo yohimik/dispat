@@ -1,0 +1,9 @@
+/build/
+/coverage/
+/dist/
+/test-build/
+/release.json
+/dispat-native
+/dispat-native.exe
+*.tmp
+*.tmp.exe

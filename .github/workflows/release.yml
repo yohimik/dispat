@@ -12,12 +12,11 @@ name: Release
 # tag-push workflow anyway, so the binary build and the GitHub release run
 # right here, after the dispat run, keyed off the tag it created.
 #
-# Every stage runs inside Docker — the gates as buildx builds, the deploys as
-# `docker run` against the release tools image — so the jobs install no Go,
-# Node or Terraform; what remains here is checkouts, Docker plumbing,
-# credentials and artifact transport.
+# Build gates and native deployment tools run inside Docker. The npm release
+# and install checks use Node on the runner for trusted publishing and native
+# package installation; Go and Terraform remain inside their images.
 #
-# Five jobs, in order: is there anything to release, do the announcement's
+# The job sequence asks: is there anything to release, do the announcement's
 # credentials still work, does the whole suite pass, release it, and then check
 # that what was released installs. Each is a gate on the next, so nothing is
 # published by a run whose tests never ran.
@@ -284,6 +283,9 @@ jobs:
     outputs:
       cli-released: ${{ steps.dispat.outputs.cli-released }}
       cli-version: ${{ steps.dispat.outputs.cli-version }}
+      npm-released: ${{ steps.dispat.outputs.npm-released }}
+      npm-version: ${{ steps.dispat.outputs.npm-version }}
+      npm-binary-version: ${{ steps.dispat.outputs.npm-binary-version }}
     # The announcement's secrets live on the job rather than on the steps that
     # use them, because a step's `if` is evaluated before its own `env`, and
     # the ngrok install has to be able to ask whether there is a token before
@@ -362,6 +364,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: sh scripts/install-tools.sh crier
 
+      # npm trusted publishing requires a current Node/npm pair. OIDC is the
+      # normal path; NPM_TOKEN exists only for the first package publication
+      # and is passed to the process rather than a container layer.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.15.0
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.5.1
+      - name: Install the pnpm workspace
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Configure the one-time npm bootstrap token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            umask 077
+            # npm expands this environment reference at runtime; never write the token itself.
+            # shellcheck disable=SC2016
+            printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' > "$RUNNER_TEMP/dispat-npmrc"
+            echo "NPM_CONFIG_USERCONFIG=$RUNNER_TEMP/dispat-npmrc" >> "$GITHUB_ENV"
+          fi
+
       - name: Download the crier that passed ping
         if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || env.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || env.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN != '' || env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != ''
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -413,6 +439,7 @@ jobs:
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # The docker space's login stage authenticates the image pushes.
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -485,3 +512,25 @@ jobs:
             "${{ needs.release.outputs.cli-version }}" \
             "${{ steps.setup.outputs.version }}" \
             "${{ steps.setup.outputs.path }}"
+
+  post-release-npm:
+    name: npm ${{ matrix.os }}
+    needs: release
+    if: ${{ !cancelled() && needs.release.outputs.npm-released == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-14, windows-latest, windows-11-arm]
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.15.0
+      - name: Install the exact npm release globally
+        shell: bash
+        run: |
+          npm install --global "@dispat/cli@${{ needs.release.outputs.npm-version }}"
+          dispat --version | awk -v expected="${{ needs.release.outputs.npm-binary-version }}" '
+            $1 == "dispat" && $2 == expected { found=1 }
+            END { exit found ? 0 : 1 }
+          '

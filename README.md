@@ -13,6 +13,14 @@ Install the binary, run `dispat init` in your Git repository, and edit the gener
 The [setup guide](https://dispat.dev/getting-started/) walks through your first release.
 
 ```sh
+# With npm (Node.js required)
+npm install --global @dispat/cli
+```
+
+The [npm package](./packages/cli) installs the binary for your platform. Its guide covers npm 12 script approval
+and script-disabled repair. Use npm to update or remove this installation.
+
+```sh
 # Linux and macOS
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 ```
@@ -148,6 +156,8 @@ dispat draws on tools and ideas that make complex work easier to inspect, compos
   is an `infra/v*` tag.
 - **[Integration tests](./tests/integration)**: the black-box suite that compiles the real binary and drives it against
   disposable git repositories. Read about setup, running, results, and the test plan.
+- **[npm package](./packages/cli)**: install the CLI globally or in a Node.js project, repair an installation whose
+  scripts were disabled, and read how npm package versions track the native binary.
 - **[docs](./packages/docs)**: the documentation site itself, released by dispat like any other package. Learn how to
   run it locally, why its build is the link checker, and how a version snapshot and a deploy are cut.
 

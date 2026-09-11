@@ -1,8 +1,7 @@
 # Updating dispat
 
-Run `dispat self-update` to upgrade your binary in place. Because dispat ships
-as a single binary with no external dependencies or package databases, nothing
-updates it automatically.
+Run `dispat self-update` to upgrade a standalone binary in place. That installation has no package manager
+to update it automatically. For an npm installation, use [the npm update commands](#npm-installations).
 
 ```console
 $ dispat self-update
@@ -341,3 +340,24 @@ The same engine installs tools that are not dispat. Run
 repository's releases, verified against the size and checksum the release
 published and installed onto a folder on your `PATH`. A runner that already has
 dispat therefore needs no second downloader for the rest of its tools.
+
+## npm installations
+
+npm owns updates when you install `@dispat/cli`. The launcher disables native update notices and rejects mutating
+`self-update` commands, including force and rollback. `dispat self-update --check` and help remain available; the
+check describes native releases, which may differ from the npm distribution's pinned release.
+
+```sh
+# Local dependency:
+npm update @dispat/cli
+# Global installation:
+npm install --global @dispat/cli@latest
+# Force installation or return to a specific npm version:
+npm install --global @dispat/cli@1.10.0 --force
+# Remove the global installation:
+npm uninstall --global @dispat/cli
+```
+
+The npm package version and binary version can have different patches. A package-only patch retains the existing
+binary pin. To reproduce an installation, retain the exact npm version or your project's lockfile. For a local
+rollback, omit `--global` and use `--save-exact --save-dev` when installing the selected version.
