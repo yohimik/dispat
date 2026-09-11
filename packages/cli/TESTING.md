@@ -5,6 +5,13 @@ not change or re-test unrelated Go runtime behavior. Tests use local files,
 processes, HTTP servers, proxies, and a disposable npm registry; they never
 publish to the public registry, create Git tags, or push commits.
 
+## Run the tests
+
+```sh
+pnpm install --ignore-scripts
+pnpm --filter @dispat/cli test
+```
+
 ## Required behavior
 
 | Area | Cases |
@@ -41,7 +48,7 @@ view`, compare registry versions or integrity, reconcile a response, or invoke
 reported on stdout, and an npm error remains a failing process status. The npm
 subprocess has a two-minute deadline and a 2 MiB output bound.
 
-## Found after initial testing
+## Issues found after development
 
 - The first artifact-verifier test packed into a custom output directory while
   the verifier assumed `dist`. `verifyArtifact` now accepts the same output
@@ -56,33 +63,18 @@ subprocess has a two-minute deadline and a 2 MiB output bound.
   That channel can be classified as a warning by the release runner. The entry
   point now writes success to stdout, with a process regression that checks the
   channel. Errors remain on stderr and preserve a nonzero exit.
-
-## Verification
-
-`pnpm --filter @dispat/cli test` passes 54 tests on macOS ARM64. Executable
-package logic reaches 99.82% line coverage and 96.59% branch coverage; release
-scripts reach 100% lines and 99.04% branches. The suite includes real entrypoint
-processes, local HTTP and HTTPS servers, a CONNECT proxy, a disposable npm
-registry, and the stale-pnpm-workspace fixture.
-
-Historical packed-artifact and Linux results remain useful background, but are
-not presented as fresh evidence for this recovery. Windows and native x64
-execution still require their configured CI runners. The parent agent is
-responsible for independent Docker, documentation, release-plan, and final
-workflow verification.
-
-## Recovery constraints
-
-Release run `34584443988` published `@dispat/cli@1.10.0` with the expected
-SHA-512 artifact, then failed before a repository release tag was recorded. A
-public npm version remains reserved after publication even when it is
-unpublished, so recovery uses npm version `1.10.1` and preserves native provider
-version `1.10.0`. No manifest version is hand-edited; the final CCME release
-record supplies the version.
-
-Removal was verified at 2026-09-11 09:57 UTC: the public package document and
-original tarball both returned 404. npm requires waiting 24 hours after complete
-package removal before publishing a new version, so 2026-09-12 09:57 UTC is the
-conservative earliest release time; the exact deletion moment remains
-user-managed. Publication, tag creation, and pushes remain outside these local
-tests.
+- An inherited npm registry environment could redirect the disposable-registry
+  test. The fixture now pins its localhost registry in both the command and
+  environment.
+- A post-publication registry lookup could fail after npm had accepted the
+  tarball, preventing release records from being written. The publisher now
+  returns success after npm succeeds; a process regression covers unavailable
+  registry metadata after an accepted upload.
+- Open: the ordinary anonymous GitHub metadata request returned HTTP 403 during
+  artifact validation. A smoke test using authenticated immutable metadata does
+  not establish that the production anonymous request succeeds.
+- Validation gap: native Windows and x64 artifact execution still requires the
+  configured CI runners. Platform-mapping tests do not verify native execution.
+- Validation gap: production trusted-publisher authorization and provenance
+  require CI verification; the disposable registry cannot establish GitHub OIDC
+  configuration.
