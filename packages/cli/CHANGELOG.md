@@ -1,5 +1,18 @@
 # Changelog
 
+## packages/cli/v1.10.1 (2026-09-11)
+
+### Fixes
+
+- improve npm metadata and standalone package setup ([79cb3d9](https://github.com/yohimik/dispat/commit/79cb3d9ec077b7a6179990c974434d4fd7621903)) (by yohimik, Codex (gpt-6-astra))
+  Add discovery keywords, normalize the homepage URL, and document a single-package release configuration with version and lockfile updates.
+
+### Authors
+
+- yohimik
+- Codex (gpt-6-astra)
+
+
 ## packages/cli/v1.10.0 (2026-09-11)
 
 ### Fixes
