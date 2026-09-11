@@ -214,6 +214,13 @@ For binaries, invoke the newly built artifact by its explicit path. Check its ve
 
 Publish the same artifact that passed. If signing, packing, or another transform changes the delivered artifact, validate the result of that transform. A rebuild inside `publish` breaks the evidence from an earlier smoke test.
 
+Finish artifact identity, version, digest, install, destination, and channel checks before the publish stage. The
+publication command must be the final external action in the publish stage. Do not follow a successful upload with a
+registry read, integrity or version lookup, status gate, or channel mutation: a failure there converts an accepted
+immutable upload into a failed package leg before dispat can write its native records. After the publication command
+succeeds, return success immediately so dispat can write its native release records. Forward the command's stdout and
+stderr at their proper severity, and propagate a nonzero publication exit.
+
 Recurring findings from the ecosystem review suggest these integration checks. Follow the references for evidence and case-specific limits.
 
 | Finding | Integration check | References |
@@ -294,6 +301,27 @@ dispat uses Conventional Commits: Monorepo Extension (CCME). Read the repository
 | `feat(api)%beta: introduce an endpoint` | Put the addressed package on beta. |
 
 Explicit scopes name configured packages. With no scope, ownership can derive from changed files. Propagation and channel syntax change release intent; do not add them as decorative prose. Accurate scopes matter for both releases and `--since` script sweeps.
+
+### Confirm release intent before authoring commits
+
+Confirm the expected packages, versions, channels, and consumer propagation with the operator before authoring final release intent.
+Include documentation and guide patches in that confirmation when they are part of the requested release. An explicit
+operator selection already given for the task is confirmation; do not repeatedly ask for it. Ask for clarification
+when the scope is ambiguous or a read-only plan selects unexpected packages, versions, channels, consumers, or
+major/minor version-group changes. An inspection or implementation request does not authorize publication unless the
+operator also authorized the release.
+
+Compose distinct release records as distinct CCME units using the package scopes and propagation described below.
+Validate the proposed message with `dispat diagnostics`, create the commit through the repository's authoring path,
+then run a full-workspace `dispat status` and the exact CI selection with the same root, configuration, environment,
+and credentials policy the release will use. Review every diagnostic: status exit `0` does not prove strict release
+policy or publication will succeed. Confirm that the complete package set, exact versions, channels, consumers, and
+version-group side effects match the operator-approved intent.
+
+If the plan differs, correct the release intent with supported CCME corrections and inspect it again. Do not edit
+manifests, create or move tags, narrow CI selection, or change release configuration merely to hide the mismatch.
+Keep preparatory commits as non-releasing records when the repository requires one final CCME release commit. Ensure
+commit CI selects every module touched by the pushed commit range, including release-plan integration tests.
 
 ### Write commits for the task
 
@@ -417,9 +445,14 @@ Planning chooses versions before package work starts. Native `autoVersion` recon
 | `onFail`, `onSkip`, and post-run/commit/push hooks | Warn-only observers. |
 | Native records and pushes | Critical after-publish work; failure makes the command fail while preserving the published state. |
 
-Independent graph branches can continue after a package fails. Consumers may be skipped. A hook named `before...` is not necessarily gating: commit, push, and announce observers occur after publication. Put required checks before or in `publish`, preferably earlier when possible.
+Independent graph branches can continue after a package fails. Consumers may be skipped. A hook named `before...` is not necessarily gating: commit, push, and announce observers occur after publication. Put required artifact and policy checks before `publish` so the publish stage contains only its authorized external action.
 
-Publish scripts must be safe to retry for the same package, version, and artifact. Return success for an existing version only after verifying that it is the exact intended artifact. Never turn every "already exists" response into success: publication may have completed remotely just before a local error or lost response.
+Choose the retry policy for each destination before releasing. When a publish response is lost or native records are
+missing, reconcile the exact package, version, artifact digest, source revision, and destination outside the publish
+script before another workflow run. If the destination does not permit an accepted version to be reused, recover
+forward with a new version when the original upload has no dispat record. Verification that remote bytes match is
+evidence for the operator's recovery decision. It does not authorize a manual release tag, channel mutation, local
+publication, or any bypass of the reviewed CI workflow.
 
 After `publish` succeeds, failure to write a tag, changelog, GitHub record, release commit, or push does not make the package unpublished. Treat the result as published with incomplete recording. See [release steps](../../packages/docs/docs/reference/releasing/steps.md) and [recovery](../../packages/docs/docs/reference/releasing/recovery.md).
 
