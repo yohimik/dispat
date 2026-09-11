@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import assert from 'node:assert/strict'
 import { PACKAGE_ROOT, isMain } from '#root/lib/root.js'
 import { verifyArtifact } from '#root/scripts/pack.js'
+import { binaryName } from '#root/lib/platform.js'
 
 const execute = promisify(execFile)
 async function run(file: string, args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}) {
@@ -26,9 +28,30 @@ export async function smoke(): Promise<void> {
   const work = await mkdtemp(path.join(tmpdir(), 'dispat npm artifact '))
   try {
     const prefix = path.join(work, 'global prefix')
-    await run('npm', ['install', '-g', '--prefix', prefix, '--ignore-scripts=false', tarball], work, { npm_config_allow_scripts: `file:${tarball}` })
+    const npmMajor = Number((await run('npm', ['--version'], work)).stdout.trim().split('.')[0])
+    const blockedInstallArgs = ['install', '-g', '--prefix', prefix]
+    // npm 12 provides the real default-denial regression. Older supported npm
+    // versions use the equivalent explicit switch so the artifact gate remains portable.
+    if (npmMajor < 12) blockedInstallArgs.push('--ignore-scripts')
+    blockedInstallArgs.push(tarball)
+    await run('npm', blockedInstallArgs, work)
     const globalBin = path.join(prefix, process.platform === 'win32' ? 'dispat.cmd' : 'bin/dispat')
-    expectVersion((await run(globalBin, ['--version'], work)).stdout, release.version, 'global install')
+    const installedPackage = path.join(prefix, process.platform === 'win32' ? 'node_modules/@dispat/bin' : 'lib/node_modules/@dispat/bin')
+    await assertMissing(path.join(installedPackage, binaryName()))
+    await assert.rejects(run(globalBin, ['--version'], work), error => {
+      const failure = error as { stderr: string }
+      if (!failure.stderr.includes(path.join(installedPackage, 'build/bin/postinstall.js'))) throw error
+      return true
+    })
+    await run(process.execPath, [path.join(installedPackage, 'build/bin/postinstall.js')], work)
+    expectVersion((await run(globalBin, ['--version'], work)).stdout, release.version, 'repaired global install')
+
+    const approvedPrefix = path.join(work, 'approved global prefix')
+    await run('npm', ['install', '-g', '--prefix', approvedPrefix, '--ignore-scripts=false', tarball], work, {
+      npm_config_allow_scripts: `file:${tarball}`
+    })
+    expectVersion((await run(path.join(approvedPrefix, process.platform === 'win32' ? 'dispat.cmd' : 'bin/dispat'), ['--version'], work)).stdout,
+      release.version, 'approved global install')
 
     const consumer = path.join(work, 'local consumer')
     await mkdir(consumer)

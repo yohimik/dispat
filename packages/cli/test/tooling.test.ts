@@ -134,14 +134,18 @@ test('postinstall is silent for a valid existing binary and diagnoses failures',
   }
 })
 
-test('barrels expose named side-effect-free APIs and bin diagnoses missing binary', () => {
+test('barrels expose named side-effect-free APIs and bin diagnoses missing binary', async t => {
   assert.equal(typeof publicApi.install, 'function')
   assert.equal(typeof publicApi.launch, 'function')
   assert.equal(typeof releaseApi.publish, 'function')
-  const result = spawnSync(process.execPath, [path.resolve('build/bin/dispat.js'), 'status'], { encoding:'utf8' })
+  const fixture = await temporary(t)
+  await fs.cp(path.resolve('build'), path.join(fixture, 'build'), { recursive:true })
+  await fs.cp(path.resolve('package.json'), path.join(fixture, 'package.json'))
+  const entrypoint = path.join(fixture, 'build/bin/dispat.js')
+  const result = spawnSync(process.execPath, [entrypoint, 'status'], { encoding:'utf8' })
   assert.equal(result.status, 1)
   assert.match(result.stderr, /could not launch/)
-  const blocked = spawnSync(process.execPath, [path.resolve('build/bin/dispat.js'), 'self-update'], { encoding:'utf8' })
+  const blocked = spawnSync(process.execPath, [entrypoint, 'self-update'], { encoding:'utf8' })
   assert.equal(blocked.status, 2)
 })
 

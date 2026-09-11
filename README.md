@@ -14,11 +14,16 @@ The [setup guide](https://dispat.dev/getting-started/) walks through your first 
 
 ```sh
 # With npm (Node.js required)
-npm install --global @dispat/bin
+npm install --global @dispat/bin --allow-scripts=@dispat/bin
 ```
 
-The [npm package](./packages/cli) installs the binary for your platform. Its guide covers npm 12 script approval
-and script-disabled repair. Use npm to update or remove this installation.
+The [npm package](./packages/cli) installs the binary for your platform. The flag above approves its installer because
+npm 12 blocks dependency install scripts by default. Coding agents should also use the version-matched
+[agent work guide](./specs/agent-guide/README.md).
+
+If an earlier install skipped the script, repair it from any directory with
+`npm explore --global @dispat/bin -- node build/bin/postinstall.js`. A failed `dispat` launch also prints a repair
+command for the exact installed path. Use npm to update or remove this installation.
 
 ```sh
 # Linux and macOS

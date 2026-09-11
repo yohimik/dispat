@@ -80,8 +80,20 @@ test('missing binary reports repair instructions without trying a download', asy
     const failure = error as { code: number; stdout: string; stderr: string }
     assert.equal(failure.code, 1)
     assert.equal(failure.stdout, '')
-    assert.match(failure.stderr, /repair a local install/)
-    assert.match(failure.stderr, /npm root -g/)
+    assert.match(failure.stderr, /install script may have been blocked/)
+    assert.match(failure.stderr, new RegExp(join(root, 'build/bin/postinstall.js').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.doesNotMatch(failure.stderr, /npm root -g/)
+    return true
+  })
+})
+
+test('npm-managed global update advice retains npm 12 script approval', async t => {
+  const root = await fixture(t)
+  await assert.rejects(execute(process.execPath, [join(root, 'build/bin/dispat.js'), 'self-update']), (error: unknown) => {
+    const failure = error as { code:number; stderr:string }
+    assert.equal(failure.code, 2)
+    assert.match(failure.stderr, /@latest --allow-scripts=@dispat\/bin/)
+    assert.match(failure.stderr, /@1\.10\.0 --allow-scripts=@dispat\/bin/)
     return true
   })
 })

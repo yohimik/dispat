@@ -2,7 +2,7 @@
   "name": "@dispat/bin",
   "version": "1.10.1",
   "description": "The dispat release orchestrator CLI",
-  "keywords": ["cli", "release", "release-automation", "versioning", "monorepo", "polyrepo", "conventional-commits", "changelog", "ci-cd"],
+  "keywords": ["cli", "release", "release-automation", "release-orchestration", "orchestrator", "orchestration", "saga", "workflow", "dependency-graph", "versioning", "monorepo", "polyrepo", "conventional-commits", "changelog", "ci-cd"],
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/yohimik/dispat.git", "directory": "packages/cli" },
   "homepage": "https://dispat.dev",

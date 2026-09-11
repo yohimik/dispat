@@ -326,7 +326,7 @@ See [From one package to many](./examples/one-to-many.md) to add deliverables wh
 Node projects can install the native CLI through npm:
 
 ```sh
-npm install --global @dispat/bin
+npm install --global @dispat/bin --allow-scripts=@dispat/bin
 dispat --version
 ```
 
@@ -349,6 +349,11 @@ npm explore @dispat/bin -- node build/bin/postinstall.js
 # For a global install:
 npm explore --global @dispat/bin -- node build/bin/postinstall.js
 ```
+
+The global form works from any directory. Do not run the local
+`node_modules/@dispat/bin/...` path after a global install; it resolves under the current directory. A failed
+`dispat` launch prints a repair command with the exact installed package path, including safe quoting for spaces and
+shell metacharacters.
 
 With pnpm, approve this package through [its script policy](https://pnpm.io/cli/approve-builds), or run
 `node node_modules/@dispat/bin/build/bin/postinstall.js` explicitly. Set `DISPAT_NPM_DEBUG=1` when diagnosing an install;

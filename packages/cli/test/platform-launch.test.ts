@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { platformKey, binaryName } from '#root/lib/platform.js'
-import { commandOf, booleanFlag, launch } from '#root/lib/launch.js'
+import { commandOf, booleanFlag, launch, repairCommand, repairInstruction, shellQuote } from '#root/lib/launch.js'
 
 function fakeChild(): ChildProcess {
   return Object.assign(new EventEmitter(), { killed: false, kill() { this.killed = true; return true } }) as unknown as ChildProcess
@@ -67,4 +67,15 @@ test('launcher reports synchronous and asynchronous spawn failures', () => {
   launch(['status'], { spawn: () => child }); child.emit('error', new Error('denied'))
   assert.equal(process.exitCode, 1); process.exitCode = 0
   assert.equal(launch(['status'], { spawn() { throw 'plain spawn failure' } }), 1)
+})
+
+test('repair command quotes the exact installation path for the active shell', () => {
+  assert.equal(shellQuote("/a path/it's/$HOME/$(nope)", 'linux'), `'/a path/it'"'"'s/$HOME/$(nope)'`)
+  assert.equal(shellQuote("C:\\a path\\it's\\%TEMP%", 'win32'), `'C:\\a path\\it''s\\%TEMP%'`)
+  const command = repairCommand("/prefix with spaces/lib/node_modules/@dispat/bin", 'linux')
+  assert.match(command, /build\/bin\/postinstall\.js'$/)
+  assert.match(command, /^'/)
+  assert.doesNotMatch(command, /npm root/)
+  assert.match(repairCommand("C:\\prefix with %TEMP%\\@dispat\\bin", 'win32'), /^& '/)
+  assert.match(repairInstruction("C:\\prefix\\@dispat\\bin", 'win32'), /in PowerShell with:/)
 })

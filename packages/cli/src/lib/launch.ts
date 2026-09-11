@@ -20,6 +20,21 @@ interface LaunchOptions {
   spawn?: (file: string, args: readonly string[], options: SpawnOptions) => ChildProcess
 }
 
+function shellQuote(value: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') return `'${value.replaceAll("'", "''")}'`
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+function repairCommand(packageDir: string, platform: NodeJS.Platform = process.platform): string {
+  const command = `${shellQuote(process.execPath, platform)} ${shellQuote(path.join(packageDir, 'build/bin/postinstall.js'), platform)}`
+  return platform === 'win32' ? `& ${command}` : command
+}
+
+function repairInstruction(packageDir: string, platform: NodeJS.Platform = process.platform, verb = 'repair'): string {
+  const shell = platform === 'win32' ? ' in PowerShell' : ''
+  return `${verb} this exact installation${shell} with:\n  ${repairCommand(packageDir, platform)}`
+}
+
 function invocation(args: readonly string[]): Invocation {
   let literal = false
   let command = ''
@@ -63,7 +78,7 @@ function booleanFlag(args: readonly string[], name: string): boolean { return in
 function launch(args: string[] = process.argv.slice(2), options: LaunchOptions = {}): ChildProcess | number {
   const parsed = invocation(args)
   if (parsed.command === 'self-update' && !parsed.booleans.get('--help') && !parsed.booleans.get('--check') && !parsed.booleans.get('--version')) {
-    process.stderr.write('dispat: self-update is managed by npm. Run `npm update @dispat/bin` locally or `npm install -g @dispat/bin@latest` globally. To force or roll back, install an explicit version such as `npm install -g @dispat/bin@1.10.0`.\n')
+    process.stderr.write('dispat: self-update is managed by npm. Run `npm update @dispat/bin` locally or `npm install -g @dispat/bin@latest --allow-scripts=@dispat/bin` globally. To force or roll back, install an explicit version such as `npm install -g @dispat/bin@1.10.0 --allow-scripts=@dispat/bin`.\n')
     return 2
   }
   const packageDir = options.packageDir || PACKAGE_ROOT
@@ -73,7 +88,7 @@ function launch(args: string[] = process.argv.slice(2), options: LaunchOptions =
     child = (options.spawn || spawn)(binary, args, {
       cwd: process.cwd(), env: { ...process.env, DISPAT_UPDATE_CHECK: '0' }, stdio: 'inherit', windowsHide: false
     })
-  } catch (error) { return missing(binary, asError(error)) }
+  } catch (error) { return missing(binary, asError(error), packageDir, options.platform) }
   const handlers = new Map<NodeJS.Signals, () => void>()
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as NodeJS.Signals[]) {
     const handler = () => { if (!child.killed) child.kill(signal) }
@@ -81,7 +96,7 @@ function launch(args: string[] = process.argv.slice(2), options: LaunchOptions =
     process.once(signal, handler)
   }
   const cleanup = () => { for (const [signal, handler] of handlers) process.removeListener(signal, handler) }
-  child.on('error', (error: Error) => { cleanup(); process.exitCode = missing(binary, error) })
+  child.on('error', (error: Error) => { cleanup(); process.exitCode = missing(binary, error, packageDir, options.platform) })
   child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
     cleanup()
     if (signal) {
@@ -91,9 +106,9 @@ function launch(args: string[] = process.argv.slice(2), options: LaunchOptions =
   return child
 }
 
-function missing(binary: string, error: Error): number {
+function missing(binary: string, error: Error, packageDir: string, platform?: NodeJS.Platform): number {
   process.stderr.write(`dispat: could not launch ${binary}: ${error.message}\n`)
-  process.stderr.write('dispat: repair a local install with `node node_modules/@dispat/bin/build/bin/postinstall.js`; for a global install run the same file under the directory printed by `npm root -g`.\n')
+  process.stderr.write(`dispat: the install script may have been blocked; ${repairInstruction(packageDir, platform)}\n`)
   return 1
 }
 
@@ -101,4 +116,4 @@ function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value))
 }
 
-export { launch, invocation, commandOf, booleanFlag, VALUE_FLAGS }
+export { launch, invocation, commandOf, booleanFlag, repairCommand, repairInstruction, shellQuote, VALUE_FLAGS }

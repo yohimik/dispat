@@ -351,9 +351,9 @@ check describes native releases, which may differ from the npm distribution's pi
 # Local dependency:
 npm update @dispat/bin
 # Global installation:
-npm install --global @dispat/bin@latest
+npm install --global @dispat/bin@latest --allow-scripts=@dispat/bin
 # Force installation or return to a specific npm version:
-npm install --global @dispat/bin@1.10.0 --force
+npm install --global @dispat/bin@1.10.0 --force --allow-scripts=@dispat/bin
 # Remove the global installation:
 npm uninstall --global @dispat/bin
 ```

@@ -4,14 +4,19 @@
 
 `@dispat/bin` installs the native Go executable and exposes the `dispat` command. Use it with a single Node application, an npm, pnpm, or Yarn monorepo, or several repositories joined through a control repository. Your existing package manager, build tools, and deployment commands remain part of the workflow.
 
+Its saga-style release orchestration records successful package publications so a retry can resume unfinished work.
+It does not attempt an automatic rollback across registries and deployment systems.
+
 [Documentation](https://dispat.dev/) · [GitHub](https://github.com/yohimik/dispat) · [Discord](https://discord.gg/83PwVSCCmk)
+
+Coding agents should follow the version-matched [agent work guide](https://github.com/yohimik/dispat/blob/main/specs/agent-guide/README.md) for inspection, testing, release, and recovery.
 
 ## Install
 
 For a global command:
 
 ```sh
-npm install --global @dispat/bin
+npm install --global @dispat/bin --allow-scripts=@dispat/bin
 dispat --version
 ```
 
@@ -42,6 +47,12 @@ npm explore @dispat/bin -- node build/bin/postinstall.js
 # For a global installation:
 npm explore --global @dispat/bin -- node build/bin/postinstall.js
 ```
+
+Run the global form from any directory. Do not prefix it with a relative
+`node_modules` path: global packages live under npm's configured prefix, not
+the current directory. A failed `dispat` launch also prints a command containing
+the exact installed package path, quoted so spaces and shell metacharacters are
+passed literally.
 
 With pnpm, approve this package through [pnpm's script policy](https://pnpm.io/cli/approve-builds), or run `node node_modules/@dispat/bin/build/bin/postinstall.js` explicitly. That explicit path also works with Yarn's `node-modules` linker. Ordinary commands never download a missing binary.
 
@@ -330,9 +341,9 @@ If a publication fails after an external upload succeeded, inspect that exact de
 
 ## Update or remove dispat
 
-Update a local npm dependency with `npm update @dispat/bin`, or a global install with `npm install -g @dispat/bin@latest`. For pnpm or Yarn, update the root development dependency with that package manager and commit the updated lockfile.
+Update a local npm dependency with `npm update @dispat/bin`, or a global install with `npm install -g @dispat/bin@latest --allow-scripts=@dispat/bin`. For pnpm or Yarn, update the root development dependency with that package manager and commit the updated lockfile.
 
-To force installation or roll back, install the required npm package version explicitly, for example `npm install -g @dispat/bin@1.10.0 --force`. Retain any required installation-script approval when updating. The launcher rejects mutating `dispat self-update` commands; `self-update --check` and help remain available. Native update notifications are disabled for npm-managed execution.
+To force installation or roll back, install the required npm package version explicitly, for example `npm install -g @dispat/bin@1.10.0 --force --allow-scripts=@dispat/bin`. The launcher rejects mutating `dispat self-update` commands; `self-update --check` and help remain available. Native update notifications are disabled for npm-managed execution.
 
 Uninstall globally with `npm uninstall -g @dispat/bin`, or remove the local development dependency with your package manager.
 
