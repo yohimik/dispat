@@ -34,7 +34,6 @@ const sidebars: SidebarsConfig = {
       link: {type: 'doc', id: 'examples/README'},
       items: [
         {type: 'doc', id: 'examples/one-to-many', label: 'From one package to many'},
-        {type: 'doc', id: 'examples/open-source', label: 'Open source integration checks'},
         {type: 'doc', id: 'examples/npm', label: 'An npm monorepo'},
         {type: 'doc', id: 'examples/release-integration', label: 'Release integration findings'},
         {type: 'doc', id: 'examples/document-artifacts', label: 'Skills, specifications and TeX'},
