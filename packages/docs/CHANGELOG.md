@@ -1,5 +1,16 @@
 # Changelog
 
+## packages/docs/v1.10.8 (2026-09-11)
+
+### Fixes
+
+- add landing page download counter ([04f1bb4](https://github.com/yohimik/dispat/commit/04f1bb4648b7a9bbab304e5952374b7bb051c572)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.7 (2026-09-10)
 
 ### Fixes
