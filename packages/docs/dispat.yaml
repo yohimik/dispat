@@ -5,6 +5,11 @@ versionGroup: cli
 dependencies:
   - provider: dispat
     keep: true
+  # The site links and examples expose the npm CLI as a release channel. Wait
+  # for that package's publication before building or deploying this record;
+  # a failed npm publish must leave the previous site in place.
+  - provider: cli
+    keep: true
   # The site's experiments page is measured against the published alpine
   # image, so the image's publish is an input to this package's build. The
   # docker space sets isBuildWaitingPublish, which is what makes this edge
@@ -108,7 +113,9 @@ scripts:
     commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
     docker buildx build --file ../../Dockerfile.gotest --target measured-export \
       --build-arg COMMIT="$commit" \
-      $(sh ../../scripts/buildx-cache.sh measured) \
+      $(sh ../../scripts/buildx-cache.sh measured \
+        gotest-ccme gotest-config gotest-manifest gotest-models \
+        gotest-scanner gotest-writer gotest-tools gotest-dispat gotest-integration) \
       --output type=local,dest=data ../..
     echo "REPORT_BENCHMARKS=$(tr '\n' ' ' < data/benchmarked.txt)" >> "$DISPAT_OUTPUT"
     echo "REPORT_COMMIT=$commit" >> "$DISPAT_OUTPUT"

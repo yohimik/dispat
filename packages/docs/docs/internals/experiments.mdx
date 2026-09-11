@@ -95,9 +95,10 @@ expectation's own output, the registry's logs, the git calls the tool made, and 
 fixture, the observer and the fault proxy are documented in
 [`tests/experiments/README.md`](https://github.com/yohimik/dispat/blob/main/tests/experiments/README.md).
 
-Every release reruns every cell. The docs package's `beforeBuild` hook runs the campaign against the image the run has
-just published, and this page is built from what it recorded, which is why the version in the sentence above is always
-the release that published the page. The
+The release workflow carries forward a completed campaign when the published native image and harness are identical.
+The docs package's `beforeBuild` hook checks the image id, exact cell list, every verdict and observation stream, and
+every dispat verdict before reuse. A new binary or protocol, or a missing, corrupt, partial or failed record, reruns
+all twelve cells. This page is built from the validated records. The
 [Experiments workflow](https://github.com/yohimik/dispat/actions/workflows/experiments.yml) is the same twelve cells on
 demand, for any released version.
 

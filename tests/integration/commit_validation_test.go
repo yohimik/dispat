@@ -343,8 +343,11 @@ func TestCommitValidationCancellationStopsEditorProcessTree(t *testing.T) {
 	r.WriteFile("editor.sh", `#!/bin/sh
 printf '%s\n' "$$" > editor.pid
 trap 'exit 143' TERM INT
-sleep 30 &
+# A child can defer or ignore graceful termination. It writes its own ready
+# marker after installing the trap so cancellation cannot race its setup.
+/bin/sh -c 'trap "" TERM INT; printf ready > editor-child-ready; sleep 30' &
 printf '%s\n' "$!" > editor-child.pid
+while [ ! -s editor-child-ready ]; do sleep 0.01; done
 wait
 `)
 	require.NoError(t, os.Chmod(r.Path("editor.sh"), 0o700))
@@ -354,8 +357,8 @@ mkdir private-tmp
 TMPDIR="$PWD/private-tmp" GIT_EDITOR=./editor.sh dispat commit --edit -m invalid &
 dispat_pid=$!
 i=0
-while { [ ! -s editor.pid ] || [ ! -s editor-child.pid ]; } && [ "$i" -lt 100 ]; do sleep 0.02; i=$((i+1)); done
-[ -s editor.pid ] && [ -s editor-child.pid ] || exit 97
+while { [ ! -s editor.pid ] || [ ! -s editor-child.pid ] || [ ! -s editor-child-ready ]; } && [ "$i" -lt 100 ]; do sleep 0.02; i=$((i+1)); done
+[ -s editor.pid ] && [ -s editor-child.pid ] && [ -s editor-child-ready ] || exit 97
 kill -TERM "$dispat_pid"
 wait "$dispat_pid" >/dev/null 2>&1
 editor_pid=$(cat editor.pid)

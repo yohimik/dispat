@@ -4,10 +4,10 @@
 # (say, to type=registry when the repository's GitHub cache budget thrashes)
 # is an edit here and nowhere else.
 #
-# Takes one argument, the scope, so each build target keeps its own cache
-# entry and a fat target cannot evict a cheap one. Outside Actions it prints
-# nothing: a local build uses the builder's own cache, which is faster than
-# any remote backend and needs no credentials.
+# The first argument is the scope to read and update. Further arguments are
+# read-only scopes: aggregate targets use them to reuse the package gates'
+# layers without folding every package into one cache entry. Outside Actions
+# only TEST_COMMIT is printed; a local build uses the builder's own cache.
 #
 # The gha backend authenticates through ACTIONS_RUNTIME_TOKEN and
 # ACTIONS_RESULTS_URL, which the runner hands only to action steps; the
@@ -15,7 +15,12 @@
 # before any dispat command runs.
 set -eu
 scope=$1
+shift
 commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
 printf '%s' "--build-arg TEST_COMMIT=$commit"
 [ "${GITHUB_ACTIONS:-}" = "true" ] || exit 0
-printf '%s' " --cache-from type=gha,scope=$scope --cache-to type=gha,scope=$scope,mode=max"
+printf '%s' " --cache-from type=gha,scope=$scope"
+for import_scope in "$@"; do
+  printf '%s' " --cache-from type=gha,scope=$import_scope"
+done
+printf '%s' " --cache-to type=gha,scope=$scope,mode=max"

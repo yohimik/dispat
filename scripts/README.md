@@ -18,13 +18,14 @@ exported by CI.
 
 | Script                                     | Called from                                            | Reads                                   | Produces |
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
-| [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its scope argument    | The `--cache-from`/`--cache-to` flags for that build's cache scope, or nothing outside Actions. |
+| [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its write scope and optional read-only scopes | `TEST_COMMIT`, plus the Actions cache flags in CI. Aggregate builds can import package scopes while updating only their own. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
 | [`install-tools.sh`](./install-tools.sh)   | the release job; the ping and replay jobs, the `tiny-toolchain` stage of [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), the `tinygo-spike-fork` stage of [`Dockerfile.tinygo`](../Dockerfile.tinygo) and `tinygo-spike-darwin.sh` | `GITHUB_TOKEN`, `DISPAT_BIN_DIR`; optionally `[all\|crier\|tinygo] [destination]` | Installs the newest Aqua with dispat, then the repository-recorded crier and TinyGo fork through `.aqua/aqua.yaml`. The destination receives `aqua` and the selected tools: a real `crier` binary and/or a link to the complete TinyGo tree at `tinygo`. |
 | [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike — build, run, net and self-update probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`, with `darwin-selfupdate.log` carrying the real-TLS update matrix and the platform verifier's answer about `SSL_CERT_FILE`. |
 
-Every gate and stage of this repository runs inside Docker, so a CI job needs Docker, git and dispat itself — no Go,
-Node or Terraform on the runner. The Go gates (vet, tests, gofmt, the coverage badge, the test report, `go mod tidy`)
+Repository gates run inside Docker, so the commit CI jobs need Docker, git and dispat itself. The release job also
+installs Node and pnpm to compile, pack and publish the npm distribution through npm trusted publishing. Terraform
+and the native Go builds remain inside Docker. The Go gates (vet, tests, gofmt, the coverage badge, the test report, `go mod tidy`)
 are targets of [`Dockerfile.gotest`](../Dockerfile.gotest) at the repository root; each dispat script drives one
 `docker buildx build` and reads results back as exported files. The CLI produces
 six release binaries from [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), where the `build` script in

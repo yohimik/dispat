@@ -17,6 +17,10 @@ almost any other kind: a benchmark number written by hand is a number about a ma
 about a machine that was busy doing something else. `-benchtime` is left at Go's own default, because a measurement
 taken over fewer iterations than the tool chose is a measurement nobody can compare.
 
+The benchmark stages are cached by the module source, workspace providers and reporting tool they contain. A docs-only
+commit reuses the identical stream; a source, dependency or harness change runs the benchmark again. The report names
+the publishing commit while retaining the runner and timestamp recorded by the actual benchmark process.
+
 ## By module
 
 <BenchmarkTable />

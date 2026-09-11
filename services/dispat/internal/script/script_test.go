@@ -3,7 +3,9 @@ package script
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -77,6 +79,43 @@ func TestRunCancelKillsChildren(t *testing.T) {
 	assert.Error(t, err, "a killed script is an error; the caller classifies it via ctx")
 	assert.Less(t, time.Since(start), 3*time.Second,
 		"the group signal must end the child promptly; only the shell dying would leave the pipes held")
+}
+
+func TestShellRunnerCancellationAllowsTermCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process-group TERM cleanup is a unix mechanism")
+	}
+	requireShell(t, "/bin/sh")
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "ready")
+	cleaned := filepath.Join(dir, "cleaned")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	readySeen := make(chan bool)
+	go func() {
+		for {
+			if _, err := os.Stat(ready); err == nil {
+				cancel()
+				readySeen <- true
+				return
+			}
+			select {
+			case <-ctx.Done():
+				readySeen <- false
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}()
+	var output bytes.Buffer
+	err := (&ShellRunner{}).Run(ctx, dir,
+		"trap 'printf cleaned > cleaned; exit 0' TERM; printf ready > ready; while :; do sleep 1; done",
+		nil, &output, &output)
+	require.True(t, <-readySeen, "script never reported readiness")
+	require.Error(t, err)
+	contents, readErr := os.ReadFile(cleaned)
+	require.NoError(t, readErr)
+	assert.Equal(t, "cleaned", string(contents))
 }
 
 func TestRunBackgroundChildDoesNotBlockWait(t *testing.T) {

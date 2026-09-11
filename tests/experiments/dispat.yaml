@@ -59,10 +59,11 @@ scripts:
         echo "midrelease $tool $scenario"
       done
     done
-  # Every cell of the campaign, four at a time. The folder is wiped
-  # through the image rather than by the host's rm, because the container
-  # writes it as root and a host rm of root-owned files needs a password
-  # nobody has in CI.
+  # Every cell of the campaign, four at a time. A completed campaign can be
+  # reused when it names this exact native image (which includes the released
+  # dispat binary, pinned tools and harness) and every expected record still
+  # parses. Failed, partial and corrupt campaigns have no valid manifest and
+  # are wiped through the image before being reproduced.
   #
   # xargs runs each cell and remembers whether any exited non-zero (123),
   # so a release fails on a dispat cell whose expectations did not hold
@@ -71,14 +72,30 @@ scripts:
     set -eu
     ROOT=$(git rev-parse --show-toplevel)
     RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+    . "$ROOT/tests/experiments/lib/cache.sh"
     dispat exec build --for pkg:experiments --in pkg:experiments
     mkdir -p "$RESULTS"
+    image=$(docker image inspect --format '{{.Id}}' dispat-experiments)
+    expected=$(dispat exec cells --for pkg:experiments --in pkg:experiments | awk '
+      NF == 2 { print $1 "-" $2 }
+      NF == 3 { print $1 "-" $3 "-" $2 }
+    ' | sort)
+    if experiment_cache_valid "$RESULTS" "$image" "$expected"; then
+      echo "reusing twelve complete cells from the identical experiments image $image"
+      exit 0
+    fi
     docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
       /results -mindepth 1 -delete
     echo "running twelve cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
+    rc=0
     dispat exec cells --for pkg:experiments --in pkg:experiments \
     | EXPERIMENTS_RESULTS="$RESULTS" xargs -P "${EXPERIMENTS_JOBS:-4}" -L 1 sh -c \
-        'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments'
+        'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments' \
+      || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      experiment_cache_write "$RESULTS" "$image" "$expected"
+    fi
+    exit "$rc"
   # The table over whatever the cells recorded, through the same verb the
   # site's report reads them with, so a job summary and the published page
   # are one renderer over one set of records.

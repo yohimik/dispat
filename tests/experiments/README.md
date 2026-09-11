@@ -109,10 +109,12 @@ dispat exec cells --for pkg:experiments --in pkg:experiments
 unset. `EXPERIMENTS_RESULTS` moves the results folder, `EXPERIMENTS_JOBS` sets how many cells run at once (four), and
 `EXPERIMENTS_EXPECT=0` records a dispat cell without gating on its verdict.
 
-Every release reruns every cell: the docs package's `beforeBuild` hook runs them against the image the run has just
-published, and the site page is built from what they recorded. The `Experiments` workflow is the by-hand run, for any
-released version, on demand; its matrix is `cells` read at the start of the run, so the two runs are the same twelve
-cells and a cell added to `cells` is a cell both of them measure.
+The release workflow restores the newest records for the current harness. The docs package's `beforeBuild` hook
+reuses them only when the experiments image id is identical, the manifest names the exact current cell list, every
+verdict and observation stream parses, and every dispat verdict passed. The image id covers the published native
+binary, pinned comparison tools and harness. A version or protocol change therefore reruns all twelve cells, as does
+any missing, corrupt, partial or failed record. The `Experiments` workflow remains the by-hand run for any released
+version; its matrix is `cells` read at the start of the run.
 
 Underneath, one cell is one container:
 

@@ -7,6 +7,7 @@
 # into a folder the line above excluded, so services/ is let back in before its
 # children are filtered.
 *
+!Dockerfile.gotest
 !go.work
 !go.work.sum
 !pkg
@@ -42,6 +43,7 @@ packages/cli/*
 !packages/cli/dispat.yaml
 !packages/docs
 packages/docs/*
+!packages/docs/dispat.yaml
 !packages/docs/docs
 !packages/docs/demo
 packages/docs/demo/illustration/node_modules

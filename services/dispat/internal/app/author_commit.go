@@ -238,7 +238,7 @@ func (a *App) runAuthorGit(ctx context.Context, args []string, stdout, stderr io
 		cmd.Env = append(cmd.Env, "GIT_EDITOR="+shellQuote(filepath.ToSlash(filepath.Join(filepath.Dir(hooks), "editor"))))
 	}
 	cmd.WaitDelay = 10 * time.Second
-	script.SetProcessGroup(cmd)
+	script.SetProcessGroupForce(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}

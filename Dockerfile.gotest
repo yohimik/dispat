@@ -24,7 +24,6 @@ ARG GO_VERSION=1.26
 # making folders read-only, and root does not honour file permissions, so a
 # root run turns those tests' expected errors into successes that fail them.
 FROM golang:${GO_VERSION} AS base
-ARG TEST_COMMIT
 RUN useradd --create-home --uid 1001 gopher
 WORKDIR /src
 RUN chown gopher:gopher /src
@@ -36,7 +35,6 @@ ENV GOPRIVATE=github.com/yohimik/dispat
 ENV DISPAT_UPDATE_CHECK=false
 ENV GOPATH=/home/gopher/go
 ENV GOCACHE=/home/gopher/.cache/go-build
-ENV TESTREPORT_COMMIT=${TEST_COMMIT}
 USER gopher
 
 # The dependency layer every workspace gate shares: the manifests alone,
@@ -112,6 +110,7 @@ COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md ./packag
 FROM src-dispat AS src-integration
 COPY --chown=gopher:gopher tests/integration ./tests/integration
 COPY --chown=gopher:gopher packages/cli/dispat.yaml ./packages/cli/dispat.yaml
+COPY --chown=gopher:gopher packages/docs/dispat.yaml ./packages/docs/dispat.yaml
 COPY --chown=gopher:gopher packages/docs/demo ./packages/docs/demo
 
 # The lint gate, one target per module: what `dispat run vet --since all`
@@ -160,10 +159,18 @@ RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
 # Identical inputs produce a cache hit, which replays the recorded result and
 # still exports the recorded profile — that is the sweep's incrementality,
 # not a gap in it.
+#
+# TEST_COMMIT deliberately enters each test stage after the expensive RUN.
+# BuildKit can therefore reuse a result only when every preceding Docker
+# input (tooling, module source and declared fixtures) is identical. The
+# following layer attests that content-identical measurement for this commit;
+# it does not turn a result from different source into a fresh profile.
 FROM src-ccme AS test-ccme
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd pkg/ccme && go run github.com/yohimik/dispat/tools/testreport test ccme -- \
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/ccme.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/ccme.commit
 FROM scratch AS export-ccme
 COPY --from=test-ccme /src/coverage /
 
@@ -171,6 +178,8 @@ FROM src-config AS test-config
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd pkg/config && go run github.com/yohimik/dispat/tools/testreport test config -- \
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/config.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/config.commit
 FROM scratch AS export-config
 COPY --from=test-config /src/coverage /
 
@@ -178,6 +187,8 @@ FROM src-manifest AS test-manifest
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd pkg/manifest && go run github.com/yohimik/dispat/tools/testreport test manifest -- \
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/manifest.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/manifest.commit
 FROM scratch AS export-manifest
 COPY --from=test-manifest /src/coverage /
 
@@ -185,6 +196,8 @@ FROM src-models AS test-models
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd pkg/models && go run github.com/yohimik/dispat/tools/testreport test models -- \
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/models.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/models.commit
 FROM scratch AS export-models
 COPY --from=test-models /src/coverage /
 
@@ -192,6 +205,8 @@ FROM src-scanner AS test-scanner
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd pkg/scanner && go run github.com/yohimik/dispat/tools/testreport test scanner -- \
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/scanner.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/scanner.commit
 FROM scratch AS export-scanner
 COPY --from=test-scanner /src/coverage /
 
@@ -199,6 +214,8 @@ FROM src-writer AS test-writer
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd pkg/writer && go run github.com/yohimik/dispat/tools/testreport test writer -- \
     ./... -count=1 -timeout 10m -covermode=atomic -coverprofile=/src/coverage/writer.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/writer.commit
 FROM scratch AS export-writer
 COPY --from=test-writer /src/coverage /
 
@@ -210,6 +227,8 @@ FROM src-tools AS test-tools
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd tools && go run github.com/yohimik/dispat/tools/testreport test tools -- \
     ./... -count=1 -covermode=atomic -coverprofile=/src/coverage/tools.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/tools.commit
 FROM scratch AS export-tools
 COPY --from=test-tools /src/coverage /
 
@@ -217,6 +236,8 @@ FROM src-dispat AS test-dispat
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd services/dispat && go run github.com/yohimik/dispat/tools/testreport test dispat -- \
     ./... -count=1 -timeout 10m -covermode=atomic -coverpkg=./... -coverprofile=/src/coverage/dispat.out
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/dispat.commit
 FROM scratch AS export-dispat
 COPY --from=test-dispat /src/coverage /
 
@@ -243,6 +264,8 @@ GORACE="atexit_sleep_ms=0 log_path=$race_log_dir/race" \
   DISPAT_TEST_RACE=1 DISPAT_TEST_RACE_LOG_DIR="$race_log_dir" \
   go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration ./... -count=1 -timeout 20m -race
 EOF
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/integration.commit
 FROM scratch AS export-integration
 COPY --from=test-integration /src/coverage/integration.out /integration.out
 COPY --from=test-integration /src/coverage/integration.commit /integration.commit
@@ -524,7 +547,7 @@ COPY --from=experiments-summary /src/coverage/experiments.md /
 # there fails the build, and there is no arrangement of this repository in
 # which every one of these folders exists at once during a bisect.
 FROM alpine:3.22 AS shellcheck
-RUN apk add --no-cache shellcheck python3
+RUN apk add --no-cache shellcheck python3 jq
 WORKDIR /src
 COPY install.sh ./
 COPY script[s] ./scripts
@@ -532,7 +555,8 @@ COPY announc[e] ./announce
 COPY specs/ccme-spec/*.sh ./specs/ccme-spec/
 COPY specs/agent-guide/*.sh ./specs/agent-guide/
 COPY tests/experiments/run.sh tests/experiments/
-COPY tests/experiments/lib/common.sh tests/experiments/lib/
+COPY tests/experiments/lib/common.sh tests/experiments/lib/cache*.sh tests/experiments/lib/
+COPY Dockerfile.gotest ./
 RUN <<'EOF'
 set -eu
 # POSIX sh, which is what these declare and what they are run as. The spike
@@ -560,6 +584,8 @@ fi
 # use arrays and [[ ]], which is why they carry a bash shebang.
 echo "shellcheck (bash): tests/experiments/run.sh tests/experiments/lib/common.sh"
 shellcheck -s bash tests/experiments/run.sh tests/experiments/lib/common.sh
+sh tests/experiments/lib/cache-test.sh
+sh scripts/cache-test.sh /src
 
 # The announcement's notes generator emits JSON that another program reads, so
 # a syntax check is not enough: it is run against a sample release and its

@@ -33,6 +33,12 @@ func DefaultShell() []string { return []string{"/bin/sh", "-c"} }
 // halfway through a folder on PATH has to reach all of it.
 func SetProcessGroup(cmd *exec.Cmd) { setSysProcAttr(cmd) }
 
+// SetProcessGroupForce gives a command the same isolation but force-kills the
+// group on cancellation. Authoring uses this for an interactive editor tree:
+// a descendant that ignores TERM must not outlive a cancelled commit while
+// retaining Git's output pipes.
+func SetProcessGroupForce(cmd *exec.Cmd) { setSysProcAttrForce(cmd) }
+
 // ShellRunner runs commands through a shell, like npm scripts do.
 type ShellRunner struct {
 	// Shell is the command prefix the script is appended to, e.g.

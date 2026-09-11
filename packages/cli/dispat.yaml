@@ -1,5 +1,6 @@
 tagFormat: packages/cli/v{version}
 versionGroup: cli
+isBuildWaitingPublish: true
 dependencies:
   - provider: dispat
     keep: true
@@ -13,11 +14,16 @@ scripts:
   build: >-
     docker buildx build --file Dockerfile --target typecheck
     $(sh ../../scripts/buildx-cache.sh cli-npm) --output type=cacheonly ../..
-  release-build:
-    - pnpm build
-    - node build/scripts/pack.js
-    - pnpm compile:test
-    - node test-build/smoke-artifact.js
+  release-build: |
+    set -eu
+    # autoVersion rewrites package.json and syncLock rewrites pnpm-lock.yaml
+    # after the workflow's explicit --ignore-scripts install. Do not let pnpm
+    # implicitly reinstall with lifecycle scripts anywhere in this sequence.
+    export pnpm_config_verify_deps_before_run=false
+    pnpm build
+    node build/scripts/pack.js
+    pnpm compile:test
+    node test-build/smoke-artifact.js
   publish: node build/scripts/publish.js
   announce: |
     echo "npm-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"

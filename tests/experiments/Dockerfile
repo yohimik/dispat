@@ -57,6 +57,7 @@ COPY lib /exp/lib
 COPY orphan /exp/orphan
 COPY midrelease /exp/midrelease
 COPY run.sh /exp/run.sh
+COPY dispat.yaml /exp/dispat.yaml
 RUN chmod +x /exp/run.sh /exp/lib/git-shim
 
 WORKDIR /work

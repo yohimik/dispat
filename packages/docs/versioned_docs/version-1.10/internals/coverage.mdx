@@ -17,6 +17,12 @@ repository README.
 The badge and this page are therefore the same number, taken from the same run: the one that gated the release which
 published this site.
 
+The container cache may reuse a profile when the complete test input layer is byte-for-byte identical: the module,
+its workspace providers, test-report tool and declared fixtures all participate in that key. A following layer stamps
+the current source commit only after that identity check. The stamp therefore says the measurement applies to this
+commit; it does not claim the test process ran again merely because documentation changed. A changed test input misses
+the cached layer and runs the suite before it can receive a fresh stamp.
+
 ## By module
 
 <CoverageTable />

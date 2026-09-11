@@ -11,6 +11,16 @@
 # either.
 ARG NODE_VERSION=22
 
+# autoVersion rewrites these packages' own versions during a release. That
+# field is publication metadata, not an install input, so normalize it before
+# the dependency layer. The source stage restores the real manifest before
+# building; DOCS_VERSION separately selects the archived documentation line.
+FROM node:${NODE_VERSION}-alpine AS dependency-manifests
+WORKDIR /manifests
+COPY packages/docs/package.json ./packages/docs/package.json
+COPY packages/cli/package.json ./packages/cli/package.json
+RUN node -e "for (const p of ['packages/docs/package.json','packages/cli/package.json']) { const v=require('./'+p); v.version='0.0.0-cache'; require('fs').writeFileSync(p, JSON.stringify(v, null, 2)+'\\n') }"
+
 FROM golang:1.26-bookworm AS counter-test
 WORKDIR /src
 COPY packages/docs/download-counter ./packages/docs/download-counter
@@ -32,8 +42,8 @@ WORKDIR /src
 # it should survive every edit that does not change a dependency. The workspace
 # root owns the lockfile, so the install runs there and reaches the one member.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages/docs/package.json ./packages/docs/
-COPY packages/cli/package.json ./packages/cli/
+COPY --from=dependency-manifests /manifests/packages/docs/package.json ./packages/docs/
+COPY --from=dependency-manifests /manifests/packages/cli/package.json ./packages/cli/
 RUN --mount=type=cache,target=/pnpm-store \
     pnpm config set store-dir /pnpm-store \
  && pnpm install --frozen-lockfile --ignore-scripts
@@ -44,6 +54,11 @@ RUN --mount=type=cache,target=/pnpm-store \
 # node_modules leaves the build — the site build installs inside this
 # Dockerfile already.
 FROM deps AS source
+
+# Source restores the package's real release version after the dependency
+# install. Every dependency field participated in dependency-manifests, so
+# pnpm may skip its automatic second install without hiding a graph change.
+ENV pnpm_config_verify_deps_before_run=false
 
 # docusaurus.config.ts sets showLastUpdateTime, which reads the git history of
 # every page, so the repository has to come along and git has to be here to read
@@ -158,6 +173,8 @@ RUN if [ -n "${DOCS_VERSION}" ] && [ ! -d "packages/docs/versioned_docs/version-
     fi \
  && if [ "${DOCS_REQUIRE_REPORT}" = "1" ]; then export DISPAT_DOCS_REPORT_VERSION="${DOCS_VERSION}"; fi \
  && pnpm --filter dispat-docs build
+# Cache-only placeholder metadata must never become published site content.
+RUN ! grep -R -F '0.0.0-cache' packages/docs/build
 
 # The build produces two different kinds of thing, and both go back to the
 # package folder:

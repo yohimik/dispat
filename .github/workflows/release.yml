@@ -311,6 +311,18 @@ jobs:
         with:
           fetch-depth: 0      # full history: dispat reads tags and commit ranges
 
+      # A docs-only release often measures the same published CLI with the
+      # same harness. Restore the newest candidate for these inputs; the
+      # harness validates its image id, complete cell list and record files
+      # before reusing it, and replaces partial or failed records otherwise.
+      - name: Restore release experiment records
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: coverage/experiments
+          key: experiments-${{ hashFiles('tests/experiments/**', 'tests/experiments/dispat.yaml') }}-${{ github.run_id }}
+          restore-keys: |
+            experiments-${{ hashFiles('tests/experiments/**', 'tests/experiments/dispat.yaml') }}-
+
       # The docker space builds two architectures per image, so the arm64 legs
       # run emulated. The containerd image store is what lets a multi-platform
       # `docker compose build` keep its manifest list locally for the push that

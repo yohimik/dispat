@@ -36,6 +36,7 @@ packages/cli/*
 !packages/cli/dispat.yaml
 !packages/docs
 packages/docs/*
+!packages/docs/dispat.yaml
 !packages/docs/demo
 packages/docs/demo/*
 !packages/docs/demo/fixtures
