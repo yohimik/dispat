@@ -1,5 +1,18 @@
 # Changelog
 
+## specs/agent-guide/v1.10.3 (2026-09-11)
+
+### Fixes
+
+- define release intent and publication boundaries ([f56f86e](https://github.com/yohimik/dispat/commit/f56f86e056e6cb5895b33618d3a1e37d29700cba)) (by yohimik)
+  Confirm the operator-approved package scope and inspect dispat status before
+  releasing. Finish validation before publication and proceed directly to records.
+
+### Authors
+
+- yohimik
+
+
 ## specs/agent-guide/v1.10.2 (2026-09-10)
 
 ### Fixes
