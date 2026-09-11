@@ -5,6 +5,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PACKAGE_ROOT, isMain } from '#root/lib/root.js'
+import { verifyArtifact } from '#root/scripts/pack.js'
 
 const execute = promisify(execFile)
 async function run(file: string, args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}) {
@@ -19,7 +20,7 @@ function expectVersion(stdout: string, version: string, operation: string): void
 }
 
 export async function smoke(): Promise<void> {
-  const artifact = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'dist/artifact.json'), 'utf8')) as { tarball: string }
+  const artifact = await verifyArtifact(PACKAGE_ROOT)
   const tarball = process.env.DISPAT_OUTPUT_TARBALL ?? artifact.tarball
   const release = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'release.json'), 'utf8')) as { version: string }
   const work = await mkdtemp(path.join(tmpdir(), 'dispat npm artifact '))

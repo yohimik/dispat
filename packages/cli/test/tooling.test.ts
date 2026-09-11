@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { main as pack, parsePackOutput } from '#root/scripts/pack.js'
+import { main as pack, parsePackOutput, verifyArtifact } from '#root/scripts/pack.js'
 import { verify } from '#root/scripts/verify-package.js'
 import { main as postinstall } from '#root/lib/postinstall.js'
 import { runPostinstall } from '#root/bin/postinstall.js'
@@ -46,6 +46,23 @@ test('pack creates one reusable tarball and records its integrity', async t => {
   assert.match(artifact.integrity, /^sha512-/)
   assert.equal((await fs.stat(artifact.tarball)).isFile(), true)
   assert.match(await fs.readFile(outputFile,'utf8'), /TARBALL=/)
+  assert.deepEqual(await verifyArtifact(root, 'packed files', {}), artifact)
+  await assert.rejects(verifyArtifact(root, 'packed files', { DISPAT_OUTPUT_TARBALL:'another.tgz' }), /TARBALL does not match/)
+  await assert.rejects(verifyArtifact(root, 'packed files', { DISPAT_OUTPUT_PACKED_VERSION:'2.0.0' }), /PACKED_VERSION does not match/)
+  await fs.appendFile(artifact.tarball, 'changed after validation')
+  await assert.rejects(verifyArtifact(root, 'packed files', {}), /tarball integrity mismatch/)
+})
+
+test('artifact verification rejects incomplete and conflicting identities before publish', async t => {
+  const root = await temporary(t)
+  await fs.mkdir(path.join(root, 'dist'))
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name:'fixture-package', version:'1.0.0' }))
+  await fs.writeFile(path.join(root, 'dist/artifact.json'), JSON.stringify({ tarball:'missing.tgz' }))
+  await assert.rejects(verifyArtifact(root, 'dist', {}), /artifact record is missing integrity/)
+  await fs.writeFile(path.join(root, 'dist/artifact.json'), JSON.stringify({
+    tarball:'missing.tgz', integrity:'sha512-invalid', name:'another-package', version:'1.0.0'
+  }))
+  await assert.rejects(verifyArtifact(root, 'dist', {}), /packed artifact is another-package@1.0.0/)
 })
 
 test('pack entry point uses its working directory and default output folder', async t => {
@@ -165,7 +182,7 @@ test('release tool entry points fail closed when required inputs are absent', ()
   assert.match(metadata.stderr, /exact semantic version/)
   const publish = spawnSync(process.execPath, [path.resolve('build/scripts/publish.js')], { encoding:'utf8', env })
   assert.equal(publish.status, 1)
-  assert.match(publish.stderr, /tarball, integrity/)
+  assert.match(publish.stderr, /DISPAT_OUTPUT_TARBALL/)
   const verification = spawnSync(process.execPath, [path.resolve('build/scripts/verify-package.js')], { encoding:'utf8', env })
   assert.notEqual(verification.status, null)
 })

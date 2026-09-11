@@ -11,6 +11,28 @@ There is one interval a tag cannot describe: a publish command may succeed and t
 writes its tag. If a run is killed during that interval, inspect that package's registry or destination before you
 retry. dispat does not claim exactly-once delivery across an arbitrary shell command.
 
+## Recover an npm publication without a release tag
+
+Treat npm's version and dispat's release tag as separate records. If npm accepts a tarball and the run stops before
+the Git tag reaches the remote, do not create the missing Git tag or npm dist-tag by hand. First inspect the exact npm
+version, the workflow revision, and the tarball integrity outside the publish script.
+
+If a workflow is interrupted after npm reports success and before Git records are written, inspect npm separately.
+A project whose publisher intentionally runs only `npm publish` leaves that decision to the workflow operator;
+rerunning the same publish command is unsafe. npm does not permit a name and version combination to be reused after
+publication, including after an unpublish. Recover forward with a new patch version through the reviewed workflow, while keeping any independent
+binary or provider pin unchanged when its bytes did not change. For example, reserve `1.10.0` and release `1.10.1`
+rather than trying to recreate `1.10.0`.
+
+Keep artifact validation before publication: build and inspect one tarball, verify its package name, version, and digest,
+exercise that exact file, then give the same path to npm. The publish stage can then remain one upload operation. If the
+entire package and all its versions are unpublished, npm also requires waiting 24 hours before publishing another
+version of that package. Use npm's authenticated procedure and follow its
+[unpublish policy](https://docs.npmjs.com/policies/unpublish/) as a separate administrative action; removal does not
+make its version reusable.
+
+## Continue after a dependent build fails
+
 In this example, `core` and its consumer `app` release together. The tests for `app` break its build after `core`
 already published.
 

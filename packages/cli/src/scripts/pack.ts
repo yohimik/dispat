@@ -2,6 +2,8 @@
 'use strict'
 
 import fs from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -10,6 +12,7 @@ const exec = promisify(execFile)
 
 interface PackOptions { cwd?: string, output?: string }
 interface PackRecord { filename: string, integrity: string, name: string, version: string }
+interface ArtifactRecord { tarball: string, integrity: string, name: string, version: string }
 
 function parsePackOutput(stdout: string): PackRecord {
   const parsed: unknown = JSON.parse(stdout)
@@ -34,5 +37,34 @@ async function main(options: PackOptions = {}) {
   process.stdout.write(`${tarball}\n`)
 }
 
+async function verifyArtifact(cwd = process.cwd(), output = 'dist', env: NodeJS.ProcessEnv = process.env): Promise<ArtifactRecord> {
+  const artifact = JSON.parse(await fs.readFile(path.join(cwd, output, 'artifact.json'), 'utf8')) as Partial<ArtifactRecord>
+  for (const key of ['tarball', 'integrity', 'name', 'version'] as const) {
+    if (typeof artifact[key] !== 'string' || !artifact[key]) throw new Error(`artifact record is missing ${key}`)
+  }
+  const record = artifact as ArtifactRecord
+  const pkg = JSON.parse(await fs.readFile(path.join(cwd, 'package.json'), 'utf8')) as { name?: unknown, version?: unknown }
+  if (record.name !== pkg.name || record.version !== pkg.version) {
+    throw new Error(`packed artifact is ${record.name}@${record.version}; expected ${String(pkg.name)}@${String(pkg.version)}`)
+  }
+  if (env.DISPAT_OUTPUT_TARBALL && path.resolve(env.DISPAT_OUTPUT_TARBALL) !== path.resolve(record.tarball)) {
+    throw new Error('DISPAT_OUTPUT_TARBALL does not match the packed artifact')
+  }
+  for (const [key, value] of [
+    ['DISPAT_OUTPUT_INTEGRITY', record.integrity],
+    ['DISPAT_OUTPUT_PACKED_NAME', record.name],
+    ['DISPAT_OUTPUT_PACKED_VERSION', record.version]
+  ] as const) {
+    if (env[key] && env[key] !== value) throw new Error(`${key} does not match the packed artifact`)
+  }
+  const hash = crypto.createHash('sha512')
+  for await (const chunk of createReadStream(record.tarball)) hash.update(chunk)
+  const integrity = `sha512-${hash.digest('base64')}`
+  if (record.integrity !== integrity) {
+    throw new Error(`tarball integrity mismatch: expected ${record.integrity}, got ${integrity}`)
+  }
+  return record
+}
+
 if (isMain(import.meta.url)) main().catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1 })
-export { main, parsePackOutput }
+export { main, parsePackOutput, verifyArtifact }
