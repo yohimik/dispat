@@ -166,6 +166,43 @@ func TestNPMDistributionStartsOnExistingNativeLine(t *testing.T) {
 	assert.Equal(t, 1, r.TagCount("services/dispat/v"), "introducing npm must not republish the provider")
 }
 
+// The first npm release is 1.10.0, not a patch above a fictitious npm tag.
+// Maintenance corrections must also remove the native release they replace.
+func TestNPMDistributionFirstReleaseUsesExactVersionAndChoreCorrections(t *testing.T) {
+	r := harness.New(t)
+	cfg := npmDistributionConfig()
+	cfg.Initials["cli"] = "0.0.0"
+	cfg.Initials["docs"] = "1.10.9"
+	r.WriteConfigModel(cfg)
+	r.WriteFile(".gitignore", "published/\nfail-provider\n")
+	r.SeedPackage("services", "dispat")
+	r.WriteFile("packages/cli/package.json", `{"name":"@dispat/cli","version":"1.10.0"}`+"\n")
+	r.WriteFile("packages/docs/package.json", `{"name":"dispat-docs","version":"1.10.9"}`+"\n")
+	r.Commit("chore: establish published baselines")
+	r.Git("tag", "services/dispat/v1.10.0")
+	r.Git("tag", "packages/docs/v1.10.9")
+	r.WriteFile("published/version", "1.10.0")
+	r.WriteFile("fail-provider", "native publication must not run\n")
+	r.CommitEmpty("fix(dispat,cli,docs)^: supporting repairs")
+	incorrect := strings.TrimSpace(r.Git("rev-parse", "HEAD"))
+	r.CommitEmpty("chore: correct supporting intent\n\nEdits: " + incorrect)
+	r.CommitEmpty("chore(cli,docs): prepare release notes\n\nDeletes: *")
+	r.CommitEmpty("fix(cli): distribute the native CLI\n\nRelease-As: 1.10.0\n\n---\n\nfix(docs): explain npm installation")
+	notes := r.Shell("dispat preview --package cli --changelog")
+	require.Zero(t, notes.Code, "%s\n%s", notes.Stdout, notes.Stderr)
+	assert.Contains(t, notes.Stdout, "distribute the native CLI")
+	assert.NotContains(t, notes.Stdout, "(corrects")
+	assert.NotContains(t, notes.Stdout, "- supporting repairs")
+	r.ReleaseOK()
+	assertNPMDistribution(t, r, "1.10.0", "1.10.0")
+	assert.True(t, r.HasTag("packages/docs/v1.10.10"))
+	assert.Equal(t, 1, r.TagCount("services/dispat/v"))
+	assert.Equal(t, 4, len(r.TagList()), "only npm and docs may add release tags")
+	tags := r.TagList()
+	r.ReleaseOK()
+	assert.Equal(t, tags, r.TagList(), "the exact initial release converges")
+}
+
 // Exercise the real package configuration, substituting only external tools.
 // A future unpublished provider must not turn an ordinary CI build into a
 // release download, or require Node tools on the host runner.
