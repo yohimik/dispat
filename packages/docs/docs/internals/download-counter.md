@@ -6,7 +6,9 @@ published release in `yohimik/dispat`, including prereleases, and the repository
 releases are excluded. Repeated downloads, automated downloads and repeated image pulls all count, so this is a count
 of distribution events rather than people or installations.
 
-A scheduled GitHub Actions workflow collects a complete snapshot every 15 minutes. GitHub release and asset
+A scheduled GitHub Actions workflow collects a complete snapshot every 15 minutes, at minutes 11, 26, 41 and 56 of
+each UTC hour. Changes to the workflow or collector on `main` also trigger an immediate refresh, and
+`workflow_dispatch` remains available for manual recovery. GitHub release and asset
 connections are both paginated, and the four Docker repositories are read separately. The snapshot is uploaded only
 after all five sources succeed; a failed run leaves the last complete JSON object in place. GitHub Actions schedules
 can be delayed, so the page shows the collection time and marks a snapshot delayed after 30 minutes.

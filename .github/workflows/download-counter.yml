@@ -1,8 +1,14 @@
 name: Refresh download counter
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/download-counter.yml'
+      - 'packages/docs/download-counter/**'
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    # Every 15 minutes, away from GitHub's busy start-of-hour queue.
+    - cron: '11,26,41,56 * * * *'
   workflow_dispatch:
 
 permissions:
