@@ -111,6 +111,7 @@ COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md ./packag
 
 FROM src-dispat AS src-integration
 COPY --chown=gopher:gopher tests/integration ./tests/integration
+COPY --chown=gopher:gopher packages/cli/dispat.yaml ./packages/cli/dispat.yaml
 COPY --chown=gopher:gopher packages/docs/demo ./packages/docs/demo
 
 # The lint gate, one target per module: what `dispat run vet --since all`

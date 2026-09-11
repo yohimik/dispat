@@ -8,7 +8,12 @@ scripts:
     docker buildx build --file Dockerfile --target typecheck
     $(sh ../../scripts/buildx-cache.sh cli-npm) --output type=cacheonly ../..
   release-metadata: node build/scripts/package-release.js
-  build:
+  # Ordinary CI compiles and exercises fixture packaging inside Docker. It
+  # must not require host Node tools or an unpublished provider release.
+  build: >-
+    docker buildx build --file Dockerfile --target typecheck
+    $(sh ../../scripts/buildx-cache.sh cli-npm) --output type=cacheonly ../..
+  release-build:
     - pnpm build
     - node build/scripts/pack.js
     - pnpm compile:test
@@ -20,6 +25,6 @@ scripts:
     echo "npm-binary-version=$DISPAT_WORKSPACE_DISPAT_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "published @dispat/cli@$DISPAT_NEW_VERSION"
 flow:
-  build: build
+  build: release-build
   publish: publish
   announce: announce

@@ -189,6 +189,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git jq \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1001 gopher
 COPY tests/integration /src/tests/integration
+COPY packages/cli/dispat.yaml /src/packages/cli/dispat.yaml
 COPY packages/docs/demo/fixtures /src/packages/docs/demo/fixtures
 COPY go.work /src/go.work
 RUN cd /src && go work edit -dropuse=./tools go.work \
@@ -236,6 +237,7 @@ RUN apk add --no-cache git && git --version
 # Copied here, after the compiles, so a test-only change never invalidates
 # the cross-compile layer above.
 COPY tests/integration /src/tests/integration
+COPY packages/cli/dispat.yaml /src/packages/cli/dispat.yaml
 
 # The suite resolves the pkg/* modules through a workspace, exactly as the
 # checkout does: the pins in tests/integration/go.mod are only as fresh as the

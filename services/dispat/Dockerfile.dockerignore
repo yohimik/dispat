@@ -31,6 +31,9 @@ scripts/*
 # Full integration tests validate the same fixtures used by the landing demos.
 !packages
 packages/*
+!packages/cli
+packages/cli/*
+!packages/cli/dispat.yaml
 !packages/docs
 packages/docs/*
 !packages/docs/demo

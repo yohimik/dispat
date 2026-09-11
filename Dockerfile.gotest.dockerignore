@@ -37,6 +37,9 @@ specs/agent-guide/*
 !specs/agent-guide/*.sh
 !packages
 packages/*
+!packages/cli
+packages/cli/*
+!packages/cli/dispat.yaml
 !packages/docs
 packages/docs/*
 !packages/docs/docs

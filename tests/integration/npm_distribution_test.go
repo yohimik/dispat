@@ -6,6 +6,8 @@ package integration
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -161,4 +163,37 @@ func TestNPMDistributionStartsOnExistingNativeLine(t *testing.T) {
 	r.ReleaseOK()
 	assertNPMDistribution(t, r, "1.10.1", "1.10.0")
 	assert.Equal(t, 1, r.TagCount("services/dispat/v"), "introducing npm must not republish the provider")
+}
+
+// Exercise the real package configuration, substituting only external tools.
+// A future unpublished provider must not turn an ordinary CI build into a
+// release download, or require Node tools on the host runner.
+func TestNPMDistributionSeparatesCIBuildFromReleasePackaging(t *testing.T) {
+	r := npmDistributionRepo(t)
+	_, source, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	config, err := os.ReadFile(filepath.Join(filepath.Dir(source), "..", "..", "packages", "cli", "dispat.yaml"))
+	require.NoError(t, err)
+	r.WriteFile("packages/cli/dispat.yaml", string(config))
+	r.WriteFile("scripts/buildx-cache.sh", "#!/bin/sh\nexit 0\n")
+	for _, name := range []string{"docker", "pnpm", "node"} {
+		r.WriteFile("bin/"+name, "#!/bin/sh\nprintf '%s %s\\n' '"+name+"' \"$*\" >> \"$PWD/../../tools.log\"\n")
+		require.NoError(t, os.Chmod(r.Path("bin", name), 0o700))
+	}
+	r.Commit("fix(cli): wire independent CI packaging")
+	res := r.Shell(`PATH="$PWD/bin:$PATH" dispat run build --since all -p cli`)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	calls, err := os.ReadFile(r.Path("tools.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(calls), "docker buildx build")
+	assert.NotContains(t, string(calls), "pnpm")
+	assert.NotContains(t, string(calls), "node")
+	assert.Empty(t, r.TagList(), "ordinary builds must not publish")
+	require.NoError(t, os.Remove(r.Path("tools.log")))
+	res = r.Shell(`PATH="$PWD/bin:$PATH" dispat release`)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	calls, err = os.ReadFile(r.Path("tools.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "pnpm build\nnode build/scripts/pack.js\npnpm compile:test\nnode test-build/smoke-artifact.js\nnode build/scripts/publish.js\n", string(calls))
+	assert.True(t, r.HasTag("packages/cli/v1.10.1"))
 }
