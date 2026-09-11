@@ -34,3 +34,8 @@ flow:
   build: release-build
   publish: publish
   announce: announce
+github:
+  footer:
+    - line: ["---", ""]
+    - line:
+        - "[npm package](https://www.npmjs.com/package/@dispat/cli/v/${DISPAT_NEW_VERSION})"

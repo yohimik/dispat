@@ -342,3 +342,8 @@ For pnpm, retain the workspace's script-approval policy or invoke the same packa
 Do not enable every dependency's scripts just to repair this package. Keep registry credentials in the CI secret
 store; installing the public binary requires no GitHub token. See [the npm monorepo example](../examples/npm.md)
 for build and publication stages.
+
+When a dispat publish script manages npm dist-tags, map `stable` to `latest` and use the planned prerelease channel
+for prerelease versions. Fail the publish when a prerelease version has no prerelease channel instead of allowing it
+to become `latest`. Compare complete semantic versions before retaining or moving an existing tag; numeric
+prerelease identifiers use numeric order, so `rc.10` follows `rc.2`.

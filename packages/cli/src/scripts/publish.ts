@@ -44,9 +44,30 @@ async function registryIntegrity(spec: string, run: Runner = sh): Promise<string
 function compareVersions(a: string, b: string): number {
   if (!isVersion(a) || !isVersion(b)) throw new Error(`cannot compare invalid versions ${a} and ${b}`)
   const normalizedA = a.split('+', 1)[0], normalizedB = b.split('+', 1)[0]
-  const pa = normalizedA.split(/[.-]/).slice(0, 3).map(Number), pb = normalizedB.split(/[.-]/).slice(0, 3).map(Number)
-  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i]
-  return normalizedA.includes('-') === normalizedB.includes('-') ? 0 : (normalizedA.includes('-') ? -1 : 1)
+  const separatorA = normalizedA.indexOf('-'), separatorB = normalizedB.indexOf('-')
+  const coreA = separatorA < 0 ? normalizedA : normalizedA.slice(0, separatorA)
+  const coreB = separatorB < 0 ? normalizedB : normalizedB.slice(0, separatorB)
+  const prereleaseA = separatorA < 0 ? '' : normalizedA.slice(separatorA + 1)
+  const prereleaseB = separatorB < 0 ? '' : normalizedB.slice(separatorB + 1)
+  const compareNumeric = (left: string, right: string): number =>
+    left.length === right.length ? left < right ? -1 : left > right ? 1 : 0 : left.length - right.length
+  const partsA = coreA.split('.'), partsB = coreB.split('.')
+  for (let i = 0; i < 3; i++) {
+    const compared = compareNumeric(partsA[i], partsB[i])
+    if (compared) return compared
+  }
+  if (!prereleaseA || !prereleaseB) return prereleaseA ? -1 : prereleaseB ? 1 : 0
+  const identifiersA = prereleaseA.split('.'), identifiersB = prereleaseB.split('.')
+  for (let i = 0; i < Math.max(identifiersA.length, identifiersB.length); i++) {
+    const left = identifiersA[i], right = identifiersB[i]
+    if (left === undefined || right === undefined) return left === undefined ? -1 : 1
+    if (left === right) continue
+    const leftNumeric = /^\d+$/.test(left), rightNumeric = /^\d+$/.test(right)
+    if (leftNumeric && rightNumeric) return compareNumeric(left, right)
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1
+    return left < right ? -1 : 1
+  }
+  return 0
 }
 
 async function reconcileTag(spec: string, name: string, version: string, channel: string, run: Runner): Promise<void> {
@@ -72,6 +93,9 @@ async function publish(options: PublishOptions = {}) {
   if (!tarball || !integrity || !version) throw new Error('tarball, integrity and DISPAT_NEW_VERSION are required')
   if (!isVersion(version)) throw new Error(`invalid npm version ${version}`)
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(channel)) throw new Error(`invalid npm channel ${channel}`)
+  if ((channel === 'stable' || channel === 'latest') && version.split('+', 1)[0].includes('-')) {
+    throw new Error(`prerelease version ${version} requires a prerelease npm channel`)
+  }
   const spec = `${name}@${version}`
   const run = options.run || sh
   const bytes = await fs.readFile(tarball)
@@ -87,7 +111,7 @@ async function publish(options: PublishOptions = {}) {
     if (existing === integrity) { await reconcileTag(spec, name, version, channel, run); return { published: false, integrity } }
     throw new Error(`${spec} already exists with conflicting integrity ${existing}`)
   }
-  if (channel === 'stable') {
+  if (channel === 'stable' || channel === 'latest') {
     let latest = ''
     try { latest = npmScalar((await run(['view', `${name}@latest`, 'version', '--json'])).stdout, 'version') }
     catch (error: unknown) {

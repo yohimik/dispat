@@ -70,6 +70,8 @@ The first remote release deployed docs 1.10.9, then failed npm packaging before 
 
 `release.json` is generated during the build and ignored by Git, together with compiled output, tarballs, coverage, and downloaded binaries. It records the exact native version, tag, asset names, byte sizes, and SHA-256 digests for all six platforms.
 
+The npm package's first publication is `1.10.0`. Its repository release baseline must remain below that version until the initial npm release record is created; an existing `1.10.0` baseline would describe the package as already released and make an explicit initial `Release-As: 1.10.0` invalid. This release bookkeeping does not change the native CLI's `1.10.0` provider pin or the npm manifest version.
+
 ```sh
 # Use an already published CLI version from the same major/minor line.
 DISPAT_WORKSPACE_DISPAT_VERSION=1.10.0 pnpm --filter @dispat/cli build
