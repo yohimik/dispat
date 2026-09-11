@@ -33,11 +33,6 @@
         },
         {
           "type": "doc",
-          "id": "examples/open-source",
-          "label": "Open source integration checks"
-        },
-        {
-          "type": "doc",
           "id": "examples/npm",
           "label": "An npm monorepo"
         },
