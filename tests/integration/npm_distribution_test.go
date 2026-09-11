@@ -17,9 +17,7 @@ import (
 // npmDistributionRepo models the production publication boundary without a
 // network destination: the provider's publish writes a receipt, which the
 // npm build must read before recording its immutable binary version.
-func npmDistributionRepo(t *testing.T) *harness.Repo {
-	t.Helper()
-	r := harness.New(t)
+func npmDistributionConfig() models.File {
 	cfg := harness.BaseFile(4, 2)
 	cfg.Initials = map[string]string{"dispat": "1.10.0", "cli": "1.10.0"}
 	cfg.VersionGroups = map[string]models.VersionGroupConfig{
@@ -46,7 +44,13 @@ func npmDistributionRepo(t *testing.T) *harness.Repo {
 		},
 	}
 	cfg.Dependencies = models.Dependencies{{Consumer: "cli", Provider: "dispat", Keep: true}}
-	r.WriteConfigModel(cfg)
+	return cfg
+}
+
+func npmDistributionRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	r.WriteConfigModel(npmDistributionConfig())
 	r.WriteFile(".gitignore", "published/\nfail-provider\nfail-npm\n")
 	r.SeedPackage("services", "dispat")
 	r.WriteFile("packages/cli/package.json", `{"name":"@dispat/cli","version":"1.10.0"}`+"\n")
@@ -126,4 +130,35 @@ func TestNPMDistributionPinsPrereleaseAndGraduatedBinaries(t *testing.T) {
 	r.ReleaseOK()
 	assertNPMDistribution(t, r, "1.11.0", "1.11.0")
 	assert.True(t, r.HasTag("services/dispat/v1.11.0"))
+}
+
+// A newly discovered distribution must not replay releases from before it
+// existed. The package-only cancellation establishes that history boundary;
+// the following source record supplies the first npm release intent.
+func TestNPMDistributionStartsOnExistingNativeLine(t *testing.T) {
+	r := harness.New(t)
+	cfg := npmDistributionConfig()
+	npmSpace := cfg.Spaces["packages"]
+	delete(cfg.Spaces, "packages")
+	cfg.Dependencies = nil
+	cfg.Initials["dispat"] = "1.9.0"
+	r.WriteConfigModel(cfg)
+	r.WriteFile(".gitignore", "published/\n")
+	r.SeedPackage("services", "dispat")
+	r.Commit("feat(dispat)^minor: publish the native line")
+	r.ReleaseOK()
+	require.True(t, r.HasTag("services/dispat/v1.10.0"))
+
+	cfg.Spaces["packages"] = npmSpace
+	cfg.Dependencies = models.Dependencies{{Consumer: "cli", Provider: "dispat", Keep: true}}
+	r.WriteConfigModel(cfg)
+	r.WriteFile("packages/cli/package.json", `{"name":"@dispat/cli","version":"1.10.0"}`+"\n")
+	r.Commit("chore(cli): introduce npm distribution")
+	assert.Contains(t, r.StatusOK().Stdout, "1.11.0", "old minor propagation is pending for the newly added consumer")
+
+	r.CommitEmpty("cancel(cli): establish npm baseline")
+	r.CommitEmpty("fix(cli): distribute the native CLI")
+	r.ReleaseOK()
+	assertNPMDistribution(t, r, "1.10.1", "1.10.0")
+	assert.Equal(t, 1, r.TagCount("services/dispat/v"), "introducing npm must not republish the provider")
 }

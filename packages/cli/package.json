@@ -1,0 +1,26 @@
+{
+  "name": "@dispat/cli",
+  "version": "1.10.0",
+  "description": "The dispat release orchestrator CLI",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/yohimik/dispat.git", "directory": "packages/cli" },
+  "homepage": "https://dispat.dev/",
+  "type": "module",
+  "imports": { "#root/*": "./build/*" },
+  "bin": { "dispat": "build/bin/dispat.js" },
+  "files": ["build/", "release.json", "README.md", "TESTING.md", "LICENSE"],
+  "scripts": {
+    "compile": "node --input-type=module -e \"import{rmSync}from'node:fs';rmSync('build',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "build": "pnpm compile && node build/scripts/package-release.js",
+    "compile:test": "node --input-type=module -e \"import{rmSync}from'node:fs';rmSync('test-build',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
+    "postinstall": "node build/bin/postinstall.js",
+    "repair": "node build/bin/postinstall.js",
+    "test": "pnpm compile && pnpm compile:test && c8 --all --include=build/**/*.js --exclude=build/**/*.d.ts --exclude=build/lib/types.js --check-coverage --lines 95 --branches 95 node --test test-build/*.test.js",
+    "pack:release": "node build/scripts/package-release.js",
+    "prepack": "node build/scripts/verify-package.js"
+  },
+  "engines": { "node": "^20.17.0 || >=22.9.0" },
+  "dependencies": { "make-fetch-happen": "15.0.6" },
+  "devDependencies": { "@types/node": "24.10.1", "c8": "10.1.3", "typescript": "6.0.2" },
+  "publishConfig": { "access": "public", "provenance": true }
+}

@@ -1,0 +1,25 @@
+tagFormat: packages/cli/v{version}
+versionGroup: cli
+dependencies:
+  - provider: dispat
+    keep: true
+scripts:
+  tests: >-
+    docker buildx build --file Dockerfile --target typecheck
+    $(sh ../../scripts/buildx-cache.sh cli-npm) --output type=cacheonly ../..
+  release-metadata: node build/scripts/package-release.js
+  build:
+    - pnpm build
+    - node build/scripts/pack.js
+    - pnpm compile:test
+    - node test-build/smoke-artifact.js
+  publish: node build/scripts/publish.js
+  announce: |
+    echo "npm-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"
+    echo "npm-version=$DISPAT_NEW_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
+    echo "npm-binary-version=$DISPAT_WORKSPACE_DISPAT_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
+    echo "published @dispat/cli@$DISPAT_NEW_VERSION"
+flow:
+  build: build
+  publish: publish
+  announce: announce

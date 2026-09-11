@@ -130,6 +130,7 @@ spaces:
 initials:
   ccme-spec: 1.0.0
   agent-guide: 0.0.0
+  cli: 1.10.0
 
 # Standalone paths are registered here; their behavior lives in each folder's
 # dispat.yaml.
