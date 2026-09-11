@@ -365,6 +365,8 @@ COPY --from=tidy /src/${MODULE}/go.mod /src/${MODULE}/go.su[m] /
 # profile line back to its source file: the whole workspace has to be here
 # for the totals to be about anything.
 FROM src-all AS badge
+ARG TEST_COMMIT
+ENV TESTREPORT_COMMIT=${TEST_COMMIT}
 COPY --chown=gopher:gopher coverage ./coverage
 RUN <<'EOF'
 set -eu
@@ -396,10 +398,13 @@ set --
 for f in *.out; do
   case "$f" in integration.out|coverage.out|coverage-unit.out) continue ;; esac
   set -- "$@" "$f"
-  test "$(cat "${f%.out}.commit")" = "$TESTREPORT_COMMIT" || {
+  stamp=${f%.out}.commit
+  test -f "$stamp" || { echo "$f has no measurement stamp" >&2; exit 1; }
+  test "$(cat "$stamp")" = "$TESTREPORT_COMMIT" || {
     echo "$f was not measured at $TESTREPORT_COMMIT" >&2; exit 1;
   }
 done
+test -f integration.commit || { echo "integration.out has no measurement stamp" >&2; exit 1; }
 test "$(cat integration.commit)" = "$TESTREPORT_COMMIT" || {
   echo "integration.out was not measured at $TESTREPORT_COMMIT" >&2; exit 1;
 }

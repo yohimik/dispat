@@ -247,6 +247,9 @@ jobs:
           dispat run unlink --since all -p dispat
           dispat run verify-unlinked --since all -p dispat
 
+      - name: Verify coverage freshness gate
+        run: sh scripts/badge-cache-test.sh
+
       # The two steps below run through `dispat exec` so the release logic
       # they carry is dispat.yaml's, and this workflow stays plumbing: what
       # remains here is checkouts and Docker plumbing.
