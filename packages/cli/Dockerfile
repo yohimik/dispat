@@ -16,7 +16,9 @@ RUN pnpm --filter @dispat/bin test
 # baseline above, and execute the packed global-install regression on npm 12.
 FROM node:24.18.0-alpine AS npm12-test
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable && npm --version | grep '^12\.'
+RUN corepack enable \
+ && npm install --global --ignore-scripts npm@12.0.1 \
+ && test "$(npm --version)" = 12.0.1
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/docs/package.json ./packages/docs/

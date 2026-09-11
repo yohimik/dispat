@@ -384,9 +384,9 @@ jobs:
       # and is passed to the process rather than a container layer.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.15.0
-      - name: Install npm with trusted publishing support
-        run: npm install --global npm@11.5.1
+          node-version: 24.18.0
+      - name: Install npm with trusted publishing and script approvals
+        run: npm install --global --ignore-scripts npm@12.0.1
       - name: Install the pnpm workspace
         run: |
           corepack enable
@@ -542,7 +542,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 24.15.0
+          node-version: 24.18.0
+      - name: Install npm with script approvals
+        run: npm install --global --ignore-scripts npm@12.0.1
       - name: Wait for the exact npm version to become available
         timeout-minutes: 6
         shell: bash
@@ -557,7 +559,7 @@ jobs:
         timeout-minutes: 8
         shell: bash
         run: |
-          npm install --global --prefer-online "@dispat/bin@${{ needs.release.outputs.npm-version }}"
+          npm install --global --prefer-online --allow-scripts=@dispat/bin "@dispat/bin@${{ needs.release.outputs.npm-version }}"
           dispat --version | awk -v expected="${{ needs.release.outputs.npm-binary-version }}" '
             $1 == "dispat" && $2 == expected { found=1 }
             END { exit found ? 0 : 1 }

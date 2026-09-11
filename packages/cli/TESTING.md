@@ -51,6 +51,9 @@ subprocess has a two-minute deadline and a 2 MiB output bound.
 
 ## Issues found after development
 
+- The independent Docker gate showed that selecting Node 24.18 alone did not select npm 12. The first npm-12 gate
+  therefore failed its version assertion. The gate and native post-release checks now install npm 12.0.1 explicitly;
+  the Docker gate also verifies that exact version before running the default-denial regression.
 - The launcher previously suggested a project-relative command after a global install. From a home directory that
   command looked under `~/node_modules` and failed before reaching the installed package. The launcher and failed
   postinstall now print the exact script path with shell-safe quoting; the packed-artifact smoke test installs under a
@@ -107,6 +110,10 @@ subprocess has a two-minute deadline and a 2 MiB output bound.
   cannot resolve that restriction; recovery must wait before retrying through CI.
 
 ## Feature review
+
+The independent review found that the self-update refusal and package README still suggested global updates without
+script approval. Those commands could recreate the same missing-binary failure after an upgrade. They now include
+the scoped approval, and the process-level entrypoint regression checks both suggested global update commands.
 
 The repair command is derived once from the wrapper's resolved package root and Node executable. It does not search
 the filesystem, invoke a shell, retry a launch, or download during ordinary command execution. Existing argument,

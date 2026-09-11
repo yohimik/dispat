@@ -147,6 +147,9 @@ test('barrels expose named side-effect-free APIs and bin diagnoses missing binar
   assert.match(result.stderr, /could not launch/)
   const blocked = spawnSync(process.execPath, [entrypoint, 'self-update'], { encoding:'utf8' })
   assert.equal(blocked.status, 2)
+  const globalUpdates = [...blocked.stderr.matchAll(/`(npm install -g [^`]+)`/g)].map(match => match[1])
+  assert.equal(globalUpdates.length, 2)
+  for (const command of globalUpdates) assert.ok(command.includes('--allow-scripts=@dispat/bin'))
 })
 
 test('postinstall entry point preserves its installer exit status', async () => {
