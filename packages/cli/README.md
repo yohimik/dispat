@@ -73,6 +73,61 @@ You can expose the preview through the root `package.json`:
 }
 ```
 
+## A single npm package
+
+You do not need workspaces or a monorepo. Install dispat in a private tooling manifest at the repository root, and put the package you publish in a subfolder:
+
+```text
+project/
+  package.json             # private: true; @dispat/bin in devDependencies
+  package-lock.json
+  dispat.yaml
+  app/
+    package.json           # your public package's name, version, test and build scripts
+    package-lock.json
+    src/
+```
+
+The package's `path` must be a folder inside the repository; `path: .` is not supported. For an existing root-level package, review the required folder move and preserve its published versions and tags using [the adoption guide](https://dispat.dev/examples/adopting/).
+
+Install the package's dependencies with `npm --prefix app install`, then save this `dispat.yaml` at the repository root:
+
+```yaml
+scripts:
+  tests: npm test
+  build: npm run build
+  publish: npm publish --access public
+  npm-lock: npm install --package-lock-only --ignore-scripts
+
+packages:
+  app:
+    path: app
+    tagFormat: app/v{version}
+    autoVersion:
+      enabled: true
+      syncLock: [npm-lock]
+    flow:
+      beforeBuild: tests
+      build: build
+      publish: publish
+
+commit:
+  enabled: true
+  include: [app/package-lock.json]
+```
+
+All four scripts run inside `app`. `autoVersion` updates its manifest before synchronizing its lockfile; the tests and build then use those release inputs. Use your package's actual test and build commands, or remove the build script and flow entry if it ships directly from source. Keep its manifest publishable; only the tooling manifest at the repository root is private.
+
+From the repository root, inspect and commit the configuration and lockfiles, then preview a change:
+
+```sh
+npm exec -- dispat compute --write
+npm exec -- dispat status
+npm exec -- dispat preview
+```
+
+A commit such as `fix: handle empty input` derives its release intent from changed files inside `app`; `fix(app): handle empty input` names the package explicitly. Here `app` is the dispat key, even when the npm package has a different name. Review the computed baseline and tag format before adopting an existing package. Run the actual release through [CI](#run-releases-in-ci), with npm authentication and Git push permissions configured there. See [single-package releases](https://dispat.dev/examples/single-package/) for growth and recovery guidance.
+
 ## An npm monorepo
 
 Keep the root package private and declare its workspaces. Each releasable package has its own `package.json`, name, version, and build script:
