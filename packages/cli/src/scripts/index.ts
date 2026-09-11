@@ -2,3 +2,4 @@ export { main as packageRelease, platforms } from '#root/scripts/package-release
 export { main as pack, parsePackOutput, verifyArtifact } from '#root/scripts/pack.js'
 export { publish } from '#root/scripts/publish.js'
 export { verify as verifyPackage } from '#root/scripts/verify-package.js'
+export { waitForNpm } from '#root/scripts/wait-for-npm.js'

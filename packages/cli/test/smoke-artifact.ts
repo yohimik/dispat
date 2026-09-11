@@ -53,8 +53,8 @@ export async function smoke(): Promise<void> {
     await mkdir(pnpmConsumer)
     await writeFile(path.join(pnpmConsumer, 'package.json'), '{"name":"dispat-pnpm-consumer","private":true}\n')
     await run('pnpm', ['add', '--ignore-scripts', tarball], pnpmConsumer)
-    await assertMissing(path.join(pnpmConsumer, 'node_modules/@dispat/cli', process.platform === 'win32' ? 'dispat-native.exe' : 'dispat-native'))
-    await run(process.execPath, [path.join(pnpmConsumer, 'node_modules/@dispat/cli/build/bin/postinstall.js')], pnpmConsumer)
+    await assertMissing(path.join(pnpmConsumer, 'node_modules/@dispat/bin', process.platform === 'win32' ? 'dispat-native.exe' : 'dispat-native'))
+    await run(process.execPath, [path.join(pnpmConsumer, 'node_modules/@dispat/bin/build/bin/postinstall.js')], pnpmConsumer)
     expectVersion((await run('pnpm', ['exec', 'dispat', '--version'], pnpmConsumer)).stdout, release.version, 'pnpm repair')
     process.stdout.write(`npm artifact passed: ${process.platform}/${process.arch}, native ${release.version}\n`)
   } finally { await rm(work, { recursive: true, force: true }) }

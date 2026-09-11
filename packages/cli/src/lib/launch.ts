@@ -63,7 +63,7 @@ function booleanFlag(args: readonly string[], name: string): boolean { return in
 function launch(args: string[] = process.argv.slice(2), options: LaunchOptions = {}): ChildProcess | number {
   const parsed = invocation(args)
   if (parsed.command === 'self-update' && !parsed.booleans.get('--help') && !parsed.booleans.get('--check') && !parsed.booleans.get('--version')) {
-    process.stderr.write('dispat: self-update is managed by npm. Run `npm update @dispat/cli` locally or `npm install -g @dispat/cli@latest` globally. To force or roll back, install an explicit version such as `npm install -g @dispat/cli@1.10.0`.\n')
+    process.stderr.write('dispat: self-update is managed by npm. Run `npm update @dispat/bin` locally or `npm install -g @dispat/bin@latest` globally. To force or roll back, install an explicit version such as `npm install -g @dispat/bin@1.10.0`.\n')
     return 2
   }
   const packageDir = options.packageDir || PACKAGE_ROOT
@@ -93,7 +93,7 @@ function launch(args: string[] = process.argv.slice(2), options: LaunchOptions =
 
 function missing(binary: string, error: Error): number {
   process.stderr.write(`dispat: could not launch ${binary}: ${error.message}\n`)
-  process.stderr.write('dispat: repair a local install with `node node_modules/@dispat/cli/build/bin/postinstall.js`; for a global install run the same file under the directory printed by `npm root -g`.\n')
+  process.stderr.write('dispat: repair a local install with `node node_modules/@dispat/bin/build/bin/postinstall.js`; for a global install run the same file under the directory printed by `npm root -g`.\n')
   return 1
 }
 

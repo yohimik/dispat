@@ -19,7 +19,7 @@ interface RegistryDocument {
 
 async function registry(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'dispat registry '))
-  let document: RegistryDocument = { name: '@dispat/cli', versions: {}, 'dist-tags': {} }
+  let document: RegistryDocument = { name: '@dispat/bin', versions: {}, 'dist-tags': {} }
   let publications = 0
   let metadataUnavailable = false
   let rejectPublication = false
@@ -64,7 +64,7 @@ async function registry(t: TestContext) {
   ], { cwd: directory, timeout: 15000, env: { ...process.env, NODE_AUTH_TOKEN: '', NPM_TOKEN: '', npm_config_cache: join(directory, 'cache') } })
   async function pack(version: string) {
     await writeFile(join(directory, 'package.json'), JSON.stringify({
-      name: '@dispat/cli', version, description: 'Disposable registry integration fixture', files: ['README.md'],
+      name: '@dispat/bin', version, description: 'Disposable registry integration fixture', files: ['README.md'],
       publishConfig: { access:'public', provenance:false }
     }))
     await writeFile(join(directory, 'README.md'), `Fixture ${version}`)
@@ -133,7 +133,7 @@ test('publish entry point follows npm success and failure without registry recon
     timeout: 15_000,
     env: { ...env, DISPAT_OUTPUT_TARBALL:artifact.tarball }
   })
-  assert.match(result.stdout, /published @dispat\/cli/)
+  assert.match(result.stdout, /published @dispat\/bin/)
   assert.equal(fixture.document['dist-tags'].latest, '1.10.2')
   assert.equal(fixture.publications, 1)
   const rejected = await fixture.pack('1.10.3')

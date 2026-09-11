@@ -10,5 +10,5 @@ COPY packages/cli/package.json ./packages/cli/
 RUN --mount=type=cache,target=/pnpm-store pnpm config set store-dir /pnpm-store \
  && pnpm install --frozen-lockfile --ignore-scripts
 COPY packages/cli ./packages/cli
-RUN pnpm --filter @dispat/cli test
+RUN pnpm --filter @dispat/bin test
 FROM test AS typecheck

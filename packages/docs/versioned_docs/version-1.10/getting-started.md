@@ -326,7 +326,7 @@ See [From one package to many](./examples/one-to-many.md) to add deliverables wh
 Node projects can install the native CLI through npm:
 
 ```sh
-npm install --global @dispat/cli
+npm install --global @dispat/bin
 dispat --version
 ```
 
@@ -334,23 +334,23 @@ The package supports Node `^20.17.0 || >=22.9.0` and Linux, macOS, and Windows o
 Installation downloads the package's pinned GitHub release and checks the size, SHA-256 digest, and binary version.
 It needs HTTPS access to GitHub and its release-asset hosts. npm proxy and custom certificate settings apply.
 
-For a local development dependency, run `npm install --save-dev @dispat/cli`, then `npm exec -- dispat status`.
+For a local development dependency, run `npm install --save-dev @dispat/bin`, then `npm exec -- dispat status`.
 The npm and native CLI versions share a major/minor line but have independent patches. `dispat --version` reports
 the native version; inspect the installed npm package to see its distribution version.
 
 npm 12 requires script approval. For a global registry install, use
-`npm install --global @dispat/cli --allow-scripts=@dispat/cli`. For local installs, retain the project’s
+`npm install --global @dispat/bin --allow-scripts=@dispat/bin`. For local installs, retain the project’s
 `allowScripts` policy or use the explicit installer below.
 
 If scripts were disabled, ordinary commands explain how to repair the installation without downloading anything:
 
 ```sh
-npm explore @dispat/cli -- node build/bin/postinstall.js
+npm explore @dispat/bin -- node build/bin/postinstall.js
 # For a global install:
-npm explore --global @dispat/cli -- node build/bin/postinstall.js
+npm explore --global @dispat/bin -- node build/bin/postinstall.js
 ```
 
 With pnpm, approve this package through [its script policy](https://pnpm.io/cli/approve-builds), or run
-`node node_modules/@dispat/cli/build/bin/postinstall.js` explicitly. Set `DISPAT_NPM_DEBUG=1` when diagnosing an install;
+`node node_modules/@dispat/bin/build/bin/postinstall.js` explicitly. Set `DISPAT_NPM_DEBUG=1` when diagnosing an install;
 installer diagnostics go to stderr. See [npm updates](./reference/self-update.md#npm-installations) and
 [npm in CI](./reference/ci.md#npm-in-node-pipelines).

@@ -315,7 +315,7 @@ Buildkite and Azure Pipelines. That guide includes the clone settings and tokens
 
 ## npm in Node pipelines
 
-Add `@dispat/cli` to the project's development dependencies and commit its lockfile. Set up a supported Node
+Add `@dispat/bin` to the project's development dependencies and commit its lockfile. Set up a supported Node
 version (`^20.17.0 || >=22.9.0`), then install and run the locked tool:
 
 ```sh
@@ -334,7 +334,7 @@ explicitly before running the CLI:
 
 ```sh
 npm ci --ignore-scripts
-npm explore @dispat/cli -- node build/bin/postinstall.js
+npm explore @dispat/bin -- node build/bin/postinstall.js
 npm exec -- dispat status
 ```
 

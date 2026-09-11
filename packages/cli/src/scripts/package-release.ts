@@ -39,7 +39,7 @@ async function main(options: PackageReleaseOptions = {}) {
   try {
     response = await (options.fetch || makeFetchHappen as unknown as PackageReleaseOptions['fetch'])!(api, {
       cache: 'no-store', retry: { retries: 2 }, timeout: API_TIMEOUT_MS, signal: controller.signal,
-      headers: { accept: 'application/vnd.github+json', 'user-agent': '@dispat/cli release packager' }
+      headers: { accept: 'application/vnd.github+json', 'user-agent': '@dispat/bin release packager' }
     })
     if (!response.ok) throw new Error(`GitHub release ${tag} is unavailable: ${response.status}`)
     const release = await readRelease(response)

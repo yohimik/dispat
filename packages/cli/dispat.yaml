@@ -29,7 +29,7 @@ scripts:
     echo "npm-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "npm-version=$DISPAT_NEW_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "npm-binary-version=$DISPAT_WORKSPACE_DISPAT_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
-    echo "published @dispat/cli@$DISPAT_NEW_VERSION"
+    echo "published @dispat/bin@$DISPAT_NEW_VERSION"
 flow:
   build: release-build
   publish: publish
@@ -38,4 +38,4 @@ github:
   footer:
     - line: ["---", ""]
     - line:
-        - "[npm package](https://www.npmjs.com/package/@dispat/cli/v/${DISPAT_NEW_VERSION})"
+        - "[npm package](https://www.npmjs.com/package/@dispat/bin/v/${DISPAT_NEW_VERSION})"

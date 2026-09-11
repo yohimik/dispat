@@ -1,5 +1,5 @@
 {
-  "name": "@dispat/cli",
+  "name": "@dispat/bin",
   "version": "1.10.0",
   "description": "The dispat release orchestrator CLI",
   "license": "MIT",

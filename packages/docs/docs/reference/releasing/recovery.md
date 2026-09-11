@@ -31,6 +31,15 @@ version of that package. Use npm's authenticated procedure and follow its
 [unpublish policy](https://docs.npmjs.com/policies/unpublish/) as a separate administrative action; removal does not
 make its version reusable.
 
+The 24-hour restriction applies to every new version under the removed package name. Advancing the patch version
+does not bypass it. A registry E409 indicating that the package is still being processed can occur during this
+interval; inspect the package's `time.unpublished.time` and wait until the restriction has expired before retrying CI.
+
+After a successful publication, independent installation checks may need to wait for registry metadata to become
+available. Poll for the exact version with a bounded deadline before installing it. Keep that readiness check in a
+post-release job, after release records, so a delayed registry response cannot turn an accepted upload into a failed
+publish stage. This short readiness wait does not replace the 24-hour restriction after complete removal.
+
 ## Continue after a dependent build fails
 
 In this example, `core` and its consumer `app` release together. The tests for `app` break its build after `core`

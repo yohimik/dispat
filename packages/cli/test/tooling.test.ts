@@ -20,9 +20,9 @@ async function temporary(t: TestContext): Promise<string> {
 }
 
 test('pack output accepts npm 11 arrays and npm 12 keyed records', () => {
-  const record = { filename: 'dispat.tgz', integrity: 'sha512-a', name: '@dispat/cli', version: '1.10.0' }
+  const record = { filename: 'dispat.tgz', integrity: 'sha512-a', name: '@dispat/bin', version: '1.10.0' }
   assert.deepEqual(parsePackOutput(JSON.stringify([record])), record)
-  assert.deepEqual(parsePackOutput(JSON.stringify({ '@dispat/cli': record })), record)
+  assert.deepEqual(parsePackOutput(JSON.stringify({ '@dispat/bin': record })), record)
   assert.throws(() => parsePackOutput('{}'), /0 artifact records/)
   assert.throws(() => parsePackOutput('null'), /0 artifact records/)
   assert.throws(() => parsePackOutput(JSON.stringify([{}, {}])), /2 artifact records/)
@@ -86,7 +86,7 @@ test('package verifier checks generated metadata and allowlisted files', async t
   ].map(([key,name]) => [key, { name, size: 1, sha256: 'a'.repeat(64) }]))
   await fs.mkdir(path.join(root, 'build/bin'), { recursive: true })
   await Promise.all(['build/bin/dispat.js','build/bin/postinstall.js','README.md','LICENSE'].map(file => fs.writeFile(path.join(root,file),'')))
-  await fs.writeFile(path.join(root,'package.json'), JSON.stringify({ version:'1.10.2' }))
+  await fs.writeFile(path.join(root,'package.json'), JSON.stringify({ name:'@dispat/bin', version:'1.10.2' }))
   await fs.writeFile(path.join(root,'release.json'), JSON.stringify({ version:'1.10.0', tag:'services/dispat/v1.10.0', assets }))
   verify(root)
   await fs.rm(path.join(root, 'LICENSE'))

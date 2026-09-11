@@ -15,7 +15,7 @@ export function isPlatformKey(value: string): value is PlatformKey {
 
 export function platformKey(platform: string = process.platform, arch: string = process.arch): PlatformKey {
   const key = `${platform}-${arch}`
-  if (!isPlatformKey(key)) throw new Error(`unsupported platform: ${platform}/${arch}; @dispat/cli supports macOS, Linux, and Windows on x64 and ARM64`)
+  if (!isPlatformKey(key)) throw new Error(`unsupported platform: ${platform}/${arch}; @dispat/bin supports macOS, Linux, and Windows on x64 and ARM64`)
   return key
 }
 

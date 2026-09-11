@@ -36,7 +36,7 @@ async function publish(options: PublishOptions = {}): Promise<void> {
 }
 
 if (isMain(import.meta.url)) publish()
-  .then(() => console.log('published @dispat/cli'))
+  .then(() => console.log('published @dispat/bin'))
   .catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1 })
 
 export { publish }

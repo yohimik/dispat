@@ -1,8 +1,8 @@
-# @dispat/cli <img alt="dispat logo" align="right" width="128" height="128" src="https://raw.githubusercontent.com/yohimik/dispat/main/imgs/logo.png" />
+# @dispat/bin <img alt="dispat logo" align="right" width="128" height="128" src="https://raw.githubusercontent.com/yohimik/dispat/main/imgs/logo.png" />
 
 **dispat** reads your conventional commits, computes the next package versions, and runs build and publish commands in dependency order. Preview the release with `dispat status` before running it.
 
-`@dispat/cli` installs the native Go executable and exposes the `dispat` command. Use it with a single Node application, an npm, pnpm, or Yarn monorepo, or several repositories joined through a control repository. Your existing package manager, build tools, and deployment commands remain part of the workflow.
+`@dispat/bin` installs the native Go executable and exposes the `dispat` command. Use it with a single Node application, an npm, pnpm, or Yarn monorepo, or several repositories joined through a control repository. Your existing package manager, build tools, and deployment commands remain part of the workflow.
 
 [Documentation](https://dispat.dev/) · [GitHub](https://github.com/yohimik/dispat) · [Discord](https://discord.gg/83PwVSCCmk)
 
@@ -11,7 +11,7 @@
 For a global command:
 
 ```sh
-npm install --global @dispat/cli
+npm install --global @dispat/bin
 dispat --version
 ```
 
@@ -19,31 +19,31 @@ For a project, install dispat once at the repository root and commit the package
 
 | Package manager | Add to the root development dependencies | Run a release preview |
 | --- | --- | --- |
-| npm | `npm install --save-dev @dispat/cli` | `npm exec -- dispat status` |
-| pnpm workspace | `pnpm add --workspace-root --save-dev @dispat/cli` | `pnpm exec dispat status` |
-| Yarn modern | `yarn add --dev @dispat/cli` | `yarn dispat status` |
+| npm | `npm install --save-dev @dispat/bin` | `npm exec -- dispat status` |
+| pnpm workspace | `pnpm add --workspace-root --save-dev @dispat/bin` | `pnpm exec dispat status` |
+| Yarn modern | `yarn add --dev @dispat/bin` | `yarn dispat status` |
 
-The Yarn examples below use its `node-modules` linker. [Yarn Classic](https://classic.yarnpkg.com/lang/en/docs/cli/add/) uses `yarn add --dev --ignore-workspace-root-check @dispat/cli` when adding the tool to a workspace root.
+The Yarn examples below use its `node-modules` linker. [Yarn Classic](https://classic.yarnpkg.com/lang/en/docs/cli/add/) uses `yarn add --dev --ignore-workspace-root-check @dispat/bin` when adding the tool to a workspace root.
 
-The package supports Node `^20.17.0 || >=22.9.0` and Linux, macOS, and Windows on x64 and ARM64. Installation needs HTTPS access to GitHub and its release-asset hosts. It downloads the pinned native release and verifies its size, SHA-256 digest, and reported version. The npm package and binary share a major/minor line but have independent patches: `dispat --version` reports the binary version, while `npm ls @dispat/cli` reports the npm distribution version.
+The package supports Node `^20.17.0 || >=22.9.0` and Linux, macOS, and Windows on x64 and ARM64. Installation needs HTTPS access to GitHub and its release-asset hosts. It downloads the pinned native release and verifies its size, SHA-256 digest, and reported version. The npm package and binary share a major/minor line but have independent patches: `dispat --version` reports the binary version, while `npm ls @dispat/bin` reports the npm distribution version.
 
 ### Installation scripts and repair
 
 npm 12 requires script approval for registry installs. For a global install:
 
 ```sh
-npm install --global @dispat/cli --allow-scripts=@dispat/cli
+npm install --global @dispat/bin --allow-scripts=@dispat/bin
 ```
 
 For local installs, retain the project's script-approval policy. If scripts were disabled or the native download failed, run the installer explicitly:
 
 ```sh
-npm explore @dispat/cli -- node build/bin/postinstall.js
+npm explore @dispat/bin -- node build/bin/postinstall.js
 # For a global installation:
-npm explore --global @dispat/cli -- node build/bin/postinstall.js
+npm explore --global @dispat/bin -- node build/bin/postinstall.js
 ```
 
-With pnpm, approve this package through [pnpm's script policy](https://pnpm.io/cli/approve-builds), or run `node node_modules/@dispat/cli/build/bin/postinstall.js` explicitly. That explicit path also works with Yarn's `node-modules` linker. Ordinary commands never download a missing binary.
+With pnpm, approve this package through [pnpm's script policy](https://pnpm.io/cli/approve-builds), or run `node node_modules/@dispat/bin/build/bin/postinstall.js` explicitly. That explicit path also works with Yarn's `node-modules` linker. Ordinary commands never download a missing binary.
 
 npm proxy and certificate settings apply to the download. When invoking the installer directly, pass the corresponding `npm_config_https_proxy`, `npm_config_proxy`, `npm_config_noproxy`, or `npm_config_cafile` environment settings as needed. Set `DISPAT_NPM_DEBUG=1` for installer diagnostics on stderr. Native command diagnostics use `dispat --log-level debug` or `dispat --log-format json`.
 
@@ -149,7 +149,7 @@ packages:
   - apps/*
 ```
 
-Install dispat at the root with `pnpm add -Dw @dispat/cli`. In the npm release configuration above, replace the script commands with:
+Install dispat at the root with `pnpm add -Dw @dispat/bin`. In the npm release configuration above, replace the script commands with:
 
 ```yaml
 scripts:
@@ -170,7 +170,7 @@ Modern Yarn uses the root `workspaces` field shown in the npm example. For this 
 nodeLinker: node-modules
 ```
 
-Add dispat at the root with `yarn add --dev @dispat/cli`, then use `yarn dispat status`. Keep your existing Yarn version pinned in the project's `packageManager` field. These instructions cover modern Yarn; Classic uses different installation and publishing commands.
+Add dispat at the root with `yarn add --dev @dispat/bin`, then use `yarn dispat status`. Keep your existing Yarn version pinned in the project's `packageManager` field. These instructions cover modern Yarn; Classic uses different installation and publishing commands.
 
 Replace the release scripts with:
 
@@ -275,11 +275,11 @@ If a publication fails after an external upload succeeded, inspect that exact de
 
 ## Update or remove dispat
 
-Update a local npm dependency with `npm update @dispat/cli`, or a global install with `npm install -g @dispat/cli@latest`. For pnpm or Yarn, update the root development dependency with that package manager and commit the updated lockfile.
+Update a local npm dependency with `npm update @dispat/bin`, or a global install with `npm install -g @dispat/bin@latest`. For pnpm or Yarn, update the root development dependency with that package manager and commit the updated lockfile.
 
-To force installation or roll back, install the required npm package version explicitly, for example `npm install -g @dispat/cli@1.10.0 --force`. Retain any required installation-script approval when updating. The launcher rejects mutating `dispat self-update` commands; `self-update --check` and help remain available. Native update notifications are disabled for npm-managed execution.
+To force installation or roll back, install the required npm package version explicitly, for example `npm install -g @dispat/bin@1.10.0 --force`. Retain any required installation-script approval when updating. The launcher rejects mutating `dispat self-update` commands; `self-update --check` and help remain available. Native update notifications are disabled for npm-managed execution.
 
-Uninstall globally with `npm uninstall -g @dispat/cli`, or remove the local development dependency with your package manager.
+Uninstall globally with `npm uninstall -g @dispat/bin`, or remove the local development dependency with your package manager.
 
 ## Documentation and community
 

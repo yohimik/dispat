@@ -56,7 +56,7 @@ func npmDistributionRepo(t *testing.T) *harness.Repo {
 	r.WriteConfigModel(npmDistributionConfig())
 	r.WriteFile(".gitignore", "published/\nfail-provider\nfail-npm\n")
 	r.SeedPackage("services", "dispat")
-	r.WriteFile("packages/cli/package.json", `{"name":"@dispat/cli","version":"1.10.0"}`+"\n")
+	r.WriteFile("packages/cli/package.json", `{"name":"@dispat/bin","version":"1.10.0"}`+"\n")
 	r.Commit("fix(dispat,cli): prepare npm distribution")
 	return r
 }
@@ -155,7 +155,7 @@ func TestNPMDistributionStartsOnExistingNativeLine(t *testing.T) {
 	cfg.Spaces["packages"] = npmSpace
 	cfg.Dependencies = models.Dependencies{{Consumer: "cli", Provider: "dispat", Keep: true}}
 	r.WriteConfigModel(cfg)
-	r.WriteFile("packages/cli/package.json", `{"name":"@dispat/cli","version":"1.10.0"}`+"\n")
+	r.WriteFile("packages/cli/package.json", `{"name":"@dispat/bin","version":"1.10.0"}`+"\n")
 	r.Commit("chore(cli): introduce npm distribution")
 	assert.Contains(t, r.StatusOK().Stdout, "1.11.0", "old minor propagation is pending for the newly added consumer")
 
@@ -179,7 +179,7 @@ func TestNPMDistributionFirstReleaseUsesExactVersionAndChoreCorrections(t *testi
 			r.WriteConfigModel(cfg)
 			r.WriteFile(".gitignore", "published/\nfail-provider\n")
 			r.SeedPackage("services", "dispat")
-			r.WriteFile("packages/cli/package.json", `{"name":"@dispat/cli","version":"1.10.0"}`+"\n")
+			r.WriteFile("packages/cli/package.json", `{"name":"@dispat/bin","version":"1.10.0"}`+"\n")
 			r.WriteFile("packages/docs/package.json", `{"name":"dispat-docs","version":"1.10.9"}`+"\n")
 			r.Commit("chore: establish published baselines")
 			r.Git("tag", "services/dispat/v1.10.0")

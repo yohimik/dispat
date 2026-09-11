@@ -343,19 +343,19 @@ dispat therefore needs no second downloader for the rest of its tools.
 
 ## npm installations
 
-npm owns updates when you install `@dispat/cli`. The launcher disables native update notices and rejects mutating
+npm owns updates when you install `@dispat/bin`. The launcher disables native update notices and rejects mutating
 `self-update` commands, including force and rollback. `dispat self-update --check` and help remain available; the
 check describes native releases, which may differ from the npm distribution's pinned release.
 
 ```sh
 # Local dependency:
-npm update @dispat/cli
+npm update @dispat/bin
 # Global installation:
-npm install --global @dispat/cli@latest
+npm install --global @dispat/bin@latest
 # Force installation or return to a specific npm version:
-npm install --global @dispat/cli@1.10.0 --force
+npm install --global @dispat/bin@1.10.0 --force
 # Remove the global installation:
-npm uninstall --global @dispat/cli
+npm uninstall --global @dispat/bin
 ```
 
 The npm package version and binary version can have different patches. A package-only patch retains the existing

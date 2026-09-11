@@ -1,6 +1,6 @@
 # npm CLI test plan
 
-This plan covers the `@dispat/cli` npm wrapper and its release tooling. It does
+This plan covers the `@dispat/bin` npm wrapper and its release tooling. It does
 not change or re-test unrelated Go runtime behavior. Tests use local files,
 processes, HTTP servers, proxies, and a disposable npm registry; they never
 publish to the public registry, create Git tags, or push commits.
@@ -9,7 +9,7 @@ publish to the public registry, create Git tags, or push commits.
 
 ```sh
 pnpm install --ignore-scripts
-pnpm --filter @dispat/cli test
+pnpm --filter @dispat/bin test
 ```
 
 ## Required behavior
@@ -22,6 +22,7 @@ pnpm --filter @dispat/cli test
 | Artifact | npm 11 array and npm 12 keyed pack output, one artifact record, exact package name and version, streaming SHA-512 verification, release-output identity, global and local npm installation, npm exec, pnpm repair, and a disposable repository status command. |
 | Publication | Exactly one `npm publish` invocation, stable and prerelease tags, access and provenance flags, npm failure propagation, a real disposable-registry upload, and successful process exit when npm accepts the upload while registry metadata remains unavailable. |
 | Workspace | Release compilation cannot trigger an implicit pnpm reinstall or lifecycle script from a stale workspace lock. |
+| Post-release readiness | Missing or incomplete exact-version metadata, HTTP 404/429/5xx, network errors, bounded retries, stalled response headers and bodies, permanent failures, and execution from TypeScript source without installed dependencies. |
 
 The package coverage gate requires at least 95% executable line and branch
 coverage. Tests and generated declarations are excluded; production branches do
@@ -78,3 +79,11 @@ subprocess has a two-minute deadline and a 2 MiB output bound.
 - Validation gap: production trusted-publisher authorization and provenance
   require CI verification; the disposable registry cannot establish GitHub OIDC
   configuration.
+- Post-release installations previously attempted npm resolution once. The
+  independent check now polls exact-version install metadata every 10 seconds
+  for at most five minutes, limits each request to 15 seconds, and then installs
+  with fresh metadata. Authentication and malformed-response failures fail
+  immediately. This wait never runs inside the publish stage.
+- npm rejected a new publication with E409 while the package was within the
+  24-hour restriction after complete removal. Post-publication readiness retries
+  cannot resolve that restriction; recovery must wait before retrying through CI.

@@ -14,7 +14,7 @@ The [setup guide](https://dispat.dev/getting-started/) walks through your first 
 
 ```sh
 # With npm (Node.js required)
-npm install --global @dispat/cli
+npm install --global @dispat/bin
 ```
 
 The [npm package](./packages/cli) installs the binary for your platform. Its guide covers npm 12 script approval

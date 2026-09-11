@@ -533,18 +533,31 @@ jobs:
     needs: release
     if: ${{ !cancelled() && needs.release.outputs.npm-released == 'true' }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-14, windows-latest, windows-11-arm]
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.15.0
+      - name: Wait for the exact npm version to become available
+        timeout-minutes: 6
+        shell: bash
+        env:
+          NPM_VERSION: ${{ needs.release.outputs.npm-version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { waitForNpm } from './packages/cli/src/scripts/wait-for-npm.ts'
+          await waitForNpm(process.env.NPM_VERSION)
+          NODE
       - name: Install the exact npm release globally
+        timeout-minutes: 8
         shell: bash
         run: |
-          npm install --global "@dispat/cli@${{ needs.release.outputs.npm-version }}"
+          npm install --global --prefer-online "@dispat/bin@${{ needs.release.outputs.npm-version }}"
           dispat --version | awk -v expected="${{ needs.release.outputs.npm-binary-version }}" '
             $1 == "dispat" && $2 == expected { found=1 }
             END { exit found ? 0 : 1 }
