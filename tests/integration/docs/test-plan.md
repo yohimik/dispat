@@ -1210,7 +1210,7 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestSpacePathsFilterAndLocate`         | `--space` covers every folder's packages; standing in a later folder infers the space, and standing inside one of its packages narrows to that package.                                                             |
 | `TestSpacePathsNoneCombined`            | A versioning-none space spanning two folders runs scripts under both and never tags anything, while the releasable space next to it releases normally.                                                              |
 
-### Goal 36: declared version groups across spaces (`versiongroups_test.go`)
+### Goal 36: declared version groups across spaces (`versiongroups_test.go`, `npm_distribution_test.go`)
 
 Everything a declared `versionGroups` group does across two spaces lives here. This suite covers full and partial
 lifecycles, sparse modes, group-membership edges on the override ladder, shared prerelease trains with pins, polyglot
@@ -1218,6 +1218,9 @@ script-only members, and per-member tag spellings.
 
 | Test                                        | Claim proven                                                                                                                                                                                                        |
 |---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestNPMDistributionKeepsIndependentPatchesAndPinnedBinary` | The npm distribution has its own patch counter, retains the published binary on npm-only patches, follows provider releases, shares minor changes, and converges after publication. |
+| `TestNPMDistributionWaitsForPublicationAndRetriesItsOwnFailure` | The npm build waits for the binary's publication; a failed provider prevents the npm build, and retrying npm publication preserves the already published provider. |
+| `TestNPMDistributionPinsPrereleaseAndGraduatedBinaries` | A shared beta pins the exact prerelease binary, and graduation replaces the pin with the stable release rather than resolving an unrelated latest tag. |
 | `TestVersionGroupSparseAcrossSpaces`        | A declared `fixedSparse` group never back-fills: an untouched member in the other space does not ride (no W234), and when it finally changes it joins at the group's next version, skipping the ones it sat out.     |
 | `TestVersionGroupPartialSparseAcrossSpaces` | Under `fixedMajorMinorSparse` a patch stays inside its member, a minor moves the shared part without dragging the other space along, and the laggard joins at the shared part when it next changes.                  |
 | `TestVersionGroupMemberOverrideLeavesTheGroup` | Versioning and versionGroup are one ladder axis: a package-level `versioning` on a declared group's member supersedes the membership its space joined, so the package versions on its own line instead of riding. |
