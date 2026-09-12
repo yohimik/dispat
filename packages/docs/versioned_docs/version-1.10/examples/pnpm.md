@@ -70,8 +70,6 @@ across the lines, and exercise the consumer policy in an isolated verification p
 pnpm add --ignore-scripts --trust-policy no-downgrade your-package@the-published-version
 ```
 
-The [`jsii` release discussion](https://github.com/aws/jsii-compiler/issues/2662) documents the concrete failure: the
-project published one version with trusted publishing, returned to token-based workflows because one package served
-multiple release lines, and pnpm then rejected later versions with `ERR_PNPM_TRUST_DOWNGRADE`. Restoring consistent
-publisher evidence is the release-side fix; weakening the consumer trust policy would hide the downgrade. dispat can
-run each line's native publish command, but npm owns the publisher configuration and authorization constraint.
+Restoring consistent publisher evidence is the release-side fix; weakening the consumer trust policy would hide the
+downgrade. dispat can run each line's native publish command, but npm owns the publisher configuration and authorization
+constraint.

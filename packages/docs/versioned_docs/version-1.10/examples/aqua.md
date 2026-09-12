@@ -94,25 +94,17 @@ publishes. Leave it out when the build uses a local binary or another shared bui
 
 ## Verify the installation boundary
 
-Before the provider publication is complete, check that the selected Aqua registry entry resolves the new version and
-that the upstream release has an asset and checksum for every required operating system and architecture. The
-[`tfcmt` 4.14.19 release](https://github.com/suzuki-shunsuke/tfcmt/releases/tag/v4.14.19), for example, contains
-macOS, Linux and Windows archives for amd64 and arm64 plus a checksum file.
+Before publication, check that the proposed Aqua registry entry names the new version and that the upstream release
+will have an asset and checksum for every required operating system and architecture.
 
 dispat does not fetch the Aqua registry, install tools, or update `.aqua-checksums.json`. It also does not rewrite an
 `aqua-registry` package definition: that schema describes how Aqua finds upstream artifacts, while this page concerns
 the consuming repository's `aqua.yaml`. A registry update, a GitHub release and a consumer pin are therefore separate
-destinations. Record each one explicitly, and reconcile the registry before retrying when publication may already
-have succeeded.
+destinations. Record each one explicitly, and reconcile the registry outside the publish command before retrying when
+publication may already have succeeded.
 
 ## See also
 
 - [Manifest tools](../editing/manifests.md#aqua) lists every accepted Aqua filename and safe YAML shape.
 - [A Docker image chain](./docker.md) explains the same provider-publication boundary for registry-backed images.
 - [Integrating an existing release pipeline](./release-integration.md) covers per-destination completion and recovery.
-
-## A public repository to compare
-
-[Aqua minisign checks at `759a4a4`](https://github.com/aquaproj/aqua/blob/759a4a4a564922351cb2912ed17519adfb1c2860/pkg/minisign/aqua.yaml): The configuration contains two pins for `jedisct1/minisign`, one inline and one in a separate version field. The local dependency edit updated both pins. The standard-registry revision and checksum policy stayed unchanged; installation and checksum regeneration remain Aqua’s job.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

@@ -3,9 +3,9 @@
 Keep your distributions in one repository and retain the Python tools that build and publish them. dispat can keep
 `pyproject.toml` and `requirements.txt` current; the first walkthrough below uses uv.
 
-For pip, PyPA build/Twine or a historical Pants monorepo, start with
-[Python without uv, including Pants](./python-pants.md). It covers StackStorm and Backend.AI source layouts, a
-locally exercised Pants 2.17.0 adapter, and the boundaries of that verification.
+For pip, PyPA build/Twine or a Pants monorepo, start with
+[Python without uv, including Pants](./python-pants.md). It covers build metadata, shared version sources and the
+boundary between dispat's release graph and Pants' build graph.
 
 ## The layout
 
@@ -150,13 +150,9 @@ each sdist and wheel that PyPI accepted. If an upload may have succeeded before 
 index before retrying: an accepted PyPI filename cannot be reused. A release can still need additional wheel files;
 compare the expected inventory rather than skipping the whole version because one file exists.
 
-This distinction showed up in two public releases. [JupyterLab 4.6.3](https://pypi.org/project/jupyterlab/4.6.3/)
-already had its wheel and sdist when a later npm channel update failed, while
-[PyArrow 24.0.0](https://pypi.org/project/pyarrow/24.0.0/) completed a much larger platform wheel matrix after the
-release hit a PyPI project quota. The latest [25.0.1 release](https://pypi.org/project/pyarrow/25.0.1/) currently has
-42 wheels and an sdist, so that incident is recovery evidence rather than a current missing-artifact report. The
-publisher must reconcile files within the package; dispat records completion at the package boundary. It can order and
-retry that publisher, but cannot raise a quota or repair credentials. See
-[integration findings](./release-integration.md#make-success-mean-available-to-the-next-stage).
+The publisher must reconcile files within the package before a retry; dispat records completion at the package
+boundary. It can order and retry that publisher, but cannot raise a quota or repair credentials. Perform remote
+reconciliation outside the publish command, then let a successful upload return immediately so dispat can write its
+release records. See [release recovery](../reference/releasing/recovery.md).
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

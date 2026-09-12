@@ -153,21 +153,11 @@ steps. Keep the native UPM manifest, test each artifact as a consumer would, and
 before retrying. See [integration findings](./release-integration.md).
 
 Check identity at all three boundaries: the `package.json` version, the release tag, and the version embedded in each
-download name or registry record. Projects such as UniTask publish one source version as a Git-installable UPM package,
-a `.unitypackage`, and a NuGet package. Success at one destination says nothing about the others, so record each
-completed publication before a retry and install each fresh artifact in a clean consumer project.
-
-The reviewed [UniTask 2.5.11 release](https://github.com/Cysharp/UniTask/releases/tag/2.5.11) and
-[NuGet version index](https://api.nuget.org/v3-flatcontainer/unitask/index.json) contain that version.
-[NuGetForUnity 4.5.0](https://github.com/GlitchEnzo/NuGetForUnity/releases/tag/v4.5.0) instead supplies its UPM/source and
-Unity-package distribution; being a NuGet integration tool does not imply it must itself publish to NuGet.
+download name or registry record. A project may publish one source version as a Git-installable UPM package, a
+`.unitypackage`, and a NuGet package. Success at one destination says nothing about the others, so reconcile each
+publication before a retry and install each fresh artifact in a clean consumer project. A NuGet integration tool does
+not necessarily publish itself to NuGet; follow the declared distribution policy.
 
 Android exports can include native libraries from packages, plugins and middleware. Apply the engine-independent
 [Android alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment) to every 64-bit `.so` in the
-final artifact, including wrappers. The linked Unity/FMOD evidence keeps ELF, APK ZIP and device checks separate.
-
-## A public repository to compare
-
-[Unity Entity Component System samples at `6786a74`](https://github.com/Unity-Technologies/EntityComponentSystemSamples/blob/6786a741ee1f118ed14cecfa02beae8e926937b0/EntitiesSamples/Packages/manifest.json): The package list mixes engine modules and editor packages. The local check rewrote `com.unity.2d.sprite` and preserved all other declarations. This file has no application version: keep that in ProjectSettings, and retain the project’s editor, export and licensing setup.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+final artifact, including wrappers. Keep ELF, APK ZIP and device checks separate.

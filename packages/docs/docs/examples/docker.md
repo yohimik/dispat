@@ -108,27 +108,20 @@ manifest, so the version lives there and the build and publish stages are `docke
 `docker compose push`. The same file shows both halves of this section: a rewritten literal (`image:`) beside an
 interpolated reference dispat leaves alone (the channel tag).
 
+A deployment Compose file can identify a third-party image as its own version source. Inspect the scanner's detected
+identity before enabling automatic own-version rewriting; use explicit dependency edits or a dedicated manifest for
+the image you publish.
+
 ## Verify the registry boundary
 
-Set the waiting flag on the provider whose image must be pushed before a consumer builds. Before that publish is
-complete, resolve the exact tag to a digest, check the required platforms, and retain the source revision in the
-release result. A consumer build that uses a moving tag can otherwise receive different bytes during a retry.
+Set the waiting flag on the provider whose image must be pushed before a consumer builds. Validate the built image's
+digest, required platforms and source revision before publication. Check the production registry separately after
+native release records exist. A consumer build that uses a moving tag can receive different bytes during a retry.
 
-The historical [Pulsar 3.0.0 child image](https://github.com/apache/pulsar/issues/20420) used
-`FROM apachepulsar/pulsar:latest` and contained 2.11.0; 3.0.1 repaired it. Bazzite shows the complementary identity
-problem: its [`testing-44.20260610` report](https://github.com/ublue-os/bazzite/issues/5113) compares a Git tag at one
-commit with an image label naming another. Current checks are healthy: Pulsar's 4.2.4 parent and child indexes expose
-amd64 and arm64, and Bazzite's 44.20260908 tag and image label both name `8e5aa39`. Publication order alone fixes
-neither historical cause. Use an immutable provider reference, validate its provenance, and carry that identity
-through partial retries.
+Publication order does not fix an image built from a moving base or labelled with the wrong source revision. Use an
+immutable provider reference, validate its provenance, and carry that identity through partial retries.
 
 Shared BuildKit contexts can avoid the registry hop, so they do not need this wait. See
 [integration findings](./release-integration.md#choose-the-build-boundary) for both build boundaries.
-
-## A public repository to compare
-
-[Docker awesome-compose at `30f4b7f`](https://github.com/docker/awesome-compose/blob/30f4b7f6a6c3b0c0ecf4d4efb0de203c48d11562/nginx-flask-mysql/compose.yaml): The nginx/flask/mysql Compose sample is deployment wiring. The scanner selected the literal `mariadb:10-focal` image as its identity, and a package-version write changed that third-party image tag. Do not enable automatic own-version rewriting on an arbitrary deployment Compose file. Inspect the detected identity first and use explicit dependency edits or a dedicated manifest for the image you publish.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

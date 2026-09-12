@@ -3,23 +3,18 @@
 O3DE’s `project.json` and `gem.json` can supply a project or gem version and explicit gem dependency constraints.
 Keep engine compatibility and the release-train identity separate when they serve different purposes.
 
-## A public input checked locally
+## Version and dependency boundaries
 
-[O3DE Atom at `80f4714`](https://github.com/o3de/o3de/blob/80f47141642496748de7313c6c475a0b564ea060/Gems/Atom/gem.json)
-declares gem `Atom` at `0.1.0` and twelve gem dependencies. These commands were exercised against a disposable
-copy using dispat 1.10.0:
+The writer can update a gem's existing version and a literal dependency constraint:
 
 ```sh
-dispat writer Gems/Atom/gem.json --set-version 9.8.7 --set 'AtomShader===0.2.0' --strict
+dispat writer Gems/Atom/gem.json --set-version 1.0.0 --set 'AtomShader===0.2.0' --strict
 dispat scanner . --strict --log-format json
 ```
 
-The result had version `9.8.7` and dependency `AtomShader==0.2.0`, with the other entries preserved. The first `=` in
-the command separates the dependency name from its range; the remaining `==` is the range operator. Readback and
-repeat-edit checks passed. The test values are not an upstream release proposal.
-
-The [21-ecosystem verification](./open-source.md) retains the pinned source, hashes and exact expected result.
-This check did not configure CMake, compile the engine, validate a gem against an engine build, or create an installer.
+The first `=` separates the dependency name from its range; the remaining `==` is the range operator. These manifest
+operations do not configure CMake, compile the engine, validate a gem against an engine build, or create an installer.
+Keep those checks in the native build and publish commands.
 
 ## Declare the release units
 

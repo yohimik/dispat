@@ -149,51 +149,26 @@ above, which is exactly why `manifestNames` is in the configuration.
 
 ## Test repository resolution
 
-Keep a clean consumer check for the published coordinates, Gradle metadata and catalog. A build using local project dependencies does not establish that a separate checkout can resolve the same release. See [integration findings](./release-integration.md#apply-the-pattern-to-your-ecosystem).
+Keep a clean consumer check against packed files or a staging repository for the coordinates, Gradle metadata and
+catalog. A build using local project dependencies does not establish that a separate checkout can resolve the same
+release. Check the production registry separately after native records exist. See
+[integration patterns](./release-integration.md#apply-the-pattern-to-your-ecosystem).
 
-Kotlin multiplatform releases show why the check needs an artifact inventory. In the historical
-[`kotlinx-serialization-hocon` 1.7.0 incident](https://github.com/Kotlin/kotlinx.serialization/issues/2717), other
-modules shipped but the HOCON POM was absent because its publish task was omitted. The repaired
-[`1.11.0` HOCON POM](https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-hocon/1.11.0/kotlinx-serialization-hocon-1.11.0.pom)
-is now available. Check the BOM, JVM artifacts and required platform variants before marking a release complete;
-one successful coordinate is not the whole publication set.
+Kotlin multiplatform releases need an explicit artifact inventory. Check the BOM, JVM artifacts and required platform
+variants before marking a release complete; one successful coordinate is not the whole publication set. Point
+versioning at the input the publisher actually uses, which may be a release property rather than a value kept in the
+source tree. Use a version-stage script for that property when appropriate.
 
-Point versioning at the input the publisher actually uses. The `kotlinx.coroutines` 1.11.0 tag retains a snapshot
-value in `gradle.properties`, while its build accepts a `DeployVersion` property and both
-[`kotlinx-coroutines-core-jvm` 1.11.0](https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.11.0/)
-and the [`1.11.0` BOM](https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-bom/1.11.0/) are present.
-That source value is intentional build input, not evidence of a bad registry release. Use a version-stage script for
-the release property when appropriate; do not add an `autoVersion.replace` rule merely to make the tag look aligned.
+### Verify Android coordinates and AARs
 
-### Audit Android coordinates and AARs
-
-Android libraries published by Gradle need the same remote-consumer boundary. MapLibre's
-[`android-v13.6.1`](https://github.com/maplibre/maplibre-native/releases/tag/android-v13.6.1) has matching
-[`org.maplibre.gl:android-sdk:13.6.1`](https://repo1.maven.org/maven2/org/maplibre/gl/android-sdk/13.6.1/) POM and AAR.
-Google's android-maps-utils [`v5.2.0`](https://github.com/googlemaps/android-maps-utils/releases/tag/v5.2.0) has its
-main, core and clustering coordinates on Central, and its release workflow runs `publishToMavenCentral` after the
-GitHub release is published. Verify every included publishable module from a clean Gradle consumer. Directories that
-are not included in `settings.gradle` are not missing artifacts, and dispat cannot infer that publication intent from
-a dormant `build.gradle` file.
+Android libraries published by Gradle need the same remote-consumer boundary. Verify every included publishable
+module from a clean Gradle consumer. Directories excluded from `settings.gradle` are not missing artifacts, and
+dispat cannot infer publication intent from a dormant `build.gradle` file.
 
 ### Compile against the published POM and AAR
 
-Artifact presence alone does not prove that its declared dependencies are sufficient. Google Maven listed
-[`firebase-auth` 24.2.0](https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-auth/maven-metadata.xml)
-as its current release on 10 September 2026. Its published
-[POM](https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-auth/24.2.0/firebase-auth-24.2.0.pom)
-does not declare a Checker Framework dependency, while its
-[AAR](https://dl.google.com/dl/android/maven2/com/google/firebase/firebase-auth/24.2.0/firebase-auth-24.2.0.aar)
-contains references to `UnknownInitialization` and `MonotonicNonNull`. A Firebase maintainer
-[reproduced the resulting Kotlin consumer failure](https://github.com/firebase/firebase-android-sdk/issues/8557#issuecomment-5443253358).
-
-dispat can order Gradle builds and publish commands and reconcile literal coordinates, but it does not inspect JVM
+Artifact presence alone does not prove that its declared dependencies are sufficient. dispat can order Gradle builds
+and publish commands and reconcile literal coordinates, but it does not inspect JVM
 bytecode or compare an AAR with its POM. Add a clean Kotlin consumer compile for the exact remote coordinate to the
 release gate. A bytecode-to-metadata scan can catch the missing annotation dependency before publication; the clean
 consumer build verifies the resolver behavior that users receive.
-
-## A public repository to compare
-
-[OkHttp at `1f04bf8`](https://github.com/square/okhttp/blob/1f04bf8028b0fd9471ba9a77eba0ad913f86705a/gradle/libs.versions.toml): The version catalog maps library coordinates through version references. A local edit of `androidx.activity:activity-ktx` changed the referenced version and read it back without flattening the catalog. Keep Gradle’s dependency resolution and wrapper; the scanner does not execute build logic.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

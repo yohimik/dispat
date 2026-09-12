@@ -73,8 +73,8 @@ core also needs a publication boundary. See [build boundaries](./release-integra
 
 ## Release only the intended consumers
 
-A commit `fix(core)^^: exercise consumers` requests propagation through two dependency levels. In a locally
-verified dispat 1.10.0 planning fixture, the graph above produced:
+A commit `fix(core)^^: exercise consumers` requests propagation to all transitive consumers. In this graph that
+reaches two dependency levels:
 
 | Package | Planned version | Why |
 | --- | --- | --- |
@@ -87,11 +87,6 @@ verified dispat 1.10.0 planning fixture, the graph above produced:
 Without propagation, the core fix releases core alone. Use `dispat status` to inspect the graph before the release
 job runs. Independent versions let a library, application and site evolve at different rates; use an explicit
 [shared version policy](../reference/releasing/versioning.md) only when they must share a version.
-
-The [reproduction](https://github.com/yohimik/dispat/blob/main/packages/docs/verification/ecosystems/one-to-many.py)
-checks both the original single-package plan and the expanded graph. It verifies that the core configuration,
-source file and baseline tag remain unchanged, four packages enter the plan, and the site stays out. This is a
-planning test in a temporary Git repository; it does not run the native builds or publishers.
 
 ## Keep recovery aligned with deliverables
 
@@ -115,6 +110,3 @@ repositories, a [control repository](../control-repository.md) can supply the sa
 | Application or service | Container, chart, deployment, site | [Docker](./docker.md), [Helm](./helm.md), [Terraform](./terraform.md), [sites](./pages.md) |
 | Mobile app | Shared library, backend, release assets | [Apple](./apple.md), [Android](./android.md), [Flutter](./flutter.md) |
 | Game | Dedicated server, modding SDK, launcher, website | [Game development](./game.md), [Steam](./steam.md), [itch.io](./itch.md) |
-
-The [open source audit](./open-source.md) adds pinned public examples for all 21 native ecosystems, including
-cases where version metadata needs an adapter instead of a native rewrite.

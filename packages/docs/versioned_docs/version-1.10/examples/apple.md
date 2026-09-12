@@ -144,7 +144,7 @@ than a version. dispat never rewrites them.
 
 Create framework outputs in a clean directory and propagate every build and signing failure. Test the resulting
 XCFramework in a clean consumer project; stale output can otherwise hide a failed build. See the
-[RxSwift reproduction and integration lessons](./release-integration.md#make-success-mean-available-to-the-next-stage).
+[release integration guidance](./release-integration.md#make-success-mean-available-to-the-next-stage).
 
 Compare the release tag with every file that supplies shipped metadata. A podspec can say `5.12.1` while an Xcode
 project still gives the built framework `MARKETING_VERSION = 5.12.0`; an `Info.plist` that contains
@@ -152,35 +152,15 @@ project still gives the built framework `MARKETING_VERSION = 5.12.0`; an `Info.p
 plist. Keep intentionally separate releases separate too: a ZIP-only packaging correction can use a new GitHub tag
 while leaving the CocoaPods version unchanged.
 
-The [Alamofire 5.12.1 report](https://github.com/Alamofire/Alamofire/issues/4053) demonstrates that historical mismatch;
-the maintainer confirmed the omitted setting, and
-[5.12.2](https://github.com/Alamofire/Alamofire/blob/5.12.2/Alamofire.xcodeproj/project.pbxproj) corrected both project
-values. Keep the check as a regression case rather than a current defect. Conversely,
-[Firebase 12.19.1](https://github.com/firebase/firebase-ios-sdk/releases/tag/12.19.1) explicitly fixes GitHub ZIP naming
-without a new CocoaPods SDK release. An integration check must understand that release policy before requiring every
-destination to advance.
+An integration check must understand the project's release policy before requiring every destination to advance.
+A packaging-only correction may use a new archive tag while leaving the CocoaPods version unchanged.
 
 ## Pin the vendored source behind a Swift tag
 
 A Swift Package Manager tag identifies the wrapper repository, including the submodule commits and generated native
-sources it contains. Check that source identity when a release delivers a vendor fix. The
-[`mlx-swift` 0.31.6 tag](https://github.com/ml-explore/mlx-swift/tree/0.31.6) pins MLX commit `ce45c525`; that vendored
-source passes the output buffer's dtype to the NAX split-K template. Upstream
-[MLX PR #3810](https://github.com/ml-explore/mlx/pull/3810) changes it to the input dtype after an M5 workload produced
-invalid results. The correction appeared in mlx-swift's later mainline vendor bump; at the 10 September 2026 check, no released Swift tag contained it.
-
-Before recording delivery, resolve every submodule at the proposed tag and test the packaged Swift consumer on the
-affected hardware path. dispat can create the wrapper tag after the build succeeds; it does not infer whether a
-vendored commit contains a native fix.
-
-## A public repository to compare
-
-[Alamofire Info.plist at `bda9ed5`](https://github.com/Alamofire/Alamofire/blob/bda9ed57d72988a3a2ada33d824583541f86eac6/Source/Info.plist): `CFBundleShortVersionString` points to `$(MARKETING_VERSION)` and the build number points to `$(CURRENT_PROJECT_VERSION)`. A version write left this plist byte-for-byte unchanged. Update the owning Xcode settings and validate the built bundle instead of replacing the substitutions.
-
-[Alamofire podspec at `bda9ed5`](https://github.com/Alamofire/Alamofire/blob/bda9ed57d72988a3a2ada33d824583541f86eac6/Alamofire.podspec): The podspec’s literal version rewrote successfully. This is independent of its plist and Xcode settings: keep all published metadata consistent, and retain pod validation and publication in the existing Apple workflow.
-
-[Alamofire Xcode project at `bda9ed5`](https://github.com/Alamofire/Alamofire/blob/bda9ed57d72988a3a2ada33d824583541f86eac6/Alamofire.xcodeproj/project.pbxproj): The local writer updated the project’s literal marketing versions and read the new version back. This check did not build or sign any Apple artifact. Preserve target-specific settings and inspect the final archive before publication.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+sources it contains. Check that source identity when a release delivers a vendor fix. Before recording delivery,
+resolve every submodule at the proposed tag and test the packaged Swift consumer on the affected hardware path.
+dispat can create the wrapper tag after the build succeeds; it does not infer whether a vendored commit contains a
+native fix.
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

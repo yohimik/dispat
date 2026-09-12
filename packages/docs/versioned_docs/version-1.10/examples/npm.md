@@ -61,44 +61,29 @@ npm version "$DISPAT_NEW_VERSION" --no-git-tag-version && npm ci && npm run buil
 
 ## Verify uploads and channel updates
 
-Treat publication of an exact version and an npm dist-tag update as distinct operations. If a later destination fails, verify the already-published version before retrying it. See the [JupyterLab release case](./release-integration.md#make-success-mean-available-to-the-next-stage).
+Treat publication of an exact version and an npm dist-tag update as distinct operations. If a later destination fails,
+reconcile the already-published version outside the publish command before retrying it. See
+[release recovery](../reference/releasing/recovery.md).
 
-Do not use the presence of `.changeset/*.md` as a proxy for publication readiness. A
-[local CLI 3.0.2 fixture](https://github.com/changesets/action/issues/241#issuecomment-5613060030) versioned one
-releasable package and retained an ignored package's Changeset file. Separate inspection of Action v2.1.2's source
-shows that its raw-file gate then chooses version handling instead of publishing; the Action itself was not executed
-in that fixture. If it remains the native coordinator, compare every
-already-versioned package with the registry and allow reconciliation while other release intent is pending. dispat
-does not read Changesets' `ignore` policy or make two coordinators share completion state.
+Do not use the presence of `.changeset/*.md` as a proxy for publication readiness. Ignored packages can retain change
+files while other packages are ready. If Changesets remains the native coordinator, account for its ignore policy and
+reconcile already-versioned packages before retrying. dispat does not make two coordinators share completion state.
 
-Verify Git records independently too. In
-[Changesets CLI #1621](https://github.com/changesets/changesets/issues/1621#issuecomment-5612991733), CLI 3.0.2
-suppressed a deterministic signing failure, exited zero and emitted a `git-tag` event although no tag existed. After
-a configured script creates tags, verify each expected ref and its push before treating recording as complete. dispat
-sees the script's process status; it cannot correct a third-party command that reports a false success receipt.
+Verify Git records independently too. A configured script can report success without creating every expected tag.
+Check each ref and push result; dispat sees the script's process status but cannot correct a false success receipt.
 
 ### Compare the planned components with the parsed release record
 
-In release-please, [issue #2801](https://github.com/googleapis/release-please/issues/2801) reports that a raw
-`<path>` token inside inline code can make release-PR reparsing silently omit one component, while
-[issue #2884](https://github.com/googleapis/release-please/issues/2884) reports that a raw `<details>` token can crash
-later runs. Calling only `PullRequestBody.parse()` from the published
-[`release-please@17.11.2`](https://www.npmjs.com/package/release-please/v/17.11.2) reproduced the omission and crash;
-it did not exercise a complete release. [PR #2885](https://github.com/googleapis/release-please/pull/2885) proposes a
-guard for the missing-summary crash and was still open when checked.
-
-dispat computes its package plan from Git and does not parse or validate release-please PR bodies. When a release
-script emits a multi-component release record, add a native gate that compares the intended component names with the
-names parsed back from that record. After publishing, compare that same set with the exact registry versions rather
-than treating a successful parser call or workflow as proof that every component shipped.
+dispat computes its package plan from Git and does not parse or validate another tool's release record. When a release
+script emits a multi-component record, compare the intended component names with the names parsed back from that record
+before publication. Reconcile registry versions outside the publish command when recovering an ambiguous result.
 
 ## Moving release intent out of Changeset files
 
 Changesets maintains a separate release-intent file for each submitted change, then generates versions and changelogs.
 It also supports [commit-message generators](https://github.com/changesets/changesets/blob/main/docs/config-file-options.md)
-and third-party adapters. The [Conventional Commits discussion](https://github.com/changesets/changesets/issues/862)
-asks for commit-derived input while retaining explicit dependency policy; it is an authoring choice, not evidence
-that Changesets cannot automate release output.
+and third-party adapters. Commit-derived input and separate change files are authoring choices; preserve explicit
+dependency policy when choosing between them.
 
 With dispat, put the reviewed note in the Git commit message. For example, when `app` exposes `core`'s breaking API:
 
@@ -111,9 +96,8 @@ Propagate: major
 Propagate-Depth: 1
 ```
 
-With an `app` → `core` dependency and both baselines at 1.0.0, dispat 1.10.0's planning fixture produced 2.0.0 for both.
-The preview rendered core's description/body and app's dependency transition into both output formats. Major
-propagation is explicit; a provider's breaking change does not imply that every consumer has broken its own API.
+With an `app` → `core` dependency and both baselines at 1.0.0, this commit plans 2.0.0 for both.
+The preview includes core's description/body and app's dependency transition. Major propagation is explicit; a provider's breaking change does not imply that every consumer has broken its own API.
 Keep the footer lines together in one final block. See [commit syntax](../reference/commits.md).
 
 Before changing the production release path:
@@ -131,14 +115,9 @@ package can use the same approach: see [single-package recovery and notes](./sin
 
 ## Compare the published manifest, not only the source manifest
 
-Some release scripts rewrite versions only in the build workspace. Paperclip's tagged source declares a development
-version while its [publishing guide](https://github.com/paperclipai/paperclip/blob/v2026.831.1/doc/PUBLISHING.md)
-explains temporary calendar-version and dependency rewrites. The [v2026.831.1 release](https://github.com/paperclipai/paperclip/releases/tag/v2026.831.1)
-and [`paperclipai@2026.831.1`](https://registry.npmjs.org/paperclipai/2026.831.1) were both present when checked.
-
-For an integration, compare the plan with the packed manifest and its internal dependency versions after those
-rewrites. Then publish the artifact that passed that check. A different version in the untouched source manifest
-is not sufficient evidence of a release-identity defect.
+Some release scripts rewrite versions only in the build workspace. Compare the plan with the packed manifest and its
+internal dependency versions after those rewrites. Then publish the artifact that passed that check. A different
+version in the untouched source manifest is not sufficient evidence of a release-identity defect.
 
 ## Edit pending notes without rewriting shared history
 
@@ -155,14 +134,8 @@ Edits: <original-commit-sha>
 ```
 
 Use the real SHA and the original package scope. An empty correction commit is allowed. Preview the result before
-release: the old Git commit remains unchanged, while the pending version plan and notes use the correction. This
-was verified with dispat 1.10.0 in the disposable authoring fixture. Corrections reach only unreleased ancestor
-records; they cannot revise an already-published release. See [correcting release records](../reference/corrections.md).
-
-## A public repository to compare
-
-[JupyterLab at `bf8d11f`](https://github.com/jupyterlab/jupyterlab/blob/bf8d11fe21ed78f1f4c4a23851f3e538c22731bb/packages/services/package.json): The services package has a literal version and internal `@jupyterlab/*` ranges. The local edit changed its version and preserved every dependency. Keep the repository’s Yarn build and publication tooling; selecting an npm-format manifest does not require switching package managers.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+release: the old Git commit remains unchanged, while the pending version plan and notes use the correction. Corrections
+reach only unreleased ancestor records; they cannot revise an already-published release. See
+[correcting release records](../reference/corrections.md).
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

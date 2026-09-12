@@ -134,29 +134,15 @@ runs and sees the already-reconciled files.
 
 ## Verify promoted coordinates
 
-A local Maven reactor build can succeed before any coordinate is available remotely. If a later build resolves the provider from a repository, set the waiting flag on that provider and check its promoted POM, JAR and required classifiers before publish succeeds. See [build boundaries](./release-integration.md#choose-the-build-boundary).
+A local Maven reactor build can succeed while the packaged metadata is incomplete. If a later build resolves the
+provider from a repository, set the waiting flag on that provider. Validate its staged POM, JAR and required classifiers
+before publication, then let the publication command return immediately on success. See
+[build boundaries](./release-integration.md#choose-the-build-boundary).
 
-Check artifact contents as well as coordinate existence. Netty's open
-[JAR license-file report](https://github.com/netty/netty/issues/17376) still reproduces on
-[`netty-codec-base` 4.2.18.Final](https://repo1.maven.org/maven2/io/netty/netty-codec-base/4.2.18.Final/): the POM and
-JAR are present, but the JAR has no `LICENSE` or `NOTICE` entry. Put a representative `jar tf` assertion in the build
-stage before publishing the immutable Central version. dispat can enforce that gate; it does not add the missing resource.
+Check artifact contents as well as coordinate metadata. Put representative `jar tf` assertions in the build stage
+before publishing an immutable version. dispat can enforce that gate; it does not add missing resources.
 
-Keep registry promotion and secondary outputs distinct. Spring Boot's workflow stages and verifies artifacts, syncs
-to Maven Central, promotes them, and only then triggers docs and other destinations. The
-[4.0.2 docs incident](https://github.com/spring-projects/spring-boot/issues/48939) therefore did not imply missing Maven
-coordinates. Current [`spring-boot` 4.1.1](https://repo1.maven.org/maven2/org/springframework/boot/spring-boot/4.1.1/)
-has its POM and JAR on Central. Model a separately deployed documentation archive as another checked output rather
-than treating a successful reactor build as proof that every destination completed.
-
-The build tool and distribution format can differ: Spring Boot uses Gradle to create Maven artifacts. A Maven-native
-example is [Dubbo 3.2.20](https://github.com/apache/dubbo/releases/tag/dubbo-3.2.20), whose tagged POM's `revision`
-property matches its [Central POM and JAR](https://repo1.maven.org/maven2/org/apache/dubbo/dubbo/3.2.20/). Preserve
-property-based versioning and verify the generated POM; a literal-value writer is not a substitute for evaluating
-the publisher's version inputs.
-
-## A public repository to compare
-
-[Apache Commons Lang at `62620f3`](https://github.com/apache/commons-lang/blob/62620f371b9c6ed337854e066d8916e56942d9af/pom.xml): The project version is literal, while several dependency versions are `${...}` properties. The local check rewrote the project version and preserved those properties. Keep the parent/property version source and Maven’s existing release checks; scanning this POM does not evaluate an effective POM.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+Keep registry promotion and secondary outputs distinct. Model a separately deployed documentation archive as another
+checked output rather than treating a successful reactor build as proof that every destination completed. The build
+tool and distribution format can also differ. Preserve property-based versioning and inspect the generated POM; a
+literal-value writer is not a substitute for evaluating the publisher's version inputs.

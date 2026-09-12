@@ -3,21 +3,18 @@
 A Defold project’s own version can be written in `game.project`. Its library archive URLs need separate handling.
 Use [From one package to many](./one-to-many.md) when the project gains extensions, a server or a website.
 
-## A public input checked locally
+## Version and dependency boundaries
 
-[Monarch at `9540975`](https://github.com/britzl/monarch/blob/954097522e7c2d4a710464dd9e8b48fb309685ab/game.project)
-declares the title `Monarch`, version `0.9`, and a `dependencies#0` URL for deftest. With dispat 1.10.0, the scanner
-reported the title and version but no dependency edges. In a disposable copy, this command changed only the project
-version to the test value `9.8.7`:
+The writer can change an existing project version:
 
 ```sh
-dispat writer game.project --set-version 9.8.7 --strict
+dispat writer game.project --set-version 1.0.0 --strict
 dispat scanner . --root-only --strict --log-format json
 ```
 
-Readback reported `Monarch@9.8.7`; the archive URL stayed unchanged, and repeating the edit changed no bytes.
-The [public-manifest verifier](./open-source.md) reproduces this against the pinned file, with hashes before and after.
-It did not run Defold’s editor, Bob, an extension build, or a store upload.
+Archive URLs need a targeted replacement or version script. Scanning and writing `game.project` does not run Defold's
+editor or Bob, build extensions, or upload to a store. Keep those native checks in the configured build and publish
+commands.
 
 ## Coordinate the project version
 
@@ -38,7 +35,7 @@ matching release tag. In an established repository, preserve its real release ba
 
 Run status and version reconciliation in a disposable checkout, then inspect the native artifact’s version. Ensure
 `[project] version` already exists when choosing native rewriting. The writer changes existing values, not absent
-keys, and this sample’s `0.9` manifest value is distinct from a three-part semantic release baseline.
+keys. A short native version such as `0.9` may also differ from a three-part semantic release baseline.
 
 ## Libraries and release identity
 

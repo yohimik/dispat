@@ -1,8 +1,8 @@
 # Examples
 
-These pages cover release setups by ecosystem and delivery target, plus verified integrations with public projects.
-Release walkthroughs show their configuration, scripts and terminal output. The public-repository audit and
-manifest-focused guides state the narrower checks they actually ran.
+These pages cover release setups by ecosystem and delivery target. Release walkthroughs show their configuration,
+scripts and terminal output, while manifest-focused guides explain what dispat changes and what remains the native
+toolchain's responsibility.
 
 Every dispat transcript comes from a real run against a throwaway repository, with only timestamps and durations
 normalized. Lines printed by your own commands, like `npm`, `docker`, or `butler`, come directly from those tools. Your
@@ -26,12 +26,11 @@ commands match your project. [An npm monorepo](./npm.md) provides a compact comp
 After that, go to the page for your own ecosystem below. Read [Adopting dispat](./adopting.md) second instead if you
 are bringing dispat to a repository that already ships versions.
 
-Read [Integrating an existing release pipeline](./release-integration.md) for findings from public release incidents,
-artifact checks, and the limits of orchestration.
+Read [Integrating an existing release pipeline](./release-integration.md) for build boundaries, artifact checks,
+recovery and the limits of orchestration.
 [Skills, specifications and TeX documentation](./document-artifacts.md) covers versioned non-code deliverables.
 
-Read [Open source integration checks](./open-source.md) for all 21 ecosystems, pinned public inputs, and locally
-verified edits and limitations. [Python without uv and with Pants](./python-pants.md) covers historical build setups.
+[Python without uv and with Pants](./python-pants.md) covers historical build setups.
 
 ## Ecosystem by ecosystem
 

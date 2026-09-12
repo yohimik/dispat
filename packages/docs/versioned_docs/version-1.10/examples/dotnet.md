@@ -169,23 +169,15 @@ publish. That ordering is the only reason the versions it just wrote resolve.
 - [Script environment variables](../reference/environment.md#workspace-data) for the workspace listing.
 - [Manifest tools](../editing/manifests.md) for the scanner and writer on their own.
 
+A project using `VersionPrefix`, `VersionSuffix` or computed MSBuild properties needs its existing build-time version
+injection or a targeted version script. The native writer does not evaluate these inputs. Inspect the packed version
+rather than treating a successful writer exit as proof that it changed.
+
 ## Keep publication destinations explicit
 
-NuGet, native runtime packages and an editor marketplace are separate destinations. Check every publisher result and
-record the package ID, version and returned artifact identity. A later successful command must not overwrite an
-earlier failure: [Stride's NuGet loop](https://github.com/stride3d/stride/issues/3416) demonstrates how an unchecked
-native exit code can otherwise leave the step green.
-
-[MonoGame 3.8.5.1](https://github.com/MonoGame/MonoGame/issues/8763) also separates the NuGet packages and GitHub VSIX
-from Visual Studio Marketplace publication. Installing a `.nupkg` does not verify the editor destination, and logging
-an HTTP error does not fail a release task. Preserve `--skip-duplicate` for recovery, but query the feed before a
-retry when the previous push result is unknown. See
-[integration findings](./release-integration.md#test-the-distributed-artifact).
-
-## A public repository to compare
-
-[Newtonsoft.Json at `09bb545`](https://github.com/JamesNK/Newtonsoft.Json/blob/09bb545d72969ad7fb4ea07db0d5c34f4fc07877/Src/Newtonsoft.Json/Newtonsoft.Json.csproj): The project uses `VersionPrefix` and `VersionSuffix`, rather than `<Version>`, and a `$(MicrosoftSourceLinkGitHubPackageVersion)` dependency. The local writer left the file byte-for-byte unchanged, even with `--strict`: the dependency edit was reported as skipped. Keep its build-time version injection or add a targeted version script; do not infer a successful version update from exit zero.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+NuGet, native runtime packages and an editor marketplace are separate destinations. Validate the package ID, version
+and artifact identity before each final publication command, and propagate every nonzero exit. Installing a `.nupkg`
+does not verify an editor destination. When a previous push result is unknown, reconcile the feed outside the publish
+command before retrying. See [integration guidance](./release-integration.md#test-the-distributed-artifact).
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

@@ -135,23 +135,13 @@ bracket could read as a section header on the next parse. A semicolon would comm
 
 ## Validate the addon that users install
 
-Match the addon `plugin.cfg` version, the source tag and the packaged native-library inventory. The reviewed
-[godot-sqlite 4.9 release](https://github.com/2shady4u/godot-sqlite/releases/tag/v4.9) supplies separate addon and demo
-archives; [gdUnit4 6.2.1](https://github.com/godot-gdunit-labs/gdUnit4/releases/tag/v6.2.1) supplies a source release.
-Those are different artifact promises. Neither proves a missing marketplace upload.
+Match the addon `plugin.cfg` version, the source tag and the packaged native-library inventory. Separate addon, demo
+and source archives are different artifact promises; none by itself proves marketplace publication.
 
 Keep Godot/ABI/platform checks in the native build scripts, and test a clean project using the distributed addon.
 For Android exports, inspect every bundled 64-bit `.so` with the shared
 [alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment), including addon and middleware
 wrappers.
 
-For a GitHub asset publisher, preserve completed files on retry and propagate each failed upload. The
-[Godot release-script reproduction](https://github.com/godotengine/godot-builds/issues/18) illustrates why a script that
-starts by creating its already-existing commit and tag may not reach the unfinished uploads on a second invocation.
-This is a reproduced script boundary, not a claim that the current Godot release lacks assets.
-
-## A public repository to compare
-
-[Godot Platformer 2D demo at `a3b5c11`](https://github.com/godotengine/godot-demo-projects/blob/a3b5c113112f77291d5f3d1360f33a882fdc52f7/2d/platformer/project.godot): The project declares a name but no `config/version`. A version write left it byte-for-byte unchanged. Set that field deliberately before adopting manifest versioning, or retain a tag-based version source; dispat does not invent the field.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+For a GitHub asset publisher, propagate each failed upload and reconcile completed files before retrying. A script
+that starts by recreating an existing commit or tag may never reach unfinished uploads on its second invocation.

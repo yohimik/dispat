@@ -157,8 +157,8 @@ dispat never descends into any of them.
 ## Test the packaged plugin
 
 Check the native library inventory inside each engine/platform archive, then install that archive into a clean test
-project. Source-tree builds can pass while the distributed ZIP lacks a library. See the
-[Cesium packaging case](./release-integration.md#test-the-distributed-artifact).
+project. Source-tree builds can pass while the distributed ZIP lacks a library. See
+[distributed artifact testing](./release-integration.md#test-the-distributed-artifact).
 
 For Android packages, run every bundled 64-bit `.so` through the shared
 [alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment), including middleware and plugin
@@ -169,24 +169,13 @@ tag while an archive filename and `EngineVersion` limit that binary to one Unrea
 native library inventory together; source compatibility with other engine versions does not prove that a packaged
 archive exists for them.
 
-For example, [SocketIOClient-Unreal 2.11.0](https://github.com/getnamo/SocketIOClient-Unreal/releases/tag/v2.11.0)
-lists a UE 5.7 archive, while [UEGitPlugin 3.16](https://github.com/ProjectBorealis/UEGitPlugin/releases/tag/3.16)
-provides a source release. Validate the project's declared destination, then retain any required Unreal build,
-licensing and marketplace steps in the configured scripts.
+Validate the project's declared destination, then retain any required Unreal build, licensing and marketplace steps
+in the configured scripts.
 
 ## Test the oldest supported engine
 
-Build the packaged plugin against the oldest engine version its guide claims to support. Steam Audio 4.8.1's
-[released guide](https://github.com/ValveSoftware/steam-audio/blob/v4.8.1/unreal/doc/getting-started.rst)
-says Unreal Engine 4.27 or later, while [issue #573](https://github.com/ValveSoftware/steam-audio/issues/573)
-reports a 4.27.2 build stopping at a missing `EditorAssetSubsystem.h`. The official plugin archive contains that
-include; a build on a newer engine does not validate the stated minimum.
+Build the packaged plugin against the oldest engine version its guide claims to support. A build on a newer engine
+does not validate the stated minimum.
 
 Keep this compatibility build in the native scripts before publishing each plugin archive. dispat can update its
 version fields and order the stages; engine API compatibility still needs the actual engine/compiler check.
-
-## A public repository to compare
-
-[SocketIOClient Unreal plugin at `f3e63dc`](https://github.com/getnamo/SocketIOClient-Unreal/blob/f3e63dcf578095f897c977d991c3fbb9aa501b94/SocketIOClient.uplugin): The plugin declares a literal `VersionName` and a separate integer `Version`. The local check changed `VersionName` while preserving the integer. Decide the build-counter policy separately, and retain Unreal’s native plugin packaging and target validation.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

@@ -7,24 +7,24 @@ native manifest ecosystems.
 
 ## Identify the actual distribution
 
-The September 10, 2026 review found several different contracts:
+Different document types have different distribution contracts:
 
-| Project | Checked distribution | Useful integration rule |
-|---|---|---|
-| [Playwright CLI 0.1.19](https://github.com/microsoft/playwright-cli/releases/tag/v0.1.19) | The npm archive contains the root skill and reference guides. The [reproduced checker gap](https://github.com/microsoft/playwright-cli/issues/463) concerns reference-only drift. | Inventory and compare the whole instruction tree, preserving intentional local edits and line-ending normalization. |
-| [Spec Kit 1.0.5](https://github.com/github/spec-kit/releases/tag/v1.0.5) | [PyPI](https://pypi.org/pypi/specify-cli/1.0.5/json) has a wheel and sdist; the wheel includes `specify_cli/core_pack/templates/`. The GitHub release has no uploaded assets. | Match documentation and recovery instructions to today's publisher. [The stale release-guide report](https://github.com/github/spec-kit/issues/4501) concerns obsolete ZIP instructions, not missing packages. |
-| [MCP specification 2026-07-28](https://github.com/modelcontextprotocol/modelcontextprotocol/releases/tag/2026-07-28) | A date-named specification revision is released independently of SDK versions. | Preserve the protocol's external revision identifier; do not force all language SDKs or documents to share one SemVer. |
-| [l3build 2026-09-09](https://github.com/latex3/l3build/releases/tag/2026-09-09) | [CTAN metadata](https://ctan.org/pkg/l3build) reports the same release date. | Keep CTAN packaging, TeX engines and acceptance rules in the native scripts; GitHub release presence is a separate check. |
+| Deliverable | Useful integration rule |
+|---|---|
+| A skill with referenced guides and scripts | Inventory and compare the whole instruction tree, preserving intentional edits and line-ending normalization. |
+| Templates distributed inside a package | Match documentation and recovery instructions to the package publisher; an absent release-page ZIP is not necessarily missing output. |
+| A date-named protocol revision | Preserve the protocol's external revision identifier; do not force all SDKs or documents to share one SemVer. |
+| A TeX package and compiled manual | Keep packaging, engines and acceptance rules in native scripts; a GitHub release is a separate destination. |
 
-A repository containing skills need not promise versioned releases. The reviewed [Anthropic skills repository](https://github.com/anthropics/skills)
-had no GitHub releases; that alone does not establish a failed publication or justify changing its distribution policy.
+A repository containing documents or skills need not promise versioned releases. Declare a package only when the
+project's distribution policy requires one.
 
 ## Choose the compatibility boundary
 
 Declare a documentation package with a real folder and its own tag format. A guide tied to the CLI's major/minor
 can use a `fixedMajorMinor` version group and receive independent patches. A standalone specification can version
-independently. dispat's [agent-guide configuration](https://github.com/yohimik/dispat/blob/v1.10.0/specs/agent-guide/dispat.yaml)
-shows version-marker replacement without a package-manager manifest, and a native verification script before recording.
+independently. A version-marker replacement can update a deliverable without a package-manager manifest; put its
+native validation before publication.
 
 Do not add an npm manifest solely to coordinate a PDF or skill folder. Keep the actual compiler and distribution
 commands in the package's scripts. dispat plans SemVer versions; a project's date-based protocol or CTAN revision
@@ -36,9 +36,8 @@ tool. Publish the complete file set before advancing a mutable discovery link su
 
 ## Keep document quality checks explicit
 
-A zero TeX exit status does not establish that the layout meets a project's publication requirements. In
-[l3build's resolved discussion](https://github.com/latex3/l3build/issues/470), maintainers discussed opt-in bad-box
-checking and accepted an implementation. Preserve the project's chosen setting and its engine limitations; do not
+A zero TeX exit status does not establish that the layout meets a project's publication requirements. Keep bad-box
+checking and acceptance rules explicit. Preserve the project's chosen setting and its engine limitations; do not
 report every warning as a publishing failure or claim that release orchestration validates PDF layout.
 
 For a manual, build in a clean directory, inspect the generated document and retain its source revision and file

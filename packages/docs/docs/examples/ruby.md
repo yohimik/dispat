@@ -127,17 +127,10 @@ reader reports what the file says rather than following the constant.
 ## Recover each publication destination
 
 Treat the gem, an npm companion, the GitHub release, and release notes as separate destinations. A failure after
-`gem push` must not hide that irreversible upload, and a retry should query RubyGems before deciding what remains.
-[Shakapacker 10.3.1](https://github.com/shakacode/shakapacker/issues/1236) is a useful repaired case: the gem and npm
-package exist, while the project separately hardened the checks and finalization around release publication.
+`gem push` must not hide that irreversible upload. Query RubyGems outside the publish command before deciding what a
+retry still needs.
 
 For a native gem, the expected destination is a set of platform variants rather than one version number. Record each
 accepted platform and digest, then reconcile missing variants without claiming the release complete. Authentication,
 signing and registry ownership remain publisher constraints. See
 [integration findings](./release-integration.md#make-success-mean-available-to-the-next-stage).
-
-## A public repository to compare
-
-[Rails Active Support at `9380b46`](https://github.com/rails/rails/blob/9380b46cd448fa3dc6a0ab050c82bfedbfda0d88/activesupport/activesupport.gemspec): The gemspec computes its version in Ruby. The local writer changed a literal `connection_pool` requirement while leaving the computed version alone. Keep Rails’ version-generation mechanism or explicitly edit its source; dispat does not execute Ruby to resolve the gem version.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.

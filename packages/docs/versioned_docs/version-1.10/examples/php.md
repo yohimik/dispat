@@ -106,22 +106,11 @@ Look at the identity line. It carries no `@version` because this manifest declar
 
 ## Track generated documentation separately
 
-Component tags, Packagist visibility and API documentation deployment are different outputs. Give a separately deployed documentation site an explicit package or verify its revision inside the publisher. See [integration findings](./release-integration.md#apply-the-pattern-to-your-ecosystem).
+Component tags, Packagist visibility and API documentation deployment are different outputs. Give a separately
+deployed documentation site an explicit package, or verify its revision before its final deployment command. See
+[integration patterns](./release-integration.md#apply-the-pattern-to-your-ecosystem).
 
-Also verify every split package that a new component requires. In
-[Symfony 8.1.1](https://github.com/symfony/symfony/issues/64735), FrameworkBundle required Service Contracts 3.7.1,
-but the split component was not tagged. The maintainers traced this to the split tool's change-detection strategy and
-[fixed it](https://github.com/symfony/symfony/pull/64744); current [`symfony/symfony` 8.1.6](https://packagist.org/packages/symfony/symfony#v8.1.6)
-is visible on Packagist. A root-tag check alone would have missed the broken dependency edge.
-
-CakePHP provides the complementary healthy case: the [`5.4.2` release](https://github.com/cakephp/cakephp/releases/tag/5.4.2)
-and [`cakephp/cakephp` 5.4.2](https://packagist.org/packages/cakephp/cakephp#5.4.2) agree, while its root manifest uses
-`self.version` for component dependencies. dispat can order component release commands and run a configured Packagist visibility check, but
-the external splitter or webhook still owns tag creation and indexing. Treat a propagation delay as pending evidence,
-not as a failed release.
-
-## A public repository to compare
-
-[Symfony HttpFoundation at `3d554bb`](https://github.com/symfony/http-foundation/blob/3d554bb228167df47c29dd55dba5c3d50a324ec7/composer.json): The manifest has no package version field. Rewriting `symfony/polyfill-mbstring` worked without adding one. Retain tag-based package versions and the existing Composer release process; absence of `version` is not an integration failure.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+Also verify every split package that a new component requires. A root tag alone cannot prove that each split package
+and dependency edge reached its destination. dispat can order component release commands, but the external splitter
+or webhook still owns tag creation and indexing. Complete destination checks before publication; reconcile ambiguous
+remote results outside the publish command before retrying.

@@ -137,30 +137,19 @@ shipping.
 
 ## Verify the published module
 
-Use a clean consumer without local replacement directives to verify the exact module path and tag. Multi-module release notes and GitHub release pages are additional outputs; a tag alone does not prove every output was finalized. See [integration findings](./release-integration.md#apply-the-pattern-to-your-ecosystem).
+Before publication, use a clean consumer without local replacement directives against the packaged source to verify
+the exact module path. Check proxy visibility separately after native release records exist. Multi-module notes and
+GitHub release pages are additional outputs; a tag alone does not prove every output was finalized. See
+[integration patterns](./release-integration.md#apply-the-pattern-to-your-ecosystem).
 
-## Audit each module namespace
+## Keep each module namespace explicit
 
-Treat every `go.mod` as its own version namespace. For example, gRPC Go's root
-[`v1.83.2`](https://github.com/grpc/grpc-go/releases/tag/v1.83.2) is available from the
-[Go proxy](https://proxy.golang.org/google.golang.org/grpc/@v/v1.83.2.info), while
-`cmd/protoc-gen-go-grpc` uses prefixed tags such as `cmd/protoc-gen-go-grpc/v1.6.2` and a separate
-[proxy path](https://proxy.golang.org/google.golang.org/grpc/cmd/protoc-gen-go-grpc/@v/v1.6.2.info).
-The prefix is part of the publication identity; a repository-wide tag is not a substitute.
+Treat every `go.mod` as its own version namespace. A nested module commonly uses a path-prefixed tag and a distinct
+proxy path; that prefix is part of the publication identity. A repository-wide tag is not a substitute.
 
-A nested manifest is not proof that maintainers intend to release it independently. Prometheus
-client_golang's root [`v1.24.1`](https://github.com/prometheus/client_golang/releases/tag/v1.24.1) is
-[available](https://proxy.golang.org/github.com/prometheus/client_golang/@v/v1.24.1.info), while the
-repository also contains `exp/go.mod` without a corresponding release in the audited tag set. Record the declared
-release policy before treating that absence as a failure. For a coordinated multi-module workflow, the
-[OpenTelemetry Go release proposal](https://github.com/open-telemetry/opentelemetry-go/issues/8414) is a useful
-recovery-test pattern: reconcile drafts, assets and already-published module releases by exact tag OID. dispat can
-order those module records, but it cannot infer release intent from the directory tree.
-
-## A public repository to compare
-
-[Cobra at `adbc881`](https://github.com/spf13/cobra/blob/adbc8813901bba65827259daa8e22ff94ec1f30e/go.mod): The module has no package version field. The local check rewrote the `pflag` requirement and read it back. Release identity still comes from Go-compatible Git tags; keep module tidying and consumer checks in the existing workflow.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+A nested manifest is not proof that maintainers intend to release it independently. Record the declared release
+policy before treating an absent module version as a failure. In a coordinated multi-module workflow, reconcile
+drafts, assets and already-published module releases by exact tag OID. dispat can order those module records, but it
+cannot infer release intent from the directory tree.
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

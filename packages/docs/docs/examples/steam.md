@@ -140,11 +140,8 @@ own line in the log.
 
 ## Validate the host and plugin together
 
-A plugin and its host can share a private protocol while arriving through different distribution systems. In the
-historical [gamescope #1239 incident](https://github.com/ValveSoftware/gamescope/issues/1239), a Flathub layer update
-to 3.14.3 reached Steam Decks whose SteamOS stable host was still 3.13.16.8-1. Flatpak games and apps crashed or froze;
-removing the layer restored launches but lost HDR. A collaborator identified the versioned IPC coupling, and the
-thread later records a working combination.
+A plugin and its host can share a private protocol while arriving through different distribution systems. Updating
+one without a compatible host can break consumers even when each artifact installs successfully.
 
 Record the host version, layer commit and target runtime channel alongside the build. Test that installed combination
 on a private branch before the publishing script promotes it with `SetLive`. Keep the upload receipt and consumer-test

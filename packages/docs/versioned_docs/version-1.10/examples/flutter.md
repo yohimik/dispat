@@ -133,21 +133,11 @@ way never to have that conversation.
 ## Check compatible published dependencies
 
 An older published version may satisfy a dependency even when the newest version does not. Check the whole version
-list against the constraint, then solve a clean consumer project to verify SDK and transitive constraints. The
-[Dartway report](https://github.com/dartway/dartway/issues/143) is the concrete edge case: `^0.11.0` remained
-installable after 0.12.1 became latest, so comparing only `latest.version` would report a false failure.
+list against the constraint, then solve a clean consumer project to verify SDK and transitive constraints. Comparing
+only `latest.version` can report a false failure.
 
-Keep source reconciliation after publication as its own stage. Flutter's package repository [now creates its sync-back
-pull request only after the release succeeds](https://github.com/flutter/packages/pull/12581), while Flame's
-[`flame_svg` 2.0.0 hotfix](https://github.com/flame-engine/flame/pull/4029) needed an explicit main-branch version and
-constraint update before the next automated version calculation. A pub.dev upload cannot be replaced; when its result
-is unknown, inspect the registry before changing source or retrying. See
-[integration findings](./release-integration.md#test-the-distributed-artifact).
-
-## A public repository to compare
-
-[Flutter path_provider at `8a35b16`](https://github.com/flutter/packages/blob/8a35b1611d677ac0cbbaf26f058a5ac12afa550c/packages/path_provider/path_provider/pubspec.yaml): The federated plugin declares separate Android, Foundation, Linux and Windows packages. Its literal version rewrite preserved those dependency ranges. Map the components you actually release into the graph and retain Flutter’s platform tests; the manifest check did not run any device or emulator.
-
-See the [21-ecosystem audit](./open-source.md) for pinned inputs, reproducible checks and their limits.
+Keep source reconciliation after publication as its own stage. A pub.dev upload cannot be replaced; when its result
+is unknown, inspect the registry outside the publish command before changing source or retrying. See
+[integration guidance](./release-integration.md#test-the-distributed-artifact).
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.
