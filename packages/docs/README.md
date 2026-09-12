@@ -48,6 +48,10 @@ relative link and every `#anchor` resolves at build time, so a dead link fails t
 job in [`.github/workflows/tests.yml`](../../.github/workflows/tests.yml) runs this check for every change to this
 package and does nothing else, because deployment belongs to the release run.
 
+The production container build includes Git history for page timestamps and historical module links. Only the
+`build` stage copies it; the `typecheck` target uses the source files without repository history, so an unrelated
+commit does not invalidate its test inputs.
+
 The `baseUrl` is `/`, served at [dispat.dev](https://dispat.dev/). Routes are registered with the base URL already
 included, so route internal links in a `.tsx` page through `@docusaurus/Link` or `useBaseUrl` anyway: the habit keeps
 every link correct if the base ever changes again, and `Link` is what makes navigation client-side.

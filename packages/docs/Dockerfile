@@ -60,12 +60,6 @@ FROM deps AS source
 # pnpm may skip its automatic second install without hiding a graph change.
 ENV pnpm_config_verify_deps_before_run=false
 
-# docusaurus.config.ts sets showLastUpdateTime, which reads the git history of
-# every page, so the repository has to come along and git has to be here to read
-# it. Another uid owns the copied tree, hence safe.directory.
-RUN apk add --no-cache git \
- && git config --system --add safe.directory '*'
-
 # staticDirectories reaches out of the package to ../../imgs, so it is part of
 # this build even though it sits outside packages/docs.
 COPY imgs ./imgs
@@ -77,7 +71,6 @@ COPY README.md ./README.md
 COPY services/dispat/README.md ./services/dispat/README.md
 COPY .github/workflows/download-counter.yml ./.github/workflows/download-counter.yml
 COPY packages/docs ./packages/docs
-COPY .git ./.git
 
 # One gate that is not the build, so it can be asked for on its own.
 FROM source AS typecheck
@@ -104,6 +97,12 @@ RUN pnpm --filter dispat-docs typecheck \
 # without figures, which is fine for them and would not be fine for the site
 # people read.
 FROM source AS build
+# Page timestamps and historical module links need Git only during the site
+# build. Keep history out of source/typecheck so commits do not invalidate
+# otherwise unchanged test inputs.
+RUN apk add --no-cache git \
+ && git config --system --add safe.directory '*'
+COPY .git ./.git
 ARG DOCS_VERSION=""
 ARG DOCS_REQUIRE_REPORT=""
 ARG DOCS_BENCH_PACKAGES=""
