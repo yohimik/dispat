@@ -1,8 +1,8 @@
 {
   "docsVersion": "1.10",
   "report": {
-    "generatedAt": "2026-09-11T12:25:37Z",
-    "commit": "8dc9f82d7a11d3aa8078d809792c3ddfd30693fb",
+    "generatedAt": "2026-09-12T16:40:27Z",
+    "commit": "87d70851a2fc1ebbd8742960fb2d1a4d2b90f151",
     "coverage": {
       "total": {
         "statements": 20357,
@@ -264,7 +264,7 @@
         "passed": 3052,
         "failed": 0,
         "skipped": 0,
-        "elapsed": 122.208
+        "elapsed": 120.99900000000002
       },
       "groups": [
         {
@@ -276,7 +276,7 @@
           "passed": 114,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 9.318,
+          "elapsed": 6.464,
           "id": "ccme",
           "path": "pkg/ccme",
           "race": false,
@@ -307,7 +307,7 @@
           "passed": 194,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 0.55,
+          "elapsed": 0.903,
           "id": "config",
           "path": "pkg/config",
           "race": false,
@@ -338,7 +338,7 @@
           "passed": 25,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 0.047,
+          "elapsed": 0.009,
           "id": "manifest",
           "path": "pkg/manifest",
           "race": false,
@@ -353,7 +353,7 @@
           "passed": 40,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 0.018,
+          "elapsed": 0.009,
           "id": "models",
           "path": "pkg/models",
           "race": false,
@@ -368,7 +368,7 @@
           "passed": 137,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 0.222,
+          "elapsed": 0.12,
           "id": "scanner",
           "path": "pkg/scanner",
           "race": false,
@@ -419,7 +419,7 @@
           "passed": 247,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 0.68,
+          "elapsed": 0.927,
           "id": "writer",
           "path": "pkg/writer",
           "race": false,
@@ -555,7 +555,7 @@
           "passed": 1556,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 28.21,
+          "elapsed": 35.089,
           "id": "dispat",
           "path": "services/dispat",
           "race": false,
@@ -570,7 +570,7 @@
           "passed": 653,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 73.265,
+          "elapsed": 71.224,
           "id": "integration",
           "path": "tests/integration",
           "race": false,
@@ -585,7 +585,7 @@
           "passed": 653,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 90.372,
+          "elapsed": 86.818,
           "id": "integration-race",
           "path": "tests/integration",
           "race": true,
@@ -600,7 +600,7 @@
           "passed": 86,
           "failed": 0,
           "skipped": 0,
-          "elapsed": 9.898,
+          "elapsed": 6.254,
           "id": "tools",
           "path": "tools",
           "race": false,
@@ -615,64 +615,64 @@
           "path": "pkg/ccme",
           "goos": "linux",
           "goarch": "amd64",
-          "cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
           "results": [
             {
               "name": "BenchmarkNormalizeFastPath",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 15670944,
-              "nsPerOp": 141.3,
+              "runs": 18227271,
+              "nsPerOp": 97.07,
               "bytesPerOp": 0,
               "allocsPerOp": 0,
-              "mbPerSec": 1535.33
+              "mbPerSec": 2235.59
             },
             {
               "name": "BenchmarkNormalizeRewrite",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 1000000,
-              "nsPerOp": 1120,
+              "runs": 2206113,
+              "nsPerOp": 563.3,
               "bytesPerOp": 240,
               "allocsPerOp": 1,
-              "mbPerSec": 204.41
+              "mbPerSec": 406.5
             },
             {
               "name": "BenchmarkParseCRLF",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 317532,
-              "nsPerOp": 6935,
+              "runs": 417896,
+              "nsPerOp": 3482,
               "bytesPerOp": 1216,
               "allocsPerOp": 5,
-              "mbPerSec": 33.02
+              "mbPerSec": 65.77
             },
             {
               "name": "BenchmarkParseDirectives",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 137539,
-              "nsPerOp": 10000,
+              "runs": 191829,
+              "nsPerOp": 8710,
               "bytesPerOp": 2512,
               "allocsPerOp": 16,
-              "mbPerSec": 37.5
+              "mbPerSec": 43.05
             },
             {
               "name": "BenchmarkParseHistory",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 36379,
-              "nsPerOp": 32203,
+              "runs": 52567,
+              "nsPerOp": 22340,
               "bytesPerOp": 9680,
               "allocsPerOp": 42,
-              "mbPerSec": 32.98
+              "mbPerSec": 47.54
             },
             {
               "name": "BenchmarkParseInvalid",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 299798,
-              "nsPerOp": 3474,
+              "runs": 425986,
+              "nsPerOp": 2946,
               "bytesPerOp": 1304,
               "allocsPerOp": 14,
               "mbPerSec": 0
@@ -681,41 +681,41 @@
               "name": "BenchmarkParseMultiUnit",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 105112,
-              "nsPerOp": 9895,
+              "runs": 167320,
+              "nsPerOp": 6260,
               "bytesPerOp": 3840,
               "allocsPerOp": 12,
-              "mbPerSec": 17.99
+              "mbPerSec": 28.43
             },
             {
               "name": "BenchmarkParseParallel",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 123109,
-              "nsPerOp": 9566,
+              "runs": 149322,
+              "nsPerOp": 14179,
               "bytesPerOp": 2512,
               "allocsPerOp": 16,
-              "mbPerSec": 39.2
+              "mbPerSec": 26.45
             },
             {
               "name": "BenchmarkParseSimple",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 409017,
-              "nsPerOp": 4072,
+              "runs": 510582,
+              "nsPerOp": 3031,
               "bytesPerOp": 1200,
               "allocsPerOp": 5,
-              "mbPerSec": 53.3
+              "mbPerSec": 71.6
             },
             {
               "name": "BenchmarkParseSubject",
               "package": "pkg/ccme",
               "procs": 4,
-              "runs": 772651,
-              "nsPerOp": 1999,
+              "runs": 662335,
+              "nsPerOp": 3842,
               "bytesPerOp": 832,
               "allocsPerOp": 2,
-              "mbPerSec": 31.52
+              "mbPerSec": 16.4
             }
           ]
         },
@@ -724,15 +724,15 @@
           "path": "pkg/config",
           "goos": "linux",
           "goarch": "amd64",
-          "cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
           "results": [
             {
               "name": "BenchmarkApplyEdits/json",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 1447,
-              "nsPerOp": 1383733,
-              "bytesPerOp": 13767,
+              "runs": 771,
+              "nsPerOp": 2117857,
+              "bytesPerOp": 13765,
               "allocsPerOp": 118,
               "mbPerSec": 0
             },
@@ -740,9 +740,9 @@
               "name": "BenchmarkApplyEdits/yaml",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 554,
-              "nsPerOp": 2456552,
-              "bytesPerOp": 413755,
+              "runs": 249,
+              "nsPerOp": 5991468,
+              "bytesPerOp": 413747,
               "allocsPerOp": 1891,
               "mbPerSec": 0
             },
@@ -751,7 +751,7 @@
               "package": "pkg/config",
               "procs": 4,
               "runs": 10000,
-              "nsPerOp": 184329,
+              "nsPerOp": 113525,
               "bytesPerOp": 29225,
               "allocsPerOp": 540,
               "mbPerSec": 0
@@ -761,8 +761,8 @@
               "package": "pkg/config",
               "procs": 4,
               "runs": 10000,
-              "nsPerOp": 172327,
-              "bytesPerOp": 29033,
+              "nsPerOp": 130541,
+              "bytesPerOp": 29031,
               "allocsPerOp": 514,
               "mbPerSec": 0
             },
@@ -770,8 +770,8 @@
               "name": "BenchmarkDecode/small",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 297946,
-              "nsPerOp": 6375,
+              "runs": 335647,
+              "nsPerOp": 3757,
               "bytesPerOp": 1056,
               "allocsPerOp": 22,
               "mbPerSec": 0
@@ -780,8 +780,8 @@
               "name": "BenchmarkEnvBinding",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 31494,
-              "nsPerOp": 41387,
+              "runs": 107013,
+              "nsPerOp": 11355,
               "bytesPerOp": 7040,
               "allocsPerOp": 135,
               "mbPerSec": 0
@@ -790,8 +790,8 @@
               "name": "BenchmarkFold/lower",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 100000000,
-              "nsPerOp": 19.61,
+              "runs": 186431728,
+              "nsPerOp": 6.532,
               "bytesPerOp": 0,
               "allocsPerOp": 0,
               "mbPerSec": 0
@@ -800,8 +800,8 @@
               "name": "BenchmarkFold/mixed",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 18795514,
-              "nsPerOp": 72.93,
+              "runs": 45831421,
+              "nsPerOp": 25.56,
               "bytesPerOp": 8,
               "allocsPerOp": 1,
               "mbPerSec": 0
@@ -810,8 +810,8 @@
               "name": "BenchmarkFold/unicode",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 4921880,
-              "nsPerOp": 207.6,
+              "runs": 14389054,
+              "nsPerOp": 86.93,
               "bytesPerOp": 16,
               "allocsPerOp": 1,
               "mbPerSec": 0
@@ -820,9 +820,9 @@
               "name": "BenchmarkLoad",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 10000,
-              "nsPerOp": 143119,
-              "bytesPerOp": 20806,
+              "runs": 15572,
+              "nsPerOp": 68942,
+              "bytesPerOp": 20805,
               "allocsPerOp": 265,
               "mbPerSec": 0
             },
@@ -830,8 +830,8 @@
               "name": "BenchmarkOverrides",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 16924,
-              "nsPerOp": 73718,
+              "runs": 18603,
+              "nsPerOp": 70988,
               "bytesPerOp": 12476,
               "allocsPerOp": 72,
               "mbPerSec": 0
@@ -840,98 +840,98 @@
               "name": "BenchmarkReadTree/json/large",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 561,
-              "nsPerOp": 2827202,
-              "bytesPerOp": 422950,
+              "runs": 661,
+              "nsPerOp": 2275788,
+              "bytesPerOp": 422951,
               "allocsPerOp": 5635,
-              "mbPerSec": 10.14
+              "mbPerSec": 12.6
             },
             {
               "name": "BenchmarkReadTree/json/medium",
               "package": "pkg/config",
               "procs": 4,
               "runs": 10000,
-              "nsPerOp": 197088,
+              "nsPerOp": 199698,
               "bytesPerOp": 32890,
               "allocsPerOp": 582,
-              "mbPerSec": 13.96
+              "mbPerSec": 13.78
             },
             {
               "name": "BenchmarkReadTree/json/small",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 53679,
-              "nsPerOp": 32611,
+              "runs": 66870,
+              "nsPerOp": 22877,
               "bytesPerOp": 3657,
               "allocsPerOp": 72,
-              "mbPerSec": 8.19
+              "mbPerSec": 11.67
             },
             {
               "name": "BenchmarkReadTree/toml/large",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 100,
-              "nsPerOp": 13127849,
-              "bytesPerOp": 698076,
+              "runs": 193,
+              "nsPerOp": 6922810,
+              "bytesPerOp": 698077,
               "allocsPerOp": 8624,
-              "mbPerSec": 1.83
+              "mbPerSec": 3.48
             },
             {
               "name": "BenchmarkReadTree/toml/medium",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 4348,
-              "nsPerOp": 366432,
-              "bytesPerOp": 56025,
+              "runs": 4396,
+              "nsPerOp": 291638,
+              "bytesPerOp": 56026,
               "allocsPerOp": 882,
-              "mbPerSec": 6.24
+              "mbPerSec": 7.85
             },
             {
               "name": "BenchmarkReadTree/toml/small",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 30559,
-              "nsPerOp": 39347,
-              "bytesPerOp": 6794,
+              "runs": 44391,
+              "nsPerOp": 29855,
+              "bytesPerOp": 6793,
               "allocsPerOp": 108,
-              "mbPerSec": 5.54
+              "mbPerSec": 7.3
             },
             {
               "name": "BenchmarkReadTree/yaml/large",
               "package": "pkg/config",
               "procs": 4,
               "runs": 100,
-              "nsPerOp": 12529420,
-              "bytesPerOp": 1137093,
+              "nsPerOp": 12958876,
+              "bytesPerOp": 1137144,
               "allocsPerOp": 19626,
-              "mbPerSec": 1.67
+              "mbPerSec": 1.61
             },
             {
               "name": "BenchmarkReadTree/yaml/medium",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 1256,
-              "nsPerOp": 1147383,
+              "runs": 1827,
+              "nsPerOp": 731380,
               "bytesPerOp": 109426,
               "allocsPerOp": 1999,
-              "mbPerSec": 1.72
+              "mbPerSec": 2.69
             },
             {
               "name": "BenchmarkReadTree/yaml/small",
               "package": "pkg/config",
               "procs": 4,
               "runs": 10000,
-              "nsPerOp": 115595,
+              "nsPerOp": 121975,
               "bytesPerOp": 17237,
               "allocsPerOp": 244,
-              "mbPerSec": 1.61
+              "mbPerSec": 1.52
             },
             {
               "name": "BenchmarkRefDepth/1",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 41872,
-              "nsPerOp": 29646,
+              "runs": 56198,
+              "nsPerOp": 26108,
               "bytesPerOp": 5065,
               "allocsPerOp": 93,
               "mbPerSec": 0
@@ -940,8 +940,8 @@
               "name": "BenchmarkRefDepth/32",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 5163,
-              "nsPerOp": 344376,
+              "runs": 7334,
+              "nsPerOp": 213487,
               "bytesPerOp": 52088,
               "allocsPerOp": 692,
               "mbPerSec": 0
@@ -950,8 +950,8 @@
               "name": "BenchmarkRefDepth/8",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 10000,
-              "nsPerOp": 100113,
+              "runs": 21084,
+              "nsPerOp": 61632,
               "bytesPerOp": 15484,
               "allocsPerOp": 232,
               "mbPerSec": 0
@@ -960,8 +960,8 @@
               "name": "BenchmarkRefWidth/2",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 66988,
-              "nsPerOp": 19532,
+              "runs": 99475,
+              "nsPerOp": 17074,
               "bytesPerOp": 3640,
               "allocsPerOp": 58,
               "mbPerSec": 0
@@ -970,8 +970,8 @@
               "name": "BenchmarkRefWidth/32",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 5473,
-              "nsPerOp": 290257,
+              "runs": 7326,
+              "nsPerOp": 263758,
               "bytesPerOp": 42848,
               "allocsPerOp": 635,
               "mbPerSec": 0
@@ -980,8 +980,8 @@
               "name": "BenchmarkRefWidth/8",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 17788,
-              "nsPerOp": 76039,
+              "runs": 20154,
+              "nsPerOp": 53355,
               "bytesPerOp": 11168,
               "allocsPerOp": 173,
               "mbPerSec": 0
@@ -990,8 +990,8 @@
               "name": "BenchmarkResolve/1",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 31377,
-              "nsPerOp": 33607,
+              "runs": 53254,
+              "nsPerOp": 25905,
               "bytesPerOp": 4888,
               "allocsPerOp": 52,
               "mbPerSec": 0
@@ -1000,8 +1000,8 @@
               "name": "BenchmarkResolve/16",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 8763,
-              "nsPerOp": 398667,
+              "runs": 10000,
+              "nsPerOp": 102977,
               "bytesPerOp": 18200,
               "allocsPerOp": 174,
               "mbPerSec": 0
@@ -1010,8 +1010,8 @@
               "name": "BenchmarkResolve/4",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 19104,
-              "nsPerOp": 62936,
+              "runs": 34725,
+              "nsPerOp": 35307,
               "bytesPerOp": 7192,
               "allocsPerOp": 76,
               "mbPerSec": 0
@@ -1020,8 +1020,8 @@
               "name": "BenchmarkSettings/dotted",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 6679,
-              "nsPerOp": 279206,
+              "runs": 8029,
+              "nsPerOp": 241742,
               "bytesPerOp": 78744,
               "allocsPerOp": 505,
               "mbPerSec": 0
@@ -1030,8 +1030,8 @@
               "name": "BenchmarkSettings/empty-objects",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 20964,
-              "nsPerOp": 56688,
+              "runs": 23122,
+              "nsPerOp": 66573,
               "bytesPerOp": 6744,
               "allocsPerOp": 5,
               "mbPerSec": 0
@@ -1040,8 +1040,8 @@
               "name": "BenchmarkSettings/flat",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 28699,
-              "nsPerOp": 43002,
+              "runs": 30082,
+              "nsPerOp": 37727,
               "bytesPerOp": 6744,
               "allocsPerOp": 5,
               "mbPerSec": 0
@@ -1050,8 +1050,8 @@
               "name": "BenchmarkSettings/nested",
               "package": "pkg/config",
               "procs": 4,
-              "runs": 15339,
-              "nsPerOp": 82845,
+              "runs": 24608,
+              "nsPerOp": 78305,
               "bytesPerOp": 11944,
               "allocsPerOp": 65,
               "mbPerSec": 0
@@ -1063,56 +1063,56 @@
           "path": "services/dispat",
           "goos": "linux",
           "goarch": "amd64",
-          "cpu": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
           "results": [
             {
               "name": "BenchmarkComputeGroup/fixed",
               "package": "services/dispat/internal/plan",
               "procs": 4,
-              "runs": 405,
-              "nsPerOp": 3225767,
-              "bytesPerOp": 589869,
-              "allocsPerOp": 3624,
+              "runs": 601,
+              "nsPerOp": 2384262,
+              "bytesPerOp": 589900,
+              "allocsPerOp": 3626,
               "mbPerSec": 0
             },
             {
               "name": "BenchmarkComputeGroup/fixedMajor",
               "package": "services/dispat/internal/plan",
               "procs": 4,
-              "runs": 351,
-              "nsPerOp": 3371766,
-              "bytesPerOp": 592365,
-              "allocsPerOp": 3622,
+              "runs": 624,
+              "nsPerOp": 1816957,
+              "bytesPerOp": 592500,
+              "allocsPerOp": 3623,
               "mbPerSec": 0
             },
             {
               "name": "BenchmarkComputeGroup/fixedMajorMinor",
               "package": "services/dispat/internal/plan",
               "procs": 4,
-              "runs": 404,
-              "nsPerOp": 2588937,
-              "bytesPerOp": 592443,
-              "allocsPerOp": 3622,
+              "runs": 499,
+              "nsPerOp": 2728985,
+              "bytesPerOp": 592692,
+              "allocsPerOp": 3624,
               "mbPerSec": 0
             },
             {
               "name": "BenchmarkComputeGroup/fixedMajorSparse",
               "package": "services/dispat/internal/plan",
               "procs": 4,
-              "runs": 452,
-              "nsPerOp": 3027941,
-              "bytesPerOp": 486749,
-              "allocsPerOp": 2409,
+              "runs": 1158,
+              "nsPerOp": 1039084,
+              "bytesPerOp": 486154,
+              "allocsPerOp": 2404,
               "mbPerSec": 0
             },
             {
               "name": "BenchmarkComputeGroup/fixedSparse",
               "package": "services/dispat/internal/plan",
               "procs": 4,
-              "runs": 516,
-              "nsPerOp": 2253971,
-              "bytesPerOp": 486399,
-              "allocsPerOp": 2406,
+              "runs": 534,
+              "nsPerOp": 2517775,
+              "bytesPerOp": 486662,
+              "allocsPerOp": 2409,
               "mbPerSec": 0
             }
           ]

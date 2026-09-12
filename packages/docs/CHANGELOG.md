@@ -1,5 +1,18 @@
 # Changelog
 
+## packages/docs/v1.10.12 (2026-09-12)
+
+### Fixes
+
+- streamline docs and build checks ([87d7085](https://github.com/yohimik/dispat/commit/87d70851a2fc1ebbd8742960fb2d1a4d2b90f151)) (by yohimik)
+
+- drop verification ([9e7b320](https://github.com/yohimik/dispat/commit/9e7b32009bb048e5a53f75e0dcf454a719bcd1cd)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.11 (2026-09-11)
 
 ### Fixes
