@@ -40,6 +40,19 @@ available. Poll for the exact version with a bounded deadline before installing 
 post-release job, after release records, so a delayed registry response cannot turn an accepted upload into a failed
 publish stage. This short readiness wait does not replace the 24-hour restriction after complete removal.
 
+### Publish the next patch before removing the previous version
+
+If the package is still published, an alternative is to keep its name and publish the next patch through the reviewed
+workflow first. For example, publish `1.10.1`, verify its release records and installation, then unpublish only
+`1.10.0` using `npm unpublish <package-name>@1.10.0`, if npm's
+[unpublish policy](https://docs.npmjs.com/policies/unpublish/) permits it. Keep `1.10.1` published: removing only the
+previous version avoids complete package removal and its 24-hour restriction, without renaming the package.
+
+Exact dependency pins and lockfiles that still require `1.10.0` may fail to install after removal; update those
+consumers to the replacement patch. If removal is not permitted or would disrupt consumers, deprecate only the old
+version with a message directing users to the patch. The removed version remains unusable for future publications.
+If all versions were already unpublished, wait out the restriction described above before publishing the patch.
+
 ## Continue after a dependent build fails
 
 In this example, `core` and its consumer `app` release together. The tests for `app` break its build after `core`
