@@ -84,9 +84,79 @@ You can expose the preview through the root `package.json`:
 }
 ```
 
+## A single root package.json
+
+Keep your existing `package.json` at the repository root and install dispat there with
+`npm install --save-dev @dispat/bin`. Your source folder becomes the dispat package; it does not need another
+manifest or a workspace:
+
+```text
+project/
+  package.json             # your package, scripts, and @dispat/bin devDependency
+  package-lock.json
+  dispat.yaml
+  src/                     # use lib/ instead if that is your source folder
+    index.js
+```
+
+Save this `dispat.yaml` at the root. This example uses `v{version}` tags; preserve the existing tag format when
+adopting a published package:
+
+```yaml
+scripts:
+  version: cd .. && npm version "$DISPAT_NEW_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
+  tests: cd .. && npm test
+  build: cd .. && npm run build
+  publish: cd .. && npm publish --access public
+
+packages:
+  app:
+    path: src
+    tagFormat: v{version}
+    autoVersion:
+      enabled: true
+      manifests: none
+    flow:
+      version: version
+      beforeBuild: tests
+      build: build
+      publish: publish
+
+commit:
+  enabled: true
+  include: [package.json, package-lock.json]
+```
+
+Scripts start in `src`, so `cd ..` runs npm against the single root manifest. Use `path: lib` for a root-level `lib/`
+folder; the scripts stay the same. Replace the test and build commands with yours, or omit the build script and flow
+entry if you publish source directly. Keep the root manifest publishable for npm, and use its `files` field to select
+the shipped files. A private application can use a deployment command in the publish stage instead.
+
+The version script updates the root manifest and its existing npm lockfile without making an npm Git commit or tag
+or running npm's version hooks. dispat records both files through `commit.include`. `autoVersion.enabled` schedules
+the version stage, while `manifests: none` disables native manifest scanning.
+`compute` looks inside the configured package folder and does not read the parent manifest.
+
+Each new package starts versioning from `0.0.0`; its commits choose the first release. A `fix(app): ...` starts at
+`0.0.1`, `feat(app): ...` at `0.1.0`, and `feat(app)!: ...` at `1.0.0`. You can also write `feat!: ...` when the commit
+changes files in the source folder. To start with a prerelease, use `feat(app)%beta: ...` for `0.1.0-beta.0`, or
+`feat(app)%beta!: ...` for `1.0.0-beta.0`. Configure the npm publish command with `--tag beta` for that channel.
+After a release, matching release tags supply the baseline for subsequent versions.
+
+Commit the setup, then run `npm exec -- dispat status` and `npm exec -- dispat preview`. An unscoped
+`fix: handle empty input` counts when it changes `src/`; use `fix(app): update runtime dependencies` for a release
+change confined to the root manifest, lockfile, tests, or other files outside `src/`. `app` is the dispat key, not the
+npm package name. Release notes are written to `src/CHANGELOG.md` when changelog recording is enabled.
+
+Run releases through [CI](#run-releases-in-ci). If a release fails after versioning, inspect the root manifest and
+lockfile before retrying: package-folder rollback does not restore files outside `src/`. The version script accepts
+the same planned version again. See [single-package releases](https://dispat.dev/examples/single-package/) for the
+complete setup and recovery guidance.
+
 ## A single npm package
 
-You do not need workspaces or a monorepo. Install dispat in a private tooling manifest at the repository root, and put the package you publish in a subfolder:
+If you prefer a separate tooling manifest, install dispat in a private manifest at the repository root and put the
+package you publish in a subfolder. This layout also needs no workspace:
 
 ```text
 project/
@@ -99,7 +169,9 @@ project/
     src/
 ```
 
-The package's `path` must be a folder inside the repository; `path: .` is not supported. For an existing root-level package, review the required folder move and preserve its published versions and tags using [the adoption guide](https://dispat.dev/examples/adopting/).
+The package's `path` must be a folder inside the repository; `path: .` is not supported. An existing root-level npm
+package can use [one root manifest](#a-single-root-packagejson) above without moving its manifest. If you choose this
+separate-folder layout, preserve published versions and tags using [the adoption guide](https://dispat.dev/examples/adopting/).
 
 Install the package's dependencies with `npm --prefix app install`, then save this `dispat.yaml` at the repository root:
 

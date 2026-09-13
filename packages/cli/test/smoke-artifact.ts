@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { PACKAGE_ROOT, isMain } from '#root/lib/root.js'
 import { verifyArtifact } from '#root/scripts/pack.js'
 import { binaryName } from '#root/lib/platform.js'
+import { smokeSingleRootPackages } from './single-root-package.js'
 
 const execute = promisify(execFile)
 async function run(file: string, args: string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}) {
@@ -66,6 +67,7 @@ export async function smoke(): Promise<void> {
     await run('git', ['add', 'dispat.yaml', 'app/package.json'], consumer)
     await run('git', ['-c', 'user.name=Artifact Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'chore: fixture'], consumer)
     await run('npm', ['exec', '--', 'dispat', 'status'], consumer)
+    await smokeSingleRootPackages(work, tarball)
 
     const npxConsumer = path.join(work, 'npm exec consumer')
     await mkdir(npxConsumer)

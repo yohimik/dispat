@@ -1,7 +1,103 @@
 # A single package, no monorepo
 
-Set up automatic semantic versioning, changelogs, and tags for a single package without a monorepo. Skip `spaces`
-entirely and declare one standalone `packages` entry. Point this entry to the folder where your code lives:
+Set up semantic versioning, changelogs, and tags for a single package without a monorepo. Skip `spaces` entirely and
+declare one standalone `packages` entry pointing to your source or package folder. An npm project can keep its only
+`package.json` at the repository root.
+
+## One root manifest
+
+Install dispat once with `npm install --save-dev @dispat/bin` and commit the npm lockfile. Follow
+[npm installation](../getting-started.md#install-with-npm) if your package manager requires installation-script approval.
+
+```text
+project/
+  package.json             # your package, scripts, and @dispat/bin devDependency
+  package-lock.json
+  dispat.yaml
+  src/
+    index.js
+```
+
+The source folder needs no manifest of its own. Save this configuration at the repository root:
+
+```yaml title="dispat.yaml"
+scripts:
+  version: cd .. && npm version "$DISPAT_NEW_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
+  tests: cd .. && npm test
+  build: cd .. && npm run build
+  publish: cd .. && npm publish --access public
+
+packages:
+  app:
+    path: src
+    tagFormat: v{version}
+    autoVersion:
+      enabled: true
+      manifests: none
+    flow:
+      version: version
+      beforeBuild: tests
+      build: build
+      publish: publish
+
+commit:
+  enabled: true
+  include: [package.json, package-lock.json]
+```
+
+Use `path: lib` instead for a root-level `lib/` folder. Scripts start inside that folder, and `cd ..` selects the root
+manifest for every npm command. Keep your actual test and build scripts; omit the build script and its flow entry if
+you publish directly from source. Keep the manifest publishable and select the shipped files with its `files` field.
+A private application can use its deployment command in the publish stage instead.
+
+The version stage updates `package.json` and its existing npm lockfile. It skips npm's version lifecycle scripts and
+Git commit/tag creation, leaving release recording to dispat. `autoVersion.enabled` schedules the version stage;
+`manifests: none` disables native manifest scanning. Keep this block so a direct release runs `flow.version`.
+`compute` does not discover the parent manifest.
+
+Each new package starts versioning from `0.0.0`. You choose how it first releases through its commits:
+
+| Commit | First version |
+| --- | --- |
+| `fix(app): handle empty input` | `0.0.1` |
+| `feat(app): add the first feature` | `0.1.0` |
+| `feat(app)!: release the first stable API` | `1.0.0` |
+| `feat(app)%beta: try the first feature` | `0.1.0-beta.0` |
+| `feat(app)%beta!: try the first stable API` | `1.0.0-beta.0` |
+
+These examples are alternatives for a new package with no earlier release tags. An unscoped `feat!: ...` also
+selects `1.0.0` when its changed files belong to the source folder. For a beta release, add `--tag beta` to the npm
+publish command so it publishes on the matching npm dist-tag. See [Channels and prereleases](../reference/commits.md#channels-and-prereleases)
+for continuing a prerelease or graduating it to stable.
+
+Once the package has a release tag, that tag supplies the baseline for subsequent versions. When adopting an already
+published package, preserve its existing `tagFormat` and history; see [Adopting dispat](./adopting.md).
+
+Commit the setup, then inspect the release from the repository root:
+
+```sh
+npm exec -- dispat status
+npm exec -- dispat preview
+```
+
+An unscoped `fix: handle empty input` counts when it changes `src/`. Use `fix(app): update runtime dependencies` for a
+release change confined to the root manifest, lockfile, tests, or other files outside `src/`. The scope is the dispat
+key `app`, even when the npm name differs. Files outside the package folder do not gain change ownership through
+`commit.include`; that list controls release-commit staging. See [What counts as a change](../configuration/change-scope.md).
+
+When enabled, changelog recording writes `src/CHANGELOG.md` (or `lib/CHANGELOG.md`). Run actual releases through
+[CI](../reference/ci.md), with npm authentication and Git permissions for your destination. These npm publish commands
+target stable releases; add your intended npm dist-tag when releasing prereleases.
+
+If versioning succeeds and a later stage fails, inspect the root manifest and lockfile before retrying.
+`revertOnFail` restores the configured package folder, not these parent files. The version command accepts the same
+planned version on retry, but existing release-input edits must still be resolved before dispat's clean-path check
+allows another run. Use a fresh CI checkout of the reviewed revision for a retry after a failure before publication;
+after any accepted publication, reconcile its records first as described below.
+
+## A manifest inside the package folder
+
+If your manifest already lives beside the code in a subfolder, commands can run there directly:
 
 ```json
 {
@@ -18,9 +114,9 @@ entirely and declare one standalone `packages` entry. Point this entry to the fo
 }
 ```
 
-Put your deliverable in a subfolder like `src` or `app`. The `path` field must name a folder inside the repository, so
-the package cannot be the repository root itself. Your config, changelog, and tags will live at the root, while your
-scripts run inside the folder.
+The `path` field must name a folder inside the repository; `path: .` is not supported. In this layout, the folder
+contains its own manifest, and its scripts and changelog use that folder. The dispat configuration lives at the root,
+and tags belong to the repository.
 
 Write commits scoped with the package name to drive releases. A commit with no scope also counts when it touches files
 inside the folder. Watch how dispat handles a new feature:
@@ -73,8 +169,7 @@ Run `dispat status` and `dispat preview --changelog --github` to inspect the pla
 The description and body supply the prose; a separate per-change release-intent file is unnecessary. Keep the reviewed
 message when squash-merging. Issue and PR discussion comments are not release input.
 
-Preserve the package-folder requirement above when evaluating an existing root-level npm repository; this example
-does not claim automatic migration of that layout.
+For the root-manifest layout above, scope changes outside the source folder with `app` when they should release it.
 
 ## Correct a pending note
 

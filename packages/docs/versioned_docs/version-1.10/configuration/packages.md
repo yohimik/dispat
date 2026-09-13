@@ -239,7 +239,9 @@ is never overtaken by lighter ones that became ready after it.
 Add a `path` to an entry to create a package **outside every space**. This could be a tools folder next to the
 workspaces, a deploy bundle at the repository top, or anything else that releases like a package but shares no parent
 folder with one. The path is relative to the monorepo root, must stay inside the repository without absolute paths or
-`..`, and must name an existing folder.
+`..`, and must name an existing folder. `path: .` is not supported. An npm project can still keep one root
+`package.json`: use `path: src` or `path: lib`, run npm commands from the parent, and explicitly version and record the
+root manifest and lockfile. See [One root manifest](../examples/single-package.md#one-root-manifest).
 
 A standalone package is a full package in every respect. It plans, versions, builds, publishes, tags, and writes
 records exactly like a space package. dispat builds its effective configuration through the same layers as an override,
