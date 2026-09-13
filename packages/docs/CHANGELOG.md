@@ -1,5 +1,18 @@
 # Changelog
 
+## packages/docs/v1.10.13 (2026-09-13)
+
+### Fixes
+
+- document same-name npm patch recovery ([4d597ec](https://github.com/yohimik/dispat/commit/4d597ec4d0a638f0ef0a39beef619144bfaf7a03)) (by yohimik)
+  Publish and verify the next patch before removing only the previous version.
+  Update current and 1.10 recovery guidance with policy and consumer constraints.
+
+### Authors
+
+- yohimik
+
+
 ## packages/docs/v1.10.12 (2026-09-12)
 
 ### Fixes
