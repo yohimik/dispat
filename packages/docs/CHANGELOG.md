@@ -1,5 +1,29 @@
 # Changelog
 
+## packages/docs/v1.10.14 (2026-09-13)
+
+### Fixes
+
+- explain root changelog paths and release commit inclusion ([cc66610](https://github.com/yohimik/dispat/commit/cc666103070be3d51425a1a49825163a9ff4556a)) (by yohimik, Codex (gpt-6-astra))
+  Keep the CLI example and current/1.10 solo and record references aligned.
+  Distinguish package-relative changelog paths from repository-relative
+  commit includes.
+
+- explain single-root npm release configuration ([3f7174d](https://github.com/yohimik/dispat/commit/3f7174dc71fcb32bd5146ccc4d79bf729c0c3fd9)) (by yohimik, Codex (gpt-6-astra))
+  Add the existing-runtime recipe and synchronize current and 1.10 docs.
+  Explain version-stage scheduling, versioning from 0.0.0, user-chosen first
+  releases, root-file scopes and recovery for parent manifest changes.
+
+### Dependencies
+
+- [cli](https://github.com/yohimik/dispat/releases/tag/packages/cli/v1.10.3): 1.10.2 -> 1.10.3
+
+### Authors
+
+- yohimik
+- Codex (gpt-6-astra)
+
+
 ## packages/docs/v1.10.13 (2026-09-13)
 
 ### Fixes

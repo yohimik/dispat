@@ -1,5 +1,26 @@
 # Changelog
 
+## packages/cli/v1.10.3 (2026-09-13)
+
+### Fixes
+
+- record solo package changelog at repository root ([cc66610](https://github.com/yohimik/dispat/commit/cc666103070be3d51425a1a49825163a9ff4556a)) (by yohimik)
+  Configure the src/lib package changelog as ../CHANGELOG.md and include it
+  with root manifests in the release commit. Exercise creation, preserved
+  history, tagged content, no-op releases and dirty-draft protection with
+  the installed artifact, without changing Go behavior.
+
+- document and verify single-root npm setup ([3f7174d](https://github.com/yohimik/dispat/commit/3f7174dc71fcb32bd5146ccc4d79bf729c0c3fd9)) (by yohimik)
+  Keep one root package.json with @dispat/bin as a development dependency
+  and a standalone src or lib package. Verify root version and lock updates,
+  package contents, local release records, change ownership and failure guards
+  with the installed artifact. Preserve existing Go behavior.
+
+### Authors
+
+- yohimik
+
+
 ## packages/cli/v1.10.2 (2026-09-11)
 
 ### Fixes

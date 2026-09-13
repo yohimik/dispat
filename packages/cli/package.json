@@ -1,6 +1,6 @@
 {
   "name": "@dispat/bin",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "The dispat release orchestrator CLI",
   "keywords": ["cli", "release", "release-automation", "release-orchestration", "orchestrator", "orchestration", "saga", "workflow", "dependency-graph", "versioning", "monorepo", "polyrepo", "conventional-commits", "changelog", "ci-cd"],
   "license": "MIT",
