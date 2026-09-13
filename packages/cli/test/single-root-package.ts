@@ -38,6 +38,9 @@ packages:
   app:
     path: ${source}
     tagFormat: v{version}
+    changelog:
+      enabled: true
+      file: ../CHANGELOG.md
     autoVersion:
       enabled: true
       manifests: none
@@ -50,7 +53,7 @@ commit:
   enabled: true
   name: Artifact Test
   email: test@example.invalid
-  include: [package.json, package-lock.json]
+  include: [package.json, package-lock.json, CHANGELOG.md]
 `
 }
 
@@ -82,8 +85,11 @@ assert.equal(require('./package.json').version, process.env.DISPAT_NEW_VERSION)
 require('node:fs').appendFileSync('events.log', [process.argv[2], process.env.DISPAT_PACKAGE, process.env.DISPAT_NEW_VERSION, process.cwd()].join(' ')+'\\n')
 `)
   await writeFile(path.join(cwd, source, 'index.js'), 'export const answer = 42\n')
+  if (source === 'lib') await writeFile(path.join(cwd, 'CHANGELOG.md'), '# Changelog\n\nOld history stays here.\n')
   await run('git', ['init', '-q', '-b', 'main'], cwd)
-  await commit(cwd, 'chore: fixture', ['package.json', 'package-lock.json', 'dispat.yaml', 'probe.cjs', `${source}/index.js`])
+  const initialFiles = ['package.json', 'package-lock.json', 'dispat.yaml', 'probe.cjs', `${source}/index.js`]
+  if (source === 'lib') initialFiles.push('CHANGELOG.md')
+  await commit(cwd, 'chore: fixture', initialFiles)
 
   const firstReleaseChoices = [
     ['fix(app): choose the first patch', '0.0.1'],
@@ -142,6 +148,12 @@ require('node:fs').appendFileSync('events.log', [process.argv[2], process.env.DI
   const taggedLock = JSON.parse((await run('git', ['show', 'v0.0.1:package-lock.json'], cwd)).stdout) as { version: string }
   assert.equal(taggedManifest.version, '0.0.1')
   assert.equal(taggedLock.version, '0.0.1')
+  const changelog = await readFile(path.join(cwd, 'CHANGELOG.md'), 'utf8')
+  assert.match(changelog, /0\.0\.1/)
+  if (source === 'lib') assert.match(changelog, /Old history stays here\./)
+  assert.equal((await run('git', ['show', 'v0.0.1:CHANGELOG.md'], cwd)).stdout, changelog)
+  await assert.rejects(readFile(path.join(cwd, source, 'CHANGELOG.md')), error =>
+    (error as NodeJS.ErrnoException).code === 'ENOENT')
   const events = await readFile(path.join(cwd, 'events.log'), 'utf8')
   assert.deepEqual(events.trim().split('\n').map(line => line.split(' ')[0]), ['test', 'build', 'publish'])
   assert.match(events, new RegExp(`test app 0\\.0\\.1 .*single root ${source}`))
@@ -163,6 +175,30 @@ require('node:fs').appendFileSync('events.log', [process.argv[2], process.env.DI
     run('npm', ['exec', '--', 'dispat', 'status', '--require-release'], cwd),
     error => (error as { code?: number }).code === 3
   )
+  await assert.rejects(
+    run('npm', ['exec', '--', 'dispat', 'release', '--require-release'], cwd),
+    error => (error as { code?: number }).code === 3
+  )
+  assert.equal(await readFile(path.join(cwd, 'CHANGELOG.md'), 'utf8'), changelog,
+    'a no-op plan must not append another changelog entry')
+
+  await writeFile(path.join(cwd, 'CHANGELOG.md'), `${changelog}\nlocal draft\n`)
+  await writeFile(path.join(cwd, source, 'index.js'), 'export const answer = 44\n')
+  await commit(cwd, 'fix(app): exercise dirty root changelog guard', [`${source}/index.js`])
+  const versionBeforeDirtyGuard = (JSON.parse(await readFile(path.join(cwd, 'package.json'), 'utf8')) as { version: string }).version
+  const eventsBeforeDirtyGuard = await readFile(path.join(cwd, 'events.log'), 'utf8')
+  await assert.rejects(run('npm', ['exec', '--', 'dispat', 'release'], cwd), error => {
+    const failure = error as { stdout?: string, stderr?: string }
+    assert.match(`${failure.stdout ?? ''}${failure.stderr ?? ''}`, /pre-existing local changes/)
+    return true
+  })
+  assert.equal((JSON.parse(await readFile(path.join(cwd, 'package.json'), 'utf8')) as { version: string }).version,
+    versionBeforeDirtyGuard, 'dirty root changelog must be refused before versioning')
+  assert.equal(await readFile(path.join(cwd, 'events.log'), 'utf8'), eventsBeforeDirtyGuard,
+    'dirty root changelog must be refused before build and publish')
+  assert.equal(await readFile(path.join(cwd, 'CHANGELOG.md'), 'utf8'), `${changelog}\nlocal draft\n`,
+    'refusing a release must preserve the local changelog draft')
+  await run('git', ['restore', 'CHANGELOG.md'], cwd)
 
   releasedManifest.scripts.test = 'node -e "process.exit(7)"'
   await writeFile(path.join(cwd, 'package.json'), `${JSON.stringify(releasedManifest, null, 2)}\n`)
@@ -173,6 +209,8 @@ require('node:fs').appendFileSync('events.log', [process.argv[2], process.env.DI
   assert.equal((await run('git', ['tag', '--list', 'v0.0.2'], cwd)).stdout.trim(), '')
   const eventsAfterFailure = await readFile(path.join(cwd, 'events.log'), 'utf8')
   assert.equal(eventsAfterFailure, events, 'the failing test gate must stop build and publish')
+  assert.equal(await readFile(path.join(cwd, 'CHANGELOG.md'), 'utf8'), changelog,
+    'a failed release must not append a changelog entry')
   await assert.rejects(run('npm', ['exec', '--', 'dispat', 'release'], cwd), error => {
     const failure = error as { stdout?: string, stderr?: string }
     assert.match(`${failure.stdout ?? ''}${failure.stderr ?? ''}`, /pre-existing local changes/)

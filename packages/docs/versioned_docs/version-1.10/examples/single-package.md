@@ -14,6 +14,7 @@ project/
   package.json             # your package, scripts, and @dispat/bin devDependency
   package-lock.json
   dispat.yaml
+  CHANGELOG.md             # created by release recording
   src/
     index.js
 ```
@@ -31,6 +32,9 @@ packages:
   app:
     path: src
     tagFormat: v{version}
+    changelog:
+      enabled: true
+      file: ../CHANGELOG.md
     autoVersion:
       enabled: true
       manifests: none
@@ -42,7 +46,7 @@ packages:
 
 commit:
   enabled: true
-  include: [package.json, package-lock.json]
+  include: [package.json, package-lock.json, CHANGELOG.md]
 ```
 
 Use `path: lib` instead for a root-level `lib/` folder. Scripts start inside that folder, and `cd ..` selects the root
@@ -85,7 +89,13 @@ release change confined to the root manifest, lockfile, tests, or other files ou
 key `app`, even when the npm name differs. Files outside the package folder do not gain change ownership through
 `commit.include`; that list controls release-commit staging. See [What counts as a change](../configuration/change-scope.md).
 
-When enabled, changelog recording writes `src/CHANGELOG.md` (or `lib/CHANGELOG.md`). Run actual releases through
+`changelog.file` is relative to the package folder: `../CHANGELOG.md` writes at the repository root for both `src/`
+and `lib/`. The file is created on the first release if absent, and new entries are prepended while existing history
+is preserved. Add the root-relative `CHANGELOG.md` to `commit.include` so the release commit and its tag include the
+notes alongside `package.json` and `package-lock.json`. Without that include, a file outside the source folder is not
+staged automatically. See [Changelog configuration](../configuration/records.md#changelog).
+
+Run actual releases through
 [CI](../reference/ci.md), with npm authentication and Git permissions for your destination. These npm publish commands
 target stable releases; add your intended npm dist-tag when releasing prereleases.
 

@@ -95,6 +95,7 @@ project/
   package.json             # your package, scripts, and @dispat/bin devDependency
   package-lock.json
   dispat.yaml
+  CHANGELOG.md             # created by release recording
   src/                     # use lib/ instead if that is your source folder
     index.js
 ```
@@ -113,6 +114,9 @@ packages:
   app:
     path: src
     tagFormat: v{version}
+    changelog:
+      enabled: true
+      file: ../CHANGELOG.md
     autoVersion:
       enabled: true
       manifests: none
@@ -124,7 +128,7 @@ packages:
 
 commit:
   enabled: true
-  include: [package.json, package-lock.json]
+  include: [package.json, package-lock.json, CHANGELOG.md]
 ```
 
 Scripts start in `src`, so `cd ..` runs npm against the single root manifest. Use `path: lib` for a root-level `lib/`
@@ -146,7 +150,11 @@ After a release, matching release tags supply the baseline for subsequent versio
 Commit the setup, then run `npm exec -- dispat status` and `npm exec -- dispat preview`. An unscoped
 `fix: handle empty input` counts when it changes `src/`; use `fix(app): update runtime dependencies` for a release
 change confined to the root manifest, lockfile, tests, or other files outside `src/`. `app` is the dispat key, not the
-npm package name. Release notes are written to `src/CHANGELOG.md` when changelog recording is enabled.
+npm package name.
+
+`changelog.file` is relative to the package folder, so `../CHANGELOG.md` writes release notes at the repository root
+for either `path: src` or `path: lib`. Including `CHANGELOG.md` in `commit.include` records it in the release commit
+with the root manifest and lockfile. Existing entries are preserved; the file is created on the first release if absent.
 
 Run releases through [CI](#run-releases-in-ci). If a release fails after versioning, inspect the root manifest and
 lockfile before retrying: package-folder rollback does not restore files outside `src/`. The version script accepts

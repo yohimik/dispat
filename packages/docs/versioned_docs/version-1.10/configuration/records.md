@@ -300,10 +300,15 @@ should read the way an unconfigured one does.
 |-----------|----------------|-----------------------------------------------|
 | `enabled`    | `true`         | Write a changelog file per published package.                                          |
 | `channels`   | every release  | Which releases get an entry. See [Choosing the channels that record](#choosing-the-channels-that-record). |
-| `file`       | `CHANGELOG.md` | File name inside the package folder.                                                   |
+| `file`       | `CHANGELOG.md` | Path relative to the package folder.                                                   |
 | `fileTitle`  | `# Changelog`  | Heads the file, above every entry. Takes the [line shapes](#your-own-words-around-an-entry) `header` and `footer` take, so it can be several lines and can differ per package. |
 | `entrySpacing` | `2`          | Blank lines between the new entry and the entry below it, from 1 to 10. See [The seam between entries](#the-seam-between-entries). |
 | *format*     |                | All entry format options above.                                                        |
+
+For a solo package declared with `path: src` or `path: lib`, set `file: ../CHANGELOG.md` to keep the changelog at the
+repository root. Add `CHANGELOG.md` to [`commit.include`](#commit) to stage it in the release commit. The changelog
+path is package-relative; the include path is repository-relative. See [One root manifest](../examples/single-package.md#one-root-manifest)
+for the complete configuration.
 
 dispat prepends new entries below the title, newest first. A file that does not open with the configured title keeps
 everything above its first entry heading where it is, and the new entry goes below that. See
