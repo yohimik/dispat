@@ -63,6 +63,8 @@ type (
 	AliasTagConfig           = public.AliasTagConfig
 	WebhookConfig            = public.WebhookConfig
 	WebhookHeader            = public.WebhookHeader
+	RepositoryOverrideConfig = public.RepositoryOverrideConfig
+	RepositoryBaselineConfig = public.RepositoryBaselineConfig
 
 	ParserConfig            = public.ParserConfig
 	ParserPropagationConfig = public.ParserPropagationConfig
@@ -1645,6 +1647,11 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, []Exc
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	deps, err := validateDependencies(pkgs, declared)
+	return pkgs, deps, excluded, err
+}
+
+func validateDependencies(pkgs []*model.Package, declared []DeclaredDependency) ([]model.Dependency, error) {
 	owner := make(map[string]bool, len(pkgs))
 	unversioned := make(map[string]bool)
 	for _, p := range pkgs {
@@ -1657,23 +1664,26 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, []Exc
 	deps := make([]model.Dependency, 0, len(declared))
 	for _, d := range declared {
 		if !owner[d.Consumer] {
-			return nil, nil, nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
-		}
-		if !owner[d.Provider] {
-			return nil, nil, nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
-		}
-		if unversioned[d.Provider] && !unversioned[d.Consumer] {
-			return nil, nil, nil, fmt.Errorf(
-				"config: %s: package %q cannot depend on %q: a space with versioning \"none\" is never released, so a releasable package cannot follow it",
-				d.Source.Label(), d.Consumer, d.Provider)
+			return nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
 		}
 		kind, err := DepKind(d.Kind)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
+			return nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
+		}
+		if !owner[d.Provider] && d.External {
+			continue
+		}
+		if !owner[d.Provider] {
+			return nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
+		}
+		if unversioned[d.Provider] && !unversioned[d.Consumer] {
+			return nil, fmt.Errorf(
+				"config: %s: package %q cannot depend on %q: a space with versioning \"none\" is never released, so a releasable package cannot follow it",
+				d.Source.Label(), d.Consumer, d.Provider)
 		}
 		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider, Kind: kind})
 	}
-	return pkgs, deps, excluded, nil
+	return deps, nil
 }
 
 // DiscoverPackages is Discover without the dependency-list validation: the

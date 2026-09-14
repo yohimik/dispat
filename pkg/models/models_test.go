@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -373,6 +374,30 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 	}
 	if string(data) != "" && json.Valid(data) != true {
 		t.Error("marshalled config must be valid JSON")
+	}
+}
+
+func TestPolyrepoModelRoundTrip(t *testing.T) {
+	f := File{
+		Polyrepo: true,
+		Configs:  []string{"../api/dispat.yaml"},
+		RepositoryOverrides: map[string]RepositoryOverrideConfig{
+			"sdk": {Commit: &CommitConfig{Enabled: Bool(true), Push: true, Branch: "main"}},
+		},
+		RepositoryBaselines: []RepositoryBaselineConfig{{
+			Consumer: "web", ReleaseTag: "sdk@1.2.3", Repository: "sdk", Revision: "abc123",
+		}},
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got File
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, f) {
+		t.Fatalf("round trip:\n got %#v\nwant %#v", got, f)
 	}
 }
 

@@ -32,8 +32,21 @@ import (
 // File mirrors the configuration at the monorepo root. The file extension
 // decides the format (yaml, json, toml, ...).
 type File struct {
-	Scripts map[string]Script      `json:"scripts,omitempty"`
-	Spaces  map[string]SpaceConfig `json:"spaces,omitempty"`
+	// Polyrepo makes configured packages repository-aware. In central mode the
+	// paths still start at the control repository, but every package belongs to
+	// the initialized Git repository containing it.
+	Polyrepo bool `json:"polyrepo,omitempty"`
+	// Configs imports repository-local dispat configurations. Paths authored in
+	// a config are relative to the declaring file.
+	Configs []string `json:"configs,omitempty"`
+	// RepositoryOverrides applies centrally-owned commit policy to source
+	// repositories, keyed by their .gitmodules name.
+	RepositoryOverrides map[string]RepositoryOverrideConfig `json:"repositoryOverrides,omitempty"`
+	// RepositoryBaselines supplies explicit cross-repository history
+	// associations when a gitlink transition is absent or ambiguous.
+	RepositoryBaselines []RepositoryBaselineConfig `json:"repositoryBaselines,omitempty"`
+	Scripts             map[string]Script          `json:"scripts,omitempty"`
+	Spaces              map[string]SpaceConfig     `json:"spaces,omitempty"`
 	// Packages holds per-package configuration, keyed by package name. An
 	// entry without `path` adjusts the configuration of a package discovered
 	// in one of the space folders, matched by folder name (every key must
@@ -602,6 +615,9 @@ type CommitConfig struct {
 	// Push pushes the release commit and tags.
 	Push   bool   `json:"push,omitempty"`   // default false
 	Remote string `json:"remote,omitempty"` // default "origin"
+	// Branch is the explicit push target used when the repository is detached.
+	// Empty uses the current branch and therefore cannot push a detached HEAD.
+	Branch string `json:"branch,omitempty"`
 	// Force writes tags that the repository or the remote already carries,
 	// instead of leaving them as they are. Default true.
 	//
@@ -630,6 +646,23 @@ type CommitConfig struct {
 	// `git config` step. Empty values fall back to git's own configuration.
 	Name  string `json:"name,omitempty"`
 	Email string `json:"email,omitempty"`
+}
+
+// RepositoryOverrideConfig is the policy a central configuration applies to
+// one source repository. It cannot relocate packages or replace an imported
+// repository's configuration.
+type RepositoryOverrideConfig struct {
+	Commit *CommitConfig `json:"commit,omitempty"`
+}
+
+// RepositoryBaselineConfig is one explicit cross-repository history
+// boundary. Repository is a .gitmodules name, or the reserved name "control".
+// Revision is resolved to an immutable full commit OID while loading.
+type RepositoryBaselineConfig struct {
+	Consumer   string `json:"consumer"`
+	ReleaseTag string `json:"releaseTag"`
+	Repository string `json:"repository"`
+	Revision   string `json:"revision"`
 }
 
 // IsEnabled reports whether the release commit is created (default false).
@@ -1257,6 +1290,9 @@ type DependencyConfig struct {
 	// image chain, a codegen coupling). Purely a compute-command annotation —
 	// the planner treats kept edges like any other.
 	Keep bool `json:"keep,omitempty" yaml:"keep,omitempty"`
+	// External permits the provider to be absent from the composed workspace.
+	// The edge is omitted from the active graph until that provider is present.
+	External bool `json:"external,omitempty" yaml:"external,omitempty"`
 }
 
 // Values of the commitErrors key.

@@ -93,7 +93,7 @@ func (d Dependencies) canonical() map[string][]any {
 // keep. Writing `{"provider": "core"}` for every plain edge would be noise on
 // the line the reader is actually scanning.
 func providerItem(e DependencyConfig) any {
-	if e.Kind == "" && !e.Keep {
+	if e.Kind == "" && !e.Keep && !e.External {
 		return e.Provider
 	}
 	item := map[string]any{"provider": e.Provider}
@@ -102,6 +102,9 @@ func providerItem(e DependencyConfig) any {
 	}
 	if e.Keep {
 		item["keep"] = true
+	}
+	if e.External {
+		item["external"] = true
 	}
 	return item
 }
@@ -272,8 +275,14 @@ func edgeFromObject(m map[string]any, where string) (DependencyConfig, error) {
 				return edge, fmt.Errorf("%s: keep wants true or false", where)
 			}
 			edge.Keep = b
+		case "external":
+			b, ok := value.(bool)
+			if !ok {
+				return edge, fmt.Errorf("%s: external wants true or false", where)
+			}
+			edge.External = b
 		default:
-			return edge, fmt.Errorf("%s: unknown key %q, want provider, kind or keep", where, k)
+			return edge, fmt.Errorf("%s: unknown key %q, want provider, kind, keep or external", where, k)
 		}
 	}
 	return edge, nil
