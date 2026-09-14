@@ -233,6 +233,14 @@ func (a *App) diffEdges(detected []detectedEdge, hasManifest, known map[string]b
 	for _, d := range declared {
 		p := pair{d.Consumer, d.Provider}
 		kinds, found := detKinds[p]
+		// An external provider may be intentionally outside this workspace;
+		// the scanner cannot disprove that declaration. A missing consumer
+		// still makes the edge stale, and present providers use normal rules.
+		if d.External && known[d.Consumer] && !known[d.Provider] {
+			a.log.Debug().Str("consumer", d.Consumer).Str("provider", d.Provider).
+				Msg("preserving external dependency outside the workspace")
+			continue
+		}
 		// An unparseable declared kind is reachable here (compute skips
 		// Discover's dependency validation on purpose): treated as "kind
 		// disagrees" when the pair is detected, and as an ordinary removal
