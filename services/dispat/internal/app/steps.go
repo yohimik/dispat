@@ -6,7 +6,6 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
-	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // The standalone step commands — changelog, autoversion, autowriter, commit,
@@ -68,7 +67,7 @@ func (a *App) syncLock(ctx context.Context, pl *plan.Plan, pkgs []string) error 
 		return nil
 	}
 	wsVars := release.WorkspaceEnv(pl, a.log)
-	runner := &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
+	runner := a.packageRunner()
 	for _, name := range pkgs {
 		if err := ctx.Err(); err != nil {
 			return err

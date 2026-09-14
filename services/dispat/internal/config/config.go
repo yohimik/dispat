@@ -401,6 +401,17 @@ func withSchemaHint(err error) error {
 }
 
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
+	return load(path, flags, false)
+}
+
+// LoadControl is Load for the CLI's control file. cliImports permits an
+// otherwise empty control config because repeatable --configs supplies all
+// package declarations after this file has been decoded.
+func LoadControl(path string, flags *pflag.FlagSet, cliImports bool) (*File, error) {
+	return load(path, flags, cliImports)
+}
+
+func load(path string, flags *pflag.FlagSet, cliImports bool) (*File, error) {
 	t, err := readTree(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
@@ -429,7 +440,7 @@ func Load(path string, flags *pflag.FlagSet) (*File, error) {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, withSchemaHint(err))
 	}
 	cfg.SourceFiles = t.Files
-	if err := validate(&cfg); err != nil {
+	if err := validate(&cfg, cliImports); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	return &cfg, nil
@@ -914,9 +925,9 @@ func fillOptional(c *File) {
 // validate checks the loaded configuration and resolves its defaulted values
 // in place. Each concern lives in its own helper; the order only matters in
 // that everything is validated before Discover consumes any of it.
-func validate(c *File) error {
+func validate(c *File, allowEmpty bool) error {
 	fillOptional(c)
-	if len(c.Spaces) == 0 && len(c.Packages) == 0 {
+	if len(c.Spaces) == 0 && len(c.Packages) == 0 && len(c.Configs) == 0 && !allowEmpty {
 		return errors.New("at least one space or package is required")
 	}
 	if err := validatePackageEntries(c); err != nil {
@@ -1515,6 +1526,9 @@ func resolveInitials(c *File) error {
 // DepSource locates where a dependency edge was declared, so `dispat
 // compute` can edit the exact file (and key) holding it.
 type DepSource struct {
+	// Repository identifies the configuration repository that owns this
+	// declaration in a composed workspace. Empty is the legacy/root config.
+	Repository string
 	// File is the config file holding the declaration; empty means the
 	// loaded root config itself.
 	File string
@@ -1648,40 +1662,45 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, []Exc
 		return nil, nil, nil, err
 	}
 	deps, err := validateDependencies(pkgs, declared)
-	return pkgs, deps, excluded, err
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return pkgs, deps, excluded, nil
 }
 
 func validateDependencies(pkgs []*model.Package, declared []DeclaredDependency) ([]model.Dependency, error) {
-	owner := make(map[string]bool, len(pkgs))
+	owner := make(map[string]string, len(pkgs))
 	unversioned := make(map[string]bool)
 	for _, p := range pkgs {
-		owner[p.Name] = true
+		owner[strings.ToLower(p.Name)] = p.Name
 		if p.Space != nil && !p.Space.Versioning.Releasable() {
-			unversioned[p.Name] = true
+			unversioned[strings.ToLower(p.Name)] = true
 		}
 	}
 
 	deps := make([]model.Dependency, 0, len(declared))
 	for _, d := range declared {
-		if !owner[d.Consumer] {
+		consumer, consumerOK := owner[strings.ToLower(d.Consumer)]
+		if !consumerOK {
 			return nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
 		}
 		kind, err := DepKind(d.Kind)
 		if err != nil {
 			return nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
 		}
-		if !owner[d.Provider] && d.External {
+		provider, providerOK := owner[strings.ToLower(d.Provider)]
+		if !providerOK && d.External {
 			continue
 		}
-		if !owner[d.Provider] {
+		if !providerOK {
 			return nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
 		}
-		if unversioned[d.Provider] && !unversioned[d.Consumer] {
+		if unversioned[strings.ToLower(provider)] && !unversioned[strings.ToLower(consumer)] {
 			return nil, fmt.Errorf(
 				"config: %s: package %q cannot depend on %q: a space with versioning \"none\" is never released, so a releasable package cannot follow it",
 				d.Source.Label(), d.Consumer, d.Provider)
 		}
-		deps = append(deps, model.Dependency{Consumer: d.Consumer, Provider: d.Provider, Kind: kind})
+		deps = append(deps, model.Dependency{Consumer: consumer, Provider: provider, Kind: kind})
 	}
 	return deps, nil
 }
@@ -1700,7 +1719,18 @@ func validateDependencies(pkgs []*model.Package, declared []DeclaredDependency) 
 // every space, validated here because the override layers need the folders
 // to exist.
 func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	d, err := newDiscovery(c, root)
+	return discoverPackagesMode(c, root, true)
+}
+
+// discoverCentralPackages is DiscoverPackages with all in-folder dispat files
+// disabled. The control configuration is the sole authority for centrally
+// managed source packages.
+func discoverCentralPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
+	return discoverPackagesMode(c, root, false)
+}
+
+func discoverPackagesMode(c *File, root string, loadFolderConfigs bool) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
+	d, err := newDiscoveryMode(c, root, loadFolderConfigs)
 	if err != nil {
 		return nil, nil, nil, err
 	}

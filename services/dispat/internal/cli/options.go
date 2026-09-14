@@ -13,6 +13,8 @@ import (
 type options struct {
 	// global
 	root, cfgName         *string
+	configs               *[]string
+	polyrepo              *bool
 	envFiles              *[]string
 	logLevel, logFormat   *string
 	quietParser           *bool
@@ -114,6 +116,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.root = fs.String("root", ".", "monorepo root folder")
 	o.cfgName = fs.String("config", "dispat.json",
 		"config file name, relative to --root; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
+	o.configs = fs.StringArray("configs", nil,
+		"import a repository-local config, relative to the control repository root (repeatable; imports imply --polyrepo)")
+	o.polyrepo = fs.Bool("polyrepo", false,
+		"treat configured package paths as initialized git-submodule repositories with independent histories and release records")
 	o.envFiles = fs.StringArray("env-file", nil,
 		"read environment variables from this file instead of ./.env (repeatable, later files win); variables the environment already sets are kept")
 	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2); dispat run uses the build value")

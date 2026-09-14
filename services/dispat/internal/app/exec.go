@@ -248,7 +248,7 @@ func (a *App) Exec(ctx context.Context, opts ExecOptions) (int, error) {
 	}
 	runner := opts.Runner
 	if runner == nil {
-		runner = &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
+		runner = a.packageRunner()
 	}
 	log := a.log.With().Str("script", opts.Script).Logger()
 	log.Debug().Str("subject", subject.label()).Str("from", from.label()).

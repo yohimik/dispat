@@ -6,6 +6,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -41,8 +43,35 @@ func (a *App) discoveredWorkspace(pkgs []*model.Package) filter.Workspace {
 // is what makes --package the only way to name one.
 func (a *App) spacePaths() map[string][]string {
 	paths := make(map[string][]string, len(a.cfg.Spaces))
-	for name, sc := range a.cfg.Spaces {
-		paths[name] = sc.Path
+	add := func(root, name string, configured []string) {
+		key := name
+		for existing := range paths {
+			if strings.EqualFold(existing, name) {
+				key = existing
+				break
+			}
+		}
+		for _, path := range configured {
+			absolute := filepath.Join(root, filepath.FromSlash(path))
+			rel, err := filepath.Rel(a.root, absolute)
+			if err == nil {
+				paths[key] = append(paths[key], filepath.ToSlash(rel))
+			}
+		}
+	}
+	if a.workspace == nil {
+		for name, sc := range a.cfg.Spaces {
+			add(a.root, name, sc.Path)
+		}
+		return paths
+	}
+	for _, repo := range a.workspace.Repositories {
+		if !repo.Control && !repo.Imported {
+			continue
+		}
+		for name, sc := range repo.Config.Spaces {
+			add(repo.Root, name, sc.Path)
+		}
 	}
 	return paths
 }
@@ -53,9 +82,28 @@ func (a *App) spacePaths() map[string][]string {
 // reaches both kinds and a declared group nobody joined is still recognised
 // well enough to be told it holds nothing.
 func (a *App) groupNames() []string {
-	names := make([]string, 0, len(a.cfg.VersionGroups))
-	for name := range a.cfg.VersionGroups {
+	var names []string
+	add := func(name string) {
+		for _, existing := range names {
+			if strings.EqualFold(existing, name) {
+				return
+			}
+		}
 		names = append(names, name)
+	}
+	if a.workspace == nil {
+		for name := range a.cfg.VersionGroups {
+			add(name)
+		}
+		return names
+	}
+	for _, repo := range a.workspace.Repositories {
+		if !repo.Control && !repo.Imported {
+			continue
+		}
+		for name := range repo.Config.VersionGroups {
+			add(name)
+		}
 	}
 	return names
 }

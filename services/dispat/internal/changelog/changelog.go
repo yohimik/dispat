@@ -103,7 +103,9 @@ func ResolveRepoEnv(owner, repo string) (string, string) {
 // Every recorder applies it as it is constructed, which is the one place the
 // environment is read.
 func (f Format) WithRepoEnv() Format {
-	f.LinkOwner, f.LinkRepo = ResolveRepoEnv(f.LinkOwner, f.LinkRepo)
+	if !f.RepositoryResolved {
+		f.LinkOwner, f.LinkRepo = ResolveRepoEnv(f.LinkOwner, f.LinkRepo)
+	}
 	return f
 }
 

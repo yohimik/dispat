@@ -356,7 +356,6 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 	}
 
 	lists := newListEdits()
-	rootSrc := config.DepSource{KeyPath: []string{"dependencies"}}
 	for _, s := range apply {
 		switch s.action {
 		case actionAdd:
@@ -364,6 +363,7 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 				lists.at(src).add = append(lists.at(src).add, s.entry)
 				continue
 			}
+			rootSrc := config.DepSource{Repository: s.src.Repository, KeyPath: []string{"dependencies"}}
 			lists.at(rootSrc).add = append(lists.at(rootSrc).add, s.entry)
 		case actionRemove:
 			lists.at(s.src).remove[s.src.Index] = true
@@ -393,10 +393,7 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 		}
 		kept = append(kept, edit.add...)
 
-		target := src.File
-		if target == "" {
-			target = cfgPath
-		}
+		target := a.dependencyConfigPath(cfgPath, src)
 		if err := edits.add(target, config.Edit{KeyPath: src.KeyPath, Value: listValue(src, kept)}); err != nil {
 			return err
 		}
@@ -410,7 +407,19 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 // share the key path ["dependencies"] in a file of their own, which is why
 // the space is part of the identity.
 func listKey(s config.DepSource) string {
-	return s.Space + "\x00" + s.File + "\x00" + strings.Join(s.KeyPath, "\x00")
+	return s.Repository + "\x00" + s.Space + "\x00" + s.File + "\x00" + strings.Join(s.KeyPath, "\x00")
+}
+
+func (a *App) dependencyConfigPath(fallback string, src config.DepSource) string {
+	if src.File != "" {
+		return src.File
+	}
+	if a.workspace != nil && src.Repository != "" {
+		if repo := a.workspace.RepositoryByName(src.Repository); repo != nil && repo.ConfigPath != "" {
+			return repo.ConfigPath
+		}
+	}
+	return fallback
 }
 
 // listValue renders the surviving entries in the shape the list is written
@@ -438,18 +447,24 @@ func (a *App) alignDeclaredList(src config.DepSource, kept []config.DependencyCo
 	if src.File != "" {
 		return
 	}
+	cfg := a.cfg
+	if a.workspace != nil && src.Repository != "" {
+		if repo := a.workspace.RepositoryByName(src.Repository); repo != nil && repo.Config != nil {
+			cfg = repo.Config
+		}
+	}
 	switch {
 	case src.IsRootList():
-		a.cfg.Dependencies = config.Dependencies(kept)
+		cfg.Dependencies = config.Dependencies(kept)
 	case src.Space != "":
-		if s, ok := a.cfg.Spaces[src.Space]; ok {
+		if s, ok := cfg.Spaces[src.Space]; ok {
 			s.Dependencies = config.Dependencies(kept)
-			a.cfg.Spaces[src.Space] = s
+			cfg.Spaces[src.Space] = s
 		}
 	case len(src.KeyPath) == 3 && src.KeyPath[0] == "packages":
-		if e, ok := a.cfg.Packages[src.KeyPath[1]]; ok {
+		if e, ok := cfg.Packages[src.KeyPath[1]]; ok {
 			e.Dependencies = listValue(src, kept).(config.ProviderList)
-			a.cfg.Packages[src.KeyPath[1]] = e
+			cfg.Packages[src.KeyPath[1]] = e
 		}
 	}
 }

@@ -38,6 +38,10 @@ type discovery struct {
 	consumed   map[string][]string // top-level packages key -> matching folders
 	excluded   []excludedDir
 	baseIgnore ignore.Chain
+	// loadFolderConfigs is false only for centrally managed polyrepo packages:
+	// the control configuration owns those packages completely and must not
+	// silently read a source repository's dispat files.
+	loadFolderConfigs bool
 
 	// spaceConfigs and onlyChecks feed the autoVersion.only check, which needs
 	// every package discovered before it can say a name is unknown.
@@ -91,6 +95,10 @@ type spaceScan struct {
 // newDiscovery resolves what every space starts from: the repository's own
 // dependency declarations and its ignore layer.
 func newDiscovery(c *File, root string) (*discovery, error) {
+	return newDiscoveryMode(c, root, true)
+}
+
+func newDiscoveryMode(c *File, root string, loadFolderConfigs bool) (*discovery, error) {
 	rootIgnore, err := ignoreLayer(root, c.Ignore)
 	if err != nil {
 		return nil, fmt.Errorf("config: %s: %w", DispatignoreName, err)
@@ -101,12 +109,13 @@ func newDiscovery(c *File, root string) (*discovery, error) {
 		// The merged declaration list: the root config's own `dependencies`
 		// first, in file order, then each space's object and each package's
 		// list in discovery order.
-		declared:     collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}}),
-		owner:        make(map[string]string),
-		ownerFold:    make(map[string]string),
-		consumed:     make(map[string][]string),
-		baseIgnore:   appendLayer(nil, rootIgnore),
-		spaceConfigs: make(map[string]SpaceConfig, len(c.Spaces)),
+		declared:          collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}}),
+		owner:             make(map[string]string),
+		ownerFold:         make(map[string]string),
+		consumed:          make(map[string][]string),
+		baseIgnore:        appendLayer(nil, rootIgnore),
+		loadFolderConfigs: loadFolderConfigs,
+		spaceConfigs:      make(map[string]SpaceConfig, len(c.Spaces)),
 	}, nil
 }
 
@@ -129,6 +138,9 @@ func (d *discovery) resolveSpaceConfig(sn string) (SpaceConfig, []string, []Spac
 	var files []SpaceFile
 	var srcs []string
 	for _, dir := range dirs {
+		if !d.loadFolderConfigs {
+			continue
+		}
 		if sameDir(dir, d.root) {
 			continue
 		}
@@ -430,13 +442,15 @@ func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]over
 		layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s: packages entry)", label, s.srcs[i]),
 			DepSource{File: s.srcs[i], KeyPath: []string{"packages", key, "dependencies"}}})
 	}
-	folderPO, folderSrc, err := loadPackageFile(dir)
-	if err != nil {
-		return nil, fmt.Errorf("config: space %q: package %q: %w", s.name, name, err)
-	}
-	if folderSrc != "" {
-		layers = append(layers, overrideLayer{folderPO, fmt.Sprintf("%s (%s)", label, folderSrc),
-			DepSource{File: folderSrc, KeyPath: []string{"dependencies"}}})
+	if d.loadFolderConfigs {
+		folderPO, folderSrc, err := loadPackageFile(dir)
+		if err != nil {
+			return nil, fmt.Errorf("config: space %q: package %q: %w", s.name, name, err)
+		}
+		if folderSrc != "" {
+			layers = append(layers, overrideLayer{folderPO, fmt.Sprintf("%s (%s)", label, folderSrc),
+				DepSource{File: folderSrc, KeyPath: []string{"dependencies"}}})
+		}
 	}
 	return layers, nil
 }
@@ -490,13 +504,15 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 	// express something a space package cannot.
 	layers := []overrideLayer{{po, label,
 		DepSource{KeyPath: []string{"packages", key, "dependencies"}}}}
-	filePO, fileSrc, err := loadPackageFile(dir)
-	if err != nil {
-		return nil, fmt.Errorf("config: %s: %w", label, err)
-	}
-	if fileSrc != "" {
-		layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s)", label, fileSrc),
-			DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}})
+	if d.loadFolderConfigs {
+		filePO, fileSrc, err := loadPackageFile(dir)
+		if err != nil {
+			return nil, fmt.Errorf("config: %s: %w", label, err)
+		}
+		if fileSrc != "" {
+			layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s)", label, fileSrc),
+				DepSource{File: fileSrc, KeyPath: []string{"dependencies"}}})
+		}
 	}
 	// A standalone package is its own space, so it starts from the same root
 	// defaults every space does, with its path filled in — always exactly one.

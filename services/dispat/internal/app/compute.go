@@ -97,7 +97,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	// Packages only, deliberately without Discover's dependency validation: a
 	// stale edge naming a deleted package must reach diffEdges as a removal
 	// suggestion, not abort the one command able to fix it.
-	pkgs, declared, _, err := config.DiscoverPackages(a.cfg, a.root)
+	pkgs, declared, _, err := config.DiscoverWorkspacePackages(a.cfg, a.root, a.workspace)
 	if err != nil {
 		a.log.Error().Err(err).Msg("package discovery failed")
 		return 0, err
@@ -138,6 +138,20 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 		}
 	}
 	sugs := changeSet{deps: a.diffEdges(scoped, scopedManifest, known, scopedDeclared)}
+	if a.workspace != nil {
+		byName := make(map[string]*model.Package, len(pkgs))
+		for _, p := range pkgs {
+			byName[strings.ToLower(p.Name)] = p
+		}
+		for i := range sugs.deps {
+			if sugs.deps[i].action != actionAdd {
+				continue
+			}
+			if owner := a.workspace.ConfigurationForPackage(byName[strings.ToLower(sugs.deps[i].entry.Consumer)]); owner != nil {
+				sugs.deps[i].src.Repository = owner.Name
+			}
+		}
+	}
 	initials, baselines := a.suggestInitials(ctx, scanned, sel)
 	sugs.initials = initials
 

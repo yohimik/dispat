@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -146,6 +147,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
+	if err := applyNestedWorkspace(fs, o); err != nil {
+		fmt.Fprintf(stderr, "dispat: invalid nested workspace context: %v\n", err)
+		return 2
+	}
 
 	// Housekeeping, before anything else and on every invocation: the copy a
 	// self-update kept is deleted once it is a week old. With no backup
@@ -219,6 +224,39 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return r.runConfigured()
+}
+
+const (
+	nestedWorkspaceRootEnv    = "DISPAT_INTERNAL_WORKSPACE_ROOT"
+	nestedWorkspaceConfigEnv  = "DISPAT_INTERNAL_WORKSPACE_CONFIG"
+	nestedWorkspaceImportsEnv = "DISPAT_INTERNAL_WORKSPACE_CONFIGS"
+)
+
+// applyNestedWorkspace restores the composed control invocation carried by an
+// owner-aware script runner. Explicit global flags still win, which lets a
+// nested command intentionally point at another workspace.
+func applyNestedWorkspace(fs *pflag.FlagSet, o *options) error {
+	root := os.Getenv(nestedWorkspaceRootEnv)
+	configPath := os.Getenv(nestedWorkspaceConfigEnv)
+	rawImports := os.Getenv(nestedWorkspaceImportsEnv)
+	if root == "" || configPath == "" || rawImports == "" {
+		return nil
+	}
+	if fs.Changed("root") || fs.Changed("config") || fs.Changed("configs") || fs.Changed("polyrepo") {
+		return nil
+	}
+	var imports []string
+	if err := json.Unmarshal([]byte(rawImports), &imports); err != nil {
+		return err
+	}
+	*o.root = root
+	*o.cfgName = configPath
+	*o.configs = append((*o.configs)[:0], imports...)
+	*o.polyrepo = true
+	if err := fs.Set("polyrepo", "true"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // splitGitCommitArgs keeps Git's flag grammar out of pflag. A message source,
@@ -375,19 +413,19 @@ func shortGitOptionTakesFollowingValue(arg string) bool {
 
 func globalFlagTakesValue(arg string) bool {
 	switch arg {
-	case "--root", "--config", "--env-file", "--concurrency", "--log-level", "--log-format":
+	case "--root", "--config", "--configs", "--env-file", "--concurrency", "--log-level", "--log-format":
 		return true
 	}
 	return false
 }
 
 func globalFlagInline(arg string) bool {
-	for _, name := range []string{"--root=", "--config=", "--env-file=", "--concurrency=", "--log-level=", "--log-format=", "--quiet-parser="} {
+	for _, name := range []string{"--root=", "--config=", "--configs=", "--env-file=", "--concurrency=", "--log-level=", "--log-format=", "--quiet-parser=", "--polyrepo="} {
 		if strings.HasPrefix(arg, name) {
 			return true
 		}
 	}
-	return arg == "--help" || arg == "--version" || arg == "--quiet-parser"
+	return arg == "--help" || arg == "--version" || arg == "--quiet-parser" || arg == "--polyrepo"
 }
 
 func commandArgumentIndex(args []string, wanted string) int {

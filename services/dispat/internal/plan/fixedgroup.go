@@ -97,7 +97,7 @@ func (cp *computation) fixedGroups() map[string][]string {
 		if rel == nil {
 			continue
 		}
-		if group := rel.Pkg.VersionGroupName(); group != "" {
+		if group := rel.Pkg.VersionGroupIdentity(); group != "" {
 			out[group] = append(out[group], name)
 		}
 	}

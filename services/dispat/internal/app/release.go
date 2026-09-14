@@ -441,7 +441,10 @@ func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser
 	// different sources. A half-configured pair is left as written and fails
 	// below, rather than crossing a configured owner with the environment's
 	// repo to reach a repository nobody named.
-	owner, repo := changelog.ResolveRepoEnv(spec.Owner, spec.Repo)
+	owner, repo := spec.Owner, spec.Repo
+	if !spec.Format.RepositoryResolved {
+		owner, repo = changelog.ResolveRepoEnv(owner, repo)
+	}
 	if owner == "" || repo == "" {
 		return nil, errors.New("no repository configured (set github.owner and github.repo, or $GITHUB_REPOSITORY)")
 	}
