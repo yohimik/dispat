@@ -2,13 +2,16 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -24,12 +27,29 @@ func ComposeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []st
 	return ComposeWorkspaceWithPins(cfg, configPath, controlRoot, cliConfigs, nil)
 }
 
+// SourcePinResolver reads the latest run-authorized revisions for one exact
+// .gitmodules repository identity. Composition invokes it while holding that
+// source's Git mutation lock, so a nested command compares a coherent pin and
+// HEAD even while another source is recording in the same release run.
+type SourcePinResolver func(repository string) ([]string, error)
+
 // ComposeWorkspaceWithPins is ComposeWorkspace with trusted, run-local source
 // revisions exported by an enclosing dispat release. It permits a nested
 // command after an earlier nested commit advanced a source, while still
 // requiring the checkout to equal either control HEAD or that exact exported
 // revision.
 func ComposeWorkspaceWithPins(cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string) (*Workspace, error) {
+	return composeWorkspace(cfg, configPath, controlRoot, cliConfigs, runPins, nil)
+}
+
+// ComposeWorkspaceWithPinResolver additionally admits fresh run-scoped pins.
+// Static callers keep using ComposeWorkspaceWithPins; only a CLI invocation
+// that accepted an inherited workspace context supplies this resolver.
+func ComposeWorkspaceWithPinResolver(cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string, resolve SourcePinResolver) (*Workspace, error) {
+	return composeWorkspace(cfg, configPath, controlRoot, cliConfigs, runPins, resolve)
+}
+
+func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string, resolve SourcePinResolver) (*Workspace, error) {
 	if cfg == nil || (!cfg.Polyrepo && len(cfg.Configs) == 0 && len(cliConfigs) == 0) {
 		return nil, nil
 	}
@@ -45,11 +65,17 @@ func ComposeWorkspaceWithPins(cfg *File, configPath, controlRoot string, cliConf
 	if err := requireCompleteRepository(root, ControlRepository); err != nil {
 		return nil, err
 	}
+	controlHead, err := gitOutput(root, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
+			fmt.Errorf("E330: polyrepo control repository has no HEAD: %w", err))
+	}
 	modules, err := loadSubmodules(root)
 	if err != nil {
 		return nil, err
 	}
-	repos := []Repository{{Name: ControlRepository, Root: root, ConfigPath: configPath, Config: cfg, Control: true, Commit: cfg.Commit}}
+	repos := []Repository{{Name: ControlRepository, Root: root, ConfigPath: configPath, Config: cfg,
+		Control: true, Commit: cfg.Commit, CompositionHead: controlHead}}
 
 	seenConfig := map[string]bool{}
 	if canonical, err := canonicalFile(configPath); err == nil {
@@ -133,18 +159,26 @@ func ComposeWorkspaceWithPins(cfg *File, configPath, controlRoot string, cliConf
 
 	// Only initialized, pinned repositories may participate. Check all source
 	// roots once here; package discovery below merely assigns packages to them.
+	compositionHeads := map[string]string{ControlRepository: controlHead}
 	for _, module := range modules {
 		if err := requireCompleteRepository(module.Root, module.Name); err != nil {
 			return nil, err
 		}
-		if err := requirePinnedModule(root, module, runPins[module.Name]); err != nil {
+		head, err := requirePinnedModuleResolved(root, controlHead, module, runPins[module.Name], resolve)
+		if err != nil {
 			return nil, err
 		}
+		compositionHeads[module.Name] = head
+	}
+	for i := range repos {
+		repos[i].CompositionHead = compositionHeads[repos[i].Name]
 	}
 	if err := resolveRepositoryBaselines(cfg, repos); err != nil {
 		return nil, err
 	}
-	return newWorkspace(root, repos, modules), nil
+	workspace := newWorkspace(root, repos, modules)
+	workspace.inheritedPins = resolve != nil
+	return workspace, nil
 }
 
 // Repository is one participant of a composed workspace.
@@ -157,18 +191,30 @@ type Repository struct {
 	Control     bool
 	Imported    bool
 	Commit      *CommitConfig
+	// CompositionHead is the exact repository HEAD accepted while the source
+	// gitlink and any inherited live pin were validated. Release planning must
+	// reproduce it before any hook or publication may run.
+	CompositionHead string
 }
 
 // Workspace is the repository ownership map shared by every command in one
 // run. It is immutable after composition.
 type Workspace struct {
-	ControlRoot  string
-	Repositories []Repository
-	modules      []submodule
-	byName       map[string]int
-	byFold       map[string]int
-	byRoot       map[string]int
-	sourceOrder  []int
+	ControlRoot   string
+	Repositories  []Repository
+	modules       []submodule
+	byName        map[string]int
+	byFold        map[string]int
+	byRoot        map[string]int
+	sourceOrder   []int
+	inheritedPins bool
+}
+
+// InheritedPinsEnabled reports whether composition accepted a validated live
+// run context. It prevents an explicit --root/--config invocation from later
+// reopening a coincidentally matching inherited coordinator.
+func (w *Workspace) InheritedPinsEnabled() bool {
+	return w != nil && w.inheritedPins
 }
 
 func newWorkspace(controlRoot string, repositories []Repository, modules []submodule) *Workspace {
@@ -385,24 +431,46 @@ func requireCompleteRepository(root, name string) error {
 	return nil
 }
 
-func requirePinnedModule(controlRoot string, module submodule, runPins []string) error {
-	pinned, err := gitOutput(controlRoot, "rev-parse", "HEAD:"+module.Path)
+func requirePinnedModule(controlRoot, controlRevision string, module submodule, runPins []string) (string, error) {
+	pinned, err := gitOutput(controlRoot, "rev-parse", controlRevision+":"+module.Path)
 	if err != nil {
-		return WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q is not pinned by control HEAD: %w", module.Name, err))
+		return "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q is not pinned by control HEAD: %w", module.Name, err))
 	}
 	head, err := gitOutput(module.Root, "rev-parse", "HEAD")
 	if err != nil {
-		return WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q has no HEAD: %w", module.Name, err))
+		return "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q has no HEAD: %w", module.Name, err))
 	}
 	if pinned != head {
 		for _, pin := range runPins {
 			if pin == head {
-				return nil
+				return head, nil
 			}
 		}
-		return WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("E330: polyrepo source repository %q is checked out at %s but control HEAD pins %s", module.Name, head, pinned))
+		return "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("E330: polyrepo source repository %q is checked out at %s but control HEAD pins %s", module.Name, head, pinned))
 	}
-	return nil
+	return head, nil
+}
+
+func requirePinnedModuleResolved(controlRoot, controlRevision string, module submodule, runPins []string, resolve SourcePinResolver) (string, error) {
+	if resolve == nil {
+		return requirePinnedModule(controlRoot, controlRevision, module, runPins)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	git := &gitx.CLI{Dir: module.Root}
+	unlock, err := git.AcquireMutation(ctx)
+	if err != nil {
+		return "", WithDiagnostic(DiagnosticRepositoryInvalid,
+			fmt.Errorf("E330: polyrepo source repository %q: acquiring live pin validation lock: %w", module.Name, err))
+	}
+	defer unlock()
+	fresh, err := resolve(module.Name)
+	if err != nil {
+		return "", WithDiagnostic(DiagnosticRepositoryInvalid,
+			fmt.Errorf("E330: polyrepo source repository %q: reading live run pin: %w", module.Name, err))
+	}
+	pins := append(append([]string(nil), runPins...), fresh...)
+	return requirePinnedModule(controlRoot, controlRevision, module, pins)
 }
 
 func resolveRepositoryBaselines(cfg *File, repos []Repository) error {
