@@ -1,5 +1,23 @@
 # Changelog
 
+## specs/agent-guide/v1.11.0-rc.0 (2026-09-15)
+
+### Fixes
+
+- clarify polyrepository configuration and release behavior ([88cf2ca](https://github.com/yohimik/dispat/commit/88cf2cae8b0355be0f5e185fc450f0c1949e4502)) (by yohimik, Codex (gpt-5.6-sol))
+  Document owner-local folder inputs and parser diagnostics, direct channel
+  precedence, and cancellation of hooks during durable release recording.
+
+- document composed repository releases ([7e38ae1](https://github.com/yohimik/dispat/commit/7e38ae131734159acb7011a835219f765c46a983)) (by yohimik, Codex (gpt-5.6-sol))
+  Describe central and imported configuration, external edges, source ownership,
+  locks, exact pin handoff, diagnostics and partial publication recovery.
+
+### Authors
+
+- yohimik
+- Codex (gpt-5.6-sol)
+
+
 ## specs/agent-guide/v1.10.3 (2026-09-11)
 
 ### Fixes
