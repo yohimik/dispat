@@ -2,9 +2,11 @@
 
 :::note Specification and implementation versions
 
-The [CCME 3.0.0 specification](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md) describes future
-VCS adapters and explicit artifact rollback. dispat 1.8.x and its CCME 2 parser do not implement those additions.
-This page documents the installed behavior; use the [CCME 2.0.0 reference](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
+The current [CCME 3 specification](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md) includes an
+optional polyrepository Git profile, external VCS adapters, and explicit artifact rollback. Current dispat implements
+the polyrepository profile as planning and repository behavior without changing its published message grammar.
+External adapters and rollback remain specification contracts rather than implemented commands. This page documents
+the installed parser behavior; use the [CCME 2.0.0 reference](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
 when checking its syntax. A `rollback(scope)` message is not a rollback command in this release.
 
 :::

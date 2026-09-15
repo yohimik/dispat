@@ -100,7 +100,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		// The workspace listing depends only on the plan, so it is built once
 		// here and shared by every package's environment.
 		wsVars:  release.WorkspaceEnv(pl, a.log),
-		runner:  &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log},
+		runner:  a.packageRunner(),
 		covered: coveredReleases(pl, covered),
 	}
 	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: opts.OnError})
@@ -153,18 +153,48 @@ func (a *App) reportNothingResolved(name string, sel filter.Result, covered []st
 // worth a package discovery, which is the one place a script defined solely in
 // a package folder's own config file can be seen.
 func (a *App) scriptDefinedAnywhere(name string) bool {
-	if _, ok := a.cfg.Script(name); ok {
-		return true
-	}
-	for _, sc := range a.cfg.Spaces {
-		if _, ok := sc.Script(name); ok {
-			return true
+	configs := []*config.File{a.cfg}
+	if a.workspace != nil {
+		configs = configs[:0]
+		for _, repo := range a.workspace.Repositories {
+			if repo.Control || repo.Imported {
+				configs = append(configs, repo.Config)
+			}
 		}
 	}
-	for _, po := range a.cfg.Packages {
-		if _, _, ok := public.FoldLookup(po.Scripts, name); ok {
+	for _, cfg := range configs {
+		if _, ok := cfg.Script(name); ok {
 			return true
 		}
+		for _, sc := range cfg.Spaces {
+			if _, ok := sc.Script(name); ok {
+				return true
+			}
+		}
+		for _, po := range cfg.Packages {
+			if _, _, ok := public.FoldLookup(po.Scripts, name); ok {
+				return true
+			}
+		}
+	}
+	if a.workspace != nil {
+		if spaces, err := config.ResolvedWorkspaceSpaceConfigs(a.cfg, a.root, a.workspace); err == nil {
+			for _, sc := range spaces {
+				if _, ok := sc.Script(name); ok {
+					return true
+				}
+			}
+		}
+		pkgs, err := a.packages()
+		if err != nil {
+			return false
+		}
+		for _, p := range pkgs {
+			if _, ok := p.Space.Script(name); ok {
+				return true
+			}
+		}
+		return false
 	}
 	// The two levels only the filesystem knows come last, cheapest first: a
 	// space folder's own config file defines its scripts whether or not the

@@ -28,6 +28,15 @@ import (
 // they cannot be hidden at all.
 func (a *App) printDiagnostics(pl *plan.Plan) {
 	quiet := a.cfg.Parser != nil && a.cfg.Parser.Quiet
+	var repositoryQuiet map[string]bool
+	if a.workspace != nil {
+		repositoryQuiet = make(map[string]bool, len(a.workspace.Repositories))
+		for _, repository := range a.workspace.Repositories {
+			if repository.Config != nil && repository.Config.Parser != nil {
+				repositoryQuiet[repository.Name] = repository.Config.Parser.Quiet
+			}
+		}
+	}
 	warnings, errors, hidden := 0, 0, 0
 	for _, d := range pl.Diagnostics {
 		if d.Level == plan.LevelError {
@@ -37,7 +46,11 @@ func (a *App) printDiagnostics(pl *plan.Plan) {
 		}
 		// Before the event is built, not after: a zerolog event taken from
 		// the pool and never sent is a leak.
-		if quiet && ccme.IsDiagnosticCode(d.Code) {
+		suppressParser := quiet
+		if sourceQuiet, ok := repositoryQuiet[d.Repository]; ok {
+			suppressParser = sourceQuiet
+		}
+		if suppressParser && ccme.IsDiagnosticCode(d.Code) {
 			hidden++
 			continue
 		}
@@ -46,6 +59,9 @@ func (a *App) printDiagnostics(pl *plan.Plan) {
 			ev = a.log.Error()
 		}
 		ev = ev.Str("code", d.Code)
+		if d.Repository != "" {
+			ev = ev.Str("repository", d.Repository)
+		}
 		if d.Pkg != "" {
 			ev = ev.Str("package", d.Pkg)
 		}

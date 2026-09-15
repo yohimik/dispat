@@ -1492,7 +1492,7 @@ func TestDependencyConsumerKeyRefused(t *testing.T) {
 	}, "pkgs/core")
 	_, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `dependencies["web"][0]: unknown key "consumer", want provider, kind or keep`)
+	assert.Contains(t, err.Error(), `dependencies["web"][0]: unknown key "consumer", want provider, kind, keep or external`)
 }
 
 // TestPackageDependenciesCarryKindAndKeep: a package's own list holds exactly

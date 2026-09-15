@@ -25,6 +25,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/install"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
+	"github.com/yohimik/dispat/services/dispat/internal/workspaceenv"
 )
 
 // runner carries what one invocation's phases share: the parsed command line,
@@ -39,12 +40,13 @@ import (
 // what makes that order visible instead of implied by a thousand lines of
 // sequence.
 type runner struct {
-	fs     *pflag.FlagSet
-	o      *options
-	inv    invocation
-	stdout io.Writer
-	stderr io.Writer
-	boot   zerolog.Logger
+	fs        *pflag.FlagSet
+	o         *options
+	inv       invocation
+	stdout    io.Writer
+	stderr    io.Writer
+	boot      zerolog.Logger
+	workspace *config.Workspace
 
 	// checkCtx bounds the background update check; update is Run's, so a
 	// phase that starts the check writes through the pointer and Run's
@@ -933,16 +935,58 @@ func (r *runner) runConfigured() int {
 		r.boot.Error().Err(err).Msg("config file not found")
 		return 1
 	}
-	cfg, err := config.Load(cfgPath, r.fs)
+	cfg, err := config.LoadControl(cfgPath, r.fs, len(*r.o.configs) > 0)
 	if err != nil {
-		r.boot.Error().Err(err).Msg("invalid configuration")
+		logConfigError(r.boot, err).Msg("invalid configuration")
 		return 1
 	}
+	// Config imports add to the control file's list. They are intentionally
+	// resolved later, from resolvedRoot, while paths authored in a config are
+	// resolved from the declaring file.
+	if r.fs.Changed("polyrepo") {
+		cfg.Polyrepo = *r.o.polyrepo
+	}
+	if len(cfg.Configs)+len(*r.o.configs) > 0 {
+		if r.fs.Changed("polyrepo") && !*r.o.polyrepo {
+			r.boot.Error().Msg("--polyrepo=false conflicts with config imports, which require polyrepo mode")
+			return 2
+		}
+		cfg.Polyrepo = true
+	}
+	var pins map[string][]string
+	var pinResolver config.SourcePinResolver
+	if r.o.nestedWorkspace {
+		env := os.Environ()
+		pins, err = workspaceenv.Pins(resolvedRoot, cfgPath, env)
+		if err != nil {
+			r.boot.Error().Err(err).Msg("cannot read enclosing release outputs")
+			return 1
+		}
+		live, liveErr := workspaceenv.OpenLivePins(resolvedRoot, cfgPath, env)
+		if liveErr != nil {
+			r.boot.Error().Err(liveErr).Msg("cannot validate enclosing live pin context")
+			return 1
+		}
+		if live != nil {
+			pinResolver = live.Pins
+		}
+	}
+	workspace, err := config.ComposeWorkspaceWithPinResolver(cfg, cfgPath, resolvedRoot, *r.o.configs, pins, pinResolver)
+	if err != nil {
+		logConfigError(r.boot, err).Msg("invalid polyrepo workspace")
+		return 1
+	}
+	r.workspace = workspace
 	if r.fs.Changed("quiet-parser") {
 		// The config states the repository's habit; the flag states this
 		// invocation's, in both directions: --quiet-parser=false brings the
 		// parser's findings back for one run without editing the config.
 		cfg.Parser.Quiet = *r.o.quietParser
+		if workspace != nil {
+			for _, repository := range workspace.Repositories {
+				repository.Config.Parser.Quiet = *r.o.quietParser
+			}
+		}
 	}
 	log := newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout)
 	// The first thing worth knowing about any run is which file it read and
@@ -981,7 +1025,7 @@ func (r *runner) runConfigured() int {
 		// --env asked for one, and no update check, for the same reason as if.
 		ctx, stop := signalCtx()
 		defer stop()
-		code, err := app.New(resolvedRoot, cfg, log).Exec(ctx, r.execOpts)
+		code, err := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log).Exec(ctx, r.execOpts)
 		if err != nil {
 			return 1
 		}
@@ -992,7 +1036,7 @@ func (r *runner) runConfigured() int {
 		// gets this far; every other `if` already ran without reading any of
 		// this. The block must stay above the update check below: no `if` path
 		// may cost a GitHub request, however much else it asked for.
-		a := app.New(resolvedRoot, cfg, log)
+		a := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log)
 		dir := *r.o.root
 		if r.ifIn != nil {
 			var err error
@@ -1034,7 +1078,7 @@ func (r *runner) runConfigured() int {
 		// root, gets this far; a literal list already ran without reading any of
 		// this. Above the update check for the same reason `if` is: no loop path
 		// may cost a GitHub request, however much else it asked for.
-		a := app.New(resolvedRoot, cfg, log)
+		a := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log)
 		ctx, stop := signalCtx()
 		defer stop()
 		dir := *r.o.root
@@ -1090,7 +1134,7 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 	// revision the run counts changes from, and the downstream expansion.
 	window := app.WindowOptions{Filter: sel, Since: *o.since, Consumers: *o.consumers}
 
-	a := app.New(root, cfg, log)
+	a := app.NewWorkspace(root, cfg, r.workspace, log)
 	if r.inv.cmd == cmdCommit && r.gitAuthoring {
 		gitDir, err := filepath.Abs(*o.root)
 		if err != nil {

@@ -38,6 +38,9 @@ type App struct {
 	log  zerolog.Logger
 	git  *gitx.CLI
 	scan scanner.Scanner
+	// workspace is nil for legacy single-repository behavior. In polyrepo
+	// mode it is the immutable ownership map shared by every command.
+	workspace *config.Workspace
 
 	// The discovered workspace, remembered for the run. Discovery walks the
 	// filesystem and is repeatable rather than cheap, and one exec invocation
@@ -49,7 +52,8 @@ type App struct {
 
 	// ignoreTags are tag names masked from baseline resolution when this
 	// invocation is a step command wired to a running release; see stepenv.go.
-	ignoreTags []string
+	ignoreTags             []string
+	ignoreTagsByRepository map[string][]string
 }
 
 // packages is the discovered workspace, walked once per App.
@@ -61,20 +65,29 @@ type App struct {
 // themselves, since that is a different question.
 func (a *App) packages() ([]*model.Package, error) {
 	a.pkgsOnce.Do(func() {
-		a.pkgs, _, _, a.pkgsErr = config.DiscoverPackages(a.cfg, a.root)
+		if a.workspace == nil {
+			a.pkgs, _, _, a.pkgsErr = config.DiscoverPackages(a.cfg, a.root)
+		} else {
+			a.pkgs, _, _, a.pkgsErr = config.DiscoverWorkspace(a.cfg, a.root, a.workspace)
+		}
 	})
 	return a.pkgs, a.pkgsErr
 }
 
 // New assembles an App for one monorepo.
 func New(root string, cfg *config.File, log zerolog.Logger) *App {
+	return NewWorkspace(root, cfg, nil, log)
+}
+
+// NewWorkspace is New with a composed repository ownership map.
+func NewWorkspace(root string, cfg *config.File, workspace *config.Workspace, log zerolog.Logger) *App {
 	git := &gitx.CLI{Dir: root, Log: log}
 	if cfg.Commit != nil {
 		// The configured identity covers every commit and annotated tag the
 		// run creates, so CI needs no `git config` step.
 		git.Name, git.Email = cfg.Commit.Name, cfg.Commit.Email
 	}
-	return &App{root: root, cfg: cfg, log: log, git: git, scan: scanner.New()}
+	return &App{root: root, cfg: cfg, workspace: workspace, log: log, git: git, scan: scanner.New()}
 }
 
 // Status computes the plan and reports it — diagnostics, then the full graph
@@ -183,22 +196,48 @@ func (a *App) checkGit() error {
 // Compute, and for every other plan-package entry point that needs the same
 // workspace view (PackagesChangedSince).
 func (a *App) planOptions() (plan.Options, error) {
-	pkgs, deps, excluded, err := config.Discover(a.cfg, a.root)
+	pkgs, deps, inactiveExternal, excluded, err := config.DiscoverWorkspacePlan(a.cfg, a.root, a.workspace)
 	if err != nil {
-		a.log.Error().Err(err).Msg("package discovery failed")
+		a.logError(err).Msg("package discovery failed")
 		return plan.Options{}, err
 	}
+	if a.workspace != nil {
+		if err := a.resolveRepositoryRecords(context.Background(), pkgs); err != nil {
+			a.log.Error().Err(err).Msg("repository record targets could not be resolved")
+			return plan.Options{}, err
+		}
+	}
 	a.logWorkspace(pkgs, deps, excluded)
-	return plan.Options{
-		Packages:         pkgs,
-		Dependencies:     deps,
-		Initials:         a.initialVersions(pkgs),
-		Root:             a.root,
-		NonPackageScopes: a.cfg.NonPackageScopes,
-		ParserConfig:     a.cfg.ResolvedParser,
-		Log:              a.log,
-		IgnoredTags:      a.ignoreTags,
-	}, nil
+	opts := plan.Options{
+		Packages:                     pkgs,
+		Dependencies:                 deps,
+		InactiveExternalDependencies: inactiveExternal,
+		Initials:                     a.initialVersions(pkgs),
+		Root:                         a.root,
+		NonPackageScopes:             a.cfg.NonPackageScopes,
+		ParserConfig:                 a.cfg.ResolvedParser,
+		Log:                          a.log,
+		IgnoredTags:                  a.ignoreTags,
+		IgnoredTagsByRepository:      a.ignoreTagsByRepository,
+	}
+	if a.workspace != nil {
+		opts.Repositories = make(map[string]plan.RepositoryHistory, len(a.workspace.Repositories))
+		for _, repository := range a.workspace.Repositories {
+			repositoryGit := &gitx.CLI{Dir: repository.Root, Name: a.git.Name, Email: a.git.Email, Log: a.log}
+			opts.Repositories[repository.Name] = plan.RepositoryHistory{
+				Name: repository.Name, Root: repository.Root, Path: repository.GitlinkPath, Git: repositoryGit,
+				ParserConfig: repository.Config.ResolvedParser, NonPackageScopes: repository.Config.NonPackageScopes,
+				Control: repository.Control,
+			}
+		}
+		for _, baseline := range a.cfg.RepositoryBaselines {
+			opts.RepositoryBaselines = append(opts.RepositoryBaselines, plan.RepositoryBaseline{
+				Consumer: baseline.Consumer, ReleaseTag: baseline.ReleaseTag,
+				Repository: baseline.Repository, Revision: baseline.Revision,
+			})
+		}
+	}
+	return opts, nil
 }
 
 // logWorkspace records what discovery resolved, for the questions a layered
@@ -307,6 +346,9 @@ func (a *App) releaseBlocked(pl *plan.Plan) string {
 // discovery refuses such a pair outright, and this stays as the reading that
 // cannot be surprised by one.
 func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
+	if a.workspace != nil {
+		return a.workspaceInitialVersions(pkgs)
+	}
 	if len(a.cfg.InitialVersions) == 0 {
 		return nil
 	}

@@ -106,6 +106,9 @@ func RenderDependenciesTOML(deps Dependencies) (string, error) {
 			if p.Keep {
 				row["keep"] = true
 			}
+			if p.External {
+				row["external"] = true
+			}
 			rows[consumer] = append(rows[consumer], row)
 		}
 	}

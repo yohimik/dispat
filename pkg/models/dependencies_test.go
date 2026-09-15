@@ -54,6 +54,20 @@ func TestDependenciesMapForm(t *testing.T) {
 	}, "the map form, with every item shape it accepts")
 }
 
+func TestExternalDependencyRoundTrip(t *testing.T) {
+	deps := decode(t, `{"web":{"provider":"sdk","external":true}}`)
+	want := Dependencies{{Consumer: "web", Provider: "sdk", External: true}}
+	eq(t, deps, want, "external provider")
+	data, err := json.Marshal(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != `{"web":[{"external":true,"provider":"sdk"}]}` {
+		t.Fatalf("marshalled external dependency = %s", got)
+	}
+	eq(t, decode(t, string(data)), want, "external provider round trip")
+}
+
 func TestDependenciesEmpty(t *testing.T) {
 	eq(t, decode(t, `{}`), nil, "an empty object declares no edges")
 	eq(t, decode(t, `null`), nil, "and neither does an absent value")
@@ -110,13 +124,15 @@ func TestDependenciesErrorsLocateTheEntry(t *testing.T) {
 			`dependencies["web"][0]: provider wants a package name`},
 		{"keep is not a boolean", `{"web": [{"provider": "core", "keep": "yes"}]}`,
 			`dependencies["web"][0]: keep wants true or false`},
+		{"external is not a boolean", `{"web": [{"provider": "core", "external": "yes"}]}`,
+			`dependencies["web"][0]: external wants true or false`},
 		{"unknown key", `{"web": [{"provider": "core", "kepe": true}]}`,
-			`dependencies["web"][0]: unknown key "kepe", want provider, kind or keep`},
+			`dependencies["web"][0]: unknown key "kepe", want provider, kind, keep or external`},
 		// The key an entry sits under is the consumer. An entry naming one
 		// itself would mean two things at once, so `consumer` is refused like
 		// any other key that does not belong.
 		{"consumer named in an entry", `{"web": [{"consumer": "api", "provider": "core"}]}`,
-			`dependencies["web"][0]: unknown key "consumer", want provider, kind or keep`},
+			`dependencies["web"][0]: unknown key "consumer", want provider, kind, keep or external`},
 		{"an array of edges is not a shape", `[{"consumer": "app", "provider": "core"}]`,
 			`dependencies wants an object keyed by consumer`},
 		{"an empty array is not a shape either", `[]`,

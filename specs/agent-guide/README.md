@@ -89,6 +89,91 @@ The default `.env` is resolved from the invocation directory rather than `--root
 
 Read-only inspection does not authorize configuration repair. Change configuration only when the requested task includes that change. This includes `dispat init`, `dispat compute --write`, release hooks, publish commands, channels, credentials, record settings, and lock settings. Once the user has authorized a particular scoped change, carry it through without unnecessary reconfirmation. Ask again only if new evidence materially changes the target or effect.
 
+## Inspect a polyrepository workspace
+
+A control repository can combine the independent Git histories of linked source repositories. This mode is explicit:
+`polyrepo: true`, `--polyrepo`, a non-empty `configs` list, or repeatable `--configs` flags activate it. If none is
+present, keep treating submodule pointer changes as ordinary control-repository changes.
+
+Before trusting a plan, inspect `.gitmodules`, the exact source names, current gitlinks, source checkouts, imported
+config paths, and effective commit policy per repository. Every active source must be initialized at the commit pinned
+by the control checkout and have complete history. Treat the control repository as the reserved identity `control` and
+each source's exact `.gitmodules` name as its identity. A commit is identified by repository plus full SHA; equal SHA
+text from two repositories says nothing about ancestry.
+
+Composition captures the source head while it verifies the control gitlink and retains that same full commit as the
+plan's initial pin boundary. A head move between composition and history loading is drift, not a new implicit input.
+
+Source configuration is never activated by a central path accidentally entering a nested repository. A file named in
+`configs` or `--configs` establishes that source's normal local root, space, and package configuration layers. Keep
+`--config`, every import, `--polyrepo`, the control checkout, and all source pins identical between status, gates, and
+release.
+Control-owned folder configuration and ignore/exclude files retain their ordinary behavior. Source-owned folder
+configuration, `.dispatignore`, and `.dispatexclude` apply only through an explicitly imported source configuration.
+
+Review ownership before running scripts. A package must live wholly inside one Git repository. In this mode, a
+control-owned wrapper may not point `src`, manifests, changelogs, or version writes across a source boundary. Paths in
+an imported configuration are source-local; paths in the control configuration retain their control-relative spelling.
+Check the closest Git worktree containing each package and its `src`; an unlisted nested repository is an ownership
+error rather than an implicitly discovered source.
+Package names form one graph. Spaces and groups from an imported configuration stay repository-local. A shared space
+or group declared centrally keeps ordinary monorepository semantics and can span sources. An unqualified CLI space or
+group selector can match local declarations in several sources.
+
+Read source commits as local direct intent. A source commit can name only its repository's packages directly; its
+propagation may cross the combined dependency graph. An explicit control commit can address packages across the fleet
+and is evaluated against that control revision's gitlinks. Do not count a gitlink move as a second package change in
+polyrepository mode. Do not resolve precedence between incomparable source commits by timestamp, traversal order, or
+SHA spelling; use an applicable control directive or stop on the reported conflict.
+An applicable direct channel directive takes precedence over conflicting propagated channels; an unmatched or
+otherwise inert direct directive does not resolve their conflict.
+
+An `external: true` dependency may name a provider omitted from the current imports. Confirm that the skipped-provider
+diagnostic is expected. If that provider is present, review the edge as an ordinary one: it affects cycles,
+propagation, ordering, failure blocking, reconciliation, `--consumers`, and scripts.
+
+Cross-repository catch-up needs a proven consumer boundary. Accept automatic reconstruction only from an ordinary
+control release checkpoint whose message identifies the exact consumer source tag, whose same commit moves that
+consumer gitlink to the tag's commit, and whose other gitlinks pin the incorporated source revisions. A matching SHA
+alone is not evidence: the tag may have been attached later, or the same pointer may span several provider moves. If
+the checkpoint is missing, custom and ambiguous, or conflicting, require an explicit `repositoryBaselines` entry with
+`consumer`, `releaseTag`, repository identity, and reachable revision. Never guess from dates.
+
+Resolve a repository boundary only when that history can affect the tagged package. A tag-only consumer release needs
+no control boundary when no applicable control intent affects it. When an explicit control directive does affect the
+package and must be ordered across the tag, require the ordinary checkpoint association or an explicit baseline whose
+repository is `control`; otherwise stop on `E333`.
+
+Source and control commits remain optional. A present `repositoryOverrides.<source>.commit` completely replaces the
+inherited commit object and omitted fields take ordinary defaults; it applies only to centrally configured sources.
+An imported source owns its commit policy. A detached source needs `commit.branch` only when it will push a release
+branch. No mode forces an empty commit or a control checkpoint.
+
+After publication, verify source recording before the control gitlink advances. If the source tag and revision succeed
+but the control checkpoint fails, retain that success and stop its consumers. The error names the source, full revision,
+and tag. Inspect the source remote, then explicitly reconcile and commit the normal control gitlink to that durable
+revision, or restore the intended pin. Until that repair, another run correctly refuses the unpinned checkout. Do not
+republish the source or force an automatic checkpoint.
+
+The release lock must cover the combined fleet, including standalone packages. dispat acquires participating remote
+locks in exact repository-name order and releases them in reverse; `control` has no special first position. Native
+multi-repository Git transactions order local advisory locks by canonical Git common directory and release them in
+reverse. Hooks and scripts run outside those local locks.
+Partial publication remains non-atomic:
+preserve successful source tags, block consumers of failures, allow independent work, and re-plan from durable records.
+After all `beforeAll` hooks, dispat rechecks the whole fleet. After each `beforePublish` hook, it rechecks that package's
+owner plus its transitive provider and shared-version-group repository closure, and any applicable control input. Avoid
+direct Git commits and release-tag writes in build or hook scripts: a relevant unplanned change stops that package with
+`E330` before publication. A native record step can advance the owner when it exports the exact full lowercase 40- or
+64-hex package commit. The outer release shares an admitted pin with already-running nested commands through private
+coordination bound to that run and removes it afterwards; this does not become a durable baseline or release ledger.
+Packages in one repository publish and record in a deterministic order; repositories can still publish concurrently.
+These checks observe drift at the validation points but cannot exclude arbitrary external Git writers after the final
+check.
+For `--since <control-revision>`, verify that the command projects that revision's gitlinks into one source range per
+repository; it must not scan the control history once per consumer or count pointer moves again. Package scripts and
+nested hooks share the combined workspace while retaining the triggering source context.
+
 ## Share configuration across Windows and Linux
 
 A developer can work on Windows while CI releases on Linux. Keep the shared graph, scripts, and lifecycle in `global.yaml`. Give each platform a small configuration that references it and overrides the shell:
@@ -360,9 +445,11 @@ not another Git commit, so multiple records in one commit do not satisfy the mul
 
 Manifest versions alone do not determine the next release. Tags, commits, dependency propagation, channels, groups, and parser policy contribute to the plan. Use `status` for the computed result. The implemented syntax is described by the [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md).
 
-CCME 3.0.0 specifies external VCS adapters and explicit rollback ahead of implementation. dispat 1.8.x does not
-execute `rollback(scope)` or accept the new adapter/rollback configuration. Do not use specification-only examples as
-runtime commands; an older parser can treat the directive as an unknown type without withdrawing anything.
+The current CCME 3 specification includes the optional polyrepository Git profile, external VCS adapters, and explicit
+rollback. Current dispat implements the polyrepository profile as planning and repository behavior without changing
+its published message grammar. It does not execute `rollback(scope)` or accept the adapter/rollback configuration.
+Do not use those specification-only examples as runtime commands; the parser can treat the directive as an unknown
+type without withdrawing anything.
 
 ### Choose when dependents release
 

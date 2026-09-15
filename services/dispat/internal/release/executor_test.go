@@ -141,6 +141,10 @@ type fakeChangelog struct {
 	fail    bool
 }
 
+type recorderFunc func(context.Context, *plan.Release) error
+
+func (f recorderFunc) Record(ctx context.Context, rel *plan.Release) error { return f(ctx, rel) }
+
 func (f *fakeChangelog) Record(_ context.Context, rel *plan.Release) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1276,6 +1280,89 @@ func TestRunGatingHookFailuresFailTheRelease(t *testing.T) {
 			assert.Empty(t, cl.entries, "or recorded")
 		})
 	}
+}
+
+type executorDiagnosticError struct{ code string }
+
+func (e executorDiagnosticError) Error() string          { return "repository snapshot moved" }
+func (e executorDiagnosticError) DiagnosticCode() string { return e.code }
+
+func TestBeforePublishValidationRunsAfterHookAndBeforePublish(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.BeforePublishScript = []string{"before-publish"}
+	runner := &fakeRunner{}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 1, Publish: 1})
+	observer := &fakeObserver{}
+	executor.Observer = observer
+	called := 0
+	executor.BeforePublish = func(_ context.Context, rel *plan.Release) error {
+		called++
+		assert.Equal(t, "a", rel.Pkg.Name)
+		assert.NotEqual(t, -1, runner.indexOf("before-publish a"), "hook completes before validation")
+		return executorDiagnosticError{code: "E330"}
+	}
+
+	results := executor.Run(t.Context(), p)
+
+	assert.Equal(t, 1, called)
+	require.Equal(t, StatusFailed, results["a"].Status)
+	assert.ErrorContains(t, results["a"].Err, "repository snapshot moved")
+	assert.Equal(t, -1, runner.indexOf("publish a"), "validation gates the publish command")
+	event, found := observer.find("a", EventPackageFailed)
+	require.True(t, found)
+	assert.Equal(t, "E330", event.Code, "webhooks retain the same typed diagnostic as logs")
+}
+
+func TestPublishRepositoryGuardCoversScriptAndRecording(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	runner := &fakeRunner{}
+	executor := newExecutor(execSpec{Runner: runner, Build: 1, Publish: 1})
+	var mu sync.Mutex
+	held, recordedWhileHeld := false, false
+	executor.AcquirePublish = func(context.Context, *plan.Release) (func(), error) {
+		mu.Lock()
+		held = true
+		mu.Unlock()
+		return func() {
+			mu.Lock()
+			held = false
+			mu.Unlock()
+		}, nil
+	}
+	executor.Recorders = []ReleaseRecorder{recorderFunc(func(context.Context, *plan.Release) error {
+		mu.Lock()
+		recordedWhileHeld = held
+		mu.Unlock()
+		return nil
+	})}
+
+	results := executor.Run(t.Context(), p)
+
+	require.Equal(t, StatusPublished, results["a"].Status)
+	mu.Lock()
+	assert.True(t, recordedWhileHeld)
+	assert.False(t, held, "guard is released after the publish tail")
+	mu.Unlock()
+}
+
+func TestPublishGroupsPreserveCrossRepositoryConcurrencyWithoutBlockingSiblings(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"source-a", "source-b", "other"}})
+	p.Releases["source-a"].Pkg.Repository = "source"
+	p.Releases["source-b"].Pkg.Repository = "source"
+	p.Releases["other"].Pkg.Repository = "other"
+	runner := &fakeRunner{delay: 20 * time.Millisecond, fail: map[string]bool{"publish source-a": true}}
+	executor := newExecutor(execSpec{Runner: runner, Build: 3, Publish: 2})
+	executor.PublishGroup = func(rel *plan.Release) string { return rel.Pkg.Repository }
+
+	results := executor.Run(t.Context(), p)
+
+	assert.Equal(t, StatusFailed, results["source-a"].Status)
+	assert.Equal(t, StatusPublished, results["source-b"].Status,
+		"a repository-ordering edge is not a provider failure")
+	assert.Equal(t, StatusPublished, results["other"].Status)
+	assert.Less(t, runner.indexOf("publish source-a"), runner.indexOf("publish source-b"))
+	assert.Equal(t, 2, runner.maxCur["publish"],
+		"the second publish slot runs another repository instead of waiting on the shared owner")
 }
 
 func TestRunVersionHookFailuresFailTheConsumer(t *testing.T) {

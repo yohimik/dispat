@@ -22,6 +22,12 @@ Check the [Configuration reference](./configuration/README.md) to understand eve
 and `dispat.toml`. This page explains how dispat discovers the file and what each default is. It also shows how a
 package overrides its space.
 
+Polyrepository control files add four machine-readable fields: `polyrepo`, `configs`, `repositoryOverrides`, and
+`repositoryBaselines`. Dependency provider objects also accept `external`, and `commit` accepts `branch`. Their exact
+runtime and recovery contract is in [A control repository](./control-repository.md#source-history-mode); the exported
+Go shapes are in [models](./go/models.md). The CLI exposes the same composition through `--polyrepo` and repeatable
+`--configs` global flags.
+
 ## The Go packages
 
 Read [Go packages](./go/README.md) for details on the six modules dispat uses. You can import each module on its own.

@@ -4,8 +4,8 @@ Look up every code dispat reports and see what to do about each one. dispat star
 packages changed, what their next versions are, and in what order. A release writes irreversibly to registries, so
 dispat refuses to start if it cannot compute a trustworthy plan.
 
-This page covers runs that never start. If a run *did* start and then failed, see
-[Recovering from a failed run](./releasing/recovery.md) and
+This page covers failures that prevent a trustworthy plan and coded diagnostics that stop or qualify a release. If a
+run started publishing before it failed, also see [Recovering from a failed run](./releasing/recovery.md) and
 [What to do when something fails](./releasing/steps.md#what-to-do-when-something-fails).
 
 **Start with `dispat status`.** Run this command to compute the exact same plan a release does and print the same
@@ -61,6 +61,32 @@ anywhere.
 
 **`the checkout is behind <remote>/<branch>; pull before releasing`**. Another clone pushed since you fetched. Your
 tags are stale and the plan would use an outdated view. Run `git pull --rebase` and try again.
+
+## Polyrepository snapshot and recording diagnostics
+
+These codes apply only when [source-history mode](../control-repository.md#source-history-mode) is active. `E330` through
+`E334` prevent publication from an untrustworthy combined snapshot. Initial failures stop the run; drift found in a
+package's final pre-publish check fails that package before its publish command and gates its consumers. `E335` reports
+a post-publication record failure, `E336` prevents uncoordinated mutation, and `E337` prevents a publish or record path
+that needs an unavailable branch. Packages already published and durably recorded remain successful, and failed or
+unrecorded providers continue to block dependent work. `W330` does not stop the run.
+
+| Code | Means | What to do |
+|------|-------|------------|
+| `E330` | A linked source is missing, uninitialized, shallow, duplicated, outside the workspace, or checked out at a commit other than the control gitlink; or a relevant planned head, release tag, or pin changes before publication. | Initialize every listed submodule, fetch complete history, and check out the exact commit pinned by control `HEAD`. Remove unplanned Git writes from build and hook commands or use the native record step with its exact exported commit. After a partial recording failure, inspect the durable source result before changing the gitlink. |
+| `E331` | A package or space crosses repository ownership, a source-local path escapes its source repository, or a package is inside an unlisted nested Git repository. | Keep the package path, `src`, manifests, and release writes inside one listed owner. Check symlinks and the closest Git worktree as well as the paths written in the config. |
+| `E332` | Imported declarations conflict, or `repositoryOverrides` does not name one exact `.gitmodules` source identity. | Remove duplicate package/config ownership. Copy the source name exactly, including case, and do not apply a central override to an imported source that owns its own commit policy. |
+| `E333` | A cross-repository consumer boundary is missing, ambiguous, conflicting, or unreachable. | Preserve an ordinary control release checkpoint that identifies the exact consumer tag and matching gitlink transition, or add the required `repositoryBaselines` tuple. Never choose a boundary by date. |
+| `E334` | Two incomparable source revisions require one semantic winner. | Add an explicit control directive at a commit whose gitlinks observe the source work it is intended to resolve. Dates, traversal order, repository names, and SHA spelling cannot order separate histories. |
+| `E335` | A source record, source push, or control gitlink checkpoint failed after publication. | Inspect which source tags and revisions reached their remotes and preserve those successes. If the source is durable but its checkpoint failed, explicitly commit or reconcile the ordinary control gitlink to that revision, or restore the intended pin. Do not republish the source or wait for dispat to create the repair. |
+| `E336` | The release lock cannot coordinate every participating repository and standalone package. | Stop competing fleet runs and restore the shared lock configuration before retrying. Independent source locks are insufficient for one combined release. |
+| `E337` | A configured release branch is absent, or a detached source needs a branch push without `commit.branch`. | Create or select the configured existing branch. Set `commit.branch` when a detached checkout must push a release commit; a tag-only or local no-branch-push operation does not need it. |
+| `W330` | An `external: true` provider is absent from this snapshot, so the edge is inactive. | Include the provider's source config when it should participate. Otherwise confirm the omission is intentional; the edge activates and receives full validation when the provider is present. |
+
+Boundary lookup is lazy for each consumer tag and repository. A tag-only release remains usable when no applicable
+control intent affects that package. If an explicit control directive does affect it and must be ordered across the
+tag, dispat needs either the ordinary checkpoint association or an explicit tuple whose `repository` is `control`;
+otherwise it reports `E333`.
 
 ## Repository-scoped errors: no correct plan exists
 

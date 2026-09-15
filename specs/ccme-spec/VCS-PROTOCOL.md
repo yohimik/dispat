@@ -4,6 +4,10 @@
 built-in Git backend. It does not read the configuration in this document and MUST NOT claim external-adapter
 conformance.
 
+The optional polyrepository profile in SPEC.md §27 composes several built-in Git repositories. It neither activates
+this protocol nor permits one of those sources to use an external adapter; polyrepository support is not evidence of
+external-adapter conformance.
+
 This protocol makes the version-control operations used by CCME explicit without changing the commit-message grammar
 or the release algorithm. Git remains the default. An external adapter is a repository-trusted local command which
 projects another version-control system onto the same immutable revision DAG and release-record model.

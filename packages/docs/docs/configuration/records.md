@@ -673,6 +673,7 @@ by the version itself and is not configurable. A `1.3.0-beta.0` that gets a rele
 | `enabled`       | `false`                  | Create one release commit at the end of a successful run.                                                                                                                                                                                                                                                                                                                                         |
 | `messageFormat` | `chore(release): {tags}` | Template. `{tags}` and `{packages}` become comma-separated lists.                                                                                                                                                                                                                                                                                                                                 |
 | `push`          | `false`                  | Push the release commit and tags. Only applies when `enabled` is true.                                                                                                                                                                                                                                     |
+| `branch`        | unset                    | In polyrepository mode, the target branch for release-commit pushes. Required for a detached checkout only when it will push a branch. |
 | `force`         | `true`                   | Write tags the repository or the remote already carries, instead of leaving them alone. The branch is never force pushed, and a release tag found at a different commit is still left as it is. See [Force](#force) below. `dispat commit --no-force` turns it off for one invocation.                                                                     |
 | `remote`        | `origin`                 | Remote to push to.                                                                                                                                                                                                                                                                                                                                                                                |
 | `name`, `email` | unset                    | The git identity every commit and annotated tag dispat creates is authored under, so a CI run needs no `git config` step. Unset values fall back to git's own configuration.  |
@@ -698,8 +699,9 @@ at the exported commit hash instead.
 GitHub releases move to the end of the run and document the release commit in their body. What the GitHub side does in
 each mode is described under [`github`](#github).
 
-Pushing pushes the branch first and the run's tags after it. It requires a checked-out branch (not a detached HEAD; use
-`actions/checkout` with a `ref`). When `push` is enabled, remote access is **verified before any release work starts**
+Pushing pushes the branch first and the run's tags after it. A single-repository run requires a checked-out branch (use
+`actions/checkout` with a `ref`). In polyrepository mode, an explicit `branch` lets a source use a detached,
+pinned checkout while naming the branch that receives its release commit. When `push` is enabled, remote access is **verified before any release work starts**
 (`git ls-remote`, switched off by `verify: false`), so a misconfigured remote fails the run before anything is built.
 An enabled GitHub configuration is likewise verified up front, push or not (see [`github`](#github)). A failure during
 the finalize phase itself (commit, tag, push, GitHub release) exits 1 with everything else in the phase still done, and

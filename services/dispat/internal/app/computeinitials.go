@@ -15,6 +15,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -37,8 +38,9 @@ const tagConcurrency = 16
 
 // initialSuggestion is one proposed initials entry.
 type initialSuggestion struct {
-	pkg     string
-	version ccme.Version
+	pkg        string
+	version    ccme.Version
+	repository string
 	// detail is the evidence: the manifest that declared the version, and why
 	// the package needs a baseline written down.
 	detail string
@@ -83,14 +85,24 @@ func (a *App) manifestBaselines(scanned []scannedPackage, sel filter.Result) []m
 	// way to silence this suggestion for good: 0.0.0 included, it is never
 	// rewritten. Matching is case-insensitive, the way App.initialVersions
 	// matches them: a key keeps the case its file wrote.
-	decided := make(map[string]bool, len(a.cfg.Initials))
-	for key := range a.cfg.Initials {
-		decided[strings.ToLower(key)] = true
-	}
+	owners := a.configurationsByRepository()
+	decidedByConfig := make(map[*config.File]map[string]bool)
 	var out []manifestBaseline
 	for _, s := range scanned {
 		if sel.Active() && !sel.Has(s.pkg.Name) {
 			continue
+		}
+		cfg := a.cfg
+		if owner := owners[s.pkg.Repository]; owner != nil {
+			cfg = owner
+		}
+		decided, indexed := decidedByConfig[cfg]
+		if !indexed {
+			decided = make(map[string]bool, len(cfg.Initials))
+			for name := range cfg.Initials {
+				decided[strings.ToLower(name)] = true
+			}
+			decidedByConfig[cfg] = decided
 		}
 		if decided[strings.ToLower(s.pkg.Name)] {
 			continue
@@ -179,9 +191,10 @@ func (a *App) unreleased(ctx context.Context, candidates []manifestBaseline) []i
 			continue // released and readable: the tag is the baseline
 		}
 		out = append(out, initialSuggestion{
-			pkg:     c.pkg.Name,
-			version: c.version,
-			detail:  fmt.Sprintf("%s declares %s; %s", c.manifest, c.version, reasons[i]),
+			pkg:        c.pkg.Name,
+			version:    c.version,
+			repository: c.pkg.Repository,
+			detail:     fmt.Sprintf("%s declares %s; %s", c.manifest, c.version, reasons[i]),
 		})
 	}
 	slices.SortFunc(out, func(a, b initialSuggestion) int { return strings.Compare(a.pkg, b.pkg) })
@@ -199,54 +212,74 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 	reasons := make([]string, len(candidates))
 	errs := make([]error, len(candidates))
 
-	if _, err := a.git.HeadSHA(ctx); err != nil {
-		// A repository with no commits yet, which is where adopting dispat
-		// often starts. Nothing can be reachable from a HEAD that does not
-		// exist, so every candidate is a first release and no tag query is
-		// worth making.
-		a.log.Debug().Err(err).Msg("no commit to read release tags from; every package is a first release")
-		for i := range reasons {
-			reasons[i] = "the repository has no commits yet"
-		}
-		return reasons, errs
+	// Shared repository state is resolved once. Packages in one repository
+	// reuse its HEAD check and alias filter instead of rescanning the fleet.
+	type repositoryBaseline struct {
+		git     *gitx.CLI
+		aliases plan.AliasFilter
+		empty   bool
 	}
-
-	// The workspace's alias tags, compiled once for every candidate. An alias
-	// belongs to the package that writes it and lands in whichever listing its
-	// shape matches, so this is the whole workspace's set rather than each
-	// candidate's own; a workspace that cannot be walked filters nothing,
-	// which is what this command did before aliases existed.
-	var aliases plan.AliasFilter
+	owned := make(map[string][]*model.Package)
 	if pkgs, err := a.packages(); err != nil {
 		a.log.Debug().Err(err).Msg("cannot read the workspace's alias tags; reading every tag as a release")
 	} else {
-		aliases = plan.NewAliasFilter(pkgs)
+		for _, p := range pkgs {
+			owned[p.Repository] = append(owned[p.Repository], p)
+		}
+	}
+	repositories := make(map[string]repositoryBaseline)
+	for _, c := range candidates {
+		name := c.pkg.Repository
+		if _, exists := repositories[name]; exists {
+			continue
+		}
+		git := a.git
+		if a.workspace != nil {
+			git = &gitx.CLI{Dir: c.pkg.RepoRoot, Log: a.log}
+		}
+		_, headErr := git.HeadSHA(ctx)
+		if headErr != nil {
+			a.log.Debug().Err(headErr).Str("repository", name).
+				Msg("no commit to read release tags from; every package is a first release")
+		}
+		repositories[name] = repositoryBaseline{
+			git: git, aliases: plan.NewAliasFilter(owned[name]), empty: headErr != nil,
+		}
 	}
 
-	sem := make(chan struct{}, tagConcurrency)
+	// A fixed worker set bounds both Git children and goroutine memory.
+	workers := min(tagConcurrency, len(candidates))
 	var wg sync.WaitGroup
-	for i, c := range candidates {
+	for worker := range workers {
 		wg.Add(1)
-		go func(i int, c manifestBaseline) {
+		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			tags, err := a.git.Tags(ctx, c.pkg.Name, plan.TagFormatFor(c.pkg))
-			if err != nil {
-				errs[i] = err
-				return
+			for i := worker; i < len(candidates); i += workers {
+				if err := ctx.Err(); err != nil {
+					errs[i] = err
+					continue
+				}
+				c := candidates[i]
+				repo := repositories[c.pkg.Repository]
+				if repo.empty {
+					reasons[i] = "the repository has no commits yet"
+					continue
+				}
+				tags, err := repo.git.Tags(ctx, c.pkg.Name, plan.TagFormatFor(c.pkg))
+				if err != nil {
+					errs[i] = err
+					continue
+				}
+				// A moving alias must never become a stable baseline.
+				stable, ok := repo.aliases.Without(tags, c.pkg.Name, a.log).StableBaseline()
+				switch {
+				case !ok:
+					reasons[i] = "no release tag yet"
+				case !stable.Parsed:
+					reasons[i] = fmt.Sprintf("newest tag %s is not a version", stable.Name)
+				}
 			}
-			// A moving alias is not a release, and reading one as the newest
-			// tag would report a released package as having no version to
-			// seed from.
-			stable, ok := aliases.Without(tags, c.pkg.Name, a.log).StableBaseline()
-			switch {
-			case !ok:
-				reasons[i] = "no release tag yet"
-			case !stable.Parsed:
-				reasons[i] = fmt.Sprintf("newest tag %s is not a version", stable.Name)
-			}
-		}(i, c)
+		}()
 	}
 	wg.Wait()
 	return reasons, errs
@@ -262,26 +295,56 @@ func (a *App) collectInitialEdits(edits *fileEdits, cfgPath string, apply []init
 	if len(apply) == 0 {
 		return nil
 	}
-	next, err := config.StringMapAt(cfgPath, []string{"initials"})
-	if err != nil {
-		return err
+	owners := a.configurationsByRepository()
+	paths := make(map[string]string)
+	if a.workspace != nil {
+		for _, repo := range a.workspace.Repositories {
+			if repo.Imported && repo.ConfigPath != "" {
+				paths[repo.Name] = repo.ConfigPath
+			}
+		}
 	}
-	if next == nil {
-		next = make(map[string]string, len(apply))
-	}
-	if a.cfg.Initials == nil {
-		a.cfg.Initials = make(map[string]string, len(apply))
-	}
-	if a.cfg.InitialVersions == nil {
-		a.cfg.InitialVersions = make(map[string]ccme.Version, len(apply))
-	}
+	byPath := make(map[string][]initialSuggestion)
+	var order []string
 	for _, s := range apply {
-		next[s.pkg] = s.version.String()
-		// The in-memory view keys these the way a load would have, so a future
-		// long-lived caller reads back what a reload would give it: under the
-		// package's own name, which is the key the edit just wrote.
-		a.cfg.Initials[s.pkg] = s.version.String()
-		a.cfg.InitialVersions[s.pkg] = s.version
+		path := cfgPath
+		if ownerPath := paths[s.repository]; ownerPath != "" {
+			path = ownerPath
+		}
+		if _, ok := byPath[path]; !ok {
+			order = append(order, path)
+		}
+		byPath[path] = append(byPath[path], s)
 	}
-	return edits.add(cfgPath, config.Edit{KeyPath: []string{"initials"}, Value: next})
+	for _, path := range order {
+		next, err := config.StringMapAt(path, []string{"initials"})
+		if err != nil {
+			return err
+		}
+		if next == nil {
+			next = make(map[string]string, len(byPath[path]))
+		}
+		for _, s := range byPath[path] {
+			next[s.pkg] = s.version.String()
+			ownerCfg := a.cfg
+			if cfg := owners[s.repository]; cfg != nil {
+				ownerCfg = cfg
+			}
+			if ownerCfg.Initials == nil {
+				ownerCfg.Initials = make(map[string]string)
+			}
+			if ownerCfg.InitialVersions == nil {
+				ownerCfg.InitialVersions = make(map[string]ccme.Version)
+			}
+			// The in-memory view keys these the way a load would have, so a future
+			// long-lived caller reads back what a reload would give it: under the
+			// package's own name, which is the key the edit just wrote.
+			ownerCfg.Initials[s.pkg] = s.version.String()
+			ownerCfg.InitialVersions[s.pkg] = s.version
+		}
+		if err := edits.add(path, config.Edit{KeyPath: []string{"initials"}, Value: next}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

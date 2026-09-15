@@ -27,6 +27,11 @@ name: Release
 # courier's. What remains here is keeping their records as an artifact.
 on:
   workflow_dispatch:
+    inputs:
+      skip_announcements:
+        description: Publish packages without social announcements
+        type: boolean
+        default: false
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -123,14 +128,15 @@ jobs:
     # env for the same reason as the release job: a step's `if` is evaluated
     # before its own `env`.
     #
-    # No secrets, no gate: a repository without the announcement secrets skips
-    # the ping and releases without announcing, exactly as before.
+    # With announcements disabled, both jobs receive empty platform inputs.
+    # The ping job still succeeds so the release keeps its normal dependencies.
+    # A repository without announcement secrets follows the same path.
     env:
-      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
-      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
-      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
-      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
-      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
+      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN || '' }}
+      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID || '' }}
+      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_LINKEDIN_TOKEN || '' }}
+      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ !inputs.skip_announcements && secrets.LINKEDIN_URN || '' }}
+      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL || '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -183,7 +189,7 @@ jobs:
 
       - name: Nothing to ping
         if: env.CRIER_PUBLISH_INSTAGRAM_TOKEN == '' && env.CRIER_PUBLISH_INSTAGRAM_USER_ID == '' && env.CRIER_PUBLISH_LINKEDIN_TOKEN == '' && env.CRIER_PUBLISH_LINKEDIN_AUTHOR_URN == '' && env.CRIER_PUBLISH_DISCORD_WEBHOOK_URL == ''
-        run: echo "no announcement secrets; the release will skip the announcement"
+        run: echo "announcements disabled or no platform secrets; the release will skip the announcement"
 
   tests:
     name: Full suite
@@ -301,12 +307,12 @@ jobs:
     # is the escape hatch from the tunnel: setting it to s3 or url points the
     # staging somewhere that needs no ngrok.
     env:
-      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
-      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
-      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
-      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
-      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
-      NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN || '' }}
+      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID || '' }}
+      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_LINKEDIN_TOKEN || '' }}
+      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ !inputs.skip_announcements && secrets.LINKEDIN_URN || '' }}
+      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL || '' }}
+      NGROK_AUTHTOKEN: ${{ !inputs.skip_announcements && secrets.NGROK_AUTHTOKEN || '' }}
       CRIER_STAGE_MODE: ${{ vars.CRIER_STAGE_MODE }}
     steps:
       - name: Checkout code

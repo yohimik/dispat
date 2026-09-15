@@ -1308,6 +1308,60 @@ func TestDiscoverUnknownProvider(t *testing.T) {
 	assert.Contains(t, err.Error(), `unknown provider package "ghost"`)
 }
 
+func TestDiscoverMissingExternalProvider(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Dependencies = []DependencyConfig{{Consumer: "core", Provider: "ghost", External: true}}
+	root := writeModelRepo(t, cfg, "pkgs/core")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, deps, _, err := Discover(loaded, root)
+	require.NoError(t, err)
+	assert.Empty(t, deps)
+	_, active, inactive, _, err := DiscoverWorkspacePlan(loaded, root, nil)
+	require.NoError(t, err)
+	assert.Empty(t, active)
+	require.Len(t, inactive, 1)
+	assert.Equal(t, model.Dependency{Consumer: "core", Provider: "ghost"}, inactive[0])
+}
+
+func TestDiscoverIncludedExternalProviderIsActive(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Dependencies = []DependencyConfig{{Consumer: "core", Provider: "util", External: true}}
+	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/util")
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, deps, _, err := Discover(loaded, root)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "core", deps[0].Consumer)
+	assert.Equal(t, "util", deps[0].Provider)
+}
+
+func TestDiscoverMissingExternalProviderStillValidatesKind(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*File)
+	}{
+		{"root edge", func(cfg *File) {
+			cfg.Dependencies = []DependencyConfig{{Consumer: "core", Provider: "ghost", Kind: "dependecies", External: true}}
+		}},
+		{"package edge", func(cfg *File) {
+			cfg.Packages = map[string]PackageConfig{"core": {Dependencies: ProviderList{{Provider: "ghost", Kind: "dependecies", External: true}}}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := minimalConfig()
+			tc.edit(&cfg)
+			root := writeModelRepo(t, cfg, "pkgs/core")
+			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.NoError(t, err)
+			_, _, _, err = Discover(loaded, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), `unknown dependency kind "dependecies"`)
+		})
+	}
+}
+
 // TestDiscoverNoneProviderRejected: a package of a versioning-none space is
 // never released, so a releasable package cannot depend on it, whichever
 // level declares the edge. The reverse direction and a none-to-none edge are

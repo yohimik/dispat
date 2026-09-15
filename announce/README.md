@@ -8,6 +8,8 @@ Rendering is capped at ten pages, so each destination receives one photo post. I
 
 The release workflow runs `crier ping` before publishing any packages. Failed credentials or required story inputs block the release. The publishing command reports each destination's result and returns failure if an announcement is incomplete. It does not retry an ambiguous publishing failure automatically. Inspect the destination before replaying to avoid duplicate posts. `ANNOUNCE_ONLY=linkedin` or `ANNOUNCE_ONLY=discord` limits a replay to that destination and needs no public staging tunnel.
 
+Select `skip_announcements` when dispatching the Release workflow to publish packages without posting to social platforms. This leaves the full test suite, package publication, release records, and installation checks enabled. Announcements remain enabled by default; the opt-out applies only to that workflow run.
+
 Set the repository secret `CRIER_PUBLISH_DISCORD_WEBHOOK_URL` to an incoming Discord webhook URL. No separate Discord bot token is required. Keep that URL out of configuration files and logs.
 
 This flow requires a Crier release that supports `publish.instagram.cover-story` and `publish.discord.mention-everyone`. Earlier versions fail configuration validation at the ping gate.

@@ -34,6 +34,8 @@ Example version 1.0.0 is not a normative declaration.
 [VCS protocol](./VCS-PROTOCOL.md)
 ## 26. Explicit rollback
 [Rollback](./ROLLBACK.md)
+## 27. Polyrepository Git profile
+repository-qualified revision identity
 [Design history](./DESIGN-HISTORY.md)
 EOF
 }
@@ -42,7 +44,8 @@ EOF
 # commit the replacements, without scanning or rewriting unrelated manifests.
 repository() {
   repo=$1
-  fixture "$repo/specs/ccme-spec" 2.0.0
+  repo_baseline=${2:-2.0.0}
+  fixture "$repo/specs/ccme-spec" "$repo_baseline"
   printf '%s\n' '{"name":"ccme-spec","version":"1.0.0"}' > "$repo/specs/ccme-spec/package.json"
   cat > "$repo/dispat.yaml" <<'EOF'
 unsafeDisableLock: true
@@ -69,6 +72,10 @@ packages:
     path: parser
     versionGroup: ccme
 EOF
+  if [ "$repo_baseline" != 2.0.0 ]; then
+    sed "s/ccme-spec: 2.0.0/ccme-spec: $repo_baseline/" "$repo/dispat.yaml" > "$repo/dispat.next"
+    mv "$repo/dispat.next" "$repo/dispat.yaml"
+  fi
   (
     cd "$repo"
     mkdir parser
@@ -80,7 +87,11 @@ EOF
     git commit -qm 'chore(ccme-spec): establish baseline'
     printf '%s\n' 'breaking specification revision' > specs/ccme-spec/change.txt
     git add .
-    git commit -qm 'release(ccme-spec): publish specification' -m 'Release-As: 3.0.0' -m '---' -m 'release(ccme): hold parser implementation' -m 'Release-As: none'
+    if [ "$repo_baseline" = 3.0.2 ]; then
+      git commit -qm 'feat(ccme-spec): add optional polyrepository profile' -m '---' -m 'release(ccme): hold parser implementation' -m 'Release-As: none'
+    else
+      git commit -qm 'release(ccme-spec): publish specification' -m 'Release-As: 3.0.0' -m '---' -m 'release(ccme): hold parser implementation' -m 'Release-As: none'
+    fi
   )
 }
 
@@ -102,6 +113,24 @@ repository "$release"
   git commit -qm 'fix(ccme-spec): clarify wording'
   DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec --require-release
   test "$(git show specs/ccme-spec/v3.0.1:specs/ccme-spec/VERSION)" = 3.0.1
+  sh specs/ccme-spec/verify.sh
+  test -z "$(git tag -l 'ccme@*')"
+  test "$(cat parser/README.md)" = unchanged
+)
+
+# The opt-in profile is a minor specification release. It must not release
+# the held parser or replace the existing major-release regression above.
+minor=$tmp/minor
+repository "$minor" 3.0.2
+(
+  cd "$minor"
+  DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec --require-release
+  test "$(git show specs/ccme-spec/v3.1.0:specs/ccme-spec/VERSION)" = 3.1.0
+  printf '%s\n' 'profile wording correction' >> specs/ccme-spec/change.txt
+  git add .
+  git commit -qm 'fix(ccme-spec): clarify profile wording'
+  DISPAT_BIN="$dispat" "$dispat" release --package ccme-spec --require-release
+  test "$(git show specs/ccme-spec/v3.1.1:specs/ccme-spec/VERSION)" = 3.1.1
   sh specs/ccme-spec/verify.sh
   test -z "$(git tag -l 'ccme@*')"
   test "$(cat parser/README.md)" = unchanged

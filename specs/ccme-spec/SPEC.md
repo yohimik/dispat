@@ -9,11 +9,13 @@ Git tags of the form `<package>@<version>` by default
 Requirement levels follow RFC 2119 (§2). This specification is itself versioned under SemVer; see §17.3 for what
 constitutes a patch, minor, and major revision of the document.
 
-**Implementation boundary.** This revision specifies CCME 3.0.0 VCS adapters and explicit rollback. dispat
-1.8.x and its CCME 2 parser do not implement them. The version markers are stamped by the specification release process. Publishing a specification does not implement its behavior. The immutable
+**Implementation boundary.** The published CCME 3 line specifies VCS adapters and explicit rollback; the current
+source also defines the optional polyrepository Git profile of §27. Implementing that profile does not implement the
+adapter or rollback protocols, and it does not change the message parser grammar. The version markers are stamped by
+the specification release process. Publishing a specification does not implement its behavior. The immutable
 [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
 remains the reference for existing CCME 2 consumers. New protocol examples MUST NOT be presented as runnable dispat
-configuration. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
+configuration for external adapters or rollback. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
 
 ---
 
@@ -45,12 +47,13 @@ configuration. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTO
 24. [Appendix D: Worked examples](#24-appendix-d-worked-examples)
 25. [VCS adapters](#25-vcs-adapters)
 26. [Explicit rollback](#26-explicit-rollback)
+27. [Polyrepository Git profile](#27-polyrepository-git-profile)
 
 ---
 
 ## 1. Summary
 
-CCME adds eight capabilities to Conventional Commits, chosen so that a single commit can fully describe its release
+CCME adds nine capabilities to Conventional Commits, chosen so that a single commit can fully describe its release
 intent across a workspace of many packages:
 
 | # | Capability                                                                                                     | Syntax                                                         |
@@ -63,6 +66,7 @@ intent across a workspace of many packages:
 | 6 | **Corrections**: restate or discard a past commit's pending release record                                    | `Edits: <sha>`, `Deletes: <sha>`, `Deletes: *`                 |
 | 7 | **VCS adapters**: use trusted shell commands behind a fixed snapshot and immutable-record contract | `vcs` configuration; Git remains the default (§25) |
 | 8 | **Explicit rollback**: withdraw an identified published artifact while retaining its release history | `rollback(api)` + `Rollback-Version: 1.4.2` (§26) |
+| 9 | **Polyrepository planning**: combine explicitly linked Git histories into one release graph without copying their commits | optional polyrepository profile (§27) |
 
 Capabilities 2 and 5 are two **independent axes** of the same idea. A commit says separately how far a *version bump*
 travels (`^`, `^^`, `+N`) and how far a *channel* travels (`%%`, `++N`), because the answers differ: a change usually
@@ -135,6 +139,8 @@ to be interpreted as described in RFC 2119.
 | **Resolvable**           | A released version an installer will select for a given consumer. A prerelease is resolvable only on its own line.      |
 | **Correction**           | A unit carrying an `Edits` or `Deletes` footer: a targeted rewrite of pending release records (§7.4).                   |
 | **Graduation**           | Ending a package's prerelease line by releasing it on `stable` (§11.5). Never happens implicitly.                       |
+| **Repository identity**  | In the polyrepository profile, `control` for the control repository or the exact `.gitmodules` name of a source repository (§27.2). |
+| **Repository revision**  | A pair `(repository identity, full commit object ID)`. A bare commit ID is never a fleet-wide identity (§27.2).          |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
 
@@ -2048,6 +2054,10 @@ incomplete. Withdrawal receipts are an additional availability input, never a re
 Build the package list (name, root path, publish target) and the dependency graph from manifests **at `HEAD`**. Publish
 targets are resolved per §13.10a.
 
+An implementation using the optional polyrepository profile MUST first construct the fixed repository snapshot and
+workspace ownership map of §27. The resulting package graph is one graph for every later phase. Repository boundaries
+do not break dependency propagation, version groups, publish ordering, failure blocking, or package selection.
+
 **The dependency graph MUST be acyclic** over the edge kinds of `propagation.kinds` and `publish.orderKinds` (§14). A
 cycle is `E200`, repository-scoped: the run aborts before any plan is computed, and the diagnostic MUST name every
 package in the cycle and the manifest field carrying each edge, because a cycle is otherwise tedious to locate by hand.
@@ -2069,6 +2079,10 @@ units scoping them resolve to `E130`/
 
 Enumerate tags reachable from `HEAD`, parse per §12.1, and compute `baseline`, `stableBaseline`, `stableCommit` per
 §12.3.
+
+Under §27, enumerate each package's records in its owning repository and reconstruct cross-repository consumer
+positions from gitlink snapshots or explicit `repositoryBaselines`. Never compare or sort commit IDs from different
+repositories as if they belonged to one ancestry relation.
 
 ### 13.3 Pending window
 
@@ -2697,6 +2711,13 @@ and `Oout` is the size of diagnostics and other emitted output.
 In the per-target row, and there only, `D` is the number of targets one unit reaches, `S` its source-set size, and `Σ`
 its resolved scope-set size.
 
+For the polyrepository profile, `H` and `A` below mean the sums over the fixed reachable snapshots of all repositories,
+not the size of a fictitious merged history. Let `Q` be the number of repositories, `Hq` and `Aq` one repository's
+reachable commits and parent edges, `G` the number of control-repository gitlink transitions examined, and `Kq` the
+number of distinct `(stable boundary, fresh boundary)` pairs used in repository `q`. Let `V` be the number of package
+memberships in shared-version groups (`V <= P`). The implementation MUST preserve repository identity in every index
+and cache key.
+
 | Phase                      | Literal transcription | Achievable            | Note                                        |
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
 | Load workspace (§13.1)     | `O(P + E)`            | `O(P + E)`            |                                             |
@@ -2713,10 +2734,29 @@ its resolved scope-set size.
 | Versions/plan (§13.9–10)   | `O(P + I + Z + Oout)` | `O(P + I + Z + Oout)` | Includes aggregates, provenance, diagnostics |
 | Publish order (§19.2)      | `O(P + E)` unordered  | `O(E + P log P)`      | Comparison heap for byte-wise ties           |
 | Blocking closure (§19.3)   | `O(F · (P + E))`      | `O(P + E)` per run    | One multi-source reverse traversal          |
+| Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
+| Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum(Kq · (Hq + Aq)) + Iw)` | Boundaries share only within one repository |
+| Publication input closure (§27.2) | `O(P · (P + E + V))` | `O(Q · (P + E + V))` | One augmented graph traversal per repository |
 
 The bold rows are the ones that matter. Each contains quantities that can be large in a workspace with thousands of
 packages and a long history. Window classes safely share history reachability work. Propagation traversal is reusable
 only under the stricter conditions below; predicate hoisting and channel incidence inversion remain safe independently.
+
+The polyrepository bounds are deliberately sums over repositories. They are not globally linear in fleet history:
+distinct boundaries can require distinct reachability sets, output can contain `P · U` scope incidences, and propagation
+can still materialise `Z` contributions. An implementation MUST NOT scan the control history once per consumer. It
+SHOULD index every relevant gitlink transition in one pass per fixed control snapshot, then answer consumer baseline
+lookups from that immutable index. It MUST parse and store each `(repository, commit)` record at most once per plan.
+Ancestry and walk caches MUST be bounded by configured memory or by an eviction policy; a cache of every queried pair
+can itself grow quadratically in `Hq`. No cache may synthesize ancestry between repositories.
+
+The publication input closure is over the graph augmented with shared-version-group membership, as §27.2 defines.
+Computing one repository's reachable package set at a time avoids a graph walk per release. A dense representation
+costs `O(P · ceil(Q / wordSize))` words before equal sets are interned; interning reduces repeated storage but does not
+change that worst case. Expanding every distinct bitset into repository-name slices raises retained storage to `O(P ·
+Q)` name references in the worst case; implementations SHOULD keep the compact form across internal boundaries or at
+least intern equal lists. Treating each group as a clique would add quadratic work in the group size; index each group
+once and visit its members as one adjacency list instead.
 
 **Windows: group by distinct baseline commit.** For a fixed `HEAD`, `W(P)` is determined by
 `stableCommit(P)`. Different package tags that resolve to the same commit therefore share a window. A release MAY
@@ -2738,6 +2778,12 @@ boundary identity is equal (with a separate no-baseline class). The shared membe
 also depends on `P`'s newest baseline of any channel: two packages can share `W(P)` because their stable baseline commit
 is equal while having different prerelease `baselineCommit(P)`, so fresh/contained membership MUST remain per package
 or be keyed by that second boundary too.
+
+In the polyrepository profile, the repository identity is also part of the window key. Two equal SHA byte strings in
+different repositories are unrelated. Within one repository, packages may share an immutable train window only when
+their stable boundary is equal, and may share a fresh window only when both stable and newest-baseline boundaries are
+equal. This is the `Kq` grouping above. A control snapshot's gitlink index can locate those boundaries, but it cannot
+replace the source repository's ancestry walk.
 
 Commit-graph generation numbers can reject some ancestry candidates and bound a graph walk. They do not establish
 ancestry by a constant-time comparison: commits on different branches can have ordered generation numbers without
@@ -2835,9 +2881,10 @@ name is still the implementer's to justify.
 
 ## 14. Configuration
 
-CCME 3 additionally defines `vcs` (§25) and explicit rollback activation plus package/space handler declarations (§26).
-These are future engine configuration contracts, not currently accepted dispat configuration keys. Omitting `vcs`
-selects Git. Omitting rollback execution enablement never authorizes withdrawal.
+CCME 3 additionally defines `vcs` (§25), explicit rollback activation plus package/space handler declarations (§26),
+and the optional polyrepository Git profile (§27). External VCS adapters and rollback remain future engine contracts;
+implementing the polyrepository profile does not implement either one. Omitting `vcs` selects Git. Omitting rollback
+execution enablement never authorizes withdrawal. Omitting `polyrepo` preserves the single-repository model.
 
 Defaults are chosen so that an unconfigured repository behaves conservatively and predictably.
 
@@ -2868,6 +2915,10 @@ Defaults are chosen so that an unconfigured repository behaves conservatively an
 | `publish.verifyConvergence` | `true`                                                       | Classify one post-success re-plan under §19.6.                                           |
 | `registries`                | `{}`                                                         | Registry name → URL/credentials handle, referenced by `publishTargets` (§13.10a).         |
 | `publishTargets`            | `{}`                                                         | Package glob → registry name or `none`. Highest-precedence target source.                 |
+| `polyrepo`                  | `false`                                                      | Opt into the polyrepository Git profile (§27).                                            |
+| `configs`                   | `[]`                                                         | Explicit configuration files imported into the combined workspace; a non-empty list activates the profile (§27.3). |
+| `repositoryOverrides`       | `{}`                                                         | Source repository identity → central release-commit policy override (§27.3).              |
+| `repositoryBaselines`       | `[]`                                                         | Explicit cross-repository consumer boundary tuples used only when ordinary checkpoint evidence is absent or ambiguous (§27.6). |
 
 ### 14.1 Safety limits
 
@@ -2918,6 +2969,8 @@ Configuration MUST NOT be able to change:
 * the requirement that a tag is written only after that package's publish succeeds (§19.1);
 * the requirement that **every** released package is tagged, whatever its publish target (§13.10a);
 * the fact that every workspace package is a release unit (§13.10a).
+* repository-qualified revision identity, the ban on timestamp baseline inference, and source-first durable recording
+  in the polyrepository profile (§27).
 
 These are the guarantees the format rests on. A tool that makes any of them configurable is not conforming, however it
 is labelled.
@@ -3173,9 +3226,11 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 
 ## 16. Diagnostics registry
 
-CCME 3 adds the following operational diagnostics. They are specification requirements for future engines, not
-claims about codes emitted by dispat 1.8. `E300`–`E309` fail the combined run; preflight failures prevent artifact mutation, while execution failures retain prior progress;
-`E320`–`E329` have the scopes and recovery rules specified in §25. Existing message diagnostics retain their scope.
+CCME 3 adds the following operational diagnostics. External-adapter and rollback codes are specification requirements
+for future engines, not claims that those optional facilities are implemented. `E300`–`E309` fail the combined run;
+preflight failures prevent artifact mutation, while execution failures retain prior progress. `E320`–`E329` have the
+scopes and recovery rules specified in §25. `E330`–`E339` apply only when the optional polyrepository profile is active
+and have the recovery rules in §27. Existing message diagnostics retain their scope.
 
 | Code | Condition |
 | --- | --- |
@@ -3194,6 +3249,18 @@ claims about codes emitted by dispat 1.8. `E300`–`E309` fail the combined run;
 The VCS adapter diagnostics `E320`–`E329`, `W320` and `W321` are defined in the incorporated
 [VCS protocol registry](./VCS-PROTOCOL.md#7-diagnostics). No operational warning may be used to mark incomplete rollback as successful.
 
+| Code | Condition |
+| --- | --- |
+| `E330` | A source repository is missing, uninitialized, shallow, unpinned, duplicated, or outside the declared workspace, or a relevant planned head, release-tag ref, or pin changes before publication. |
+| `E331` | A package or space path crosses repository ownership, a source-local path escapes its source repository, or a package is inside an unlisted nested Git worktree. |
+| `E332` | Imported declarations conflict, or a repository override names no exact `.gitmodules` source identity. |
+| `E333` | A cross-repository consumer boundary is missing, ambiguous, conflicting, or unreachable. |
+| `E334` | Semantics require precedence between incomparable source revisions and no applicable control directive resolves it. |
+| `E335` | A source release record, source push, or control gitlink checkpoint failed after publication. |
+| `E336` | The fleet lock cannot coordinate every participating repository and standalone package. |
+| `E337` | A configured release branch is absent, or a detached repository needs a branch push without `commit.branch`. |
+| `W330` | An `external: true` dependency provider is absent, so its edge is inactive for this snapshot. |
+
 Errors (`E`) MUST be reported. Their blast radius depends on the code:
 
 * **Unit-scoped** (`E100`–`E181` except `E158`, and `E210`–`E213`): the offending unit contributes nothing; other
@@ -3201,9 +3268,16 @@ Errors (`E`) MUST be reported. Their blast radius depends on the code:
 * **Message-scoped** (`E001`, `E002`, `E158`): the commit contributes nothing.
 * **Repository-scoped** (`E182`, `E185`, `E191`, `E195`, `E196`, `E200`): the run cannot produce a correct plan and
   MUST abort. These are integrity failures, not authoring mistakes, and no partial release may be emitted.
-* **Run-scoped** (`E197`, `E198`, `E199`, `E300`–`E309`, `E320`–`E329`): the run's *publication* cannot be completed or trusted. Packages already
-  published and tagged before the error remain published and tagged; the run MUST stop, report what was completed, and
-  exit non-zero. These are recoverable by a later run, unlike repository-scoped errors.
+* **Run-scoped** (`E197`, `E198`, `E199`, `E300`–`E309`, `E320`–`E329`, `E335`–`E337`): the run's *publication* cannot be completed or trusted. Packages already
+  published and tagged before the error remain published and tagged. An error found before package execution aborts
+  the run. `E335`–`E337` found on an active package stop that publication or recording path and its dependent work;
+  independent packages MAY continue. The run MUST report what completed and exit non-zero. These are recoverable by a
+  later run, unlike repository-scoped errors.
+* **Polyrepository-scoped** (`E330`–`E334`): while the optional profile is active, the combined run cannot produce a
+  trustworthy plan. An initial error MUST abort before package work. When `E330` is instead discovered by the required
+  final revalidation after package work has begun, it MUST fail that package before its publish command and block its
+  dependent work; independent packages MAY continue. The same checkout evaluated with the profile omitted retains the
+  single-repository semantics and diagnostic scope of earlier revisions.
 
 Every code is in exactly one bucket. `E182` and `E185` are repository-scoped although each is discovered while computing
 one package's version: neither has an offending unit, since both are properties of a tag that already exists, found during
@@ -3365,6 +3439,12 @@ An implementation conforms to CCME 3.0.2 if and only if it:
 15. Recognizes and separately plans rollback per §26, requires explicit activation, executes its identity-bound
     handlers and receipts, refuses unsafe or incomplete withdrawal, and satisfies its conformance vectors.
 
+The polyrepository behavior of §27 is an **optional conformance profile**. An implementation that advertises that
+profile MUST satisfy every §27 rule and vector in addition to the applicable core requirements above. An implementation
+that does not advertise it remains conforming for a single repository and MUST preserve that behavior when `polyrepo`
+and `configs` are absent. Merely discovering nested Git repositories or accepting source paths is not profile
+conformance.
+
 A CCME 2 parser or an engine implementing only the ordinary forward-release projection MUST identify that narrower
 support and MUST NOT claim full CCME 3 conformance. Specification publication, prose examples, and static protocol
 vectors are not implementation or experimental evidence.
@@ -3398,6 +3478,10 @@ Implementations MUST sort every collection that reaches the output (packages, co
 total order (package name byte-wise; then commit topological index; then unit index). Iteration order of an unordered
 container MUST NOT be observable.
 
+For §27, fixed repository state means the complete map from repository identity to full head object ID, the control
+gitlink snapshot, reachable release tags, and explicit baseline tuples. Output order compares repository identities
+byte-wise before repository-local topological commit index and unit index. Commit dates never provide an order.
+
 ### 17.3 Versioning of this specification
 
 This document is CCME **3.0.2** and is itself versioned under SemVer:
@@ -3413,6 +3497,8 @@ The 3.0.0 revision reserves previously inert `rollback` units for explicitly act
 VCS-dependent canonical revision operands. It also expands full-engine conformance to the adapter and rollback
 protocols. These semantic and conformance changes require a major revision. A new optional key alone would not.
 The activation boundary prevents an engine upgrade from silently executing old rollback-shaped messages.
+An optional execution profile that preserves the previous plan exactly when omitted is a minor addition; §27 is such a
+profile. Its repository-qualified state and recovery rules become mandatory only for implementations advertising it.
 
 The escape hatches that make minor versions safe are `W140` and `W150`. Implementations MUST NOT convert either into an
 error by default; `strictTypes` is opt-in for exactly this reason.
@@ -5434,3 +5520,376 @@ Git CLI arguments are not portable adapter requests. This clarification changes 
 required `Rollback-Version` footer, activation, package/space handlers, consumer-first withdrawal, durable intent and
 completion receipts, retries, version non-reuse, and conformance vectors. Missing handlers are preflight errors.
 No part of this protocol is implemented by the current dispat release merely because it is documented here.
+
+## 27. Polyrepository Git profile
+
+This optional profile lets one **control repository** plan and execute one package graph whose packages are owned by
+several linked Git repositories. It changes where history and release records are read; it does not change the message
+grammar, bump lattice, train and fresh windows, holds, cancellation, corrections, channel rules, dependency graph, or
+partial-publication guarantees defined above. Git is REQUIRED for every participating repository. Activating this
+profile does not activate or claim conformance with the external adapter or rollback protocols of §§25–26.
+
+### 27.1 Activation and compatibility
+
+The profile is active when `polyrepo: true`, a global `--polyrepo` option, or at least one explicitly imported
+configuration is present. With none of those inputs, nested repositories retain the single-repository behavior of the
+previous specification: the control history is the only history, gitlink moves are ordinary changed paths, and this
+section has no effect. Implementations MUST test that opt-out behavior as part of profile conformance.
+
+Activation is explicit and run-wide. The engine MUST NOT activate the profile merely because it sees `.gitmodules`, a
+nested `.git` directory, or a package path inside another repository. A source repository requires no dispat
+configuration when the control file declares its packages. A source configuration becomes a normal repository-local
+root only when the control file's `configs` list or a repeatable global `--configs PATH` option names it; its ordinary
+root, space, and package layering then applies inside that repository. Merely entering a source path from centrally
+declared configuration MUST NOT start that discovery.
+
+### 27.2 Fixed fleet snapshot and identity
+
+The control repository has the reserved identity `control`. Each linked source repository has the exact submodule name
+declared by `.gitmodules`; paths and remote URLs are not identities. `control` and its case variants MUST NOT be used
+as submodule names in this profile. Repository names, package names, tags, and commit IDs retain their original bytes for output and are
+matched only under their existing rules.
+
+Before parsing history, the engine resolves one immutable map:
+
+```
+fleetHead = { repository identity -> full Git commit object ID }
+```
+
+Every configured source MUST be an initialized, non-shallow Git worktree at the commit pinned by the control
+repository's current gitlink. A missing gitlink, an uninitialized or shallow source, a source checked out at another
+commit, an ambiguous `.gitmodules` name, or a path escaping the control workspace is `E330`. The control repository
+itself MUST also have complete history. The fixed input also includes the relevant release-tag refs and control
+gitlinks from which those heads were resolved.
+
+The source head captured while validating a control gitlink is the initial `fleetHead` value used by planning. The
+engine MUST retain that exact observation; it MUST NOT later reread a moved head and silently substitute it as the
+initial pin boundary. A later observation is accepted only by the explicit native-record admission below.
+
+After all fleet `beforeAll` hooks and before the first package task, the engine MUST revalidate every participating
+repository against that input. For a package `P`, let `relevantPackages(P)` be the least set containing `P` and closed
+under both provider edges and shared-version-group membership. Immediately after `P`'s `beforePublish` hook and before
+its publish command, the engine MUST revalidate the owners of every package in that set. It MUST also revalidate the
+control repository when an explicit control unit affecting any package in that set was consulted, including a hold or
+cancellation, or when an enabled control checkpoint will record `P`. A changed relevant head, release-tag ref, or pin
+is `E330`; the engine MUST NOT publish that package from observations spanning two fleet states. A change in an
+unrelated repository after the fleet check does not invalidate a package whose input closure excludes it.
+
+An exact new head and release-tag ref produced by a successful native record step for the current owning package MAY
+advance the run's expected input. The engine MUST admit only an explicitly exported full lowercase 40- or 64-hex
+commit ID and the exact package and alias refs from that success. It MUST serialize publication and recording for
+packages in one repository so later packages observe that admitted transition; packages with different owners MAY
+retain their normal publication concurrency.
+Other Git commits or relevant ref mutations performed during build or hook commands are not admitted automatically:
+if they affect a later revalidation, the package fails with `E330` and requires a new plan.
+
+An implementation MAY carry an admitted exact source revision to nested commands through private, transient state for
+the current run. That state MUST be bound to the same control root, configuration, source identity, and run; it MUST
+authorize only the admitted full commit ID and MUST be removed when the run ends. It is coordination between live
+commands, not a baseline, release record, tag payload, recovery ledger, or input to a later plan.
+
+The fleet lock and per-worktree mutation locks coordinate participating CCME/dispat operations. They do not claim to
+exclude every external Git writer. The checks above detect relevant changes visible at their validation points; the
+implementation MUST NOT claim that they make publication atomic with arbitrary processes after the final check.
+
+A commit identity is always `(repository, full object ID)`. Logs MAY display a unique abbreviation beside the
+repository name, but stored keys, correction lookup, caches, diagnostics, and plan provenance MUST use the qualified
+full identity. Two identical object-ID byte strings in different repositories are incomparable. Commit dates, author
+dates, filesystem modification times, tag creation dates, and fetch order MUST NOT create ancestry or precedence.
+
+The engine reads each repository's reachable DAG once for the fixed snapshot and preserves native parent order. It
+MUST NOT manufacture a synthetic fleet DAG or parent edge. Ancestry, changed paths, direct pending windows,
+cancellation barriers, corrections, and source-local `Reverts` are evaluated in the repository that owns the commit.
+
+### 27.3 Configuration composition and ownership
+
+The additional configuration surface is:
+
+```yaml
+polyrepo: true
+configs:
+  - services/api/dispat.source.yaml
+repositoryOverrides:
+  sdk-source:
+    commit:
+      enabled: true
+      push: true
+      branch: main
+repositoryBaselines:
+  - consumer: web
+    releaseTag: web@2.4.0
+    repository: api-source
+    revision: 6f1a9f0d2b90c8f96a4d74dcb6568fd373b22c16
+```
+
+`configs` is a control-file array of file paths. Each path is relative to that control file; each `--configs` path is
+relative to the control root. Canonical duplicate paths are loaded once. An imported root MUST NOT declare another
+fleet `configs` list; every participating source is named by the control run. Imports are explicit configuration
+composition: the named file establishes that source's ordinary repository-local root, space, and package layering,
+including its explicit references and normal in-folder configuration. Central path traversal alone establishes no such
+root and MUST NOT infer source configuration. `--config` continues to select the one control file and does not become
+repeatable.
+
+An imported package or space path is relative to the source repository that owns the imported file. A path declared
+in the control configuration retains its existing control-relative spelling, and its canonical location determines the
+source repository owner. Every package path and every space-expanded package path MUST be wholly inside exactly one
+repository. A source-owned package is REQUIRED to use a source-owned path. A wrapper in the control repository whose
+`src` or manifests cross into a source repository is `E331` in this profile, even if the same wrapper remains legal in
+single-repository mode. The closest Git worktree containing a package path and its `src` MUST be the repository assigned
+from the control checkout. A package inside an otherwise valid but unlisted nested Git worktree is `E331`; that
+worktree must be registered as a participating source before it can own packages. `..`, symlink, worktree, or
+nested-repository traversal MUST NOT bypass this ownership check.
+
+All package names form one case-preserving, case-insensitive workspace namespace. Duplicate package declarations,
+incompatible settings for one package, and other imports for which the existing merge rules cannot produce one value
+are `E332`. Centrally declared and explicitly imported sources MAY coexist when their package and space declarations
+are disjoint. An imported space and every implicit or named version group from its imported configuration are local to
+that repository. An unqualified CLI space or group selector selects matching local declarations across all
+repositories. A shared-versioning space or `versionGroups` entry declared by the control configuration retains its
+ordinary monorepository identity and MAY span repository owners. Dependencies and control-declared shared groups
+therefore operate on the combined package graph without repository qualification.
+
+`repositoryOverrides` is keyed by an exact source repository identity from `.gitmodules`. Each value may contain a
+`commit` object and no relocation or package-definition fields. When the object is absent, the source inherits the
+control repository's whole commit policy. When it is present, it **replaces** that policy as one complete
+`CommitConfig` and omitted fields take their normal defaults; fields are not overlaid individually. This distinction is
+required for plain boolean fields such as `push`. `commit.branch` supplies an explicit branch when a commit-enabled
+checkout is detached. Unknown keys are `E332`. The override does not move a package, import a configuration, change
+history ownership, or create a source.
+An override applies only to a source configured centrally. An explicitly imported source owns its own commit policy;
+an override for that same repository is `E332` rather than a second precedence layer.
+
+### 27.4 Dependency providers and scope
+
+A dependency provider object MAY set `external: true`. If its named package is absent from the combined workspace,
+the edge is inactive and emits `W330`; the missing provider is not synthesized. Only provider-presence validation is
+skipped: the consumer, edge kind, and every other field MUST still validate. If the provider is present, the edge
+is ordinary and participates in validation, cycle detection, propagation, version reconciliation, publish ordering,
+failure blocking, and `--consumers`. A configuration computation or rewrite MUST preserve `external: true`, including
+while the provider is absent. A missing provider without `external: true` retains the existing configuration error.
+
+A unit read from a source repository can directly resolve only packages owned by that repository. This applies to an
+explicit package scope or glob, `*`, `.`, changed-path fallback, and exclusions. Naming a package owned by another
+repository is an error rather than a cross-repository direct change. After the direct source set is resolved,
+propagation traverses the combined dependency graph normally and may reach consumers in any repository.
+
+A unit read from the control repository has no source-owned changed paths. Its explicit package names and package globs,
+including `*`, resolve across the fleet, so it can state a fleet-wide release, hold, cancellation, or
+channel directive. An unscoped control unit is inert unless existing control-owned package paths resolve it. A gitlink
+move is snapshot evidence and MUST NOT also become a direct package change while this profile is active; otherwise the
+same source change would be counted once from its source commit and again from the pointer update.
+
+Any semantic rule that selects the "newest" of competing directives applies directly within one repository DAG and
+within the control history. Source revisions from different repositories have no such order. If incomparable source
+records propose outcomes for one package where the existing rule requires a single winner, the engine MUST fail with
+`E334`; it MUST NOT pick by date, traversal order, repository name, or SHA. An explicit control directive can resolve
+the conflict. It is evaluated against the exact source gitlinks recorded at that control commit, its **causal
+snapshot**, so it cannot rewrite or suppress source work that the control revision did not yet observe.
+
+### 27.5 Repository-local windows and fleet propagation
+
+For a package `P`, direct work is collected from its owning repository. Its stable and fresh direct boundaries are the
+reachable source release tags defined by §§12–13. A source unit is parsed and stored once, resolves to its repository-
+local direct source set, and then propagates through the one combined graph. Admission remains
+`commitOf(u) in Wfresh(D)`, but for a consumer `D` in another repository that membership means that `D`'s last release
+had not yet incorporated the qualified source revision. Section 27.6 defines how that consumer position is proven.
+
+Stable train aggregation and fresh admission remain separate. Packages can share an immutable train window only when
+they have the same owning repository and stable boundary; they can share a fresh window only when their owning
+repository, stable boundary, and newest baseline boundary are all equal. Holds, cancellation, correction, channel
+transition matching, per-target admission, provenance, and warnings remain per unit and package even when a graph walk
+is reused. A propagation walk may be shared only for equal source set, depth, and edge kinds (§13.11).
+
+### 27.6 Cross-repository consumer boundaries
+
+The profile adds no ledger, tag payload, metadata ref, or timestamp convention. It reconstructs a consumer's position
+in a source repository from normal source release tags and ordinary control gitlink history, or requires an explicit
+baseline tuple.
+
+Automatic reconstruction is valid only when one ordinary **control release checkpoint** supplies all of this evidence:
+
+1. the control commit's normal release-commit message identifies the consumer's exact source release tag;
+2. that same control commit changes the consumer repository's gitlink to the commit peeled from that tag; and
+3. that commit's gitlinks pin the exact revision of each other source repository incorporated by the consumer release.
+
+A matching consumer gitlink SHA by itself proves nothing. A tag may have been added later to an already-pinned commit,
+or a standalone release may have been imported after provider pointers advanced. Several control commits may also pin
+the same consumer SHA while pinning different provider SHAs. The engine MUST NOT choose among them by date or proximity.
+If the normal checkpoint message is customized beyond unambiguous parsing, any of the evidence is missing, or several
+checkpoints imply different positions, automatic reconstruction fails with `E333`.
+
+`repositoryBaselines` resolves that case explicitly. Every entry contains exactly:
+
+* `consumer`: a package name;
+* `releaseTag`: an exact reachable release tag of that consumer in its owning repository;
+* `repository`: `control` or an exact source repository identity; and
+* `revision`: a revision reachable in that repository.
+
+The tuple states that the named consumer release incorporated that repository through the named revision. The engine
+resolves `revision` to one full object ID once and uses ancestry, never lexical comparison. A duplicate or conflicting
+tuple with the same `(consumer, releaseTag, repository)` key is `E333`; two entries for different repositories are
+independent and commonly required. Stable and prerelease consumer tags remain separate entries because they define
+different fresh boundaries. A tuple cannot substitute for a missing consumer release tag or make an unreachable
+revision reachable.
+
+Tag-only release recording is conforming and often sufficient for direct source history. It can leave a later
+cross-repository boundary ambiguous; the operator must then add the explicit tuple. The engine MUST fail instead of
+guessing. Configuration may omit tuples that automatic checkpoint evidence proves.
+
+Boundary resolution is lazy per consumer tag and repository. The mere presence of the control repository does not
+require every source tag to have a control boundary. If no applicable control unit affects a tagged package, tag-only
+recording remains sufficient for that history. If an applicable explicit control unit affects the package and its
+position relative to the tag is required, that control position MUST be proven by the ordinary checkpoint association
+above or by an explicit tuple whose `repository` is `control`; otherwise the engine fails with `E333`.
+
+### 27.7 Publication, checkpoints, and recovery
+
+The combined publish sequence is the dependency-first sequence of §19.2 across all repositories. Publication remains
+non-atomic. Each successful package MUST receive its immutable release tag in its owning repository at the ordinary
+tag-after-publish record point, including on that repository's configured release commit when enabled. A control
+checkpoint may follow only after that source record succeeds. A failure to record or durably push the tag is `E335`;
+prior successes remain successful, and dependent work is protected by the same blocking closure as §19.3. A retry
+reads all source tags again and preserves those successes.
+
+Source and control release commits are OPTIONAL exactly as their effective `commit.enabled` settings say. An engine
+MUST NOT force an empty commit, force a source commit merely because the profile is active, or require a control
+checkpoint. With commits disabled, tags point at the planned source heads and ordinary tag-only operation is valid.
+With a source commit enabled, it is created only when the configured release writes produced something to commit.
+
+When source commit and push are enabled, the engine MUST durably record the source release first. Only after the source
+branch/commit and tags are reachable from its configured remote may the control worktree advance that source's gitlink.
+This prevents a pushed control pointer to a source commit nobody else can fetch. A normal control checkpoint, when
+enabled and non-empty, records those gitlink transitions using the ordinary release-commit message that §27.6 can later
+associate with exact source release tags. If control commits are disabled or no gitlink changed, no checkpoint is
+created.
+
+A commit-enabled repository at detached `HEAD` that needs to push a branch MUST have an explicit `commit.branch`;
+otherwise it fails with `E337` before publication. A detached tag-only or local commit with no branch push does not
+require one. The configured branch is pushed without force under the ordinary commit policy. A source-specific
+`repositoryOverrides.<name>.commit` may provide this field, and an imported source configuration may provide it in its
+own `commit` object.
+
+The release lock MUST coordinate the control repository, every active source repository, and standalone packages as
+one fleet. An implementation unable to acquire or verify that shared exclusion fails with `E336`; independent per-repo
+locks acquired without a deadlock-free fleet protocol are insufficient. Status and other read-only planning retain
+their ordinary lock-free behavior.
+
+Every operation that can hold more than one fleet or worktree lock MUST use one stable total order over the lock
+resource identities and release them in reverse order. Per-worktree mutation locks cover only the complete native Git
+transaction that reads, commits, tags, pushes, or checkpoints the affected repositories. Hooks and arbitrary scripts
+run outside those mutation locks; their changes remain subject to the fixed-input checks of §27.2.
+
+No rollback is inferred after a partial publish. Record every success that can still be recorded, stop dependent work,
+report publication and recording failures separately, and retry from durable source tags. Never delete, move, or
+duplicate a successful source tag to make the control checkpoint look atomic.
+
+If a source record succeeds and the control gitlink checkpoint then fails, `E335` MUST name the source repository,
+full source revision, and exact release tag and require explicit control-checkpoint repair. The next run remains `E330`
+while the source checkout and committed gitlink are unpinned. An operator first verifies the durable source outcome,
+then explicitly commits/reconciles the ordinary control gitlink to that revision or restores the intended pin. The
+engine MUST NOT auto-commit the repair, force a checkpoint, republish the source, or infer success from the worktree.
+Dependent publication remains gated until the fixed fleet snapshot is valid again.
+
+### 27.8 Commands, hooks, and `--since`
+
+Every command sees the same combined workspace and selectors. Package scripts run in their package paths. Root, space,
+package, run, and nested hooks retain the repository owner of the triggering package as well as the combined graph and
+selection context; entering a nested repository MUST NOT silently reload its configuration or narrow the fleet.
+
+For `--since <control-revision>`, resolve that control revision and project its gitlinks into repository-qualified
+source boundaries. A source package is changed when its source history after the projected gitlink addresses it. A
+source added after the selected control revision contributes its reachable history according to the ordinary
+no-baseline rule. A removed, missing, or ambiguous historical gitlink is an error. `--since all` still selects every
+package. The engine MUST NOT treat the control gitlink transition itself as an additional package change.
+
+### 27.9 Performance requirements
+
+The engine MUST index relevant control gitlink transitions once per fixed control snapshot, not once per consumer or
+provider pair. It MUST store each parsed `(repository, commit)` record once and share immutable window membership only
+under the keys in §27.5. It SHOULD use bounded reachability and ancestry caches; an unbounded pair cache can consume
+quadratic memory even when history is walked once. Equal SHA spellings across repositories MUST occupy distinct keys.
+
+With the notation of §13.11, input traversal is realistically `O(G + sum(Hq + Aq))` before distinct-boundary window
+work, and window reachability is `O(sum(Kq * (Hq + Aq)) + Iw)` for an indexed implementation. Parsing, scope
+incidences, propagation, provenance, sorting, and output retain their separate `N`, `R`, `I`, `Z`, and `Oout` costs.
+This profile makes no globally linear end-to-end claim and permits no synthetic ancestry shortcut.
+
+Publication revalidation has a separate output-sensitive cost. If repository `q` participates in `Jq` fleet or
+package checks and its relevant tag snapshot contains `Tq` refs, a full-ref implementation performs
+`O(sum(Jq * (1 + Tq)))` comparison work in addition to Git and filesystem access. Let `L` be the total number of
+repository memberships across all package input closures; retaining those closures costs `O(L)` memory and `L` can be
+`P * Q`. Implementations SHOULD share immutable provider-closure results or repository bitsets where dependencies have
+the same suffix, but MUST retain each package's exact closure. Neither this validation cost nor its memory is included
+in the one-time history-walk bound above.
+
+### 27.10 Conformance vectors
+
+1. The profile is absent in a repository with initialized submodules. **Use the single-repository algorithm exactly.**
+   A gitlink move remains one control changed path; no source history is loaded.
+2. `polyrepo: true` with two initialized, pinned, complete sources. One source commit is `feat(core)^: x`, and an app
+   in the other source depends on `core`. **Directly bump `core`, then propagate to the app across the combined graph.**
+3. The control gitlink also moved to the `feat(core)` commit. **Do not count a second direct change.** The pointer is
+   snapshot evidence in this profile.
+4. A source commit explicitly scopes a package owned by another source. **Fail that unit.** The same outcome cannot be
+   obtained by treating the scope as fleet-wide; propagation is the cross-repository path.
+5. A control commit's explicit scope-set names packages from two sources, or uses `*`. **Apply it fleet-wide** at that
+   control commit's causal gitlink snapshot.
+6. A central wrapper owns `services/api` while `services/api/src` is a source repository and the package's source or
+   manifests cross that boundary. **`E331`.** In opt-out single-repository mode, retain the previous wrapper behavior.
+7. An imported config uses `path: packages/api`; the file lives in source `api-source`. **Resolve the path within
+   `api-source` and apply that root's ordinary local space/package layering.** Do not resolve it against the control
+   root. A centrally declared path entering the same source does not implicitly load that config.
+8. Two repositories each declare a local space `services`. `--space services` selects both. A local implicit version
+   group does not span them; a group with that name declared centrally may span both.
+9. `app` names `{provider: optional-runtime, external: true}`. With no such package, emit `W330` and no edge. After an
+   imported config supplies it, validate and use the edge for cycles, propagation, ordering, blocking, and consumers.
+   An invalid edge kind fails in both states.
+10. A control history pins consumer SHA `C` both before and after provider `P1`, and the consumer tag is later attached
+    to `C`. **`E333`.** Matching the SHA or choosing the nearer/date-later control commit is non-conforming.
+11. A normal control release checkpoint identifies the exact consumer tag, changes its gitlink to the tag's commit,
+    and pins provider `P0` in the same commit. **Infer `P0` as the consumer boundary.** If the message association is
+    missing or custom and ambiguous, require `repositoryBaselines`.
+12. An explicit baseline names `(app, app@2.4.0, core-source, P0)`, and every identity is reachable. **Use `P0`.** A
+    second entry with `P1` or `P0` for the same key is `E333`; an entry for another repository is valid and independent.
+    Never choose a duplicate by list order.
+13. Two incomparable source directives require newest-wins channel or `Release-As` precedence for one consumer.
+    **`E334`.** An applicable later control directive resolves the choice against its causal source snapshot.
+14. Commits are disabled in every repository. A package publishes and its source tag succeeds. **Accept the tag-only
+    release and create no empty commit.** If a future consumer boundary cannot be proven, require an explicit tuple.
+15. That tag-only package has no applicable control unit. **Use its source tag without requiring a control boundary.**
+    If an applicable explicit control unit must instead be ordered across the tag, require a proven ordinary checkpoint
+    or an explicit `(consumer, releaseTag, control, revision)` tuple; otherwise report `E333`.
+16. A source publish and tag succeed; an unrelated source fails; its dependents are blocked. **Preserve and report the
+    first success, record no tag for the failure, continue only independent work, and recompute from tags on retry.**
+17. A source commit is enabled and produces a commit. Its source push fails. **Do not advance or push the control
+    gitlink to that unreachable commit; report `E335`.**
+18. A commit-enabled source is detached, needs a branch push, and has no `commit.branch`. **`E337` before
+    publication.** A local commit or tag-only detached operation that pushes no branch remains valid. With an existing
+    explicit branch, push that branch without forcing it.
+19. `--since R` names a control revision whose gitlinks point to `A0` and `B0`; current links point to `A2` and `B1`.
+    **Evaluate source ranges `A0..A2` and `B0..B1` once each**, then apply normal scope and combined propagation.
+20. Ten consumers share one release checkpoint and one provider boundary. **One control gitlink index and one immutable
+    provider window class are valid.** Ten control-history scans are non-conforming; merging fresh windows whose newest
+    baselines differ is also non-conforming.
+21. All repositories are individually lockable but the implementation cannot establish fleet-wide exclusion.
+    **`E336` before mutation.** Per-repository success does not prove fleet coordination.
+22. A relevant source tag changes in `beforeAll`. **`E330` after the hooks and before the first package task.** A
+    provider head changes in a consumer's `beforePublish`; **`E330` before that consumer's publish command.** A head
+    change in an unrelated repository after the fleet check does not invalidate that consumer.
+23. A successful native record step for one package exports its full new source commit and creates that package's
+    exact release tag. **Admit that transition for later packages in the same repository and serialize their publish
+    and record work.** A direct Git commit or relevant tag written by arbitrary build or hook code has no such
+    admission and is `E330` when a relevant check observes it. Packages owned by different repositories may publish
+    concurrently.
+24. A centrally declared or imported package path is inside a Git worktree that is nested below its assigned owner but
+    is not a listed source. **`E331`.** Merely finding the nested worktree does not register it. With the optional
+    profile disabled, retain the existing single-repository discovery behavior.
+25. Control commits are disabled, but an explicit control directive contributes to source package `A`'s plan. The
+    control head changes in `A`'s `beforePublish`. **`E330` before `A` publishes.** The same change does not invalidate
+    package `B` when neither its provider/group closure nor its plan consulted control history.
+26. Centrally declared fixed-group members `A` and `B` have different source owners and no dependency edge. Work in
+    `A` makes `B` ride the shared version. **`A`'s repository is a publication input for `B`; changing it after `A`'s
+    admitted record and before `B` publishes is `E330`.** Group membership cannot be omitted from the input closure.
+27. A successful nested native record advances a source while another package script from the same run is already
+    active. **Admit only the exact exported full commit ID.** Transient run coordination may make that pin visible to a
+    later nested command in the active script; it is removed at run completion and supplies no baseline on a later run.

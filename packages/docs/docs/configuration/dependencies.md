@@ -20,6 +20,8 @@ dependencies:
       keep: true
     - provider: tooling
       kind: devDependencies
+    - provider: optional-runtime
+      external: true
 ```
 
 Set `kind` to name the manifest field the edge stands for. This can be `dependencies` (the default), `devDependencies`,
@@ -30,8 +32,16 @@ Set `keep: true` to mark an edge [`dispat compute`](../cli/compute.md) must neve
 deliberate relations no manifest declares, like a Docker base-image chain. The planner treats kept edges like any other
 edge.
 
-Both packages must exist. dispat matches their names without regard to case, just like every other name-keyed part of
-the config. It rejects self-dependencies and cycles, and ignores duplicates.
+Set `external: true` when the provider belongs to a source configuration that is not always imported. While that
+package is absent, dispat skips the edge and reports it; it does not invent a package. When the package is present, the
+edge becomes ordinary: name validation, cycle checks, propagation, release ordering, failure blocking, version
+reconciliation, `--consumers`, and script ordering all apply. `dispat compute` preserves the declaration in both
+states. The option skips only the missing-provider error; an invalid consumer, `kind`, or other field still fails while
+the provider is absent. A missing provider without `external: true` remains an error.
+
+The consumer must exist, and a provider must exist unless its object sets `external: true`. dispat matches names
+without regard to case, just like every other name-keyed part of the config. It rejects self-dependencies and cycles,
+and ignores duplicates.
 
 You cannot make a releasable package depend on a package in a
 [`versioning: none` space](../reference/releasing/versioning.md#packages-that-never-release-none). The provider would

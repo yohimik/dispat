@@ -126,6 +126,15 @@ type AliasTag struct {
 
 type Space struct {
 	Name string
+	// Repository identifies the owning repository in a composed workspace.
+	// Empty is the legacy single-repository identity.
+	Repository string
+	RepoRoot   string
+	// GroupIdentity is the repository-qualified identity used internally by
+	// the planner for an imported repository's local version group. The
+	// authored VersionGroup stays unchanged for selectors, scripts and output.
+	// Empty means VersionGroupName is already the planner identity.
+	GroupIdentity string
 	// Path of the space's primary folder — the first configured path —
 	// relative to the monorepo root. A space may spread over several folders;
 	// every direct sub-folder of each is a package, unless a .dispatexclude
@@ -333,6 +342,10 @@ func (a *AutoVersion) Reconciles() bool {
 type Package struct {
 	Name string
 	Dir  string // folder in which scripts run
+	// Repository and RepoRoot identify where this package's history, scripts,
+	// edits and release records belong. Both are empty in legacy workspaces.
+	Repository string
+	RepoRoot   string
 	// Src narrows which of the package's files count as changes to it: a
 	// Dir-relative path, empty for the whole folder. See ScopeDir.
 	Src   string
@@ -405,6 +418,20 @@ func (p *Package) VersionGroupName() string {
 	return p.Space.Name // the zero value means the space's own group
 }
 
+// VersionGroupIdentity is the planner key for a shared version group. An
+// imported config's groups are repository-local even when another imported
+// config uses the same authored name; centrally declared groups deliberately
+// retain their ordinary cross-repository identity.
+func (p *Package) VersionGroupIdentity() string {
+	if name := p.VersionGroupName(); name != "" {
+		if p.Space.GroupIdentity != "" {
+			return p.Space.GroupIdentity
+		}
+		return name
+	}
+	return ""
+}
+
 // EntryLine is one block of record text with the filters deciding which
 // packages it is written for — the resolved counterpart of the config's line
 // shorthands, which have all been expanded into this one shape by the time it
@@ -424,11 +451,14 @@ type EntryLine struct {
 // counterpart of the config's entry-format options, shared by the changelog
 // file and the GitHub release body. Empty fields mean the renderer defaults.
 type RecordFormat struct {
-	DateFormat        string
-	BreakingTitle     string
-	FeaturesTitle     string
-	FixesTitle        string
-	DependenciesTitle string
+	// RepositoryResolved prevents a source repository's absent coordinates
+	// from falling back to the control repository's CI environment.
+	RepositoryResolved bool
+	DateFormat         string
+	BreakingTitle      string
+	FeaturesTitle      string
+	FixesTitle         string
+	DependenciesTitle  string
 	// ReleaseName names the release: the GitHub release's name, or a
 	// sub-header in a changelog entry. Empty means the destination's own
 	// default (the tag on GitHub, nothing in a file).
@@ -631,6 +661,7 @@ func (s GitHubSpec) Key() string {
 // left out here would give one package the other's attribution, silently and
 // only when the two happened to differ.
 func (f RecordFormat) writeKey(b *strings.Builder) {
+	fmt.Fprintf(b, "\x00%t", f.RepositoryResolved)
 	fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q\x00%q", f.DateFormat, f.BreakingTitle, f.FeaturesTitle,
 		f.FixesTitle, f.DependenciesTitle, f.ReleaseName)
 	fmt.Fprintf(b, "\x00%q\x00%q\x00%q\x00%q\x00%q\x00%q", f.AuthorsPlacement, f.AuthorsFormat,

@@ -242,7 +242,7 @@ func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTa
 		return out, nil
 	}
 
-	full, err := cp.resolveSHA(t.target.SHA)
+	full, err := cp.resolveSHA(rec.repository, t.target.SHA)
 	if err != nil {
 		return out, err
 	}
@@ -300,22 +300,24 @@ func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTa
 //
 // Answers are memoised: the same target named twice, in one unit or across a
 // history, costs one lookup.
-func (cp *computation) resolveSHA(sha string) (string, *correctionError) {
-	if _, ok := cp.byKey[sha]; ok {
-		return sha, nil
+func (cp *computation) resolveSHA(repository, sha string) (string, *correctionError) {
+	key := historyKey(repository, sha)
+	if _, ok := cp.byKey[key]; ok {
+		return key, nil
 	}
-	if full, ok := cp.shaCache[sha]; ok {
+	cacheKey := historyKey(repository, sha)
+	if full, ok := cp.shaCache[cacheKey]; ok {
 		if full == "" {
 			return "", unknownTarget(sha)
 		}
 		return full, nil
 	}
 
-	full, ok := cp.lookupSHA(sha)
+	full, ok := cp.lookupSHA(repository, sha)
 	if cp.shaCache == nil {
 		cp.shaCache = make(map[string]string)
 	}
-	cp.shaCache[sha] = full
+	cp.shaCache[cacheKey] = full
 	if !ok {
 		return "", unknownTarget(sha)
 	}
@@ -331,17 +333,22 @@ func unknownTarget(sha string) *correctionError {
 // commits already examined. The fallback is exact for every target a correction
 // can still act on, which is what makes a Git implementation without the
 // capability usable rather than wrong.
-func (cp *computation) lookupSHA(sha string) (string, bool) {
-	if r, ok := cp.git.(commitResolver); ok {
+func (cp *computation) lookupSHA(repository, sha string) (string, bool) {
+	git := cp.git
+	if h, ok := cp.history(repository); ok && h.Git != nil {
+		git = h.Git
+	}
+	if r, ok := git.(commitResolver); ok {
 		full, err := r.ResolveCommit(cp.ctx, sha)
 		if err != nil || full == "" {
 			return "", false
 		}
-		return full, true
+		return historyKey(repository, full), true
 	}
 	var found string
 	for key := range cp.byKey {
-		if !strings.HasPrefix(key, sha) {
+		repo, raw := splitHistoryKey(key)
+		if !strings.EqualFold(repo, repository) || !strings.HasPrefix(raw, sha) {
 			continue
 		}
 		if found != "" {
@@ -674,7 +681,7 @@ func (cp *computation) suppressRevertedNotes() {
 // suppressOneRevert handles one well-formed Reverts value and returns how many
 // entries it took out of the notes.
 func (cp *computation) suppressOneRevert(rec *commitRec, pos int, u *ccme.Unit, raw string, trace bool) int {
-	full, ok := cp.resolveRevertTarget(raw)
+	full, ok := cp.resolveRevertTarget(rec.repository, raw)
 	// Ancestor-or-self, where a correction demands a proper ancestor: a revert
 	// is a claim about code, and a commit may carry the inverse diff of
 	// something in the same commit.
@@ -734,18 +741,20 @@ func (cp *computation) suppressNote(pkg string, u *ccme.Unit) {
 // resolveRevertTarget resolves a Reverts value without raising E210: an
 // unresolvable target is one of §7.3's two degraded forms, not an error, and
 // the caller reports it as W213.
-func (cp *computation) resolveRevertTarget(sha string) (string, bool) {
-	if _, ok := cp.byKey[sha]; ok {
-		return sha, true
+func (cp *computation) resolveRevertTarget(repository, sha string) (string, bool) {
+	key := historyKey(repository, sha)
+	if _, ok := cp.byKey[key]; ok {
+		return key, true
 	}
-	if full, ok := cp.shaCache[sha]; ok {
+	cacheKey := historyKey(repository, sha)
+	if full, ok := cp.shaCache[cacheKey]; ok {
 		return full, full != ""
 	}
-	full, ok := cp.lookupSHA(sha)
+	full, ok := cp.lookupSHA(repository, sha)
 	if cp.shaCache == nil {
 		cp.shaCache = make(map[string]string)
 	}
-	cp.shaCache[sha] = full
+	cp.shaCache[cacheKey] = full
 	return full, ok
 }
 
@@ -772,7 +781,7 @@ func isTargetSHA(s string) bool {
 // All three are the same question, "is there still a record here to act on",
 // and a correction that finds no record reports W209 rather than acting.
 func (cp *computation) pending(pkg, key string) bool {
-	if !cp.window[pkg][key] || cp.containedInBaseline(pkg, key) {
+	if !cp.inWindow(pkg, key) || cp.containedInBaseline(pkg, key) {
 		return false
 	}
 	return !cp.cancelledFor(key, pkg)
@@ -782,6 +791,7 @@ func (cp *computation) pending(pkg, key string) bool {
 // except for Git implementations that report no sha at all, whose synthetic
 // keys are left as they are.
 func shortKey(key string) string {
+	key = rawHistoryKey(key)
 	if strings.HasPrefix(key, syntheticKeyPrefix) || len(key) <= 12 {
 		return key
 	}

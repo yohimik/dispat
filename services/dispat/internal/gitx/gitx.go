@@ -659,9 +659,8 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 // globs overlap. Tags itself remains uncached and observes tags created after
 // an earlier call, which callers outside one planning snapshot rely on.
 func (c *CLI) TagsForPackages(ctx context.Context, formats map[string]TagFormat) (map[string]Tags, error) {
-	result := make(map[string]Tags, len(formats))
 	if len(formats) == 0 {
-		return result, nil
+		return map[string]Tags{}, nil
 	}
 	out, err := c.run(ctx, "tag", "--list", "--merged", "HEAD",
 		"--sort=-v:refname", "--sort=-creatordate",
@@ -669,29 +668,161 @@ func (c *CLI) TagsForPackages(ctx context.Context, formats map[string]TagFormat)
 	if err != nil {
 		return nil, err
 	}
+	return parseTagsForPackages(out, formats), nil
+}
+
+type packageTagMatcher struct {
+	packageName string
+	prefix      string
+	suffix      string
+	reader      VersionReader
+}
+
+func newPackageTagMatcher(pkg string, format TagFormat) (packageTagMatcher, bool) {
+	tpl, err := format.WithDefault().template()
+	if err != nil {
+		return packageTagMatcher{}, false
+	}
+	return packageTagMatcherFromTemplate(pkg, tpl)
+}
+
+func packageTagMatcherFromTemplate(pkg string, tpl *tagTemplate) (packageTagMatcher, bool) {
+	prefix, suffix, ok := tpl.split(pkg)
+	if !ok {
+		return packageTagMatcher{}, false
+	}
+	return packageTagMatcher{
+		packageName: pkg,
+		prefix:      prefix,
+		suffix:      suffix,
+		reader:      VersionReader{tpl: tpl, pkg: pkg},
+	}, true
+}
+
+func (m packageTagMatcher) matches(tag string) bool {
+	return len(tag) > len(m.prefix)+len(m.suffix) &&
+		strings.HasPrefix(tag, m.prefix) && strings.HasSuffix(tag, m.suffix)
+}
+
+type tagInventoryEntry struct {
+	name   string
+	commit string
+}
+
+func parseTagInventoryLine(line string) (tagInventoryEntry, bool) {
+	// strings.Lines retains the line ending. Remove only that framing: tabs
+	// and spaces are field contents here, and trimming the whole record would
+	// turn a missing leading or trailing tab into a different record shape.
+	line = strings.TrimSuffix(line, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	if strings.TrimSpace(line) == "" {
+		return tagInventoryEntry{}, false
+	}
+	name, rest, ok := strings.Cut(line, "\t")
+	if !ok {
+		return tagInventoryEntry{}, false
+	}
+	object, peeled, hasPeeled := strings.Cut(rest, "\t")
+	entry := tagInventoryEntry{name: strings.TrimSpace(name), commit: strings.TrimSpace(object)}
+	if hasPeeled {
+		if before, _, found := strings.Cut(peeled, "\t"); found {
+			peeled = before
+		}
+		if peeled = strings.TrimSpace(peeled); peeled != "" {
+			entry.commit = peeled
+		}
+	}
+	return entry, true
+}
+
+// detach copies the retained fields out of the full git-for-each-ref output.
+// A Tag can outlive planning, so keeping a small matching slice must not retain
+// the potentially very large inventory string that surrounded it.
+func (e tagInventoryEntry) detach() tagInventoryEntry {
+	return tagInventoryEntry{name: strings.Clone(e.name), commit: strings.Clone(e.commit)}
+}
+
+func (m packageTagMatcher) read(entry tagInventoryEntry) Tag {
+	tag := Tag{Name: entry.name, Commit: entry.commit}
+	if version, ok := m.reader.ParseVersion(entry.name); ok {
+		tag.Version, tag.Parsed = version, true
+	}
+	return tag
+}
+
+// parseTagsForPackages parses each raw ref once, then dispatches it only to
+// formats whose expanded literal prefix can match. The trie walk is linear in
+// the tag's bytes (each node has at most the fixed byte alphabet); work after
+// that is the real candidate overlap between custom formats. Empty-prefix
+// formats deliberately remain candidates for every tag.
+func parseTagsForPackages(out string, formats map[string]TagFormat) map[string]Tags {
+	result := make(map[string]Tags, len(formats))
+	prefixes := &tagPrefixNode[packageTagMatcher]{}
+	templates := make(map[TagFormat]*tagTemplate)
 	names := make([]string, 0, len(formats))
 	for name := range formats {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		result[name] = parseTags(out, name, formats[name].WithDefault())
+		result[name] = nil
+		format := formats[name].WithDefault()
+		tpl, compiled := templates[format]
+		if !compiled {
+			var err error
+			tpl, err = format.template()
+			if err != nil {
+				tpl = nil
+			}
+			templates[format] = tpl
+		}
+		if tpl == nil {
+			continue
+		}
+		matcher, ok := packageTagMatcherFromTemplate(name, tpl)
+		if ok {
+			prefixes.add(matcher.prefix, matcher)
+		}
 	}
-	return result, nil
+
+	for line := range strings.Lines(out) {
+		entry, ok := parseTagInventoryLine(line)
+		if !ok || entry.name == LockTagName || strings.HasPrefix(entry.name, LockAttemptTagPrefix) {
+			continue
+		}
+		detached := false
+		node := prefixes
+		for depth := 0; node != nil; depth++ {
+			for _, matcher := range node.matchers {
+				if matcher.matches(entry.name) {
+					if !detached {
+						entry = entry.detach()
+						detached = true
+					}
+					result[matcher.packageName] = append(result[matcher.packageName], matcher.read(entry))
+				}
+			}
+			if depth == len(entry.name) {
+				break
+			}
+			node = node.child(entry.name[depth])
+		}
+	}
+	return result
 }
 
 func parseTags(out, pkg string, format TagFormat) Tags {
+	matcher, ok := newPackageTagMatcher(pkg, format)
+	if !ok {
+		return nil
+	}
 	var tags Tags
-	for _, line := range strings.Split(out, "\n") {
-		if strings.TrimSpace(line) == "" {
+	for line := range strings.Lines(out) {
+		entry, ok := parseTagInventoryLine(line)
+		if !ok {
 			continue
 		}
-		f := strings.Split(line, "\t")
-		if len(f) < 2 {
-			continue
-		}
-		name := strings.TrimSpace(f[0])
-		if name == LockTagName || strings.HasPrefix(name, LockAttemptTagPrefix) {
+		if entry.name == LockTagName || strings.HasPrefix(entry.name, LockAttemptTagPrefix) {
 			// dispat's own coordination ref, which is on HEAD for the whole of
 			// the run doing the planning. A format broad enough to match it —
 			// "{version}" makes the glob "*" — would otherwise adopt it as the
@@ -703,21 +834,10 @@ func parseTags(out, pkg string, format TagFormat) Tags {
 		// matches a tag of a package called "core@extra". Re-checking the
 		// shape against the format is what keeps someone else's tags out
 		// (§12.1).
-		if !format.Matches(pkg, name) {
+		if !matcher.matches(entry.name) {
 			continue
 		}
-		t := Tag{Name: name, Commit: strings.TrimSpace(f[1])}
-		// An annotated tag's %(objectname) is the tag object; the commit is
-		// the peeled %(*objectname). Lightweight tags leave it empty.
-		if len(f) > 2 {
-			if peeled := strings.TrimSpace(f[2]); peeled != "" {
-				t.Commit = peeled
-			}
-		}
-		if v, ok := format.ParseVersion(pkg, name); ok {
-			t.Version, t.Parsed = v, true
-		}
-		tags = append(tags, t)
+		tags = append(tags, matcher.read(entry.detach()))
 	}
 	return tags
 }

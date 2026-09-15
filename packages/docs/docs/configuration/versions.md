@@ -97,6 +97,19 @@ question for good.
 
 An entry of `"core": "0.0.0"` says "this package starts from zero" and stays that way.
 
+## Cross-repository consumer boundaries
+
+In [polyrepository mode](../control-repository.md#when-a-boundary-needs-help), a consumer's own release tag tells dispat
+where that consumer is in its repository, but it does not by itself say which revision of another source repository the
+release incorporated. dispat can infer that position from an unambiguous normal control release checkpoint. When no
+such checkpoint exists, add a `repositoryBaselines` tuple to the control configuration. Do not replace this with an
+`initials` entry: `initials` supplies a version, while a repository baseline supplies a source-history boundary.
+
+Boundary lookup is lazy. A tag-only consumer release needs no control boundary when no applicable control intent
+affects that package. If an explicit control directive does affect it and must be ordered across the tag, preserve the
+ordinary checkpoint association or add a tuple whose `repository` is `control`; an unknown control position is
+`E333` rather than a date-based guess.
+
 ## Renaming a package
 
 A package's name is its folder name, or the key of its standalone [`packages`](./packages.md) entry, spelled exactly as

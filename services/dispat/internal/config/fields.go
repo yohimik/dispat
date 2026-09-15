@@ -41,6 +41,10 @@ func decodeSpaceFile(src map[string]any, dst *SpaceFile) error {
 // repository-wide defaults for the space-shaped keys.
 func fileFields(dst *File) fields {
 	return fields{
+		"polyrepo":              flag(&dst.Polyrepo),
+		"configs":               strs(&dst.Configs),
+		"repositoryoverrides":   objMap(&dst.RepositoryOverrides, repositoryOverrideFields),
+		"repositorybaselines":   objList(&dst.RepositoryBaselines, repositoryBaselineFields),
 		"scripts":               scriptMap(&dst.Scripts),
 		"spaces":                objMap(&dst.Spaces, spaceConfigFields),
 		"packages":              objMap(&dst.Packages, packageConfigFields),
@@ -308,11 +312,25 @@ func commitFields(dst *CommitConfig) fields {
 		"messageformat": str(&dst.MessageFormat),
 		"push":          flag(&dst.Push),
 		"remote":        str(&dst.Remote),
+		"branch":        str(&dst.Branch),
 		"force":         flagPtr(&dst.Force),
 		"verify":        flagPtr(&dst.Verify),
 		"include":       strs(&dst.Include),
 		"name":          str(&dst.Name),
 		"email":         str(&dst.Email),
+	}
+}
+
+func repositoryOverrideFields(dst *RepositoryOverrideConfig) fields {
+	return fields{"commit": obj(&dst.Commit, commitFields)}
+}
+
+func repositoryBaselineFields(dst *RepositoryBaselineConfig) fields {
+	return fields{
+		"consumer":   str(&dst.Consumer),
+		"releasetag": str(&dst.ReleaseTag),
+		"repository": str(&dst.Repository),
+		"revision":   str(&dst.Revision),
 	}
 }
 
