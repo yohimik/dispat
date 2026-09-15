@@ -108,6 +108,8 @@ Source configuration is never activated by a central path accidentally entering 
 `configs` or `--configs` establishes that source's normal local root, space, and package configuration layers. Keep
 `--config`, every import, `--polyrepo`, the control checkout, and all source pins identical between status, gates, and
 release.
+Control-owned folder configuration and ignore/exclude files retain their ordinary behavior. Source-owned folder
+configuration, `.dispatignore`, and `.dispatexclude` apply only through an explicitly imported source configuration.
 
 Review ownership before running scripts. A package must live wholly inside one Git repository. In this mode, a
 control-owned wrapper may not point `src`, manifests, changelogs, or version writes across a source boundary. Paths in
@@ -123,6 +125,8 @@ propagation may cross the combined dependency graph. An explicit control commit 
 and is evaluated against that control revision's gitlinks. Do not count a gitlink move as a second package change in
 polyrepository mode. Do not resolve precedence between incomparable source commits by timestamp, traversal order, or
 SHA spelling; use an applicable control directive or stop on the reported conflict.
+An applicable direct channel directive takes precedence over conflicting propagated channels; an unmatched or
+otherwise inert direct directive does not resolve their conflict.
 
 An `external: true` dependency may name a provider omitted from the current imports. Confirm that the skipped-provider
 diagnostic is expected. If that provider is present, review the edge as an ordinary one: it affects cycles,

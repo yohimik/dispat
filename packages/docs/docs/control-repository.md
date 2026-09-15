@@ -113,6 +113,15 @@ package layers apply inside that repository, along with references it explicitly
 that merely enters a source does not start this discovery. This keeps a coincidental filename from changing fleet
 policy while preserving normal local layering for a source you deliberately import.
 
+Each imported source uses its own parser settings. Its `parser.quiet` controls whether that source's parser findings
+are printed; `--quiet-parser` and `--quiet-parser=false` override every repository for the invocation. Diagnostics
+identify their source repository alongside the commit. Quiet mode changes display only: the control configuration's
+`commitErrors` policy still determines whether commit-message errors block the combined release.
+
+Control-owned folders keep their ordinary configuration layers, `.dispatignore`, and `.dispatexclude` files. For a
+centrally declared source path, those source-owned files do not change the central declaration or its change scope.
+Import the source configuration explicitly when its local discovery policy should apply.
+
 List every imported source at the control level. An imported source cannot use its own `configs` key to pull another
 repository into the fleet; its ordinary `$ref` composition remains available inside that source.
 
@@ -138,6 +147,10 @@ intentional fleet-wide hold, cancellation, channel transition, or release direct
 exact source commits pinned by that control revision. Source commits from separate repositories have no reliable
 newest order; if two incomparable directives need one winner, dispat fails rather than sorting by date. A later control
 directive can settle the choice from a known source snapshot.
+
+An applicable direct channel directive still takes precedence over propagated channels, even when the propagated
+proposals come from incomparable source revisions. A directive that proposes no change, including an unmatched
+transition, does not settle their conflict.
 
 The control gitlink move itself is never a second source change in this mode. The source commit supplies release intent;
 the pointer records which source snapshot the control revision observed.
@@ -237,6 +250,10 @@ already recorded successes survive a failure, consumers of a failed provider sta
 continue. The next run reconstructs the remaining plan from source tags. A recording error is reported separately and
 never turns an unrecorded publish into a success.
 
+After interruption, dispat still records successful publications within its recording timeout. Source and control
+commit/push hooks respect the interruption: running hooks are cancelled and later hooks are skipped while native
+commits, tags, pushes, and required checkpoints finish.
+
 If a source tag and revision are durable but the control checkpoint fails, the error names the source repository, full
 revision, and tag. The next run refuses the unpinned checkout. Inspect the source remote, then explicitly commit or
 reconcile the control gitlink to that durable revision, or restore the source checkout to the intended committed pin.
@@ -304,6 +321,8 @@ changes. `--since all` keeps its usual meaning and selects every package.
 Every command sees the same combined workspace. Package scripts run in their package folders, and nested hooks retain
 both the source repository context and the combined graph. Entering a source folder does not load another config or
 silently narrow the fleet.
+Nested release steps exclude the current run's tags only from their owning repositories when reconstructing the plan.
+An identically named tag in another source remains that source's published baseline.
 
 ### CI checkout
 
