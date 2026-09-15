@@ -266,6 +266,81 @@ func TestComposeWorkspaceRejectsImportedPackagePathSymlinkEscape(t *testing.T) {
 	require.ErrorContains(t, err, "path or src escapes its owner root")
 }
 
+func TestComposeWorkspaceRejectsCentralPackageInUnlistedNestedRepository(t *testing.T) {
+	sdk := workspaceRepo(t, "sdk", nil)
+	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, File{
+		Polyrepo: true,
+		Packages: map[string]PackageConfig{"nested": {Path: "vendor/nested/pkg"}},
+	})
+	nested := filepath.Join(root, "vendor", "nested")
+	require.NoError(t, os.MkdirAll(filepath.Join(nested, "pkg"), 0o755))
+	workspaceGit(t, nested, "init", "-b", "main")
+
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	require.NoError(t, err)
+	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
+	require.ErrorContains(t, err, "unlisted nested Git repository")
+	requireWorkspaceDiagnostic(t, err, DiagnosticOwnershipInvalid)
+}
+
+func TestComposeWorkspaceRejectsImportedPackageInUnlistedNestedRepository(t *testing.T) {
+	sdkCfg := &File{Packages: map[string]PackageConfig{"sdk": {Path: "pkgs/sdk"}}}
+	sdk := workspaceRepo(t, "sdk", sdkCfg)
+	root, path := workspaceControl(t, map[string]string{"sdk": sdk},
+		File{Configs: []string{"sources/sdk/dispat.json"}})
+	packageRoot := filepath.Join(root, "sources", "sdk", "pkgs", "sdk")
+	workspaceGit(t, packageRoot, "init", "-b", "main")
+
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	require.NoError(t, err)
+	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
+	require.ErrorContains(t, err, "unlisted nested Git repository")
+	requireWorkspaceDiagnostic(t, err, DiagnosticOwnershipInvalid)
+}
+
+func TestComposeWorkspaceRejectsSrcInUnlistedNestedRepository(t *testing.T) {
+	sdk := workspaceRepo(t, "sdk", nil)
+	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, File{
+		Polyrepo: true,
+		Packages: map[string]PackageConfig{"tool": {Path: "tools/tool", Src: "src"}},
+	})
+	src := filepath.Join(root, "tools", "tool", "src")
+	require.NoError(t, os.MkdirAll(src, 0o755))
+	workspaceGit(t, src, "init", "-b", "main")
+
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	require.NoError(t, err)
+	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
+	require.ErrorContains(t, err, "src path")
+	require.ErrorContains(t, err, "unlisted nested Git repository")
+	requireWorkspaceDiagnostic(t, err, DiagnosticOwnershipInvalid)
+}
+
+func TestComposeWorkspaceRejectsSymlinkedGitMarker(t *testing.T) {
+	sdk := workspaceRepo(t, "sdk", nil)
+	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, File{
+		Polyrepo: true,
+		Packages: map[string]PackageConfig{"tool": {Path: "tools/tool"}},
+	})
+	tool := filepath.Join(root, "tools", "tool")
+	require.NoError(t, os.MkdirAll(tool, 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(root, ".git"), filepath.Join(tool, ".git")))
+
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	require.NoError(t, err)
+	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
+	require.ErrorContains(t, err, "unsupported .git marker")
+	requireWorkspaceDiagnostic(t, err, DiagnosticOwnershipInvalid)
+}
+
 func TestComposeWorkspaceRequiresExactRepositoryOverrideIdentity(t *testing.T) {
 	enabled := true
 	sdk := workspaceRepo(t, "sdk", nil)

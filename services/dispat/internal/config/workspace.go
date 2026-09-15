@@ -470,6 +470,7 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 	var pkgs []*model.Package
 	var declared []DeclaredDependency
 	var excluded []ExcludedDir
+	gitRoots := &gitRootMemo{byDir: make(map[string]string)}
 	for _, repo := range workspace.Repositories {
 		if !repo.Control && !repo.Imported {
 			continue
@@ -493,7 +494,7 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 			owner := repo.Name
 			ownerRoot := repo.Root
 			if repo.Control {
-				owner, ownerRoot, err = packageRepository(p, workspace)
+				owner, ownerRoot, err = packageRepository(p, workspace, gitRoots)
 				if err != nil {
 					return nil, nil, nil, err
 				}
@@ -505,6 +506,9 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 				dirOwner, scopeOwner := workspace.repositoryForCanonicalDir(dir), workspace.repositoryForCanonicalDir(scope)
 				if dirOwner == nil || scopeOwner == nil || dirOwner.Name != repo.Name || scopeOwner.Name != repo.Name {
 					return nil, nil, nil, WithDiagnostic(DiagnosticOwnershipInvalid, fmt.Errorf("polyrepo: imported repository %q package %q path or src escapes its owner root %s", repo.Name, p.Name, repo.Root))
+				}
+				if err := gitRoots.requireOwner(p, dir, scope, &repo); err != nil {
+					return nil, nil, nil, err
 				}
 				p.Dir = dir
 			}
@@ -545,7 +549,7 @@ func canonicalPackagePaths(p *model.Package) (string, string, error) {
 	return dir, scope, nil
 }
 
-func packageRepository(p *model.Package, workspace *Workspace) (string, string, error) {
+func packageRepository(p *model.Package, workspace *Workspace, gitRoots *gitRootMemo) (string, string, error) {
 	dir, scope, err := canonicalPackagePaths(p)
 	if err != nil {
 		return "", "", err
@@ -566,8 +570,66 @@ func packageRepository(p *model.Package, workspace *Workspace) (string, string, 
 			return "", "", WithDiagnostic(DiagnosticOwnershipInvalid, fmt.Errorf("polyrepo: package %q path %s spans source repository %q at %s", p.Name, p.Dir, source.Name, source.Root))
 		}
 	}
+	if err := gitRoots.requireOwner(p, dir, scope, dirOwner); err != nil {
+		return "", "", err
+	}
 	p.Dir = dir
 	return dirOwner.Name, dirOwner.Root, nil
+}
+
+type gitRootMemo struct {
+	byDir map[string]string
+}
+
+func (m *gitRootMemo) requireOwner(p *model.Package, dir, scope string, owner *Repository) error {
+	for _, candidate := range []struct {
+		label string
+		path  string
+	}{{"path", dir}, {"src path", scope}} {
+		actual, err := m.nearest(candidate.path)
+		if err != nil {
+			return WithDiagnostic(DiagnosticOwnershipInvalid, fmt.Errorf("polyrepo: package %q %s %s: %w", p.Name, candidate.label, candidate.path, err))
+		}
+		if actual != owner.Root {
+			return WithDiagnostic(DiagnosticOwnershipInvalid, fmt.Errorf("polyrepo: package %q %s %s belongs to unlisted nested Git repository %s, not repository %q at %s", p.Name, candidate.label, candidate.path, actual, owner.Name, owner.Root))
+		}
+	}
+	return nil
+}
+
+// nearest finds the nearest Git worktree marker without starting one Git
+// process per package. Every traversed ancestor is memoized for the remaining
+// discovery pass. Both normal `.git` directories and worktree/submodule
+// `.git` files are repositories; symlinked markers are rejected.
+func (m *gitRootMemo) nearest(path string) (string, error) {
+	current := filepath.Clean(path)
+	var traversed []string
+	for {
+		if root, ok := m.byDir[current]; ok {
+			for _, dir := range traversed {
+				m.byDir[dir] = root
+			}
+			return root, nil
+		}
+		traversed = append(traversed, current)
+		info, err := os.Lstat(filepath.Join(current, ".git"))
+		switch {
+		case err == nil && (info.IsDir() || info.Mode().IsRegular()):
+			for _, dir := range traversed {
+				m.byDir[dir] = current
+			}
+			return current, nil
+		case err == nil:
+			return "", fmt.Errorf("unsupported .git marker at %s", current)
+		case !os.IsNotExist(err):
+			return "", fmt.Errorf("inspect .git marker at %s: %w", current, err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("no Git repository contains %s", path)
+		}
+		current = parent
+	}
 }
 
 func validatePackageOwnership(pkgs []*model.Package) error {
