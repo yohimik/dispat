@@ -1,5 +1,29 @@
 # Changelog
 
+## packages/docs/v1.11.0-rc.0 (2026-09-15)
+
+### Fixes
+
+- clarify polyrepository configuration and release behavior ([88cf2ca](https://github.com/yohimik/dispat/commit/88cf2cae8b0355be0f5e185fc450f0c1949e4502)) (by yohimik, Codex (gpt-5.6-sol))
+  Document owner-local folder inputs and parser diagnostics, direct channel
+  precedence, and cancellation of hooks during durable release recording.
+
+- document composed repository releases ([7e38ae1](https://github.com/yohimik/dispat/commit/7e38ae131734159acb7011a835219f765c46a983)) (by yohimik, Codex (gpt-5.6-sol))
+  Describe central and imported configuration, external edges, source ownership,
+  locks, exact pin handoff, diagnostics and partial publication recovery.
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.0): 1.10.0 -> 1.11.0-rc.0
+- [cli](https://github.com/yohimik/dispat/releases/tag/packages/cli/v1.11.0-rc.0): 1.10.3 -> 1.11.0-rc.0
+- [dispat-alpine](https://github.com/yohimik/dispat/releases/tag/docker/dispat-alpine/v1.11.0-rc.0): 1.10.0 -> 1.11.0-rc.0
+
+### Authors
+
+- yohimik
+- Codex (gpt-5.6-sol)
+
+
 ## packages/docs/v1.10.14 (2026-09-13)
 
 ### Fixes
