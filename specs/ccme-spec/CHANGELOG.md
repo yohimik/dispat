@@ -1,5 +1,18 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.0 (2026-09-15)
+
+### Features
+
+- define polyrepository Git planning ([7e38ae1](https://github.com/yohimik/dispat/commit/7e38ae131734159acb7011a835219f765c46a983)) (by yohimik)
+  Add the optional profile for repository identities, fixed histories, consumer
+  boundaries, source records, fleet locks and bounded planning indexes.
+
+### Authors
+
+- yohimik
+
+
 ## specs/ccme-spec/v3.0.2 (2026-09-09)
 
 ### Fixes
