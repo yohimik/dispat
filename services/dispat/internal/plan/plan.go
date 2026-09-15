@@ -234,6 +234,16 @@ const (
 	// fresh hundred would say a boundary exists where none does.
 	CodeCommitRefUnavailable = "W240"
 
+	// CodeRepositoryBoundary reports a missing, ambiguous, conflicting or
+	// unreachable cross-repository consumer baseline (§27.6).
+	CodeRepositoryBoundary = "E333"
+	// CodeRepositoryPrecedence reports incomparable source revisions where a
+	// semantic rule requires one winner and no causal control directive does.
+	CodeRepositoryPrecedence = "E334"
+	// CodeExternalProviderAbsent reports an explicitly external provider whose
+	// repository is not part of the current workspace snapshot.
+	CodeExternalProviderAbsent = "W330"
+
 	// CodeNoChangesTextEmpty marks a configured noChangesText that expanded to
 	// nothing, or to whitespace alone: the names it interpolates are unset, so
 	// the entry carries the built-in line naming the release's cause rather
@@ -510,12 +520,14 @@ const MaxMajorJump = 1
 // commit log. It is resolved by a human correcting the repository, after which
 // the run is simply repeated, so no partial release may be emitted meanwhile.
 var repositoryScoped = map[string]bool{
-	CodeBadPrereleaseTag:    true, // E182
-	CodeGraduateNoIncrease:  true, // E185
-	CodeDuplicateVersionTag: true, // E191
-	CodeVersionNotGreater:   true, // E195
-	CodeShallowRepository:   true, // E196
-	CodeDependencyCycle:     true, // E200
+	CodeBadPrereleaseTag:     true, // E182
+	CodeGraduateNoIncrease:   true, // E185
+	CodeDuplicateVersionTag:  true, // E191
+	CodeVersionNotGreater:    true, // E195
+	CodeShallowRepository:    true, // E196
+	CodeDependencyCycle:      true, // E200
+	CodeRepositoryBoundary:   true, // E333
+	CodeRepositoryPrecedence: true, // E334
 }
 
 // IsRepositoryScoped reports whether a diagnostic code aborts the run whatever
@@ -550,8 +562,9 @@ func (d Diagnostic) String() string {
 // is the consumer-side view of §9.2 that §13.7b asks implementations to offer:
 // "which of my packages are behind their dependencies, and behind which?".
 type StaleSource struct {
-	Provider string // the package the contribution came from
-	Commit   string // the commit carrying the unit
+	Provider  string // the package the contribution came from
+	Commit    string // the commit carrying the unit
+	commitKey string // repository-qualified identity used only inside planning
 	// Level is the number of hops to this package, measured from the unit's
 	// whole source set the way §9.2 measures depth. A unit written over
 	// several packages records one contribution per source, all at the
@@ -590,14 +603,16 @@ type Release struct {
 	HasBaseline bool
 	// Tagged reports whether a parseable *stable* release tag exists — the
 	// counterpart of HasBaseline for the stable baseline Current comes from.
-	Tagged       bool
-	StableCommit string // commit of the stable baseline tag; "" when untagged
+	Tagged          bool
+	StableCommit    string // commit of the stable baseline tag; "" when untagged
+	stableCommitKey string
 	// BaselineCommit is the commit of the baseline tag — the newest tag of any
 	// kind. On a prerelease train it is ahead of StableCommit, and everything
 	// at or behind it has already been published by the train; for a stable
 	// package the two coincide.
-	BaselineCommit string
-	FromInitials   bool // Current came from the config initials
+	BaselineCommit    string
+	baselineCommitKey string
+	FromInitials      bool // Current came from the config initials
 
 	OwnBump        ccme.Bump // direct(P), §13.6
 	PropagatedBump ccme.Bump // propagated(P), §13.7
@@ -772,10 +787,10 @@ func (r *Release) AuthorsFor(u *ccme.Unit) []Author { return r.UnitAuthors[u] }
 // reference that leads nowhere.
 func (r *Release) UnitCommit(u *ccme.Unit) string {
 	key := r.UnitCommits[u]
-	if strings.HasPrefix(key, syntheticKeyPrefix) {
+	if strings.HasPrefix(rawHistoryKey(key), syntheticKeyPrefix) {
 		return ""
 	}
-	return key
+	return rawHistoryKey(key)
 }
 
 // AllAuthors returns every author of the release's window, narrowed exactly as
@@ -1142,10 +1157,16 @@ type Plan struct {
 	Releases    map[string]*Release // one entry per package
 	Providers   map[string][]string // consumer -> its providers
 	Diagnostics []Diagnostic
+	// RepositoryHeads is the immutable source snapshot planning read, keyed by
+	// stable repository identity. The release recorder uses it to detect an
+	// intervening checkout mutation before any script or tag-only record can
+	// accidentally publish the new HEAD under the old plan.
+	RepositoryHeads map[string]string
 
 	// ancestor answers "is a an ancestor-or-self of b" over the commits the
 	// plan examined; it backs PossiblyBehind.
-	ancestor func(a, b string) bool
+	ancestor         func(a, b string) bool
+	stableBoundaries map[string]map[string]string
 }
 
 // HasErrors reports whether any error-severity diagnostic was raised, of any
@@ -1238,6 +1259,14 @@ func (p *Plan) PossiblyBehind(consumer, provider string) bool {
 	if c == nil || pr == nil || pr.StableCommit == "" {
 		return false
 	}
+	if len(p.stableBoundaries) > 0 {
+		providerKey := pr.stableCommitKey
+		consumerKey := p.stableBoundaries[consumer][strings.ToLower(pr.Pkg.Repository)]
+		if consumerKey == "" {
+			return true
+		}
+		return p.ancestor != nil && !p.ancestor(providerKey, consumerKey)
+	}
 	if c.StableCommit == "" {
 		return true // never released while the provider has been
 	}
@@ -1257,8 +1286,12 @@ type edge struct {
 type commitRec struct {
 	commit gitx.Commit
 	key    string
-	rank   int // position in history, 0 = newest
-	units  []*ccme.Unit
+	// repository/root identify the history carrying commit. Empty repository
+	// is the legacy single history.
+	repository string
+	root       string
+	rank       int // position in history, 0 = newest
+	units      []*ccme.Unit
 	// unitCount is how many units the message carried, invalid ones included.
 	// units holds only those that parsed, and a correction's "#n" selector
 	// counts positions in the message (§7.4.1), so the two are different
@@ -1267,7 +1300,9 @@ type commitRec struct {
 	// scope[i] is the resolved scope-set of units[i] (§6), as package names.
 	scope []map[string]bool
 	// derivedSet memoises derived(commit) (§6.2).
-	derivedSet map[string]bool
+	derivedSet          map[string]bool
+	propagations        []propagation
+	channelPropagations []channelPropagation
 }
 
 // pin is an exact `Release-As` directive together with the context its guards
@@ -1294,6 +1329,9 @@ type Options struct {
 	Packages []*model.Package
 	// Dependencies are the graph edges.
 	Dependencies []model.Dependency
+	// InactiveExternalDependencies are syntactically valid external edges
+	// whose providers are absent from the current workspace snapshot.
+	InactiveExternalDependencies []model.Dependency
 	// Initials is the baseline for a package whose latest tag is missing or
 	// unparseable, keyed by package name.
 	Initials map[string]ccme.Version
@@ -1325,6 +1363,14 @@ type Options struct {
 	// published history — that would empty the window the record needs — so
 	// the environment wiring masks it here. See the app's step wiring.
 	IgnoredTags []string
+	// Repositories enables composed history. Keys and Name are stable
+	// .gitmodules identities; one entry has Control true. Empty preserves the
+	// legacy single-history Git argument exactly.
+	Repositories map[string]RepositoryHistory
+	// RepositoryBaselines are explicit cross-repository release boundaries.
+	RepositoryBaselines []RepositoryBaseline
+	// HistoryStats optionally receives operation counts for scale tests.
+	HistoryStats *HistoryStats
 }
 
 type computation struct {
@@ -1334,26 +1380,48 @@ type computation struct {
 	root     string
 	initials map[string]ccme.Version
 	// nonPackage holds Options.NonPackageScopes as a set.
-	nonPackage map[string]bool
+	nonPackage       map[string]bool
+	nonPackageByRepo map[string]map[string]bool
 	// ignoredTags is Options.IgnoredTags as a set; see that field.
-	ignoredTags map[string]bool
+	ignoredTags      map[string]bool
+	histories        map[string]RepositoryHistory
+	controlRepo      string
+	baselines        map[baselineKey]string
+	baselineSpecs    []RepositoryBaseline
+	stats            *HistoryStats
+	parsers          map[string]*ccme.Parser
+	repositoryHeads  map[string]string
+	controlHistory   []gitx.ControlHistoryCommit
+	controlIndexed   bool
+	controlStates    map[string]*controlGitlinkState
+	controlPathIndex map[string]int
+	controlPathCount int
 
 	pkgs      []*model.Package
 	scopeDirs []scopeDir // prepared once; see prepareScopeDirs
 	byName    map[string]*model.Package
+	byFold    map[string]string
 	order     []string
 	providers map[string][]string
 	edges     map[string][]edge
 
 	parser *ccme.Parser
 
-	rel     map[string]*Release
-	tags    map[string]gitx.Tags       // package -> its tag listing, newest first
-	window  map[string]map[string]bool // package -> commit keys it has not released
-	commits []*commitRec               // newest first, deduplicated
-	byKey   map[string]*commitRec
-	parents map[string][]string
-	linked  bool // whether parent pointers are available
+	rel                 map[string]*Release
+	tags                map[string]gitx.Tags         // package -> its tag listing, newest first
+	window              map[string]map[string]bool   // package -> commit keys it has not released
+	windowRefs          map[string][]map[string]bool // composed package -> shared repository windows
+	repositoryReach     map[string][]string
+	stableBoundaries    map[string]map[string]string // package -> repository -> qualified stable boundary
+	publishedBoundaries map[string]map[string]string // package -> repository -> qualified latest-tag boundary
+	stableTags          map[string]gitx.Tag
+	latestTags          map[string]gitx.Tag
+	controlSnapshots    map[string]controlSnapshot
+	controlAmbiguous    map[string]bool
+	commits             []*commitRec // newest first, deduplicated
+	byKey               map[string]*commitRec
+	parents             map[string][]string
+	linked              bool // whether parent pointers are available
 
 	// ownContribs is each package's direct contributions with the commits
 	// that carried them: what directBumps folded into OwnBump, kept apart so
@@ -1389,6 +1457,7 @@ type computation struct {
 
 	// channel axis state, produced by §9.2 phase 1 and settled by §13.8.
 	proposed    map[string]channelPick
+	proposedAll map[string][]channelPick
 	channel     map[string]string
 	channelFrom map[string]string
 
@@ -1398,7 +1467,7 @@ type computation struct {
 	// Compute rather than let the weaker fallbacks decide cancellation and
 	// containment.
 	ancCache map[[2]string]bool
-	ancNoGit bool
+	ancNoGit map[string]bool
 	ancErr   error
 
 	diags []Diagnostic
@@ -1431,31 +1500,73 @@ type computation struct {
 func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	pkgs := opts.Packages
 	cp := &computation{
-		ctx:         ctx,
-		git:         git,
-		log:         opts.Log,
-		root:        opts.Root,
-		initials:    opts.Initials,
-		nonPackage:  make(map[string]bool, len(opts.NonPackageScopes)),
-		ignoredTags: make(map[string]bool, len(opts.IgnoredTags)),
-		pkgs:        pkgs,
-		byName:      make(map[string]*model.Package, len(pkgs)),
-		rel:         make(map[string]*Release, len(pkgs)),
-		tags:        make(map[string]gitx.Tags, len(pkgs)),
-		window:      make(map[string]map[string]bool, len(pkgs)),
-		ownContribs: make(map[string][]groupContrib, len(pkgs)),
-		byKey:       make(map[string]*commitRec),
-		parents:     make(map[string][]string),
-		held:        make(map[string]bool),
-		pinned:      make(map[string]pin),
-		proposed:    make(map[string]channelPick),
-		channel:     make(map[string]string, len(pkgs)),
-		channelFrom: make(map[string]string),
-		dropped:     make(map[dropKey]*correctionRec),
-		corrects:    make(map[string]map[*ccme.Unit][]string),
-		noteDrops:   make(map[string]map[*ccme.Unit]bool),
-		unitAuthors: make(map[*ccme.Unit][]Author),
-		unitCommits: make(map[*ccme.Unit]string),
+		ctx:                 ctx,
+		git:                 git,
+		log:                 opts.Log,
+		root:                opts.Root,
+		initials:            opts.Initials,
+		nonPackage:          make(map[string]bool, len(opts.NonPackageScopes)),
+		nonPackageByRepo:    make(map[string]map[string]bool, len(opts.Repositories)),
+		ignoredTags:         make(map[string]bool, len(opts.IgnoredTags)),
+		pkgs:                pkgs,
+		byName:              make(map[string]*model.Package, len(pkgs)),
+		byFold:              make(map[string]string, len(pkgs)),
+		rel:                 make(map[string]*Release, len(pkgs)),
+		tags:                make(map[string]gitx.Tags, len(pkgs)),
+		window:              make(map[string]map[string]bool, len(pkgs)),
+		windowRefs:          make(map[string][]map[string]bool, len(pkgs)),
+		repositoryReach:     make(map[string][]string, len(pkgs)),
+		stableBoundaries:    make(map[string]map[string]string, len(pkgs)),
+		publishedBoundaries: make(map[string]map[string]string, len(pkgs)),
+		ownContribs:         make(map[string][]groupContrib, len(pkgs)),
+		byKey:               make(map[string]*commitRec),
+		parents:             make(map[string][]string),
+		held:                make(map[string]bool),
+		pinned:              make(map[string]pin),
+		proposed:            make(map[string]channelPick),
+		proposedAll:         make(map[string][]channelPick),
+		channel:             make(map[string]string, len(pkgs)),
+		channelFrom:         make(map[string]string),
+		dropped:             make(map[dropKey]*correctionRec),
+		corrects:            make(map[string]map[*ccme.Unit][]string),
+		noteDrops:           make(map[string]map[*ccme.Unit]bool),
+		unitAuthors:         make(map[*ccme.Unit][]Author),
+		unitCommits:         make(map[*ccme.Unit]string),
+		ancNoGit:            make(map[string]bool),
+		histories:           make(map[string]RepositoryHistory, len(opts.Repositories)),
+		baselines:           make(map[baselineKey]string, len(opts.RepositoryBaselines)),
+		baselineSpecs:       append([]RepositoryBaseline(nil), opts.RepositoryBaselines...),
+		stats:               opts.HistoryStats,
+		parsers:             make(map[string]*ccme.Parser),
+		repositoryHeads:     make(map[string]string),
+	}
+	for key, history := range opts.Repositories {
+		if history.Name == "" {
+			history.Name = key
+		}
+		cp.histories[strings.ToLower(history.Name)] = history
+		scopes := make(map[string]bool, len(history.NonPackageScopes))
+		for _, scope := range history.NonPackageScopes {
+			scopes[scope] = true
+		}
+		cp.nonPackageByRepo[strings.ToLower(history.Name)] = scopes
+		if history.Control {
+			cp.controlRepo = history.Name
+		}
+	}
+	for _, baseline := range opts.RepositoryBaselines {
+		repository := baseline.Repository
+		if history, ok := cp.histories[strings.ToLower(repository)]; ok {
+			repository = history.Name
+		}
+		key := baselineKey{consumer: strings.ToLower(baseline.Consumer), tag: baseline.ReleaseTag,
+			repository: strings.ToLower(repository)}
+		if _, duplicate := cp.baselines[key]; duplicate {
+			cp.err(CodeRepositoryBoundary, baseline.Consumer, "", fmt.Sprintf(
+				"duplicate repository baseline for release %s and repository %s", baseline.ReleaseTag, repository))
+			return cp.fatalPlan(), nil
+		}
+		cp.baselines[key] = historyKey(repository, baseline.Revision)
 	}
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
@@ -1470,16 +1581,46 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		}
 		return nil, err
 	}
+	for _, dependency := range opts.InactiveExternalDependencies {
+		cp.warn(CodeExternalProviderAbsent, dependency.Consumer, "", fmt.Sprintf(
+			"external provider %q is absent; the %s edge is inactive for this workspace snapshot",
+			dependency.Provider, dependency.Kind.String()))
+	}
+	if len(cp.histories) > 0 {
+		cp.prepareRepositoryReach()
+	}
 
 	// §16 E196: a shallow or grafted clone hides commits and tags, so every
 	// window and baseline computed over it is silently wrong. Checked before
 	// any history is read.
-	if shallow, err := git.IsShallow(ctx); err != nil {
-		return nil, fmt.Errorf("plan: checking repository completeness: %w", err)
-	} else if shallow {
-		cp.err(CodeShallowRepository, "", "",
-			"the repository is shallow or grafted: history is incomplete, so no correct plan can be computed; run `git fetch --unshallow` first")
-		return cp.fatalPlan(), nil
+	checkHistories := []RepositoryHistory{{Git: git}}
+	if len(cp.histories) > 0 {
+		checkHistories = checkHistories[:0]
+		for _, history := range cp.histories {
+			checkHistories = append(checkHistories, history)
+		}
+	}
+	for _, history := range checkHistories {
+		if shallow, err := history.Git.IsShallow(ctx); err != nil {
+			return nil, fmt.Errorf("plan: checking repository %s completeness: %w", history.Name, err)
+		} else if shallow {
+			cp.err(CodeShallowRepository, "", "",
+				fmt.Sprintf("repository %s is shallow or grafted: history is incomplete, so no correct plan can be computed; run `git fetch --unshallow` first", history.Name))
+			return cp.fatalPlan(), nil
+		}
+		if len(cp.histories) > 0 {
+			head, ok := history.Git.(interface {
+				HeadSHA(context.Context) (string, error)
+			})
+			if !ok {
+				continue
+			}
+			sha, err := head.HeadSHA(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("plan: reading repository %s HEAD: %w", history.Name, err)
+			}
+			cp.repositoryHeads[history.Name] = sha
+		}
 	}
 	// The parser options come from the configuration file's `parser` object;
 	// a zero Config is the specification defaults, so nothing changes for a
@@ -1489,6 +1630,14 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		return nil, err
 	}
 	cp.parser = parser
+	cp.parsers[""] = parser
+	for _, history := range cp.histories {
+		configured, err := ccme.NewParser(history.ParserConfig)
+		if err != nil {
+			return nil, fmt.Errorf("plan: repository %s parser: %w", history.Name, err)
+		}
+		cp.parsers[strings.ToLower(history.Name)] = configured
+	}
 
 	if err := cp.loadTagsAndWindows(); err != nil { // §13.2, §13.3
 		if errors.Is(err, errFatalPlan) {
@@ -1499,6 +1648,12 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	cp.log.Debug().Int("packages", len(cp.order)).Int("commits", len(cp.commits)).
 		Msg("plan: windows loaded")
 	if err := cp.parseAndResolve(); err != nil { // §13.4
+		return nil, err
+	}
+	if err := cp.resolveApplicableControlBoundaries(); err != nil {
+		if errors.Is(err, errFatalPlan) {
+			return cp.fatalPlan(), nil
+		}
 		return nil, err
 	}
 	cp.collectCancels()        // §13.5
@@ -1526,11 +1681,13 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	}
 
 	return &Plan{
-		Order:       cp.order,
-		Releases:    cp.rel,
-		Providers:   cp.providers,
-		Diagnostics: cp.diags,
-		ancestor:    cp.ancestorOrSelf,
+		Order:            cp.order,
+		Releases:         cp.rel,
+		Providers:        cp.providers,
+		Diagnostics:      cp.diags,
+		RepositoryHeads:  cp.repositoryHeads,
+		ancestor:         cp.ancestorOrSelf,
+		stableBoundaries: cp.stableBoundaries,
 	}, nil
 }
 
@@ -1545,12 +1702,30 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 // come back in dependency order.
 func PackagesChangedSince(ctx context.Context, git gitx.Git, opts Options, rev string) ([]string, error) {
 	cp := &computation{
-		ctx:        ctx,
-		git:        git,
-		root:       opts.Root,
-		nonPackage: make(map[string]bool, len(opts.NonPackageScopes)),
-		pkgs:       opts.Packages,
-		byName:     make(map[string]*model.Package, len(opts.Packages)),
+		ctx:              ctx,
+		git:              git,
+		root:             opts.Root,
+		nonPackage:       make(map[string]bool, len(opts.NonPackageScopes)),
+		nonPackageByRepo: make(map[string]map[string]bool, len(opts.Repositories)),
+		pkgs:             opts.Packages,
+		byName:           make(map[string]*model.Package, len(opts.Packages)),
+		byFold:           make(map[string]string, len(opts.Packages)),
+		histories:        make(map[string]RepositoryHistory, len(opts.Repositories)),
+		parsers:          make(map[string]*ccme.Parser),
+	}
+	for key, history := range opts.Repositories {
+		if history.Name == "" {
+			history.Name = key
+		}
+		cp.histories[strings.ToLower(history.Name)] = history
+		scopes := make(map[string]bool, len(history.NonPackageScopes))
+		for _, scope := range history.NonPackageScopes {
+			scopes[scope] = true
+		}
+		cp.nonPackageByRepo[strings.ToLower(history.Name)] = scopes
+		if history.Control {
+			cp.controlRepo = history.Name
+		}
 	}
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
@@ -1563,15 +1738,58 @@ func PackagesChangedSince(ctx context.Context, git gitx.Git, opts Options, rev s
 		return nil, err
 	}
 	cp.parser = parser
+	cp.parsers[""] = parser
+	for _, history := range cp.histories {
+		configured, err := ccme.NewParser(history.ParserConfig)
+		if err != nil {
+			return nil, fmt.Errorf("plan: repository %s parser: %w", history.Name, err)
+		}
+		cp.parsers[strings.ToLower(history.Name)] = configured
+	}
 
-	commits, err := git.Commits(ctx, rev)
-	if err != nil {
-		return nil, fmt.Errorf("plan: resolving commits since %q: %w", rev, err)
+	var records []*commitRec
+	if len(cp.histories) == 0 {
+		commits, err := git.Commits(ctx, rev)
+		if err != nil {
+			return nil, fmt.Errorf("plan: resolving commits since %q: %w", rev, err)
+		}
+		for _, commit := range commits {
+			records = append(records, &commitRec{commit: commit, key: commitKey(commit), root: opts.Root})
+		}
+	} else {
+		control, ok := cp.histories[strings.ToLower(cp.controlRepo)]
+		if !ok {
+			return nil, fmt.Errorf("plan: composed history has no control repository")
+		}
+		reader, ok := control.Git.(gitlinkSnapshotReader)
+		if !ok {
+			return nil, fmt.Errorf("plan: control repository cannot project gitlinks at %q", rev)
+		}
+		links, err := reader.GitlinksAt(ctx, rev)
+		if err != nil {
+			return nil, fmt.Errorf("plan: resolving control gitlinks at %q: %w", rev, err)
+		}
+		for _, history := range cp.histories {
+			since := links[history.Path]
+			if history.Control {
+				since = rev
+			}
+			commits, err := history.Git.Commits(ctx, since)
+			if err != nil {
+				return nil, fmt.Errorf("plan: resolving repository %s commits since %q: %w", history.Name, since, err)
+			}
+			for _, commit := range commits {
+				records = append(records, &commitRec{commit: commit, key: historyKey(history.Name, commitKey(commit)), repository: history.Name, root: history.Root})
+			}
+		}
 	}
 	selected := make(map[string]bool)
-	for _, c := range commits {
-		rec := &commitRec{commit: c, key: commitKey(c)}
-		data, err := cp.parser.Parse(c.Message)
+	for _, rec := range records {
+		configured := cp.parser
+		if parser := cp.parsers[strings.ToLower(rec.repository)]; parser != nil {
+			configured = parser
+		}
+		data, err := configured.Parse(rec.commit.Message)
 		if data == nil {
 			return nil, fmt.Errorf("plan: %s: %w", rec.key, err)
 		}
@@ -1599,6 +1817,7 @@ func (cp *computation) loadWorkspace(deps []model.Dependency) error {
 	g := graph.New()
 	for _, p := range cp.pkgs {
 		cp.byName[p.Name] = p
+		cp.byFold[strings.ToLower(p.Name)] = p.Name
 		g.AddNode(p.Name)
 	}
 	cp.providers = make(map[string][]string)
@@ -1677,6 +1896,13 @@ func (cp *computation) fatalPlan() *Plan {
 // ---------------------------------------------------------------------------
 
 func (cp *computation) loadTagsAndWindows() error {
+	if len(cp.histories) > 0 {
+		return cp.loadRepositoryTagsAndWindows()
+	}
+	return cp.loadLegacyTagsAndWindows()
+}
+
+func (cp *computation) loadLegacyTagsAndWindows() error {
 	// Per-package commit lists, kept so the union can be ranked afterwards.
 	lists := make([][]gitx.Commit, 0, len(cp.pkgs))
 
@@ -1897,10 +2123,48 @@ func (cp *computation) baselineChannel(pkg string) string {
 // is a published tag).
 func (cp *computation) containedInBaseline(pkg, key string) bool {
 	rel := cp.rel[pkg]
+	if len(cp.histories) > 0 {
+		repository, _ := splitHistoryKey(key)
+		stable := cp.stableBoundaries[pkg][strings.ToLower(repository)]
+		published := cp.publishedBoundaries[pkg][strings.ToLower(repository)]
+		if published == "" || published == stable {
+			return false
+		}
+		return cp.ancestorOrSelf(key, published)
+	}
 	if rel == nil || rel.BaselineCommit == "" || rel.BaselineCommit == rel.StableCommit {
 		return false
 	}
 	return cp.ancestorOrSelf(key, rel.BaselineCommit)
+}
+
+func (cp *computation) inWindow(pkg, key string) bool {
+	if len(cp.histories) == 0 {
+		return cp.window[pkg][key]
+	}
+	repository, _ := splitHistoryKey(key)
+	if p := cp.byName[pkg]; p != nil && strings.EqualFold(repository, cp.controlRepo) &&
+		!strings.EqualFold(p.Repository, cp.controlRepo) {
+		boundary := cp.stableBoundaries[pkg][strings.ToLower(cp.controlRepo)]
+		return boundary == "" || !cp.ancestorOrSelf(key, boundary)
+	}
+	for _, window := range cp.windowRefs[pkg] {
+		if window[key] {
+			return true
+		}
+	}
+	return false
+}
+
+func (cp *computation) windowSize(pkg string) int {
+	if len(cp.histories) == 0 {
+		return len(cp.window[pkg])
+	}
+	n := 0
+	for _, window := range cp.windowRefs[pkg] {
+		n += len(window)
+	}
+	return n
 }
 
 // buildUnion merges the per-package windows into one history-ordered,
@@ -1954,6 +2218,12 @@ func (cp *computation) ancestorOrSelf(a, b string) bool {
 	if cp.ancCache == nil {
 		cp.ancCache = make(map[[2]string]bool)
 	}
+	// A fleet can ask many independent ancestry questions. Bound retention
+	// without changing answers; repeated work after eviction is preferable to
+	// retaining a quadratic pair matrix for the lifetime of a large run.
+	if len(cp.ancCache) >= 65536 {
+		clear(cp.ancCache)
+	}
 	cp.ancCache[key] = v
 	return v
 }
@@ -1971,13 +2241,28 @@ func (cp *computation) ancestorOrSelf(a, b string) bool {
 // cancelled context, say) would change which releases get cancelled or
 // contained.
 func (cp *computation) ancestorLookup(a, b string) bool {
-	if !cp.ancNoGit && cp.ancErr == nil {
-		yes, err := cp.git.IsAncestor(cp.ctx, a, b)
+	repoA, rawA := splitHistoryKey(a)
+	repoB, rawB := splitHistoryKey(b)
+	if !strings.EqualFold(repoA, repoB) {
+		if strings.EqualFold(repoB, cp.controlRepo) {
+			return cp.controlObserves(b, a)
+		}
+		return false
+	}
+	git, _, hasGit := cp.gitForKey(a)
+	if !hasGit {
+		git = cp.git
+	}
+	if !cp.ancNoGit[strings.ToLower(repoA)] && cp.ancErr == nil {
+		if cp.stats != nil {
+			cp.stats.AncestryLookups.Add(1)
+		}
+		yes, err := git.IsAncestor(cp.ctx, rawA, rawB)
 		switch {
 		case err == nil:
 			return yes
 		case errors.Is(err, gitx.ErrNoAncestry):
-			cp.ancNoGit = true
+			cp.ancNoGit[strings.ToLower(repoA)] = true
 		default:
 			cp.ancErr = err
 		}
@@ -2025,7 +2310,11 @@ func (cp *computation) ancestryFailed() error {
 
 func (cp *computation) parseAndResolve() error {
 	for _, rec := range cp.commits {
-		data, err := cp.parser.Parse(rec.commit.Message)
+		parser := cp.parser
+		if configured := cp.parsers[strings.ToLower(rec.repository)]; configured != nil {
+			parser = configured
+		}
+		data, err := parser.Parse(rec.commit.Message)
 		if data == nil {
 			return fmt.Errorf("plan: %s: %w", rec.key, err)
 		}
@@ -2038,6 +2327,8 @@ func (cp *computation) parseAndResolve() error {
 		rec.unitCount = len(data.Units)
 		cp.resolveAuthors(rec)
 		rec.scope = make([]map[string]bool, len(rec.units))
+		rec.propagations = make([]propagation, len(rec.units))
+		rec.channelPropagations = make([]channelPropagation, len(rec.units))
 		for i, u := range rec.units {
 			// The commit behind the unit, recorded here because this is the
 			// one place a unit and the record that carried it are both in
@@ -2055,6 +2346,12 @@ func (cp *computation) parseAndResolve() error {
 					"unit resolved to no package and is inert: "+u.Header.Raw)
 			}
 			rec.scope[i] = res.packages
+			if !u.IsCancel() {
+				rec.channelPropagations[i] = cp.unitChannelPropagation(u, rec)
+				if u.Bump != ccme.BumpNone {
+					rec.propagations[i] = cp.unitPropagation(u, rec)
+				}
+			}
 		}
 	}
 	return nil
@@ -2072,7 +2369,7 @@ func (cp *computation) liftDiagnostics(res *ccme.Result, commit string) {
 		cp.diags = append(cp.diags, Diagnostic{
 			Code:    d.Code,
 			Level:   level,
-			Commit:  commit,
+			Commit:  rawHistoryKey(commit),
 			Message: d.Message,
 		})
 	}
@@ -2167,7 +2464,7 @@ func (cp *computation) reportCancels() {
 // is spent trivially; W131 already reports the inert unit.
 func (cp *computation) cancelSpent(c *cancelRec) bool {
 	for pkg := range c.scope {
-		if cp.window[pkg][c.key] && !cp.containedInBaseline(pkg, c.key) {
+		if cp.inWindow(pkg, c.key) && !cp.containedInBaseline(pkg, c.key) {
 			return false
 		}
 	}
@@ -2204,7 +2501,7 @@ func (cp *computation) resolveHolds() {
 				continue
 			}
 			for _, name := range sortedKeys(rec.scope[i]) {
-				if !cp.window[name][rec.key] {
+				if !cp.inWindow(name, rec.key) {
 					continue // already released: no longer in force
 				}
 				if cp.containedInBaseline(name, rec.key) {
@@ -2232,7 +2529,50 @@ func (cp *computation) resolveHolds() {
 
 	for _, name := range names {
 		recs := pending[name]
-		winner := recs[0] // newest
+		// Collapse each repository to its newest semantic candidate before
+		// comparing histories. This keeps validation linear in the number of
+		// directives plus participating repositories instead of all pairs.
+		frontier := make([]directiveRec, 0, len(recs))
+		repositoryIndex := make(map[string]int)
+		for _, candidate := range recs {
+			repository, _ := splitHistoryKey(candidate.commit)
+			key := strings.ToLower(repository)
+			if index, exists := repositoryIndex[key]; exists {
+				previous := frontier[index]
+				if newer, comparable := cp.commitPrecedence(candidate.commit, previous.commit); comparable && newer {
+					frontier[index] = candidate
+				}
+				continue
+			}
+			repositoryIndex[key] = len(frontier)
+			frontier = append(frontier, candidate)
+		}
+		winner := frontier[0]
+		values := make(map[string]bool, len(frontier))
+		for _, candidate := range frontier {
+			values[candidate.directive.raw] = true
+			if newer, comparable := cp.commitPrecedence(candidate.commit, winner.commit); comparable && newer {
+				winner = candidate
+			}
+		}
+		if len(values) > 1 && len(frontier) > 1 {
+			picks := make([]channelPick, 0, len(frontier))
+			for _, candidate := range frontier {
+				picks = append(picks, channelPick{channel: candidate.directive.raw, commit: candidate.commit})
+			}
+			resolved := false
+			for _, candidate := range frontier {
+				repository, _ := splitHistoryKey(candidate.commit)
+				if strings.EqualFold(repository, cp.controlRepo) && cp.controlResolves(candidate.commit, picks) {
+					winner, resolved = candidate, true
+					break
+				}
+			}
+			if !resolved {
+				cp.err(CodeRepositoryPrecedence, name, "",
+					"conflicting Release-As directives come from incomparable revisions; add a causally applicable control directive")
+			}
+		}
 		if len(recs) > 1 {
 			cp.warn(CodeReleaseAsConflict, name, winner.commit,
 				fmt.Sprintf("%d Release-As directives are pending; the newest (%q) wins",
@@ -2291,7 +2631,7 @@ func (cp *computation) directBumps() {
 				continue
 			}
 			for _, name := range sortedKeys(rec.scope[i]) {
-				if !cp.window[name][rec.key] {
+				if !cp.inWindow(name, rec.key) {
 					continue
 				}
 				if cp.cancelledFor(rec.key, name) {
@@ -2332,7 +2672,7 @@ func (cp *computation) sourcePackages(rec *commitRec, i int) map[string]bool {
 		// (stable release), or a prerelease of its train shipped it — the
 		// window still contains it then, because the window is measured from
 		// the stable tag, but the artefact is just as public.
-		discharged := !cp.window[name][rec.key] || cp.containedInBaseline(name, rec.key)
+		discharged := !cp.inWindow(name, rec.key) || cp.containedInBaseline(name, rec.key)
 		if discharged || !(cp.cancelledFor(rec.key, name) || cp.held[name]) {
 			out[name] = true
 		}
@@ -2636,7 +2976,7 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 			// means by From is what this package last shipped against — the
 			// provider's version as of this package's own baseline tag,
 			// reconstructed from tags exactly as a graduation's span is.
-			if from, ok := cp.versionAt(prov, rel.BaselineCommit); ok {
+			if from, ok := cp.versionForConsumerAt(prov, name, false); ok {
 				u.From = from
 			}
 		}
@@ -2675,7 +3015,7 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 			if pr == nil || seen[prov] {
 				continue
 			}
-			from, ok := cp.versionAt(prov, rel.BaselineCommit)
+			from, ok := cp.versionForConsumerAt(prov, name, false)
 			if !ok || from.Compare(pr.Previous()) == 0 {
 				continue
 			}
@@ -2694,7 +3034,7 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 	// is a tail of the train-long one the graduation reports.
 	if rel.HasBaseline && rel.Baseline.IsPrerelease() && !rel.Next.IsPrerelease() {
 		for i := range out {
-			if from, ok := cp.versionAt(out[i].Name, rel.StableCommit); ok {
+			if from, ok := cp.versionForConsumerAt(out[i].Name, name, true); ok {
 				out[i].From = from
 			}
 		}
@@ -2703,7 +3043,7 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 			if pr == nil || seen[prov] {
 				continue
 			}
-			from, ok := cp.versionAt(prov, rel.StableCommit)
+			from, ok := cp.versionForConsumerAt(prov, name, true)
 			if !ok || from.String() == pr.Previous().String() {
 				continue
 			}
@@ -2734,11 +3074,43 @@ func (cp *computation) versionAt(pkg, commit string) (ccme.Version, bool) {
 		if !t.Parsed || t.Commit == "" {
 			continue
 		}
-		if cp.ancestorOrSelf(t.Commit, commit) {
+		key := t.Commit
+		if len(cp.histories) > 0 {
+			key = historyKey(cp.byName[pkg].Repository, t.Commit)
+		}
+		if cp.ancestorOrSelf(key, commit) {
 			return t.Version, true
 		}
 	}
 	return ccme.Version{}, false
+}
+
+// versionForConsumerAt reconstructs the provider version contained in one of
+// the consumer's published boundaries. In a composed workspace the relevant
+// commit belongs to the provider repository rather than to the consumer tag's
+// repository; repositoryBoundary resolved that correspondence once while the
+// windows were loaded.
+func (cp *computation) versionForConsumerAt(provider, consumer string, stable bool) (ccme.Version, bool) {
+	if len(cp.histories) == 0 {
+		rel := cp.rel[consumer]
+		if rel == nil {
+			return ccme.Version{}, false
+		}
+		commit := rel.BaselineCommit
+		if stable {
+			commit = rel.StableCommit
+		}
+		return cp.versionAt(provider, commit)
+	}
+	p := cp.byName[provider]
+	if p == nil {
+		return ccme.Version{}, false
+	}
+	boundaries := cp.publishedBoundaries
+	if stable {
+		boundaries = cp.stableBoundaries
+	}
+	return cp.versionAt(provider, boundaries[consumer][strings.ToLower(p.Repository)])
 }
 
 // AliasFilter recognises every alias tag the workspace's packages write, so a
@@ -2855,7 +3227,7 @@ func (cp *computation) logReleases() {
 			// The whole pending window since the stable baseline — on a train
 			// it spans commits earlier prereleases already shipped, so it is
 			// not "commits this release adds"; the name says so.
-			Int("windowSinceStable", len(cp.window[name])).
+			Int("windowSinceStable", cp.windowSize(name)).
 			Str("bump", rel.Bump.String()).
 			Str("channel", rel.Channel).
 			Str("next", rel.Next.String()).
@@ -2969,16 +3341,16 @@ func (cp *computation) reportHeld() {
 // ---------------------------------------------------------------------------
 
 func (cp *computation) warn(code, pkg, commit, msg string) {
-	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: commit, Message: msg})
+	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: rawHistoryKey(commit), Message: msg})
 }
 
 func (cp *computation) err(code, pkg, commit, msg string) {
-	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelError, Pkg: pkg, Commit: commit, Message: msg})
+	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelError, Pkg: pkg, Commit: rawHistoryKey(commit), Message: msg})
 }
 
 // relWarn attaches a warning to a package's release as well as to the run.
 func (cp *computation) relWarn(pkg, code, commit, msg string) {
-	d := Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: commit, Message: msg}
+	d := Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: rawHistoryKey(commit), Message: msg}
 	if rel := cp.rel[pkg]; rel != nil {
 		rel.Diagnostics = append(rel.Diagnostics, d)
 	}

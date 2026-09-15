@@ -113,6 +113,8 @@ func (f *fakeGit) Commits(_ context.Context, sinceTag string) ([]gitx.Commit, er
 	if sinceTag != "" {
 		if sha, ok := f.tags[sinceTag]; ok && sha != "" {
 			from = f.index(sha) + 1
+		} else if i := f.index(sinceTag); i >= 0 {
+			from = i + 1
 		}
 	}
 	var out []gitx.Commit

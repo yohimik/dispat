@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
-	public "github.com/yohimik/dispat/pkg/models"
-
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
@@ -92,7 +90,9 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 
 	case t.IsAll(): // "*"
 		for _, p := range cp.pkgs {
-			out[p.Name] = true
+			if cp.commitCanScope(rec, p) {
+				out[p.Name] = true
+			}
 		}
 
 	case t.IsGlob():
@@ -102,7 +102,7 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		matched := false
 		pattern := strings.ToLower(t.Name)
 		for _, p := range cp.pkgs {
-			if GlobMatch(pattern, strings.ToLower(p.Name)) {
+			if cp.commitCanScope(rec, p) && GlobMatch(pattern, strings.ToLower(p.Name)) {
 				out[p.Name] = true
 				matched = true
 			}
@@ -112,7 +112,8 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		}
 
 	default:
-		if name, p, ok := public.FoldLookup(cp.byName, t.Name); ok && p != nil {
+		name := cp.byFold[strings.ToLower(t.Name)]
+		if p := cp.byName[name]; p != nil && cp.commitCanScope(rec, p) {
 			out[name] = true
 			return
 		}
@@ -120,7 +121,13 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		// exists to catch. dispat's own release commit is scoped "release",
 		// so without this every run would leave an error behind for the next
 		// one to trip over.
-		if cp.nonPackage[t.Name] {
+		nonPackage := cp.nonPackage
+		if rec != nil && rec.repository != "" {
+			if owned := cp.nonPackageByRepo[strings.ToLower(rec.repository)]; owned != nil {
+				nonPackage = owned
+			}
+		}
+		if nonPackage[t.Name] {
 			res.nonPackage = append(res.nonPackage, t.Name)
 			return
 		}
@@ -135,6 +142,26 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 	}
 }
 
+// commitCanScope enforces the repository ownership boundary. A source
+// history can only describe packages it owns; the control history retains
+// fleet-wide explicit directives, and legacy plans have no repository name.
+func (cp *computation) commitCanScope(rec *commitRec, p *model.Package) bool {
+	if rec == nil || rec.repository == "" || len(cp.histories) == 0 {
+		return true
+	}
+	if strings.EqualFold(rec.repository, cp.controlRepo) {
+		return true
+	}
+	return strings.EqualFold(rec.repository, p.Repository)
+}
+
+func (cp *computation) commitCanDerive(rec *commitRec, p *model.Package) bool {
+	if rec == nil || rec.repository == "" || len(cp.histories) == 0 {
+		return true
+	}
+	return strings.EqualFold(rec.repository, p.Repository)
+}
+
 // reportScope raises the diagnostics a resolution collected. where names the
 // footer the scope-set came from, or is empty for a header scope-set.
 func (cp *computation) reportScope(res scopeResult, rec *commitRec, where string) {
@@ -142,11 +169,15 @@ func (cp *computation) reportScope(res scopeResult, rec *commitRec, where string
 	if where != "" {
 		prefix = where + ": "
 	}
+	location := " at HEAD"
+	if rec.repository != "" {
+		location = " in repository " + rec.repository + location
+	}
 	for _, name := range res.unknownIncludes {
-		cp.err(CodeUnknownInclude, name, rec.key, prefix+"scope names no package at HEAD")
+		cp.err(CodeUnknownInclude, name, rec.key, prefix+"scope names no package"+location)
 	}
 	for _, name := range res.unknownExcludes {
-		cp.warn(CodeUnknownScope, name, rec.key, prefix+"exclusion names no package at HEAD")
+		cp.warn(CodeUnknownScope, name, rec.key, prefix+"exclusion names no package"+location)
 	}
 	for _, glob := range res.emptyGlobs {
 		cp.warn(CodeEmptyGlob, "", rec.key, prefix+"glob "+glob+" matched no package")
@@ -179,10 +210,17 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 	out := make(map[string]bool)
 	firstFile := make(map[string]string)
 	for _, file := range rec.commit.Files {
-		full := path.Clean(path.Join(cp.rootSlash(), filepath.ToSlash(file)))
+		root := rec.root
+		if root == "" {
+			root = cp.rootSlash()
+		}
+		full := path.Clean(path.Join(filepath.ToSlash(root), filepath.ToSlash(file)))
 		var owner *scopeDir
 		for i := range cp.scopeDirs {
 			sd := &cp.scopeDirs[i]
+			if !cp.commitCanDerive(rec, sd.pkg) {
+				continue
+			}
 			if !underDir(full, sd.dir) {
 				continue
 			}

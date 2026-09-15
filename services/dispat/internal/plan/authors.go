@@ -169,7 +169,7 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 	windowSeen := make(map[string]bool)
 	freshSeen := make(map[string]bool)
 	for _, rec := range cp.commits {
-		if !cp.window[name][rec.key] {
+		if !cp.inWindow(name, rec.key) {
 			continue
 		}
 		a := Author{Name: rec.commit.AuthorName, Email: rec.commit.AuthorEmail}

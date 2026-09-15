@@ -5,6 +5,7 @@ package plan
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -354,7 +355,10 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 		for _, name := range members {
 			rel := cp.rel[name]
 			if rel.HasBaseline && rel.Baseline.Compare(g.Baseline) == 0 && rel.BaselineCommit != "" {
-				mask = rel.BaselineCommit
+				mask = rel.baselineCommitKey
+				if mask == "" {
+					mask = rel.BaselineCommit
+				}
 				break
 			}
 		}
@@ -407,7 +411,11 @@ func (cp *computation) groupFresh(name, mask string) (own, propagated ccme.Bump,
 		own = ccme.MaxBump(own, c.bump)
 	}
 	for _, s := range cp.rel[name].Sources {
-		if cp.ancestorOrSelf(s.Commit, mask) {
+		key := s.commitKey
+		if key == "" {
+			key = s.Commit
+		}
+		if cp.ancestorOrSelf(key, mask) {
 			continue
 		}
 		propagated = ccme.MaxBump(propagated, s.Bump)
@@ -432,7 +440,8 @@ func (cp *computation) groupFresh(name, mask string) (own, propagated ccme.Bump,
 func (cp *computation) fixedGroupPin(g *Release, groupName string, members []string, depth int) (pin, bool) {
 	var groupPin pin
 	pinnedVersions := make(map[string]bool)
-	hasPin := false
+	frontier := make([]pin, 0, len(members))
+	repositoryIndex := make(map[string]int)
 	for _, name := range members {
 		p, ok := cp.pinned[name]
 		if !ok {
@@ -442,13 +451,45 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 			continue // the member's own business, not the group's
 		}
 		pinnedVersions[p.version.String()] = true
-		if !hasPin || cp.newerCommit(p.commit, groupPin.commit) {
-			groupPin = p
-			hasPin = true
+		repository, _ := splitHistoryKey(p.commit)
+		key := strings.ToLower(repository)
+		if index, exists := repositoryIndex[key]; exists {
+			previous := frontier[index]
+			if newer, comparable := cp.commitPrecedence(p.commit, previous.commit); comparable && newer {
+				frontier[index] = p
+			}
+			continue
 		}
+		repositoryIndex[key] = len(frontier)
+		frontier = append(frontier, p)
 	}
+	hasPin := len(frontier) > 0
 	if !hasPin {
 		return pin{}, false
+	}
+	groupPin = frontier[0]
+	for _, candidate := range frontier[1:] {
+		if newer, comparable := cp.commitPrecedence(candidate.commit, groupPin.commit); comparable && newer {
+			groupPin = candidate
+		}
+	}
+	if len(pinnedVersions) > 1 && len(frontier) > 1 {
+		picks := make([]channelPick, 0, len(frontier))
+		for _, candidate := range frontier {
+			picks = append(picks, channelPick{channel: candidate.version.String(), commit: candidate.commit})
+		}
+		resolved := false
+		for _, candidate := range frontier {
+			repository, _ := splitHistoryKey(candidate.commit)
+			if strings.EqualFold(repository, cp.controlRepo) && cp.controlResolves(candidate.commit, picks) {
+				groupPin, resolved = candidate, true
+				break
+			}
+		}
+		if !resolved {
+			cp.err(CodeRepositoryPrecedence, g.Pkg.Name, "",
+				"conflicting fixed-group pins come from incomparable revisions; add a causally applicable control directive")
+		}
 	}
 	groupPin.packages = 1
 	if len(pinnedVersions) > 1 {

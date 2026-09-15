@@ -114,7 +114,7 @@ func (cp *computation) propagateChannels() {
 			if u.IsCancel() {
 				continue
 			}
-			cprop := cp.unitChannelPropagation(u, rec)
+			cprop := rec.channelPropagations[i]
 			if cprop.inert() {
 				continue
 			}
@@ -133,7 +133,7 @@ func (cp *computation) propagateChannels() {
 				reached++
 				// Admission is the TARGET's window, exactly as on the bump
 				// axis (§13.3, fourth row).
-				if !cp.window[t.name][rec.key] {
+				if !cp.inWindow(t.name, rec.key) {
 					continue
 				}
 				if cp.containedInBaseline(t.name, rec.key) {
@@ -182,15 +182,49 @@ func (cp *computation) propagateChannels() {
 // the traversal visits units in exactly that order, the first proposal wins
 // and any later one is the conflict.
 func (cp *computation) proposeChannel(pkg string, pick channelPick) {
+	// Keep one semantic winner per repository. Older proposals in that same
+	// history cannot decide a cross-repository conflict, and retaining them
+	// made validation compare every unit with every other unit.
+	repository, _ := splitHistoryKey(pick.commit)
+	frontier := cp.proposedAll[pkg]
+	replaced := false
+	for i, candidate := range frontier {
+		candidateRepository, _ := splitHistoryKey(candidate.commit)
+		if !strings.EqualFold(repository, candidateRepository) {
+			continue
+		}
+		if newer, comparable := cp.commitPrecedence(pick.commit, candidate.commit); comparable && newer {
+			frontier[i] = pick
+		}
+		replaced = true
+		break
+	}
+	if !replaced {
+		frontier = append(frontier, pick)
+		if cp.stats != nil {
+			cp.stats.ChannelFrontierEntries.Add(1)
+		}
+	}
+	cp.proposedAll[pkg] = frontier
 	prev, ok := cp.proposed[pkg]
 	if !ok {
 		cp.proposed[pkg] = pick
 		return
 	}
 	if prev.channel != pick.channel {
-		cp.relWarn(pkg, CodePropagatedChannelConflict, pick.commit,
-			fmt.Sprintf("conflicting propagated channels %q and %q; the newer %q wins",
-				prev.channel, pick.channel, prev.channel))
+		previousChannel := prev.channel
+		newer, comparable := cp.commitPrecedence(pick.commit, prev.commit)
+		if comparable {
+			if newer {
+				cp.proposed[pkg] = pick
+				prev = pick
+			}
+			cp.relWarn(pkg, CodePropagatedChannelConflict, pick.commit,
+				fmt.Sprintf("conflicting propagated channels %q and %q; the newer %q wins",
+					previousChannel, pick.channel, prev.channel))
+		}
+	} else if newer, comparable := cp.commitPrecedence(pick.commit, prev.commit); comparable && newer {
+		cp.proposed[pkg] = pick
 	}
 }
 
@@ -257,7 +291,7 @@ func (cp *computation) resolveChannels() {
 				continue
 			}
 			for _, name := range sortedKeys(rec.scope[i]) {
-				if !cp.window[name][rec.key] { // §13.4a
+				if !cp.inWindow(name, rec.key) { // §13.4a
 					continue
 				}
 				if cp.containedInBaseline(name, rec.key) {
@@ -283,7 +317,8 @@ func (cp *computation) resolveChannels() {
 	tracing := cp.log.Trace().Enabled()
 	for _, p := range cp.pkgs {
 		base := cp.baselineChannel(p.Name)
-		if direct, ok := cp.directChannelFor(p.Name, cands[p.Name], base); ok {
+		if direct, directCommit, ok := cp.directChannelFor(p.Name, cands[p.Name], base); ok {
+			cp.validateChannelPrecedence(p.Name, directCommit)
 			cp.channel[p.Name] = direct
 			if tracing {
 				cp.log.Trace().Str("package", p.Name).Str("channel", direct).
@@ -294,6 +329,7 @@ func (cp *computation) resolveChannels() {
 		// A direct directive beats every propagated one regardless of age;
 		// only in its absence does a propagated channel apply.
 		if pick, ok := cp.proposed[p.Name]; ok {
+			cp.validateChannelPrecedence(p.Name, "")
 			cp.channel[p.Name] = pick.channel
 			cp.channelFrom[p.Name] = pick.provider
 			if tracing {
@@ -312,15 +348,12 @@ func (cp *computation) resolveChannels() {
 // W186 counts candidates that actually propose something — a transition that
 // does not match, or a value equal to the package's current channel, is not a
 // competitor at all and must not be counted.
-func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, base string) (string, bool) {
+func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, base string) (string, string, bool) {
 	if len(cands) == 0 { // the overwhelmingly common case
-		return "", false
+		return "", "", false
 	}
-	type proposal struct {
-		channel string
-		commit  string
-	}
-	var proposals []proposal
+	var proposals []channelPick
+	var proposalChannels []string
 	for _, c := range cands {
 		// graduates=true: a direct directive is the deliberate, reviewable way
 		// to end a train, and is the only non-transition form that may (§11.5).
@@ -341,17 +374,81 @@ func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, ba
 			}
 			continue
 		}
-		proposals = append(proposals, proposal{channel: p.target, commit: c.commit})
+		pick := channelPick{channel: p.target, commit: c.commit}
+		if len(proposalChannels) < 2 {
+			proposalChannels = append(proposalChannels, p.target)
+		}
+		repository, _ := splitHistoryKey(c.commit)
+		replaced := false
+		for i, previous := range proposals {
+			previousRepository, _ := splitHistoryKey(previous.commit)
+			if !strings.EqualFold(repository, previousRepository) {
+				continue
+			}
+			if newer, comparable := cp.commitPrecedence(pick.commit, previous.commit); comparable && newer {
+				proposals[i] = pick
+			}
+			replaced = true
+			break
+		}
+		if !replaced {
+			proposals = append(proposals, pick)
+		}
 	}
 	if len(proposals) == 0 {
-		return "", false
+		return "", "", false
 	}
-	if len(proposals) > 1 {
-		cp.relWarn(pkg, CodeChannelConflict, proposals[0].commit,
+	winner := proposals[0]
+	for _, candidate := range proposals[1:] {
+		if newer, comparable := cp.commitPrecedence(candidate.commit, winner.commit); comparable && newer {
+			winner = candidate
+		}
+	}
+	if cp.channelFrontierConflict(proposals, "") {
+		cp.err(CodeRepositoryPrecedence, pkg, "",
+			"conflicting direct channel directives come from incomparable revisions; add a causally applicable control directive")
+	}
+	if len(proposalChannels) > 1 {
+		cp.relWarn(pkg, CodeChannelConflict, winner.commit,
 			fmt.Sprintf("conflicting channel directives %q and %q; the newer %q wins",
-				proposals[0].channel, proposals[1].channel, proposals[0].channel))
+				proposalChannels[0], proposalChannels[1], winner.channel))
 	}
-	return proposals[0].channel, true
+	return winner.channel, winner.commit, true
+}
+
+func (cp *computation) validateChannelPrecedence(pkg, directCommit string) {
+	candidates := cp.proposedAll[pkg]
+	if cp.channelFrontierConflict(candidates, directCommit) {
+		cp.err(CodeRepositoryPrecedence, pkg, "",
+			"conflicting channel directives come from incomparable source revisions; add a causally applicable control directive")
+	}
+}
+
+// channelFrontierConflict decides cross-repository precedence from the
+// already-collapsed repository frontier in O(R). Different repositories are
+// comparable only when a control revision's gitlink snapshot observes every
+// source winner.
+func (cp *computation) channelFrontierConflict(candidates []channelPick, directCommit string) bool {
+	if len(candidates) < 2 {
+		return false
+	}
+	channels := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		channels[candidate.channel] = true
+	}
+	if len(channels) < 2 {
+		return false
+	}
+	if directCommit != "" && cp.controlResolves(directCommit, candidates) {
+		return false
+	}
+	for _, candidate := range candidates {
+		repository, _ := splitHistoryKey(candidate.commit)
+		if strings.EqualFold(repository, cp.controlRepo) && cp.controlResolves(candidate.commit, candidates) {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +464,7 @@ func (cp *computation) propagateBumps() {
 				// not, which is what makes `release` usable for graduation.
 				continue
 			}
-			prop := cp.unitPropagation(u, rec)
+			prop := rec.propagations[i]
 			if prop.inert() { // "^none", "+0" — already warned by the parser
 				continue
 			}
@@ -411,7 +508,7 @@ func (cp *computation) propagateBumps() {
 				// the whole of catch-up: a consumer that missed a run still
 				// has the commit pending, so it is still admitted, whatever
 				// the source has since released (§13.7a, G2).
-				if !cp.window[t.name][rec.key] {
+				if !cp.inWindow(t.name, rec.key) {
 					continue
 				}
 				if cp.cancelledFor(rec.key, t.name) { // §13.5a
@@ -452,10 +549,11 @@ func (cp *computation) propagateBumps() {
 				// §9.2 measures from the source set as a whole.
 				for _, src := range srcNames {
 					rel.Sources = append(rel.Sources, StaleSource{
-						Provider: src,
-						Commit:   rec.key,
-						Level:    t.level,
-						Bump:     prop.Bump,
+						Provider:  src,
+						Commit:    rawHistoryKey(rec.key),
+						commitKey: rec.key,
+						Level:     t.level,
+						Bump:      prop.Bump,
 					})
 				}
 				if cp.log.Trace().Enabled() {
