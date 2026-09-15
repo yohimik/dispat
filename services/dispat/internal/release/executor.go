@@ -82,6 +82,10 @@ type Result struct {
 	// re-run. They never change Status, and the command they belong to reports
 	// them on its way out.
 	Critical []error
+	// RecordBlocked retains a published outcome while preventing consumers
+	// from using a release whose required durable records are incomplete.
+	// Skipped dependents carry it forward through the package graph.
+	RecordBlocked bool
 }
 
 // Tagger creates release tags; *gitx.CLI satisfies it. A nil Tagger on the
@@ -138,7 +142,24 @@ type Executor struct {
 	Runner             script.Runner
 	Tagger             Tagger
 	Recorders          []ReleaseRecorder // run in order after each successful publish
-	Reverter           Reverter          // rolls back package folders for revertOnFail spaces
+	// BeforePublish runs after the package's beforePublish hook and immediately
+	// before its publish command. Composed workspaces use it to revalidate the
+	// fixed fleet snapshot after arbitrary user hook code has run.
+	BeforePublish func(context.Context, *plan.Release) error
+	// AcquirePublish serializes publish and recording for packages which share
+	// mutable repository state. Its release function is held through the
+	// publish tail and called on every success or failure path.
+	AcquirePublish func(context.Context, *plan.Release) (func(), error)
+	// PublishGroup serializes publish tasks which share mutable repository
+	// state without occupying a publish worker while they wait. Empty keeps
+	// legacy scheduling. These are ordering edges only: one sibling's failure
+	// does not make another sibling a dependency-blocked release.
+	PublishGroup func(*plan.Release) string
+	// BlockOnRecordFailure requires durable records before consumers proceed.
+	// Legacy runs leave this false; composed repositories enable it because
+	// a missing source record or control checkpoint invalidates consumption.
+	BlockOnRecordFailure bool
+	Reverter             Reverter // rolls back package folders for revertOnFail spaces
 	// Force rewrites a tag the repository already carries instead of failing
 	// on it (commit.force, default true). The pre-existing-tag rules still
 	// come first: a tag already at the release commit is a skip, and one at a
@@ -204,6 +225,11 @@ type spaceLogin struct {
 	// one stage that gates on the login), so they reach the publish stage and
 	// everything after it.
 	outputs []plan.Output
+}
+
+type spaceLoginKey struct {
+	repository string
+	name       string
 }
 
 // Sequence is one command sequence together with everything it runs under —
@@ -288,11 +314,12 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	wsVars := WorkspaceEnv(p, e.Log)
 
 	// One login gate per space that configures a login script.
-	logins := make(map[string]*spaceLogin)
+	logins := make(map[spaceLoginKey]*spaceLogin)
 	for _, rel := range p.Releases {
 		if len(rel.Pkg.Space.LoginScript) > 0 {
-			if _, ok := logins[rel.Pkg.Space.Name]; !ok {
-				logins[rel.Pkg.Space.Name] = &spaceLogin{}
+			key := spaceLoginKey{rel.Pkg.Space.Repository, rel.Pkg.Space.Name}
+			if _, ok := logins[key]; !ok {
+				logins[key] = &spaceLogin{}
 			}
 		}
 	}
@@ -335,6 +362,22 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 				sched.AddEdge(task{prov, taskPublish}, first)
 			}
 			sched.AddEdge(task{prov, taskPublish}, pub)
+		}
+	}
+	if e.PublishGroup != nil {
+		last := make(map[string]string)
+		for _, name := range p.Order {
+			if !changed[name] {
+				continue
+			}
+			group := e.PublishGroup(p.Releases[name])
+			if group == "" {
+				continue
+			}
+			if previous := last[group]; previous != "" {
+				sched.AddEdge(task{previous, taskPublish}, task{name, taskPublish})
+			}
+			last[group] = name
 		}
 	}
 
@@ -429,7 +472,7 @@ type run struct {
 	*Executor
 	plan    *plan.Plan
 	wsVars  []string
-	logins  map[string]*spaceLogin
+	logins  map[spaceLoginKey]*spaceLogin
 	results map[string]*Result
 	mu      sync.Mutex
 	started map[string]time.Time
@@ -489,10 +532,18 @@ func syncLockBudget(p *plan.Plan, changed map[string]bool) int {
 // environment of the task shares.
 type taskCtx struct {
 	*run
-	t       task
-	rel     *plan.Release
-	updates []providerUpdate
-	log     zerolog.Logger
+	t              task
+	rel            *plan.Release
+	updates        []providerUpdate
+	log            zerolog.Logger
+	publishRelease func()
+}
+
+func (tc *taskCtx) finishPublishGuard() {
+	if tc.publishRelease != nil {
+		tc.publishRelease()
+		tc.publishRelease = nil
+	}
 }
 
 // env builds the DISPAT_* environment of the task's scripts and hooks; stage
@@ -559,8 +610,12 @@ func (r *run) execute(ctx context.Context, t task) {
 	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results); skip {
 		res.Status = StatusSkipped
 		res.Blocked, res.BlockedBy = true, blocker
+		res.RecordBlocked = r.results[blocker].RecordBlocked
 		reason := "provider " + blocker + " failed or was skipped, and the package has no changes of its own"
-		if pr := r.plan.Releases[blocker]; pr != nil && pr.Pkg.Space.BuildWaitsPublish {
+		if res.RecordBlocked {
+			reason = "provider " + blocker + " has incomplete release records; repair its records before releasing dependents"
+		}
+		if pr := r.plan.Releases[blocker]; !res.RecordBlocked && pr != nil && pr.Pkg.Space.BuildWaitsPublish {
 			reason = "provider " + blocker + " failed or was skipped, and this package's build takes its publish as input"
 		}
 		_, ran := r.started[t.pkg] // earlier stages already modified the folder?
@@ -626,8 +681,16 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 		ev := packageEvent(t.pkg, rel, EventPackageFailed)
 		ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), t.kind.String(), err.Error()
+		var diagnostic interface{ DiagnosticCode() string }
+		if errors.As(err, &diagnostic) {
+			ev.Code = diagnostic.DiagnosticCode()
+		}
 		r.notify(ev)
-		log.Error().Err(err).Msg(msg)
+		event := log.Error().Err(err)
+		if ev.Code != "" {
+			event.Str("code", ev.Code)
+		}
+		event.Msg(msg)
 		if rel.Pkg.Space.RevertOnFail {
 			r.revert(ctx, rel, log)
 		}
@@ -704,6 +767,15 @@ func (r *run) execute(ctx context.Context, t task) {
 			fail(err, "login failed")
 			return
 		}
+		if tc.AcquirePublish != nil {
+			releasePublish, err := tc.AcquirePublish(ctx, rel)
+			if err != nil {
+				fail(err, "acquiring publish repository guard failed")
+				return
+			}
+			tc.publishRelease = releasePublish
+			defer tc.finishPublishGuard()
+		}
 	}
 
 	if what, err := tc.stageFrame(ctx, frame); err != nil {
@@ -731,7 +803,7 @@ func (r *run) execute(ctx context.Context, t task) {
 // (safe: only this package's current task touches rel.Outputs).
 func (tc *taskCtx) loginGate(ctx context.Context) error {
 	space := tc.rel.Pkg.Space
-	sl := tc.logins[space.Name]
+	sl := tc.logins[spaceLoginKey{space.Repository, space.Name}]
 	if sl == nil {
 		return nil
 	}
@@ -786,6 +858,11 @@ func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err er
 	if err := tc.hook(ctx, "before"+stageTitle(kind), s.before, true); err != nil {
 		return "before" + stageTitle(kind) + " hook failed", err
 	}
+	if kind == taskPublish && tc.BeforePublish != nil {
+		if err := tc.BeforePublish(ctx, tc.rel); err != nil {
+			return "pre-publish repository validation failed", err
+		}
+	}
 	if s.native != nil {
 		if err := s.native(ctx); err != nil {
 			return "auto-versioning failed", err
@@ -825,14 +902,19 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	recCtx := context.WithoutCancel(ctx)
 	// Neither the recorders nor the tag may fail the package now. The artefact
 	// is on its registry: reporting the package as failed would revert its
-	// folder, run its onFail script and skip every consumer, none of which
-	// un-publishes anything. Each failure is recorded as a critical instead,
+	// folder or run its onFail script, neither of which un-publishes anything.
+	// Required-record mode separately blocks consumers until repair. Each
+	// failure is recorded as a critical instead,
 	// the rest of the tail still runs, and the run exits non-zero at the end.
 	for _, rec := range tc.Recorders {
 		if err := rec.Record(recCtx, rel); err != nil {
 			// The next recorder still runs: a changelog that could not be
 			// written is no reason to skip the GitHub release as well.
-			tc.critical(res, plan.CodeRecordFailed, err, "release recording failed")
+			code := plan.CodeRecordFailed
+			if tc.BlockOnRecordFailure {
+				code = "E335"
+			}
+			tc.critical(res, code, err, "release recording failed")
 		}
 	}
 	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
@@ -842,6 +924,7 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	}
 	tc.mu.Lock()
 	res.Status = StatusPublished
+	res.RecordBlocked = tc.BlockOnRecordFailure && len(res.Critical) > 0
 	res.Duration = time.Since(tc.started[tc.t.pkg])
 	tc.mu.Unlock()
 	ev := packageEvent(tc.t.pkg, rel, EventPackagePublished)
@@ -849,11 +932,17 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	tc.notify(ev)
 	// In release-commit mode the tag does not exist yet — finalize creates it
 	// — so the line names it as planned rather than stating it as a fact.
-	if tc.Tagger != nil {
+	if tc.BlockOnRecordFailure && res.RecordBlocked {
+		tc.log.Info().Str("tag", rel.TagName()).Msg("published, required release records incomplete")
+	} else if tc.Tagger != nil || tc.BlockOnRecordFailure {
 		tc.log.Info().Str("tag", rel.TagName()).Msg("published")
 	} else {
 		tc.log.Info().Str("plannedTag", rel.TagName()).Msg("published, tag deferred to the release commit")
 	}
+	// The source record and status are settled. Outcome hooks observe them but
+	// do not mutate the release transaction, so packages sharing a repository
+	// need not remain serialized while postPublish/announce runs.
+	tc.finishPublishGuard()
 
 	if ctx.Err() != nil {
 		// Interrupted: the release is out and recorded; observers stay silent.
@@ -1084,6 +1173,9 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, str
 		r, ok := results[prov]
 		if !ok { // unchanged provider
 			continue
+		}
+		if r.RecordBlocked {
+			return true, prov
 		}
 		switch r.Status {
 		case StatusFailed, StatusSkipped:

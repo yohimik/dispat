@@ -113,7 +113,7 @@ func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) [
 	rel := p.Releases[pkg]
 	updates := make([]providerUpdate, 0, len(rel.Updates))
 	for _, u := range rel.Updates {
-		if r, ok := results[u.Name]; ok && (r.Status == StatusFailed || r.Status == StatusSkipped) {
+		if r, ok := results[u.Name]; ok && (r.Status == StatusFailed || r.Status == StatusSkipped || r.RecordBlocked) {
 			continue
 		}
 		pr := p.Releases[u.Name]
@@ -163,7 +163,7 @@ func WorkspaceEnv(p *plan.Plan, log zerolog.Logger) []string {
 			pre+"_CHANNEL="+e.Channel,
 			pre+"_RELEASING="+boolEnv(e.Releasing))
 	}
-	return append(out, plan.WorkspacePackagesEnvVar+"="+strings.Join(keys, " "))
+	return appendWorkspaceOwners(p, append(out, plan.WorkspacePackagesEnvVar+"="+strings.Join(keys, " ")))
 }
 
 // updatedEnv renders the live provider updates the same way, under

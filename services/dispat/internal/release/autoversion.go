@@ -261,7 +261,7 @@ func (tc *taskCtx) providerVersion(name string) (version string, prerelease, rel
 	pr := tc.plan.Releases[name]
 	tc.mu.Lock()
 	res, ok := tc.results[name]
-	dead := ok && (res.Status == StatusFailed || res.Status == StatusSkipped)
+	dead := ok && (res.Status == StatusFailed || res.Status == StatusSkipped || res.RecordBlocked)
 	tc.mu.Unlock()
 	if pr.Releasing() && !dead {
 		return pr.Next.String(), pr.IsPrerelease(), true
