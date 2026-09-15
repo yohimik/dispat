@@ -182,7 +182,7 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 				cp.stats.TagInventories.Add(1)
 			}
 			for _, p := range packages {
-				cp.tags[p.Name] = cp.withoutIgnoredTags(aliases[repository].Without(all[p.Name], p.Name, cp.log))
+				cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases[repository].Without(all[p.Name], p.Name, cp.log))
 			}
 			cp.log.Debug().Str("repository", history.Name).Int("packages", len(packages)).
 				Int("tags", repositoryTagCount(cp.tags, packages)).Msg("plan: repository tag inventory loaded")
@@ -199,7 +199,7 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 			if cp.stats != nil {
 				cp.stats.TagInventories.Add(1)
 			}
-			cp.tags[p.Name] = cp.withoutIgnoredTags(aliases[repository].Without(tags, p.Name, cp.log))
+			cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases[repository].Without(tags, p.Name, cp.log))
 		}
 		cp.log.Debug().Str("repository", history.Name).Int("packages", len(packages)).
 			Int("tags", repositoryTagCount(cp.tags, packages)).Msg("plan: repository tag inventory loaded")
@@ -898,7 +898,10 @@ func (cp *computation) resolveApplicableControlBoundaries() error {
 			}
 		}
 	}
-	for name := range needed {
+	for _, name := range cp.order {
+		if !needed[name] {
+			continue
+		}
 		cp.controlInputs[name] = true
 		pkg := cp.byName[name]
 		if pkg == nil || strings.EqualFold(pkg.Repository, cp.controlRepo) {

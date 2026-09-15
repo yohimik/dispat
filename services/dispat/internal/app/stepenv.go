@@ -138,7 +138,6 @@ func (a *App) wireStep(w *WindowOptions) (*runEnv, error) {
 	if env == nil {
 		return nil, nil
 	}
-	a.ignoreTags = append(a.ignoreTags, env.tag)
 	a.maskRunTags(env)
 	if len(w.Filter.Packages)+len(w.Filter.Spaces)+len(w.Filter.Groups) == 0 {
 		w.Filter.Packages = []string{env.pkg}
@@ -156,8 +155,11 @@ func (a *App) wireStep(w *WindowOptions) (*runEnv, error) {
 // the workspace no longer carries is skipped, and a tag that was never
 // written masks nothing.
 func (a *App) maskRunTags(env *runEnv) {
-	if len(env.releasing) == 0 {
-		return
+	if a.workspace == nil {
+		a.ignoreTags = append(a.ignoreTags, env.tag)
+		if len(env.releasing) == 0 {
+			return
+		}
 	}
 	pkgs, err := a.packages()
 	if err != nil {
@@ -166,14 +168,43 @@ func (a *App) maskRunTags(env *runEnv) {
 	}
 	byName := make(map[string]*model.Package, len(pkgs))
 	for _, p := range pkgs {
-		byName[p.Name] = p
+		byName[strings.ToLower(p.Name)] = p
+	}
+	if a.workspace != nil {
+		mask := func(packageName, tag string) {
+			p := byName[strings.ToLower(packageName)]
+			if p == nil {
+				a.log.Debug().Str("package", packageName).Str("tag", tag).
+					Msg("cannot resolve package owner to mask the run's tag")
+				return
+			}
+			repository := a.workspace.RepositoryForPackage(p)
+			if repository == nil {
+				a.log.Debug().Str("package", packageName).Str("tag", tag).
+					Msg("cannot resolve repository owner to mask the run's tag")
+				return
+			}
+			if a.ignoreTagsByRepository == nil {
+				a.ignoreTagsByRepository = make(map[string][]string)
+			}
+			a.ignoreTagsByRepository[repository.Name] = append(a.ignoreTagsByRepository[repository.Name], tag)
+		}
+		mask(env.pkg, env.tag)
+		for _, r := range env.releasing {
+			p := byName[strings.ToLower(r.name)]
+			if p == nil {
+				continue
+			}
+			mask(r.name, plan.TagFormatFor(p).Render(p.Name, r.version))
+		}
+		return
 	}
 	for _, r := range env.releasing {
-		p := byName[r.name]
+		p := byName[strings.ToLower(r.name)]
 		if p == nil {
 			continue
 		}
-		a.ignoreTags = append(a.ignoreTags, plan.TagFormatFor(p).Render(r.name, r.version))
+		a.ignoreTags = append(a.ignoreTags, plan.TagFormatFor(p).Render(p.Name, r.version))
 	}
 }
 

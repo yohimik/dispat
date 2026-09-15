@@ -52,7 +52,8 @@ type App struct {
 
 	// ignoreTags are tag names masked from baseline resolution when this
 	// invocation is a step command wired to a running release; see stepenv.go.
-	ignoreTags []string
+	ignoreTags             []string
+	ignoreTagsByRepository map[string][]string
 }
 
 // packages is the discovered workspace, walked once per App.
@@ -217,6 +218,7 @@ func (a *App) planOptions() (plan.Options, error) {
 		ParserConfig:                 a.cfg.ResolvedParser,
 		Log:                          a.log,
 		IgnoredTags:                  a.ignoreTags,
+		IgnoredTagsByRepository:      a.ignoreTagsByRepository,
 	}
 	if a.workspace != nil {
 		opts.Repositories = make(map[string]plan.RepositoryHistory, len(a.workspace.Repositories))

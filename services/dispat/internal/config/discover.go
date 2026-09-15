@@ -38,10 +38,11 @@ type discovery struct {
 	consumed   map[string][]string // top-level packages key -> matching folders
 	excluded   []excludedDir
 	baseIgnore ignore.Chain
-	// loadFolderConfigs is false only for centrally managed polyrepo packages:
-	// the control configuration owns those packages completely and must not
-	// silently read a source repository's dispat files.
-	loadFolderConfigs bool
+	// folderInputs decides whether a folder belongs to the repository whose
+	// config is being resolved. Composed discovery uses it for every implicit
+	// dispat config, ignore and exclude file; ordinary discovery admits all of
+	// them.
+	folderInputs folderInputPolicy
 
 	// spaceConfigs and onlyChecks feed the autoVersion.only check, which needs
 	// every package discovered before it can say a name is unknown.
@@ -92,13 +93,17 @@ type spaceScan struct {
 	fileConsumed  map[string][]string
 }
 
-// newDiscovery resolves what every space starts from: the repository's own
-// dependency declarations and its ignore layer.
-func newDiscovery(c *File, root string) (*discovery, error) {
-	return newDiscoveryMode(c, root, true)
-}
+type folderInputPolicy func(string) bool
 
-func newDiscoveryMode(c *File, root string, loadFolderConfigs bool) (*discovery, error) {
+func allowAllFolderInputs(string) bool { return true }
+
+// newDiscoveryMode resolves what every space starts from: the repository's
+// own dependency declarations and its ignore layer. folderInputs decides
+// which implicit files belong to that repository.
+func newDiscoveryMode(c *File, root string, folderInputs folderInputPolicy) (*discovery, error) {
+	if folderInputs == nil {
+		folderInputs = allowAllFolderInputs
+	}
 	rootIgnore, err := ignoreLayer(root, c.Ignore)
 	if err != nil {
 		return nil, fmt.Errorf("config: %s: %w", DispatignoreName, err)
@@ -109,13 +114,13 @@ func newDiscoveryMode(c *File, root string, loadFolderConfigs bool) (*discovery,
 		// The merged declaration list: the root config's own `dependencies`
 		// first, in file order, then each space's object and each package's
 		// list in discovery order.
-		declared:          collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}}),
-		owner:             make(map[string]string),
-		ownerFold:         make(map[string]string),
-		consumed:          make(map[string][]string),
-		baseIgnore:        appendLayer(nil, rootIgnore),
-		loadFolderConfigs: loadFolderConfigs,
-		spaceConfigs:      make(map[string]SpaceConfig, len(c.Spaces)),
+		declared:     collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}}),
+		owner:        make(map[string]string),
+		ownerFold:    make(map[string]string),
+		consumed:     make(map[string][]string),
+		baseIgnore:   appendLayer(nil, rootIgnore),
+		folderInputs: folderInputs,
+		spaceConfigs: make(map[string]SpaceConfig, len(c.Spaces)),
 	}, nil
 }
 
@@ -138,7 +143,7 @@ func (d *discovery) resolveSpaceConfig(sn string) (SpaceConfig, []string, []Spac
 	var files []SpaceFile
 	var srcs []string
 	for _, dir := range dirs {
-		if !d.loadFolderConfigs {
+		if !d.folderInputs(dir) {
 			continue
 		}
 		if sameDir(dir, d.root) {
@@ -173,7 +178,11 @@ func (d *discovery) resolveSpaceConfig(sn string) (SpaceConfig, []string, []Spac
 // run`'s typo guard, which must not call a name undefined because the one
 // space defining it is empty.
 func ResolvedSpaceConfigs(c *File, root string) (map[string]SpaceConfig, error) {
-	d, err := newDiscovery(c, root)
+	return resolvedSpaceConfigsMode(c, root, allowAllFolderInputs)
+}
+
+func resolvedSpaceConfigsMode(c *File, root string, folderInputs folderInputPolicy) (map[string]SpaceConfig, error) {
+	d, err := newDiscoveryMode(c, root, folderInputs)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +218,8 @@ func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
 	}
 	chains := make([]ignore.Chain, len(dirs))
 	for i, dir := range dirs {
-		spaceIgnore, err := ignoreLayer(dir, spacePatterns)
+		allowed := d.folderInputs(dir)
+		spaceIgnore, err := ignoreLayerWithFile(dir, spacePatterns, allowed)
 		if err != nil {
 			return nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
@@ -272,9 +282,14 @@ func (d *discovery) scanSpace(sn string) error {
 	// index of package names.
 	foundIn := make(map[string]foundFolder)
 	for pi, dir := range s.dirs {
-		exclude, err := loadExclude(dir)
-		if err != nil {
-			return fmt.Errorf("config: space %q: %s: %w", sn, DispatexcludeName, err)
+		allowed := d.folderInputs(dir)
+		var exclude []string
+		if allowed {
+			var err error
+			exclude, err = loadExclude(dir)
+			if err != nil {
+				return fmt.Errorf("config: space %q: %s: %w", sn, DispatexcludeName, err)
+			}
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -371,7 +386,8 @@ func (d *discovery) spacePackage(s *spaceScan, pi int, name string) (*model.Pack
 		return nil, err
 	}
 	if len(layers) == 0 {
-		if pkg.Ignore, err = packageIgnore(s.chains[pi], pkg.Dir, nil); err != nil {
+		allowed := d.folderInputs(pkg.Dir)
+		if pkg.Ignore, err = packageIgnoreWithFile(s.chains[pi], pkg.Dir, nil, allowed); err != nil {
 			return nil, fmt.Errorf("config: %s: %w", label, err)
 		}
 		if !s.baseRefsChecked {
@@ -404,7 +420,8 @@ func (d *discovery) spacePackage(s *spaceScan, pi int, name string) (*model.Pack
 		d.onlyChecks = append(d.onlyChecks, onlyCheck{label, merged.AutoVersion})
 	}
 	applyMerged(pkg, merged, ex)
-	if pkg.Ignore, err = packageIgnore(s.chains[pi], pkg.Dir, ex.ignore); err != nil {
+	allowed := d.folderInputs(pkg.Dir)
+	if pkg.Ignore, err = packageIgnoreWithFile(s.chains[pi], pkg.Dir, ex.ignore, allowed); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", label, err)
 	}
 	return pkg, nil
@@ -442,7 +459,8 @@ func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]over
 		layers = append(layers, overrideLayer{filePO, fmt.Sprintf("%s (%s: packages entry)", label, s.srcs[i]),
 			DepSource{File: s.srcs[i], KeyPath: []string{"packages", key, "dependencies"}}})
 	}
-	if d.loadFolderConfigs {
+	allowed := d.folderInputs(dir)
+	if allowed {
 		folderPO, folderSrc, err := loadPackageFile(dir)
 		if err != nil {
 			return nil, fmt.Errorf("config: space %q: package %q: %w", s.name, name, err)
@@ -504,7 +522,8 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 	// express something a space package cannot.
 	layers := []overrideLayer{{po, label,
 		DepSource{KeyPath: []string{"packages", key, "dependencies"}}}}
-	if d.loadFolderConfigs {
+	allowed := d.folderInputs(dir)
+	if allowed {
 		filePO, fileSrc, err := loadPackageFile(dir)
 		if err != nil {
 			return nil, fmt.Errorf("config: %s: %w", label, err)
@@ -540,7 +559,7 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 		d.onlyChecks = append(d.onlyChecks, onlyCheck{label, merged.AutoVersion})
 	}
 	applyMerged(pkg, merged, ex)
-	if pkg.Ignore, err = packageIgnore(d.baseIgnore, pkg.Dir, ex.ignore); err != nil {
+	if pkg.Ignore, err = packageIgnoreWithFile(d.baseIgnore, pkg.Dir, ex.ignore, allowed); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", label, err)
 	}
 	return pkg, nil

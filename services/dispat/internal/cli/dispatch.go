@@ -982,6 +982,11 @@ func (r *runner) runConfigured() int {
 		// invocation's, in both directions: --quiet-parser=false brings the
 		// parser's findings back for one run without editing the config.
 		cfg.Parser.Quiet = *r.o.quietParser
+		if workspace != nil {
+			for _, repository := range workspace.Repositories {
+				repository.Config.Parser.Quiet = *r.o.quietParser
+			}
+		}
 	}
 	log := newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout)
 	// The first thing worth knowing about any run is which file it read and

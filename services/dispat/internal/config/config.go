@@ -1731,18 +1731,11 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 // every space, validated here because the override layers need the folders
 // to exist.
 func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	return discoverPackagesMode(c, root, true)
+	return discoverPackagesMode(c, root, allowAllFolderInputs)
 }
 
-// discoverCentralPackages is DiscoverPackages with all in-folder dispat files
-// disabled. The control configuration is the sole authority for centrally
-// managed source packages.
-func discoverCentralPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	return discoverPackagesMode(c, root, false)
-}
-
-func discoverPackagesMode(c *File, root string, loadFolderConfigs bool) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	d, err := newDiscoveryMode(c, root, loadFolderConfigs)
+func discoverPackagesMode(c *File, root string, folderInputs folderInputPolicy) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
+	d, err := newDiscoveryMode(c, root, folderInputs)
 	if err != nil {
 		return nil, nil, nil, err
 	}

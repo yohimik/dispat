@@ -549,6 +549,9 @@ type Diagnostic struct {
 	Pkg     string
 	Commit  string
 	Message string
+	// Repository identifies the commit's owner in a composed workspace. It
+	// remains separate from Commit so public commit abbreviations are stable.
+	Repository string `json:",omitempty"`
 }
 
 func (d Diagnostic) String() string {
@@ -1371,6 +1374,11 @@ type Options struct {
 	// published history — that would empty the window the record needs — so
 	// the environment wiring masks it here. See the app's step wiring.
 	IgnoredTags []string
+	// IgnoredTagsByRepository masks exact tag names only in the named
+	// repository history. Step commands in a composed workspace use this to
+	// avoid hiding an equal tag name belonging to another source. IgnoredTags
+	// remains the legacy workspace-wide API.
+	IgnoredTagsByRepository map[string][]string
 	// Repositories enables composed history. Keys and Name are stable
 	// .gitmodules identities; one entry has Control true. Empty preserves the
 	// legacy single-history Git argument exactly.
@@ -1391,19 +1399,20 @@ type computation struct {
 	nonPackage       map[string]bool
 	nonPackageByRepo map[string]map[string]bool
 	// ignoredTags is Options.IgnoredTags as a set; see that field.
-	ignoredTags      map[string]bool
-	histories        map[string]RepositoryHistory
-	controlRepo      string
-	baselines        map[baselineKey]string
-	baselineSpecs    []RepositoryBaseline
-	stats            *HistoryStats
-	parsers          map[string]*ccme.Parser
-	repositoryHeads  map[string]string
-	controlHistory   []gitx.ControlHistoryCommit
-	controlIndexed   bool
-	controlStates    map[string]*controlGitlinkState
-	controlPathIndex map[string]int
-	controlPathCount int
+	ignoredTags             map[string]bool
+	ignoredTagsByRepository map[string]map[string]bool
+	histories               map[string]RepositoryHistory
+	controlRepo             string
+	baselines               map[baselineKey]string
+	baselineSpecs           []RepositoryBaseline
+	stats                   *HistoryStats
+	parsers                 map[string]*ccme.Parser
+	repositoryHeads         map[string]string
+	controlHistory          []gitx.ControlHistoryCommit
+	controlIndexed          bool
+	controlStates           map[string]*controlGitlinkState
+	controlPathIndex        map[string]int
+	controlPathCount        int
 
 	pkgs      []*model.Package
 	scopeDirs []scopeDir // prepared once; see prepareScopeDirs
@@ -1509,14 +1518,16 @@ type computation struct {
 func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	pkgs := opts.Packages
 	cp := &computation{
-		ctx:                 ctx,
-		git:                 git,
-		log:                 opts.Log,
-		root:                opts.Root,
-		initials:            opts.Initials,
-		nonPackage:          make(map[string]bool, len(opts.NonPackageScopes)),
-		nonPackageByRepo:    make(map[string]map[string]bool, len(opts.Repositories)),
-		ignoredTags:         make(map[string]bool, len(opts.IgnoredTags)),
+		ctx:              ctx,
+		git:              git,
+		log:              opts.Log,
+		root:             opts.Root,
+		initials:         opts.Initials,
+		nonPackage:       make(map[string]bool, len(opts.NonPackageScopes)),
+		nonPackageByRepo: make(map[string]map[string]bool, len(opts.Repositories)),
+		ignoredTags:      make(map[string]bool, len(opts.IgnoredTags)),
+		ignoredTagsByRepository: make(map[string]map[string]bool,
+			len(opts.IgnoredTagsByRepository)),
 		pkgs:                pkgs,
 		byName:              make(map[string]*model.Package, len(pkgs)),
 		byFold:              make(map[string]string, len(pkgs)),
@@ -1583,6 +1594,13 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	}
 	for _, t := range opts.IgnoredTags {
 		cp.ignoredTags[t] = true
+	}
+	for repository, tags := range opts.IgnoredTagsByRepository {
+		set := make(map[string]bool, len(tags))
+		for _, tag := range tags {
+			set[tag] = true
+		}
+		cp.ignoredTagsByRepository[repository] = set
 	}
 
 	if err := cp.loadWorkspace(opts.Dependencies); err != nil { // §13.1
@@ -1691,11 +1709,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	}
 
 	repositoryInputOrder, repositoryInputs := cp.releaseRepositoryInputs()
-	// Plan retains cp through ancestorOrSelf. Drop composition-only scratch
-	// once its compact immutable result has been built so the release lifetime
-	// does not also retain O(P*Q) repository-name references.
-	cp.repositoryReach = nil
-	cp.controlInputs = nil
+	cp.releaseWorkspaceScratch()
 	return &Plan{
 		Order:                cp.order,
 		Releases:             cp.rel,
@@ -1707,6 +1721,28 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		ancestor:             cp.ancestorOrSelf,
 		stableBoundaries:     cp.stableBoundaries,
 	}, nil
+}
+
+// Plan retains the computation through ancestorOrSelf. These composition
+// indexes have no role after the release plan is built; dropping them lets
+// shared window memberships and parser/precedence indexes be collected while
+// publication still needs repository ancestry and stable consumer boundaries.
+func (cp *computation) releaseWorkspaceScratch() {
+	cp.repositoryReach = nil
+	cp.controlInputs = nil
+	cp.windowRefs = nil
+	cp.publishedBoundaries = nil
+	cp.stableTags = nil
+	cp.latestTags = nil
+	cp.controlSnapshots = nil
+	cp.controlAmbiguous = nil
+	cp.baselines = nil
+	cp.baselineSpecs = nil
+	cp.parsers = nil
+	cp.nonPackageByRepo = nil
+	cp.byFold = nil
+	cp.proposedAll = nil
+	cp.ignoredTagsByRepository = nil
 }
 
 // PackagesChangedSince resolves which packages the commits in rev..HEAD
@@ -1987,7 +2023,7 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		if err != nil {
 			return fmt.Errorf("plan: %s: %w", p.Name, err)
 		}
-		tags = cp.withoutIgnoredTags(aliases.Without(tags, p.Name, cp.log))
+		tags = cp.withoutIgnoredTags("", aliases.Without(tags, p.Name, cp.log))
 		// Kept for the graduation's dependencies record: reconstructing what a
 		// consumer's last stable release shipped against is a question about
 		// the provider's tags, and the planner holds no other state between
@@ -2379,16 +2415,18 @@ func (cp *computation) parseAndResolve() error {
 // and severity. Flattening them onto one code would lose exactly the
 // information §16 assigns a blast radius to.
 func (cp *computation) liftDiagnostics(res *ccme.Result, commit string) {
+	repository, revision := splitHistoryKey(commit)
 	for _, d := range res.Diagnostics {
 		level := LevelWarn
 		if d.Severity == ccme.SeverityError {
 			level = LevelError
 		}
 		cp.diags = append(cp.diags, Diagnostic{
-			Code:    d.Code,
-			Level:   level,
-			Commit:  rawHistoryKey(commit),
-			Message: d.Message,
+			Code:       d.Code,
+			Level:      level,
+			Commit:     revision,
+			Message:    d.Message,
+			Repository: repository,
 		})
 	}
 }
@@ -3209,13 +3247,14 @@ func (f AliasFilter) matches(tag string) bool {
 
 // withoutIgnoredTags drops the masked tag names from a package's tag listing
 // before baselines are read; see Options.IgnoredTags.
-func (cp *computation) withoutIgnoredTags(tags gitx.Tags) gitx.Tags {
-	if len(cp.ignoredTags) == 0 {
+func (cp *computation) withoutIgnoredTags(repository string, tags gitx.Tags) gitx.Tags {
+	qualified := cp.ignoredTagsByRepository[repository]
+	if len(cp.ignoredTags) == 0 && len(qualified) == 0 {
 		return tags
 	}
 	kept := tags[:0:0]
 	for _, t := range tags {
-		if !cp.ignoredTags[t.Name] {
+		if !cp.ignoredTags[t.Name] && !qualified[t.Name] {
 			kept = append(kept, t)
 		}
 	}
@@ -3359,16 +3398,19 @@ func (cp *computation) reportHeld() {
 // ---------------------------------------------------------------------------
 
 func (cp *computation) warn(code, pkg, commit, msg string) {
-	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: rawHistoryKey(commit), Message: msg})
+	repository, revision := splitHistoryKey(commit)
+	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: revision, Repository: repository, Message: msg})
 }
 
 func (cp *computation) err(code, pkg, commit, msg string) {
-	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelError, Pkg: pkg, Commit: rawHistoryKey(commit), Message: msg})
+	repository, revision := splitHistoryKey(commit)
+	cp.diags = append(cp.diags, Diagnostic{Code: code, Level: LevelError, Pkg: pkg, Commit: revision, Repository: repository, Message: msg})
 }
 
 // relWarn attaches a warning to a package's release as well as to the run.
 func (cp *computation) relWarn(pkg, code, commit, msg string) {
-	d := Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: rawHistoryKey(commit), Message: msg}
+	repository, revision := splitHistoryKey(commit)
+	d := Diagnostic{Code: code, Level: LevelWarn, Pkg: pkg, Commit: revision, Repository: repository, Message: msg}
 	if rel := cp.rel[pkg]; rel != nil {
 		rel.Diagnostics = append(rel.Diagnostics, d)
 	}

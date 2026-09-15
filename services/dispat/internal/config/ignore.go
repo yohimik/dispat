@@ -31,9 +31,21 @@ const DispatignoreName = ".dispatignore"
 // dir is an absolute filesystem path; the layer keeps it slash-separated,
 // which is the form changed-file paths arrive in.
 func ignoreLayer(dir string, patterns []string) (ignore.Layer, error) {
-	filePatterns, err := readIgnoreFile(dir)
-	if err != nil {
-		return ignore.Layer{}, err
+	return ignoreLayerWithFile(dir, patterns, true)
+}
+
+// ignoreLayerWithFile keeps authored config patterns active while allowing
+// composed discovery to withhold a folder's .dispatignore when that folder is
+// owned by another repository. Legacy discovery always passes true through
+// ignoreLayer above.
+func ignoreLayerWithFile(dir string, patterns []string, readFile bool) (ignore.Layer, error) {
+	var filePatterns []string
+	var err error
+	if readFile {
+		filePatterns, err = readIgnoreFile(dir)
+		if err != nil {
+			return ignore.Layer{}, err
+		}
 	}
 	if len(patterns) == 0 && len(filePatterns) == 0 {
 		return ignore.Layer{}, nil
@@ -85,10 +97,11 @@ func appendLayer(chain ignore.Chain, l ignore.Layer) ignore.Chain {
 	return append(chain, l)
 }
 
-// packageIgnore builds one package's chain: the levels above it, then its own
-// patterns and the .dispatignore in its folder.
-func packageIgnore(outer ignore.Chain, dir string, patterns []string) (ignore.Chain, error) {
-	layer, err := ignoreLayer(dir, patterns)
+// packageIgnoreWithFile builds one package's chain: the levels above it, then
+// its own patterns and, when readFile is true, the .dispatignore in its
+// folder.
+func packageIgnoreWithFile(outer ignore.Chain, dir string, patterns []string, readFile bool) (ignore.Chain, error) {
+	layer, err := ignoreLayerWithFile(dir, patterns, readFile)
 	if err != nil {
 		return nil, err
 	}

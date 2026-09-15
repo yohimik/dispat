@@ -470,13 +470,46 @@ func pathWithin(root, path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// recordHooks carries the live run lifetime into user hooks while native
+// release recording proceeds on its separate durable context. Checking the
+// observer directly before every hook closes the small scheduling window in
+// which context.AfterFunc has observed cancellation but has not run yet.
+type recordHooks struct {
+	ctx      context.Context
+	observer context.Context
+}
+
+func (h recordHooks) run(hooks *runHooks, name string, refs []string) {
+	if h.ctx.Err() != nil || h.observer.Err() != nil {
+		return
+	}
+	hooks.run(h.ctx, name, refs)
+}
+
 func (w *workspaceRecorder) Record(ctx context.Context, rel *plan.Release) error {
+	return w.record(ctx, ctx, rel)
+}
+
+// RecordAfterPublish keeps native release records durable after interruption,
+// while source and control hooks remain observers of the still-live run.
+func (w *workspaceRecorder) RecordAfterPublish(recordCtx, observerCtx context.Context, rel *plan.Release) error {
+	return w.record(recordCtx, observerCtx, rel)
+}
+
+func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *plan.Release) error {
 	r := w.byName[rel.Pkg.Repository]
 	if r == nil {
 		return fmt.Errorf("no repository owner for package %s", rel.Pkg.Name)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(recordCtx, 5*time.Minute)
 	defer cancel()
+	hookCtx, cancelHooks := context.WithCancel(ctx)
+	stopHooks := context.AfterFunc(observerCtx, cancelHooks)
+	defer func() {
+		stopHooks()
+		cancelHooks()
+	}()
+	hooks := recordHooks{ctx: hookCtx, observer: observerCtx}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.git.Log.Debug().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).Msg("recording source release")
@@ -490,7 +523,7 @@ func (w *workspaceRecorder) Record(ctx context.Context, rel *plan.Release) error
 	var pin string
 	if r.repo.Commit.IsEnabled() && rel.ExportedCommit() == "" {
 		var err error
-		pin, err = w.commit(ctx, r, []string{rel.Pkg.Dir}, rel, rel.TagName())
+		pin, err = w.commitWithHooks(ctx, hooks, r, []string{rel.Pkg.Dir}, rel, rel.TagName())
 		if err != nil {
 			return fmt.Errorf("repository %s source release commit failed; no release tag or control checkpoint was written: %w", r.repo.Name, errors.Join(append(failures, err)...))
 		}
@@ -504,7 +537,7 @@ func (w *workspaceRecorder) Record(ctx context.Context, rel *plan.Release) error
 	}
 	r.admitRecordedRelease(pinned)
 	if r.repo.Commit.PushEnabled() {
-		r.hooks.run(ctx, "beforePush", r.repo.Config.Run.BeforePush)
+		hooks.run(r.hooks, "beforePush", r.repo.Config.Run.BeforePush)
 		tags := []string{rel.TagName()}
 		var moving []string
 		for _, alias := range rel.AliasTags() {
@@ -527,11 +560,11 @@ func (w *workspaceRecorder) Record(ctx context.Context, rel *plan.Release) error
 		if err != nil {
 			return fmt.Errorf("repository %s tag %s: source push failed; repair source records before advancing the control gitlink: %w", r.repo.Name, rel.TagName(), errors.Join(append(failures, err)...))
 		}
-		r.hooks.run(ctx, "afterPush", r.repo.Config.Run.AfterPush)
+		hooks.run(r.hooks, "afterPush", r.repo.Config.Run.AfterPush)
 		r.git.Log.Info().Str("tag", rel.TagName()).Msg("pushed source release records")
 	}
 	if !r.repo.Control && len(failures) == 0 {
-		if err := w.checkpoint(ctx, r, pinned, rel.TagName()); err != nil {
+		if err := w.checkpointWithHooks(ctx, hooks, r, pinned, rel.TagName()); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -548,7 +581,11 @@ func (w *workspaceRecorder) Record(ctx context.Context, rel *plan.Release) error
 }
 
 func (w *workspaceRecorder) commit(ctx context.Context, r *repositoryRecord, dirs []string, rel *plan.Release, tag string) (string, error) {
-	r.hooks.run(ctx, "beforeCommit", r.repo.Config.Run.BeforeCommit)
+	return w.commitWithHooks(ctx, recordHooks{ctx: ctx, observer: ctx}, r, dirs, rel, tag)
+}
+
+func (w *workspaceRecorder) commitWithHooks(ctx context.Context, hooks recordHooks, r *repositoryRecord, dirs []string, rel *plan.Release, tag string) (string, error) {
+	hooks.run(r.hooks, "beforeCommit", r.repo.Config.Run.BeforeCommit)
 	unlock, err := gitx.AcquireMutations(ctx, r.git)
 	if err != nil {
 		return "", err
@@ -583,8 +620,8 @@ func (w *workspaceRecorder) commit(ctx context.Context, r *repositoryRecord, dir
 	if committed {
 		r.git.Log.Info().Str("message", msg).Msg("created release commit")
 	}
-	r.hooks.run(ctx, "afterCommit", r.repo.Config.Run.AfterCommit)
-	r.hooks.run(ctx, "postCommit", r.repo.Config.Run.PostCommit)
+	hooks.run(r.hooks, "afterCommit", r.repo.Config.Run.AfterCommit)
+	hooks.run(r.hooks, "postCommit", r.repo.Config.Run.PostCommit)
 	return pin, nil
 }
 
@@ -674,6 +711,10 @@ func verifyPinnedSource(ctx context.Context, source *repositoryRecord, rel *plan
 }
 
 func (w *workspaceRecorder) checkpoint(ctx context.Context, source *repositoryRecord, rel *plan.Release, tag string) error {
+	return w.checkpointWithHooks(ctx, recordHooks{ctx: ctx, observer: ctx}, source, rel, tag)
+}
+
+func (w *workspaceRecorder) checkpointWithHooks(ctx context.Context, hooks recordHooks, source *repositoryRecord, rel *plan.Release, tag string) error {
 	control := w.byName[config.ControlRepository]
 	if control == nil || !control.repo.Commit.IsEnabled() {
 		return nil
@@ -681,9 +722,9 @@ func (w *workspaceRecorder) checkpoint(ctx context.Context, source *repositoryRe
 	control.mu.Lock()
 	defer control.mu.Unlock()
 	pin := rel.ExportedCommit()
-	controlPin, err := w.commitCheckpoint(ctx, control, source, rel, tag)
+	controlPin, err := w.commitCheckpoint(ctx, hooks, control, source, rel, tag)
 	if err == nil && controlPin != "" && control.repo.Commit.PushEnabled() {
-		control.hooks.run(ctx, "beforePush", control.repo.Config.Run.BeforePush)
+		hooks.run(control.hooks, "beforePush", control.repo.Config.Run.BeforePush)
 		var unlock func()
 		unlock, err = gitx.AcquireMutations(ctx, source.git, control.git)
 		if err == nil {
@@ -702,7 +743,7 @@ func (w *workspaceRecorder) checkpoint(ctx context.Context, source *repositoryRe
 			unlock()
 		}
 		if err == nil {
-			control.hooks.run(ctx, "afterPush", control.repo.Config.Run.AfterPush)
+			hooks.run(control.hooks, "afterPush", control.repo.Config.Run.AfterPush)
 		}
 	}
 	if err != nil {
@@ -715,8 +756,8 @@ func (w *workspaceRecorder) checkpoint(ctx context.Context, source *repositoryRe
 	return nil
 }
 
-func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, control, source *repositoryRecord, rel *plan.Release, tag string) (string, error) {
-	control.hooks.run(ctx, "beforeCommit", control.repo.Config.Run.BeforeCommit)
+func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, hooks recordHooks, control, source *repositoryRecord, rel *plan.Release, tag string) (string, error) {
+	hooks.run(control.hooks, "beforeCommit", control.repo.Config.Run.BeforeCommit)
 	unlock, err := gitx.AcquireMutations(ctx, source.git, control.git)
 	if err != nil {
 		return "", err
@@ -734,8 +775,8 @@ func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, control, sourc
 	}
 	if !needed {
 		unlock()
-		control.hooks.run(ctx, "afterCommit", control.repo.Config.Run.AfterCommit)
-		control.hooks.run(ctx, "postCommit", control.repo.Config.Run.PostCommit)
+		hooks.run(control.hooks, "afterCommit", control.repo.Config.Run.AfterCommit)
+		hooks.run(control.hooks, "postCommit", control.repo.Config.Run.PostCommit)
 		return "", nil
 	}
 	if control.repo.Commit.PushEnabled() && control.branch == "" {
@@ -769,8 +810,8 @@ func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, control, sourc
 	}
 	// Hooks observe the commit and must never run under the advisory lock.
 	unlock()
-	control.hooks.run(ctx, "afterCommit", control.repo.Config.Run.AfterCommit)
-	control.hooks.run(ctx, "postCommit", control.repo.Config.Run.PostCommit)
+	hooks.run(control.hooks, "afterCommit", control.repo.Config.Run.AfterCommit)
+	hooks.run(control.hooks, "postCommit", control.repo.Config.Run.PostCommit)
 	if !committed {
 		return "", nil
 	}

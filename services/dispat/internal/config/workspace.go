@@ -514,6 +514,41 @@ func DiscoverWorkspace(c *File, controlRoot string, workspace *Workspace) ([]*mo
 	return pkgs, active, excluded, err
 }
 
+// ResolvedWorkspaceSpaceConfigs resolves space-only folder layers with the
+// same ownership policy as DiscoverWorkspace. The slice retains equal local
+// space names from different imported repositories because either may define
+// the only occurrence of a run script.
+func ResolvedWorkspaceSpaceConfigs(c *File, controlRoot string, workspace *Workspace) ([]SpaceConfig, error) {
+	if workspace == nil {
+		resolved, err := ResolvedSpaceConfigs(c, controlRoot)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]SpaceConfig, 0, len(resolved))
+		for _, name := range sortedSpaceNames(c) {
+			out = append(out, resolved[name])
+		}
+		return out, nil
+	}
+	gitRoots := &gitRootMemo{byDir: make(map[string]string)}
+	var out []SpaceConfig
+	for i := range workspace.Repositories {
+		repository := &workspace.Repositories[i]
+		if !repository.Control && !repository.Imported {
+			continue
+		}
+		folderInputs := newWorkspaceFolderPolicy(workspace, repository, gitRoots)
+		resolved, err := resolvedSpaceConfigsMode(repository.Config, repository.Root, folderInputs.allow)
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range sortedSpaceNames(repository.Config) {
+			out = append(out, resolved[name])
+		}
+	}
+	return out, nil
+}
+
 // DiscoverWorkspacePlan returns both active dependency edges and declared
 // external edges whose provider is absent from this snapshot. Planning keeps
 // the latter out of the graph but reports their inactive state explicitly.
@@ -547,11 +582,8 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 		var deps []DeclaredDependency
 		var ex []ExcludedDir
 		var err error
-		if repo.Control {
-			local, deps, ex, err = discoverCentralPackages(repo.Config, repo.Root)
-		} else {
-			local, deps, ex, err = DiscoverPackages(repo.Config, repo.Root)
-		}
+		folderInputs := newWorkspaceFolderPolicy(workspace, &repo, gitRoots)
+		local, deps, ex, err = discoverPackagesMode(repo.Config, repo.Root, folderInputs.allow)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -647,6 +679,60 @@ func packageRepository(p *model.Package, workspace *Workspace, gitRoots *gitRoot
 
 type gitRootMemo struct {
 	byDir map[string]string
+}
+
+// workspaceFolderPolicy admits implicit configuration and ignore files only
+// when their canonical folder belongs to the repository whose explicit config
+// is being resolved. The nearest-Git-root check keeps an unlisted nested
+// worktree from speaking before package ownership can reject it with E331.
+type workspaceFolderPolicy struct {
+	workspace      *Workspace
+	repositoryName string
+	repositoryRoot string
+	gitRoots       *gitRootMemo
+	byPath         map[string]bool
+	byCanonical    map[string]bool
+}
+
+func newWorkspaceFolderPolicy(workspace *Workspace, repository *Repository, gitRoots *gitRootMemo) *workspaceFolderPolicy {
+	return &workspaceFolderPolicy{
+		workspace:      workspace,
+		repositoryName: repository.Name,
+		repositoryRoot: repository.Root,
+		gitRoots:       gitRoots,
+		byPath:         make(map[string]bool),
+		byCanonical:    make(map[string]bool),
+	}
+}
+
+func (p *workspaceFolderPolicy) allow(path string) bool {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	abs = filepath.Clean(abs)
+	if allowed, ok := p.byPath[abs]; ok {
+		return allowed
+	}
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		p.byPath[abs] = false
+		return false
+	}
+	canonical = filepath.Clean(canonical)
+	if allowed, ok := p.byCanonical[canonical]; ok {
+		p.byPath[abs] = allowed
+		return allowed
+	}
+	owner := p.workspace.repositoryForCanonicalDir(canonical)
+	allowed := owner != nil && owner.Name == p.repositoryName && owner.Root == p.repositoryRoot
+	if allowed {
+		actual, rootErr := p.gitRoots.nearest(canonical)
+		allowed = rootErr == nil && actual == p.repositoryRoot
+	}
+	p.byPath[abs] = allowed
+	p.byCanonical[canonical] = allowed
+	return allowed
 }
 
 func (m *gitRootMemo) requireOwner(p *model.Package, dir, scope string, owner *Repository) error {

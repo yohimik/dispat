@@ -103,6 +103,15 @@ type ReleaseRecorder interface {
 	Record(ctx context.Context, rel *plan.Release) error
 }
 
+// postPublishRecorder separates the durable record transaction from its
+// observer lifetime. The first context survives interruption so a published
+// release is still recorded; the second is the live run context, allowing
+// recorder-owned hooks to stop with the operator's run. Recorders without
+// this extension retain the ReleaseRecorder contract above.
+type postPublishRecorder interface {
+	RecordAfterPublish(recordCtx, observerCtx context.Context, rel *plan.Release) error
+}
+
 // Reverter rolls back local changes inside a package folder; *gitx.CLI
 // satisfies it. Used for spaces with revertOnFail.
 type Reverter interface {
@@ -907,7 +916,13 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// failure is recorded as a critical instead,
 	// the rest of the tail still runs, and the run exits non-zero at the end.
 	for _, rec := range tc.Recorders {
-		if err := rec.Record(recCtx, rel); err != nil {
+		var err error
+		if aware, ok := rec.(postPublishRecorder); ok {
+			err = aware.RecordAfterPublish(recCtx, ctx, rel)
+		} else {
+			err = rec.Record(recCtx, rel)
+		}
+		if err != nil {
 			// The next recorder still runs: a changelog that could not be
 			// written is no reason to skip the GitHub release as well.
 			code := plan.CodeRecordFailed

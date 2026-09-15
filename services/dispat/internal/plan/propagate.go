@@ -317,8 +317,7 @@ func (cp *computation) resolveChannels() {
 	tracing := cp.log.Trace().Enabled()
 	for _, p := range cp.pkgs {
 		base := cp.baselineChannel(p.Name)
-		if direct, directCommit, ok := cp.directChannelFor(p.Name, cands[p.Name], base); ok {
-			cp.validateChannelPrecedence(p.Name, directCommit)
+		if direct, ok := cp.directChannelFor(p.Name, cands[p.Name], base); ok {
 			cp.channel[p.Name] = direct
 			if tracing {
 				cp.log.Trace().Str("package", p.Name).Str("channel", direct).
@@ -329,7 +328,7 @@ func (cp *computation) resolveChannels() {
 		// A direct directive beats every propagated one regardless of age;
 		// only in its absence does a propagated channel apply.
 		if pick, ok := cp.proposed[p.Name]; ok {
-			cp.validateChannelPrecedence(p.Name, "")
+			cp.validateChannelPrecedence(p.Name)
 			cp.channel[p.Name] = pick.channel
 			cp.channelFrom[p.Name] = pick.provider
 			if tracing {
@@ -348,9 +347,9 @@ func (cp *computation) resolveChannels() {
 // W186 counts candidates that actually propose something — a transition that
 // does not match, or a value equal to the package's current channel, is not a
 // competitor at all and must not be counted.
-func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, base string) (string, string, bool) {
+func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, base string) (string, bool) {
 	if len(cands) == 0 { // the overwhelmingly common case
-		return "", "", false
+		return "", false
 	}
 	var proposals []channelPick
 	var proposalChannels []string
@@ -396,7 +395,7 @@ func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, ba
 		}
 	}
 	if len(proposals) == 0 {
-		return "", "", false
+		return "", false
 	}
 	winner := proposals[0]
 	for _, candidate := range proposals[1:] {
@@ -404,7 +403,7 @@ func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, ba
 			winner = candidate
 		}
 	}
-	if cp.channelFrontierConflict(proposals, "") {
+	if cp.channelFrontierConflict(proposals) {
 		cp.err(CodeRepositoryPrecedence, pkg, "",
 			"conflicting direct channel directives come from incomparable revisions; add a causally applicable control directive")
 	}
@@ -413,12 +412,12 @@ func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, ba
 			fmt.Sprintf("conflicting channel directives %q and %q; the newer %q wins",
 				proposalChannels[0], proposalChannels[1], winner.channel))
 	}
-	return winner.channel, winner.commit, true
+	return winner.channel, true
 }
 
-func (cp *computation) validateChannelPrecedence(pkg, directCommit string) {
+func (cp *computation) validateChannelPrecedence(pkg string) {
 	candidates := cp.proposedAll[pkg]
-	if cp.channelFrontierConflict(candidates, directCommit) {
+	if cp.channelFrontierConflict(candidates) {
 		cp.err(CodeRepositoryPrecedence, pkg, "",
 			"conflicting channel directives come from incomparable source revisions; add a causally applicable control directive")
 	}
@@ -428,7 +427,7 @@ func (cp *computation) validateChannelPrecedence(pkg, directCommit string) {
 // already-collapsed repository frontier in O(R). Different repositories are
 // comparable only when a control revision's gitlink snapshot observes every
 // source winner.
-func (cp *computation) channelFrontierConflict(candidates []channelPick, directCommit string) bool {
+func (cp *computation) channelFrontierConflict(candidates []channelPick) bool {
 	if len(candidates) < 2 {
 		return false
 	}
@@ -437,9 +436,6 @@ func (cp *computation) channelFrontierConflict(candidates []channelPick, directC
 		channels[candidate.channel] = true
 	}
 	if len(channels) < 2 {
-		return false
-	}
-	if directCommit != "" && cp.controlResolves(directCommit, candidates) {
 		return false
 	}
 	for _, candidate := range candidates {
