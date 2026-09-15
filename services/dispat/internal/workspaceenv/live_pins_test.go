@@ -1,6 +1,7 @@
 package workspaceenv
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,4 +122,167 @@ func TestLivePinsAuthorizeRepositoriesWhosePackageKeysCollide(t *testing.T) {
 	got, err := reader.Pins("a-source")
 	require.NoError(t, err)
 	assert.Equal(t, []string{pin}, got)
+}
+
+func TestLivePinsRejectMalformedMetadataFiles(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, string)
+	}{
+		{"trailing JSON", func(t *testing.T, path string) {
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+			require.NoError(t, err)
+			_, err = f.WriteString("{}")
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+		}},
+		{"unknown field", func(t *testing.T, path string) {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			data = bytes.TrimSpace(data)
+			require.NoError(t, os.WriteFile(path,
+				append(append([]byte(nil), data[:len(data)-1]...), []byte(`,"unknown":true}`)...), 0o600))
+		}},
+		{"symlink", func(t *testing.T, path string) {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			target := filepath.Join(t.TempDir(), "metadata.json")
+			require.NoError(t, os.WriteFile(target, data, 0o600))
+			require.NoError(t, os.Remove(path))
+			if err := os.Symlink(target, path); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+		}},
+		{"non regular", func(t *testing.T, path string) {
+			require.NoError(t, os.Remove(path))
+			require.NoError(t, os.Mkdir(path, 0o700))
+		}},
+		{"oversize", func(t *testing.T, path string) {
+			require.NoError(t, os.Truncate(path, (8<<20)+1))
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root, config, owners, env := livePinFixture(t)
+			store, err := NewLivePins(root, config, owners, []string{"source-a", "source-b"})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			dir := strings.TrimPrefix(store.Environment(), LivePins+"=")
+			env = append(env, store.Environment())
+			tc.mutate(t, filepath.Join(dir, liveMetadataFile))
+
+			_, err = OpenLivePins(root, config, env)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLivePinsRejectMalformedOwnerRecords(t *testing.T) {
+	valid := strings.Repeat("a", 40)
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, string)
+	}{
+		{"trailing JSON", func(t *testing.T, path string) {
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+			require.NoError(t, err)
+			_, err = f.WriteString("{}")
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+		}},
+		{"unknown field", func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path,
+				[]byte(`{"owner":"source-a","revision":"`+valid+`","unknown":true}`), 0o600))
+		}},
+		{"wrong owner", func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path,
+				[]byte(`{"owner":"source-b","revision":"`+valid+`"}`), 0o600))
+		}},
+		{"short revision", func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path,
+				[]byte(`{"owner":"source-a","revision":"`+valid[:12]+`"}`), 0o600))
+		}},
+		{"symlink", func(t *testing.T, path string) {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			target := filepath.Join(t.TempDir(), "pin.json")
+			require.NoError(t, os.WriteFile(target, data, 0o600))
+			require.NoError(t, os.Remove(path))
+			if err := os.Symlink(target, path); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+		}},
+		{"non regular", func(t *testing.T, path string) {
+			require.NoError(t, os.Remove(path))
+			require.NoError(t, os.Mkdir(path, 0o700))
+		}},
+		{"oversize", func(t *testing.T, path string) {
+			require.NoError(t, os.Truncate(path, 4097))
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root, config, owners, env := livePinFixture(t)
+			store, err := NewLivePins(root, config, owners, []string{"source-a", "source-b"})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			require.NoError(t, store.Remember("source-a", valid))
+			env = append(env, store.Environment())
+			reader, err := OpenLivePins(root, config, env)
+			require.NoError(t, err)
+			dir := strings.TrimPrefix(store.Environment(), LivePins+"=")
+			tc.mutate(t, filepath.Join(dir, livePinFilename("source-a")))
+
+			_, err = reader.Pins("source-a")
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLivePinsRejectStaleCoordinator(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, string)
+	}{
+		{"deleted", func(t *testing.T, dir string) {
+			require.NoError(t, os.RemoveAll(dir))
+		}},
+		{"replaced by file", func(t *testing.T, dir string) {
+			require.NoError(t, os.RemoveAll(dir))
+			require.NoError(t, os.WriteFile(dir, []byte("stale"), 0o600))
+		}},
+		{"replaced by symlink", func(t *testing.T, dir string) {
+			require.NoError(t, os.RemoveAll(dir))
+			target := t.TempDir()
+			if err := os.Symlink(target, dir); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root, config, owners, env := livePinFixture(t)
+			store, err := NewLivePins(root, config, owners, []string{"source-a", "source-b"})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			env = append(env, store.Environment())
+			require.NoError(t, store.Remember("source-a", strings.Repeat("a", 40)))
+			reader, err := OpenLivePins(root, config, env)
+			require.NoError(t, err)
+			missing, err := reader.Pins("source-b")
+			require.NoError(t, err)
+			assert.Nil(t, missing, "an intact coordinator may have no record for an owner")
+			dir := strings.TrimPrefix(store.Environment(), LivePins+"=")
+			tc.mutate(t, dir)
+
+			_, openErr := OpenLivePins(root, config, env)
+			require.Error(t, openErr)
+			_, readErr := reader.Pins("source-a")
+			require.Error(t, readErr)
+			if tc.name == "deleted" {
+				assert.ErrorIs(t, openErr, os.ErrNotExist)
+				assert.ErrorIs(t, readErr, os.ErrNotExist)
+			}
+		})
+	}
 }

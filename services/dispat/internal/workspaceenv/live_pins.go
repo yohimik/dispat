@@ -301,8 +301,15 @@ func writeLivePin(dir string, owners map[string]bool, owner, revision string) er
 }
 
 func readLivePin(dir, owner string) (livePinRecord, bool, error) {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return livePinRecord{}, false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return livePinRecord{}, false, errors.New("live pin context is not a directory")
+	}
 	var record livePinRecord
-	err := readBoundedJSON(filepath.Join(dir, livePinFilename(owner)), 4096, &record)
+	err = readBoundedJSON(filepath.Join(dir, livePinFilename(owner)), 4096, &record)
 	if errors.Is(err, os.ErrNotExist) {
 		return livePinRecord{}, false, nil
 	}
