@@ -50,12 +50,12 @@ should move together.
 [`dispat if --changed`](./cli/if.md#changed-packages) to execute a script only in the packages a change reached. This
 includes dependants, so the pipeline scales with the diff rather than with the repository.
 
-dispat does not make a monorepo out of separate repositories. Its graph is the packages in one checkout.
+Without a control repository, each dispat run still sees one repository and one graph.
 
-## Where dispat does not help: across repositories
+## Joining repositories through a control checkout
 
-dispat cannot order releases or propagate a version between two projects in different repositories. There is no graph
-spanning them because there is no single history to read.
+Independent runs cannot order releases or propagate a version between two projects in different repositories. There is
+no graph spanning those runs.
 
 Separate repositories mean the only connection is a published version, and picking that version up is the consumer's
 own decision. This is the definition of the choice rather than a gap to work around. A bot like Renovate opens a pull
@@ -63,9 +63,10 @@ request for dispat to release, and the
 [reconciliation pickup](./configuration/autoversion.md#picking-up-providers-released-without-you) handles this
 situation automatically inside one repository.
 
-You can get the graph back without merging anything by using a repository that holds only the configuration and links
-the others as git submodules. dispat runs in this single checkout to order releases and propagate versions across every
-linked repository while the code stays where it is.
+You can get the graph back without merging histories by using a repository that holds the control configuration and
+links the sources as git submodules. In source-history mode, dispat reads each source's commits and tags under one fixed
+gitlink snapshot. In pointer-history mode, control commits describe pointer moves. Both modes order releases and
+propagate versions across the combined graph while the code stays where it is.
 [A control repository for many repositories](./control-repository.md) explains this pattern and its costs.
 
 ## dispat in a single-project repository
@@ -107,8 +108,9 @@ The reverse is no harder. Extract the folder into its own repository, and keep t
 came with it, or state `initials` if it did not. The package's next release continues from the version it was on rather
 than starting at zero.
 
-You lose the ordering and the propagation between the split-off project and what remains. This is the same trade the
-table above describes. You gain independence.
+Separate dispat runs lose ordering and propagation between the split-off project and what remains. A control repository
+can retain them by linking both sources and declaring the cross-repository edge. This is an extra shared pipeline and
+lock, so choose it only when that coordination is useful.
 
 ## Choosing
 

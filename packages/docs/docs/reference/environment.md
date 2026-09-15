@@ -238,6 +238,13 @@ generated repository, that the tag should point at. Like any output, it reaches 
 echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"
 ```
 
+In source-history mode, the outer release also publishes an admitted full source commit through private per-run
+coordination. Nested dispat commands validate that live pin against the same control root, configuration, exact source
+identity, and current Git head while holding the source mutation lock. This lets a command in an already-running sibling
+script observe a native record completed elsewhere in the same run. An explicit `--root`, `--config`, `--configs`, or
+`--polyrepo` suppresses inherited coordination. The private data is removed when the release ends and is never a
+release record, baseline, tag payload, or input to a later plan.
+
 ## Run outcome data
 
 The [run-level hooks](../configuration/run-hooks.md) additionally receive the run's outcome. dispat renders these with

@@ -17,14 +17,24 @@ dispat fails with an error naming every name it tried when no candidate exists a
 Pass an explicit `--config` to use a specific file with no fallback. A typo there fails loudly instead of quietly
 loading a different file.
 
+For a [polyrepository workspace](../control-repository.md#source-history-mode), this file remains the control file.
+Set `polyrepo: true` when it declares source-owned paths directly, or list source configuration files in `configs`.
+You can also repeat `--configs`. Imports are explicit: dispat never discovers a `dispat.*` file merely because a
+package path enters a linked repository. Once a source root is explicitly imported, its ordinary root, space, and
+package configuration layers apply within that repository. A package and its `src` must belong to the closest listed
+Git worktree; an unlisted nested repository is an `E331` ownership error rather than another implicit source.
+
 **Unknown keys are rejected** as typo protection. Put keys dispat does not know in [`custom`](./custom.md). A rejected
 key that looks like a real setting can also mean the file was written for a newer dispat than the one reading it, and
 `dispat self-update --check` reports whether a newer one exists.
 
-**Case.** Every key keeps the spelling you write, and dispat matches keys case-insensitively. A script, space, package
-or versioning group is therefore named once, in the case you chose, and reached from anywhere by any spelling: a
+**Case.** Every key keeps the spelling you write. dispat matches ordinary configuration names case-insensitively. A
+script, space, package or versioning group is therefore named once, in the case you chose, and reached from anywhere by any spelling: a
 `--package` flag, a commit scope, a flow entry and a dependency edge all match without being asked to agree with the
 map. The name itself travels as written, so it is what a tag, an event and the `DISPAT_*` variables report.
+
+Repository identities are the exception. A `repositoryOverrides` key must exactly match its `.gitmodules` name,
+including case, because that external name identifies the owning Git history.
 
 Two keys of one object that differ only by case are refused when the file loads, and the error names both. There is no
 lookup anywhere in dispat that could choose between them. The one exception is [`custom`](./custom.md), whose contents
@@ -69,6 +79,10 @@ full examples.
 | `packages`         | map name → package                         | no       | Per-package configuration. This holds overrides for space packages (where the key is the folder name) and standalone packages outside every space via `path`. See [Packages](./packages.md).    |
 | `versionGroups`    | map name → `{versioning}`                  | no       | Shared-versioning groups that cut across spaces. A space's or package's `versionGroup` key joins a group by name. A group may share the whole version, the major and minor, or the major alone. See [Versioning groups](./spaces.md#versioning-groups) and the [Shared versions](../reference/releasing/versioning.md) walkthrough. |
 | `dependencies`     | map consumer → providers                   | no       | Consumer → provider relations between packages. See [`dependencies`](./dependencies.md) below. Spaces and packages declare their own too.                                                                                |
+| `polyrepo`         | bool                                        | no       | Read each explicitly linked source repository's own Git history. The default is `false`; non-empty `configs` also enables it. See [Source-history mode](../control-repository.md#source-history-mode). |
+| `configs`          | array of strings                            | no       | Source configuration files imported by the control file into the combined workspace. Paths are relative to the control file. Imports enable polyrepository mode and are never discovered implicitly; imported roots cannot declare another fleet import list. |
+| `repositoryOverrides` | map repository name → object             | no       | Release-commit policy overrides keyed by the exact `.gitmodules` name. See [Repository commit policy](../control-repository.md#repository-commit-policy). |
+| `repositoryBaselines` | array of objects                          | no       | Explicit `{consumer, releaseTag, repository, revision}` boundaries for cross-repository history that a normal release checkpoint cannot prove. See [Ambiguous boundaries](../control-repository.md#when-a-boundary-needs-help). |
 | `concurrency`      | int or `[int, int]`                        | no       | One value for both stages, or `[build, publish]`. The value `0` or an omitted key means the number of CPUs. More than two values is an error.                                             |
 | `logLevel`         | string                                     | no       | Minimum log level. The options are `trace`, `debug`, `info` (default), `warn`, or `error`. See [what each level carries](#log-levels).                                                  |
 | `logFormat`        | string                                     | no       | Logger output. The options are `pretty` (default, colored console output) or `json` (machine-readable lines for CI ingestion).                                                         |
@@ -172,7 +186,7 @@ an absent key means 1. They are the two sides of the same number and they are no
 
 Everything else is repository-wide and only exists at the root. This includes `spaces`, `versionGroups`,
 `initials`, `commit`, `shell`, `run`, `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`,
-`updateCheck`, and `unsafeDisableLock`.
+`updateCheck`, `unsafeDisableLock`, `polyrepo`, `configs`, `repositoryOverrides`, and `repositoryBaselines`.
 
 Read [the override ladder](./packages.md#the-override-ladder) to see the full order for one package from weakest to
 strongest.

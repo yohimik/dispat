@@ -30,6 +30,10 @@ Read [Integrating an existing release pipeline](./release-integration.md) for bu
 recovery and the limits of orchestration.
 [Skills, specifications and TeX documentation](./document-artifacts.md) covers versioned non-code deliverables.
 
+[A control repository](../control-repository.md#source-history-mode) shows a complete polyrepository example: one
+central control file, explicitly imported source configs, cross-repository dependencies, source-owned tags, and the
+manual baseline tuple used when ordinary gitlink checkpoints cannot prove what a consumer release incorporated.
+
 [Python without uv and with Pants](./python-pants.md) covers historical build setups.
 
 ## Ecosystem by ecosystem

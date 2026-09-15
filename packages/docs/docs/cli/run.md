@@ -23,6 +23,9 @@ Selection happens in three steps, in this order:
    scopeless units fall back to the files they changed. A window that covers only packages outside the script's reach
    completes as a no-op, so a sweep such as `dispat run build --since HEAD~1` stays green when a commit touches only
    packages without the script.
+   In [polyrepository mode](../control-repository.md#source-history-mode), a control-repository revision is
+   projected through its gitlinks. dispat evaluates each source repository from that pinned revision to its current
+   head and counts the source commits once; the pointer move is not a second change.
 2. **The filter** picks from that window using `--package`, `--space`, `--group`, or your current folder, as described
    in [Choosing the packages](#choosing-the-packages). It only ever narrows, so `dispat run build -p core` runs core
    when core changed and nothing at all when it did not. Pass `--since all -p core` to run a script regardless of

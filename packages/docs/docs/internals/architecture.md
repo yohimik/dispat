@@ -64,6 +64,10 @@ back as a release tag.
    result carries the flag bindings, and dispat's own decoder reads that copy into the model and validates it, folding
    a key to find the field it names, refusing any key the model has no field for, and refusing two keys of one object
    that differ only by case. Nothing is renamed on the way, so a map key reaches the model as its author wrote it.
+
+   In source-history mode, workspace composition validates each initialized source head against its control gitlink and
+   retains that exact commit as the plan's initial pin boundary. The later history load cannot silently replace it with
+   a head that moved between composition and planning.
 3. Discover packages across every direct sub-folder of each space path not excluded by the space's `.dispatexclude`.
    Package names must be unique across spaces, case included, because every name in dispat is matched
    case-insensitively. Discovery includes every standalone `packages` entry with a `path`.
@@ -95,11 +99,19 @@ back as a release tag.
 8. Verify remote and API access up front when `commit.push` or GitHub releases are enabled. dispat runs `git ls-remote`
    and `GET /repos/{owner}/{repo}` to fail fast before any release work starts. Set `commit.verify: false` to skip the
    git check.
-9. Run the gating run-level `beforeAll` hook. A failure here aborts the run before any release work begins.
+9. Run the gating run-level `beforeAll` hooks. A failure here aborts the run before any release work begins. In
+   source-history mode, revalidate every participating repository after all control and imported hooks finish. A
+   relevant head, release-tag, or pin change is `E330` before the first package task.
 10. Execute the task graph with per-stage concurrency budgets. This runs a version, build, and publish stage per
     *releasing* package, excluding held packages. The space's gating hooks bracket each stage (`beforeAll`,
     `beforeVersion`/`postVersion`, `beforeBuild`/`postBuild`, `beforePublish`). A space's `flow.login` runs once before
-    its first publish. Every other publish in that space waits on it.
+    its first publish. Every other publish in that space waits on it. Source-history mode revalidates a package's
+    owner plus the transitive provider and shared-version-group repository closure after `beforePublish` and before its
+    publish command. The same check includes control when applicable control intent was consulted or a checkpoint will
+    participate. Packages from one repository publish and record in a deterministic order; packages from different
+    repositories retain the ordinary concurrency budget. Exact source pins admitted by nested native records are shared
+    through a private coordinator bound to the current run so already-running sibling commands can validate fresh state;
+    this transient data is removed with the run and never becomes planning history.
 11. Three things run in order after each successful publish. The release recorders run first, writing the changelog
     file and the GitHub release unless you are in release-commit mode. The annotated tag runs next. dispat defers this
     tag in release-commit mode, and a `PACKAGE_<KEY>` script export pins it to the exported commit instead of HEAD. The
@@ -122,6 +134,11 @@ The planner acts as a pure function of your history, graph, and configuration. I
 outcome of any previous run. This makes re-running after a partial publish deterministic. The one date-derived input is
 git's newest-first tag ordering, which decides which tag counts as a package's latest. That ordering remains a fixed
 property of the repository and stays the same on every re-run.
+
+In source-history mode, the planner passes repository input closures to release validation as immutable, interned
+bitsets in a shared repository order. Validation reuses those words and copies a set only when it must add an optional
+control checkpoint. Planning drops its temporary repository-name lists before returning the plan, so those lists do
+not remain reachable through the plan's ancestry callback.
 
 **Windows.** dispat answers every question of the form "does this commit still count?" against a *pending window*. This
 window contains the commits from a package's last **stable** tag to `HEAD`. Which package's window it consults depends
@@ -374,13 +391,17 @@ changes which releases get cancelled or contained.
 
 ## Failure semantics
 
-**Once the release work starts, no error aborts the run.** Everything that can refuse a release happens before any of
-it. This includes the [release lock](../reference/releasing/release-lock.md), a blocked plan, the branch guard, the
-behind-remote check, the remote and GitHub verification, and the `beforeAll` hook. Those refuse while nothing has
-happened yet, which is the only moment refusing costs nothing. From the first build script onward, the run always goes
-to the end. A package can fail, and dispat can skip its consumers behind it. Every other package still releases, and
-the finalize phase still records whatever published. Only an interrupt stops a run early, and even then dispat records
-what already published.
+**Once the release work starts, one package error does not abort the run.** Run-wide checks include the
+[release lock](../reference/releasing/release-lock.md), a blocked plan, the branch guard, the behind-remote check, the
+remote and GitHub verification, the `beforeAll` hooks, and the source-history fleet revalidation after those hooks.
+Those refuse while nothing has happened yet. From the first build script onward, the task graph continues: a package
+can fail, its consumers can be skipped behind it, and independent packages still run. The finalize phase records what
+published. Only an interrupt stops the graph early, and even then dispat records what already published.
+
+Source-history mode also has a package-local refusal point after work begins. Immediately before a package's publish
+command, dispat revalidates the repositories whose history supplies that package's plan. Relevant drift is `E330`: the
+package fails before publishing, its consumers remain gated, and independent work continues. This catches Git changes
+made by build or hook commands after planning without claiming that dispat can exclude arbitrary external writers.
 
 Inside that, there is a second and stronger line. **Once a package's publish succeeds, nothing can fail that package**.
 See [After the point of no return](#after-the-point-of-no-return) below.
@@ -523,6 +544,15 @@ features. dispat implements and emits every other code of the registry, includin
 parser. dispat raises `E210`-`E213` and `W209`-`W215` here. These resolve an `Edits` or `Deletes` target against
 history and report what the correction did (see [Correcting a record](../reference/corrections.md)). Read
 [Diagnostic codes](../reference/plan-errors.md) to see what each of those six means and what to do about it.
+
+The optional polyrepository Git profile adds its own implemented diagnostic family. `E330` rejects an invalid or
+changed fleet repository snapshot, `E331` rejects ownership crossings and unlisted nested repositories, and `E332`
+rejects composition and override conflicts,
+`E333` reports a missing or ambiguous cross-repository boundary, and `E334` reports semantics that would require an
+order between incomparable source revisions. Publication and coordination failures use `E335`, `E336`, and `E337`.
+An absent provider explicitly declared with `external: true` emits `W330` and leaves that edge inactive for the current
+snapshot. The [diagnostic reference](../reference/plan-errors.md#polyrepository-snapshot-and-recording-diagnostics)
+gives the recovery for each code.
 
 In the other direction, thirty-one codes are dispat's own. They sit outside the specification's registry, attached to
 features the specification predates or does not have. They are numbered from `W220` and `E215` upward. This clears the

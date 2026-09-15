@@ -30,6 +30,30 @@ cfg := models.File{
 data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
 ```
 
+For a polyrepository control file, the model exposes the configuration contract directly:
+
+```go
+cfg := models.File{
+	Polyrepo: true,
+	Configs:  []string{"services/api/dispat.source.yaml"},
+	RepositoryOverrides: map[string]models.RepositoryOverrideConfig{
+		"api-source": {Commit: &models.CommitConfig{
+			Enabled: models.Bool(true), Push: true, Branch: "main",
+		}},
+	},
+	RepositoryBaselines: []models.RepositoryBaselineConfig{{
+		Consumer: "web", ReleaseTag: "web@2.4.0",
+		Repository: "api-source", Revision: "6f1a9f0d2b90c8f96a4d74dcb6568fd373b22c16",
+	}},
+}
+```
+
+`RepositoryOverrideConfig.Commit`, when present, replaces the complete inherited commit policy and uses ordinary
+`CommitConfig` defaults for omitted fields. Leaving the whole object absent inherits the control policy. The
+`DependencyConfig.External` boolean marks a provider that may be absent from the composed workspace; the edge becomes
+active normally when the provider is imported. See [A control repository](../control-repository.md#source-history-mode)
+for the runtime rules behind these values.
+
 ## The contract
 
 Every field carries one `json` tag, and that tag is both halves of the contract: the key the CLI decodes the file by,

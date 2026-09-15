@@ -50,6 +50,22 @@ The default is auto. Set the config file name relative to `--root`. Leave this u
 using the [resolution rules](../configuration/README.md). Passing an explicit name uses that exact file with no
 fallback and no ascent.
 
+### `--configs`
+
+Import one additional configuration into a combined polyrepository workspace. Repeat the flag for more files. Paths
+start at the effective control root, canonical duplicates load once, and the presence of this flag enables
+[polyrepository mode](../control-repository.md#source-history-mode). `--config` still selects the one control file;
+`--configs` adds source-owned declarations. The named file establishes that source's ordinary local root, space, and
+package configuration layers. A centrally declared path entering another linked repository does not trigger discovery
+there.
+
+### `--polyrepo`
+
+Read the independent Git histories of the source repositories explicitly linked by the control repository. The default
+is false. This mode also turns on when the control config has `polyrepo: true` or imports `configs`. It requires each
+declared source to be initialized at its pinned gitlink commit with complete history. See
+[A control repository](../control-repository.md#source-history-mode).
+
 ### `--env-file`
 
 The default is `./.env`. Read environment variables from this file instead of `./.env`. You can repeat this flag, and
