@@ -193,6 +193,12 @@ integration suite itself.
     release's files is the binary, what the result is called and where it goes, whether it is a binary at all
     (`--pipe`), and the idempotence the destination's own checksum decides. The idempotence and the usage exits are
     what make a list of pinned installs a shell script, which one scenario runs as one.
+52. **Repository-aware histories** (`polyrepo_test.go`): central and imported configurations compose one package graph
+    over real Git submodules while every package keeps its owning repository's commits, tags and release baseline.
+    The black-box fixtures cover central ownership ignoring implicit child configs, repository-local scope resolution
+    followed by explicit cross-repository propagation, file and repeated CLI imports, mixed central/imported source packages,
+    optional external providers, identical object and tag names in different repositories, an interleaved A -> B -> A
+    release, source-integrity refusals, and the evidence boundary for cross-repository consumer baselines.
 
 ### Manifests and editing
 
@@ -1446,6 +1452,60 @@ This goal owns checking supplied text without a commit operation. Goal 50 owns G
 | `TestDiagnosticsChecksLiteralWholeMessage` | Literal and multiline arguments reach the parser without Git cleanup; any invalid unit rejects the message. |
 | `TestDiagnosticsSeparatesUsageAndConfigErrors` | Arity and foreign flags exit 2; unreadable or malformed explicit configuration exits 1. |
 
+### Goal 52: repository-aware histories (`polyrepo_test.go`)
+
+Every source in this goal is a disposable initialized Git repository checked out as a real submodule of a disposable
+control repository. The suite drives the compiled binary only. It neither contacts production services nor relies on
+timestamps to relate histories.
+
+| Test | Invariant |
+| --- | --- |
+| `TestPolyrepoCentralOwnershipAndSourceScopedHistory` | A central `polyrepo: true` config owns packages through its existing space paths and ignores implicit source-root configs; package tags and baselines live in each source, source scopes address only local packages, and an explicit provider propagation directive crosses repositories once. |
+| `TestPolyrepoControlWildcardIsFleetWide` | A `fix(*)` unit in control history resolves against the combined namespace and directly patches packages owned by two different source repositories. |
+| `TestPolyrepoOptOutKeepsLegacyPointerHistory` | With every activation input absent, an initialized submodule stays on the legacy control history: its gitlink move is an ordinary control changed path, nested source commits are not loaded, and the package tag remains in the control repository. |
+| `TestPolyrepoImportedConfigsAndCLIImports` | `configs` and repeated `--configs` compose repository-local configurations whose relative package paths start at their declaring repositories; imports imply polyrepo, `--config` still selects the control file, same-named source spaces remain local, and explicit `--polyrepo=false` with imports is refused. |
+| `TestPolyrepoConfigImportResolvesFromDeclaringFragment` | A `configs` path merged from a root `$ref` resolves relative to the fragment that declared it, while the equivalent CLI import resolves from the control root. |
+| `TestPolyrepoCanonicalConfigImportsAreDeduplicated` | Canonically equivalent paths to one imported config compose one owner rather than duplicate package identities, while a missing explicit import remains fatal. |
+| `TestPolyrepoMixedCentralAndImportedPackages` | A centrally declared source package and an imported source package keep disjoint histories while participating in one plan and one selector surface. |
+| `TestPolyrepoSinceControlRevisionProjectsSourceGitlinks` | `--since` at a historical control revision projects each source's old gitlink into its own range, and the later control pointer commit is snapshot evidence rather than a duplicate package change. |
+| `TestPolyrepoImportedDefaultsAndNestedCommandContext` | An imported repository keeps its own shell, environment and scripts, and a nested dispat process launched from its package directory retains the outer composed workspace and can select a package from another import. |
+| `TestPolyrepoNestedStepsReadLiveCommitPin` | A source-owned script runs nested changelog and commit steps followed by a nested fleet plan in the same shell; the plan reads the exact source SHA just appended to the live `DISPAT_OUTPUT` file before any control gitlink checkpoint exists. |
+| `TestPolyrepoNestedInterleavedOwnerPinsRetainEveryCandidate` | Nested commits across A/lib -> B/service -> A/tool retain exact candidate SHA sets per owner, so returning to source A after source B neither deadlocks nor loses the newer source-A pin. |
+| `TestPolyrepoNestedCommitTagsSerializePerOwnerAndRunOwnersInParallel` | With publish concurrency 2, two independent packages in one source serialize their nested commit/tag Git writes while a bounded handshake proves another source can publish concurrently. |
+| `TestPolyrepoConcurrentNestedCommandReadsPinsPublishedAfterShellStart` | Two independent source publish shells start concurrently; after source A records a nested commit, source B's already-running shell reads that newly verified pin through the live workspace channel and can run nested status and commit commands. |
+| `TestPolyrepoNestedForeignOwnerExportCannotAuthorizeSourceHead` | A package export is mapped to that package's exact repository owner; placing another source's SHA under the wrong package key cannot authorize an unpinned checkout and reports E330. |
+| `TestPolyrepoImportedSameNameSpacesHaveIndependentLogins` | Two imported repositories may both declare `workspace`; each uses its own login gate, source-local environment and source-local credentials marker. |
+| `TestPolyrepoImportedGitHubPoliciesUseSourceOwners` | Two imported repositories route their package release to separate fake GitHub owners/endpoints, proving source-local recorder policy survives composition without contacting a production service. |
+| `TestPolyrepoExternalDependencyIsActiveWhenPresent` | An `external: true` edge emits W330 while its provider is absent, still rejects an invalid edge kind, and becomes an ordinary active graph edge when that provider is included, including case-insensitive endpoint resolution, cycle detection, propagation, `--consumers`, dependency-first execution and failure blocking. |
+| `TestPolyrepoComputePreservesExternalDependency` | A compute write that adds a detected source-to-source edge preserves an existing external provider's `external`, `kind` and `keep` fields in canonical serialization. |
+| `TestPolyrepoComputeWritesImportedOwnerConfig` | Compute derives edges across imports but writes a consumer's new declaration and backup in its source config, leaving the imports-only control file byte-for-byte unchanged and preserving external fields beside the edit. |
+| `TestPolyrepoRejectsReservedControlRepositoryName` | Exact and mixed-case `.gitmodules` names cannot shadow the reserved synthetic `control` history in central or imported mode; composition reports E330 before publication, tags or Git mutation. |
+| `TestPolyrepoOwnershipValidation` | Package identities are case-insensitively unique across sources, imported paths cannot escape their owning repository, centrally declared control-owned packages remain valid, and a control wrapper cannot cross into a source even though the same wrapper remains valid in opt-out legacy mode. |
+| `TestPolyrepoImportedGroupsAreLocalAndCentralGroupsMaySpanSources` | Same-named groups in imported configs remain repository-local, while unqualified imported space/group selectors take the union of same-named local identities and a group explicitly declared by the central config may share a version across source repositories. |
+| `TestPolyrepoFixedRideGuardsSourceHistoryWithoutDependency` | A source-B package that rides source A solely through a central fixed group guards A's contributing history; after A records successfully, an unplanned A mutation in B's `beforePublish` reports E330 and prevents B publication without any dependency edge. |
+| `TestPolyrepoIdenticalObjectIDsAndTagNamesStayIsolated` | Two source checkouts may have the same commit OID and same tag spelling without sharing cached history or baselines; moving one changes only its package. |
+| `TestPolyrepoSameTagSpellingKeepsCheckpointOwnersSeparate` | Two consumers may each own `v1.0.0` in different sources and have separate valid control checkpoints; their distinct provider snapshots remain qualified by consumer owner and produce different propagated bumps. |
+| `TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution` | Competing propagated channels from incomparable source DAGs report E334; a control directive resolves only proposals in its causal gitlink snapshot and cannot suppress a later source proposal. |
+| `TestPolyrepoPrereleaseAndStableWindowsStayRepositoryLocal` | A beta train and stable release line advance side by side in different source repositories; their fresh windows, counters, channels and tags do not bleed across histories. |
+| `TestPolyrepoStableAndPrereleaseBaselineTuplesStaySeparate` | Stable and prerelease releases of one consumer retain distinct explicit provider positions; the active beta tuple exposes catch-up that the stable tuple would hide. |
+| `TestPolyrepoInterleavedRepositoryGraphReleases` | The package DAG A/lib -> B/service -> A/tool completes without repository-order deadlock, and each tag lands in its source repository. |
+| `TestPolyrepoRepositoryOverrideCommitsAndPushesDetachedSource` | A complete repository commit override writes the source-owned changelog and record under its own identity, pushes a detached source to `commit.branch`, and the separate root commit policy creates a local control gitlink checkpoint. |
+| `TestPolyrepoDetachedPushRequiresBranch` | A commit-enabled detached source that must push a branch is rejected with E337 before publication or creation of its source commit, tag, or control checkpoint when `commit.branch` is absent. |
+| `TestPolyrepoCheckpointFailurePreservesSourceAndBlocksConsumer` | E335 after a successful source commit/tag preserves that durable publication, leaves the control gitlink truthful, blocks the dependent leg, and reports the final webhook status as failed; explicit ordinary checkpoint repair lets retry keep the provider tag and finish the consumer once. |
+| `TestPolyrepoSourceRecordFailureBlocksConsumerAndRetries` | A failed source release commit creates neither source tag nor control checkpoint and blocks dependent publication; after the operator removes the failure and explicitly cleans the retained generated source state, retry records both repositories. |
+| `TestPolyrepoPartialReleasePreservesIndependentSuccessOnRetry` | An unrelated source failure blocks its consumer while independent source publication remains tagged; retry reads that durable tag and publishes only the unfinished source work. |
+| `TestPolyrepoSourcePushFailureDoesNotAdvanceControl` | E335 on a rejected source branch/tag push may retain local source state but cannot create or push a control checkpoint pointing at the unreachable commit. |
+| `TestPolyrepoReleaseLockGuardsAndCleansSourceWork` | The control repository's held remote lock refuses the whole fleet, an uncoordinated source reports E336 before mutation, contention in a later source preserves its foreign lock while unwinding already-acquired source and control locks, and an interrupted admitted source build clears the fleet lock without recording a release. |
+| `TestPolyrepoReleaseCleansLivePinContext` | A real package shell receives the outer release's private live-pin directory, and the outer release removes it after both successful publication and a gating failure before publication. |
+| `TestPolyrepoRefusesUninitializedPinnedMismatchAndShallowSources` | An uninitialized submodule, a checkout whose HEAD differs from its control gitlink, and a shallow source all fail before planning. |
+| `TestPolyrepoBeforeAllTagDriftStopsBeforePublication` | A source high-water tag added by `beforeAll` after planning changes the fixed fleet inventory and reports E330 before package work or publication starts. |
+| `TestPolyrepoBeforePublishBaselineTagDriftStopsPublication` | A baseline tag force-moved after build by `beforePublish` is detected by the per-package snapshot guard; publication and the planned source tag remain absent. |
+| `TestPolyrepoBeforePublishControlDirectiveDriftStopsPublication` | When an applicable control directive supplies source release intent, a `beforePublish` control-HEAD mutation invalidates that exact provenance and reports E330 before publication even with automatic control commits disabled. |
+| `TestPolyrepoCrossRepositoryBaselineRequiresEvidence` | A source tag added later to a consumer SHA the control repository already pinned does not prove which provider revision it consumed; a coincidentally matching current gitlink is insufficient, duplicate baseline keys are rejected, and one explicit `repositoryBaselines` tuple recovers the plan. |
+| `TestPolyrepoCustomCheckpointMessageProvesNoBaseline` | A control commit that moves matching provider and consumer gitlinks under an opaque custom message is not automatic release-checkpoint evidence and reports E333 when later provider work needs a consumer boundary. |
+| `TestPolyrepoReleaseCheckpointProvidesNextConsumerBaseline` | A normal control release checkpoint that names exact source tags and carries their matching gitlink transitions is sufficient evidence for the consumer's next cross-repository baseline after the bootstrap tuple is removed. |
+| `TestPolyrepoImportedConsumerBaselineRequiresEvidence` | Importing an already-tagged standalone consumer after the provider pointer advanced does not prove the old consumer release adopted that provider snapshot; ambiguity is refused until an explicit baseline tuple identifies its actual provider revision. |
+
 ## Regression fences
 
 Dedicated guard tests pin subtle planner properties so regressions fail exactly one distinct test:
@@ -1501,6 +1561,9 @@ than showing up as a puzzling behaviour change somewhere downstream.
 | **A correction that reached no package said nothing at all.** A correction with no scope-set takes its packages from its targets, so a target no pending window still holds left it addressing nothing, and it was skipped before it could report. This is the one shape `W209` exists to prevent: the operator writes the correction, sees no diagnostic, and believes the record was fixed. | `TestCorrectionReachingNoPackageStillReportsW209`                                                                        | `internal/plan` |
 | **`E213` reported once per target rather than once per package.** Two targets that both omit the same package is one mistake in one scope-set, fixed once; reporting it per footer scaled the noise with the number of footers.                                | `TestCorrectionWideningIsReportedOncePerPackage`                                                                          | `internal/plan` |
 | **A unit naming one target twice reported `W210` against itself.** §7.4.1 collapses several targets into the one carrying record, so the second mention is redundant rather than superseded; the warning told the operator a newer commit had overridden their correction and named the correction's own commit as the culprit. | `TestCorrectionNamingOneTargetTwiceIsNotSuperseded`                                                                       | `internal/plan` |
+| **An imports-only control configuration was rejected before workspace composition.** The legacy single-repository validator required a local space or package even when `configs` supplied every package in the fleet, so the new import path was unreachable without a dummy local declaration. | `TestPolyrepoOwnershipValidation` (`duplicate package identity across sources`, `imported path escapes its owner`) | `polyrepo_test.go`; `internal/config` |
+| **An imported source's top-level run script was rejected as undefined.** The early typo guard searched only the control config and rediscovered packages only from the control root, so execution never reached the imported package that resolved the script. | `TestPolyrepoImportedDefaultsAndNestedCommandContext` | `polyrepo_test.go`; `internal/app` |
+| **`compute --write` ignored imported repositories.** It rediscovered packages from the control config and root instead of the composed workspace, so an imports-only run exited successfully without scanning source manifests, deriving cross-source edges, or writing the consumer owner's config and backup. | `TestPolyrepoComputeWritesImportedOwnerConfig` | `polyrepo_test.go`; `internal/app` |
 
 ## Running
 
@@ -1519,7 +1582,8 @@ in a fresh `t.TempDir()`, keeping tests isolated and safe to run in any order or
   Prefer `HasCodeForPackage` over `HasCode` whenever the diagnostic names a package.
 - Author configs as `pkg/models` values starting from `harness.BaseFile(concurrency...)` and write them with
   `r.WriteConfigModel(cfg)`. Fall back to `harness.WriteConfigRaw` only for shapes the model cannot express, such as
-  unknown keys. Reuse shared fixtures in `helpers_test.go` (`singlePackageRepo`, `linkedRepo`, `libsConfig`,
+  unknown keys. `polyrepo_test.go` deliberately authors raw JSON while the new composition schema settles, keeping
+  repository ownership and import boundaries visible in each fixture. Reuse shared fixtures in `helpers_test.go` (`singlePackageRepo`, `linkedRepo`, `libsConfig`,
   `markerBuild`/`buildRuns` for script-execution claims). If only one test uses a config, write it out fully inside
   that test to keep the input visible.
 - Use `r.ReleaseOK()` and `r.StatusOK()` for runs that must succeed. Use plain `Release()` or `Status()` with an
