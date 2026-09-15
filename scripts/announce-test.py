@@ -61,4 +61,9 @@ sys.exit(int(os.environ.get('ANNOUNCE_TEST_EXIT', '0')))
     for overrides in ({'DISPAT_STAGE':'run:announce'}, {'DISPAT_NEW_VERSION':''}):
         code, calls = run(**overrides)
         assert code == 0 and calls == []
+    # A dispatch that skips announcements withholds every platform credential.
+    code, calls = run(CRIER_PUBLISH_INSTAGRAM_TOKEN='', CRIER_PUBLISH_INSTAGRAM_USER_ID='',
+                      CRIER_PUBLISH_LINKEDIN_TOKEN='', CRIER_PUBLISH_LINKEDIN_AUTHOR_URN='',
+                      CRIER_PUBLISH_DISCORD_WEBHOOK_URL='')
+    assert code == 0 and calls == [], 'no platform credentials must skip every publisher'
 print('announcement flow: one publisher call, changelog data, platform selection and no retries passed')
