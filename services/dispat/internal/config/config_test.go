@@ -1317,6 +1317,11 @@ func TestDiscoverMissingExternalProvider(t *testing.T) {
 	_, deps, _, err := Discover(loaded, root)
 	require.NoError(t, err)
 	assert.Empty(t, deps)
+	_, active, inactive, _, err := DiscoverWorkspacePlan(loaded, root, nil)
+	require.NoError(t, err)
+	assert.Empty(t, active)
+	require.Len(t, inactive, 1)
+	assert.Equal(t, model.Dependency{Consumer: "core", Provider: "ghost"}, inactive[0])
 }
 
 func TestDiscoverIncludedExternalProviderIsActive(t *testing.T) {

@@ -1669,6 +1669,11 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, []Exc
 }
 
 func validateDependencies(pkgs []*model.Package, declared []DeclaredDependency) ([]model.Dependency, error) {
+	active, _, err := validateDependenciesForPlan(pkgs, declared)
+	return active, err
+}
+
+func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDependency) ([]model.Dependency, []model.Dependency, error) {
 	owner := make(map[string]string, len(pkgs))
 	unversioned := make(map[string]bool)
 	for _, p := range pkgs {
@@ -1679,30 +1684,37 @@ func validateDependencies(pkgs []*model.Package, declared []DeclaredDependency) 
 	}
 
 	deps := make([]model.Dependency, 0, len(declared))
+	var inactive []model.Dependency
+	seenInactive := make(map[model.Dependency]bool)
 	for _, d := range declared {
 		consumer, consumerOK := owner[strings.ToLower(d.Consumer)]
 		if !consumerOK {
-			return nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
+			return nil, nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
 		}
 		kind, err := DepKind(d.Kind)
 		if err != nil {
-			return nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
+			return nil, nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
 		}
 		provider, providerOK := owner[strings.ToLower(d.Provider)]
 		if !providerOK && d.External {
+			edge := model.Dependency{Consumer: consumer, Provider: d.Provider, Kind: kind}
+			if !seenInactive[edge] {
+				seenInactive[edge] = true
+				inactive = append(inactive, edge)
+			}
 			continue
 		}
 		if !providerOK {
-			return nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
+			return nil, nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
 		}
 		if unversioned[strings.ToLower(provider)] && !unversioned[strings.ToLower(consumer)] {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"config: %s: package %q cannot depend on %q: a space with versioning \"none\" is never released, so a releasable package cannot follow it",
 				d.Source.Label(), d.Consumer, d.Provider)
 		}
 		deps = append(deps, model.Dependency{Consumer: consumer, Provider: provider, Kind: kind})
 	}
-	return deps, nil
+	return deps, inactive, nil
 }
 
 // DiscoverPackages is Discover without the dependency-list validation: the

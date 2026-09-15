@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -25,7 +27,9 @@ func TestValidatePackageOwnershipPathBoundaries(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			pkgs := make([]*model.Package, len(tc.paths))
 			for i, path := range tc.paths {
-				pkgs[i] = &model.Package{Name: fmt.Sprint(i), Dir: filepath.Join(root, filepath.FromSlash(path))}
+				dir := filepath.Join(root, filepath.FromSlash(path))
+				require.NoError(t, os.MkdirAll(dir, 0o755))
+				pkgs[i] = &model.Package{Name: fmt.Sprint(i), Dir: dir}
 			}
 			before := append([]*model.Package(nil), pkgs...)
 			err := validatePackageOwnership(pkgs)
@@ -39,13 +43,32 @@ func TestValidatePackageOwnershipPathBoundaries(t *testing.T) {
 	}
 }
 
+func TestValidatePackageOwnershipRejectsCanonicalPathAliases(t *testing.T) {
+	root := t.TempDir()
+	actual := filepath.Join(root, "actual")
+	require.NoError(t, os.Mkdir(actual, 0o755))
+	alias := filepath.Join(root, "alias")
+	require.NoError(t, os.Symlink(actual, alias))
+
+	err := validatePackageOwnership([]*model.Package{
+		{Name: "first", Dir: actual},
+		{Name: "second", Dir: alias},
+	})
+	require.ErrorContains(t, err, "ownership overlaps")
+}
+
 func BenchmarkValidatePackageOwnership(b *testing.B) {
 	for _, count := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			root := b.TempDir()
 			pkgs := make([]*model.Package, count)
 			for i := range pkgs {
 				name := fmt.Sprintf("pkg%d", i)
-				pkgs[i] = &model.Package{Name: name, Dir: filepath.Join("workspace", name)}
+				dir := filepath.Join(root, name)
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					b.Fatal(err)
+				}
+				pkgs[i] = &model.Package{Name: name, Dir: dir}
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
