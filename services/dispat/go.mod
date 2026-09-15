@@ -11,7 +11,7 @@ require (
 	github.com/yohimik/dispat/pkg/ccme v1.0.0
 	github.com/yohimik/dispat/pkg/config v1.0.0
 	github.com/yohimik/dispat/pkg/manifest v1.2.0
-	github.com/yohimik/dispat/pkg/models v1.10.0
+	github.com/yohimik/dispat/pkg/models v1.11.0-rc.0
 	github.com/yohimik/dispat/pkg/scanner v1.2.0
 	github.com/yohimik/dispat/pkg/writer v1.2.0
 	golang.org/x/sys v0.47.0

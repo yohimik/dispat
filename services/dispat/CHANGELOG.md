@@ -1,5 +1,119 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.0 (2026-09-15)
+
+### Features
+
+- release composed repositories with guarded source records ([3b751b5](https://github.com/yohimik/dispat/commit/3b751b58e27beea1d9ea0c6f6aac45d887aa9775)) (by yohimik, Codex (gpt-5.6-sol))
+  Plan from each repository history and preserve the accepted source heads.
+  Acquire ordered fleet locks, guard publication inputs, record and push in the
+  owning repository, and share exact native pins with nested workspace commands.
+  Keep optional control checkpoints and source-local policies explicit.
+
+- share verified source pins with concurrent nested commands ([074d1dc](https://github.com/yohimik/dispat/commit/074d1dc069a48fd9e4a4826ba2cffad0a275ed48)) (by yohimik, Codex (gpt-5.6-sol))
+  Bind temporary per-run pin coordination to the exact workspace and source
+  identities. Publish atomic owner records, bound file reads, preserve full
+  commit exports, and remove transient coordination at run completion.
+
+- coordinate repository publication and critical source records ([26f4a16](https://github.com/yohimik/dispat/commit/26f4a162f880fe2a025e38ad0c5c8c7ed499eb40)) (by yohimik, Codex (gpt-5.6-sol))
+  Order publications sharing a repository without blocking independent
+  repositories or converting sibling order into dependency failure edges.
+  Preserve published results and block consumer closure after required record
+  failures. Carry workspace ownership to nested commands and diagnostic codes
+  to failed-package observers.
+
+- guard repository mutations and release tag snapshots ([52075ac](https://github.com/yohimik/dispat/commit/52075ace92c3e2506551c9a7084d0755bf9f28ae)) (by yohimik, Codex (gpt-5.6-sol))
+  Serialize native Git mutations by common Git directory and compare exact
+  package tag refs before publication. Share compiled prefix dispatch between
+  tag inventory and snapshot readers without retaining command buffers.
+
+- plan releases across repository-owned Git histories ([685b6cf](https://github.com/yohimik/dispat/commit/685b6cf1ee7548d74e287a74b7cba5e6a2dc3b27)) (by yohimik, Codex (gpt-5.6-sol))
+  Read source tags and commit windows under the control gitlink snapshot.
+  Keep scope, corrections and ancestry repository-local while propagating
+  through the combined graph. Require explicit boundaries when normal
+  release checkpoints do not prove prior consumption, and causal control
+  intent when incomparable source directives conflict.
+
+  Share canonical commit payloads, persistent gitlink snapshots and distinct
+  window memberships; retain existing single-repository diagnostics.
+
+- compose repository configurations under a control root ([db6208d](https://github.com/yohimik/dispat/commit/db6208d976e1c92b3bddc3060f3cb8a4845d1059)) (by yohimik, Codex (gpt-5.6-sol))
+  Load explicit source configs or central package definitions with repository
+  ownership, local defaults, external dependencies and nested script context.
+  Route selectors and config computation through the composed workspace and
+  resolve source record destinations independently from the control environment.
+
+  Index initial versions and repository aliases once per operation, bound tag
+  query workers, and validate overlapping package scopes with sorted directory
+  prefixes. Cover config precedence, ownership, imported scripts and writeback.
+
+  Verify the isolated staged milestone across app, config, CLI, Git, changelog
+  and model suites; benchmark the new indexes through 10,000 packages.
+  Multi-history release planning and recording follow in subsequent commits.
+
+- validate optional external dependency providers ([d5c2ea1](https://github.com/yohimik/dispat/commit/d5c2ea1f85f463adfdd5626902e27381f8018220)) (by yohimik, Codex (gpt-5.6-sol))
+  Accept the polyrepo configuration surface and keep absent external providers
+  out of the active graph while validating consumers and dependency kinds.
+  Exercise absent and included providers and malformed dependency kinds.
+
+### Fixes
+
+- preserve repository ownership throughout composed releases ([683ab0e](https://github.com/yohimik/dispat/commit/683ab0ead51d3df4a7b27b655bb978a31a4bebee)) (by yohimik, Codex (gpt-5.6-sol))
+  Keep folder inputs, parser diagnostics and nested-step tag masks local to
+  their declaring repository. Honor direct channel intent, stop user hooks
+  on interruption, order boundary errors and free temporary planning indexes.
+
+- retain compact repository input closures ([7ced500](https://github.com/yohimik/dispat/commit/7ced5004126d95ae3748047b73873315994e8d2a)) (by yohimik, Codex (gpt-5.6-sol))
+  Carry owner, provider, shared-group and applicable control history into
+  publication validation as interned immutable bitsets. Share sparse provider
+  lists during planning and discard temporary name lists before the returned
+  plan retains its ancestry callback.
+
+- reject stale workspace pin readers ([bb54e30](https://github.com/yohimik/dispat/commit/bb54e30c151a64b631eefdf456f47382c0719d0f)) (by yohimik, Codex (gpt-5.6-sol))
+  Fail when a cached reader loses its coordinator or the directory is replaced.
+  Cover malformed, oversized, symlinked and non-regular coordination files while
+  preserving an absent owner pin inside a valid run.
+
+- retain source pins from composition through planning ([55d4308](https://github.com/yohimik/dispat/commit/55d43080a1f14d4f226046f2726e51a1a9249333)) (by yohimik, Codex (gpt-5.6-sol))
+  Compare source HEAD with the captured control revision and resolve live pins
+  under the source Git mutation lock. Reject control identity collisions before
+  building repository ownership, including every case variant.
+
+- reject packages owned by unlisted nested repositories ([7213ef0](https://github.com/yohimik/dispat/commit/7213ef0ee1ba9ef9ae86be2f8f763f39400420b9)) (by yohimik, Codex (gpt-5.6-sol))
+  Memoize existing Git-root ancestry during workspace discovery so package
+  and source paths cannot silently use a different repository history.
+  Preserve the existing requirement that configured source folders exist.
+
+- preserve config provenance and exact repository ownership ([4c14f03](https://github.com/yohimik/dispat/commit/4c14f0380cf1a71dd4ea59cd21e89b610fdade0e)) (by yohimik, Codex (gpt-5.6-sol))
+  Resolve imported paths from each declaring reference file, canonicalize
+  checkout ownership, and retain the logical gitlink path for history and
+  recording. Validate exact repository identities and report structured
+  composition diagnostics. Accept only exact owner-qualified commit exports
+  when a nested command reuses its enclosing workspace.
+
+- index shared tag inventories without retaining raw buffers ([d9304c7](https://github.com/yohimik/dispat/commit/d9304c746e3026df315619f6dd288e4f2fe92422)) (by yohimik, Codex (gpt-5.6-sol))
+  Parse each ref once and dispatch matching package formats through a prefix
+  index. Preserve tag ordering, peeling, malformed records and custom format
+  overlap while detaching retained fields from the raw inventory allocation.
+
+- preserve absent external providers during config computation ([1745be8](https://github.com/yohimik/dispat/commit/1745be8f3d575e757b6f94957b2729bb36756e5e)) (by yohimik, Codex (gpt-6-astra))
+  Keep optional providers outside the workspace when rewriting dependency
+  lists, without hiding missing consumers or stale edges to present providers.
+  Retain external annotations through kind corrections and dependency additions.
+
+  Cover JSON and YAML root, space and package declarations, repeated computation,
+  and the existing TOML manual-edit fallback. Regressions fail before the fix.
+
+### Dependencies
+
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.11.0-rc.0): 1.10.0 -> 1.11.0-rc.0
+
+### Authors
+
+- yohimik
+- Codex (gpt-5.6-sol)
+
+
 ## services/dispat/v1.10.0 (2026-09-09)
 
 ### Features
