@@ -1,5 +1,19 @@
 # Changelog
 
+## pkg/models/v1.11.0-rc.0 (2026-09-15)
+
+### Features
+
+- describe polyrepo configuration and external dependencies ([d5c2ea1](https://github.com/yohimik/dispat/commit/d5c2ea1f85f463adfdd5626902e27381f8018220)) (by yohimik)
+  Add opt-in composition, repository commit overrides and explicit history
+  baseline tuples. Preserve optional external dependency annotations in
+  configuration serialization.
+
+### Authors
+
+- yohimik
+
+
 ## pkg/models/v1.10.0 (2026-09-09)
 
 No changes: a version bump to keep the versioning group on one major and minor version.
