@@ -15,13 +15,13 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
-	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // ReleaseOptions narrows a release — and the release `status` reports on — to
@@ -103,7 +103,16 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err := a.checkGit(); err != nil {
 		return nil, err
 	}
-	if !a.lockDisabled() {
+	var workspaceRecords *workspaceRecorder
+	if a.workspace != nil {
+		workspaceRecords = a.newWorkspaceRecorder()
+		unlock, err := workspaceRecords.acquire(ctx)
+		if err != nil {
+			a.log.Error().Err(err).Str("code", "E336").Msg("unable to acquire fleet release locks")
+			return nil, err
+		}
+		defer unlock()
+	} else if !a.lockDisabled() {
 		lock := &release.Lock{Git: a.git, Remote: a.pushRemote(), Log: a.log}
 		if err := lock.Acquire(ctx); err != nil {
 			a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", gitx.RedactURL(a.pushRemote())).
@@ -132,7 +141,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	//
 	// commit.verify (default true) can switch the git check off for remotes
 	// that reject ls-remote but accept pushes.
-	if pushMode && a.cfg.Commit.VerifyEnabled() {
+	if workspaceRecords == nil && pushMode && a.cfg.Commit.VerifyEnabled() {
 		if err := a.git.VerifyRemote(ctx, remote); err != nil {
 			a.log.Error().Err(err).Str("remote", gitx.RedactURL(remote)).Msg("git remote verification failed")
 			return nil, err
@@ -145,14 +154,37 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 			return nil, err
 		}
 	}
+	if workspaceRecords != nil {
+		packages, err := a.packages()
+		if err != nil {
+			return nil, err
+		}
+		if err := workspaceRecords.captureSnapshot(ctx, packages); err != nil {
+			a.logError(err).Msg("unable to capture fixed fleet snapshot")
+			return nil, err
+		}
+	}
 
 	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	if workspaceRecords != nil {
+		workspaceRecords.setSnapshotPlan(pl)
+	}
 	if blocked := a.releaseBlocked(pl); blocked != "" {
 		a.log.Error().Str("reason", blocked).Msg("refusing to release")
 		return nil, errors.New(blocked)
+	}
+	if workspaceRecords != nil {
+		if err := workspaceRecords.verifyPlannedHeads(pl); err != nil {
+			a.logError(err).Msg("repository changed after workspace composition")
+			return nil, err
+		}
+		if err := workspaceRecords.verify(ctx, pl); err != nil {
+			a.logError(err).Msg("source repository verification failed")
+			return nil, err
+		}
 	}
 	// The branch guard fires before any GitHub verification or hook: a run on
 	// the wrong branch is refused whatever its plan says. It sits after the
@@ -162,6 +194,22 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		a.log.Error().Err(err).Msg("refusing to release")
 		return nil, err
 	}
+	if workspaceRecords != nil {
+		if err := workspaceRecords.prepare(ctx, pl); err != nil {
+			a.logError(err).Msg("refusing to release source repositories")
+			return nil, err
+		}
+		cleanupPins, err := workspaceRecords.pins.start(
+			workspaceRecords.pins.root, workspaceRecords.pins.config, workspacePinOwners(pl),
+			workspacePinRepositories(a.workspace))
+		if err != nil {
+			err = config.WithDiagnostic(config.DiagnosticRepositoryInvalid,
+				fmt.Errorf("E330: creating live workspace pin context: %w", err))
+			a.logError(err).Msg("refusing to release source repositories")
+			return nil, err
+		}
+		defer cleanupPins()
+	}
 
 	// An automatic release commit can capture pre-existing work, and
 	// revertOnFail can discard it. Refuse before hooks or writes when either
@@ -170,11 +218,11 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// manifest edits remain valid input (including an interrupted run's output).
 	var protected []string
 	for _, rel := range pl.Releasing() {
-		if commitMode || rel.Pkg.Space.RevertOnFail {
+		if workspaceRecords == nil && (commitMode || rel.Pkg.Space.RevertOnFail) {
 			protected = append(protected, rel.Pkg.Dir)
 		}
 	}
-	if commitMode {
+	if workspaceRecords == nil && commitMode {
 		protected = a.appendIncludeDirs(protected, a.cfg.Commit.Include)
 	}
 	var dirty []string
@@ -207,8 +255,15 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if commitMode {
 		tagger = nil
 	}
+	if workspaceRecords != nil {
+		tagger = nil
+		workspaceRecords.gh = gh
+	}
 
-	runner := &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
+	runner := a.packageRunner()
+	if workspaceRecords != nil {
+		runner = workspaceRecords.pins.runner(runner)
+	}
 	// The run-level hooks share one environment: the workspace listing before
 	// the run, widened to the run outcome once the task graph finishes.
 	hooks := &runHooks{cfg: a.cfg, runner: runner, root: a.root,
@@ -219,6 +274,19 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err := hooks.runGating(ctx, "beforeAll", a.cfg.Run.BeforeAll); err != nil {
 		a.log.Error().Err(err).Msg("beforeAll hook failed, refusing to release")
 		return nil, err
+	}
+	if workspaceRecords != nil {
+		for _, owner := range workspaceRecords.ordered {
+			if owner.repo.Imported {
+				if err := owner.hooks.runGating(ctx, "beforeAll", owner.repo.Config.Run.BeforeAll); err != nil {
+					return nil, fmt.Errorf("repository %s beforeAll hook failed: %w", owner.repo.Name, err)
+				}
+			}
+		}
+		if err := workspaceRecords.verifySnapshot(ctx, nil); err != nil {
+			a.logError(err).Msg("repository changed during beforeAll hooks")
+			return nil, err
+		}
 	}
 
 	// Webhooks begin once the run is committed to execute: a refused run — a
@@ -251,6 +319,24 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		Observer:           obs,
 		Log:                a.log,
 	}
+	if workspaceRecords != nil {
+		executor.Recorders = []release.ReleaseRecorder{workspaceRecords}
+		executor.Reverter = workspaceRecords
+		executor.BlockOnRecordFailure = true
+		executor.AcquirePublish = workspaceRecords.acquirePublish
+		executor.PublishGroup = func(rel *plan.Release) string {
+			if rel == nil || rel.Pkg == nil {
+				return ""
+			}
+			return rel.Pkg.Repository
+		}
+		executor.BeforePublish = func(ctx context.Context, rel *plan.Release) error {
+			if err := workspaceRecords.verifyPublishBranch(ctx, rel); err != nil {
+				return err
+			}
+			return workspaceRecords.verifySnapshot(ctx, rel)
+		}
+	}
 	start := time.Now()
 	results := executor.Run(ctx, pl)
 
@@ -268,13 +354,23 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		finCtx, finCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	} else {
 		hooks.env = release.RunEnv(pl, results, a.log)
+		if workspaceRecords != nil {
+			for _, owner := range workspaceRecords.ordered {
+				if owner.repo.Imported {
+					owner.hooks.env = hooks.env
+					owner.hooks.run(ctx, "postAll", owner.repo.Config.Run.PostAll)
+				}
+			}
+		}
 		// postAll runs once the whole task graph has finished, releases or not —
 		// "nothing published" is an outcome a notification script wants to see
 		// too.
 		hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
 	}
 	crit := &criticals{}
-	a.finalize(finCtx, finalizer{gh: gh, remote: remote, hooks: hooks, crit: crit, skipHooks: interrupted}, pl, results)
+	if workspaceRecords == nil {
+		a.finalize(finCtx, finalizer{gh: gh, remote: remote, hooks: hooks, crit: crit, skipHooks: interrupted}, pl, results)
+	}
 	finCancel()
 	if interrupted && errors.Is(finCtx.Err(), context.DeadlineExceeded) {
 		crit.record(a.log, plan.CodeCommitFailed, finCtx.Err(),
@@ -293,7 +389,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		switch {
 		case interrupted:
 			status = "interrupted"
-		case failed > 0:
+		case failed > 0 || (workspaceRecords != nil && crit.err() != nil):
 			status = "failed"
 		}
 		wh.Event(a.releaseFinishedEvent(pl, results, status))

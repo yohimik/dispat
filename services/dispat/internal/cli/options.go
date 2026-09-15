@@ -11,6 +11,10 @@ import (
 // is the list the command table in usage.go names by flag name — the two
 // together are the whole flag surface.
 type options struct {
+	// nestedWorkspace is set only when the enclosing script context restored
+	// every workspace flag. Explicit invocation flags never inherit run pins.
+	nestedWorkspace bool
+
 	// global
 	root, cfgName         *string
 	configs               *[]string

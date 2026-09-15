@@ -195,9 +195,9 @@ func (a *App) checkGit() error {
 // Compute, and for every other plan-package entry point that needs the same
 // workspace view (PackagesChangedSince).
 func (a *App) planOptions() (plan.Options, error) {
-	pkgs, deps, excluded, err := config.DiscoverWorkspace(a.cfg, a.root, a.workspace)
+	pkgs, deps, inactiveExternal, excluded, err := config.DiscoverWorkspacePlan(a.cfg, a.root, a.workspace)
 	if err != nil {
-		a.log.Error().Err(err).Msg("package discovery failed")
+		a.logError(err).Msg("package discovery failed")
 		return plan.Options{}, err
 	}
 	if a.workspace != nil {
@@ -207,16 +207,35 @@ func (a *App) planOptions() (plan.Options, error) {
 		}
 	}
 	a.logWorkspace(pkgs, deps, excluded)
-	return plan.Options{
-		Packages:         pkgs,
-		Dependencies:     deps,
-		Initials:         a.initialVersions(pkgs),
-		Root:             a.root,
-		NonPackageScopes: a.cfg.NonPackageScopes,
-		ParserConfig:     a.cfg.ResolvedParser,
-		Log:              a.log,
-		IgnoredTags:      a.ignoreTags,
-	}, nil
+	opts := plan.Options{
+		Packages:                     pkgs,
+		Dependencies:                 deps,
+		InactiveExternalDependencies: inactiveExternal,
+		Initials:                     a.initialVersions(pkgs),
+		Root:                         a.root,
+		NonPackageScopes:             a.cfg.NonPackageScopes,
+		ParserConfig:                 a.cfg.ResolvedParser,
+		Log:                          a.log,
+		IgnoredTags:                  a.ignoreTags,
+	}
+	if a.workspace != nil {
+		opts.Repositories = make(map[string]plan.RepositoryHistory, len(a.workspace.Repositories))
+		for _, repository := range a.workspace.Repositories {
+			repositoryGit := &gitx.CLI{Dir: repository.Root, Name: a.git.Name, Email: a.git.Email, Log: a.log}
+			opts.Repositories[repository.Name] = plan.RepositoryHistory{
+				Name: repository.Name, Root: repository.Root, Path: repository.GitlinkPath, Git: repositoryGit,
+				ParserConfig: repository.Config.ResolvedParser, NonPackageScopes: repository.Config.NonPackageScopes,
+				Control: repository.Control,
+			}
+		}
+		for _, baseline := range a.cfg.RepositoryBaselines {
+			opts.RepositoryBaselines = append(opts.RepositoryBaselines, plan.RepositoryBaseline{
+				Consumer: baseline.Consumer, ReleaseTag: baseline.ReleaseTag,
+				Repository: baseline.Repository, Revision: baseline.Revision,
+			})
+		}
+	}
+	return opts, nil
 }
 
 // logWorkspace records what discovery resolved, for the questions a layered

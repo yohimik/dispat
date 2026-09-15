@@ -75,6 +75,9 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		a.log.Error().Err(err).Msg("cannot commit")
 		return err
 	}
+	if a.workspace != nil {
+		return a.commitWorkspace(ctx, pl, covered, opts)
+	}
 
 	// A fresh CLI, not a struct copy: the CLI carries lazily built cache
 	// state (a sync.Once) that must not be copied.

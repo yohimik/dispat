@@ -256,6 +256,7 @@ func applyNestedWorkspace(fs *pflag.FlagSet, o *options) error {
 	if err := fs.Set("polyrepo", "true"); err != nil {
 		return err
 	}
+	o.nestedWorkspace = true
 	return nil
 }
 

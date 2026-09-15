@@ -25,6 +25,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/install"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 	"github.com/yohimik/dispat/services/dispat/internal/selfupdate"
+	"github.com/yohimik/dispat/services/dispat/internal/workspaceenv"
 )
 
 // runner carries what one invocation's phases share: the parsed command line,
@@ -936,7 +937,7 @@ func (r *runner) runConfigured() int {
 	}
 	cfg, err := config.LoadControl(cfgPath, r.fs, len(*r.o.configs) > 0)
 	if err != nil {
-		r.boot.Error().Err(err).Msg("invalid configuration")
+		logConfigError(r.boot, err).Msg("invalid configuration")
 		return 1
 	}
 	// Config imports add to the control file's list. They are intentionally
@@ -952,9 +953,27 @@ func (r *runner) runConfigured() int {
 		}
 		cfg.Polyrepo = true
 	}
-	workspace, err := config.ComposeWorkspace(cfg, cfgPath, resolvedRoot, *r.o.configs)
+	var pins map[string][]string
+	var pinResolver config.SourcePinResolver
+	if r.o.nestedWorkspace {
+		env := os.Environ()
+		pins, err = workspaceenv.Pins(resolvedRoot, cfgPath, env)
+		if err != nil {
+			r.boot.Error().Err(err).Msg("cannot read enclosing release outputs")
+			return 1
+		}
+		live, liveErr := workspaceenv.OpenLivePins(resolvedRoot, cfgPath, env)
+		if liveErr != nil {
+			r.boot.Error().Err(liveErr).Msg("cannot validate enclosing live pin context")
+			return 1
+		}
+		if live != nil {
+			pinResolver = live.Pins
+		}
+	}
+	workspace, err := config.ComposeWorkspaceWithPinResolver(cfg, cfgPath, resolvedRoot, *r.o.configs, pins, pinResolver)
 	if err != nil {
-		r.boot.Error().Err(err).Msg("invalid polyrepo workspace")
+		logConfigError(r.boot, err).Msg("invalid polyrepo workspace")
 		return 1
 	}
 	r.workspace = workspace

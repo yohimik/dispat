@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/github"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -68,7 +69,15 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 		// Ordering smell, said out loud before anything is created: a release
 		// for a tag nobody made yet has GitHub invent the tag at the default
 		// branch head — the wrong commit, looking plausible.
-		if exists, terr := a.git.TagExists(ctx, env.tag); terr == nil && !exists {
+		git := a.git
+		if a.workspace != nil {
+			if rel := pl.Releases[env.pkg]; rel != nil {
+				if repo := a.workspace.RepositoryForPackage(rel.Pkg); repo != nil {
+					git = &gitx.CLI{Dir: repo.Root, Log: a.log}
+				}
+			}
+		}
+		if exists, terr := git.TagExists(ctx, env.tag); terr == nil && !exists {
 			a.log.Warn().Str("code", plan.CodeStepBeforeTag).Str("tag", env.tag).
 				Msg("github step before the run's tag exists; the commit step belongs first")
 		}

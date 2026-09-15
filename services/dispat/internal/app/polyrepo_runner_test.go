@@ -14,6 +14,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/workspaceenv"
 )
 
 func TestWorkspaceRunnerUsesOwnerShellAndCarriesNestedContext(t *testing.T) {
@@ -35,6 +36,27 @@ func TestWorkspaceRunnerUsesOwnerShellAndCarriesNestedContext(t *testing.T) {
 	assert.Contains(t, stdout.String(), root+"\n")
 	assert.Contains(t, stdout.String(), "dispat.json\n")
 	assert.Contains(t, stdout.String(), `sources/lib/dispat.json`)
+}
+
+func TestWorkspaceRunnerCarriesExplicitOwnersAndClearsInheritedOwners(t *testing.T) {
+	root := t.TempDir()
+	owner := filepath.Join(root, "sources", "lib")
+	require.NoError(t, os.MkdirAll(owner, 0o755))
+	workspace := &config.Workspace{ControlRoot: root, Repositories: []config.Repository{
+		{Name: config.ControlRepository, Root: root, Config: &config.File{}, Control: true},
+		{Name: "lib-source", Root: owner, Config: &config.File{}},
+	}}
+	runner := &workspaceScriptRunner{workspace: workspace, fallback: []string{"sh", "-c"}}
+	t.Setenv(workspaceenv.Owners, `{"PACKAGE_FOREIGN":"wrong-source"}`)
+	for _, dir := range []string{root, owner} {
+		var output bytes.Buffer
+		require.NoError(t, runner.Run(t.Context(), dir, `printf '%s' "$DISPAT_INTERNAL_WORKSPACE_OWNERS"`,
+			[]string{workspaceenv.Owners + `={"PACKAGE_LIB":"lib-source"}`}, &output, &output))
+		assert.JSONEq(t, `{"PACKAGE_LIB":"lib-source"}`, output.String())
+		output.Reset()
+		require.NoError(t, runner.Run(t.Context(), dir, `printf '%s' "$DISPAT_INTERNAL_WORKSPACE_OWNERS"`, nil, &output, &output))
+		assert.Empty(t, output.String())
+	}
 }
 
 func TestImportedSelectorNamesUnionAcrossRepositories(t *testing.T) {
