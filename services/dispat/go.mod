@@ -14,6 +14,7 @@ require (
 	github.com/yohimik/dispat/pkg/models v1.10.0
 	github.com/yohimik/dispat/pkg/scanner v1.2.0
 	github.com/yohimik/dispat/pkg/writer v1.2.0
+	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -25,6 +26,5 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	golang.org/x/mod v0.29.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 )

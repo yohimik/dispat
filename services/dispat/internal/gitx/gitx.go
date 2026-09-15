@@ -750,43 +750,6 @@ func (m packageTagMatcher) read(entry tagInventoryEntry) Tag {
 	return tag
 }
 
-type tagPrefixNode struct {
-	children []tagPrefixEdge
-	matchers []packageTagMatcher
-}
-
-type tagPrefixEdge struct {
-	byteValue byte
-	child     *tagPrefixNode
-}
-
-func (n *tagPrefixNode) add(prefix string, matcher packageTagMatcher) {
-	for i := 0; i < len(prefix); i++ {
-		var child *tagPrefixNode
-		for edge := range n.children {
-			if n.children[edge].byteValue == prefix[i] {
-				child = n.children[edge].child
-				break
-			}
-		}
-		if child == nil {
-			child = &tagPrefixNode{}
-			n.children = append(n.children, tagPrefixEdge{byteValue: prefix[i], child: child})
-		}
-		n = child
-	}
-	n.matchers = append(n.matchers, matcher)
-}
-
-func (n *tagPrefixNode) child(value byte) *tagPrefixNode {
-	for _, edge := range n.children {
-		if edge.byteValue == value {
-			return edge.child
-		}
-	}
-	return nil
-}
-
 // parseTagsForPackages parses each raw ref once, then dispatches it only to
 // formats whose expanded literal prefix can match. The trie walk is linear in
 // the tag's bytes (each node has at most the fixed byte alphabet); work after
@@ -794,7 +757,7 @@ func (n *tagPrefixNode) child(value byte) *tagPrefixNode {
 // formats deliberately remain candidates for every tag.
 func parseTagsForPackages(out string, formats map[string]TagFormat) map[string]Tags {
 	result := make(map[string]Tags, len(formats))
-	prefixes := &tagPrefixNode{}
+	prefixes := &tagPrefixNode[packageTagMatcher]{}
 	templates := make(map[TagFormat]*tagTemplate)
 	names := make([]string, 0, len(formats))
 	for name := range formats {
