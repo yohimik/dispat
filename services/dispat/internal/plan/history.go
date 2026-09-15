@@ -858,18 +858,6 @@ func (cp *computation) history(name string) (RepositoryHistory, bool) {
 	return h, ok
 }
 
-func (cp *computation) packageHistory(p *model.Package) (RepositoryHistory, error) {
-	name := ""
-	if p != nil {
-		name = p.Repository
-	}
-	h, ok := cp.history(name)
-	if !ok || h.Git == nil {
-		return RepositoryHistory{}, fmt.Errorf("plan: package %s has no repository history %q", p.Name, name)
-	}
-	return h, nil
-}
-
 // resolveApplicableControlBoundaries activates control history only for
 // packages an explicit control unit can actually address. A local/tag-only
 // source release therefore needs no artificial control tuple, while a tagged
