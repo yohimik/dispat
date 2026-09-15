@@ -1625,9 +1625,14 @@ func TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution(t *test
 	commitPolyrepoSource(t, control, "sources/a", "release(a)%beta%%beta++1: propose beta")
 	control.WriteFile("sources/b/packages/b/channel.txt", "rc\n")
 	commitPolyrepoSource(t, control, "sources/b", "release(b)%rc%%rc++1: propose rc")
-	cfg["repositoryBaselines"] = append(cfg["repositoryBaselines"].([]any), map[string]any{
-		"consumer": "app", "releaseTag": "app@1.0.0", "repository": "control", "revision": controlBaseline,
-	})
+	cfg["repositoryBaselines"] = append(cfg["repositoryBaselines"].([]any),
+		map[string]any{
+			"consumer": "app", "releaseTag": "app@1.0.0", "repository": "control", "revision": controlBaseline,
+		},
+		map[string]any{
+			"consumer": "a", "releaseTag": "a@1.0.0", "repository": "control", "revision": controlBaseline,
+		},
+	)
 	writePolyrepoJSON(t, control, "dispat.json", cfg)
 	control.Git("add", "dispat.json", "sources/a", "sources/b")
 	control.Git("commit", "-q", "-m", "chore: observe incomparable channel proposals")
@@ -1636,10 +1641,10 @@ func TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution(t *test
 	assert.NotZero(t, conflict.Code)
 	assert.True(t, harness.HasCode(conflict.Events, "E334"), "stdout:\n%s\nstderr:\n%s", conflict.Stdout, conflict.Stderr)
 
-	control.CommitEmpty("release(app)%beta: resolve observed proposals")
+	control.CommitEmpty("release(a)%%beta++1: resolve observed proposals")
 	resolved := control.StatusOK()
 	assert.Contains(t, harness.GraphLine(resolved.Events, "app").Str("version"), "beta",
-		"a direct control directive resolves proposals in its causal snapshot")
+		"a propagated control proposal resolves same-axis candidates in its causal snapshot")
 
 	control.WriteFile("sources/b/packages/b/channel.txt", "canary\n")
 	commitPolyrepoSource(t, control, "sources/b", "release(b)%canary%%canary++1: later proposal")
@@ -1647,8 +1652,57 @@ func TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution(t *test
 	later := control.Status()
 	assert.NotZero(t, later.Code)
 	assert.True(t, harness.HasCode(later.Events, "E334"),
-		"the earlier control directive cannot resolve source work outside its gitlink snapshot: stdout:\n%s\nstderr:\n%s",
+		"the earlier control proposal cannot resolve source work outside its gitlink snapshot: stdout:\n%s\nstderr:\n%s",
 		later.Stdout, later.Stderr)
+}
+
+// TestPolyrepoOwnerChannelBeatsIncomparablePropagation keeps all three
+// histories real: two providers propose different propagated channels while
+// the consumer's own source chooses its channel directly. The direct choice
+// is authoritative even though neither provider history observes the other.
+func TestPolyrepoOwnerChannelBeatsIncomparablePropagation(t *testing.T) {
+	newSource := func(t *testing.T, pkg string) *harness.Repo {
+		t.Helper()
+		source := harness.New(t)
+		source.SeedPackage("packages", pkg)
+		source.Commit("feat(" + pkg + "): initial package")
+		source.Git("tag", "-a", pkg+"@1.0.0", "-m", "initial release")
+		return source
+	}
+	aSource := newSource(t, "a")
+	bSource := newSource(t, "b")
+	appSource := newSource(t, "app")
+	control := harness.New(t)
+	addPolyrepoSource(t, control, "a-source", "sources/a", aSource)
+	addPolyrepoSource(t, control, "b-source", "sources/b", bSource)
+	addPolyrepoSource(t, control, "app-source", "sources/app", appSource)
+	cfg := polyrepoFile()
+	cfg["spaces"] = centralSpaces(map[string]string{
+		"a":   "sources/a/packages",
+		"b":   "sources/b/packages",
+		"app": "sources/app/packages",
+	})
+	cfg["dependencies"] = map[string]any{"app": []any{"a", "b"}}
+	cfg["repositoryBaselines"] = []any{
+		map[string]any{"consumer": "app", "releaseTag": "app@1.0.0", "repository": "a-source", "revision": "a@1.0.0"},
+		map[string]any{"consumer": "app", "releaseTag": "app@1.0.0", "repository": "b-source", "revision": "b@1.0.0"},
+	}
+	writePolyrepoJSON(t, control, "dispat.json", cfg)
+	control.Commit("chore: establish source baselines")
+
+	control.WriteFile("sources/a/packages/a/channel.txt", "beta\n")
+	commitPolyrepoSource(t, control, "sources/a", "release(a)%beta%%beta++1: propose beta")
+	control.WriteFile("sources/b/packages/b/channel.txt", "rc\n")
+	commitPolyrepoSource(t, control, "sources/b", "release(b)%rc%%rc++1: propose rc")
+	control.WriteFile("sources/app/packages/app/channel.txt", "canary\n")
+	commitPolyrepoSource(t, control, "sources/app", "release(app)%canary: choose the app channel")
+	control.Git("add", "sources/a", "sources/b", "sources/app")
+	control.Git("commit", "-q", "-m", "chore: observe channel proposals")
+
+	status := control.StatusOK()
+	app := harness.GraphLine(status.Events, "app")
+	assert.Equal(t, "stable -> canary", app.Str("channel"))
+	assert.Contains(t, app.Str("version"), "-canary.")
 }
 
 // TestPolyrepoPrereleaseAndStableWindowsStayRepositoryLocal advances a beta

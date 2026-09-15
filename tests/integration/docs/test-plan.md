@@ -1452,7 +1452,7 @@ This goal owns checking supplied text without a commit operation. Goal 50 owns G
 | `TestDiagnosticsChecksLiteralWholeMessage` | Literal and multiline arguments reach the parser without Git cleanup; any invalid unit rejects the message. |
 | `TestDiagnosticsSeparatesUsageAndConfigErrors` | Arity and foreign flags exit 2; unreadable or malformed explicit configuration exits 1. |
 
-### Goal 52: repository-aware histories (`polyrepo_test.go`)
+### Goal 52: repository-aware histories (`polyrepo*_test.go`)
 
 Every source in this goal is a disposable initialized Git repository checked out as a real submodule of a disposable
 control repository. The suite drives the compiled binary only. It neither contacts production services nor relies on
@@ -1460,6 +1460,11 @@ timestamps to relate histories.
 
 | Test | Invariant |
 | --- | --- |
+| `TestPolyrepoFolderInputsFollowConfigurationOwnership` | Control-owned and explicitly imported folder configuration, ignore files, and exclude files apply; centrally managed source files cannot change discovery, tags, or change admission, including through a source symlink. |
+| `TestPolyrepoEmptySpaceFolderScriptsFollowConfigurationOwnership` | Scripts defined only by empty control-owned or imported space folders pass the run typo guard; an incidental central-source folder script remains unknown. |
+| `TestPolyrepoParserQuietFollowsDiagnosticRepository` | Imported parser display policy follows the diagnostic's repository despite the opposite control setting; explicit quiet flags override the whole invocation, and emitted diagnostics retain repository identity and ordinary SHA abbreviations. |
+| `TestPolyrepoInterruptionDuringRecordKeepsNativeRecordsAndSkipsHooks` | SIGINT during a source commit hook stops later source/control commit and push hooks while preserving the published source tag, source push, control checkpoint, and control push. |
+| `TestPolyrepoOwnerChannelBeatsIncomparablePropagation` | An applicable source-owner direct channel wins over conflicting propagated source channels without E334. |
 | `TestPolyrepoCentralOwnershipAndSourceScopedHistory` | A central `polyrepo: true` config owns packages through its existing space paths and ignores implicit source-root configs; package tags and baselines live in each source, source scopes address only local packages, and an explicit provider propagation directive crosses repositories once. |
 | `TestPolyrepoControlWildcardIsFleetWide` | A `fix(*)` unit in control history resolves against the combined namespace and directly patches packages owned by two different source repositories. |
 | `TestPolyrepoOptOutKeepsLegacyPointerHistory` | With every activation input absent, an initialized submodule stays on the legacy control history: its gitlink move is an ordinary control changed path, nested source commits are not loaded, and the package tag remains in the control repository. |
@@ -1473,6 +1478,7 @@ timestamps to relate histories.
 | `TestPolyrepoNestedInterleavedOwnerPinsRetainEveryCandidate` | Nested commits across A/lib -> B/service -> A/tool retain exact candidate SHA sets per owner, so returning to source A after source B neither deadlocks nor loses the newer source-A pin. |
 | `TestPolyrepoNestedCommitTagsSerializePerOwnerAndRunOwnersInParallel` | With publish concurrency 2, two independent packages in one source serialize their nested commit/tag Git writes while a bounded handshake proves another source can publish concurrently. |
 | `TestPolyrepoConcurrentNestedCommandReadsPinsPublishedAfterShellStart` | Two independent source publish shells start concurrently; after source A records a nested commit, source B's already-running shell reads that newly verified pin through the live workspace channel and can run nested status and commit commands. |
+| `TestPolyrepoNestedStepMasksTagsWithinItsOwner` | A nested source-A step masks source A's in-flight `v1.1.0` tag without erasing an unrelated source B baseline with the same repository-local tag spelling. |
 | `TestPolyrepoNestedForeignOwnerExportCannotAuthorizeSourceHead` | A package export is mapped to that package's exact repository owner; placing another source's SHA under the wrong package key cannot authorize an unpinned checkout and reports E330. |
 | `TestPolyrepoImportedSameNameSpacesHaveIndependentLogins` | Two imported repositories may both declare `workspace`; each uses its own login gate, source-local environment and source-local credentials marker. |
 | `TestPolyrepoImportedGitHubPoliciesUseSourceOwners` | Two imported repositories route their package release to separate fake GitHub owners/endpoints, proving source-local recorder policy survives composition without contacting a production service. |
@@ -1485,7 +1491,7 @@ timestamps to relate histories.
 | `TestPolyrepoFixedRideGuardsSourceHistoryWithoutDependency` | A source-B package that rides source A solely through a central fixed group guards A's contributing history; after A records successfully, an unplanned A mutation in B's `beforePublish` reports E330 and prevents B publication without any dependency edge. |
 | `TestPolyrepoIdenticalObjectIDsAndTagNamesStayIsolated` | Two source checkouts may have the same commit OID and same tag spelling without sharing cached history or baselines; moving one changes only its package. |
 | `TestPolyrepoSameTagSpellingKeepsCheckpointOwnersSeparate` | Two consumers may each own `v1.0.0` in different sources and have separate valid control checkpoints; their distinct provider snapshots remain qualified by consumer owner and produce different propagated bumps. |
-| `TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution` | Competing propagated channels from incomparable source DAGs report E334; a control directive resolves only proposals in its causal gitlink snapshot and cannot suppress a later source proposal. |
+| `TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution` | Competing propagated channels from incomparable source DAGs report E334; a propagated control proposal resolves only proposals in its causal gitlink snapshot and cannot suppress a later source proposal. |
 | `TestPolyrepoPrereleaseAndStableWindowsStayRepositoryLocal` | A beta train and stable release line advance side by side in different source repositories; their fresh windows, counters, channels and tags do not bleed across histories. |
 | `TestPolyrepoStableAndPrereleaseBaselineTuplesStaySeparate` | Stable and prerelease releases of one consumer retain distinct explicit provider positions; the active beta tuple exposes catch-up that the stable tuple would hide. |
 | `TestPolyrepoInterleavedRepositoryGraphReleases` | The package DAG A/lib -> B/service -> A/tool completes without repository-order deadlock, and each tag lands in its source repository. |

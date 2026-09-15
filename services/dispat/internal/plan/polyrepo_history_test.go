@@ -185,16 +185,17 @@ func TestIncomparableSourceChannelsNeedCausalControlResolution(t *testing.T) {
 		{channel: "rc", commit: historyKey("source-b", b1)},
 	}
 	cp.proposedAll = map[string][]channelPick{"app": initial}
-	cp.validateChannelPrecedence("app", "")
+	cp.validateChannelPrecedence("app")
 	require.Len(t, cp.diags, 1)
 	assert.Equal(t, CodeRepositoryPrecedence, cp.diags[0].Code)
 
 	cp.diags = nil
-	cp.validateChannelPrecedence("app", historyKey("control", c1))
-	assert.Empty(t, cp.diags, "a control snapshot containing both source revisions resolves precedence")
+	cp.proposedAll["app"] = append(initial, channelPick{channel: "beta", commit: historyKey("control", c1)})
+	cp.validateChannelPrecedence("app")
+	assert.Empty(t, cp.diags, "a propagated control candidate containing both source revisions resolves precedence")
 
-	cp.proposedAll["app"] = append(initial, channelPick{channel: "alpha", commit: historyKey("source-a", a2)})
-	cp.validateChannelPrecedence("app", historyKey("control", c1))
+	cp.proposedAll["app"] = append(cp.proposedAll["app"], channelPick{channel: "alpha", commit: historyKey("source-a", a2)})
+	cp.validateChannelPrecedence("app")
 	require.Len(t, cp.diags, 1)
 	assert.Equal(t, CodeRepositoryPrecedence, cp.diags[0].Code,
 		"later source work restores the conflict because the old control snapshot did not observe it")
