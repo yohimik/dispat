@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"strings"
@@ -444,6 +445,7 @@ func (cp *computation) prepareRepositoryReach() {
 	}
 	words := (len(repositories) + 63) / 64
 	sets := make(map[string][]uint64, len(cp.order))
+	interned := make(map[string][]string)
 	for _, name := range cp.order {
 		bits := make([]uint64, words)
 		if p := cp.byName[name]; p != nil {
@@ -464,12 +466,18 @@ func (cp *computation) prepareRepositoryReach() {
 			}
 		}
 		sets[name] = bits
-		out := make([]string, 0, len(repositories))
+		key := repositoryWordsKey(bits)
+		if shared, ok := interned[key]; ok {
+			cp.repositoryReach[name] = shared
+			continue
+		}
+		var out []string
 		for i, repository := range repositories {
 			if bits[i/64]&(uint64(1)<<uint(i%64)) != 0 {
 				out = append(out, repository)
 			}
 		}
+		interned[key] = out
 		cp.repositoryReach[name] = out
 	}
 }
@@ -903,6 +911,7 @@ func (cp *computation) resolveApplicableControlBoundaries() error {
 		}
 	}
 	for name := range needed {
+		cp.controlInputs[name] = true
 		pkg := cp.byName[name]
 		if pkg == nil || strings.EqualFold(pkg.Repository, cp.controlRepo) {
 			continue
@@ -923,6 +932,137 @@ func (cp *computation) resolveApplicableControlBoundaries() error {
 		}
 	}
 	return nil
+}
+
+// releaseRepositoryInputs closes the history inputs used by each package
+// over dependency propagation and shared-version groups. Dependency closure
+// is already available in repositoryReach. Each repository then traverses
+// the package graph once, which avoids a separate graph search per release.
+func (cp *computation) releaseRepositoryInputs() ([]string, map[string][]uint64) {
+	if len(cp.histories) == 0 {
+		return nil, nil
+	}
+	repositories := make([]string, 0, len(cp.histories))
+	index := make(map[string]int, len(cp.histories))
+	for _, history := range cp.histories {
+		repositories = append(repositories, history.Name)
+	}
+	slices.Sort(repositories)
+	for i, repository := range repositories {
+		index[strings.ToLower(repository)] = i
+	}
+	wordCount := (len(repositories) + 63) / 64
+	sets := make(map[string][]uint64, len(cp.order))
+	groups := make(map[string][]string)
+	groupSets := make(map[string][]uint64)
+	dependents := make(map[string][]string, len(cp.order))
+	for _, name := range cp.order {
+		bits := make([]uint64, wordCount)
+		for _, repository := range cp.repositoryReach[name] {
+			if i, ok := index[strings.ToLower(repository)]; ok {
+				bits[i/64] |= uint64(1) << uint(i%64)
+			}
+		}
+		if cp.controlInputs[name] {
+			if i, ok := index[strings.ToLower(cp.controlRepo)]; ok {
+				bits[i/64] |= uint64(1) << uint(i%64)
+			}
+		}
+		sets[name] = bits
+		if pkg := cp.byName[name]; pkg != nil {
+			if group := pkg.VersionGroupIdentity(); group != "" {
+				groups[group] = append(groups[group], name)
+				if groupSets[group] == nil {
+					groupSets[group] = make([]uint64, wordCount)
+				}
+				for i, word := range bits {
+					groupSets[group][i] |= word
+				}
+			}
+		}
+		seen := make(map[string]bool)
+		for _, provider := range cp.providers[name] {
+			if !seen[provider] {
+				dependents[provider] = append(dependents[provider], name)
+				seen[provider] = true
+			}
+		}
+	}
+
+	for group, members := range groups {
+		for _, name := range members {
+			for i, word := range groupSets[group] {
+				sets[name][i] |= word
+			}
+		}
+	}
+
+	// Dependency and group edges can alternate (a group member can introduce
+	// a provider input that changes a downstream group). Propagating one
+	// repository bit at a time reaches the exact fixed point in
+	// O(Q*(P+E+V)), where Q is repositories and V is shared-group membership,
+	// without repeatedly scanning whole bitsets as individual inputs arrive.
+	for repositoryIndex := range repositories {
+		word := repositoryIndex / 64
+		mask := uint64(1) << uint(repositoryIndex%64)
+		queue := make([]string, 0, len(cp.order))
+		seen := make(map[string]bool, len(cp.order))
+		seenGroups := make(map[string]bool, len(groups))
+		for _, name := range cp.order {
+			if sets[name][word]&mask != 0 {
+				seen[name] = true
+				queue = append(queue, name)
+			}
+		}
+		for len(queue) > 0 {
+			name := queue[0]
+			queue = queue[1:]
+			sets[name][word] |= mask
+			for _, dependent := range dependents[name] {
+				if !seen[dependent] {
+					seen[dependent] = true
+					queue = append(queue, dependent)
+				}
+			}
+			pkg := cp.byName[name]
+			if pkg == nil || pkg.VersionGroupIdentity() == "" {
+				continue
+			}
+			group := pkg.VersionGroupIdentity()
+			if seenGroups[group] {
+				continue
+			}
+			seenGroups[group] = true
+			for _, member := range groups[group] {
+				if !seen[member] {
+					seen[member] = true
+					queue = append(queue, member)
+				}
+			}
+		}
+	}
+
+	result := make(map[string][]uint64, len(cp.order))
+	interned := make(map[string][]uint64)
+	for _, name := range cp.order {
+		values := sets[name]
+		key := repositoryWordsKey(values)
+		if shared, ok := interned[key]; ok {
+			values = shared
+		} else {
+			interned[key] = values
+		}
+		result[name] = values
+	}
+	return repositories, result
+}
+
+func repositoryWordsKey(words []uint64) string {
+	key := make([]byte, len(words)*8)
+	for i, word := range words {
+		binary.LittleEndian.PutUint64(key[i*8:], word)
+	}
+	return string(key)
 }
 
 func (cp *computation) gitForKey(key string) (gitx.Git, string, bool) {

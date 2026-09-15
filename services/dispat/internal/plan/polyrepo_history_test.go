@@ -5,6 +5,7 @@ package plan
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -15,6 +16,17 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
+
+func repositoryInputNames(pl *Plan, name string) []string {
+	var inputs []string
+	for i, repository := range pl.RepositoryInputOrder {
+		words := pl.RepositoryInputs[name]
+		if i/64 < len(words) && words[i/64]&(uint64(1)<<uint(i%64)) != 0 {
+			inputs = append(inputs, repository)
+		}
+	}
+	return inputs
+}
 
 type composedControlGit struct {
 	*fakeGit
@@ -290,6 +302,8 @@ func TestControlHistoryAdmissionIsLazyAndRequiresAProvenBoundary(t *testing.T) {
 	pl, err := Compute(context.Background(), &withoutIntent, options)
 	require.NoError(t, err)
 	assert.False(t, pl.Fatal(), "a tag-only source release does not require an artificial control tuple")
+	assert.ElementsMatch(t, []string{"source"}, repositoryInputNames(pl, "app"),
+		"control history which cannot affect the package is not a publication input")
 
 	options.Repositories["control"] = RepositoryHistory{Name: "control", Root: "/w", Git: control, Control: true}
 	pl, err = Compute(context.Background(), control, options)
@@ -302,6 +316,58 @@ func TestControlHistoryAdmissionIsLazyAndRequiresAProvenBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
 	assert.Equal(t, v(1, 0, 1), pl.Releases["app"].Next)
+	assert.ElementsMatch(t, []string{"control", "source"}, repositoryInputNames(pl, "app"))
+	encoded, err := json.Marshal(&Plan{
+		RepositoryInputOrder: pl.RepositoryInputOrder,
+		RepositoryInputs:     pl.RepositoryInputs,
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "RepositoryInput", "execution bitsets do not change public JSON plans")
+}
+
+func TestHeldControlIntentRemainsARepositoryInput(t *testing.T) {
+	control := &composedControlGit{fakeGit: newFakeGit(), control: []gitx.ControlHistoryCommit{{
+		SHA:     "cccccccccccccccccccccccccccccccccccccccc",
+		Message: "release(lib): wait\n\nRelease-As: none",
+	}}}
+	pl, err := Compute(context.Background(), control, Options{
+		Packages: []*model.Package{
+			{Name: "lib", Dir: "/w/lib/lib", RepoRoot: "/w/lib", Repository: "lib-source", Space: &model.Space{Name: "libs"}},
+			{Name: "app", Dir: "/w/app/app", RepoRoot: "/w/app", Repository: "app-source", Space: &model.Space{Name: "apps"}},
+		},
+		Dependencies: []model.Dependency{{Consumer: "app", Provider: "lib"}},
+		Initials:     map[string]ccme.Version{"lib": v(1, 0, 0), "app": v(1, 0, 0)},
+		Repositories: map[string]RepositoryHistory{
+			"control":    {Name: "control", Root: "/w", Git: control, Control: true},
+			"lib-source": {Name: "lib-source", Root: "/w/lib", Path: "lib", Git: newFakeGit()},
+			"app-source": {Name: "app-source", Root: "/w/app", Path: "app", Git: newFakeGit()},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	assert.Equal(t, []string{"lib"}, pl.Held())
+	assert.ElementsMatch(t, []string{"app-source", "control", "lib-source"}, repositoryInputNames(pl, "app"),
+		"a held provider's control input remains relevant to its consumer")
+}
+
+func TestCanceledControlIntentRemainsARepositoryInput(t *testing.T) {
+	control := &composedControlGit{fakeGit: newFakeGit(), control: []gitx.ControlHistoryCommit{{
+		SHA:     "cccccccccccccccccccccccccccccccccccccccc",
+		Message: "cancel(app): discard pending work",
+	}}}
+	pl, err := Compute(context.Background(), control, Options{
+		Packages: []*model.Package{{Name: "app", Dir: "/w/source/app", RepoRoot: "/w/source", Repository: "source", Space: &model.Space{Name: "apps"}}},
+		Initials: map[string]ccme.Version{"app": v(1, 0, 0)},
+		Repositories: map[string]RepositoryHistory{
+			"control": {Name: "control", Root: "/w", Git: control, Control: true},
+			"source":  {Name: "source", Root: "/w/source", Path: "source", Git: newFakeGit()},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	assert.False(t, pl.Releases["app"].Releasing())
+	assert.ElementsMatch(t, []string{"control", "source"}, repositoryInputNames(pl, "app"),
+		"a cancellation still consults control history even when no work survives")
 }
 
 func TestControlSnapshotsShareUnchangedPersistentRoots(t *testing.T) {
@@ -478,6 +544,53 @@ func TestFixedGroupAcrossSourcesWithNoPins(t *testing.T) {
 	assert.False(t, pl.Releases["b"].Releasing())
 }
 
+func TestFixedGroupCarriesRepositoryInputsWithoutADependencyEdge(t *testing.T) {
+	control := &composedControlGit{fakeGit: newFakeGit()}
+	shared := &model.Space{Name: "shared", Versioning: model.VersioningFixed, GroupIdentity: "central/shared"}
+	pl, err := Compute(context.Background(), control, Options{
+		Packages: []*model.Package{
+			{Name: "a", Dir: "/w/a/a", RepoRoot: "/w/a", Repository: "source-a", Space: shared},
+			{Name: "b", Dir: "/w/b/b", RepoRoot: "/w/b", Repository: "source-b", Space: shared},
+		},
+		Initials: map[string]ccme.Version{"a": v(1, 0, 0), "b": v(1, 0, 0)},
+		Repositories: map[string]RepositoryHistory{
+			"control":  {Name: "control", Root: "/w", Git: control, Control: true},
+			"source-a": {Name: "source-a", Root: "/w/a", Path: "a", Git: newFakeGit(commit{sha: "a1", message: "fix(a): patch"})},
+			"source-b": {Name: "source-b", Root: "/w/b", Path: "b", Git: newFakeGit()},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.True(t, pl.Releases["a"].Releasing())
+	require.True(t, pl.Releases["b"].FixedRide)
+	assert.Empty(t, pl.Providers["b"], "the shared group is the only relationship")
+	assert.ElementsMatch(t, []string{"source-a", "source-b"}, repositoryInputNames(pl, "b"))
+	assert.Equal(t, &pl.RepositoryInputs["a"][0], &pl.RepositoryInputs["b"][0],
+		"equal group closures share one immutable bitset")
+}
+
+func TestRepositoryInputsUseMultipleWords(t *testing.T) {
+	cp := &computation{
+		order:           []string{"last"},
+		byName:          map[string]*model.Package{"last": {Name: "last", Repository: "source-64"}},
+		repositoryReach: map[string][]string{"last": {"source-64"}},
+		controlInputs:   map[string]bool{"last": true},
+		histories:       make(map[string]RepositoryHistory),
+		controlRepo:     "control",
+	}
+	cp.histories["control"] = RepositoryHistory{Name: "control"}
+	for i := range 65 {
+		name := fmt.Sprintf("source-%02d", i)
+		cp.histories[name] = RepositoryHistory{Name: name}
+	}
+
+	order, inputs := cp.releaseRepositoryInputs()
+	pl := &Plan{RepositoryInputOrder: order, RepositoryInputs: inputs}
+
+	require.Len(t, inputs["last"], 2)
+	assert.ElementsMatch(t, []string{"control", "source-64"}, repositoryInputNames(pl, "last"))
+}
+
 func BenchmarkControlCheckpointPersistentSnapshots(b *testing.B) {
 	const repositories = 32
 	histories := map[string]RepositoryHistory{"control": {Name: "control", Control: true}}
@@ -532,6 +645,52 @@ func BenchmarkComputeComposedSharedHistory(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if _, err := Compute(context.Background(), control, options); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReleaseRepositoryInputs(b *testing.B) {
+	const (
+		packageCount    = 1024
+		repositoryCount = 32
+		groupSize       = 16
+	)
+	cp := &computation{
+		order:           make([]string, 0, packageCount),
+		byName:          make(map[string]*model.Package, packageCount),
+		providers:       make(map[string][]string, packageCount),
+		repositoryReach: make(map[string][]string, packageCount),
+		controlInputs:   make(map[string]bool),
+		histories:       make(map[string]RepositoryHistory, repositoryCount),
+		controlRepo:     "control",
+	}
+	for repositoryIndex := range repositoryCount {
+		name := fmt.Sprintf("source-%02d", repositoryIndex)
+		if repositoryIndex == 0 {
+			name = "control"
+		}
+		cp.histories[name] = RepositoryHistory{Name: name}
+	}
+	for packageIndex := range packageCount {
+		name := fmt.Sprintf("package-%04d", packageIndex)
+		repository := fmt.Sprintf("source-%02d", 1+packageIndex%(repositoryCount-1))
+		space := &model.Space{Name: fmt.Sprintf("group-%03d", packageIndex/groupSize),
+			GroupIdentity: fmt.Sprintf("central/group-%03d", packageIndex/groupSize), Versioning: model.VersioningFixed}
+		cp.order = append(cp.order, name)
+		cp.byName[name] = &model.Package{Name: name, Repository: repository, Space: space}
+		cp.repositoryReach[name] = []string{repository}
+		if packageIndex > 0 {
+			cp.providers[name] = []string{cp.order[(packageIndex-1)/2]}
+		}
+		if packageIndex%31 == 0 {
+			cp.controlInputs[name] = true
+		}
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		if _, got := cp.releaseRepositoryInputs(); len(got) != packageCount {
+			b.Fatalf("got %d package inputs", len(got))
 		}
 	}
 }

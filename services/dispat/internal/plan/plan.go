@@ -1162,6 +1162,14 @@ type Plan struct {
 	// intervening checkout mutation before any script or tag-only record can
 	// accidentally publish the new HEAD under the old plan.
 	RepositoryHeads map[string]string
+	// RepositoryInputOrder and RepositoryInputs compactly encode the exact
+	// repository history closure consulted for each package's plan: its owner,
+	// transitive providers, shared-version group inputs, and applicable control
+	// intent. RepositoryInputs values are immutable bitsets indexed by the
+	// sorted RepositoryInputOrder and are interned when packages share a set.
+	// They are internal execution metadata rather than part of JSON plan output.
+	RepositoryInputOrder []string            `json:"-"`
+	RepositoryInputs     map[string][]uint64 `json:"-"`
 
 	// ancestor answers "is a an ancestor-or-self of b" over the commits the
 	// plan examined; it backs PossiblyBehind.
@@ -1412,6 +1420,7 @@ type computation struct {
 	window              map[string]map[string]bool   // package -> commit keys it has not released
 	windowRefs          map[string][]map[string]bool // composed package -> shared repository windows
 	repositoryReach     map[string][]string
+	controlInputs       map[string]bool
 	stableBoundaries    map[string]map[string]string // package -> repository -> qualified stable boundary
 	publishedBoundaries map[string]map[string]string // package -> repository -> qualified latest-tag boundary
 	stableTags          map[string]gitx.Tag
@@ -1516,6 +1525,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		window:              make(map[string]map[string]bool, len(pkgs)),
 		windowRefs:          make(map[string][]map[string]bool, len(pkgs)),
 		repositoryReach:     make(map[string][]string, len(pkgs)),
+		controlInputs:       make(map[string]bool, len(pkgs)),
 		stableBoundaries:    make(map[string]map[string]string, len(pkgs)),
 		publishedBoundaries: make(map[string]map[string]string, len(pkgs)),
 		ownContribs:         make(map[string][]groupContrib, len(pkgs)),
@@ -1680,14 +1690,22 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		return nil, err
 	}
 
+	repositoryInputOrder, repositoryInputs := cp.releaseRepositoryInputs()
+	// Plan retains cp through ancestorOrSelf. Drop composition-only scratch
+	// once its compact immutable result has been built so the release lifetime
+	// does not also retain O(P*Q) repository-name references.
+	cp.repositoryReach = nil
+	cp.controlInputs = nil
 	return &Plan{
-		Order:            cp.order,
-		Releases:         cp.rel,
-		Providers:        cp.providers,
-		Diagnostics:      cp.diags,
-		RepositoryHeads:  cp.repositoryHeads,
-		ancestor:         cp.ancestorOrSelf,
-		stableBoundaries: cp.stableBoundaries,
+		Order:                cp.order,
+		Releases:             cp.rel,
+		Providers:            cp.providers,
+		Diagnostics:          cp.diags,
+		RepositoryHeads:      cp.repositoryHeads,
+		RepositoryInputOrder: repositoryInputOrder,
+		RepositoryInputs:     repositoryInputs,
+		ancestor:             cp.ancestorOrSelf,
+		stableBoundaries:     cp.stableBoundaries,
 	}, nil
 }
 
