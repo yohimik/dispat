@@ -2296,7 +2296,7 @@ modules through cross-component contracts; their profile is merged with the inst
 `TestPublicAPIExtendedManifestLifecycles` walks every supported ecosystem and engine manifest through the public
 scanner, writer, and scanner again, checking each requested dependency survives in canonical form.
 `TestPublicAPICCMEConformanceVectors` runs scoped, unscoped, multi-unit, escaped-separator, strict-type, and invalid
-UTF-8 messages through the current v2 public parser and its preferred validity/scope predicates.
+UTF-8 messages through the current public parser and its preferred validity/scope predicates.
 `TestPublicAPIConfigWatchReloadsAnAtomicEdit` covers the optional config/watch subpackage so it remains part of the
 integration denominator and proves an atomic config edit is observed as a new successfully parsed value.
 `TestPublicAPIRefusalsPreserveInputsAndBoundResources` exercises malformed manifests, the public size limit,
@@ -2308,8 +2308,8 @@ them again, rescans the manifests, and updates all nine build-counter formats wh
 leave the files unchanged. `TestPublicAPIConfigResolutionSettersAndDependencyModels` resolves an owned nested folder,
 applies an override, decodes the public setter shapes, and round-trips canonical typed dependency models while proving
 a failed decode leaves the receiver unchanged.
-Eight conformance drivers carry `pkg/ccme/v2` through its published parser, which the CLI never reaches because the
-CLI consumes v1 from the module cache. `TestPublicAPICCMEHeaderGrammarConformance` walks the type charset, the
+Eight conformance drivers exercise the public API of `pkg/ccme`. The CLI and these drivers use the same unsuffixed
+module from the workspace. `TestPublicAPICCMEHeaderGrammarConformance` walks the type charset, the
 scope-set grammar and its term cap, the breaking marker and the separator rules of §5 under both strictness modes.
 `TestPublicAPICCMEDirectiveAxesConformance` walks both propagation axes of §5.3, every doubled-sigil guard, the
 channel grammar of §11.2 and the footer reconciliation of §8.3. `TestPublicAPICCMEFooterRegistryConformance` walks the

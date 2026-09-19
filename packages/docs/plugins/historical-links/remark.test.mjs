@@ -59,15 +59,15 @@ test('pins pkg.go.dev to the module version resolved at the historical ref', () 
   const root = site();
   const resolve = (module, major, ref) => {
     assert.equal(ref, refs['1.8']);
-    return module === 'ccme' && major === '/v2' ? 'v2.0.0' : 'v1.2.0';
+    return module === 'scanner' && major === '/v2' ? 'v2.0.0' : 'v1.2.0';
   };
   assert.equal(
     rewriteHistoricalUrl('https://pkg.go.dev/github.com/yohimik/dispat/pkg/scanner#Scan', '1.8', refs, root, {}, {}, '1.8', resolve),
     'https://pkg.go.dev/github.com/yohimik/dispat/pkg/scanner@v1.2.0#Scan',
   );
   assert.equal(
-    rewriteHistoricalUrl('https://pkg.go.dev/github.com/yohimik/dispat/pkg/ccme/v2?tab=doc', '1.8', refs, root, {}, {}, '1.8', resolve),
-    'https://pkg.go.dev/github.com/yohimik/dispat/pkg/ccme/v2@v2.0.0?tab=doc',
+    rewriteHistoricalUrl('https://pkg.go.dev/github.com/yohimik/dispat/pkg/scanner/v2?tab=doc', '1.8', refs, root, {}, {}, '1.8', resolve),
+    'https://pkg.go.dev/github.com/yohimik/dispat/pkg/scanner/v2@v2.0.0?tab=doc',
   );
 });
 
@@ -85,7 +85,7 @@ test('prefers the release plan module version before its tag exists', () => {
 test('rejects a recorded version whose major disagrees with the module path', () => {
   const root = site();
   assert.throws(
-    () => rewriteHistoricalUrl('https://pkg.go.dev/github.com/yohimik/dispat/pkg/ccme/v2', '1.8', refs, root, {}, {}, '1.8', undefined, {ccme: 'v3.0.0'}),
+    () => rewriteHistoricalUrl('https://pkg.go.dev/github.com/yohimik/dispat/pkg/scanner/v2', '1.8', refs, root, {}, {}, '1.8', undefined, {scanner: 'v3.0.0'}),
     /does not match module path major v2/,
   );
 });

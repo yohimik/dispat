@@ -1,8 +1,10 @@
 # ccme: the commit parser
 
-`github.com/yohimik/dispat/pkg/ccme/v2` is a Go parser for Conventional Commits, Monorepo Extension 2.0.0. This format is
-a strict superset of Conventional Commits 1.0.0 that adds scopes as packages, propagation depth, and prerelease
-channels. The package parses commit messages and nothing else: no git, no workspace, no versions.
+`github.com/yohimik/dispat/pkg/ccme` is a Go parser for Conventional Commits. Further parser releases are on hold.
+The published unsuffixed module remains at v1.0.0. Its message grammar and parser behavior are retained by Conventional
+Commits, Monorepo Extension 2.0.0, a strict superset of Conventional Commits 1.0.0 that adds scopes as packages,
+propagation depth, and prerelease channels. The package parses commit messages and nothing else: no git, no workspace,
+no versions.
 
 The parser uses no regular expressions. It runs a single left-to-right index scan with one byte of lookahead, no
 backtracking, and no recursion. This gives O(n) time and O(1) working space, which matters when you feed it untrusted
@@ -12,7 +14,7 @@ Read the specification at [SPEC.md](https://github.com/yohimik/dispat/blob/main/
 section reference in the package points into this file.
 
 ```sh
-go get github.com/yohimik/dispat/pkg/ccme/v2
+go get github.com/yohimik/dispat/pkg/ccme@v1.0.0
 ```
 
 ## Parsing a message
@@ -118,5 +120,5 @@ Copy a description to keep it from a large message, because a `Result` retains t
 
 - [Commit messages](../reference/commits.md) describes the same format for the people writing the commits.
 - [Diagnostic codes](../reference/plan-errors.md) lists every code the parser and the engine can emit.
-- Read the full API on [pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/ccme/v2) and view the source
+- Read the full v1.0.0 API on [pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/ccme@v1.0.0) and view the source
   [on GitHub](https://github.com/yohimik/dispat/tree/main/pkg/ccme).

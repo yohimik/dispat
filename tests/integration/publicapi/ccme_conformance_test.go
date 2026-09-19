@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	ccme "github.com/yohimik/dispat/pkg/ccme/v2"
+	ccme "github.com/yohimik/dispat/pkg/ccme"
 )
 
 // shaFull and shaShort are the two commit-id shapes a correction footer may

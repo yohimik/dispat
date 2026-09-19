@@ -131,7 +131,7 @@ func productionCoverpkg() string {
 	}
 	return strings.Join([]string{
 		"github.com/yohimik/dispat/services/dispat/...",
-		"github.com/yohimik/dispat/pkg/ccme/v2/...",
+		"github.com/yohimik/dispat/pkg/ccme/...",
 		"github.com/yohimik/dispat/pkg/config/...",
 		"github.com/yohimik/dispat/pkg/manifest/...",
 		"github.com/yohimik/dispat/pkg/models/...",

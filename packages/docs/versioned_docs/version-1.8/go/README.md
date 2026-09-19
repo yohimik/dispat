@@ -11,7 +11,7 @@ The six packages below are the whole of the importable surface.
 
 | Module | Import path | What it does |
 |--------|-------------|--------------|
-| [ccme](./ccme.md) | `github.com/yohimik/dispat/pkg/ccme/v2` | Parses commit messages in the Conventional Commits Monorepo Extension format |
+| [ccme](./ccme.md) | `github.com/yohimik/dispat/pkg/ccme` | Parses commit messages in the Conventional Commits Monorepo Extension format |
 | [config](./config.md) | `github.com/yohimik/dispat/pkg/config` | Loads JSON, YAML and TOML configuration without reflection |
 | [scanner](./scanner.md) | `github.com/yohimik/dispat/pkg/scanner` | Reads dependency manifests into one ecosystem-neutral shape |
 | [writer](./writer.md) | `github.com/yohimik/dispat/pkg/writer` | Rewrites those manifests in place, byte for byte |
@@ -33,12 +33,13 @@ configuration means, and `config` says how a configuration is loaded at all.
 
 ## Installing
 
-Each module is versioned and tagged separately. They use the layout Go expects for a multi-module repository. For
-example, the `github.com/yohimik/dispat/pkg/ccme/v2` module is released by the `pkg/ccme/v2.0.0` tag rather than a
-repository-wide version:
+Each module is versioned and tagged separately. They use the layout Go expects for a multi-module repository. Further
+CCME parser releases are on hold, and its unsuffixed module path still resolves to the published v1.0.0 parser. The
+immutable `pkg/ccme/v2.0.0` Git tag remains part of the repository's history; it does not make 2.0.0
+fetchable from the unsuffixed Go module path:
 
 ```sh
-go get github.com/yohimik/dispat/pkg/ccme/v2
+go get github.com/yohimik/dispat/pkg/ccme@v1.0.0
 go get github.com/yohimik/dispat/pkg/config
 go get github.com/yohimik/dispat/pkg/scanner
 go get github.com/yohimik/dispat/pkg/writer

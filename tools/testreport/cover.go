@@ -201,7 +201,7 @@ func (c *coverage) modules() []Module {
 }
 
 // packageOf turns a block key into the workspace-relative package that holds
-// it: `github.com/yohimik/dispat/pkg/ccme/v2/parse.go:12.34,15.2` -> `pkg/ccme`.
+// it: `github.com/yohimik/dispat/pkg/ccme/parse.go:12.34,15.2` -> `pkg/ccme`.
 func packageOf(blockKey string) string {
 	file := blockKey
 	if i := strings.LastIndex(file, ":"); i >= 0 {
@@ -219,7 +219,7 @@ type moduleDecls []moduleDecl
 
 // workspacePath translates a Go import package through the module identities
 // declared by the workspace. A semantic-import suffix belongs to the module
-// name, not necessarily to its folder (`.../ccme/v2` lives in `pkg/ccme`).
+// name, not necessarily to its folder (`example.com/acme/parser/v2` can live in `pkg/parser`).
 func (m moduleDecls) workspacePath(importPath string) string {
 	best := moduleDecl{}
 	for _, candidate := range m {

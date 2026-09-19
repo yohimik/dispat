@@ -273,7 +273,7 @@ RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 <<'
 set -eu
 cd services/dispat
 export DISPAT_COVERDIR=/src/coverage/covdata
-export DISPAT_COVERPKG='github.com/yohimik/dispat/services/dispat/...,github.com/yohimik/dispat/pkg/ccme/v2/...,github.com/yohimik/dispat/pkg/config/...,github.com/yohimik/dispat/pkg/manifest/...,github.com/yohimik/dispat/pkg/models/...,github.com/yohimik/dispat/pkg/scanner/...,github.com/yohimik/dispat/pkg/writer/...'
+export DISPAT_COVERPKG='github.com/yohimik/dispat/services/dispat/...,github.com/yohimik/dispat/pkg/ccme/...,github.com/yohimik/dispat/pkg/config/...,github.com/yohimik/dispat/pkg/manifest/...,github.com/yohimik/dispat/pkg/models/...,github.com/yohimik/dispat/pkg/scanner/...,github.com/yohimik/dispat/pkg/writer/...'
 rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
 go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... \
   -count=1 -timeout 20m -covermode=atomic -coverpkg="$DISPAT_COVERPKG" \

@@ -13,7 +13,9 @@ Use ordinary Go composition: small cohesive types, explicit dependencies, and in
 
 - Name structs with nouns that describe their responsibility.
 - Name action functions and methods with verbs, such as `LoadConfig` or `AcquireLocks`.
-- Start boolean predicates with `Is`, such as `IsEnabled` or `IsAncestor`. A lookup returning a value and a presence boolean keeps its action name, such as `FindPackage`.
+- Start constructor names with `New` for exported functions or `new` for unexported functions, such as `NewUser` or `newUser`.
+- Name methods that convert a value to a specific type after the target type, such as `User.Int()` for an integer conversion.
+- Start boolean predicates with `Is` for a singular subject, such as `IsEnabled` or `IsAncestor`, and `Are` for a plural subject, such as `ArePackagesLocal`. A lookup returning a value and a presence boolean keeps its action name, such as `FindPackage`.
 - Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
 - Preserve published APIs. Introduce a preferred name with a documented deprecated alias or forwarding function when a rename would break users. Required standard-library methods keep their contract names.
 - Keep functions focused on one operation. Split a long function along meaningful validation, planning, execution, or cleanup boundaries. Do not fragment a readable operation into trivial helpers just to lower its line count.

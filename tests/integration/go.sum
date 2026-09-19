@@ -15,8 +15,6 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/yohimik/dispat/pkg/ccme v1.0.0 h1:1W9Jn33m4YY4NvHs5PLQNP6U8vje5nPhIoRSu0GaRVo=
 github.com/yohimik/dispat/pkg/ccme v1.0.0/go.mod h1:8UxO6Pk3eSjs5g99B0At74CfvZpI+6yVCiHMsENuyPE=
-github.com/yohimik/dispat/pkg/ccme/v2 v2.0.0 h1:blMaFNaBGI3glcaehg3qW6HPfGf4DUm/b62TBt9L8KU=
-github.com/yohimik/dispat/pkg/ccme/v2 v2.0.0/go.mod h1:d9kkXgpE2EYgLRbIWks0J9Hsy02TgHU/dp+Lphr+aoQ=
 github.com/yohimik/dispat/pkg/config v1.0.0 h1:GjbLd3rJuWz+5LpAqC0XKn9NclWFmTp/rhHo5FEmoSM=
 github.com/yohimik/dispat/pkg/config v1.0.0/go.mod h1:4w8sekc42s1RxWGmWULbfD8Gm33pYh2zwOfa3dNk4a8=
 github.com/yohimik/dispat/pkg/manifest v1.2.0 h1:ucmnCxJYATbnia2CU7KDXB2Ofh7zwYyb31TCzp8vzo4=

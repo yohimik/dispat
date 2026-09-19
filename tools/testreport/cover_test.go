@@ -15,11 +15,11 @@ import (
 // integration suite also reaches.
 func TestCoverageCountsARepeatedBlockOnce(t *testing.T) {
 	const profile = `mode: atomic
-github.com/yohimik/dispat/pkg/ccme/v2/parse.go:10.1,12.2 2 1
-github.com/yohimik/dispat/pkg/ccme/v2/parse.go:14.1,16.2 2 0
+github.com/yohimik/dispat/pkg/ccme/parse.go:10.1,12.2 2 1
+github.com/yohimik/dispat/pkg/ccme/parse.go:14.1,16.2 2 0
 mode: set
-github.com/yohimik/dispat/pkg/ccme/v2/parse.go:10.1,12.2 2 3
-github.com/yohimik/dispat/pkg/ccme/v2/parse.go:14.1,16.2 2 0
+github.com/yohimik/dispat/pkg/ccme/parse.go:10.1,12.2 2 3
+github.com/yohimik/dispat/pkg/ccme/parse.go:14.1,16.2 2 0
 `
 	c := newCoverage()
 	if err := c.add(strings.NewReader(profile)); err != nil {
@@ -49,7 +49,7 @@ func TestCoverageMergesRatherThanIntersects(t *testing.T) {
 
 func TestCoverageGroupsIntoModulesAndPackages(t *testing.T) {
 	const profile = `mode: atomic
-github.com/yohimik/dispat/pkg/ccme/v2/parse.go:1.1,2.2 4 1
+github.com/yohimik/dispat/pkg/ccme/parse.go:1.1,2.2 4 1
 github.com/yohimik/dispat/services/dispat/internal/plan/plan.go:1.1,2.2 1 1
 github.com/yohimik/dispat/services/dispat/internal/plan/plan.go:4.1,5.2 1 0
 github.com/yohimik/dispat/services/dispat/main.go:1.1,2.2 2 1
@@ -129,12 +129,12 @@ func TestPackageAndModulePaths(t *testing.T) {
 
 func TestModuleDeclarationsMapSemanticImportVersionsToWorkspaceFolders(t *testing.T) {
 	declared := moduleDecls{
-		{dir: "pkg/ccme", path: "github.com/yohimik/dispat/pkg/ccme/v2"},
+		{dir: "pkg/parser", path: "example.com/acme/parser/v2"},
 		{dir: "pkg/tool", path: "github.com/yohimik/dispat/pkg/tool"},
 	}
 	for _, tc := range []struct{ importPath, want string }{
-		{"github.com/yohimik/dispat/pkg/ccme/v2", "pkg/ccme"},
-		{"github.com/yohimik/dispat/pkg/ccme/v2/internal/parser", "pkg/ccme/internal/parser"},
+		{"example.com/acme/parser/v2", "pkg/parser"},
+		{"example.com/acme/parser/v2/internal/parser", "pkg/parser/internal/parser"},
 		{"github.com/yohimik/dispat/pkg/tool/v2/helpers", "pkg/tool/v2/helpers"},
 	} {
 		if got := declared.workspacePath(tc.importPath); got != tc.want {

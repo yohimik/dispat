@@ -11,14 +11,15 @@ The specification is [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs
 documentation points to it. Chapter §20 covers parsing, while §17 covers Conformance.
 
 The parser and specification share major and minor versions through the `ccme` version group. Patch versions remain
-package-specific. Version 2 uses the same message grammar and parser behavior as version 1; Go callers must use the
-`/v2` import path. This package handles message syntax and message-local diagnostics. Git history, dependency graphs,
-fresh admission, propagation, and release planning belong to dispat's release engine.
+package-specific. Further parser releases are on hold. The published module at the unsuffixed path remains v1.0.0;
+it implements the message grammar and parser behavior retained by CCME 2.0.0. This package handles message
+syntax and message-local diagnostics. Git history, dependency graphs, fresh admission, propagation, and release
+planning belong to dispat's release engine.
 
 ## Install
 
 ```sh
-go get github.com/yohimik/dispat/pkg/ccme/v2
+go get github.com/yohimik/dispat/pkg/ccme@v1.0.0
 ```
 
 ## Use

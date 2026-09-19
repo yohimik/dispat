@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	ccme "github.com/yohimik/dispat/pkg/ccme/v2"
+	ccme "github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/pkg/config"
 	configwatch "github.com/yohimik/dispat/pkg/config/watch"
 	"github.com/yohimik/dispat/pkg/manifest"

@@ -14,10 +14,9 @@ import (
 const gateCommit = "0123456789abcdef0123456789abcdef01234567"
 
 // productionBlockFiles names one instrumented file per production module,
-// spelled the way a coverage profile spells it: by import path, with the
-// semantic-import suffix `pkg/ccme` carries.
+// spelled the way a coverage profile spells it: by import path.
 var productionBlockFiles = map[string]string{
-	"ccme":     "github.com/yohimik/dispat/pkg/ccme/v2/x.go",
+	"ccme":     "github.com/yohimik/dispat/pkg/ccme/x.go",
 	"config":   "github.com/yohimik/dispat/pkg/config/x.go",
 	"manifest": "github.com/yohimik/dispat/pkg/manifest/x.go",
 	"models":   "github.com/yohimik/dispat/pkg/models/x.go",
@@ -113,7 +112,7 @@ func TestCoverageCommandSkipsTheBadgeScriptsOwnMergeOutputs(t *testing.T) {
 	dir := gateFolder(t, gateCommit, 0)
 	for name := range mergeOutputs {
 		write(t, filepath.Join(dir, name),
-			"mode: set\ngithub.com/yohimik/dispat/pkg/ccme/v2/x.go:1.1,2.2 1 1\n")
+			"mode: set\ngithub.com/yohimik/dispat/pkg/ccme/x.go:1.1,2.2 1 1\n")
 	}
 	var out strings.Builder
 	if err := coverageCheck([]string{"-coverage", dir, "-commit", gateCommit,
@@ -447,7 +446,7 @@ func TestProductionInventoryHoldsEveryReleasedModule(t *testing.T) {
 			t.Errorf("IsProductionModule(%q) = true, want the inventory to name released modules only", module)
 		}
 	}
-	if IsProductionModule("") || IsProductionModule("pkg") || IsProductionModule("pkg/ccme/v2") {
+	if IsProductionModule("") || IsProductionModule("pkg") || IsProductionModule("pkg/parser/v2") {
 		t.Error("IsProductionModule matched something that is not a module of the inventory")
 	}
 }
