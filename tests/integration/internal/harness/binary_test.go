@@ -3,10 +3,36 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestProductionCoverpkgIncludesEveryProductionModule(t *testing.T) {
+	t.Setenv("DISPAT_COVERPKG", "")
+	got := strings.Split(productionCoverpkg(), ",")
+	want := []string{
+		"github.com/yohimik/dispat/services/dispat/...",
+		"github.com/yohimik/dispat/pkg/ccme/v2/...",
+		"github.com/yohimik/dispat/pkg/config/...",
+		"github.com/yohimik/dispat/pkg/manifest/...",
+		"github.com/yohimik/dispat/pkg/models/...",
+		"github.com/yohimik/dispat/pkg/scanner/...",
+		"github.com/yohimik/dispat/pkg/writer/...",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("productionCoverpkg = %q, want %q", got, want)
+	}
+}
+
+func TestProductionCoverpkgAcceptsTheRunnerScope(t *testing.T) {
+	t.Setenv("DISPAT_COVERPKG", "example.test/one/...,example.test/two/...")
+	if got := productionCoverpkg(); got != "example.test/one/...,example.test/two/..." {
+		t.Fatalf("productionCoverpkg = %q", got)
+	}
+}
 
 func clearBuildSelectionEnv(t *testing.T) {
 	t.Helper()
@@ -28,15 +54,15 @@ func TestCompilerSelection(t *testing.T) {
 	kind, err := compilerKind()
 	require.NoError(t, err)
 	require.Equal(t, "tinygo", kind)
-	require.True(t, UsesTinyGo())
+	require.True(t, IsTinyGo())
 	require.Equal(t, []string{"-opt=z", "-no-debug", "-p", "2"}, compilerBuildArgs())
 	require.NoError(t, validateBuildSelection())
 }
 
-func TestUsesTinyGoRequiresExplicitCompiler(t *testing.T) {
+func TestIsTinyGoRequiresExplicitCompiler(t *testing.T) {
 	clearBuildSelectionEnv(t)
 	t.Setenv("DISPAT_TEST_BINARY", "/tmp/tinygo-built-but-opaque")
-	require.False(t, UsesTinyGo())
+	require.False(t, IsTinyGo())
 	require.Empty(t, compilerBuildArgs())
 }
 

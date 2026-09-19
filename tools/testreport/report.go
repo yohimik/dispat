@@ -40,6 +40,14 @@ type Coverage struct {
 	Unit        Stats    `json:"unit"`
 	Integration Stats    `json:"integration"`
 	Modules     []Module `json:"modules"`
+	// IntegrationModules keeps the black-box layer attributable. A high
+	// aggregate cannot hide a first-party module that was absent from the
+	// instrumented binary or was barely exercised.
+	IntegrationModules []Module `json:"integrationModules"`
+	// IntegrationMissing names production packages present in the unit
+	// inventory but absent from the integration denominator. Their statements
+	// are missing, not uncovered, so the integration gate must reject them.
+	IntegrationMissing []Package `json:"integrationMissing"`
 }
 
 // Stats is one statement-coverage measurement.

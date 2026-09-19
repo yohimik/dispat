@@ -319,10 +319,11 @@ func outcomeOf(cell Cell) string {
 }
 
 // headline opens both renderings with what the campaign is: how many cells,
-// on which release.
+// on which release. The count is the records', never a number written down
+// here: a campaign gains a cell whenever the harness's cell list does.
 //
 // The two degenerate cases are spelled out rather than formatted into the
-// same sentence, because "0 cells on dispat " and "12 cells on dispat " are
+// same sentence, because "0 cells on dispat " and "1 cells on dispat " are
 // both sentences a reader would take as a claim about a release.
 func headline(e Experiments) string {
 	cells := fmt.Sprintf("%d cells", len(e.Cells))

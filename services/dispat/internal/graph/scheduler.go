@@ -173,7 +173,12 @@ func Drain[N comparable, C comparable](ctx context.Context, s *Scheduler[N], cla
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("graph: %d node(s) can never become ready (dependency cycle)", len(s.Blocked()))
+			// Wrapped in the sentinel TopoSort's CycleError also carries, so
+			// a caller can recognise "the graph has no order" with errors.Is
+			// rather than by reading the sentence. Not CycleError itself:
+			// Drain is generic over the node type and that error names
+			// strings.
+			return fmt.Errorf("graph: %d node(s) can never become ready: %w", len(s.Blocked()), ErrCycle)
 		}
 		n := <-done
 		c := class(n)

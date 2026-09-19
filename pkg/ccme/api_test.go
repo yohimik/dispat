@@ -188,8 +188,8 @@ func TestUnitAccessors(t *testing.T) {
 	if u.IsCancel() || u.IsRelease() || u.IsControl() {
 		t.Error("a feat unit reported as a control unit")
 	}
-	if !u.HasExplicitScope() {
-		t.Error("HasExplicitScope() = false for feat(core)")
+	if !u.IsScopeExplicit() {
+		t.Error("IsScopeExplicit() = false for feat(core)")
 	}
 	if got := u.BreakingDescription(); got != "the reason" {
 		t.Errorf("BreakingDescription() = %q", got)
@@ -210,8 +210,8 @@ func TestUnitAccessors(t *testing.T) {
 		t.Error("release unit not recognised as a control unit")
 	}
 	res, _ = p.Parse("feat: no scope")
-	if res.Units[0].HasExplicitScope() {
-		t.Error("HasExplicitScope() = true for an unscoped unit")
+	if res.Units[0].IsScopeExplicit() {
+		t.Error("IsScopeExplicit() = true for an unscoped unit")
 	}
 	if res.Units[0].BreakingDescription() != "" {
 		t.Error("BreakingDescription() should be empty without a footer")
@@ -229,8 +229,8 @@ func TestResultAccessors(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 
-	if !res.HasErrors() {
-		t.Error("HasErrors() = false")
+	if !res.IsInvalid() {
+		t.Error("IsInvalid() = false")
 	}
 	if got := len(res.Errors()); got != 1 {
 		t.Errorf("Errors() = %d, want 1", got)
@@ -268,8 +268,8 @@ func TestResultAccessors(t *testing.T) {
 	if clean.Errors() != nil || clean.Warnings() != nil || clean.Codes() != nil {
 		t.Error("a clean parse should report nil diagnostic slices")
 	}
-	if clean.HasErrors() {
-		t.Error("HasErrors() = true on a clean parse")
+	if clean.IsInvalid() {
+		t.Error("IsInvalid() = true on a clean parse")
 	}
 	if got := clean.Bump(); got != BumpMinor {
 		t.Errorf("Bump() = %s, want minor", got)

@@ -68,3 +68,24 @@ scripts/*
 !announce
 announce/*
 !announce/*.sh
+
+# Bootstrap integration fixture and pinned tool policy.
+!.aqua
+!scripts/test-install-tools.py
+
+# The configuration sweep's inputs: every committed dispat config, whose
+# `scripts` entries are shell like anything else the sweep reads, and the
+# reader that pulls them out. The configs under pkg/, docker/, tools/ and
+# tests/ arrive with those folders; the rest are named here one by one,
+# because each sits in a folder an exception above has already filtered. A
+# new package whose folder is filtered belongs on this list, or its scripts
+# become the only shell in the repository nothing checks.
+!scripts/lint-config-scripts.py
+!dispat.yaml
+!packages/dispat.yaml
+!services/dispat.yaml
+!specs/agent-guide/dispat.yaml
+!specs/ccme-spec/dispat.yaml
+!infra
+infra/*
+!infra/dispat.yaml

@@ -107,6 +107,13 @@ After an ordinary cancellation, dispat gives completed publishes up to five minu
 push, and GitHub release record. It skips further user hooks during this detached finalization. A timeout is reported
 as a recording failure, with the local tags and commits left available for inspection.
 
+A fleet released from a [control repository](../../control-repository.md#source-history-mode) recovers by the same
+rule, with the records spread across the repositories that own them. Each successful package is tagged in its owner
+after publishing, already recorded successes survive a failure elsewhere, consumers of a failed provider stay blocked,
+and the next run reconstructs the remaining plan from those source tags. A recording error is reported separately and
+never turns an unrecorded publish into a success. The control-repository page states what to do when a source tag is
+durable but the control checkpoint failed.
+
 If release commits are enabled, commit or stash pre-existing changes in selected package folders and `commit.include`
 paths before retrying; dispat refuses them so its automatic commit cannot capture unrelated work. It likewise refuses
 pre-existing changes only in selected package folders where `revertOnFail` could reset them. With both features off,

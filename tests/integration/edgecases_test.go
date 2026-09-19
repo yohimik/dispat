@@ -62,9 +62,9 @@ func TestEdgePinPrereleaseOfTheRequiredBump(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@1.1.0-rc.0"), "the pinned rc is what ships; tags: %v", r.TagList())
-	assert.False(t, r.HasTag("core@1.1.0"), "the stable version must not be released instead")
-	assert.False(t, harness.HasCodeForPackage(res.Events, "E156", "core"),
+	assert.True(t, r.IsTagged("core@1.1.0-rc.0"), "the pinned rc is what ships; tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("core@1.1.0"), "the stable version must not be released instead")
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "E156", "core"),
 		"an rc of the required minor satisfies the bump; stdout:\n%s", res.Stdout)
 
 	// The train continues from the tag that was just written, which is what
@@ -72,7 +72,7 @@ func TestEdgePinPrereleaseOfTheRequiredBump(t *testing.T) {
 	// one-off version.
 	r.CommitEmpty("fix(core)%rc: another go")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@1.1.0-rc.1"), "the train continues; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@1.1.0-rc.1"), "the train continues; tags: %v", r.TagList())
 }
 
 // TestEdgePinPrereleaseBelowTheBumpIsStillRefused: the other half of the same
@@ -89,9 +89,9 @@ func TestEdgePinPrereleaseBelowTheBumpIsStillRefused(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	assert.True(t, harness.HasCodeForPackage(res.Events, "E156", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "E156", "core"),
 		"an rc of 1.1.0 does not carry a breaking change; stdout:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("core@2.0.0"),
+	assert.True(t, r.IsTagged("core@2.0.0"),
 		"the rejected pin contributes nothing and the computed version still ships; tags: %v", r.TagList())
 }
 
@@ -116,10 +116,10 @@ func TestEdgePinPrereleaseMovesAWholeGroup(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("a@1.1.0-rc.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.1.0-rc.0"), "the group runs one train; tags: %v", r.TagList())
-	assert.False(t, r.HasTag("a@1.1.0"), "nothing graduates here")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"), "b rides the pin")
+	assert.True(t, r.IsTagged("a@1.1.0-rc.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.1.0-rc.0"), "the group runs one train; tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("a@1.1.0"), "nothing graduates here")
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"), "b rides the pin")
 }
 
 // ---------------------------------------------------------------------------
@@ -169,8 +169,8 @@ func TestEdgeAutoVersionSyncsWithoutPropagation(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	require.True(t, r.HasTag("core@1.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("web@1.0.1"), "the consumer releases its own patch; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@1.0.1"), "the consumer releases its own patch; tags: %v", r.TagList())
 
 	web, err := os.ReadFile(r.Path("packages", "web", "package.json"))
 	require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestEdgeAutoVersionSyncsWithoutPropagation(t *testing.T) {
 		"the declared range follows the provider with no propagation to carry it")
 	assert.Contains(t, string(web), `"version": "1.0.1"`, "and the consumer's own version is its own")
 
-	assert.False(t, harness.HasCodeForPackage(res.Events, "W221", "web"),
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W221", "web"),
 		"the edge is declared, so nothing is optimistic about it; stdout:\n%s", res.Stdout)
 }
 
@@ -218,8 +218,8 @@ func TestEdgeAutoReplaceSyncsWithoutPropagation(t *testing.T) {
 
 	r.ReleaseOK()
 
-	require.True(t, r.HasTag("core@1.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("web@1.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@1.0.1"), "tags: %v", r.TagList())
 
 	gradle, err := os.ReadFile(r.Path("packages", "web", "build.gradle"))
 	require.NoError(t, err)
@@ -285,8 +285,8 @@ func TestEdgeVersionScriptSeesEveryUpdatedProvider(t *testing.T) {
 
 	r.ReleaseOK()
 
-	require.True(t, r.HasTag("core@1.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("web@1.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@1.0.1"), "tags: %v", r.TagList())
 
 	// The scripted space: the version stage exists and was told about core.
 	log, err := os.ReadFile(r.Path("version.log"))
@@ -358,11 +358,11 @@ func TestEdgeGroupNewcomerWithNoVersionJoinsAtTheGroupVersion(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("a@1.2.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("newbie@1.2.1"),
+	assert.True(t, r.IsTagged("a@1.2.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("newbie@1.2.1"),
 		"the newcomer joins at the group's version, not at 0.0.1; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "newbie"), "the ride is explained")
-	assert.False(t, harness.HasCode(res.Events, "W233"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "newbie"), "the ride is explained")
+	assert.False(t, harness.IsCodePresent(res.Events, "W233"),
 		"a newcomer has no version to disagree about; stdout:\n%s", res.Stdout)
 
 	// And it converges: the next run has nothing to say about either.
@@ -392,10 +392,10 @@ func TestEdgeGroupMemberOnAnotherMajorIsReported(t *testing.T) {
 	r.CommitEmpty("fix(a): an ordinary fix")
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("a@9.0.1"),
+	assert.True(t, r.IsTagged("a@9.0.1"),
 		"the group versions from its newest member; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("stray@9.0.1"), "tags: %v", r.TagList())
-	assert.True(t, harness.HasCode(res.Events, "W233"),
+	assert.True(t, r.IsTagged("stray@9.0.1"), "tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresent(res.Events, "W233"),
 		"the major spread must be reported; stdout:\n%s", res.Stdout)
 }
 
@@ -418,10 +418,10 @@ func TestEdgeGroupMinorSpreadIsNotReported(t *testing.T) {
 	r.CommitEmpty("fix(a): an ordinary fix")
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("a@1.2.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("laggard@1.2.1"), "the laggard is caught up; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "laggard"))
-	assert.False(t, harness.HasCode(res.Events, "W233"),
+	assert.True(t, r.IsTagged("a@1.2.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("laggard@1.2.1"), "the laggard is caught up; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "laggard"))
+	assert.False(t, harness.IsCodePresent(res.Events, "W233"),
 		"below the major this is ordinary catch-up; stdout:\n%s", res.Stdout)
 }
 
@@ -452,9 +452,9 @@ func TestEdgeGroupSparseMemberDecidingTheMajorIsReported(t *testing.T) {
 	r.CommitEmpty("fix(a): an ordinary fix")
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("a@9.0.1"),
+	assert.True(t, r.IsTagged("a@9.0.1"),
 		"the group versions from its newest member whatever mode it is in; tags: %v", r.TagList())
-	assert.True(t, harness.HasCode(res.Events, "W233"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W233"),
 		"the sparse member decided the major, so it is named; stdout:\n%s", res.Stdout)
 }
 
@@ -505,7 +505,7 @@ func TestEdgeRevertOnFailStopsAtThePublish(t *testing.T) {
 
 	assert.FileExists(t, r.Path("packages/good/good/leftover.txt"),
 		"the published package keeps what its build wrote: revert stops at the publish")
-	assert.True(t, r.HasTag("good@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("good@0.1.0"), "tags: %v", r.TagList())
 }
 
 // TestEdgeRevertOnFailIsThreeStateAtThePackageLevel: revertOnFail is one of
@@ -567,7 +567,7 @@ func TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted(t *testing.T) {
 		kept, err := os.ReadFile(r.Path("packages", "keeper", "local.txt"))
 		require.NoError(t, err)
 		assert.Equal(t, "keep me\n", string(kept))
-		assert.True(t, r.HasTag("keeper@0.1.0"))
+		assert.True(t, r.IsTagged("keeper@0.1.0"))
 	})
 
 	t.Run("reverted package refuses existing work", func(t *testing.T) {
@@ -609,13 +609,13 @@ func TestEdgeRevertOnFailNeverReachesAFailedCommit(t *testing.T) {
 
 	res := r.Release()
 	require.NotEqual(t, 0, res.Code, "a release missing its commit must not exit green\nstdout:\n%s", res.Stdout)
-	require.True(t, harness.HasCode(res.Events, "E223"),
+	require.True(t, harness.IsCodePresent(res.Events, "E223"),
 		"the commit failure is reported under its own code, events:\n%s", res.Stdout)
 
 	assert.Contains(t, res.Stdout, `"status":"published"`,
 		"the artefact is out, so the package is published and not failed")
 	assert.NotContains(t, res.Stdout, `"status":"failed"`)
-	assert.True(t, r.HasTag("core@0.1.0"),
+	assert.True(t, r.IsTagged("core@0.1.0"),
 		"the tag survives the commit failure; tags: %v", r.TagList())
 	assert.FileExists(t, r.Path("packages/core/leftover.txt"),
 		"revertOnFail is on, and still nothing is rolled back once a package has published")

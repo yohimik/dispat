@@ -22,6 +22,8 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
+	"github.com/yohimik/dispat/services/dispat/internal/script"
+	"github.com/yohimik/dispat/services/dispat/internal/webhook"
 )
 
 // ReleaseOptions narrows a release — and the release `status` reports on — to
@@ -61,10 +63,109 @@ type ReleaseOptions struct {
 // reached execution (a blocked plan, failed verification, a failed gating
 // hook).
 func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*release.Result, error) {
-	// The invocation, named before any work happens: an incident readback
-	// starts from "what run was this", and this line answers it at the
-	// default level. Selection fields appear only when a selection was in
-	// force, so an unfiltered run's line reads as one word of intent.
+	a.logReleaseStarted(opts)
+	// checkGit runs first so a repository without git still fails in its own
+	// words rather than on a raw `git tag`.
+	if err := a.checkGit(); err != nil {
+		return nil, err
+	}
+	fleet, unlock, err := a.acquireReleaseLocks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Idempotence lets the normal completion path release before its summary
+	// and closing webhook while this defer still protects every earlier return.
+	// Cleanup detaches from cancellation inside: an interrupted run has more
+	// reason to give the lock back than a finished one.
+	unlocked := false
+	unlockOnce := func() error {
+		if unlocked {
+			return nil
+		}
+		unlocked = true
+		return unlock()
+	}
+	cleanupPins := func() {}
+	finishCleanup := func() error {
+		cleanupPins()
+		return unlockOnce()
+	}
+	defer func() { _ = finishCleanup() }()
+
+	pl, err := a.planUnderLock(ctx, opts, fleet)
+	if err != nil {
+		return nil, err
+	}
+	if fleet != nil {
+		cleanup, err := a.prepareFleetRelease(ctx, pl, fleet)
+		if err != nil {
+			return nil, err
+		}
+		cleaned := false
+		cleanupPins = func() {
+			if !cleaned {
+				cleaned = true
+				cleanup()
+			}
+		}
+	}
+	if err := a.refuseDirtyReleasePaths(ctx, pl, fleet != nil); err != nil {
+		return nil, err
+	}
+	// Resolve the GitHub releasers: one per distinct target the packages'
+	// resolved policies name — most runs resolve to a single one. Empty
+	// means every package is disabled or unresolvable. It needs the plan, so
+	// it cannot move up with the git verification above.
+	gh, err := a.verifiedGitHubDispatch(ctx, pl)
+	if err != nil {
+		return nil, err
+	}
+	if fleet != nil {
+		fleet.gh = gh
+	}
+
+	runner := a.packageRunner()
+	if fleet != nil {
+		runner = fleet.pins.runner(runner)
+	}
+	// The run-level hooks share one environment: the workspace listing before
+	// the run, widened to the run outcome once the task graph finishes.
+	hooks := &runHooks{cfg: a.cfg, runner: runner, root: a.root,
+		env: release.WorkspaceEnv(pl, a.log), log: a.log}
+	if err := a.runGatingHooks(ctx, hooks, fleet); err != nil {
+		return nil, err
+	}
+
+	// Webhooks begin once the run is committed to execute: a refused run — a
+	// blocked plan, failed verification, a failed gating hook — emits nothing,
+	// because nothing it planned was ever started. Close is deferred right
+	// here so every exit path flushes the queued deliveries, detached from
+	// cancellation (an interrupt is the run outcome listeners most want to
+	// hear about) and bounded by the dispatcher's own flush deadline. Normal
+	// completion releases locks before queuing the closing outcome, so that
+	// delivery includes any lock cleanup failure.
+	wh := a.webhookDispatcher(pl)
+	// The interface field is only assigned through a non-nil check: a typed
+	// nil *Dispatcher inside the interface would defeat the executor's own
+	// nil test.
+	var obs release.Observerx
+	if wh != nil {
+		defer wh.Close(context.WithoutCancel(ctx))
+		obs = wh
+		wh.Event(a.releaseStartedEvent(pl))
+	}
+
+	executor := a.newReleaseExecutor(pl, fleet, gh, runner, obs)
+	start := time.Now()
+	results := executor.Run(ctx, pl)
+	return a.completeRelease(ctx, pl, results, hooks, gh, fleet, finishCleanup, wh, start)
+}
+
+// logReleaseStarted names the invocation before any work happens: an incident
+// readback starts from "what run was this", and this line answers it at the
+// default level. Selection fields appear only when a selection was in force,
+// so an unfiltered run's line reads as one word of intent.
+func (a *App) logReleaseStarted(opts ReleaseOptions) {
 	ev := a.log.Info().Str("root", a.root)
 	if len(opts.Filter.Packages) > 0 {
 		ev = ev.Strs("packages", opts.Filter.Packages)
@@ -82,66 +183,71 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		ev = ev.Bool("requireRelease", true)
 	}
 	ev.Msg("release started")
+}
 
-	// The lock comes before the plan, not before the publish, and it comes
-	// before it unconditionally: two runs that both got as far as planning
-	// have already read the same tags and decided on the same versions, and
-	// whichever of them notices second has wasted the work either way.
-	//
-	// There is no --require-release exception. Whether there is work to do is
-	// not known until after planning, so "do not lock when the plan is empty"
-	// is not a rule this function is in a position to follow — it would have
-	// to plan first, which is the thing the lock exists to serialise. A run
-	// that turns out to have nothing to publish therefore takes the lock,
-	// gives it straight back, and exits 3. The lock-free way to ask whether a
-	// release would do anything is `dispat status --require-release`, which
-	// plans without ever touching the remote, and is what a CI gate should
-	// call before it calls this.
-	//
-	// checkGit runs first so a repository without git still fails in its own
-	// words rather than on a raw `git tag`.
-	if err := a.checkGit(); err != nil {
-		return nil, err
-	}
-	var workspaceRecords *workspaceRecorder
+// acquireReleaseLocks takes the release lock of every participating repository
+// before the run plans anything, and returns the fleet recorder (nil outside a
+// composed workspace) with the function that gives the locks back.
+//
+// The lock comes before the plan, not before the publish, and it comes before
+// it unconditionally: two runs that both got as far as planning have already
+// read the same tags and decided on the same versions, and whichever of them
+// notices second has wasted the work either way.
+//
+// There is no --require-release exception. Whether there is work to do is not
+// known until after planning, so "do not lock when the plan is empty" is not a
+// rule this function is in a position to follow — it would have to plan first,
+// which is the thing the lock exists to serialise. A run that turns out to
+// have nothing to publish therefore takes the lock, gives it straight back,
+// and exits 3. The lock-free way to ask whether a release would do anything is
+// `dispat status --require-release`, which plans without ever touching the
+// remote, and is what a CI gate should call before it calls this.
+func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func() error, error) {
 	if a.workspace != nil {
-		workspaceRecords = a.newWorkspaceRecorder()
-		unlock, err := workspaceRecords.acquire(ctx)
+		fleet := a.newWorkspaceRecorder()
+		unlock, err := fleet.acquire(ctx)
 		if err != nil {
 			a.log.Error().Err(err).Str("code", "E336").Msg("unable to acquire fleet release locks")
-			return nil, err
+			return nil, nil, err
 		}
-		defer unlock()
-	} else if !a.lockDisabled() {
-		lock := &release.Lock{Git: a.git, Remote: a.pushRemote(), Log: a.log}
-		if err := lock.Acquire(ctx); err != nil {
-			a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", gitx.RedactURL(a.pushRemote())).
-				Str("remedy", release.LockRemedy).Msg("unable to create the release lock tag")
-			return nil, err
-		}
-		// Deferred, so every way out of this function goes through it: a
-		// refusal, a failed package, a finished run. Detached from
-		// cancellation, so a Ctrl-C unlocks too — an interrupted run has more
-		// reason to give the lock back than a finished one, since nobody is
-		// standing by to do it by hand.
-		defer lock.Release(context.WithoutCancel(ctx))
+		return fleet, unlock, nil
 	}
+	if a.lockDisabled() {
+		warnLockDisabled(a.log, []string{a.root}, a.cfg.UnsafeDisableLock)
+		return nil, func() error { return nil }, nil
+	}
+	lockRemote, resolveErr := lockDestination(ctx, a.git, a.pushRemote(), a.log)
+	if resolveErr != nil {
+		a.log.Error().Err(resolveErr).Str("tag", release.LockTagName).
+			Str("remote", gitx.RedactURL(a.pushRemote())).Msg("unable to create the release lock tag")
+		return nil, nil, fmt.Errorf("resolve release-lock push destination: %w", resolveErr)
+	}
+	lock := &release.Lock{Git: a.git, Remote: lockRemote, Log: a.log}
+	if err := lock.Acquire(ctx); err != nil {
+		a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", gitx.RedactURL(a.pushRemote())).
+			Str("remedy", release.LockRemedy).Msg("unable to create the release lock tag")
+		return nil, nil, err
+	}
+	return nil, func() error {
+		return config.WithDiagnostic("E336", lock.Release(context.WithoutCancel(ctx)))
+	}, nil
+}
 
-	commitMode := a.cfg.Commit.IsEnabled()
-	pushMode := a.cfg.Commit.PushEnabled()
-	remote := a.pushRemote()
-
+// planUnderLock verifies external access, fixes the fleet snapshot and
+// computes the plan every later phase works from. Everything here happens
+// while the locks are held, so no answer can go stale between the check and
+// the release it guards.
+func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *workspaceRecorder) (*plan.Plan, error) {
 	// Verify external access up front, before anything is planned. The order
 	// is the point: a plan is built from the repository's tags, so a checkout
 	// that has fallen behind the remote produces a plan that is wrong rather
 	// than a plan that fails — it recomputes versions somebody else already
-	// published. Refusing here means no such plan is ever built, and refusing
-	// under the held lock means the answer cannot go stale between the check
-	// and the release it guards.
+	// published. Refusing here means no such plan is ever built.
 	//
 	// commit.verify (default true) can switch the git check off for remotes
 	// that reject ls-remote but accept pushes.
-	if workspaceRecords == nil && pushMode && a.cfg.Commit.VerifyEnabled() {
+	if fleet == nil && a.cfg.Commit.IsPushEnabled() && a.cfg.Commit.IsVerifyEnabled() {
+		remote := a.pushRemote()
 		if err := a.git.VerifyRemote(ctx, remote); err != nil {
 			a.log.Error().Err(err).Str("remote", gitx.RedactURL(remote)).Msg("git remote verification failed")
 			return nil, err
@@ -154,12 +260,12 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 			return nil, err
 		}
 	}
-	if workspaceRecords != nil {
+	if fleet != nil {
 		packages, err := a.packages()
 		if err != nil {
 			return nil, err
 		}
-		if err := workspaceRecords.captureSnapshot(ctx, packages); err != nil {
+		if err := fleet.captureSnapshot(ctx, packages); err != nil {
 			a.logError(err).Msg("unable to capture fixed fleet snapshot")
 			return nil, err
 		}
@@ -169,19 +275,20 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err != nil {
 		return nil, err
 	}
-	if workspaceRecords != nil {
-		workspaceRecords.setSnapshotPlan(pl)
+	if fleet != nil {
+		fleet.setSnapshotPlan(pl)
+		fleet.setLinkPlan(pl)
 	}
 	if blocked := a.releaseBlocked(pl); blocked != "" {
 		a.log.Error().Str("reason", blocked).Msg("refusing to release")
 		return nil, errors.New(blocked)
 	}
-	if workspaceRecords != nil {
-		if err := workspaceRecords.verifyPlannedHeads(pl); err != nil {
+	if fleet != nil {
+		if err := fleet.verifyPlannedHeads(pl); err != nil {
 			a.logError(err).Msg("repository changed after workspace composition")
 			return nil, err
 		}
-		if err := workspaceRecords.verify(ctx, pl); err != nil {
+		if err := fleet.verify(ctx, pl); err != nil {
 			a.logError(err).Msg("source repository verification failed")
 			return nil, err
 		}
@@ -194,53 +301,67 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		a.log.Error().Err(err).Msg("refusing to release")
 		return nil, err
 	}
-	if workspaceRecords != nil {
-		if err := workspaceRecords.prepare(ctx, pl); err != nil {
-			a.logError(err).Msg("refusing to release source repositories")
-			return nil, err
-		}
-		cleanupPins, err := workspaceRecords.pins.start(
-			workspaceRecords.pins.root, workspaceRecords.pins.config, workspacePinOwners(pl),
-			workspacePinRepositories(a.workspace))
-		if err != nil {
-			err = config.WithDiagnostic(config.DiagnosticRepositoryInvalid,
-				fmt.Errorf("E330: creating live workspace pin context: %w", err))
-			a.logError(err).Msg("refusing to release source repositories")
-			return nil, err
-		}
-		defer cleanupPins()
-	}
+	return pl, nil
+}
 
-	// An automatic release commit can capture pre-existing work, and
-	// revertOnFail can discard it. Refuse before hooks or writes when either
-	// behavior is active. A release with both disabled preserves writer edits
-	// in the working tree and performs no Git reset, so existing changelog or
-	// manifest edits remain valid input (including an interrupted run's output).
+// prepareFleetRelease settles every source repository's release preconditions
+// and opens the run's live pin context, returning the context's cleanup.
+func (a *App) prepareFleetRelease(ctx context.Context, pl *plan.Plan, fleet *workspaceRecorder) (func(), error) {
+	if err := fleet.prepare(ctx, pl); err != nil {
+		a.logError(err).Msg("refusing to release source repositories")
+		return nil, err
+	}
+	cleanupPins, err := fleet.pins.start(
+		fleet.pins.root, fleet.pins.config, workspacePinOwners(pl),
+		workspacePinRepositories(a.workspace))
+	if err != nil {
+		err = config.WithDiagnostic(config.DiagnosticRepositoryInvalid,
+			fmt.Errorf("E330: creating live workspace pin context: %w", err))
+		a.logError(err).Msg("refusing to release source repositories")
+		return nil, err
+	}
+	return cleanupPins, nil
+}
+
+// refuseDirtyReleasePaths protects pre-existing work. An automatic release
+// commit can capture it, and revertOnFail can discard it, so the run is
+// refused before hooks or writes when either behavior is active. A release
+// with both disabled preserves writer edits in the working tree and performs
+// no Git reset, so existing changelog or manifest edits remain valid input
+// (including an interrupted run's output). The fleet path runs its own
+// per-repository check in prepare.
+func (a *App) refuseDirtyReleasePaths(ctx context.Context, pl *plan.Plan, fleet bool) error {
+	if fleet {
+		return nil
+	}
+	commitMode := a.cfg.Commit.IsEnabled()
 	var protected []string
 	for _, rel := range pl.Releasing() {
-		if workspaceRecords == nil && (commitMode || rel.Pkg.Space.RevertOnFail) {
+		if commitMode || rel.Pkg.Space.RevertOnFail {
 			protected = append(protected, rel.Pkg.Dir)
 		}
 	}
-	if workspaceRecords == nil && commitMode {
+	if commitMode {
 		protected = a.appendIncludeDirs(protected, a.cfg.Commit.Include)
 	}
-	var dirty []string
-	if len(protected) > 0 {
-		dirty, err = a.git.DirtyPaths(ctx, protected)
+	if len(protected) == 0 {
+		return nil
 	}
+	dirty, err := a.git.DirtyPaths(ctx, protected)
 	if err != nil {
-		return nil, fmt.Errorf("checking release paths for local changes: %w", err)
-	} else if len(dirty) > 0 {
+		return fmt.Errorf("checking release paths for local changes: %w", err)
+	}
+	if len(dirty) > 0 {
 		err := fmt.Errorf("release paths have pre-existing local changes (%s); commit, stash, or move them before releasing", strings.Join(dirty, ", "))
 		a.log.Error().Err(err).Strs("paths", dirty).Msg("refusing to release")
-		return nil, err
+		return err
 	}
+	return nil
+}
 
-	// Resolve the GitHub releasers: one per distinct target the packages'
-	// resolved policies name — most runs resolve to a single one. Empty
-	// means every package is disabled or unresolvable. It needs the plan, so
-	// it cannot move up with the git verification above.
+// verifiedGitHubDispatch resolves the run's GitHub releasers and proves each
+// one is reachable before any package work starts.
+func (a *App) verifiedGitHubDispatch(ctx context.Context, pl *plan.Plan) (*ghDispatch, error) {
 	gh := a.githubDispatch(pl)
 	for _, r := range gh.all {
 		if err := r.Verify(ctx); err != nil {
@@ -248,65 +369,53 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 			return nil, err
 		}
 	}
+	return gh, nil
+}
 
-	// In release-commit mode, tagging moves to the finalize phase so the tags
-	// reference the end-of-run commit.
-	var tagger release.Tagger = a.git
-	if commitMode {
-		tagger = nil
-	}
-	if workspaceRecords != nil {
-		tagger = nil
-		workspaceRecords.gh = gh
-	}
-
-	runner := a.packageRunner()
-	if workspaceRecords != nil {
-		runner = workspaceRecords.pins.runner(runner)
-	}
-	// The run-level hooks share one environment: the workspace listing before
-	// the run, widened to the run outcome once the task graph finishes.
-	hooks := &runHooks{cfg: a.cfg, runner: runner, root: a.root,
-		env: release.WorkspaceEnv(pl, a.log), log: a.log}
-	// beforeAll is the one gating run hook: it fires before any release work,
-	// when nothing has happened yet, so its failure can honestly stop the run
-	// — and does, before anything is built, published or tagged.
+// runGatingHooks fires beforeAll, the one gating run hook: it runs before any
+// release work, when nothing has happened yet, so its failure can honestly
+// stop the run — and does, before anything is built, published or tagged. In
+// a composed workspace each imported repository's own beforeAll follows, and
+// the fleet snapshot is re-verified afterwards because a hook can move a
+// repository the plan was computed from.
+func (a *App) runGatingHooks(ctx context.Context, hooks *runHooks, fleet *workspaceRecorder) error {
 	if err := hooks.runGating(ctx, "beforeAll", a.cfg.Run.BeforeAll); err != nil {
 		a.log.Error().Err(err).Msg("beforeAll hook failed, refusing to release")
-		return nil, err
+		return err
 	}
-	if workspaceRecords != nil {
-		for _, owner := range workspaceRecords.ordered {
-			if owner.repo.Imported {
-				if err := owner.hooks.runGating(ctx, "beforeAll", owner.repo.Config.Run.BeforeAll); err != nil {
-					return nil, fmt.Errorf("repository %s beforeAll hook failed: %w", owner.repo.Name, err)
-				}
+	if fleet == nil {
+		return nil
+	}
+	for _, owner := range fleet.ordered {
+		// The entry repository's own hooks are the run's hooks, fired above:
+		// every peer of a choreographed fleet is an imported configuration,
+		// the entry included, and running them again here would run the
+		// operator's gate twice.
+		if owner.repo.Imported && !owner.repo.Entry {
+			if err := owner.hooks.runGating(ctx, "beforeAll", owner.repo.Config.Run.BeforeAll); err != nil {
+				return fmt.Errorf("repository %s beforeAll hook failed: %w", owner.repo.Name, err)
 			}
 		}
-		if err := workspaceRecords.verifySnapshot(ctx, nil); err != nil {
-			a.logError(err).Msg("repository changed during beforeAll hooks")
-			return nil, err
-		}
 	}
-
-	// Webhooks begin once the run is committed to execute: a refused run — a
-	// blocked plan, failed verification, a failed gating hook — emits nothing,
-	// because nothing it planned was ever started. Close is deferred right
-	// here so every exit path flushes the queued deliveries, detached from
-	// cancellation (an interrupt is the run outcome listeners most want to
-	// hear about) and bounded by the dispatcher's own flush deadline; deferred
-	// after the lock's release above, so the flush finishes first.
-	wh := a.webhookDispatcher(pl)
-	// The interface field is only assigned through a non-nil check: a typed
-	// nil *Dispatcher inside the interface would defeat the executor's own
-	// nil test.
-	var obs release.Observer
-	if wh != nil {
-		defer wh.Close(context.WithoutCancel(ctx))
-		obs = wh
-		wh.Event(a.releaseStartedEvent(pl))
+	if err := fleet.verifySnapshot(ctx, nil); err != nil {
+		a.logError(err).Msg("repository changed during beforeAll hooks")
+		return err
 	}
+	return nil
+}
 
+// newReleaseExecutor assembles the task graph runner for this run. In
+// release-commit mode tagging moves to the finalize phase so the tags
+// reference the end-of-run commit; a composed workspace records through its
+// fleet recorder instead, which owns tags, commits and checkpoints per
+// repository.
+func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *ghDispatch,
+	runner script.Runnerx, obs release.Observerx) *release.Executor {
+	commitMode := a.cfg.Commit.IsEnabled()
+	var tagger release.Taggerx = a.git
+	if commitMode || fleet != nil {
+		tagger = nil
+	}
 	executor := &release.Executor{
 		BuildConcurrency:   a.cfg.BuildConcurrency,
 		PublishConcurrency: a.cfg.PublishConcurrency,
@@ -314,38 +423,45 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		Tagger:             tagger,
 		Recorders:          a.recorders(gh, commitMode),
 		Reverter:           a.git,
-		Force:              a.cfg.Commit.ForceEnabled(),
+		Force:              a.cfg.Commit.IsForceEnabled(),
 		Scanner:            a.scan,
 		Observer:           obs,
 		Log:                a.log,
 	}
-	if workspaceRecords != nil {
-		executor.Recorders = []release.ReleaseRecorder{workspaceRecords}
-		executor.Reverter = workspaceRecords
-		executor.BlockOnRecordFailure = true
-		executor.AcquirePublish = workspaceRecords.acquirePublish
-		executor.PublishGroup = func(rel *plan.Release) string {
-			if rel == nil || rel.Pkg == nil {
-				return ""
-			}
-			return rel.Pkg.Repository
-		}
-		executor.BeforePublish = func(ctx context.Context, rel *plan.Release) error {
-			if err := workspaceRecords.verifyPublishBranch(ctx, rel); err != nil {
-				return err
-			}
-			return workspaceRecords.verifySnapshot(ctx, rel)
-		}
+	if fleet == nil {
+		return executor
 	}
-	start := time.Now()
-	results := executor.Run(ctx, pl)
+	executor.Recorders = []release.ReleaseRecorderx{fleet}
+	executor.Reverter = fleet
+	executor.BlockOnRecordFailure = true
+	executor.AcquirePublish = fleet.acquirePublish
+	executor.PublishGroup = func(rel *plan.Release) string {
+		if rel == nil || rel.Pkg == nil {
+			return ""
+		}
+		return rel.Pkg.Repository
+	}
+	executor.BeforePublish = func(ctx context.Context, rel *plan.Release) error {
+		if err := fleet.verifyPublishBranch(ctx, rel); err != nil {
+			return err
+		}
+		return fleet.verifySnapshot(ctx, rel)
+	}
+	return executor
+}
 
-	// An interrupted run stops running the operator's scripts — no postAll, no
-	// finalize bracket hooks — but what *published* before the interruption
-	// must still get its durable record: the release commit, the tags and the
-	// push are how a completed leg commits (§17), and losing them re-releases
-	// released versions on the next run. finalize therefore proceeds for the
-	// published packages, detached from the cancellation.
+// completeRelease runs the closing phase: the post-run hooks, the durable
+// records of whatever published, the summary, and the one closing webhook.
+//
+// An interrupted run stops running the operator's scripts — no postAll, no
+// finalize bracket hooks — but what *published* before the interruption must
+// still get its durable record: the release commit, the tags and the push are
+// how a completed leg commits (§17), and losing them re-releases released
+// versions on the next run. finalize therefore proceeds for the published
+// packages, detached from the cancellation.
+func (a *App) completeRelease(ctx context.Context, pl *plan.Plan, results map[string]*release.Result,
+	hooks *runHooks, gh *ghDispatch, fleet *workspaceRecorder, finishCleanup func() error, wh *webhook.Dispatcher,
+	start time.Time) (map[string]*release.Result, error) {
 	interrupted := ctx.Err() != nil
 	finCtx := ctx
 	finCancel := func() {}
@@ -354,9 +470,10 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		finCtx, finCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	} else {
 		hooks.env = release.RunEnv(pl, results, a.log)
-		if workspaceRecords != nil {
-			for _, owner := range workspaceRecords.ordered {
-				if owner.repo.Imported {
+		if fleet != nil {
+			for _, owner := range fleet.ordered {
+				// The entry's own postAll is the run's, fired just below.
+				if owner.repo.Imported && !owner.repo.Entry {
 					owner.hooks.env = hooks.env
 					owner.hooks.run(ctx, "postAll", owner.repo.Config.Run.PostAll)
 				}
@@ -368,14 +485,19 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
 	}
 	crit := &criticals{}
-	if workspaceRecords == nil {
-		a.finalize(finCtx, finalizer{gh: gh, remote: remote, hooks: hooks, crit: crit, skipHooks: interrupted}, pl, results)
+	if fleet == nil {
+		a.finalize(finCtx, finalizer{gh: gh, remote: a.pushRemote(), hooks: hooks, crit: crit,
+			skipHooks: interrupted}, pl, results)
 	}
 	finCancel()
 	if interrupted && errors.Is(finCtx.Err(), context.DeadlineExceeded) {
 		crit.record(a.log, plan.CodeCommitFailed, finCtx.Err(),
 			"recording completed releases timed out after interruption", nil)
 	}
+	// Locks cover every publication, durable record and run hook. Their
+	// release is itself the final critical step: perform it before the summary
+	// and closing webhook so neither can call a stranded lock a success.
+	crit.keep(finishCleanup())
 	failed, _ := a.summarize(pl, results, time.Since(start))
 	// Everything the run owed has now been attempted. What is left to decide
 	// is only what to report, in order of what the operator has to do about
@@ -385,13 +507,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if wh != nil {
 		// The one closing delivery, whatever the outcome: the status names
 		// the run's own word for it, the same word the exit code speaks.
-		status := "succeeded"
-		switch {
-		case interrupted:
-			status = "interrupted"
-		case failed > 0 || (workspaceRecords != nil && crit.err() != nil):
-			status = "failed"
-		}
+		status := releaseFinalStatus(interrupted, failed, crit.err())
 		wh.Event(a.releaseFinishedEvent(pl, results, status))
 	}
 	if interrupted {
@@ -401,6 +517,16 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		return results, fmt.Errorf("%d package(s) failed", failed)
 	}
 	return results, crit.err()
+}
+
+func releaseFinalStatus(interrupted bool, failed int, critical error) string {
+	if interrupted {
+		return "interrupted"
+	}
+	if failed > 0 || critical != nil {
+		return "failed"
+	}
+	return "succeeded"
 }
 
 // checkBranchAllowed enforces run.allowBranch: when the guard is set, the
@@ -419,7 +545,7 @@ func (a *App) checkBranchAllowed(ctx context.Context) error {
 		return fmt.Errorf("HEAD is detached and run.allowBranch is set; check out an allowed branch (%s)", allowed)
 	}
 	for _, pattern := range a.cfg.Run.AllowBranch {
-		if globx.Match(pattern, branch) {
+		if globx.IsMatch(pattern, branch) {
 			return nil
 		}
 	}
@@ -445,7 +571,7 @@ func (a *App) checkNotBehind(ctx context.Context, remote string) error {
 		return err
 	}
 	if behind {
-		return fmt.Errorf("the checkout is behind %s/%s; pull before releasing", remote, branch)
+		return fmt.Errorf("the checkout is behind %s/%s; pull before releasing", gitx.RedactURL(remote), branch)
 	}
 	return nil
 }
@@ -456,8 +582,8 @@ func (a *App) checkNotBehind(ctx context.Context, remote string) error {
 // dispatch when any package resolved a releaser, except in release-commit
 // mode, where GitHub recording moves to the finalize phase so the releases
 // reference the end-of-run commit.
-func (a *App) recorders(gh *ghDispatch, commitMode bool) []release.ReleaseRecorder {
-	recs := []release.ReleaseRecorder{&changelog.Dispatcher{Log: a.log}}
+func (a *App) recorders(gh *ghDispatch, commitMode bool) []release.ReleaseRecorderx {
+	recs := []release.ReleaseRecorderx{&changelog.Dispatcher{Log: a.log}}
 	if !gh.empty() && !commitMode {
 		recs = append(recs, gh)
 	}
@@ -466,7 +592,7 @@ func (a *App) recorders(gh *ghDispatch, commitMode bool) []release.ReleaseRecord
 
 // ghDispatch routes each package's release to the releaser its resolved
 // GitHub policy names; a package whose policy is disabled or unresolvable
-// has none and records nothing. It implements release.ReleaseRecorder. all
+// has none and records nothing. It implements release.ReleaseRecorderx. all
 // holds the distinct releasers once each, for up-front verification and the
 // finalize phase's commit stamping.
 type ghDispatch struct {
@@ -475,11 +601,11 @@ type ghDispatch struct {
 	log   zerolog.Logger
 }
 
-// Record implements release.ReleaseRecorder. It is the one gate both paths
+// Record implements release.ReleaseRecorderx. It is the one gate both paths
 // pass through — the per-publish recorder and the finalize phase — so the
 // prerelease opt-out is checked here rather than at each caller.
 func (d *ghDispatch) Record(ctx context.Context, rel *plan.Release) error {
-	if spec := rel.Pkg.GitHub; !spec.Records(rel.Channel) {
+	if spec := rel.Pkg.GitHub; !spec.IsRecorded(rel.Channel) {
 		github.LogSkip(d.log, spec, rel)
 		return nil
 	}

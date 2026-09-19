@@ -42,7 +42,7 @@ type tagSplice struct {
 // ${property} or an Xcode $(MARKETING_VERSION), spelled for a reference whose
 // interpolation can sit in either half.
 func writableImageRef(ref manifest.ImageRef) bool {
-	return ref.HasTag() && !ref.Pinned() && !ref.Interpolated()
+	return ref.IsTagged() && !ref.IsPinned() && !ref.IsInterpolated()
 }
 
 // imageTagWriter accumulates the tag splices one file's rewrite will make, and
@@ -132,7 +132,7 @@ func (w *imageTagWriter) setVersion(line, start int, text, version string) error
 // queue records the splice that turns one reference's tag into text. start is
 // where the reference begins in its line, so the tag's own offsets shift by it.
 func (w *imageTagWriter) queue(line, start int, ref manifest.ImageRef, tag string) error {
-	if !manifest.ValidTag(tag) {
+	if !manifest.IsValidTag(tag) {
 		return fmt.Errorf("%s: refusing to write %q as a Docker tag", w.path, tag)
 	}
 	w.pending[line] = append(w.pending[line], tagSplice{

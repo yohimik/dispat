@@ -64,8 +64,8 @@ func TestOverridesFlowBuildPerPackage(t *testing.T) {
 	data, err := os.ReadFile(r.Path("override.log"))
 	require.NoError(t, err, "core must have run its own build")
 	assert.Equal(t, "override-build\n", string(data), "core runs its own build exactly once")
-	assert.True(t, r.HasTag("core@0.1.0"))
-	assert.True(t, r.HasTag("extra@0.1.0"))
+	assert.True(t, r.IsTagged("core@0.1.0"))
+	assert.True(t, r.IsTagged("extra@0.1.0"))
 
 	// Convergence: the override changes what runs, not what releases.
 	res := r.ReleaseOK()
@@ -164,9 +164,9 @@ func TestOverridesInFolderFileWins(t *testing.T) {
 
 	r.ReleaseOK()
 
-	assert.True(t, r.HasTag("file-core@0.1.0"), "the in-folder file's tagFormat wins: %v", r.TagList())
-	assert.False(t, r.HasTag("entry-core@0.1.0"))
-	assert.True(t, r.HasTag("extra@0.1.0"), "the sibling keeps the repository default")
+	assert.True(t, r.IsTagged("file-core@0.1.0"), "the in-folder file's tagFormat wins: %v", r.TagList())
+	assert.False(t, r.IsTagged("entry-core@0.1.0"))
+	assert.True(t, r.IsTagged("extra@0.1.0"), "the sibling keeps the repository default")
 }
 
 // TestOverridesDispatexclude: a folder listed in the space's .dispatexclude is
@@ -183,9 +183,9 @@ func TestOverridesDispatexclude(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@0.1.0"))
+	assert.True(t, r.IsTagged("core@0.1.0"))
 	assert.Equal(t, 0, r.TagCount("scratch@"), "an ignored folder never releases")
-	assert.True(t, harness.HasCode(res.Events, "E130"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E130"),
 		"the ignored folder's name is an unknown scope, like any non-package")
 }
 
@@ -379,8 +379,8 @@ func TestOverridesSpacePackagesEntry(t *testing.T) {
 
 	r.ReleaseOK()
 
-	assert.True(t, r.HasTag("space-entry-core@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("extra@0.1.0"), "the sibling keeps the repository default")
+	assert.True(t, r.IsTagged("space-entry-core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("extra@0.1.0"), "the sibling keeps the repository default")
 }
 
 // TestOverridesSpaceFile: a dispat config file inside the space folder is the
@@ -410,8 +410,8 @@ func TestOverridesSpaceFile(t *testing.T) {
 
 	r.ReleaseOK()
 
-	assert.True(t, r.HasTag("libs-core@0.1.0"), "the space file's tagFormat wins: %v", r.TagList())
-	assert.True(t, r.HasTag("api@0.1.0"), "the other space is untouched")
+	assert.True(t, r.IsTagged("libs-core@0.1.0"), "the space file's tagFormat wins: %v", r.TagList())
+	assert.True(t, r.IsTagged("api@0.1.0"), "the other space is untouched")
 	assert.Equal(t, 1, countLines(r, "file.log"), "the space file's build ran for its package")
 	assert.Equal(t, 1, countLines(r, "root.log"), "and the root's build only for the other space")
 	assert.FileExists(t, r.Path("packages", "core", "CHANGELOG.md"),
@@ -453,8 +453,8 @@ func TestOverridesLadderNearestWins(t *testing.T) {
 
 	r.ReleaseOK()
 
-	assert.True(t, r.HasTag("p4-core@0.1.0"), "the package's own file is nearest: %v", r.TagList())
-	assert.True(t, r.HasTag("s2-extra@0.1.0"),
+	assert.True(t, r.IsTagged("p4-core@0.1.0"), "the package's own file is nearest: %v", r.TagList())
+	assert.True(t, r.IsTagged("s2-extra@0.1.0"),
 		"a package no entry names still takes the space file's format")
 	assert.FileExists(t, r.Path("packages", "extra", "HISTORY.md"),
 		"the root entry's record policy still reaches the package it names")
@@ -494,9 +494,9 @@ func TestOverridesSpaceLayerDependencies(t *testing.T) {
 	r.Commit("fix(core): a change that must propagate")
 	r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("mid@0.1.1"), "the space entry's edge carried the bump to mid: %v", r.TagList())
-	assert.True(t, r.HasTag("web@0.1.1"), "the space file's edge carried it on to web: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("mid@0.1.1"), "the space entry's edge carried the bump to mid: %v", r.TagList())
+	assert.True(t, r.IsTagged("web@0.1.1"), "the space file's edge carried it on to web: %v", r.TagList())
 }
 
 // countLines returns how many lines a log file in the monorepo root holds,

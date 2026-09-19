@@ -77,18 +77,46 @@ func TestVerifyCoverageStampsRejectsMissingStaleAndMixedRuns(t *testing.T) {
 			t.Fatal("want unexpected profile rejected")
 		}
 	})
+	t.Run("orphan stamp", func(t *testing.T) {
+		dir := makeRun(t)
+		write(t, filepath.Join(dir, "abandoned.commit"), commit+"\n")
+		if err := verifyCoverageStamps(dir, commit); err == nil || !strings.Contains(err.Error(), "orphan coverage stamp") {
+			t.Fatalf("orphan stamp error = %v", err)
+		}
+	})
+	t.Run("all provenance failures are reported", func(t *testing.T) {
+		dir := makeRun(t)
+		write(t, filepath.Join(dir, "tools.commit"), "older\n")
+		if err := os.Remove(filepath.Join(dir, "writer.out")); err != nil {
+			t.Fatal(err)
+		}
+		err := verifyCoverageStamps(dir, commit)
+		if err == nil || !strings.Contains(err.Error(), "tools.out was measured at older") ||
+			!strings.Contains(err.Error(), "missing coverage profile writer.out") {
+			t.Fatalf("combined provenance error = %v", err)
+		}
+	})
 }
 
 func TestCoverageCommandPrintsTheMergedIntegerDenominator(t *testing.T) {
 	const commit = "0123456789abcdef"
 	dir := t.TempDir()
 	for _, name := range []string{"ccme", "config", "manifest", "models", "scanner", "writer", "tools", "dispat", "integration"} {
-		covered := "0"
-		if name == "ccme" || name == "integration" {
-			covered = "1"
+		profile := "mode: atomic\nexample.test/" + name + "/x.go:1.1,2.2 3 0\n"
+		if name == "ccme" {
+			profile = "mode: atomic\nexample.test/ccme/x.go:1.1,2.2 3 1\n"
 		}
-		write(t, filepath.Join(dir, name+".out"),
-			"mode: atomic\nexample.test/"+name+"/x.go:1.1,2.2 3 "+covered+"\n")
+		if name == "integration" {
+			profile = "mode: atomic\n" +
+				"github.com/yohimik/dispat/pkg/ccme/v2/x.go:1.1,2.2 1 1\n" +
+				"github.com/yohimik/dispat/pkg/config/x.go:1.1,2.2 1 1\n" +
+				"github.com/yohimik/dispat/pkg/manifest/x.go:1.1,2.2 1 1\n" +
+				"github.com/yohimik/dispat/pkg/models/x.go:1.1,2.2 1 1\n" +
+				"github.com/yohimik/dispat/pkg/scanner/x.go:1.1,2.2 1 1\n" +
+				"github.com/yohimik/dispat/pkg/writer/x.go:1.1,2.2 1 1\n" +
+				"github.com/yohimik/dispat/services/dispat/x.go:1.1,2.2 1 1\n"
+		}
+		write(t, filepath.Join(dir, name+".out"), profile)
 		write(t, filepath.Join(dir, name+".commit"), commit+"\n")
 	}
 	var out, errs strings.Builder
@@ -96,8 +124,38 @@ func TestCoverageCommandPrintsTheMergedIntegerDenominator(t *testing.T) {
 	if code != 0 || errs.Len() != 0 {
 		t.Fatalf("coverage command = %d, stderr %q", code, errs.String())
 	}
-	if got := out.String(); got != "6 27 22.2%\n" {
-		t.Fatalf("coverage output = %q, want merged covered statements, denominator and display percent", got)
+	if got := out.String(); !strings.Contains(got, "combined 10 31 32.3%\n") ||
+		!strings.Contains(got, "integration 7 7 100.0%\n") ||
+		!strings.Contains(got, "integration-module services/dispat 1 1 100.0%\n") {
+		t.Fatalf("coverage output = %q, want combined, integration, and per-module provenance", got)
+	}
+}
+
+func TestVerifyIntegrationCoverageRequiresTheFullDenominatorAndMinimum(t *testing.T) {
+	complete := Coverage{Integration: Stats{Covered: 95, Statements: 100}}
+	for _, path := range productionModules {
+		complete.IntegrationModules = append(complete.IntegrationModules, Module{Path: path, Stats: Stats{Covered: 1, Statements: 1, Percent: 100}})
+	}
+	if err := verifyIntegrationCoverage(complete, 95); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := complete
+	missing.IntegrationModules = missing.IntegrationModules[1:]
+	if err := verifyIntegrationCoverage(missing, 95); err == nil || !strings.Contains(err.Error(), "missing production module") {
+		t.Fatalf("missing module error = %v", err)
+	}
+
+	below := complete
+	below.Integration = Stats{Covered: 94, Statements: 100, Percent: 94}
+	if err := verifyIntegrationCoverage(below, 95); err == nil || !strings.Contains(err.Error(), "below 95.0%") {
+		t.Fatalf("minimum error = %v", err)
+	}
+
+	omitted := complete
+	omitted.IntegrationMissing = []Package{{Path: "pkg/config/watch", Stats: Stats{Statements: 17}}}
+	if err := verifyIntegrationCoverage(omitted, 95); err == nil || !strings.Contains(err.Error(), "pkg/config/watch (17 statements)") {
+		t.Fatalf("omitted denominator error = %v", err)
 	}
 }
 
@@ -357,6 +415,9 @@ func TestReadCoverageKeepsTheLayersApart(t *testing.T) {
 	}
 	if len(cov.Modules) != 1 || cov.Modules[0].Path != "pkg/ccme" {
 		t.Errorf("modules = %+v", cov.Modules)
+	}
+	if len(cov.IntegrationMissing) != 1 || cov.IntegrationMissing[0].Statements != 2 {
+		t.Errorf("integration missing inventory = %+v", cov.IntegrationMissing)
 	}
 }
 

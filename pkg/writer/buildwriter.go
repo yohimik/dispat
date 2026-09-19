@@ -122,7 +122,9 @@ const pbxKeyBuild = "CURRENT_PROJECT_VERSION"
 
 // setXcodeBuild writes CURRENT_PROJECT_VERSION in every build configuration
 // that declares it, under the same three guards rewriteXcodeProj stands its
-// marketing-version writes on.
+// marketing-version writes on. A configuration whose counter defers to another
+// build setting is left where it is, on the same reasoning: the reference is
+// what carries the number, and a literal in its place would freeze it.
 func setXcodeBuild(path, build string) (Result, error) {
 	var res Result
 	if strings.ContainsAny(build, "\";{}\n\r") {
@@ -137,7 +139,7 @@ func setXcodeBuild(path, build string) (Result, error) {
 	changed := false
 	for i, line := range lines {
 		key, value, span, ok := pbxSetting(line)
-		if !ok || key != pbxKeyBuild {
+		if !ok || key != pbxKeyBuild || isDeferredValue(value) {
 			continue
 		}
 		before++

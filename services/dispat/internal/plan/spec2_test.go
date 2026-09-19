@@ -22,13 +22,13 @@ func TestSpec2SuppressionLapseCanExposeCatchUp(t *testing.T) {
 		{sha: "c2", message: "cancel(core): suppress the pending source"},
 	}
 	before := newFakeGit(history...).tag("core", "1.0.0", "c0").tag("app", "1.0.0", "c0")
-	assert.False(t, compute(t, before, nil).Releases["app"].Changed(),
+	assert.False(t, compute(t, before, nil).Releases["app"].IsChanged(),
 		"while core is suppressed there is no source from which app can inherit work")
 
 	after := newFakeGit(history...).tag("core", "1.0.0", "c0").tag("core", "1.1.0", "c2").
 		tag("app", "1.0.0", "c0")
 	app := compute(t, after, nil).Releases["app"]
-	assert.True(t, app.Changed(), "publishing core discharges its suppression and exposes app's debt")
+	assert.True(t, app.IsChanged(), "publishing core discharges its suppression and exposes app's debt")
 	assert.True(t, app.CatchUp)
 	assert.Equal(t, []string{"core"}, app.DueTo)
 }
@@ -42,7 +42,7 @@ func TestSpec2RejectedBumpProducesNoStaleSourceRow(t *testing.T) {
 	).tag("core", "1.0.0", "").tag("app", "1.0.0", "").tag("app", "1.0.1-rc.0", "c0")
 
 	p := compute(t, git, nil)
-	assert.False(t, p.Releases["app"].Changed())
+	assert.False(t, p.Releases["app"].IsChanged())
 	assert.Empty(t, p.StaleSources("app"), "a W208 rejection must not leave an upward stale row")
 	assert.True(t, hasCode(p, CodeBumpSuppressed), "W208, got %v", codes(p))
 }
@@ -59,7 +59,7 @@ func TestSpec2RejectedBumpDoesNotSuppressChannel(t *testing.T) {
 	assert.Equal(t, ccme.BumpNone, app.PropagatedBump)
 	assert.Empty(t, p.StaleSources("app"))
 	assert.Equal(t, "rc", app.Channel)
-	assert.True(t, app.ChannelChanged(), "the independently admitted channel still applies")
+	assert.True(t, app.IsChannelChanged(), "the independently admitted channel still applies")
 	assert.True(t, hasCode(p, CodeBumpSuppressed), "W208, got %v", codes(p))
 }
 
@@ -75,14 +75,14 @@ func TestSpec2SourceGraduationChangesInheritedRetry(t *testing.T) {
 	first := newFakeGit(history...).tag("core", "1.0.0", "").tag("core", "1.0.1-beta.0", "c0").
 		tag("app", "1.0.0", "")
 	firstApp := compute(t, first, nil).Releases["app"]
-	require.True(t, firstApp.Changed())
+	require.True(t, firstApp.IsChanged())
 	assert.Equal(t, "beta", firstApp.Channel)
 	assertVersion(t, pre(1, 0, 1, "beta", "0"), firstApp.Next)
 
 	retry := newFakeGit(history...).tag("core", "1.0.0", "").tag("core", "1.0.1-beta.0", "c0").
 		tag("core", "1.0.1", "c2").tag("app", "1.0.0", "")
 	retryApp := compute(t, retry, nil).Releases["app"]
-	require.True(t, retryApp.Changed())
+	require.True(t, retryApp.IsChanged())
 	assert.Equal(t, "stable", retryApp.Channel)
 	assertVersion(t, v(1, 0, 1), retryApp.Next)
 }
@@ -103,7 +103,7 @@ func TestSpec2SelfSourceCheckIsPerUnit(t *testing.T) {
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
 	require.NoError(t, err)
 	cli := p.Releases["cli"]
-	assert.True(t, cli.Changed())
+	assert.True(t, cli.IsChanged())
 	assert.Equal(t, []string{"utils"}, cli.DueTo,
 		"the cli/core unit excludes cli as its own source, while the utils unit still admits it")
 	assert.Len(t, cli.Sources, 1)

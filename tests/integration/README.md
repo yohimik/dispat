@@ -1,6 +1,6 @@
 # Integration tests
 
-This is the black-box integration suite for the dispat CLI. Because it is a separate Go module, Go's `internal` rule
+This module contains the black-box integration suite for the dispat CLI and cross-module public API scenarios. Because it is a separate Go module, Go's `internal` rule
 prevents it from importing `services/dispat/internal/*`. It compiles the **real binary** from
 [`services/dispat`](../../services/dispat), runs it against disposable git repositories just like your shell would, and
 asserts on three release outputs:
@@ -11,7 +11,7 @@ asserts on three release outputs:
   *timing* rather than mere ordering is the claim.
 
 You author test configs as typed models from the public [`pkg/models`](../../pkg/models) module and marshal them to
-JSON. If your test compiles, its config is guaranteed to load.
+JSON. Compilation checks the configuration shape; runtime validation still checks paths, references, and policy.
 
 Read the **[test plan](./docs/test-plan.md)** for the full design, including goals, architecture, flakiness policies,
 conventions, and the per-test coverage matrix.
@@ -63,4 +63,26 @@ entire suite and publishes live data alongside the documentation site:
 - **[test coverage](https://dispat.dev/internals/coverage/)**: statement coverage across all workspace
   packages, including this suite's instrumented binary.
 
-To see which goals each test proves, consult the matrix in the [test plan](./docs/test-plan.md).
+The `publicapi` package exercises supported manifest formats, configuration resolution, parser behavior, and safe
+rewrites through the public modules. Its coverage joins the instrumented CLI profile; neither uses unit-test hits.
+
+## What each test owes
+
+Every test in this module has exactly one goal, written down in the [test plan](./docs/test-plan.md). The
+[requirement matrix](./docs/qa-requirements.md) works the other way round: it lists the released behavior the
+candidate is accepted on, and names the assertions that demonstrate each requirement. A reference in either document
+is a globally unique `TestName`, or a `path/to/file_test.go::TestName` qualified by the file that declares it.
+
+Both are checked rather than trusted:
+
+```sh
+sh scripts/check-test-plan.sh      # from anywhere in the repository
+```
+
+It fails on a reference to a test that does not exist, on an ambiguous bare name that more than one validated module
+declares, on a test here with no goal in the plan, and on a matrix row whose recorded status its own references do not
+support. In CI it is the `repo-checks` target of `Dockerfile.gotest`, which also enforces the matrix thresholds. So a
+new test is finished when it has a plan row, and a renamed test is finished when both documents still resolve.
+
+Reference integrity is not coverage. A named assertion becomes evidence only once the suite that contains it has run,
+which the separate coverage gate measures and binds to a revision.

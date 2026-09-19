@@ -5,12 +5,12 @@
 // three.
 package globx
 
-// Match reports whether s matches pattern, where "*" matches any run of
+// IsMatch reports whether s matches pattern, where "*" matches any run of
 // bytes, path separators included ("@acme/*" reaches "@acme/ui"). The
 // matcher is an iterative two-pointer walk with a single backtrack point: no
 // regular expression, no recursion, and linear on every input a pattern can
 // be.
-func Match(pattern, s string) bool {
+func IsMatch(pattern, s string) bool {
 	star, mark := -1, 0
 	i, j := 0, 0
 	for i < len(s) {

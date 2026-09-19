@@ -168,6 +168,8 @@ func BackupPath(exe string) string {
 // path that does not exist. It writes nothing, so a read-only install
 // directory is fine, and it reports no errors because housekeeping must never
 // be the reason a command fails.
+//
+//namingcheck:exempt an action whose bool reports what it removed rather than asking about state
 func PruneBackup(exe string, now time.Time) bool {
 	if exe == "" {
 		return false

@@ -35,6 +35,7 @@ Example version 1.0.0 is not a normative declaration.
 ## 26. Explicit rollback
 [Rollback](./ROLLBACK.md)
 ## 27. Polyrepository Git profile
+### 27.11 Choreographed saga
 repository-qualified revision identity
 [Design history](./DESIGN-HISTORY.md)
 EOF

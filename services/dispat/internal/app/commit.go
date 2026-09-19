@@ -81,7 +81,7 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 
 	// A fresh CLI, not a struct copy: the CLI carries lazily built cache
 	// state (a sync.Once) that must not be copied.
-	git := &gitx.CLI{Dir: a.git.Dir, Name: a.git.Name, Email: a.git.Email, Log: a.git.Log}
+	git := &gitx.LocalGitx{Dir: a.git.Dir, Name: a.git.Name, Email: a.git.Email, Log: a.git.Log}
 	if opts.Name != "" {
 		git.Name = opts.Name
 	}
@@ -106,7 +106,7 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		remote = "origin"
 	}
 
-	force := a.cfg.Commit.ForceEnabled()
+	force := a.cfg.Commit.IsForceEnabled()
 	if opts.NoForce {
 		force = false
 	}
@@ -140,7 +140,7 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 // That also makes tags a plain slice — only one package is ever inside Do.
 type commitWork struct {
 	app *App
-	git *gitx.CLI
+	git *gitx.LocalGitx
 	tag bool
 	// tagName overrides the computed tag; empty means compute it. The
 	// invocation was refused above unless it covers exactly one package, so
@@ -187,7 +187,7 @@ func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 			return fmt.Errorf("release commit failed: %w", err)
 		}
 		if committed {
-			log.Info().Str("message", msg).Msg("created release commit")
+			log.Info().Str("commitMessage", msg).Msg("created release commit")
 		} else {
 			log.Debug().Msg("nothing to commit")
 		}

@@ -29,7 +29,7 @@ type fakeRunner struct {
 	outcomes map[string]error
 }
 
-var _ script.Runner = (*fakeRunner)(nil)
+var _ script.Runnerx = (*fakeRunner)(nil)
 
 func (f *fakeRunner) Run(_ context.Context, dir, command string, env []string, _, _ io.Writer) error {
 	f.ran = append(f.ran, command)

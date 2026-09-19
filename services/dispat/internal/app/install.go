@@ -58,7 +58,7 @@ type InstallOptions struct {
 	GOOS, GOARCH string
 	// Env answers the three questions the install folder depends on. Nil is
 	// the real machine.
-	Env install.Environment
+	Env install.Environmentx
 	// JSON renders events through Log instead of the report.
 	JSON bool
 	// Out receives the report.
@@ -72,7 +72,7 @@ type InstallOptions struct {
 }
 
 // env is the machine the install folder is resolved against.
-func (o InstallOptions) env() install.Environment {
+func (o InstallOptions) env() install.Environmentx {
 	if o.Env != nil {
 		return o.Env
 	}

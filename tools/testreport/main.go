@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,9 +19,12 @@ const usage = `usage:
   testreport bench <log-name> -- <go test args...>              run go test -bench -json, keep the stream, summarise it
   testreport build  [-coverage dir] [-out file] [-commit sha] [-keep file] [-modules file]
                     [-experiments dir]                          build the report from a full test run
-  testreport coverage [-coverage dir] -commit sha               validate and print covered statements percent
+  testreport coverage [-coverage dir] -commit sha [-minimum-total pct] [-minimum-integration pct]
+                    validate provenance and enforce separate coverage gates
   testreport render <log>                                       summarise one go test -json log
   testreport experiments [-markdown] [dir]                      summarise a release experiments campaign
+  testreport testplan [-plan file] [-requirements file] [-minimum-mapped pct]
+                    [-minimum-critical pct] [root]              check the test plan and the requirement matrix
 `
 
 func main() {
@@ -62,6 +66,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = render(args[1:], stdout)
 	case "experiments":
 		err = experiments(args[1:], stdout)
+	case "testplan":
+		err = testPlanCheck(args[1:], stdout)
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -77,6 +83,8 @@ func coverageCheck(args []string, w io.Writer) error {
 	fs := flag.NewFlagSet("coverage", flag.ContinueOnError)
 	dir := fs.String("coverage", "coverage", "folder holding coverage profiles")
 	commit := fs.String("commit", "", "tested commit")
+	minimumTotal := fs.Float64("minimum-total", 0, "minimum combined statement coverage")
+	minimumIntegration := fs.Float64("minimum-integration", 0, "minimum integration-only statement coverage")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -90,7 +98,102 @@ func coverageCheck(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "%d %d %.1f%%\n", cov.Total.Covered, cov.Total.Statements, cov.Total.Percent)
+	// Every figure is printed under the revision it was measured at, because a
+	// percentage with no commit beside it is a number somebody will quote later
+	// about a tree it was never taken from. The stamps above have already been
+	// checked against it, so the line is a statement of provenance rather than
+	// a label.
+	fmt.Fprintf(w, "commit %s\n", *commit)
+	fmt.Fprintf(w, "combined %d %d %.1f%%\n", cov.Total.Covered, cov.Total.Statements, cov.Total.Percent)
+	fmt.Fprintf(w, "integration %d %d %.1f%%\n", cov.Integration.Covered, cov.Integration.Statements, cov.Integration.Percent)
+	for _, module := range cov.IntegrationModules {
+		fmt.Fprintf(w, "integration-module %s %d %d %.1f%%\n", module.Path, module.Covered, module.Statements, module.Percent)
+	}
+	if err := verifyProductionInventory(cov); err != nil {
+		return err
+	}
+	if !IsMinimumMet(cov.Total, *minimumTotal) {
+		return fmt.Errorf("combined coverage %d/%d (%.1f%%) is below %.1f%%", cov.Total.Covered, cov.Total.Statements, cov.Total.Percent, *minimumTotal)
+	}
+	if err := verifyIntegrationCoverage(cov, *minimumIntegration); err != nil {
+		return err
+	}
+	return nil
+}
+
+func IsMinimumMet(stats Stats, minimum float64) bool {
+	return minimum <= 0 || stats.Statements > 0 && float64(stats.Covered)*100 >= minimum*float64(stats.Statements)
+}
+
+// productionModules is the published inventory: the CLI and the six modules
+// released from this workspace. It is written out rather than derived from
+// go.work because it is the frozen statement of what a coverage figure is a
+// figure *about*, and deriving it would let the denominator follow whatever
+// the workspace happened to declare on the day.
+//
+// Every entry is a floor. A module leaving this list is a module leaving the
+// release, so the list only ever grows, and
+// TestProductionInventoryHoldsEveryReleasedModule keeps it agreeing with the
+// workspace's own use list.
+var productionModules = []string{
+	"pkg/ccme", "pkg/config", "pkg/manifest", "pkg/models", "pkg/scanner", "pkg/writer", "services/dispat",
+}
+
+func IsProductionModule(path string) bool {
+	for _, production := range productionModules {
+		if path == production {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyProductionInventory refuses a run whose merged profiles no longer hold
+// every production module.
+//
+// verifyIntegrationCoverage below asks what the black-box and public-API suites
+// reached; this asks what was measured at all. A profile that arrived empty, or
+// a `-coverpkg` list a change quietly dropped a module from, would otherwise
+// shrink the denominator every percentage above is computed against, and the
+// gate would report a better number for measuring less.
+func verifyProductionInventory(cov Coverage) error {
+	measured := make(map[string]Module, len(cov.Modules))
+	for _, module := range cov.Modules {
+		measured[module.Path] = module
+	}
+	var missing []string
+	for _, path := range productionModules {
+		if measured[path].Statements == 0 {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("coverage inventory is missing production module %s: the denominator shrank",
+			strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+func verifyIntegrationCoverage(cov Coverage, minimum float64) error {
+	byPath := make(map[string]Module, len(cov.IntegrationModules))
+	for _, module := range cov.IntegrationModules {
+		byPath[module.Path] = module
+	}
+	for _, path := range productionModules {
+		if byPath[path].Statements == 0 {
+			return fmt.Errorf("integration coverage is missing production module %s", path)
+		}
+	}
+	if len(cov.IntegrationMissing) > 0 {
+		var missing []string
+		for _, pkg := range cov.IntegrationMissing {
+			missing = append(missing, fmt.Sprintf("%s (%d statements)", pkg.Path, pkg.Statements))
+		}
+		return fmt.Errorf("integration denominator omits production packages or blocks: %s", strings.Join(missing, ", "))
+	}
+	if !IsMinimumMet(cov.Integration, minimum) {
+		return fmt.Errorf("integration coverage %d/%d (%.1f%%) is below %.1f%%", cov.Integration.Covered, cov.Integration.Statements, cov.Integration.Percent, minimum)
+	}
 	return nil
 }
 
@@ -188,30 +291,45 @@ func verifyCoverageStamps(dir, commit string) error {
 		"models.out": true, "scanner.out": true, "writer.out": true, "tools.out": true,
 		"dispat.out": true, "integration.out": true}
 	seen := map[string]bool{}
+	var problems []error
 	for _, profile := range profiles {
 		if mergeOutputs[filepath.Base(profile)] {
 			continue
 		}
 		name := filepath.Base(profile)
 		if !want[name] {
-			return fmt.Errorf("unexpected coverage profile %s from a mixed run", name)
+			problems = append(problems, fmt.Errorf("unexpected coverage profile %s from a mixed run", name))
+			continue
 		}
 		seen[name] = true
 		stamp := strings.TrimSuffix(profile, ".out") + ".commit"
 		body, err := os.ReadFile(stamp)
 		if err != nil {
-			return fmt.Errorf("%s has no tested-commit stamp: %w", profile, err)
+			problems = append(problems, fmt.Errorf("%s has no tested-commit stamp: %w", profile, err))
+			continue
 		}
 		if got := strings.TrimSpace(string(body)); got != commit {
-			return fmt.Errorf("%s was measured at %s, want %s", profile, got, commit)
+			problems = append(problems, fmt.Errorf("%s was measured at %s, want %s", profile, got, commit))
 		}
 	}
 	for name := range want {
 		if !seen[name] {
-			return fmt.Errorf("missing coverage profile %s: run the full suite", name)
+			problems = append(problems, fmt.Errorf("missing coverage profile %s: run the full suite", name))
 		}
 	}
-	return nil
+	stamps, err := filepath.Glob(filepath.Join(dir, "*.commit"))
+	if err != nil {
+		problems = append(problems, err)
+	}
+	for _, stamp := range stamps {
+		profile := strings.TrimSuffix(stamp, ".commit") + ".out"
+		if _, err := os.Stat(profile); errors.Is(err, os.ErrNotExist) {
+			problems = append(problems, fmt.Errorf("orphan coverage stamp %s has no profile: mixed or incomplete run", stamp))
+		} else if err != nil {
+			problems = append(problems, fmt.Errorf("checking profile for %s: %w", stamp, err))
+		}
+	}
+	return errors.Join(problems...)
 }
 
 // carryForward folds an earlier report's benchmark groups in for the modules
@@ -338,10 +456,12 @@ func readCoverage(dir string) (Coverage, error) {
 		logf(levelWarn, "no %s in %s: the integration layer will read as zero", integrationProfile, dir)
 	}
 	cov := Coverage{
-		Total:       total.stats(),
-		Unit:        unit.stats(),
-		Integration: integration.stats(),
-		Modules:     total.modules(),
+		Total:              total.stats(),
+		Unit:               unit.stats(),
+		Integration:        integration.stats(),
+		Modules:            total.modules(),
+		IntegrationModules: integration.modules(),
+		IntegrationMissing: integration.missingProductionBlocks(unit),
 	}
 	logf(levelInfo, "coverage: unit %.1f%% / integration %.1f%% / total %.1f%%",
 		cov.Unit.Percent, cov.Integration.Percent, cov.Total.Percent)

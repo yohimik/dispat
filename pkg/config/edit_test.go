@@ -396,6 +396,41 @@ func TestApplyEditsWritesAWholeDocument(t *testing.T) {
 	})
 }
 
+// TestApplyEditsYAMLUnsupportedWholeDocumentValueReturnsError covers yaml.v3's
+// unsupported-kind panic at the whole-document encoding boundary. ApplyEdits
+// exposes an error and leaves both the source and backup absent from mutation.
+func TestApplyEditsYAMLUnsupportedWholeDocumentValueReturnsError(t *testing.T) {
+	const src = "name: app\n"
+	path := writeFile(t, t.TempDir(), "fragment.yaml", src)
+	err := applyEdits(t, path, Edit{Value: make(chan int)})
+	if err == nil || !strings.Contains(err.Error(), "cannot marshal type: chan int") {
+		t.Fatalf("ApplyEdits = %v; want unsupported YAML value error", err)
+	}
+	if got := readBack(t, path); got != src {
+		t.Fatalf("source changed after refused edit:\n%s", got)
+	}
+	if _, statErr := os.Stat(path + BackupSuffix); !os.IsNotExist(statErr) {
+		t.Fatalf("refused edit created a backup: %v", statErr)
+	}
+}
+
+type panickingYAMLMarshaler struct{}
+
+func (panickingYAMLMarshaler) MarshalYAML() (any, error) { panic("custom YAML marshal panic") }
+
+// TestApplyEditsYAMLDoesNotRecoverACallerPanic keeps encodeYAML's recovery
+// limited to yaml.v3's known unsupported-kind panic. A custom marshaler still
+// owns its panic and the caller sees it unchanged.
+func TestApplyEditsYAMLDoesNotRecoverACallerPanic(t *testing.T) {
+	path := writeFile(t, t.TempDir(), "fragment.yaml", "name: app\n")
+	defer func() {
+		if got := recover(); got != "custom YAML marshal panic" {
+			t.Fatalf("recovered %v; want the custom marshaler panic", got)
+		}
+	}()
+	_ = applyEdits(t, path, Edit{Value: panickingYAMLMarshaler{}})
+}
+
 // TestRenderKeyTOML: the paste-ready fallback, nested under its key path.
 func TestRenderKeyTOML(t *testing.T) {
 	got, err := RenderKeyTOML([]string{"areas", "libs", "path"}, []string{"pkgs"})

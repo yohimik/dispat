@@ -44,14 +44,14 @@ func TestParseImageRefSplitsEveryShape(t *testing.T) {
 			t.Errorf("ParseImageRef(%q) = %q/%q/%q, want %q/%q/%q",
 				tc.ref, got.Repository, got.Tag, got.Digest, tc.repo, tc.tag, tc.digest)
 		}
-		if got.HasTag() != tc.hasTag {
-			t.Errorf("ParseImageRef(%q).HasTag() = %v, want %v", tc.ref, got.HasTag(), tc.hasTag)
+		if got.IsTagged() != tc.hasTag {
+			t.Errorf("ParseImageRef(%q).IsTagged() = %v, want %v", tc.ref, got.IsTagged(), tc.hasTag)
 		}
-		if got.Pinned() != tc.pinned {
-			t.Errorf("ParseImageRef(%q).Pinned() = %v, want %v", tc.ref, got.Pinned(), tc.pinned)
+		if got.IsPinned() != tc.pinned {
+			t.Errorf("ParseImageRef(%q).IsIsPinned() = %v, want %v", tc.ref, got.IsPinned(), tc.pinned)
 		}
-		if got.Interpolated() != tc.interp {
-			t.Errorf("ParseImageRef(%q).Interpolated() = %v, want %v", tc.ref, got.Interpolated(), tc.interp)
+		if got.IsInterpolated() != tc.interp {
+			t.Errorf("ParseImageRef(%q).IsIsInterpolated() = %v, want %v", tc.ref, got.IsInterpolated(), tc.interp)
 		}
 	}
 }
@@ -64,7 +64,7 @@ func TestParseImageRefOffsetsPointAtTheTag(t *testing.T) {
 		"redis:7.2@sha256:abc123",
 	} {
 		got := ParseImageRef(ref)
-		if !got.HasTag() {
+		if !got.IsTagged() {
 			t.Fatalf("ParseImageRef(%q) found no tag", ref)
 		}
 		if ref[got.TagStart:got.TagEnd] != got.Tag {
@@ -93,16 +93,16 @@ func TestValidTag(t *testing.T) {
 		"1.2.3", "latest", "v1.2.3", "1.2.3-alpine", "_odd", "A1", "1.0.0-rc.1",
 		strings.Repeat("a", 128),
 	} {
-		if !ValidTag(tag) {
-			t.Errorf("ValidTag(%q) = false, want true", tag)
+		if !IsValidTag(tag) {
+			t.Errorf("IsValidTag(%q) = false, want true", tag)
 		}
 	}
 	for _, tag := range []string{
 		"", ".1.2.3", "-1.2.3", "1.2.3 ", "a/b", "a:b", "^1.2.3", "1.2.3\n",
 		strings.Repeat("a", 129),
 	} {
-		if ValidTag(tag) {
-			t.Errorf("ValidTag(%q) = true, want false", tag)
+		if IsValidTag(tag) {
+			t.Errorf("IsValidTag(%q) = true, want false", tag)
 		}
 	}
 }

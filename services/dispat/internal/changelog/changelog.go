@@ -126,7 +126,7 @@ func SpecFormat(f model.RecordFormat) Format { return Format{RecordFormat: f} }
 // Dispatcher routes each release through a FileWriter built from the
 // package's resolved changelog policy — per-package configuration decides
 // the file, the title, the format, and whether a changelog is written at
-// all. It implements release.ReleaseRecorder.
+// all. It implements release.ReleaseRecorderx.
 type Dispatcher struct {
 	Now func() time.Time // injectable clock, passed to the writers
 	Log zerolog.Logger   // carries the per-package skip notices
@@ -137,7 +137,7 @@ type Dispatcher struct {
 // records nothing.
 func (d *Dispatcher) Record(ctx context.Context, rel *plan.Release) error {
 	spec := rel.Pkg.Changelog
-	if !spec.Records(rel.Channel) {
+	if !spec.IsRecorded(rel.Channel) {
 		LogSkip(d.Log, spec, rel)
 		return nil
 	}
@@ -167,7 +167,7 @@ func LogSkip(log zerolog.Logger, spec model.ChangelogSpec, rel *plan.Release) {
 //
 // Inside the entry rather than above it, and after the header line rather than
 // before it, because the header is what every re-run recognises an existing
-// entry by (see HasEntry). A note that moved or split that line would make the
+// entry by (see IsEntryPresent). A note that moved or split that line would make the
 // next run write the entry a second time.
 //
 // A package whose policy wrote no entry gets no note: there is nothing to
@@ -176,7 +176,7 @@ func LogSkip(log zerolog.Logger, spec model.ChangelogSpec, rel *plan.Release) {
 // does not carry the entry.
 func NoteEntry(rel *plan.Release, note string) (string, bool, error) {
 	spec := rel.Pkg.Changelog
-	if !spec.Records(rel.Channel) {
+	if !spec.IsRecorded(rel.Channel) {
 		return "", false, nil
 	}
 	w := &FileWriter{File: spec.File}
@@ -206,7 +206,11 @@ func NoteEntry(rel *plan.Release, note string) (string, bool, error) {
 		if info, statErr := os.Stat(path); statErr == nil {
 			mode = info.Mode().Perm()
 		}
-		if err := os.WriteFile(path, []byte(bom+strings.Join(out, "\n")), mode); err != nil {
+		// The same atomic replace Record uses, and for the same reason: this
+		// rewrites the whole file after the package is already published, in
+		// the middle of the merge recovery, so a plain write interrupted
+		// halfway would take the package's history with it.
+		if err := fsx.WriteFileAtomic(path, []byte(bom+strings.Join(out, "\n")), mode); err != nil {
 			return "", false, fmt.Errorf("changelog: %w", err)
 		}
 		return path, true, nil
@@ -214,7 +218,7 @@ func NoteEntry(rel *plan.Release, note string) (string, bool, error) {
 	return "", false, nil
 }
 
-// HasEntry reports whether content already carries the release entry for tag:
+// IsEntryPresent reports whether content already carries the release entry for tag:
 // a line beginning "## <tag> (". The match is line-anchored so body text that
 // merely quotes a header does not count, and the trailing " (" keeps a tag
 // that is a prefix of another (core@1.2.0 vs core@1.2.0-beta.1) from matching
@@ -225,7 +229,7 @@ func NoteEntry(rel *plan.Release, note string) (string, bool, error) {
 // since the marker is anchored at the start of the line rather than the end.
 // Both matter because this is the idempotence check of the whole record path:
 // an entry the check fails to see is an entry written a second time.
-func HasEntry(content []byte, tag string) bool {
+func IsEntryPresent(content []byte, tag string) bool {
 	marker := "## " + tag + " ("
 	_, text := cutBOM(string(content))
 	for _, line := range strings.Split(text, "\n") {
@@ -296,7 +300,7 @@ func builtinNoChangesLine(rel *plan.Release) string {
 		return "No changes: the pending work and its reverts cancel out.\n"
 	case rel.Pinned:
 		return "No changes: a version set by Release-As.\n"
-	case rel.ChannelChanged():
+	case rel.IsChannelChanged():
 		return "No changes: a channel transition, " + rel.ChannelTransition() + ".\n"
 	default:
 		return "No changes.\n"
@@ -410,7 +414,7 @@ func RenderEntry(rel *plan.Release, date time.Time, f Format) string {
 }
 
 // FileWriter prepends release entries to a changelog file inside a package.
-// It implements release.ReleaseRecorder.
+// It implements release.ReleaseRecorderx.
 type FileWriter struct {
 	File string // file name inside the package folder, default "CHANGELOG.md"
 	// FileTitle heads the file, above every entry; an empty list means the
@@ -467,11 +471,18 @@ func (w *FileWriter) HasEntryFor(rel *plan.Release) (bool, error) {
 		}
 		return false, fmt.Errorf("changelog: %w", err)
 	}
-	return HasEntry(existing, rel.TagName()), nil
+	return IsEntryPresent(existing, rel.TagName()), nil
 }
 
 // Record writes the release entry for rel at the top of the package
 // changelog, creating the file when missing.
+//
+// The context is deliberately unused. Every operation here is a local read and
+// one atomic replace, none of which takes a context, and the recording runs
+// after the package is published: a cancelled run that skipped it would leave
+// a published package with no record, which is the one state the next run
+// cannot reason about. The parameter stays because ReleaseRecorderx is what
+// the GitHub recorder implements too, and that one does reach the network.
 func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	now := time.Now
 	if w.Now != nil {
@@ -494,7 +505,7 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 			mode = info.Mode().Perm()
 		}
 	}
-	if HasEntry(existing, rel.TagName()) {
+	if IsEntryPresent(existing, rel.TagName()) {
 		// The entry was written earlier — by a `dispat changelog` step in the
 		// flow, or by a previous run. Writing again would duplicate it, so
 		// this write, wherever it comes from, is a skip.

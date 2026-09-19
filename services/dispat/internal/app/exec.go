@@ -42,16 +42,16 @@ const (
 	EnvScopeBoth = "both"
 )
 
-// ValidEnvScope reports whether the value is a known --env scope. It is the
-// counterpart of ValidOnError: the controller checks the flag before any
+// IsValidEnvScope reports whether the value is a known --env scope. It is the
+// counterpart of IsValidOnError: the controller checks the flag before any
 // config is loaded, so a usage mistake never first costs a config error.
-func ValidEnvScope(v string) bool {
+func IsValidEnvScope(v string) bool {
 	return v == EnvScopeStatic || v == EnvScopeDispat || v == EnvScopeBoth
 }
 
-// NeedsPlan reports whether an --env scope requires a computed plan, which is
+// IsPlanNeeded reports whether an --env scope requires a computed plan, which is
 // the only git-touching path in the command.
-func NeedsPlan(scope string) bool { return scope == EnvScopeDispat || scope == EnvScopeBoth }
+func IsPlanNeeded(scope string) bool { return scope == EnvScopeDispat || scope == EnvScopeBoth }
 
 // locationKind is which place in the monorepo a location names.
 type locationKind int
@@ -82,10 +82,10 @@ type Location struct {
 // the top level has no version of its own to report.
 func (l Location) IsPackage() bool { return l.kind == kindPackage }
 
-// Deferred reports whether resolving the location needs the configuration:
+// IsDeferred reports whether resolving the location needs the configuration:
 // a name has to be looked up, or a folder turned into the level it stands in.
 // The controller asks before it decides whether a command must load one.
-func (l Location) Deferred() bool {
+func (l Location) IsDeferred() bool {
 	return l.kind == kindPackage || l.kind == kindSpace || l.kind == kindRoot
 }
 
@@ -136,7 +136,7 @@ type ExecOptions struct {
 	Stdout, Stderr io.Writer
 	// Runner executes the script. Nil means a ShellRunner on the configured
 	// shell; tests pass their own.
-	Runner script.Runner
+	Runner script.Runnerx
 }
 
 // LocationPackage names one package.
@@ -297,7 +297,7 @@ func (a *App) ResolveSubject(loc Location, dir string) (Location, error) {
 // A location naming a level is refused rather than guessed at. The caller
 // asked for the config-free half knowing which half it had.
 func PlainDir(loc Location, dir string) (string, error) {
-	if loc.Deferred() {
+	if loc.IsDeferred() {
 		return "", fmt.Errorf("%s cannot be resolved without a configuration", loc.label())
 	}
 	return checkDir(loc, plainDir(loc, dir))
@@ -356,6 +356,10 @@ func (a *App) locationDir(loc Location, dir string) (string, error) {
 		}
 		return p.Dir, nil
 	case kindSpace:
+		// The root file's entry, not the effective configuration the levels
+		// below read: `path` is the space's identity rather than an
+		// overridable value, so no folder layer can move it, and asking the
+		// entry keeps --in as cheap as it has always been.
 		sc, ok := a.cfg.Space(loc.name)
 		if !ok {
 			return "", fmt.Errorf("unknown space %q", loc.name)
@@ -409,19 +413,22 @@ type scriptLevel struct {
 
 // scriptLevels lists the maps to read, nearest first.
 //
-// A package's own map comes from the built model rather than from the config
-// maps directly: a package declares scripts across four layers, two of which
-// live in files only discovery reads, and the layer fold is the one place that
-// knows all four. --fallback then skips straight to the package's effective
-// map, which is already every layer plus its space's and the top level's, so
-// the layered case reads exactly what `dispat run` would resolve.
+// Neither a package's map nor a space's comes from the config maps directly.
+// A package declares scripts across four layers, two of which live in files
+// only discovery reads, and the layer fold is the one place that knows all
+// four; --fallback then skips straight to the package's effective map, which
+// is already every layer plus its space's and the top level's, so the layered
+// case reads exactly what `dispat run` would resolve. A space declares them
+// across two — its `spaces` entry and each of its folders' own config files —
+// and spaceConfig settles the pair, so a script written beside the space is
+// reachable by the level that owns it rather than only through a package.
 func (a *App) scriptLevels(from Location, fallback bool) ([]scriptLevel, error) {
 	root := scriptLevel{a.cfg.Scripts, "the top level"}
 	switch from.kind {
 	case kindSpace:
-		sc, ok := a.cfg.Space(from.name)
-		if !ok {
-			return nil, fmt.Errorf("unknown space %q", from.name)
+		sc, err := a.spaceConfig(from.name)
+		if err != nil {
+			return nil, err
 		}
 		levels := []scriptLevel{{sc.Scripts, from.label()}}
 		if fallback {
@@ -442,6 +449,25 @@ func (a *App) scriptLevels(from Location, fallback bool) ([]scriptLevel, error) 
 		}, nil
 	}
 	return []scriptLevel{root}, nil
+}
+
+// spaceConfig finds one space's effective configuration by name,
+// case-insensitively, for the same reason discoverPackage matches that way.
+//
+// Effective rather than as written in the root file: a space declares its
+// scripts and its env across two layers, the `spaces` entry and each of its
+// folders' own config files, and `dispat run` resolves both through the built
+// package. A subject naming the space has no package to read, so it reads the
+// settled pair here and the two commands answer with one set.
+func (a *App) spaceConfig(name string) (config.SpaceConfig, error) {
+	spaces, err := a.spaces()
+	if err != nil {
+		return config.SpaceConfig{}, err
+	}
+	if _, sc, ok := public.FoldLookup(spaces, name); ok {
+		return sc, nil
+	}
+	return config.SpaceConfig{}, fmt.Errorf("unknown space %q", name)
 }
 
 // discoverPackage finds one package in the workspace by name,
@@ -466,7 +492,7 @@ func (a *App) discoverPackage(name string) (*model.Package, error) {
 // a plan. That is the whole performance claim of the command, so the plan sits
 // behind this check and nowhere earlier.
 func (a *App) execEnv(ctx context.Context, subj Location, scope string) ([]string, error) {
-	if !NeedsPlan(scope) {
+	if !IsPlanNeeded(scope) {
 		return a.staticEnv(subj)
 	}
 	if subj.kind != kindPackage {
@@ -498,14 +524,15 @@ func (a *App) execEnv(ctx context.Context, subj Location, scope string) ([]strin
 // A package's layers are already merged onto the built model by the package
 // build (config.buildSpace), so this reads that rather than merging again: two
 // mergers would be two answers to the same question. A space has no built form
-// outside a package, so its two layers are merged here through the same
-// MergeEnv the build uses.
+// outside a package, so discovery settles its own two layers (spaceConfig) and
+// only the top level is left to put underneath, through the same MergeEnv the
+// build uses for exactly that step.
 func (a *App) declaredEnv(subj Location) ([]string, error) {
 	switch subj.kind {
 	case kindSpace:
-		sc, ok := a.cfg.Space(subj.name)
-		if !ok {
-			return nil, fmt.Errorf("unknown space %q", subj.name)
+		sc, err := a.spaceConfig(subj.name)
+		if err != nil {
+			return nil, err
 		}
 		return config.EnvPairs(config.MergeEnv(a.cfg.Env, sc.Env)), nil
 	case kindPackage:

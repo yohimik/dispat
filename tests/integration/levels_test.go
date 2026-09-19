@@ -117,10 +117,10 @@ func TestLevelsRootVersioningAppliesPerSpace(t *testing.T) {
 	r.WriteFile("packages/core/api.txt", "changed\n")
 	r.Commit("feat(core): a new export")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("utils@0.2.0"), "the space's other package rode along")
-	assert.False(t, r.HasTag("app@0.2.0"), "the independent space did not")
-	assert.False(t, r.HasTag("web@0.2.0"))
+	assert.True(t, r.IsTagged("core@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("utils@0.2.0"), "the space's other package rode along")
+	assert.False(t, r.IsTagged("app@0.2.0"), "the independent space did not")
+	assert.False(t, r.IsTagged("web@0.2.0"))
 }
 
 // TestLevelsRootReachesAStandalonePackage: a package outside every space is
@@ -137,7 +137,7 @@ func TestLevelsRootReachesAStandalonePackage(t *testing.T) {
 	r.Commit("feat(core,tool): bootstrap")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("tool@v0.1.0"), "the root's tagFormat reached it; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("tool@v0.1.0"), "the root's tagFormat reached it; tags: %v", r.TagList())
 	assert.Equal(t, []string{"root", "root"}, logLines(r, "build.log"),
 		"and so did the root's flow, for the space package and the standalone one")
 }
@@ -176,7 +176,7 @@ func TestLevelsSpaceRecordsAndSrc(t *testing.T) {
 	r.WriteFile("packages/core/docs/guide.md", "docs only\n")
 	r.Commit("fix: a scopeless commit touching only what src leaves out")
 	res := r.ReleaseOK()
-	assert.False(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
 	assert.Contains(t, res.Stdout, "W131", "the unit resolved to no package")
 }
 

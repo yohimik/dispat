@@ -24,6 +24,12 @@ dependencies:
   - provider: infra
     keep: true
 scripts:
+  # The CI gate: the site's own Dockerfile, type-checked and no further, under
+  # a buildx cache key of its own. The cli package runs the same shape from
+  # its own Dockerfile under its own key, which is why neither is the space's.
+  tests: >-
+    docker buildx build --file Dockerfile --target typecheck
+    $(sh ../../scripts/buildx-cache.sh docs) --output type=cacheonly ../..
   # Read binary sizes from GitHub metadata for the exact CLI release.
   # The site plugin validates its schema and complete asset set, then archives
   # it under the docs major/minor. A release must never fall back to an older
@@ -148,7 +154,7 @@ scripts:
     dispat exec summary --for pkg:experiments --in pkg:experiments || true
     cells=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json | wc -l | tr -d ' ')
     {
-      echo "REPORT_EXPERIMENTS=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json -exec dirname {} \; | xargs -n 1 basename | sort | tr '\n' ' ')"
+      echo "REPORT_EXPERIMENTS=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json | sed 's|/verdict\.json$||; s|.*/||' | sort | tr '\n' ' ')"
       echo "REPORT_EXPERIMENTS_VERSION=$EXPERIMENTS_DISPAT_VERSION"
     } >> "$DISPAT_OUTPUT"
     echo "recorded $cells cells on dispat $EXPERIMENTS_DISPAT_VERSION"

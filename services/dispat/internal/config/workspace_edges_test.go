@@ -400,7 +400,7 @@ func TestComposeWorkspacePropagatesLivePinResolverFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	var resolved []string
-	workspace, err := ComposeWorkspaceWithPinResolver(loaded, path, root, nil,
+	workspace, err := ComposeWorkspaceWithPinResolver(t.Context(), loaded, path, root, nil,
 		map[string][]string{"sdk": {advanced}}, func(repository string) ([]string, error) {
 			resolved = append(resolved, repository)
 			return nil, errors.New("coordinator record is malformed")

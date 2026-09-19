@@ -39,14 +39,36 @@ type File struct {
 	// Configs imports repository-local dispat configurations. Paths authored in
 	// a config are relative to the declaring file.
 	Configs []string `json:"configs,omitempty"`
-	// RepositoryOverrides applies centrally-owned commit policy to source
-	// repositories, keyed by their .gitmodules name.
+	// RepositoryOverrides states repository participation and centrally-owned
+	// commit policy for source repositories, keyed by their exact .gitmodules
+	// name. A key naming no linked repository is refused whichever it states.
 	RepositoryOverrides map[string]RepositoryOverrideConfig `json:"repositoryOverrides,omitempty"`
 	// RepositoryBaselines supplies explicit cross-repository history
 	// associations when a gitlink transition is absent or ambiguous.
 	RepositoryBaselines []RepositoryBaselineConfig `json:"repositoryBaselines,omitempty"`
-	Scripts             map[string]Script          `json:"scripts,omitempty"`
-	Spaces              map[string]SpaceConfig     `json:"spaces,omitempty"`
+	// Saga selects which polyrepository protocol a fleet releases under:
+	// SagaOrchestration, the default, where one control repository owns the
+	// fleet's intent and records a gitlink checkpoint after each source
+	// release; or SagaChoreography, where every repository is a peer carrying
+	// its own identity and configuration, and the fleet is composed by
+	// following the submodule links between the peers. An absent key keeps a
+	// configuration on the orchestrated path it has always taken.
+	Saga string `json:"saga,omitempty"`
+	// Repository is this repository's own identity in a choreographed fleet.
+	// Every peer states it, every peer's roster names the others by it, and it
+	// must equal the submodule name its neighbours link this repository under,
+	// which is what makes one identity readable from either side of a link.
+	// It is written as [A-Za-z0-9._-]+ and may not be the reserved
+	// orchestration identity "control".
+	Repository string `json:"repository,omitempty"`
+	// Repositories is the roster of the choreographed fleet this repository
+	// belongs to: every other peer, by identity, with where the link to it
+	// lives and where it is fetched from. The roster states membership rather
+	// than the links themselves; `dispat compute` derives the minimum set of
+	// submodule links that connects the roster and proposes them.
+	Repositories []RepositoryLinkConfig `json:"repositories,omitempty"`
+	Scripts      map[string]Script      `json:"scripts,omitempty"`
+	Spaces       map[string]SpaceConfig `json:"spaces,omitempty"`
 	// Packages holds per-package configuration, keyed by package name. An
 	// entry without `path` adjusts the configuration of a package discovered
 	// in one of the space folders, matched by folder name (every key must
@@ -270,8 +292,12 @@ type ParserPropagationConfig struct {
 	// ChannelDepth is the channel axis counterpart of Depth. Default 0.
 	ChannelDepth string `json:"channelDepth,omitempty"`
 	// Kinds are the dependency edges propagation follows: "dependencies",
-	// "peerDependencies", "optionalDependencies", "devDependencies" or
-	// "all". Default: every kind except devDependencies.
+	// "peerDependencies", "optionalDependencies", "devDependencies" or the
+	// wildcard "*" for every kind. Any other value is refused by the loader.
+	// Default (the key absent): every kind except devDependencies. A file
+	// writing the key with an empty list gives the opposite instruction and
+	// follows no edge at all. That state is the one this field cannot
+	// round-trip: omitempty drops a present empty list on the way out.
 	Kinds []string `json:"kinds,omitempty"`
 	// Channel is the default propagated channel: "inherit" (default),
 	// "none", "stable" or a channel name.
@@ -588,15 +614,15 @@ func (c *GitHubConfig) RecordChannels() []string {
 	return c.Channels
 }
 
-// AllPackagesEnabled reports whether every published package gets a GitHub
+// IsAllPackagesEnabled reports whether every published package gets a GitHub
 // release regardless of the DISPAT_EXPORT_GITHUB export. Nil-safe.
-func (c *GitHubConfig) AllPackagesEnabled() bool {
+func (c *GitHubConfig) IsAllPackagesEnabled() bool {
 	return c != nil && c.AllPackages != nil && *c.AllPackages
 }
 
-// DraftEnabled reports whether releases are created as drafts, left for a
+// IsDraftEnabled reports whether releases are created as drafts, left for a
 // human to publish. Nil-safe.
-func (c *GitHubConfig) DraftEnabled() bool {
+func (c *GitHubConfig) IsDraftEnabled() bool {
 	return c != nil && c.Draft != nil && *c.Draft
 }
 
@@ -652,7 +678,54 @@ type CommitConfig struct {
 // one source repository. It cannot relocate packages or replace an imported
 // repository's configuration.
 type RepositoryOverrideConfig struct {
-	Commit *CommitConfig `json:"commit,omitempty"`
+	// Enabled controls whether this repository participates in the composed
+	// workspace. Absence means true. A disabled repository is removed before
+	// any repository initialization, history, pin, package or lock work, and
+	// the control space paths inside it stop contributing packages. Its
+	// filesystem boundary stays reserved: a control package declared inside it
+	// is still an ownership error. Unlike Commit, participation applies to a
+	// centrally configured and an explicitly imported source alike.
+	Enabled *bool         `json:"enabled,omitempty"`
+	Commit  *CommitConfig `json:"commit,omitempty"`
+}
+
+// IsEnabled reports whether the repository participates (default true).
+func (c RepositoryOverrideConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
+
+// Saga values of the `saga` key: which polyrepository protocol releases the
+// fleet. Orchestration is the default an absent key keeps.
+const (
+	// SagaOrchestration is the control-repository protocol: one repository
+	// owns the fleet's configuration and records a gitlink checkpoint after
+	// each source release.
+	SagaOrchestration = "orchestration"
+	// SagaChoreography is the peer protocol: no control repository, every
+	// participant carries its own identity, configuration and release
+	// records, and a release may start in any of them.
+	SagaChoreography = "choreography"
+)
+
+// RepositoryLinkConfig is one peer of a choreographed fleet, as the roster
+// names it.
+type RepositoryLinkConfig struct {
+	// Name is the peer's exact identity: its own `repository` value, and the
+	// submodule name any link to it is created under.
+	Name string `json:"name"`
+	// URL is where the peer is cloned from when a link to it is created.
+	URL string `json:"url,omitempty"`
+	// Path is where a link to this peer lives inside this repository,
+	// relative to its root. Empty means the default ".links/<name>".
+	Path string `json:"path,omitempty"`
+	// Branch is the peer's release branch, which a created link is pinned at
+	// so the pin is fetchable. Empty leaves the remote's default branch.
+	Branch string `json:"branch,omitempty"`
+}
+
+// IsChoreographed reports whether this configuration releases under the
+// choreographed saga. Nil-safe, and the value is matched the way every other
+// config value is, without regard to case.
+func (c *File) IsChoreographed() bool {
+	return c != nil && strings.EqualFold(c.Saga, SagaChoreography)
 }
 
 // RepositoryBaselineConfig is one explicit cross-repository history
@@ -669,17 +742,17 @@ type RepositoryBaselineConfig struct {
 // Nil-safe.
 func (c *CommitConfig) IsEnabled() bool { return c != nil && c.Enabled != nil && *c.Enabled }
 
-// PushEnabled reports whether the release commit and tags are pushed; only
+// IsPushEnabled reports whether the release commit and tags are pushed; only
 // meaningful with the commit enabled. Nil-safe.
-func (c *CommitConfig) PushEnabled() bool { return c.IsEnabled() && c.Push }
+func (c *CommitConfig) IsPushEnabled() bool { return c.IsEnabled() && c.Push }
 
-// ForceEnabled reports whether tags are written over ones that already exist
+// IsForceEnabled reports whether tags are written over ones that already exist
 // (default true). Nil-safe.
-func (c *CommitConfig) ForceEnabled() bool { return c == nil || c.Force == nil || *c.Force }
+func (c *CommitConfig) IsForceEnabled() bool { return c == nil || c.Force == nil || *c.Force }
 
-// VerifyEnabled reports whether remote access is verified before any release
+// IsVerifyEnabled reports whether remote access is verified before any release
 // work when pushing (default true). Nil-safe.
-func (c *CommitConfig) VerifyEnabled() bool { return c == nil || c.Verify == nil || *c.Verify }
+func (c *CommitConfig) IsVerifyEnabled() bool { return c == nil || c.Verify == nil || *c.Verify }
 
 // Versioning values of a space (the `versioning` key).
 //
@@ -1101,17 +1174,17 @@ type AliasTagConfig struct {
 	Force *bool `json:"force,omitempty"`
 }
 
-// ForceEnabled reports whether this alias overwrites an existing ref, given
+// IsForceEnabled reports whether this alias overwrites an existing ref, given
 // the run's default.
-func (a AliasTagConfig) ForceEnabled(runDefault bool) bool {
+func (a AliasTagConfig) IsForceEnabled(runDefault bool) bool {
 	if a.Force != nil {
 		return *a.Force
 	}
 	return runDefault
 }
 
-// AppliesTo reports whether the alias is written for a release on channel.
-func (a AliasTagConfig) AppliesTo(channel string) bool {
+// IsApplicableTo reports whether the alias is written for a release on channel.
+func (a AliasTagConfig) IsApplicableTo(channel string) bool {
 	if len(a.Channels) == 0 {
 		return true
 	}
@@ -1225,9 +1298,9 @@ func (c *AutoVersionConfig) IsEnabled() bool {
 	return c != nil && (c.Enabled == nil || *c.Enabled)
 }
 
-// WriteVersionEnabled reports whether the package's own version field is
+// IsWriteVersionEnabled reports whether the package's own version field is
 // rewritten (default true). Nil-safe.
-func (c *AutoVersionConfig) WriteVersionEnabled() bool {
+func (c *AutoVersionConfig) IsWriteVersionEnabled() bool {
 	return c != nil && (c.WriteVersion == nil || *c.WriteVersion)
 }
 
@@ -1319,10 +1392,10 @@ func Bool(b bool) *bool { return &b }
 // fields (Changelog.EntrySpacing), whose nil means "use the default".
 func Int(n int) *int { return &n }
 
-// UpdateCheckEnabled reports whether dispat looks for a newer release of
+// IsUpdateCheckEnabled reports whether dispat looks for a newer release of
 // itself (default true). Nil-safe, so a configuration that never mentions it
 // gets the default.
-func (c *File) UpdateCheckEnabled() bool {
+func (c *File) IsUpdateCheckEnabled() bool {
 	return c == nil || c.UpdateCheck == nil || *c.UpdateCheck
 }
 

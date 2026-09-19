@@ -37,7 +37,7 @@
 // Relink is the link half of the package. Where Rewrite changes the version
 // text a manifest declares, Relink manages the directive that points a
 // dependency at a local folder, the way a go.mod replace does. Five formats
-// have such a directive; SupportsLink reports which, Links enumerates the
+// have such a directive; IsLinkSupported reports which, Links enumerates the
 // directives a file already carries, and DropLinks removes them all without
 // being told their names.
 //
@@ -274,19 +274,19 @@ func RewriteAs(path string, format manifest.Format, version string, edits []Edit
 	return res, err
 }
 
-// Supported reports whether the manifest at path has a writer. It reads the
+// IsSupported reports whether the manifest at path has a writer. It reads the
 // whole path, not just the name, because four formats are recognised by the
 // folder they sit in.
-func Supported(path string) bool {
+func IsSupported(path string) bool {
 	_, ok := dispatch(path)
 	return ok
 }
 
-// Writer is the package-level entry points behind one swappable value,
+// Writerx is the package-level entry points behind one swappable value,
 // mirroring the scanner's Scanner: a caller wiring the two halves together can
-// fake the writes the same way it fakes the reads. Supported and SupportsLink
+// fake the writes the same way it fakes the reads. IsSupported and IsLinkSupported
 // stay package-level; they are table lookups with nothing worth faking.
-type Writer interface {
+type Writerx interface {
 	Rewrite(path, version string, edits []Edit) (Result, error)
 	Relink(path string, links []Link) (LinkResult, error)
 	Replace(path string, reps []Replacement) (ReplaceResult, error)
@@ -295,32 +295,32 @@ type Writer interface {
 	SetBuild(path, build string) (Result, error)
 }
 
-// fsWriter is the Writer whose writes land on the filesystem.
-type fsWriter struct{}
+// LocalWriterx is the Writer whose writes land on the filesystem.
+type LocalWriterx struct{}
 
 // New returns the filesystem-backed Writer.
-func New() Writer { return fsWriter{} }
+func New() Writerx { return LocalWriterx{} }
 
-func (fsWriter) Rewrite(path, version string, edits []Edit) (Result, error) {
+func (LocalWriterx) Rewrite(path, version string, edits []Edit) (Result, error) {
 	return Rewrite(path, version, edits)
 }
 
-func (fsWriter) Relink(path string, links []Link) (LinkResult, error) {
+func (LocalWriterx) Relink(path string, links []Link) (LinkResult, error) {
 	return Relink(path, links)
 }
 
-func (fsWriter) Replace(path string, reps []Replacement) (ReplaceResult, error) {
+func (LocalWriterx) Replace(path string, reps []Replacement) (ReplaceResult, error) {
 	return Replace(path, reps)
 }
 
-func (fsWriter) Links(path string) ([]Link, error) {
+func (LocalWriterx) Links(path string) ([]Link, error) {
 	return Links(path)
 }
 
-func (fsWriter) DropLinks(path string) (LinkResult, error) {
+func (LocalWriterx) DropLinks(path string) (LinkResult, error) {
 	return DropLinks(path)
 }
 
-func (fsWriter) SetBuild(path, build string) (Result, error) {
+func (LocalWriterx) SetBuild(path, build string) (Result, error) {
 	return SetBuild(path, build)
 }

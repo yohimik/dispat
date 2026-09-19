@@ -34,13 +34,13 @@ const Command = "install"
 // place and a half-read archive must not be left sitting on PATH.
 const stagePattern = "dispat-install-"
 
-// Fetcher stages a verified asset in a folder and answers where it put it.
+// Fetcherx stages a verified asset in a folder and answers where it put it.
 //
 // It is the one piece of the download this package borrows rather than owns,
 // and it is an interface so the pipe path can be driven without a network:
 // what happens to a staged file is this package's business, and where the
 // staged file came from is not.
-type Fetcher interface {
+type Fetcherx interface {
 	Fetch(ctx context.Context, a selfupdate.Asset, dir, target string) (string, error)
 }
 
@@ -62,7 +62,7 @@ func NewInstaller(exe string, client *http.Client, token string, log zerolog.Log
 // It is what the pipe path installs through: the asset is checked exactly as
 // an installed one is, but nothing is ever renamed onto PATH, so a pipe that
 // fails leaves the machine as it found it.
-func Stage(ctx context.Context, f Fetcher, a selfupdate.Asset, fn func(path string) error) error {
+func Stage(ctx context.Context, f Fetcherx, a selfupdate.Asset, fn func(path string) error) error {
 	dir, err := os.MkdirTemp("", stagePattern)
 	if err != nil {
 		return fmt.Errorf("install: cannot stage the download: %w", err)

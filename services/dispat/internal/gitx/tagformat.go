@@ -379,7 +379,7 @@ func coreString(v ccme.Version) string {
 }
 
 // split returns the literal text before the version and after the whole
-// prerelease section — the loose bounds Glob and Matches work with. Both
+// prerelease section — the loose bounds Glob and IsMatch work with. Both
 // shapes share the trailing literal, because the section ends at {counter},
 // so one pair of bounds covers a stable and a prerelease tag alike.
 func (t *tagTemplate) split(pkg string) (prefix, suffix string, ok bool) {

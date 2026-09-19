@@ -51,10 +51,10 @@ func TestComposedIgnoredTagsAreRepositoryQualified(t *testing.T) {
 		IgnoredTagsByRepository: map[string][]string{"source-a": {"shared@1.1.0"}},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	assert.True(t, pl.Releases["a"].Releasing(), "A reads the baseline from before its in-flight tag")
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.True(t, pl.Releases["a"].IsReleasing(), "A reads the baseline from before its in-flight tag")
 	assert.Equal(t, "1.1.0", pl.Releases["a"].Next.String())
-	assert.False(t, pl.Releases["b"].Releasing(), "B keeps its repository-local v1.1.0 baseline")
+	assert.False(t, pl.Releases["b"].IsReleasing(), "B keeps its repository-local v1.1.0 baseline")
 }
 
 // TestFlatIgnoredTagsRemainWorkspaceWide preserves the pre-polyrepo API for
@@ -79,7 +79,7 @@ func TestFlatIgnoredTagsRemainWorkspaceWide(t *testing.T) {
 		IgnoredTags: []string{"shared@1.1.0"},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	assert.True(t, pl.Releases["a"].Releasing())
-	assert.True(t, pl.Releases["b"].Releasing())
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.True(t, pl.Releases["a"].IsReleasing())
+	assert.True(t, pl.Releases["b"].IsReleasing())
 }

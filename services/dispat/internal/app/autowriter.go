@@ -300,7 +300,7 @@ func (a *App) newWriterWork(ctx context.Context, pl *plan.Plan, covered []string
 		// local link is the supported state rather than a hazard.
 		anyReleasable := false
 		for _, name := range covered {
-			if rel := pl.Releases[name]; rel != nil && rel.Releasable() {
+			if rel := pl.Releases[name]; rel != nil && rel.IsReleasable() {
 				anyReleasable = true
 				break
 			}
@@ -330,7 +330,7 @@ func (w *writerWork) expand(names map[string]string, dep, text string) (string, 
 		return "", fmt.Errorf("%s: %s names no package in this workspace, so %s cannot be resolved",
 			dep, dep, VersionPlaceholder)
 	}
-	if !rel.Releasable() {
+	if !rel.IsReleasable() {
 		return "", fmt.Errorf("%s: %s has versioning \"none\" and never carries a version, so %s cannot be resolved",
 			dep, pkg, VersionPlaceholder)
 	}
@@ -341,7 +341,7 @@ func (w *writerWork) expand(names map[string]string, dep, text string) (string, 
 // planned one when it is releasing, its current one otherwise. It is the same
 // answer auto-versioning writes into a consumer's range.
 func plannedVersion(rel *plan.Release) string {
-	if rel.Releasing() {
+	if rel.IsReleasing() {
 		return rel.Next.String()
 	}
 	if rel.HasBaseline {
@@ -354,7 +354,7 @@ func plannedVersion(rel *plan.Release) string {
 // name — a dependency that is no package of this workspace — never is.
 func updating(pl *plan.Plan, pkg string) bool {
 	rel := pl.Releases[pkg]
-	return rel != nil && rel.Releasing()
+	return rel != nil && rel.IsReleasing()
 }
 
 func (w *writerWork) stage() string { return "autowriter" }
@@ -374,7 +374,7 @@ func (w *writerWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 	}
 	edits := w.edits
 	if w.version != "" {
-		if strings.Contains(w.version, VersionPlaceholder) && !rel.Releasable() {
+		if strings.Contains(w.version, VersionPlaceholder) && !rel.IsReleasable() {
 			// A none package has no planned version to stamp; writing the
 			// zero one would put "0.0.0" into a manifest nobody versions.
 			w.app.log.Debug().Str("package", rel.Pkg.Name).
@@ -416,7 +416,7 @@ func (w *writerWork) manifests(ctx context.Context, rel *plan.Release) ([]scanne
 	}
 	out := make([]scanner.Manifest, 0, len(mans))
 	for _, m := range mans {
-		if !writer.Supported(m.Path) && m.Ecosystem != scanner.EcosystemAqua {
+		if !writer.IsSupported(m.Path) && m.Ecosystem != scanner.EcosystemAqua {
 			continue // a read-only ecosystem: nothing here can write it
 		}
 		if w.scope == model.ScopeAll && w.ownedElsewhere(rel.Pkg.Name, rel.Pkg.Dir, m.Path) {
@@ -454,7 +454,7 @@ func (w *writerWork) write(ctx context.Context, rel *plan.Release, mans []scanne
 		if m.Ecosystem == scanner.EcosystemAqua {
 			one.Format = manifest.FormatAqua
 		}
-		if !m.AtPackageRoot() {
+		if !m.IsAtPackageRoot() {
 			// The own-version write applies to the package's own manifests
 			// alone: a nested example has its own version story, and stamping
 			// the release version into it would be wrong however the sweep
@@ -511,31 +511,41 @@ func (w *writerWork) relative(path string) string {
 // the writer reports nothing at all for an edit the manifest already spells
 // exactly as asked — and a second, converged run must not then call that edit
 // stale. So every edit this manifest was asked for landed here unless the
-// manifest came back saying it declares no such thing.
+// manifest came back saying it declares no such thing, or cannot express that
+// link at all.
 func (w *writerWork) record(pkg string, tried manifestEdit, res writer.Result, linkRes writer.LinkResult) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.counts.applied += len(res.Applied) + len(linkRes.Applied)
+	if res.VersionWritten {
+		// The package's own version is one edit like any other: a
+		// --set-version sweep that changed a manifest must not report
+		// "0 applied" beside the log line that says the version was written.
+		w.counts.applied++
+	}
 	w.counts.skipped += len(res.Skipped) + len(linkRes.Skipped)
 	w.counts.missing += len(res.Missing) + len(linkRes.Missing)
 	if res.VersionWritten || len(res.Applied) > 0 || len(linkRes.Applied) > 0 {
 		w.changed[pkg] = true
 	}
 
-	missing := make(map[string]bool, len(res.Missing)+len(linkRes.Missing))
+	unmatched := make(map[string]bool, len(res.Missing)+len(linkRes.Missing)+len(linkRes.Skipped))
 	for _, e := range res.Missing {
-		missing[editKey(e)] = true
+		unmatched[editKey(e)] = true
 	}
 	for _, r := range linkRes.Missing {
-		missing[linkKey(r)] = true
+		unmatched[linkKey(r)] = true
+	}
+	for _, r := range linkRes.Skipped {
+		unmatched[linkKey(r)] = true
 	}
 	for _, e := range tried.Edits {
-		if key := editKey(e); !missing[key] {
+		if key := editKey(e); !unmatched[key] {
 			w.landed[key] = true
 		}
 	}
 	for _, r := range tried.Links {
-		if key := linkKey(r); !missing[key] {
+		if key := linkKey(r); !unmatched[key] {
 			w.landed[key] = true
 		}
 	}

@@ -188,7 +188,7 @@ func readNotes(opts SelfUpdateOptions, rel selfupdate.Release) selfupdate.Notes 
 	opts.Log.Debug().Str("tag", rel.Tag).Int("bytes", len(rel.Body)).
 		Msg("self-update: release notes fetched")
 	notes := selfupdate.ParseNotes(rel.Body)
-	if notes.Empty() {
+	if notes.IsEmpty() {
 		opts.Log.Warn().Str("tag", rel.Tag).
 			Msg("the release carries no notes dispat can read; linking the changelog instead")
 		return notes

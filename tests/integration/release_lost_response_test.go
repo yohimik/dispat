@@ -65,9 +65,9 @@ func TestReleaseReconcilesGithubCreateWhoseResponseWasLost(t *testing.T) {
 	first := r.Release()
 	require.NotEqual(t, 0, first.Code, "a lost response leaves the run incomplete")
 	assert.Contains(t, first.Stdout+first.Stderr, "release recording failed")
-	assert.True(t, harness.HasCode(first.Events, "E222"), "the ambiguous record is a post-publish critical")
-	assert.True(t, r.HasTag("core@0.1.0"), "the published package keeps its durable tag")
-	assert.True(t, r.HasTag("utils@0.1.0"), "independent work continues after the ambiguous response")
+	assert.True(t, harness.IsCodePresent(first.Events, "E222"), "the ambiguous record is a post-publish critical")
+	assert.True(t, r.IsTagged("core@0.1.0"), "the published package keeps its durable tag")
+	assert.True(t, r.IsTagged("utils@0.1.0"), "independent work continues after the ambiguous response")
 	mu.Lock()
 	firstPosts := posts["core@0.1.0"] + posts["utils@0.1.0"]
 	mu.Unlock()

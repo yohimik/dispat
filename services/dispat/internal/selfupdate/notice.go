@@ -24,8 +24,8 @@ type Result struct {
 	Origin  Origin
 }
 
-// Behind reports whether the release found is newer than what is running.
-func (r Result) Behind() bool { return r.Latest.Compare(r.Current) > 0 }
+// IsBehind reports whether the release found is newer than what is running.
+func (r Result) IsBehind() bool { return r.Latest.Compare(r.Current) > 0 }
 
 // Check asks, in the background, whether a newer stable release is out.
 //
@@ -71,7 +71,7 @@ func Check(ctx context.Context, s Source, build Build) <-chan Result {
 // would undo it, and the command that knows the right answer is the one that
 // prints it.
 func Notice(res Result, goos string) string {
-	if !res.Behind() {
+	if !res.IsBehind() {
 		return ""
 	}
 	var b strings.Builder

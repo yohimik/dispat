@@ -43,8 +43,8 @@ func TestSpaceDependenciesOrderTheRelease(t *testing.T) {
 	r.SeedPackage("packages", "web")
 	r.Commit("feat(core,web): bootstrap")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("web@0.1.0"))
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@0.1.0"))
 
 	// The consumer says nothing of its own, so its release can only come from
 	// the edge the space declared: the caret asks for the provider's bump to
@@ -52,8 +52,8 @@ func TestSpaceDependenciesOrderTheRelease(t *testing.T) {
 	r.WriteFile("packages/core/api.txt", "changed\n")
 	r.Commit("fix(core)^: patch the provider")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("web@0.1.1"), "the consumer was carried along the space's edge")
+	assert.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("web@0.1.1"), "the consumer was carried along the space's edge")
 	assert.Contains(t, res.Stdout, "web")
 }
 
@@ -76,8 +76,8 @@ func TestSpaceDependenciesCrossSpaceEdge(t *testing.T) {
 	r.WriteFile("packages/core/api.txt", "changed\n")
 	r.Commit("feat(core)^: a new export")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app@0.1.1"), "the consumer in the other space followed")
+	assert.True(t, r.IsTagged("core@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app@0.1.1"), "the consumer in the other space followed")
 	assert.Contains(t, res.Stdout, "propagated from core")
 }
 
@@ -127,9 +127,9 @@ func TestSpaceFileDependenciesThroughTheBinary(t *testing.T) {
 	r.WriteFile("packages/utils/helper.txt", "changed\n")
 	r.Commit("fix(utils)^: patch")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("utils@0.1.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("web@0.1.1"), "carried along the space file's edge")
-	assert.False(t, r.HasTag("core@0.1.1"), "and nothing else moved")
+	assert.True(t, r.IsTagged("utils@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("web@0.1.1"), "carried along the space file's edge")
+	assert.False(t, r.IsTagged("core@0.1.1"), "and nothing else moved")
 }
 
 // TestSpaceDependenciesComputeEditsThemInPlace: `dispat compute --write`

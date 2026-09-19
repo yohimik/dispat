@@ -35,15 +35,15 @@ type Target struct {
 // Path is the file itself.
 func (t Target) Path() string { return filepath.Join(t.Dir, t.Name) }
 
-// Environment is what a Target needs to resolve itself. It is an interface so
+// Environmentx is what a Target needs to resolve itself. It is an interface so
 // a test can ask for a machine it is not running on: the answer depends on
 // three things the process does not choose, and passing all three is what
 // keeps the rule testable without touching the real /usr/local/bin.
-type Environment interface {
+type Environmentx interface {
 	// Getenv answers a variable, empty when it is unset.
 	Getenv(key string) string
-	// Writable reports whether a folder exists and can be written to.
-	Writable(dir string) bool
+	// IsWritable reports whether a folder exists and can be written to.
+	IsWritable(dir string) bool
 	// GOOS is the platform the binary is being installed for.
 	GOOS() string
 }
@@ -57,11 +57,11 @@ func (e OSEnvironment) Getenv(key string) string { return os.Getenv(key) }
 // GOOS is the platform this environment installs for.
 func (e OSEnvironment) GOOS() string { return e.OS }
 
-// Writable reports whether dir exists and accepts a file, by writing one.
+// IsWritable reports whether dir exists and accepts a file, by writing one.
 // Asking the mode bits instead would answer for the wrong user under sudo and
 // for no user at all on a read-only mount, and the one thing this decides is
 // whether the very next step can create a file there.
-func (e OSEnvironment) Writable(dir string) bool {
+func (e OSEnvironment) IsWritable(dir string) bool {
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		return false
@@ -84,7 +84,7 @@ func (e OSEnvironment) Writable(dir string) bool {
 // which is what a project's binary is nearly always called. On Windows a name
 // with no extension gains .exe, because a file without one is not a program
 // there.
-func ResolveTarget(dir, name string, repo Repository, env Environment) (Target, error) {
+func ResolveTarget(dir, name string, repo Repository, env Environmentx) (Target, error) {
 	resolved, err := resolveDir(dir, env)
 	if err != nil {
 		return Target{}, err
@@ -102,7 +102,7 @@ func ResolveTarget(dir, name string, repo Repository, env Environment) (Target, 
 }
 
 // resolveDir walks the folder rule until something answers.
-func resolveDir(dir string, env Environment) (string, error) {
+func resolveDir(dir string, env Environmentx) (string, error) {
 	if dir == "" {
 		dir = env.Getenv(BinDirEnv)
 	}
@@ -116,7 +116,7 @@ func resolveDir(dir string, env Environment) (string, error) {
 		}
 		return abs, nil
 	}
-	if env.Writable(SystemBinDir) {
+	if env.IsWritable(SystemBinDir) {
 		return SystemBinDir, nil
 	}
 	if home := env.Getenv("HOME"); home != "" {

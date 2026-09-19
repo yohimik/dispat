@@ -89,7 +89,7 @@ func (a *App) manifestBaselines(scanned []scannedPackage, sel filter.Result) []m
 	decidedByConfig := make(map[*config.File]map[string]bool)
 	var out []manifestBaseline
 	for _, s := range scanned {
-		if sel.Active() && !sel.Has(s.pkg.Name) {
+		if sel.IsActive() && !sel.IsSelected(s.pkg.Name) {
 			continue
 		}
 		cfg := a.cfg
@@ -215,7 +215,7 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 	// Shared repository state is resolved once. Packages in one repository
 	// reuse its HEAD check and alias filter instead of rescanning the fleet.
 	type repositoryBaseline struct {
-		git     *gitx.CLI
+		git     *gitx.LocalGitx
 		aliases plan.AliasFilter
 		empty   bool
 	}
@@ -235,7 +235,7 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 		}
 		git := a.git
 		if a.workspace != nil {
-			git = &gitx.CLI{Dir: c.pkg.RepoRoot, Log: a.log}
+			git = &gitx.LocalGitx{Dir: c.pkg.RepoRoot, Log: a.log}
 		}
 		_, headErr := git.HeadSHA(ctx)
 		if headErr != nil {

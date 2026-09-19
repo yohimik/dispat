@@ -79,12 +79,12 @@ func TestStepsWiredIntoAPublishLeg(t *testing.T) {
 	// The provider's leg made its own records: its tag exists, is on the
 	// remote, and points at the leg's commit rather than the final release
 	// commit (the step exported PACKAGE_CORE, so finalize skipped it, W223).
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("web@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, harness.HasCode(res.Events, "W223"),
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("web@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresent(res.Events, "W223"),
 		"finalize finds the leg's tag already at its commit: %s", res.Stdout)
-	assert.False(t, harness.HasCode(res.Events, "W228"), "no drift on the happy path")
-	assert.False(t, harness.HasCode(res.Events, "E219"))
+	assert.False(t, harness.IsCodePresent(res.Events, "W228"), "no drift on the happy path")
+	assert.False(t, harness.IsCodePresent(res.Events, "E219"))
 
 	// The consumer's build saw the provider's tag on the remote mid-run.
 	seen, err := os.ReadFile(r.Path("seen.log"))
@@ -129,13 +129,13 @@ func TestStepsWiredSurviveAPartialRun(t *testing.T) {
 
 	res := r.Command("release", "-p", "core")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	require.Equal(t, 0, r.TagCount("web@"), "the consumer waits for the next run")
 
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("web@0.1.0"), "the consumer catches up; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("web@0.1.0"), "the consumer catches up; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("core@"), "the provider is not re-released: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "E219"))
+	assert.False(t, harness.IsCodePresent(res.Events, "E219"))
 }
 
 // TestStepsDuplicatedCollapseIntoSkips: a flow that lists the record steps
@@ -165,13 +165,13 @@ func TestStepsDuplicatedCollapseIntoSkips(t *testing.T) {
 	res := r.ReleaseOK()
 
 	assert.Equal(t, 1, r.TagCount("core@"), "one tag, however many commit steps ran: %v", r.TagList())
-	assert.True(t, harness.HasCode(res.Events, "W226"), "the second changelog step is a skip")
-	assert.True(t, harness.HasCode(res.Events, "W223"), "the second commit step's tag is a skip")
+	assert.True(t, harness.IsCodePresent(res.Events, "W226"), "the second changelog step is a skip")
+	assert.True(t, harness.IsCodePresent(res.Events, "W223"), "the second commit step's tag is a skip")
 	changelog, err := os.ReadFile(r.Path("packages/core/CHANGELOG.md"))
 	require.NoError(t, err)
 	assert.Equal(t, 1, strings.Count(string(changelog), "## core@0.1.0"),
 		"one entry, however many changelog steps ran:\n%s", changelog)
-	assert.False(t, harness.HasCode(res.Events, "E219"))
+	assert.False(t, harness.IsCodePresent(res.Events, "E219"))
 }
 
 // TestStepsWiredRecordTheRunsDependencies: the dependencies section of a
@@ -212,17 +212,17 @@ func TestStepsWiredRecordTheRunsDependencies(t *testing.T) {
 
 	// The group holds one version, so the provider's tag existing mid-run is
 	// exactly the floor the consumer's replan must not read.
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
 	changelog, err := os.ReadFile(r.Path("packages/app/CHANGELOG.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(changelog), "- core: 0.0.0 -> 0.1.0",
 		"the consumer's entry names the provider's movement:\n%s", changelog)
 	assert.NotContains(t, string(changelog), "0.1.1",
 		"no version the run never released:\n%s", changelog)
-	assert.False(t, harness.HasCode(res.Events, "W228"),
+	assert.False(t, harness.IsCodePresent(res.Events, "W228"),
 		"the masked replan reproduces the run, no drift to correct")
-	assert.False(t, harness.HasCode(res.Events, "E219"))
+	assert.False(t, harness.IsCodePresent(res.Events, "E219"))
 }
 
 // TestStepsGithubBeforeCommitWarns: a github step ordered before the commit
@@ -291,7 +291,7 @@ func TestStepsGithubBeforeCommitWarns(t *testing.T) {
 	assert.Contains(t, res.Stdout, "W224",
 		"the correctly placed second github step finds the release created and skips")
 	assert.Equal(t, []string{"core@0.1.0"}, creates, "one release created, at the run's tag")
-	assert.True(t, r.HasTag("core@0.1.0"))
+	assert.True(t, r.IsTagged("core@0.1.0"))
 }
 
 // TestStepsCatchUpEntrySpansTheProvidersMovement: the record steps write a
@@ -329,17 +329,17 @@ func TestStepsCatchUpEntrySpansTheProvidersMovement(t *testing.T) {
 	r.SeedPackage("services", "web")
 	r.Commit("feat(core)^: both release once")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("web@0.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@0.0.1"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(core)^: published alone; web catches up next run")
 	res := r.Command("release", "-p", "core")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
 	require.Zero(t, r.TagCount("web@0.0.2"), "tags: %v", r.TagList())
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("web@0.0.2"), "the catch-up; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@0.0.2"), "the catch-up; tags: %v", r.TagList())
 	entry := entryOf(t, spacedChangelog(t, r, "services", "web"), "web@0.0.2")
 	assert.Contains(t, entry, "- core: 0.1.0 -> 0.1.1",
 		"the step-written entry spans from web's last release")
@@ -408,8 +408,8 @@ func TestStepsAlignedRecordsKeepTheirDependencyLinks(t *testing.T) {
 	r.Commit("feat(web): the consumer moves too")
 
 	res := r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("web@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@0.1.0"), "tags: %v", r.TagList())
 
 	// The drift happened and was corrected: without this the scenario would
 	// prove nothing, because a replan agreeing with the run keeps its own

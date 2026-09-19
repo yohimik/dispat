@@ -126,7 +126,16 @@ func (a *App) runSweep(ctx context.Context, pl *plan.Plan, covered []string,
 	drainErr := graph.Drain(ctx, sched,
 		func(string) struct{} { return struct{}{} },
 		func(struct{}) int { return budget },
-		func(pkg string) int { return pl.Releases[pkg].Pkg.BuildWeight },
+		// The weight of a name the plan does not carry is one slot rather
+		// than a panic in a scheduler goroutine: every name here comes from
+		// the plan, and a sweep is the wrong place to discover it did not.
+		func(pkg string) int {
+			rel := pl.Releases[pkg]
+			if rel == nil || rel.Pkg == nil {
+				return 1
+			}
+			return rel.Pkg.BuildWeight
+		},
 		func(pkg string) { s.execute(ctx, pkg) })
 
 	return s.report(), drainErr
@@ -150,10 +159,15 @@ func budgetFor(work packageWork) int {
 // coveredReleases indexes the covered packages by name, which is how both the
 // sweep and the works that carry data between packages ask "is this provider
 // one of ours?" without walking the slice every time.
+// A name the plan does not carry is left out rather than stored as a nil
+// release: the callers ask this index whether a provider is one of theirs, and
+// a present key holding nothing answers yes to a question it cannot support.
 func coveredReleases(pl *plan.Plan, covered []string) map[string]*plan.Release {
 	rels := make(map[string]*plan.Release, len(covered))
 	for _, pkg := range covered {
-		rels[pkg] = pl.Releases[pkg]
+		if rel := pl.Releases[pkg]; rel != nil {
+			rels[pkg] = rel
+		}
 	}
 	return rels
 }
@@ -199,6 +213,14 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 	}()
 
 	log := s.app.log.With().Str("package", pkg).Str("stage", s.work.stage()).Logger()
+	// A package handed out a moment before the interrupt has nothing to do
+	// with it any more. The scheduler has already stopped launching; this
+	// stops the one in flight from resolving and running, the same check the
+	// release executor makes at the top of its own task.
+	if ctx.Err() != nil {
+		log.Debug().Msg("run cancelled: package not started")
+		return
+	}
 	// What this package would do is asked before the cascade runs, so a package
 	// skipped for a failed provider still counts as one the sweep reached.
 	t, err := s.work.resolve(ctx, s.covered[pkg])

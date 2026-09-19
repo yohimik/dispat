@@ -427,13 +427,13 @@ func TestLocationDeferredMarksWhatNeedsAConfiguration(t *testing.T) {
 		"package": LocationPackage("core"),
 		"space":   LocationSpace("libs"),
 	} {
-		assert.True(t, loc.Deferred(), name+" can only be placed by a configuration")
+		assert.True(t, loc.IsDeferred(), name+" can only be placed by a configuration")
 	}
 	for name, loc := range map[string]Location{
 		"cwd":  LocationCwd(),
 		"path": LocationPath("./build"),
 	} {
-		assert.False(t, loc.Deferred(), name+" is answered by the command line alone")
+		assert.False(t, loc.IsDeferred(), name+" is answered by the command line alone")
 	}
 }
 
@@ -616,16 +616,16 @@ func TestExecDiscoversTheWorkspaceOnce(t *testing.T) {
 
 func TestValidEnvScope(t *testing.T) {
 	for _, ok := range []string{EnvScopeStatic, EnvScopeDispat, EnvScopeBoth} {
-		assert.True(t, ValidEnvScope(ok), ok)
+		assert.True(t, IsValidEnvScope(ok), ok)
 	}
 	for _, bad := range []string{"", "STATIC", "all", "none"} {
-		assert.False(t, ValidEnvScope(bad), bad)
+		assert.False(t, IsValidEnvScope(bad), bad)
 	}
 	// Only the two scopes that name release variables pay for a plan, which is
 	// the command's whole performance claim.
-	assert.False(t, NeedsPlan(EnvScopeStatic))
-	assert.True(t, NeedsPlan(EnvScopeDispat))
-	assert.True(t, NeedsPlan(EnvScopeBoth))
+	assert.False(t, IsPlanNeeded(EnvScopeStatic))
+	assert.True(t, IsPlanNeeded(EnvScopeDispat))
+	assert.True(t, IsPlanNeeded(EnvScopeBoth))
 }
 
 func TestWithoutStaticDropsTheDeclaredPairs(t *testing.T) {

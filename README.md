@@ -2,28 +2,22 @@
 
 [![coverage](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 
-**dispat** reads your conventional commits, works out the next versions, and builds and publishes changed packages in
-dependency order. Preview the release with `dispat status` before running it.
+**Autistic stability for ADHD projects. Mathematical planning. Saga recovery.**
 
-Use your existing build and publish commands across Go, npm, Cargo, Python, Docker, and other tools. dispat works with
-one package, a [monorepo](https://dispat.dev/monorepo/), or several repositories joined through a
-[control repository](https://dispat.dev/control-repository/).
+**dispat** turns conventional commits into versions, then builds and publishes changed packages in dependency order.
+Mathematical version rules make the plan repeatable: identical history and configuration produce the same versions.
+Saga recovery preserves recorded publications so the next run can finish the remaining packages. Preview the work with `dispat status` before releasing.
+
+Build and publish stages run your own shell commands, so a package in any language can take part. Automatic manifest
+editing covers a defined list of [supported formats](https://dispat.dev/editing/manifests/). dispat works with one
+package, a [monorepo](https://dispat.dev/monorepo/), or several repositories joined through a
+[control repository](https://dispat.dev/control-repository/) or a
+[choreographed fleet](https://dispat.dev/next/choreographed-repositories/).
+Independent source histories and choreographed fleets require the 1.11 release candidate; the default installers
+select the latest stable release.
 
 Install the binary, run `dispat init` in your Git repository, and edit the generated `dispat.json` for your packages.
 The [setup guide](https://dispat.dev/getting-started/) walks through your first release.
-
-```sh
-# With npm (Node.js required)
-npm install --global @dispat/bin --allow-scripts=@dispat/bin
-```
-
-The [npm package](./packages/cli) installs the binary for your platform. The flag above approves its installer because
-npm 12 blocks dependency install scripts by default. Coding agents should also use the version-matched
-[agent work guide](./specs/agent-guide/README.md).
-
-If an earlier install skipped the script, repair it from any directory with
-`npm explore --global @dispat/bin -- node build/bin/postinstall.js`. A failed `dispat` launch also prints a repair
-command for the exact installed path. Use npm to update or remove this installation.
 
 ```sh
 # Linux and macOS
@@ -39,6 +33,22 @@ wget -qO- https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
 # Windows, in PowerShell
 irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 ```
+
+The install script downloads the binary for your platform and verifies its checksum. No language runtime is required.
+
+Coding agents should also use the version-matched [agent work guide](./specs/agent-guide/README.md).
+
+```sh
+# ...or with npm (Node.js required)
+npm install --global @dispat/bin --allow-scripts=@dispat/bin
+```
+
+The [npm package](./packages/cli) installs the same binary for your platform. The flag above approves its installer
+because npm 12 blocks dependency install scripts by default.
+
+If an earlier install skipped the script, repair it from any directory with
+`npm explore --global @dispat/bin -- node build/bin/postinstall.js`. A failed `dispat` launch also prints a repair
+command for the exact installed path. Use npm to update or remove this installation.
 
 ```yaml
 # ...or on GitHub Actions
@@ -77,13 +87,19 @@ when a release crosses toolchains or destinations, and completing it requires mo
   destination. See [single-package releases](https://dispat.dev/examples/single-package/).
 - **Monorepos and polyrepos use the same release model.** A monorepo declares packages and their dependencies in one
   checkout. A [control repository](https://dispat.dev/control-repository/) can assemble separate repositories through
-  pinned Git submodules and coordinate them with one graph. Its pointer-update commits carry release intent, and its
-  history holds the release records; the linked repositories keep their own histories.
-- **Your manifests and commands remain the inputs.** dispat reads supported project manifests, can derive dependency
-  edges with `dispat compute`, and reconciles versions through `autoVersion`. Build and publish stages use your shell
-  commands across Go, npm, Cargo, Python, Docker, mobile projects, and game engines. Configure the toolchain's checks,
-  credentials, and artifact validation in those stages. [Commit messages](https://dispat.dev/reference/commits/)
-  provide version intent and release notes.
+  Git submodules and coordinate them with one graph, in either of two modes. In source-history mode
+  (`polyrepo: true`), dispat reads each linked repository's own commits and tags, those repositories own their release
+  records, and a submodule pointer move establishes the source range instead of counting as a package change. In
+  pointer-history mode, the default, the control repository's pointer-update commits carry the release intent, and its
+  own history holds the versions, changelogs, tags and records. Pick the mode that matches where your release intent
+  is already written.
+- **Your manifests and commands remain the inputs.** Build and publish stages run the shell commands you configure, so
+  the language of a package is your choice rather than dispat's. Configure the toolchain's checks, credentials, and
+  artifact validation in those stages. Reading manifests is the separate half: dispat parses a
+  [defined list of formats](https://dispat.dev/editing/manifests/) across Go, npm, Cargo, Python, Docker, mobile and
+  game projects, derives dependency edges from them with `dispat compute`, and rewrites the versions it supports
+  through `autoVersion`. [Commit messages](https://dispat.dev/reference/commits/) provide version intent and release
+  notes.
 - **Plan only the work the release needs.** Git history and release tags determine the changed packages and affected
   consumers. Unchanged packages stay outside the release plan. BuildKit layers, Go's build cache, and other existing
   caches can speed up the selected stages; dispat does not require a separate task-cache service. Preview the package

@@ -32,7 +32,7 @@ const controlHistoryMarker = "dispat-control-gitlink-history-v1"
 // gitlink delta in one cancellable Git process. Results are newest first in
 // topological order, matching git log. Merge deltas use the first parent and
 // the root commit is diffed against the empty tree.
-func (c *CLI) ControlGitlinkHistory(ctx context.Context) ([]ControlHistoryCommit, error) {
+func (c *LocalGitx) ControlGitlinkHistory(ctx context.Context) ([]ControlHistoryCommit, error) {
 	out, err := c.run(ctx,
 		"log",
 		"--topo-order",
@@ -51,9 +51,20 @@ func (c *CLI) ControlGitlinkHistory(ctx context.Context) ([]ControlHistoryCommit
 	if out == "" {
 		return nil, nil
 	}
+	if strings.TrimSpace(out) == "" {
+		return nil, fmt.Errorf("gitx: malformed empty control history")
+	}
 	return parseControlGitlinkHistory(out)
 }
 
+// parseControlGitlinkHistory reads the whole `git log` answer into the commits
+// the planner keeps.
+//
+// Every string it keeps is copied. strings.Split hands back slices of its
+// input, so one retained forty-character object id would otherwise pin the
+// entire log output — tens of megabytes on a repository with a long history —
+// for as long as the plan lives, and the plan lives for the whole run. The
+// copies cost one pass over the fields that are kept and let the buffer go.
 func parseControlGitlinkHistory(out string) ([]ControlHistoryCommit, error) {
 	fields := strings.Split(out, "\x00")
 	commits := make([]ControlHistoryCommit, 0)
@@ -78,17 +89,18 @@ func parseControlGitlinkHistory(out string) ([]ControlHistoryCommit, error) {
 			return nil, fmt.Errorf("gitx: malformed control history object id %q", sha)
 		}
 		parentIDs := strings.Fields(parents)
-		for _, parent := range parentIDs {
+		for i, parent := range parentIDs {
 			if !fullObjectID(parent) {
 				return nil, fmt.Errorf("gitx: malformed control history parent %q", parent)
 			}
+			parentIDs[i] = strings.Clone(parent)
 		}
 		commit := ControlHistoryCommit{
-			SHA:         sha,
+			SHA:         strings.Clone(sha),
 			Parents:     parentIDs,
-			AuthorName:  strings.TrimSpace(authorName),
-			AuthorEmail: strings.TrimSpace(authorEmail),
-			Message:     strings.Trim(message, "\n"),
+			AuthorName:  strings.Clone(strings.TrimSpace(authorName)),
+			AuthorEmail: strings.Clone(strings.TrimSpace(authorEmail)),
+			Message:     strings.Clone(strings.Trim(message, "\n")),
 			Gitlinks:    make(map[string]GitlinkTransition),
 		}
 
@@ -108,7 +120,7 @@ func parseControlGitlinkHistory(out string) ([]ControlHistoryCommit, error) {
 			if !strings.HasPrefix(meta, ":") || i+1 >= len(fields) {
 				return nil, fmt.Errorf("gitx: malformed control history raw record %q", field)
 			}
-			path := fields[i+1]
+			path := strings.Clone(fields[i+1])
 			i += 2
 			commit.Files = append(commit.Files, path)
 			parts := strings.Fields(strings.TrimPrefix(meta, ":"))
@@ -116,7 +128,7 @@ func parseControlGitlinkHistory(out string) ([]ControlHistoryCommit, error) {
 				return nil, fmt.Errorf("gitx: malformed control history raw metadata %q", meta)
 			}
 			if parts[0] == "160000" || parts[1] == "160000" {
-				commit.Gitlinks[path] = GitlinkTransition{From: parts[2], To: parts[3]}
+				commit.Gitlinks[path] = GitlinkTransition{From: strings.Clone(parts[2]), To: strings.Clone(parts[3])}
 			}
 		}
 		commits = append(commits, commit)

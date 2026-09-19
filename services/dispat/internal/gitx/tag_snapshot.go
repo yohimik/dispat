@@ -60,7 +60,7 @@ func NewTagSnapshotMatcher(namespaces []TagNamespace) *TagSnapshotMatcher {
 // refs which a configured package can write. Matching is dispatched through
 // a literal-prefix trie, so disjoint package namespaces do not multiply the
 // cost of a large ref inventory.
-func (c *CLI) RelevantTagSnapshot(ctx context.Context, matcher *TagSnapshotMatcher) (TagSnapshot, error) {
+func (c *LocalGitx) RelevantTagSnapshot(ctx context.Context, matcher *TagSnapshotMatcher) (TagSnapshot, error) {
 	if matcher == nil || matcher.root == nil {
 		return TagSnapshot{}, nil
 	}
@@ -104,7 +104,7 @@ func namespaceMatchers(namespaces []TagNamespace) []refNamespaceMatcher {
 			tpl := compileTagFormat(string(format))
 			alias := format.Matcher(namespace.Package)
 			matchers = append(matchers, refNamespaceMatcher{
-				prefix: literalTagPrefix(tpl, namespace.Package), matches: alias.Matches,
+				prefix: literalTagPrefix(tpl, namespace.Package), matches: alias.IsMatch,
 			})
 		}
 	}

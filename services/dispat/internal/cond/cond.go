@@ -137,7 +137,7 @@ func checkCondName(name, spec string) error {
 	if name == "" {
 		return fmt.Errorf("condition %q names no variable", spec)
 	}
-	if !release.ValidEnvName(name) {
+	if !release.IsValidEnvName(name) {
 		return fmt.Errorf("condition %q: %q is not a variable name ([A-Za-z_][A-Za-z0-9_]*)", spec, name)
 	}
 	return nil
@@ -150,7 +150,7 @@ func checkCondName(name, spec string) error {
 // matching the shell's [ -n "$NAME" ], since a CI system that exports an empty
 // variable has not answered yes. An unset variable therefore equals only the
 // empty value, exactly as $NAME expands to nothing in the shell.
-func (c Condition) Match(lookup func(string) string) bool {
+func (c Condition) IsMatch(lookup func(string) string) bool {
 	// A resolved condition already holds its answer and names no variable, so
 	// it is the one kind that must not reach for the environment.
 	switch c.op {
@@ -170,9 +170,9 @@ func (c Condition) Match(lookup func(string) string) bool {
 	case opNe:
 		return value != c.Value
 	case opGlob:
-		return globx.Match(c.Value, value)
+		return globx.IsMatch(c.Value, value)
 	case opNotGlob:
-		return !globx.Match(c.Value, value)
+		return !globx.IsMatch(c.Value, value)
 	}
 	return false
 }

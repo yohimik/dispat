@@ -117,6 +117,13 @@ func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) [
 			continue
 		}
 		pr := p.Releases[u.Name]
+		if pr == nil {
+			// A provider named by the update list but absent from the plan has
+			// no space or channel to report, and reading one from nothing
+			// would take the whole run down over a variable. Skipped for the
+			// same reason workspaceVersions skips a missing release.
+			continue
+		}
 		updates = append(updates, providerUpdate{
 			Package:    u.Name,
 			Space:      pr.Pkg.Space.Name,
@@ -290,7 +297,7 @@ func workspaceVersions(p *plan.Plan) []workspaceVersion {
 			continue
 		}
 		entry := workspaceVersion{Package: name, Channel: rel.Channel}
-		if rel.Releasing() {
+		if rel.IsReleasing() {
 			entry.Version, entry.Releasing = rel.Next.String(), true
 		} else if rel.HasBaseline {
 			entry.Version = rel.Baseline.String()

@@ -50,10 +50,17 @@ func TestGitPrerequisitesGuard(t *testing.T) {
 }
 
 func TestValidOnError(t *testing.T) {
-	assert.True(t, ValidOnError(OnErrorSkip))
-	assert.True(t, ValidOnError(OnErrorContinue))
-	assert.False(t, ValidOnError(""))
-	assert.False(t, ValidOnError("explode"))
+	assert.True(t, IsValidOnError(OnErrorSkip))
+	assert.True(t, IsValidOnError(OnErrorContinue))
+	assert.False(t, IsValidOnError(""))
+	assert.False(t, IsValidOnError("explode"))
+}
+
+func TestReleaseFinalStatusIncludesMonorepoCriticalFailure(t *testing.T) {
+	assert.Equal(t, "failed", releaseFinalStatus(false, 0, assert.AnError))
+	assert.Equal(t, "failed", releaseFinalStatus(false, 1, nil))
+	assert.Equal(t, "interrupted", releaseFinalStatus(true, 1, assert.AnError))
+	assert.Equal(t, "succeeded", releaseFinalStatus(false, 0, nil))
 }
 
 func TestInitialVersionsMapping(t *testing.T) {

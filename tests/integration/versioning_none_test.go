@@ -60,7 +60,7 @@ func TestVersioningNoneLifecycle(t *testing.T) {
 	// Run 1: both packages changed, one release.
 	r.Commit("feat(core,smoke): bootstrap both spaces")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("smoke@"), "a none package is never tagged; tags: %v", r.TagList())
 
 	line := harness.GraphLine(res.Events, "smoke")
@@ -77,7 +77,7 @@ func TestVersioningNoneLifecycle(t *testing.T) {
 	assert.Equal(t, 1, len(r.TagList()), "converged: nothing new to release")
 	line = harness.GraphLine(res.Events, "smoke")
 	assert.Contains(t, line.Str("message"), "script-only (versioning: none)")
-	assert.False(t, harness.HasCode(res.Events, "W193"), "no catch-up diagnostics for a none package")
+	assert.False(t, harness.IsCodePresent(res.Events, "W193"), "no catch-up diagnostics for a none package")
 }
 
 // TestVersioningNoneRunDefaultWindow: the default `dispat run` window is the
@@ -157,7 +157,7 @@ func TestVersioningNoneProviderEdgeRejected(t *testing.T) {
 	r.SeedPackage("tools", "probe")
 	r.Commit("feat(probe): a second none package")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("smoke@"))
 	assert.Zero(t, r.TagCount("probe@"))
 }
@@ -194,9 +194,9 @@ func TestVersioningNoneConsumerWithLocalLink(t *testing.T) {
 
 	// The provider releases exactly as it would without the linked consumer.
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("smoke@"))
-	assert.False(t, harness.HasCodeForPackage(res.Events, "W193", "smoke"))
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W193", "smoke"))
 
 	// A placeholder naming the none package cannot be resolved.
 	res = r.Command("autowriter", "--since", "all", "--set", "github.com/acme/smoke={version}")
@@ -244,10 +244,10 @@ func TestVersioningNoneReleaseAsInert(t *testing.T) {
 
 	r.CommitEmpty("feat(smoke): pinned work\n\nRelease-As: 2.0.0")
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W238", "smoke"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W238", "smoke"),
 		"the inert directive is reported")
 	assert.Zero(t, r.TagCount("smoke@"), "pinning a none package tags nothing; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("core@0.1.0"), "the rest of the run is unaffected; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "the rest of the run is unaffected; tags: %v", r.TagList())
 }
 
 // TestVersioningNoneReleaseOnlySettingsInert: release-only settings on a

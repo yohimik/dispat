@@ -101,7 +101,7 @@ func applies(l model.EntryLine, rel *plan.Release) bool {
 	return matchesAny(l.Package, pkg.Name) &&
 		matchesAny(l.Space, space) &&
 		matchesAny(l.Group, group) &&
-		model.ChannelsAdmit(l.Channels, rel.Channel)
+		model.IsChannelAdmitted(l.Channels, rel.Channel)
 }
 
 // matchesAny reports whether value matches one of the patterns, with no
@@ -116,7 +116,7 @@ func matchesAny(patterns []string, value string) bool {
 		return false // a package outside any space matches no space or group filter
 	}
 	for _, p := range patterns {
-		if globx.Match(strings.ToLower(p), strings.ToLower(value)) {
+		if globx.IsMatch(strings.ToLower(p), strings.ToLower(value)) {
 			return true
 		}
 	}

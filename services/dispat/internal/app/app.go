@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -36,8 +37,8 @@ type App struct {
 	root string
 	cfg  *config.File
 	log  zerolog.Logger
-	git  *gitx.CLI
-	scan scanner.Scanner
+	git  *gitx.LocalGitx
+	scan scanner.Scannerx
 	// workspace is nil for legacy single-repository behavior. In polyrepo
 	// mode it is the immutable ownership map shared by every command.
 	workspace *config.Workspace
@@ -49,6 +50,14 @@ type App struct {
 	pkgsOnce sync.Once
 	pkgs     []*model.Package
 	pkgsErr  error
+
+	// The spaces as they effectively are — the root file's entries with each
+	// space folder's own config file merged over them — remembered for the
+	// same reason as pkgs: one exec invocation can ask for a space's scripts
+	// and its env separately. See spaces.
+	spacesOnce sync.Once
+	spaceCfgs  map[string]config.SpaceConfig
+	spacesErr  error
 
 	// ignoreTags are tag names masked from baseline resolution when this
 	// invocation is a step command wired to a running release; see stepenv.go.
@@ -74,6 +83,22 @@ func (a *App) packages() ([]*model.Package, error) {
 	return a.pkgs, a.pkgsErr
 }
 
+// spaces is every space as it effectively is, keyed by name and settled once
+// per App.
+//
+// A space is declared across two layers — the root file's `spaces` entry and
+// each of its folders' own config files — and `dispat run` resolves a script
+// or an env value through the built package, which already carries both. A
+// command naming a space directly has no package to read, so it settles the
+// same two layers here: reading the entry alone would make one command blind
+// to a layer every other command sees.
+func (a *App) spaces() (map[string]config.SpaceConfig, error) {
+	a.spacesOnce.Do(func() {
+		a.spaceCfgs, a.spacesErr = config.ResolvedControlSpaceConfigs(a.cfg, a.root, a.workspace)
+	})
+	return a.spaceCfgs, a.spacesErr
+}
+
 // New assembles an App for one monorepo.
 func New(root string, cfg *config.File, log zerolog.Logger) *App {
 	return NewWorkspace(root, cfg, nil, log)
@@ -81,7 +106,7 @@ func New(root string, cfg *config.File, log zerolog.Logger) *App {
 
 // NewWorkspace is New with a composed repository ownership map.
 func NewWorkspace(root string, cfg *config.File, workspace *config.Workspace, log zerolog.Logger) *App {
-	git := &gitx.CLI{Dir: root, Log: log}
+	git := &gitx.LocalGitx{Dir: root, Log: log}
 	if cfg.Commit != nil {
 		// The configured identity covers every commit and annotated tag the
 		// run creates, so CI needs no `git config` step.
@@ -107,7 +132,7 @@ func (a *App) Status(ctx context.Context, opts ReleaseOptions) error {
 		return err
 	}
 	if blocked := a.releaseBlocked(pl); blocked != "" {
-		if pl.Fatal() {
+		if pl.IsFatal() {
 			// No correct plan exists: the one case status itself fails on.
 			a.log.Error().Str("reason", blocked).Msg("refusing to release")
 			return errors.New(blocked)
@@ -160,7 +185,7 @@ func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan
 		return nil, err
 	}
 	a.printGraph(pl)
-	if opts.Strict && !narrowing.Clean() {
+	if opts.Strict && !narrowing.IsClean() {
 		err := errors.New("the selection cannot be released as it stands and --strict is set")
 		a.log.Error().Err(err).Msg("refusing to release")
 		return nil, err
@@ -170,7 +195,7 @@ func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan
 	// plan is left alone so releaseBlocked keeps the truer message — "no correct
 	// plan exists" outranks "nothing to release", and a fatal plan exits 1
 	// where this refusal exits 3.
-	if opts.RequireRelease && !pl.Fatal() && len(pl.Releasing()) == 0 {
+	if opts.RequireRelease && !pl.IsFatal() && len(pl.Releasing()) == 0 {
 		a.log.Error().Err(ErrNothingToRelease).Msg("refusing to release")
 		return nil, ErrNothingToRelease
 	}
@@ -195,14 +220,17 @@ func (a *App) checkGit() error {
 // planOptions discovers the workspace and assembles the planner inputs — for
 // Compute, and for every other plan-package entry point that needs the same
 // workspace view (PackagesChangedSince).
-func (a *App) planOptions() (plan.Options, error) {
+func (a *App) planOptions(ctx context.Context) (plan.Options, error) {
+	if err := ctx.Err(); err != nil {
+		return plan.Options{}, err
+	}
 	pkgs, deps, inactiveExternal, excluded, err := config.DiscoverWorkspacePlan(a.cfg, a.root, a.workspace)
 	if err != nil {
 		a.logError(err).Msg("package discovery failed")
 		return plan.Options{}, err
 	}
 	if a.workspace != nil {
-		if err := a.resolveRepositoryRecords(context.Background(), pkgs); err != nil {
+		if err := a.resolveRepositoryRecords(ctx, pkgs); err != nil {
 			a.log.Error().Err(err).Msg("repository record targets could not be resolved")
 			return plan.Options{}, err
 		}
@@ -221,13 +249,14 @@ func (a *App) planOptions() (plan.Options, error) {
 		IgnoredTagsByRepository:      a.ignoreTagsByRepository,
 	}
 	if a.workspace != nil {
+		opts.LinkEvidence = a.workspace.IsChoreographed()
 		opts.Repositories = make(map[string]plan.RepositoryHistory, len(a.workspace.Repositories))
 		for _, repository := range a.workspace.Repositories {
-			repositoryGit := &gitx.CLI{Dir: repository.Root, Name: a.git.Name, Email: a.git.Email, Log: a.log}
+			repositoryGit := &gitx.LocalGitx{Dir: repository.Root, Name: a.git.Name, Email: a.git.Email, Log: a.log}
 			opts.Repositories[repository.Name] = plan.RepositoryHistory{
 				Name: repository.Name, Root: repository.Root, Path: repository.GitlinkPath, Git: repositoryGit,
 				ParserConfig: repository.Config.ResolvedParser, NonPackageScopes: repository.Config.NonPackageScopes,
-				Control: repository.Control,
+				Control: repository.Control, Linker: repository.Linker, Links: repository.Links,
 			}
 		}
 		for _, baseline := range a.cfg.RepositoryBaselines {
@@ -306,11 +335,34 @@ func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
 		a.log.Error().Err(err).Msg("git prerequisites missing")
 		return nil, err
 	}
-	opts, err := a.planOptions()
+	opts, err := a.planOptions(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Capture workload counts only when they will be logged. Large fleets can
+	// then distinguish repeated history reads from graph work without paying
+	// for diagnostic counters during ordinary releases.
+	work := a.log.Debug()
+	var started time.Time
+	if work.Enabled() {
+		opts.HistoryStats = &plan.HistoryStats{}
+		started = time.Now()
+	}
 	pl, err := plan.Compute(ctx, a.git, opts)
+	if s := opts.HistoryStats; s != nil {
+		work.Dur("elapsed", time.Since(started)).Err(err).
+			Int64("tagInventories", s.TagInventories.Load()).
+			Int64("commitWindows", s.CommitWindows.Load()).
+			Int64("uniqueCommits", s.UniqueCommits.Load()).
+			Int64("canonicalBytes", s.CanonicalBytes.Load()).
+			Int64("windowCommitRefs", s.WindowCommitRefs.Load()).
+			Int64("ancestryLookups", s.AncestryLookups.Load()).
+			Int64("controlSnapshotRuns", s.ControlSnapshotRuns.Load()).
+			Int64("persistentLinkNodes", s.PersistentLinkNodes.Load()).
+			Int64("reachabilityEdges", s.ReachabilityEdges.Load()).
+			Int64("channelFrontierEntries", s.ChannelFrontierEntries.Load()).
+			Int64("linkReads", s.LinkReads.Load()).Msg("planning workload")
+	}
 	if err != nil {
 		a.log.Error().Err(err).Msg("planning failed")
 		return nil, err
@@ -329,10 +381,10 @@ func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
 // scope was mistyped, or not releasing at all. `commitErrors` is where a
 // repository states its answer.
 func (a *App) releaseBlocked(pl *plan.Plan) string {
-	if pl.Fatal() {
+	if pl.IsFatal() {
 		return "the repository cannot produce a correct plan (§16 repository-scoped error)"
 	}
-	if a.cfg.CommitErrors == config.CommitErrorsError && pl.HasErrors() {
+	if a.cfg.CommitErrors == config.CommitErrorsError && pl.IsInvalid() {
 		return `a commit message has errors and commitErrors is "error"`
 	}
 	return ""

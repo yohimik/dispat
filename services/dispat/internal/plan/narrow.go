@@ -56,9 +56,9 @@ type Narrowing struct {
 	Split    []SplitGroup
 }
 
-// Clean reports a narrowing that cost nothing: every selected package
+// IsClean reports a narrowing that cost nothing: every selected package
 // releases and no versioning group is split. It is what --strict gates on.
-func (n Narrowing) Clean() bool { return len(n.Withheld) == 0 && len(n.Split) == 0 }
+func (n Narrowing) IsClean() bool { return len(n.Withheld) == 0 && len(n.Split) == 0 }
 
 // Narrow restricts the plan to the named packages: every other releasing
 // package is marked Deselected, which is all it takes for the executor, the
@@ -83,7 +83,7 @@ func (p *Plan) Narrow(selected []string) Narrowing {
 	planned := make(map[string]bool, len(p.Order))
 	order := make([]string, 0, len(p.Order))
 	for _, name := range p.Order {
-		if rel := p.Releases[name]; rel != nil && rel.Releasing() {
+		if rel := p.Releases[name]; rel != nil && rel.IsReleasing() {
 			planned[name] = true
 			order = append(order, name)
 		}

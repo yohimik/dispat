@@ -81,8 +81,8 @@ func TestPackagesStandalonePath(t *testing.T) {
 
 	r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@0.1.0"))
-	assert.True(t, r.HasTag("cli@0.1.0"), "the standalone package releases: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"))
+	assert.True(t, r.IsTagged("cli@0.1.0"), "the standalone package releases: %v", r.TagList())
 	data, err := os.ReadFile(r.Path("cli.log"))
 	require.NoError(t, err, "cli must have run its own build, inside tools/cli")
 	assert.Equal(t, "cli-built\n", string(data))
@@ -284,7 +284,7 @@ func TestPackagesSrcNarrowsChangeDetection(t *testing.T) {
 	r.SeedPackage("packages", "plain")
 	r.Commit("feat(core,plain): first release of both")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.FileExists(t, r.Path("packages/core/CHANGELOG.md"),
 		"the changelog is still written in the package folder, outside src")
 
@@ -298,19 +298,19 @@ func TestPackagesSrcNarrowsChangeDetection(t *testing.T) {
 	r.WriteFile("packages/core/lib/parser.txt", "better code\n")
 	r.Commit("fix: tighten the parser")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.1"), "a change inside src releases as before; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.1"), "a change inside src releases as before; tags: %v", r.TagList())
 
 	// A package that declares no src keeps its whole folder.
 	r.WriteFile("packages/plain/docs/guide.md", "prose\n")
 	r.Commit("fix: document plain")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("plain@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("plain@0.1.1"), "tags: %v", r.TagList())
 
 	// Naming the package by scope reaches it wherever the files are.
 	r.WriteFile("packages/core/docs/guide.md", "final prose\n")
 	r.Commit("fix(core): the scope always addresses the package")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.2"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.2"), "tags: %v", r.TagList())
 }
 
 // TestPackagesSrcMustNameAFolder: a src that can never match narrows the

@@ -52,7 +52,7 @@ func TestMultiRefMergesObjectFragments(t *testing.T) {
 	r.Commit("feat(core): first release")
 
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Contains(t, res.Stdout, "building locally", "the later file wins the key it shares")
 	assert.Contains(t, res.Stdout, "publishing", "and the key only the first file wrote survives")
 

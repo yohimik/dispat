@@ -36,7 +36,7 @@ import (
 // is decided: `dispat autowriter` resolves a dependency name onto a package
 // through this index too, and a second answer to "whose manifest name is this"
 // is exactly the kind of drift the index exists to prevent.
-func WorkspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log zerolog.Logger) (names, dirs map[string]string) {
+func WorkspaceNames(ctx context.Context, sc scanner.Scannerx, p *plan.Plan, log zerolog.Logger) (names, dirs map[string]string) {
 	owners := make([]scanner.Owner, 0, len(p.Order))
 	dirs = make(map[string]string, len(p.Order))
 	for _, name := range p.Order {
@@ -47,7 +47,11 @@ func WorkspaceNames(ctx context.Context, sc scanner.Scanner, p *plan.Plan, log z
 		dirs[filepath.Clean(rel.Pkg.Dir)] = name
 		mans, err := sc.ScanRoot(ctx, rel.Pkg.Dir)
 		if err != nil {
-			log.Debug().Err(err).Str("package", name).Msg("auto-versioning: root manifest failed to parse")
+			// Warn, not debug: the manifest that did not parse is missing from
+			// the name index every later reconciliation reads, so a consumer
+			// naming this package can silently go unversioned. That is a
+			// recoverable condition an operator has to be able to see.
+			log.Warn().Err(err).Str("package", name).Msg("auto-versioning: root manifest failed to parse")
 		}
 		owners = append(owners, scanner.Owner{Package: name, Names: rel.Pkg.ManifestNames, Manifests: mans})
 	}
@@ -105,7 +109,7 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr // interrupted mid-stage: no more rewrites
 		}
-		if !writer.Supported(m.Path) && m.Ecosystem != scanner.EcosystemAqua {
+		if !writer.IsSupported(m.Path) && m.Ecosystem != scanner.EcosystemAqua {
 			// Defensive: every scanned format has a writer today, and the
 			// fence tests keep it so. The guard stays for the day one gains a
 			// reader first.
@@ -118,8 +122,8 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 		// own version story, and stamping the release version into it would be
 		// wrong however the space scans. A path-qualified format is the one
 		// nested file that is still the package's own, because its folder is
-		// part of the format's name; see Manifest.AtPackageRoot.
-		if av.WriteVersion && m.AtPackageRoot() {
+		// part of the format's name; see Manifest.IsAtPackageRoot.
+		if av.WriteVersion && m.IsAtPackageRoot() {
 			version = tc.rel.Next.String()
 			if m.Version != "" && m.Version != tc.rel.Previous().String() && m.Version != version {
 				// §12.4: tags are authoritative; a manifest version disagreeing
@@ -263,7 +267,7 @@ func (tc *taskCtx) providerVersion(name string) (version string, prerelease, rel
 	res, ok := tc.results[name]
 	dead := ok && (res.Status == StatusFailed || res.Status == StatusSkipped || res.RecordBlocked)
 	tc.mu.Unlock()
-	if pr.Releasing() && !dead {
+	if pr.IsReleasing() && !dead {
 		return pr.Next.String(), pr.IsPrerelease(), true
 	}
 	if pr.HasBaseline {
@@ -289,7 +293,7 @@ type AutoVersioner struct {
 
 // NewAutoVersioner prepares the reconciliation for one plan. A nil scanner
 // defaults to the filesystem scanner.
-func NewAutoVersioner(ctx context.Context, p *plan.Plan, sc scanner.Scanner, log zerolog.Logger) *AutoVersioner {
+func NewAutoVersioner(ctx context.Context, p *plan.Plan, sc scanner.Scannerx, log zerolog.Logger) *AutoVersioner {
 	if sc == nil {
 		sc = scanner.New()
 	}
@@ -319,9 +323,9 @@ func (v *AutoVersioner) Package(ctx context.Context, rel *plan.Release, policy f
 	return nil
 }
 
-// Changed reports whether the package's manifests were actually modified,
+// IsChanged reports whether the package's manifests were actually modified,
 // which is what a caller keys syncLock off, exactly as the executor does.
-func (v *AutoVersioner) Changed(pkg string) bool {
+func (v *AutoVersioner) IsChanged(pkg string) bool {
 	v.run.mu.Lock()
 	defer v.run.mu.Unlock()
 	return v.run.avChanged[pkg]
@@ -405,7 +409,7 @@ func matchAny(globs []string, rng string) bool {
 		return true
 	}
 	for _, g := range globs {
-		if plan.GlobMatch(g, rng) {
+		if plan.IsGlobMatch(g, rng) {
 			return true
 		}
 	}

@@ -54,13 +54,13 @@ func TestVersionGroupSparseAcrossSpaces(t *testing.T) {
 	r.Commit("feat(lib1): moves only itself")
 
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app1@"), "sparse: an untouched member does not ride; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride, so nothing to explain")
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "no ride, so nothing to explain")
 
 	r.CommitEmpty("feat(app1): now app1 moves")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.2.0"),
+	assert.True(t, r.IsTagged("app1@0.2.0"),
 		"the member joins at the group's next version, skipping 0.1.0; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("lib1@"), "the other member sat this one out")
 
@@ -77,23 +77,23 @@ func TestVersionGroupPartialSparseAcrossSpaces(t *testing.T) {
 	r.Commit("feat(lib1): begin")
 	r.CommitEmpty("feat(app1): begin")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("app1@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app1@0.1.0"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(lib1): a patch below the shared part")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.1"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("app1@"), "a patch never crosses a major.minor group")
 
 	r.CommitEmpty("feat(lib1): a minor moves the shared part")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.2.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("app1@"), "sparse: the other space still does not ride")
-	assert.False(t, harness.HasCode(res.Events, "W234"))
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"))
 
 	r.CommitEmpty("fix(app1): the laggard changes at last")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.2.0"),
+	assert.True(t, r.IsTagged("app1@0.2.0"),
 		"the member joins at the group's shared part; tags: %v", r.TagList())
 }
 
@@ -112,14 +112,14 @@ func TestVersionGroupMemberOverrideLeavesTheGroup(t *testing.T) {
 	r.Commit("feat(lib1): moves the group, not the detached member")
 
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app1@"), "the overridden member no longer rides; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W234"))
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"))
 
 	// Its own change versions it on its own line, not at the group's next.
 	r.CommitEmpty("feat(app1): its own first release")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.1.0"),
+	assert.True(t, r.IsTagged("app1@0.1.0"),
 		"independent: app1 starts its own line instead of joining the group at 0.2.0; tags: %v", r.TagList())
 }
 
@@ -132,18 +132,18 @@ func TestVersionGroupPrereleaseTrain(t *testing.T) {
 	r.Commit("feat(lib1)%beta: begin the train")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0-beta.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.1.0-beta.0"), "the ride shares the train; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0-beta.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.1.0-beta.0"), "the ride shares the train; tags: %v", r.TagList())
 
 	r.CommitEmpty("feat(lib1)%beta: more on the train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0-beta.1"), "one shared counter; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.1.0-beta.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0-beta.1"), "one shared counter; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.1.0-beta.1"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(lib1)%beta>stable: graduate the train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0"), "graduated; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.1.0"), "the whole group graduates together; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0"), "graduated; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.1.0"), "the whole group graduates together; tags: %v", r.TagList())
 
 	// One window, two channels: the group moves as one, and the member whose
 	// channel lost is told so. rc rather than alpha, because a train can only
@@ -151,7 +151,7 @@ func TestVersionGroupPrereleaseTrain(t *testing.T) {
 	r.CommitEmpty("feat(lib1)%beta: the next train")
 	r.CommitEmpty("feat(app1)%rc: asks for another channel")
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCode(res.Events, "W236"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W236"),
 		"divergent member channels while the group moves are said out loud: %s", res.Stdout)
 }
 
@@ -178,17 +178,17 @@ func TestGroupFilterPartialMode(t *testing.T) {
 	r.Commit("feat(lib1)!: a breaking change")
 
 	res := r.ReleaseOK("--group", "platform")
-	assert.True(t, r.HasTag("lib1@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@1.0.0"), "the shared major moves both spaces; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
+	assert.True(t, r.IsTagged("lib1@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@1.0.0"), "the shared major moves both spaces; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "app1"),
 		"the ride is explained: %s", res.Stdout)
 
 	r.CommitEmpty("feat(lib1): a minor of lib1's own")
 	res = r.ReleaseOK("--group", "platform")
-	assert.True(t, r.HasTag("lib1@1.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@1.1.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("app1@"),
 		"below the shared major the members stay independent, --group or not")
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride below the shared major")
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "no ride below the shared major")
 
 	r.ReleaseOK("--group", "platform")
 	assert.Len(t, r.TagList(), 3, "converged")
@@ -209,8 +209,8 @@ func TestVersionGroupDivergentTagFormats(t *testing.T) {
 	r.Commit("feat(lib1): moves the whole group")
 
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1-v0.1.0"), "libs spells its tags its own way; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.1.0"), "svc keeps the default spelling; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1-v0.1.0"), "libs spells its tags its own way; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.1.0"), "svc keeps the default spelling; tags: %v", r.TagList())
 	for _, e := range res.Events {
 		assert.NotEqual(t, "error", e["level"], "one version, two spellings, no error: %+v", e)
 	}
@@ -222,18 +222,18 @@ func TestVersionGroupDivergentTagFormats(t *testing.T) {
 	// one shared counter, one graduation.
 	r.CommitEmpty("feat(lib1)%rc: board the train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1-v0.2.0-rc.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.2.0-rc.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1-v0.2.0-rc.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.2.0-rc.0"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(lib1)%rc: more on the train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1-v0.2.0-rc.1"), "each member reads its own spelling back; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.2.0-rc.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1-v0.2.0-rc.1"), "each member reads its own spelling back; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.2.0-rc.1"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(lib1)%rc>stable: graduate")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1-v0.2.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1-v0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.2.0"), "tags: %v", r.TagList())
 	r.ReleaseOK()
 	assert.Len(t, r.TagList(), 8, "converged after the train")
 }
@@ -250,14 +250,14 @@ func TestVersionGroupExactPinMidTrain(t *testing.T) {
 	r := seedGroupRepo(t, groupConfig(models.VersioningFixed))
 	r.Commit("feat(lib1)%rc: board the train")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("lib1@0.1.0-rc.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("app1@0.1.0-rc.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.1.0-rc.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app1@0.1.0-rc.0"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("release(lib1): jump the train\n\nRelease-As: 1.0.0-rc.0")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@1.0.0-rc.0"), "the pin moves the train; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@1.0.0-rc.0"), "and the whole group with it; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
+	assert.True(t, r.IsTagged("lib1@1.0.0-rc.0"), "the pin moves the train; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@1.0.0-rc.0"), "and the whole group with it; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "app1"),
 		"the ride is explained: %s", res.Stdout)
 
 	// A plain graduation computes 0.1.0 off the stable baseline, which sits
@@ -265,14 +265,14 @@ func TestVersionGroupExactPinMidTrain(t *testing.T) {
 	r.CommitEmpty("fix(lib1)%rc>stable: graduate")
 	blocked := r.Release()
 	assert.NotEqual(t, 0, blocked.Code, "a backwards graduation is repository-scoped")
-	assert.True(t, harness.HasCode(blocked.Events, "E185"), "out: %s", blocked.Stdout)
+	assert.True(t, harness.IsCodePresent(blocked.Events, "E185"), "out: %s", blocked.Stdout)
 	assert.Equal(t, 2, r.TagCount("lib1@"), "nothing released; tags: %v", r.TagList())
 
 	// The remedy the diagnostic reference names: pin the graduation.
 	r.CommitEmpty("release(lib1)%rc>stable: graduate at the pin\n\nRelease-As: 1.0.0")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@1.0.0"), "the train graduates where the pin put it; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@1.0.0"), "the train graduates where the pin put it; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@1.0.0"), "tags: %v", r.TagList())
 
 	r.ReleaseOK()
 	assert.Equal(t, 3, r.TagCount("lib1@"), "converged: %v", r.TagList())
@@ -286,17 +286,17 @@ func TestVersionGroupSparseMemberPin(t *testing.T) {
 	r := seedGroupRepo(t, groupConfig(models.VersioningFixedSparse))
 	r.Commit("feat(lib1): begin")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.1.0"), "tags: %v", r.TagList())
 	require.Zero(t, r.TagCount("app1@"), "sparse: nothing rides")
 
 	r.CommitEmpty("release(lib1): jump\n\nRelease-As: 1.0.0")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@1.0.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app1@"), "a pin does not back-fill a sparse member; tags: %v", r.TagList())
 
 	r.CommitEmpty("feat(app1): the laggard changes at last")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@1.1.0"),
+	assert.True(t, r.IsTagged("app1@1.1.0"),
 		"the member joins above the pin, skipping what it sat out; tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("lib1@"), "the pinned member sat this one out")
 }
@@ -316,7 +316,7 @@ func TestVersionGroupNoneMemberIsScriptOnly(t *testing.T) {
 	r.Commit("feat(lib1): moves the group\n---\nfeat(app1): script-only work")
 
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app1@"), "a none package is never tagged; tags: %v", r.TagList())
 	line := harness.GraphLine(res.Events, "app1")
 	assert.Contains(t, line.Str("message"), "script-only",
@@ -353,21 +353,21 @@ func TestVersionGroupMixedDepthTrain(t *testing.T) {
 	r.Commit("feat(lib1)%rc: a minor only the deeper mode shares")
 
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCode(res.Events, "W237"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W237"),
 		"the mixed depth must be reported: %s", res.Stdout)
-	assert.True(t, r.HasTag("lib1@0.1.0-rc.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.1.0-rc.0"),
+	assert.True(t, r.IsTagged("lib1@0.1.0-rc.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.1.0-rc.0"),
 		"the deepest depth shares the minor, so the train carries both; tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(lib1)%rc: more on the train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0-rc.1"), "one shared counter; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.1.0-rc.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0-rc.1"), "one shared counter; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.1.0-rc.1"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(lib1)%rc>stable: graduate")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("lib1@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app1@0.1.0"), "the whole group graduates; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("lib1@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.1.0"), "the whole group graduates; tags: %v", r.TagList())
 }
 
 // TestVersionGroupPartialReleaseCatchesUp: a run that dies between two
@@ -392,16 +392,16 @@ func TestVersionGroupPartialReleaseCatchesUp(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "app1's leg must fail the run\nstdout:\n%s", res.Stdout)
-	require.True(t, r.HasTag("lib1@0.1.0"), "lib1 published before the death; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.1.0"), "lib1 published before the death; tags: %v", r.TagList())
 	require.Zero(t, r.TagCount("app1@"), "app1's leg died; tags: %v", r.TagList())
 
 	require.NoError(t, os.Remove(r.Path("fail-app1")))
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.1.0"),
+	assert.True(t, r.IsTagged("app1@0.1.0"),
 		"app1 catches up at the version that already carries its work; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("lib1@"),
 		"lib1 published this work already and must not be re-released; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W234"),
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"),
 		"the catch-up releases app1's own commits; there is no ride to explain")
 
 	r.ReleaseOK()
@@ -450,16 +450,16 @@ func TestVersionGroupPartialReleaseCatchUpAcrossModes(t *testing.T) {
 			require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
 			res := r.Release()
 			require.Equal(t, 1, res.Code, "app1's leg must fail\nstdout:\n%s", res.Stdout)
-			require.True(t, r.HasTag("lib1@"+tc.published), "tags: %v", r.TagList())
+			require.True(t, r.IsTagged("lib1@"+tc.published), "tags: %v", r.TagList())
 			require.Zero(t, r.TagCount("app1@"+tc.published), "tags: %v", r.TagList())
 
 			require.NoError(t, os.Remove(r.Path("fail-app1")))
 			res = r.ReleaseOK()
-			assert.True(t, r.HasTag("app1@"+tc.published),
+			assert.True(t, r.IsTagged("app1@"+tc.published),
 				"%s: the laggard joins at the published version; tags: %v", tc.mode, r.TagList())
 			assert.Equal(t, 1, r.TagCount("lib1@"+tc.published),
 				"%s: the holder is not re-released; tags: %v", tc.mode, r.TagList())
-			assert.False(t, harness.HasCode(res.Events, "W234"),
+			assert.False(t, harness.IsCodePresent(res.Events, "W234"),
 				"%s: the laggard releases its own commits, nobody rides", tc.mode)
 
 			before := len(r.TagList())
@@ -493,12 +493,12 @@ func TestVersionGroupCauselessLaggardRidesToThePublishedVersion(t *testing.T) {
 	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "the ride must fail\nstdout:\n%s", res.Stdout)
-	require.True(t, r.HasTag("lib1@0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.2.0"), "tags: %v", r.TagList())
 
 	require.NoError(t, os.Remove(r.Path("fail-app1")))
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.2.0"), "tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app1"),
+	assert.True(t, r.IsTagged("app1@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "app1"),
 		"a cause-less catch-up is a ride, and the ride is explained")
 	assert.Equal(t, 1, r.TagCount("lib1@0.2.0"), "the holder is not re-released; tags: %v", r.TagList())
 
@@ -528,15 +528,15 @@ func TestVersionGroupPartialReleaseTwoLaggards(t *testing.T) {
 	require.NoError(t, os.WriteFile(r.Path("fail-app2"), nil, 0o644))
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
-	require.True(t, r.HasTag("lib1@0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.2.0"), "tags: %v", r.TagList())
 
 	require.NoError(t, os.Remove(r.Path("fail-app1")))
 	require.NoError(t, os.Remove(r.Path("fail-app2")))
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.2.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app2@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app1@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app2@0.2.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("lib1@0.2.0"), "tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W234"), "both laggards carry their own commits")
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "both laggards carry their own commits")
 
 	before := len(r.TagList())
 	r.ReleaseOK()
@@ -562,16 +562,16 @@ func TestVersionGroupPartialReleaseNewerWorkMovesOn(t *testing.T) {
 	r.CommitEmpty("feat(lib1, app1): shared work, app1's leg will die")
 	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
 	require.Equal(t, 1, r.Release().Code)
-	require.True(t, r.HasTag("lib1@0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.2.0"), "tags: %v", r.TagList())
 	require.NoError(t, os.Remove(r.Path("fail-app1")))
 
 	r.CommitEmpty("feat(app1): new work since the partial release")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.3.0"),
+	assert.True(t, r.IsTagged("app1@0.3.0"),
 		"fresh work owns the next minor; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("lib1@0.3.0"),
+	assert.True(t, r.IsTagged("lib1@0.3.0"),
 		"the moved prefix takes the group along; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "lib1"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "lib1"),
 		"lib1's re-release is a ride this time, and it is explained")
 	assert.Zero(t, r.TagCount("app1@0.2.0"),
 		"the laggard never lands on the version it skipped past; tags: %v", r.TagList())
@@ -600,13 +600,13 @@ func TestVersionGroupTrainPartialReleaseAdvancesTheTrain(t *testing.T) {
 	require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
-	require.True(t, r.HasTag("lib1@0.2.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.2.0-beta.0"), "tags: %v", r.TagList())
 
 	require.NoError(t, os.Remove(r.Path("fail-app1")))
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("app1@0.2.0-beta.1"),
+	assert.True(t, r.IsTagged("app1@0.2.0-beta.1"),
 		"the laggard boards at the train's next stop; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("lib1@0.2.0-beta.1"),
+	assert.True(t, r.IsTagged("lib1@0.2.0-beta.1"),
 		"the holder rides the advanced train beside it; tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app1@0.2.0-beta.0"),
 		"the published prerelease is the holder's alone; tags: %v", r.TagList())

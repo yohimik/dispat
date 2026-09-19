@@ -29,7 +29,7 @@ var bootLog atomic.Pointer[zerolog.Logger]
 // configured logger is built from the file this is about to load.
 func UseLogger(l zerolog.Logger) { bootLog.Store(&l) }
 
-// bootLogger is the pkg/config Logger over whatever UseLogger last stored.
+// bootLogger is the pkg/config Loggerx over whatever UseLogger last stored.
 type bootLogger struct{}
 
 func (bootLogger) Enabled(level lib.Level) bool {
@@ -68,9 +68,9 @@ func (bootLogger) Log(level lib.Level, event string, fields ...lib.Field) {
 }
 
 // zerologLevel maps the library's levels onto zerolog's. They are the same
-// five, in the same order, which is why the mapping is a switch rather than
-// arithmetic: the day either side adds one, this fails to compile rather than
-// quietly logging at the wrong level.
+// five, in the same order. An explicit switch keeps the mapping readable
+// without depending on either package's numeric values; unknown levels use
+// debug until their meaning is defined here.
 func zerologLevel(level lib.Level) zerolog.Level {
 	switch level {
 	case lib.LevelTrace:

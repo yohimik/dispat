@@ -28,8 +28,8 @@ func (k Kind) String() string {
 	return string(k)
 }
 
-// Valid reports whether k is one of the four dependency kinds.
-func (k Kind) Valid() bool {
+// IsValid reports whether k is one of the four dependency kinds.
+func (k Kind) IsValid() bool {
 	switch k {
 	case KindDependencies, KindDevDependencies, KindPeerDependencies, KindOptionalDependencies:
 		return true

@@ -103,17 +103,17 @@ func (r *Rules) Decide(rel string) (matched, ignored bool) {
 	return false, false
 }
 
-// Match reports whether rel is ignored by these patterns alone.
-func (r *Rules) Match(rel string) bool {
+// IsMatch reports whether rel is ignored by these patterns alone.
+func (r *Rules) IsMatch(rel string) bool {
 	matched, ignored := r.Decide(rel)
 	return matched && ignored
 }
 
 func (r rule) matches(rel, base string) bool {
-	if globx.Match(r.pattern, rel) {
+	if globx.IsMatch(r.pattern, rel) {
 		return true
 	}
-	if r.bare && globx.Match(r.pattern, base) {
+	if r.bare && globx.IsMatch(r.pattern, base) {
 		return true
 	}
 	if !r.dirOnly {
@@ -131,7 +131,7 @@ func (r rule) matches(rel, base string) bool {
 		if i < 0 {
 			return false // the last segment is the file, not a folder
 		}
-		if globx.Match(r.pattern, rest[:i]) {
+		if globx.IsMatch(r.pattern, rest[:i]) {
 			return true
 		}
 		rest = rest[i+1:]
@@ -155,11 +155,11 @@ type Layer struct {
 // their own.
 type Chain []Layer
 
-// Ignores reports whether the file at the absolute slash-separated path is
+// IsIgnored reports whether the file at the absolute slash-separated path is
 // ignored for the package this chain belongs to. Later layers are nearer the
 // package, so each one that has something to say overrules the ones before
 // it, and a layer that says nothing leaves their verdict standing.
-func (c Chain) Ignores(file string) bool {
+func (c Chain) IsIgnored(file string) bool {
 	ignored := false
 	for _, l := range c {
 		rel, ok := Relative(l.Dir, file)

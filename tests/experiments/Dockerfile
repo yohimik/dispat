@@ -21,8 +21,12 @@
 #   docker run --rm -v "$PWD/coverage/experiments:/results" dispat-experiments midrelease dispat
 ARG DISPAT_VERSION=1.7.1
 ARG NODE_VERSION=22
+ARG DISPAT_BINARY_SOURCE=shipped-binary
 
 FROM docker.io/yohimik/dispat-alpine:${DISPAT_VERSION} AS official
+FROM official AS shipped-binary
+RUN cp /usr/local/bin/dispat /dispat
+FROM ${DISPAT_BINARY_SOURCE} AS selected-binary
 
 FROM node:${NODE_VERSION}-slim AS runtime
 RUN apt-get update \
@@ -40,7 +44,14 @@ RUN cd /opt/tools && npm ci --no-audit --no-fund \
  && npm cache clean --force >/dev/null 2>&1
 ENV PATH=/opt/tools/node_modules/.bin:$PATH
 
-COPY --from=official /usr/local/bin/dispat /usr/local/bin/dispat
+# `candidate-binary` can be supplied as a named build context containing a
+# file named /dispat. The default remains the immutable bytes copied from the
+# shipped image above.
+ARG DISPAT_BINARY_ID=shipped
+COPY --from=selected-binary /dispat /usr/local/bin/dispat
+RUN sha256sum /usr/local/bin/dispat | cut -d' ' -f1 > /etc/dispat-experiments-binary.sha256
+ENV EXPERIMENTS_DISPAT_BINARY_ID=${DISPAT_BINARY_ID}
+LABEL dev.dispat.experiments.binary-id=${DISPAT_BINARY_ID}
 
 # The identity every fixture repository commits under, and the dispat
 # defaults an unattended run needs.
@@ -56,6 +67,7 @@ ENV DISPAT_UPDATE_CHECK=0 \
 COPY lib /exp/lib
 COPY orphan /exp/orphan
 COPY midrelease /exp/midrelease
+COPY propagation /exp/propagation
 COPY run.sh /exp/run.sh
 COPY dispat.yaml /exp/dispat.yaml
 RUN chmod +x /exp/run.sh /exp/lib/git-shim

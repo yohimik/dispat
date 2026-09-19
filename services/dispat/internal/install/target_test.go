@@ -20,8 +20,8 @@ type fakeEnv struct {
 	goos     string
 }
 
-func (e fakeEnv) Getenv(key string) string { return e.vars[key] }
-func (e fakeEnv) Writable(dir string) bool { return e.writable[dir] }
+func (e fakeEnv) Getenv(key string) string   { return e.vars[key] }
+func (e fakeEnv) IsWritable(dir string) bool { return e.writable[dir] }
 func (e fakeEnv) GOOS() string {
 	if e.goos == "" {
 		return "linux"
@@ -283,19 +283,19 @@ func TestOSEnvironmentAnswersTheRealMachine(t *testing.T) {
 	assert.Empty(t, env.Getenv("DISPAT_NOTHING_SETS_THIS"))
 
 	dir := t.TempDir()
-	assert.True(t, env.Writable(dir))
-	assert.False(t, env.Writable(filepath.Join(dir, "absent")))
-	assert.False(t, env.Writable(filepath.Join(dir, "..")+string(filepath.Separator)+"absent"))
+	assert.True(t, env.IsWritable(dir))
+	assert.False(t, env.IsWritable(filepath.Join(dir, "absent")))
+	assert.False(t, env.IsWritable(filepath.Join(dir, "..")+string(filepath.Separator)+"absent"))
 
 	file := filepath.Join(dir, "file")
 	require.NoError(t, os.WriteFile(file, nil, 0o644))
-	assert.False(t, env.Writable(file), "a file is not a folder to install into")
+	assert.False(t, env.IsWritable(file), "a file is not a folder to install into")
 
 	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
 		locked := t.TempDir()
 		require.NoError(t, os.Chmod(locked, 0o500))
 		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
-		assert.False(t, env.Writable(locked))
+		assert.False(t, env.IsWritable(locked))
 	}
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)

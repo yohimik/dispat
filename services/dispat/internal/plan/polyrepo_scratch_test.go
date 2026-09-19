@@ -35,6 +35,9 @@ func TestReleaseWorkspaceScratchPreservesPlanAncestry(t *testing.T) {
 		repositoryReach:         map[string][]string{"app": {"source"}},
 		controlInputs:           map[string]bool{"app": true},
 		windowRefs:              map[string][]map[string]bool{"app": {{historyKey("source", "source2"): true}}},
+		windowKeys:              map[string][]string{"app": {historyKey("source", "source2")}},
+		windowKey:               map[string]string{"app": "commit:source2"},
+		windowAuthors:           map[windowIdentity]windowAuthorSet{{window: "commit:source2"}: {}},
 		publishedBoundaries:     map[string]map[string]string{"app": {"source": historyKey("source", "source2")}},
 		stableTags:              map[string]gitx.Tag{"app": {Name: "app@1.0.0"}},
 		latestTags:              map[string]gitx.Tag{"app": {Name: "app@1.0.0"}},
@@ -64,6 +67,9 @@ func TestReleaseWorkspaceScratchPreservesPlanAncestry(t *testing.T) {
 	assert.Nil(t, cp.repositoryReach)
 	assert.Nil(t, cp.controlInputs)
 	assert.Nil(t, cp.windowRefs)
+	assert.Nil(t, cp.windowAuthors)
+	assert.Nil(t, cp.windowKeys)
+	assert.Nil(t, cp.windowKey)
 	assert.Nil(t, cp.publishedBoundaries)
 	assert.Nil(t, cp.stableTags)
 	assert.Nil(t, cp.latestTags)
@@ -81,6 +87,6 @@ func TestReleaseWorkspaceScratchPreservesPlanAncestry(t *testing.T) {
 		"same-owner ancestry remains available")
 	assert.True(t, cp.ancestorOrSelf(historyKey("source", "source1"), historyKey("control", "control1")),
 		"the retained control snapshot still observes its source pin")
-	assert.False(t, pl.PossiblyBehind("app", "lib"),
+	assert.False(t, pl.IsPossiblyBehind("app", "lib"),
 		"the public plan helper retains its stable boundary and ancestry callback")
 }

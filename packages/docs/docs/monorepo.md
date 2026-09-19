@@ -69,6 +69,14 @@ gitlink snapshot. In pointer-history mode, control commits describe pointer move
 propagate versions across the combined graph while the code stays where it is.
 [A control repository for many repositories](./control-repository.md) explains this pattern and its costs.
 
+## Joining repositories as peers
+
+You do not have to add a repository to get the graph. With `saga: choreography`, every repository is a peer that keeps
+its own configuration and release records, two-sided submodule links join the peers, and a run started in any of them
+composes the whole fleet. The trade is symmetry against central control: no commit can address the fleet as a whole,
+because every unit is read against the repository that carries it.
+[A choreographed fleet](./choreographed-repositories.md) explains the keys, the links and the boundaries.
+
 ## dispat in a single-project repository
 
 dispat does not require more than one package. A repository delivering one thing declares one standalone entry to get

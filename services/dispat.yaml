@@ -13,6 +13,11 @@ scripts:
     docker buildx build --file ../../Dockerfile.gotest --target vet-$DISPAT_PACKAGE
     $(sh ../../scripts/buildx-cache.sh vet-$DISPAT_PACKAGE)
     --output type=cacheonly ../..
+  # The record step this space alone writes mid-run. The changelog entry and
+  # the commit are named by four publishes across the repository and stay at
+  # the top level; the release page mid-run is this space's own, so it is
+  # declared here rather than above packages that never call it.
+  github: dispat github
 # The CLI's publish is its records: changelog, the leg's commit with the tag
 # pushed (go.mod already pinning the pkg/* tags the earlier legs pushed), and
 # the GitHub release with the binaries attached — created here, mid-run,

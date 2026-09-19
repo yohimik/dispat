@@ -235,7 +235,16 @@ const (
 	CodeCommitRefUnavailable = "W240"
 
 	// CodeRepositoryBoundary reports a missing, ambiguous, conflicting or
-	// unreachable cross-repository consumer baseline (§27.6).
+	// unreachable cross-repository consumer baseline (§27.6). The same code
+	// covers the other way a control position can fail to line up with a
+	// source: an applicable control unit whose own gitlink snapshot pins a
+	// revision the active source checkout does not contain, so the intent
+	// would be projected onto code that never carried the snapshot it was
+	// written against (validateControlProjectionHeads). Both are the one
+	// question "where does this source sit relative to that control
+	// position", and both are unanswerable rather than merely inconvenient,
+	// which is why they share a repository-scoped code instead of splitting
+	// into two an operator would have to learn separately.
 	CodeRepositoryBoundary = "E333"
 	// CodeRepositoryPrecedence reports incomparable source revisions where a
 	// semantic rule requires one winner and no causal control directive does.
@@ -773,9 +782,9 @@ type Release struct {
 // unit (§7.4, §13.10).
 func (r *Release) UnitCorrects(u *ccme.Unit) []string { return r.Corrects[u] }
 
-// UnitSuppressed reports a unit whose changelog entry a revert suppressed
+// IsUnitSuppressed reports a unit whose changelog entry a revert suppressed
 // (§7.3).
-func (r *Release) UnitSuppressed(u *ccme.Unit) bool { return r.SuppressedNotes[u] }
+func (r *Release) IsUnitSuppressed(u *ccme.Unit) bool { return r.SuppressedNotes[u] }
 
 // AuthorsFor returns who the unit is by, empty for a unit nothing attributed.
 func (r *Release) AuthorsFor(u *ccme.Unit) []Author { return r.UnitAuthors[u] }
@@ -888,8 +897,8 @@ func (r *Release) Previous() ccme.Version {
 	return r.Current
 }
 
-// ChannelChanged reports whether the package is moving between channels.
-func (r *Release) ChannelChanged() bool { return r.Channel != r.BaselineChannel }
+// IsChannelChanged reports whether the package is moving between channels.
+func (r *Release) IsChannelChanged() bool { return r.Channel != r.BaselineChannel }
 
 // IsPrerelease reports whether the version being released carries a
 // prerelease component.
@@ -897,7 +906,7 @@ func (r *Release) IsPrerelease() bool { return r.Next.IsPrerelease() }
 
 // ChannelTransition renders the channel movement the plan must display.
 func (r *Release) ChannelTransition() string {
-	if !r.ChannelChanged() {
+	if !r.IsChannelChanged() {
 		return r.Channel
 	}
 	return r.BaselineChannel + " -> " + r.Channel
@@ -910,8 +919,8 @@ func (r *Release) ChannelTransition() string {
 // commits its baseline already contains is NOT changed — that work shipped in
 // the baseline prerelease, and re-admitting it would re-release the train on
 // every run.
-func (r *Release) Changed() bool {
-	return (r.Bump != ccme.BumpNone && r.NewWork) || r.ChannelChanged() || r.Pinned || r.FixedRide
+func (r *Release) IsChanged() bool {
+	return (r.Bump != ccme.BumpNone && r.NewWork) || r.IsChannelChanged() || r.Pinned || r.FixedRide
 }
 
 // NotesUnits returns the units the release's *notes* — the changelog entry,
@@ -947,11 +956,11 @@ func (r *Release) NotesUnits() []*ccme.Unit {
 	return out
 }
 
-// NoChanges reports whether the release carries no content of its own — no
+// IsWithoutChanges reports whether the release carries no content of its own — no
 // units, no provider updates — and exists only to keep the space's fixed
 // versioning aligned. The changelog and the GitHub release render a single
 // "no changes" entry for it.
-func (r *Release) NoChanges() bool {
+func (r *Release) IsWithoutChanges() bool {
 	// NotesUnits rather than Units, mirroring what the entry renders: Units
 	// spans the whole prerelease train, so a riding member with any train
 	// history would fail this test and render an empty body instead of the
@@ -971,13 +980,13 @@ func (r *Release) SharedDepth() int {
 	return r.Pkg.Space.Versioning.SharedDepth()
 }
 
-// Releasable reports whether the package takes part in the release flow at
+// IsReleasable reports whether the package takes part in the release flow at
 // all: false only under versioning "none", whose packages exist to run
 // scripts and are never versioned, tagged or published. Nil-safe like
 // SharedDepth, and permanent where Held is per-run: a held package keeps a
 // computed version waiting, a none package never has one.
-func (r *Release) Releasable() bool {
-	return r.Pkg == nil || r.Pkg.Space == nil || r.Pkg.Space.Versioning.Releasable()
+func (r *Release) IsReleasable() bool {
+	return r.Pkg == nil || r.Pkg.Space == nil || r.Pkg.Space.Versioning.IsReleasable()
 }
 
 // Releasing reports whether the package is in this run's plan: it is
@@ -990,16 +999,16 @@ func (r *Release) Releasable() bool {
 // workspace environment, auto-versioning's provider ranges, the finalize phase
 // and the summary all ask it, which is what makes narrowing a plan a single
 // decision rather than a condition repeated in five places.
-func (r *Release) Releasing() bool {
-	return r.Changed() && !r.Held && !r.Deselected && r.Releasable()
+func (r *Release) IsReleasing() bool {
+	return r.IsChanged() && !r.Held && !r.Deselected && r.IsReleasable()
 }
 
-// RunsScripts reports whether the package sits in the default script window:
+// IsInScriptWindow reports whether the package sits in the default script window:
 // releasing, or a changed versioning-none package the selection kept. Run
 // scripts are the one thing a none package exists for, so the window that
 // would otherwise be exactly the plan admits it too.
-func (r *Release) RunsScripts() bool {
-	return r.Releasing() || (!r.Releasable() && r.Changed() && !r.Deselected)
+func (r *Release) IsInScriptWindow() bool {
+	return r.IsReleasing() || (!r.IsReleasable() && r.IsChanged() && !r.Deselected)
 }
 
 // TagFormat is the release tag template of the package's space, or the
@@ -1122,7 +1131,7 @@ func (r *Release) Reason() string {
 			return "channel from " + r.ChannelFrom
 		}
 		return "channel " + r.ChannelTransition()
-	case r.FreshOwnBump():
+	case r.IsFreshOwnBump():
 		return "direct"
 	case len(r.DueTo) > 0:
 		return "propagated from " + strings.Join(r.DueTo, ", ")
@@ -1145,7 +1154,7 @@ func (r *Release) Reason() string {
 // explain why the package is releasing again. Exported because the
 // executor's skip cascade asks the same question: whether the package has a
 // reason of its own for *this* release.
-func (r *Release) FreshOwnBump() bool {
+func (r *Release) IsFreshOwnBump() bool {
 	for _, u := range r.FreshUnits {
 		if u.Bump != ccme.BumpNone {
 			return true
@@ -1180,10 +1189,10 @@ type Plan struct {
 	stableBoundaries map[string]map[string]string
 }
 
-// HasErrors reports whether any error-severity diagnostic was raised, of any
+// IsInvalid reports whether any error-severity diagnostic was raised, of any
 // blast radius. Whether that stops the run is a policy question the caller
 // answers; see Fatal for the errors that stop it regardless.
-func (p *Plan) HasErrors() bool {
+func (p *Plan) IsInvalid() bool {
 	for _, d := range p.Diagnostics {
 		if d.Level == LevelError {
 			return true
@@ -1192,11 +1201,11 @@ func (p *Plan) HasErrors() bool {
 	return false
 }
 
-// Fatal reports whether any repository-scoped error was raised. These abort
+// IsFatal reports whether any repository-scoped error was raised. These abort
 // the run whatever the configured policy: they mean no correct plan exists, so
 // emitting a partial release would be releasing something nobody computed
 // (§16).
-func (p *Plan) Fatal() bool {
+func (p *Plan) IsFatal() bool {
 	for _, d := range p.Diagnostics {
 		if d.Level == LevelError && IsRepositoryScoped(d.Code) {
 			return true
@@ -1212,7 +1221,7 @@ func (p *Plan) Fatal() bool {
 func (p *Plan) Releasing() []*Release {
 	out := make([]*Release, 0, len(p.Order))
 	for _, name := range p.Order {
-		if r := p.Releases[name]; r != nil && r.Releasing() {
+		if r := p.Releases[name]; r != nil && r.IsReleasing() {
 			out = append(out, r)
 		}
 	}
@@ -1265,7 +1274,7 @@ func (p *Plan) StaleSources(pkg string) []StaleSource {
 // the units between the two tags may all be `^none`, or `+0`, or scoped away,
 // or reach the consumer only beyond their declared depth, or travel only over
 // devDependencies edges. Use it to find candidates; use the plan to decide.
-func (p *Plan) PossiblyBehind(consumer, provider string) bool {
+func (p *Plan) IsPossiblyBehind(consumer, provider string) bool {
 	c, pr := p.Releases[consumer], p.Releases[provider]
 	if c == nil || pr == nil || pr.StableCommit == "" {
 		return false
@@ -1385,13 +1394,18 @@ type Options struct {
 	Repositories map[string]RepositoryHistory
 	// RepositoryBaselines are explicit cross-repository release boundaries.
 	RepositoryBaselines []RepositoryBaseline
+	// LinkEvidence reads cross-repository boundaries from the fleet links
+	// rather than from a control repository's checkpoints. It is what a
+	// choreographed fleet sets, and it is false for every other plan, which
+	// keeps the control checkpoint the only evidence they have ever used.
+	LinkEvidence bool
 	// HistoryStats optionally receives operation counts for scale tests.
 	HistoryStats *HistoryStats
 }
 
 type computation struct {
 	ctx      context.Context
-	git      gitx.Git
+	git      gitx.Gitx
 	log      zerolog.Logger
 	root     string
 	initials map[string]ccme.Version
@@ -1413,6 +1427,15 @@ type computation struct {
 	controlStates           map[string]*controlGitlinkState
 	controlPathIndex        map[string]int
 	controlPathCount        int
+	// evidence is how this computation proves a cross-repository boundary:
+	// the control checkpoints, or the fleet links. Chosen once at setup.
+	evidence boundaryEvidence
+	// linkPaths is each repository's fleet link paths, so a commit that only
+	// moved a link is not read as a change to a package.
+	linkPaths map[string]map[string]bool
+	// linkedFleet records that this computation reads a choreographed fleet,
+	// which is what makes a remedy naming a control repository wrong advice.
+	linkedFleet bool
 
 	pkgs      []*model.Package
 	scopeDirs []scopeDir // prepared once; see prepareScopeDirs
@@ -1424,10 +1447,22 @@ type computation struct {
 
 	parser *ccme.Parser
 
-	rel                 map[string]*Release
-	tags                map[string]gitx.Tags         // package -> its tag listing, newest first
-	window              map[string]map[string]bool   // package -> commit keys it has not released
-	windowRefs          map[string][]map[string]bool // composed package -> shared repository windows
+	rel        map[string]*Release
+	tags       map[string]gitx.Tags         // package -> its tag listing, newest first
+	window     map[string]map[string]bool   // package -> commit keys it has not released
+	windowRefs map[string][]map[string]bool // composed package -> shared repository windows
+	// windowKeys names the history views a composed package's window was
+	// assembled from, in the order they were attached; windowKey is the
+	// single-history equivalent. Both are the cache keys the loaders already
+	// compute, and packages released at the same boundaries share them, which
+	// is what windowIdentity reads.
+	windowKeys map[string][]string
+	windowKey  map[string]string
+	// windowAuthors memoises collectWindowAuthors by window identity. The
+	// author collection reads every commit of the union per package, so
+	// without this it is quadratic in a workspace whose packages share one
+	// history and in a fleet whose repositories all contribute to it.
+	windowAuthors       map[windowIdentity]windowAuthorSet
 	repositoryReach     map[string][]string
 	controlInputs       map[string]bool
 	stableBoundaries    map[string]map[string]string // package -> repository -> qualified stable boundary
@@ -1487,6 +1522,12 @@ type computation struct {
 	ancCache map[[2]string]bool
 	ancNoGit map[string]bool
 	ancErr   error
+	// pinPresent memoises the commit-presence probe behind sourceContainsPin,
+	// keyed by qualified revision. The guard asks the same question once per
+	// applicable control unit, and a fleet catching up has many of those over
+	// the same few gitlink pins; without the memo each one is a subprocess,
+	// which is the cost ancCache exists to avoid on the ancestry side.
+	pinPresent map[string]bool
 
 	diags []Diagnostic
 }
@@ -1515,7 +1556,7 @@ type computation struct {
 // reachable tags once for the workspace, then reads one bounded log range per
 // distinct window origin. Git implementations without bulk tag support retain
 // the per-package tag-query fallback.
-func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
+func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 	pkgs := opts.Packages
 	cp := &computation{
 		ctx:              ctx,
@@ -1535,6 +1576,9 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		tags:                make(map[string]gitx.Tags, len(pkgs)),
 		window:              make(map[string]map[string]bool, len(pkgs)),
 		windowRefs:          make(map[string][]map[string]bool, len(pkgs)),
+		windowKeys:          make(map[string][]string, len(pkgs)),
+		windowKey:           make(map[string]string, len(pkgs)),
+		windowAuthors:       make(map[windowIdentity]windowAuthorSet),
 		repositoryReach:     make(map[string][]string, len(pkgs)),
 		controlInputs:       make(map[string]bool, len(pkgs)),
 		stableBoundaries:    make(map[string]map[string]string, len(pkgs)),
@@ -1574,6 +1618,13 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 		if history.Control {
 			cp.controlRepo = history.Name
 		}
+	}
+	cp.prepareLinkPaths()
+	cp.linkedFleet = opts.LinkEvidence
+	if opts.LinkEvidence {
+		cp.evidence = newLinkEvidence(cp)
+	} else {
+		cp.evidence = checkpointEvidence{cp: cp}
 	}
 	for _, baseline := range opts.RepositoryBaselines {
 		repository := baseline.Repository
@@ -1678,6 +1729,7 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	if err := cp.parseAndResolve(); err != nil { // §13.4
 		return nil, err
 	}
+	cp.log.Debug().Int("commits", len(cp.commits)).Msg("plan: window units parsed and scoped")
 	if err := cp.resolveApplicableControlBoundaries(); err != nil {
 		if errors.Is(err, errFatalPlan) {
 			return cp.fatalPlan(), nil
@@ -1688,7 +1740,13 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 	cp.applyCorrections()      // §13.4b, on the stream every phase below reads
 	cp.suppressRevertedNotes() // §7.3, on the corrected stream
 	cp.resolveHolds()          // §13.6a
-	cp.directBumps()           // §13.6
+	if err := cp.validateControlProjectionHeads(); err != nil {
+		if errors.Is(err, errFatalPlan) {
+			return cp.fatalPlan(), nil
+		}
+		return nil, err
+	}
+	cp.directBumps() // §13.6
 	if err := cp.ancestryFailed(); err != nil {
 		return nil, err
 	}
@@ -1697,13 +1755,24 @@ func Compute(ctx context.Context, git gitx.Git, opts Options) (*Plan, error) {
 
 	// §13.7 is §9.2's three phases; §13.8 is invoked from inside it.
 	cp.propagateChannels() // phase 1
-	cp.resolveChannels()   // phase 2 (§13.8)
-	cp.propagateBumps()    // phase 3
+	cp.log.Debug().Int("proposals", len(cp.proposed)).Msg("plan: channel proposals propagated")
+	cp.resolveChannels() // phase 2 (§13.8)
+	cp.log.Debug().Int("channels", len(cp.channel)).Msg("plan: channels resolved")
+	cp.propagateBumps() // phase 3
+	cp.log.Debug().Msg("plan: bumps propagated")
 
 	cp.finalise()      // §13.9, §13.10
 	cp.reportCancels() // W170
 	cp.reportHeld()    // W154
 	cp.logReleases()
+	releasing := 0
+	for _, rel := range cp.rel {
+		if rel.IsReleasing() {
+			releasing++
+		}
+	}
+	cp.log.Debug().Int("packages", len(cp.order)).Int("releasing", releasing).
+		Int("diagnostics", len(cp.diags)).Msg("plan: versions computed and ordered")
 	if err := cp.ancestryFailed(); err != nil {
 		return nil, err
 	}
@@ -1731,11 +1800,21 @@ func (cp *computation) releaseWorkspaceScratch() {
 	cp.repositoryReach = nil
 	cp.controlInputs = nil
 	cp.windowRefs = nil
+	// The attribution is on the releases now, and the keys that indexed it
+	// answer no question the plan can still be asked.
+	cp.windowAuthors = nil
+	cp.windowKeys = nil
+	cp.windowKey = nil
+	cp.pinPresent = nil
 	cp.publishedBoundaries = nil
 	cp.stableTags = nil
 	cp.latestTags = nil
 	cp.controlSnapshots = nil
 	cp.controlAmbiguous = nil
+	if cp.evidence != nil {
+		cp.evidence.drop()
+	}
+	cp.linkPaths = nil
 	cp.baselines = nil
 	cp.baselineSpecs = nil
 	cp.parsers = nil
@@ -1754,7 +1833,7 @@ func (cp *computation) releaseWorkspaceScratch() {
 // specified. Scope diagnostics are deliberately not raised — this selects
 // packages to run a script over, it does not plan a release — and the names
 // come back in dependency order.
-func PackagesChangedSince(ctx context.Context, git gitx.Git, opts Options, rev string) ([]string, error) {
+func PackagesChangedSince(ctx context.Context, git gitx.Gitx, opts Options, rev string) ([]string, error) {
 	cp := &computation{
 		ctx:              ctx,
 		git:              git,
@@ -1811,23 +1890,12 @@ func PackagesChangedSince(ctx context.Context, git gitx.Git, opts Options, rev s
 			records = append(records, &commitRec{commit: commit, key: commitKey(commit), root: opts.Root})
 		}
 	} else {
-		control, ok := cp.histories[strings.ToLower(cp.controlRepo)]
-		if !ok {
-			return nil, fmt.Errorf("plan: composed history has no control repository")
-		}
-		reader, ok := control.Git.(gitlinkSnapshotReader)
-		if !ok {
-			return nil, fmt.Errorf("plan: control repository cannot project gitlinks at %q", rev)
-		}
-		links, err := reader.GitlinksAt(ctx, rev)
+		project, err := cp.projectSince(rev, opts.LinkEvidence)
 		if err != nil {
-			return nil, fmt.Errorf("plan: resolving control gitlinks at %q: %w", rev, err)
+			return nil, err
 		}
 		for _, history := range cp.histories {
-			since := links[history.Path]
-			if history.Control {
-				since = rev
-			}
+			since := project(history)
 			commits, err := history.Git.Commits(ctx, since)
 			if err != nil {
 				return nil, fmt.Errorf("plan: resolving repository %s commits since %q: %w", history.Name, since, err)
@@ -1956,6 +2024,35 @@ func (cp *computation) loadTagsAndWindows() error {
 	return cp.loadLegacyTagsAndWindows()
 }
 
+// loadPackageTags bounds both active Git calls and goroutines for backends
+// without a bulk tag inventory. Cancellation stops scheduling new queries.
+func (cp *computation) loadPackageTags(tagsFor []gitx.Tags, tagsErr []error) error {
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+schedule:
+	for i, p := range cp.pkgs {
+		if cp.ctx.Err() != nil {
+			break
+		}
+		if !(&Release{Pkg: p}).IsReleasable() {
+			continue
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-cp.ctx.Done():
+			break schedule
+		}
+		wg.Add(1)
+		go func(i int, p *model.Package) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			tagsFor[i], tagsErr[i] = cp.git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
+		}(i, p)
+	}
+	wg.Wait()
+	return cp.ctx.Err()
+}
+
 func (cp *computation) loadLegacyTagsAndWindows() error {
 	// Per-package commit lists, kept so the union can be ranked afterwards.
 	lists := make([][]gitx.Commit, 0, len(cp.pkgs))
@@ -1971,7 +2068,7 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 	}); ok {
 		formats := make(map[string]gitx.TagFormat, len(cp.pkgs))
 		for _, p := range cp.pkgs {
-			if (&Release{Pkg: p}).Releasable() {
+			if (&Release{Pkg: p}).IsReleasable() {
 				formats[p.Name] = (&Release{Pkg: p}).TagFormat()
 			}
 		}
@@ -1979,27 +2076,14 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		if err != nil {
 			return fmt.Errorf("plan: loading tags: %w", err)
 		}
+		if cp.stats != nil {
+			cp.stats.TagInventories.Add(1)
+		}
 		for i, p := range cp.pkgs {
 			tagsFor[i] = all[p.Name]
 		}
-	} else {
-		sem := make(chan struct{}, 16)
-		var wg sync.WaitGroup
-		for i, p := range cp.pkgs {
-			// A versioning-none package is never tagged, so there is nothing to
-			// query: its tags stay empty and its window is the whole history.
-			if !(&Release{Pkg: p}).Releasable() {
-				continue
-			}
-			wg.Add(1)
-			go func(i int, p *model.Package) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				tagsFor[i], tagsErr[i] = cp.git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
-			}(i, p)
-		}
-		wg.Wait()
+	} else if err := cp.loadPackageTags(tagsFor, tagsErr); err != nil {
+		return fmt.Errorf("plan: loading tags: %w", err)
 	}
 
 	// Windows are one `git log` per DISTINCT starting commit: packages whose
@@ -2073,7 +2157,7 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		default: // never stably released: the window is the whole history (§13.3)
 			// Initials seed a first release; a versioning-none package never
 			// has one, so a fabricated Current must not appear for it.
-			if init, ok := cp.initials[p.Name]; ok && rel.Releasable() {
+			if init, ok := cp.initials[p.Name]; ok && rel.IsReleasable() {
 				rel.Current, rel.FromInitials = init, true
 			}
 		}
@@ -2086,17 +2170,32 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		cacheKey := commitWindowCacheKey(rel.StableCommit, since)
 		commits, ok := commitsBySince[cacheKey]
 		if !ok {
+			// A Git implementation that ignores its context would otherwise
+			// keep reading one window per package after an interrupt. The
+			// check costs one atomic load per distinct boundary.
+			if err := cp.ctx.Err(); err != nil {
+				return fmt.Errorf("plan: loading windows: %w", err)
+			}
 			commits, err = cp.git.Commits(cp.ctx, since)
 			if err != nil {
 				return fmt.Errorf("plan: %s: %w", p.Name, err)
 			}
 			commitsBySince[cacheKey] = commits
 			lists = append(lists, commits)
+			if cp.stats != nil {
+				cp.stats.CommitWindows.Add(1)
+				cp.stats.WindowCommitRefs.Add(int64(len(commits)))
+			}
+			cp.log.Debug().Str("boundary", cacheKey).Int("commits", len(commits)).
+				Msg("plan: history window indexed")
 		}
 		cp.window[p.Name] = sharedCommitWindow(windowsBySince, cacheKey, commits)
+		cp.windowKey[p.Name] = cacheKey
 	}
 
 	cp.buildUnion(lists)
+	cp.log.Debug().Int("packages", len(cp.pkgs)).Int("windows", len(commitsBySince)).
+		Int("commits", len(cp.commits)).Msg("plan: tags and windows loaded")
 	return nil
 }
 
@@ -2243,6 +2342,9 @@ func (cp *computation) buildUnion(lists [][]gitx.Commit) {
 			rec := &commitRec{commit: c, key: key, rank: len(cp.commits)}
 			cp.byKey[key] = rec
 			cp.commits = append(cp.commits, rec)
+			if cp.stats != nil {
+				cp.stats.UniqueCommits.Add(1)
+			}
 			if ps := c.Parents; len(ps) > 0 {
 				cp.parents[key] = ps
 				cp.linked = true
@@ -2626,7 +2728,7 @@ func (cp *computation) resolveHolds() {
 			}
 			if !resolved {
 				cp.err(CodeRepositoryPrecedence, name, "",
-					"conflicting Release-As directives come from incomparable revisions; add a causally applicable control directive")
+					"conflicting Release-As directives come from incomparable revisions"+cp.precedenceRemedy())
 			}
 		}
 		if len(recs) > 1 {
@@ -2760,7 +2862,7 @@ func (cp *computation) finalise() {
 		// A hold suspends a release a none package was never going to make;
 		// leaving Held false keeps it out of the held counts and W154, so the
 		// one exclusion the graph reports for it is its versioning.
-		rel.Held = cp.held[name] && rel.Releasable()
+		rel.Held = cp.held[name] && rel.IsReleasable()
 		// §13.10: the plan marks its corrected and suppressed entries. Both
 		// maps are keyed by unit, and rel.Units holds pointers into the same
 		// parsed messages, so the marks travel with the units to every
@@ -2834,7 +2936,7 @@ func (cp *computation) newerCommit(a, b string) bool {
 // is what keeps the independent loop and the fixed-group fallback agreeing
 // about pin precedence.
 func (cp *computation) versionOne(name string, rel *Release) {
-	if !rel.Releasable() {
+	if !rel.IsReleasable() {
 		// A none package carries no version: Next mirrors Current (both zero)
 		// so nothing downstream reads a fabricated release, and a pin aimed
 		// at it is inert rather than an error — the commit may legitimately
@@ -2855,7 +2957,7 @@ func (cp *computation) versionOne(name string, rel *Release) {
 
 // computeVersion implements §13.9 for a package with no exact Release-As.
 func (cp *computation) computeVersion(rel *Release) {
-	if !rel.Changed() {
+	if !rel.IsChanged() {
 		// Nothing to release. Next stays at the baseline so that reporting
 		// shows the package's current position rather than a fabricated one.
 		rel.Next = rel.Current
@@ -3053,7 +3155,7 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 		// A provider that is not releasing has published nothing new for this
 		// run to pick up. It still reaches Updates through DueTo when an
 		// earlier run published it and this one is the catch-up (§13.7a).
-		if pr := cp.rel[prov]; pr != nil && pr.Releasing() {
+		if pr := cp.rel[prov]; pr != nil && pr.IsReleasing() {
 			add(prov)
 		}
 	}
@@ -3238,7 +3340,7 @@ func (f AliasFilter) Without(tags gitx.Tags, pkg string, log zerolog.Logger) git
 // name.
 func (f AliasFilter) matches(tag string) bool {
 	for _, m := range f.matchers {
-		if m.Matches(tag) {
+		if m.IsMatch(tag) {
 			return true
 		}
 	}
@@ -3288,7 +3390,7 @@ func (cp *computation) logReleases() {
 			Str("bump", rel.Bump.String()).
 			Str("channel", rel.Channel).
 			Str("next", rel.Next.String()).
-			Bool("releasing", rel.Releasing())
+			Bool("releasing", rel.IsReleasing())
 		if len(rel.DueTo) > 0 {
 			ev = ev.Strs("dueTo", rel.DueTo)
 		}
@@ -3305,7 +3407,7 @@ func (cp *computation) logReleases() {
 func (cp *computation) reportCatchUp() {
 	inPlan := make(map[string]bool)
 	for _, name := range cp.order {
-		if rel := cp.rel[name]; rel != nil && rel.Releasing() {
+		if rel := cp.rel[name]; rel != nil && rel.IsReleasing() {
 			inPlan[name] = true
 		}
 	}
@@ -3317,7 +3419,7 @@ func (cp *computation) reportCatchUp() {
 		// releasing again — a package whose only fresh cause is propagation
 		// from an already-published provider is a catch-up whatever its train
 		// history says.
-		if rel == nil || !rel.Releasing() || rel.FreshOwnBump() {
+		if rel == nil || !rel.IsReleasing() || rel.IsFreshOwnBump() {
 			continue
 		}
 		if len(rel.Sources) == 0 {
@@ -3358,7 +3460,7 @@ func (cp *computation) reportCatchUp() {
 func (cp *computation) reportChannelOnly() {
 	for _, name := range cp.order {
 		rel := cp.rel[name]
-		if rel == nil || !rel.Releasing() {
+		if rel == nil || !rel.IsReleasing() {
 			continue
 		}
 		// A pinned release is explained by its footer, not by its channel,
@@ -3368,7 +3470,7 @@ func (cp *computation) reportChannelOnly() {
 		// Bump is deliberately train-wide here, unlike the catch-up scan's
 		// freshOwnBump: a graduation publishes the train's whole window, so
 		// any bump in it explains the release even when nothing is fresh.
-		if rel.Bump != ccme.BumpNone || rel.Pinned || rel.FixedRide || !rel.ChannelChanged() {
+		if rel.Bump != ccme.BumpNone || rel.Pinned || rel.FixedRide || !rel.IsChannelChanged() {
 			continue
 		}
 		rel.ChannelOnly = true
@@ -3385,7 +3487,7 @@ func (cp *computation) reportChannelOnly() {
 func (cp *computation) reportHeld() {
 	for _, name := range cp.order {
 		rel := cp.rel[name]
-		if rel == nil || !rel.Held || !rel.Changed() {
+		if rel == nil || !rel.Held || !rel.IsChanged() {
 			continue
 		}
 		cp.pkgWarn(rel, CodeHeldVersion, "",

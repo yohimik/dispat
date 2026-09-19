@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // BackupVersion is the version the kept binary reports, or an error when
@@ -21,6 +24,10 @@ func BackupVersion(ctx context.Context, exe string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, backup, "--version")
 	cmd.Env = append(os.Environ(), "DISPAT_UPDATE_CHECK=0")
+	// The same bound the install's own smoke test takes: a binary that leaves
+	// a child holding the output pipes must not hold the wait open.
+	script.SetProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("selfupdate: the backup at %s does not run: %w", backup, err)
@@ -80,6 +87,10 @@ func runVersion(ctx context.Context, path string) string {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "--version")
 	cmd.Env = append(os.Environ(), "DISPAT_UPDATE_CHECK=0")
+	// The same bound the install's own smoke test takes: a binary that leaves
+	// a child holding the output pipes must not hold the wait open.
+	script.SetProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return ""

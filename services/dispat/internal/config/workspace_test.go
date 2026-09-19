@@ -589,14 +589,14 @@ func TestComposeWorkspaceRejectsUnpinnedSource(t *testing.T) {
 	workspace, err := ComposeWorkspaceWithPins(loaded, path, root, nil, map[string][]string{"sdk": {"older", advanced}})
 	require.NoError(t, err)
 	require.NotNil(t, workspace)
-	assert.False(t, workspace.InheritedPinsEnabled())
+	assert.False(t, workspace.IsInheritedPinsEnabled())
 	var resolved []string
-	workspace, err = ComposeWorkspaceWithPinResolver(loaded, path, root, nil, nil, func(repository string) ([]string, error) {
+	workspace, err = ComposeWorkspaceWithPinResolver(t.Context(), loaded, path, root, nil, nil, func(repository string) ([]string, error) {
 		resolved = append(resolved, repository)
 		return []string{advanced}, nil
 	})
 	require.NoError(t, err)
-	assert.True(t, workspace.InheritedPinsEnabled())
+	assert.True(t, workspace.IsInheritedPinsEnabled())
 	assert.Equal(t, []string{"sdk"}, resolved)
 	assert.Equal(t, advanced, workspace.RepositoryByName("sdk").CompositionHead)
 	assert.Equal(t, strings.TrimSpace(workspaceGit(t, root, "rev-parse", "HEAD")),

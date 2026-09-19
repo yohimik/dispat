@@ -1,8 +1,10 @@
 # @dispat/bin <img alt="dispat logo" align="right" width="128" height="128" src="https://raw.githubusercontent.com/yohimik/dispat/main/imgs/logo.png" />
 
+**Autistic stability for ADHD projects. Mathematical planning. Saga recovery.**
+
 **dispat** reads your conventional commits, computes the next package versions, and runs build and publish commands in dependency order. Preview the release with `dispat status` before running it.
 
-`@dispat/bin` installs the native Go executable and exposes the `dispat` command. Use it with a single Node application, an npm, pnpm, or Yarn monorepo, or several repositories joined through a control repository. Your existing package manager, build tools, and deployment commands remain part of the workflow.
+`@dispat/bin` installs the native Go executable and exposes the `dispat` command. Use it with a single Node application, an npm, pnpm, or Yarn monorepo, or several repositories joined through a control repository. Your existing package manager, build tools, and deployment commands remain part of the workflow: the build and publish stages are shell commands, so a Node workspace can release a Go service or a container in the same run.
 
 Its saga-style release orchestration records successful package publications so a retry can resume unfinished work.
 It does not attempt an automatic rollback across registries and deployment systems.
@@ -407,7 +409,9 @@ commit:
 
 This example passes the planned version through the script environment and leaves linked manifests unchanged. If publishing a versioned library from a submodule, configure its manifest rewriting and publication explicitly; a wrapper's nested manifest needs different handling from a package-root manifest.
 
-Clone the control repository with its full history and initialize pinned submodules with `git submodule update --init --recursive`. Move a pointer through a reviewed commit such as `feat(backend)^: deploy the new API`. That pointer-update commit supplies the release intent; dispat does not import the linked repository's commit history as the control repository's release history. The control repository owns the resulting release tags and records.
+Clone the control repository with its full history and initialize pinned submodules with `git submodule update --init --recursive`. The configuration above leaves `polyrepo` unset, which is pointer-history mode: move a pointer through a reviewed commit such as `feat(backend)^: deploy the new API`, and that pointer-update commit supplies the release intent. The linked repositories need no dispat configuration and no commit convention, and the control repository owns the resulting versions, changelogs, tags, and records.
+
+Set `polyrepo: true` for source-history mode instead. dispat then reads each linked repository's own conventional commits and release tags under the pinned gitlink snapshot, and each source repository owns its own records while the control repository supplies the combined graph, the shared policy, and the fleet lock.
 
 Read [the control-repository guide](https://dispat.dev/control-repository/) for setup, pointer synchronization, manifest handling, and recovery, or [one repository or many](https://dispat.dev/monorepo/) to compare the layouts.
 

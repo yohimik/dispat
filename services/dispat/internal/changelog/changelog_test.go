@@ -355,7 +355,7 @@ func TestRideWithProviderMovementIsNotNoChanges(t *testing.T) {
 			To:   ccme.Version{Major: 1, Minor: 2},
 		}},
 	}
-	assert.False(t, rel.NoChanges())
+	assert.False(t, rel.IsWithoutChanges())
 	sections := RenderSections(rel, Format{})
 	assert.Contains(t, sections, "### Dependencies")
 	assert.Contains(t, sections, "- utils: 1.1.0 -> 1.2.0")
@@ -433,11 +433,11 @@ func TestHasEntryIsLineAnchored(t *testing.T) {
 	// Quoted or indented header text in a body must not suppress a write, and
 	// a tag that extends another must not match its prefix.
 	body := []byte("# Changelog\n\n## core@1.3.0-beta.1 (2026-08-09)\n\n- see `## core@9.9.9 (` in docs\n  ## core@2.0.0 (indented)\n")
-	assert.True(t, HasEntry(body, "core@1.3.0-beta.1"))
-	assert.False(t, HasEntry(body, "core@1.3.0"), "a prefix of an existing tag does not match")
-	assert.False(t, HasEntry(body, "core@9.9.9"), "mid-line mention does not count")
-	assert.False(t, HasEntry(body, "core@2.0.0"), "indented text does not count")
-	assert.False(t, HasEntry(nil, "core@1.0.0"), "an absent file has no entries")
+	assert.True(t, IsEntryPresent(body, "core@1.3.0-beta.1"))
+	assert.False(t, IsEntryPresent(body, "core@1.3.0"), "a prefix of an existing tag does not match")
+	assert.False(t, IsEntryPresent(body, "core@9.9.9"), "mid-line mention does not count")
+	assert.False(t, IsEntryPresent(body, "core@2.0.0"), "indented text does not count")
+	assert.False(t, IsEntryPresent(nil, "core@1.0.0"), "an absent file has no entries")
 }
 
 // TestRecordMultiLineFileTitle: a file title may be several lines, written
@@ -505,7 +505,7 @@ func TestRecordEveryEntryCarriesItsOwnBlocks(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(content, "\n---\n"), "one footer per entry")
 	assert.Contains(t, content, "### core 2.1.0", "each entry names its own release")
 	assert.Contains(t, content, "### core 2.0.0")
-	assert.True(t, HasEntry([]byte(content), "core@2.1.0"), "the entry stays findable under its sub-header")
+	assert.True(t, IsEntryPresent([]byte(content), "core@2.1.0"), "the entry stays findable under its sub-header")
 }
 
 // TestRecordChangedFileTitleLeavesTheFilesOwnTitleInPlace documents the one
@@ -664,8 +664,8 @@ func TestHasEntryReadsThroughAByteOrderMark(t *testing.T) {
 	// The idempotence check is what stops an entry being written twice, so it
 	// has to see an entry however the file was saved. A mark sits in front of
 	// the first line, which is the one line a changelog can open an entry on.
-	assert.True(t, HasEntry([]byte("\ufeff## core@1.3.0 (2026-08-09)\n"), "core@1.3.0"))
-	assert.True(t, HasEntry([]byte("\ufeff# Changelog\r\n\r\n## core@1.3.0 (2026-08-09)\r\n"), "core@1.3.0"))
+	assert.True(t, IsEntryPresent([]byte("\ufeff## core@1.3.0 (2026-08-09)\n"), "core@1.3.0"))
+	assert.True(t, IsEntryPresent([]byte("\ufeff# Changelog\r\n\r\n## core@1.3.0 (2026-08-09)\r\n"), "core@1.3.0"))
 }
 
 func TestRecordOverAPreambleIsIdempotent(t *testing.T) {
@@ -781,7 +781,7 @@ func TestNoteEntryAnnotatesTheEntryWithoutMovingItsHeader(t *testing.T) {
 
 	body, rerr := os.ReadFile(path)
 	require.NoError(t, rerr)
-	assert.True(t, HasEntry(body, rel.TagName()), "the header a re-run looks for is untouched")
+	assert.True(t, IsEntryPresent(body, rel.TagName()), "the header a re-run looks for is untouched")
 	assert.Contains(t, string(body), "> Something true about how this went out.")
 	assert.Contains(t, string(body), "> On two lines.", "every line is quoted, so none reads as a heading")
 	header := strings.Index(string(body), "## "+rel.TagName()+" (")

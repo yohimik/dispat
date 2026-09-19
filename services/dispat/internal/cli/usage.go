@@ -83,7 +83,7 @@ var helperFlags = []string{"on-failure", "in"}
 
 // globalFlags apply to every command, so they are rendered separately rather
 // than repeated in each entry.
-var globalFlags = []string{"root", "config", "configs", "polyrepo", "env-file", "concurrency", "log-level", "log-format",
+var globalFlags = []string{"root", "config", "configs", "polyrepo", "saga", "env-file", "concurrency", "log-level", "log-format",
 	"quiet-parser", "version", "help"}
 
 // updateCheckFlags are read on every command without being any command's own:

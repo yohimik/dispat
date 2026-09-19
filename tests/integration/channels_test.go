@@ -55,7 +55,7 @@ func TestChannelsNamedChannelGate(t *testing.T) {
 	// A beta: on both policies' channels.
 	r.Commit("feat(core)%beta: first work")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0-beta.0"), "tags: %v", r.TagList())
 	changelog := func() string {
 		data, err := os.ReadFile(r.Path("packages/core/CHANGELOG.md"))
 		require.NoError(t, err)
@@ -67,14 +67,14 @@ func TestChannelsNamedChannelGate(t *testing.T) {
 	// An rc: the changelog records it, the releases page does not.
 	r.CommitEmpty("release(core)%beta>rc: promote")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0-rc.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0-rc.0"), "tags: %v", r.TagList())
 	assert.Contains(t, changelog(), "## core@0.1.0-rc.0 (", "an rc is a prerelease too")
 	assert.Len(t, bodies(), 1, "but it is not the channel the releases page names")
 
 	// The graduation: neither records it.
 	r.CommitEmpty("release(core)%rc>stable: graduate")
 	res := r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.NotContains(t, changelog(), "## core@0.1.0 (",
 		"a changelog of the prereleases holds the stable release back")
 	assert.Len(t, bodies(), 1, "and the releases page still carries the one beta")
@@ -342,5 +342,5 @@ func TestChannelsAreReportedInTheSkipEvent(t *testing.T) {
 	}
 	assert.True(t, found, "the skip is on the record")
 	assert.NoFileExists(t, r.Path("packages/core/CHANGELOG.md"))
-	assert.True(t, r.HasTag("core@0.1.0-beta.0"), "the release itself is untouched")
+	assert.True(t, r.IsTagged("core@0.1.0-beta.0"), "the release itself is untouched")
 }

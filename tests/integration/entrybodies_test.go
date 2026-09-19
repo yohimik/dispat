@@ -29,7 +29,7 @@ func bodiesRepo(t *testing.T, apiURL string) *harness.Repo {
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): bootstrap")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	return r
 }
 
@@ -53,7 +53,7 @@ func TestEntryBodyOfAPinOnlyRelease(t *testing.T) {
 
 	r.CommitEmpty("release(core): cut it exactly here\n\nRelease-As: 1.0.0")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@1.0.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.0.0"), "tags: %v", r.TagList())
 
 	line := "No changes: a version set by Release-As."
 	assert.Contains(t, entryOf(t, changelogOf(t, r, "core"), "core@1.0.0"), line)
@@ -69,9 +69,9 @@ func TestEntryBodyOfAChannelOnlyRelease(t *testing.T) {
 
 	r.CommitEmpty("release(core)%rc: enter the rc line")
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W202", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W202", "core"),
 		"a channel-only release is said out loud: %s", res.Stdout)
-	require.True(t, r.HasTag("core@0.1.1-rc.0"),
+	require.True(t, r.IsTagged("core@0.1.1-rc.0"),
 		"the channel-entry patch applies (W204); tags: %v", r.TagList())
 
 	line := "No changes: a channel transition, stable -> rc."
@@ -93,8 +93,8 @@ func TestEntryBodyOfACancelledOutRelease(t *testing.T) {
 	r.WriteFile("packages/core/main.txt", "")
 	r.Commit("revert(core): a bad idea\n\nReverts: " + bad)
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W212", "core"), "out: %s", res.Stdout)
-	require.True(t, r.HasTag("core@1.0.0"), "the major is still owed; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W212", "core"), "out: %s", res.Stdout)
+	require.True(t, r.IsTagged("core@1.0.0"), "the major is still owed; tags: %v", r.TagList())
 
 	line := "No changes: the pending work and its reverts cancel out."
 	entry := entryOf(t, changelogOf(t, r, "core"), "core@1.0.0")

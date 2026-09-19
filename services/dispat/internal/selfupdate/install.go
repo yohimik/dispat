@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 const (
@@ -26,16 +28,20 @@ const (
 	downloadTimeout = 10 * time.Minute
 	// smokeTimeout bounds the "does the new binary run" check.
 	smokeTimeout = 30 * time.Second
+	// maxRefusalBody bounds how much of a refused download's body is drained
+	// before the connection goes back to the pool. An error page is small;
+	// nothing past this is worth reading to keep a connection.
+	maxRefusalBody = 4 << 10
 )
 
-// Validator inspects a downloaded file before an installer commits to it.
+// Validatorx inspects a downloaded file before an installer commits to it.
 //
 // It is a strategy rather than a step because the two callers can trust
 // different things: replacing dispat with dispat can insist the new binary
 // runs and reports the version the release promised, and installing an
 // unknown tool can insist on nothing at all, since a foreign binary need not
 // answer --version and one downloaded for another platform cannot run here.
-type Validator interface {
+type Validatorx interface {
 	Validate(ctx context.Context, path string) error
 }
 
@@ -59,7 +65,7 @@ type Installer struct {
 	// Validator is what the downloaded file has to satisfy before anything is
 	// moved. Nil accepts whatever arrived, which is all an installer can do
 	// for a binary it knows nothing about.
-	Validator Validator
+	Validator Validatorx
 	// Command is the command word this installer's failures name. Empty is
 	// "selfupdate"; see commandOr.
 	Command string
@@ -213,7 +219,10 @@ func (i *Installer) download(ctx context.Context, a Asset, f *os.File) error {
 		return fmt.Errorf("%s: %s: %w", i.what(), a.Name, rewindErr)
 	}
 	if second := i.fetch(ctx, a, f, a.URL, false); second != nil {
-		return fmt.Errorf("%w; the public download URL then failed too: %v", err, second)
+		// Both causes stay in the chain: the fallback may have failed because
+		// the run was cancelled, and a caller asking that question must not
+		// be answered with the API refusal alone.
+		return errors.Join(fmt.Errorf("%w; the public download URL then failed too", err), second)
 	}
 	return nil
 }
@@ -254,6 +263,10 @@ func (i *Installer) fetch(ctx context.Context, a Asset, f *os.File, url string, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Drained before it is closed: this is the refusal the authenticated
+		// attempt retries past, and an undrained body costs that retry a
+		// fresh connection.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxRefusalBody))
 		return fmt.Errorf("%s: downloading %s: %w %s", i.what(), a.Name, errBadStatus, resp.Status)
 	}
 
@@ -296,6 +309,10 @@ func smokeTest(ctx context.Context, path, want string) error {
 	// The binary being tested is about to check for updates otherwise, which
 	// is a network call nobody asked for in the middle of an install.
 	cmd.Env = append(os.Environ(), "DISPAT_UPDATE_CHECK=0")
+	// A binary that forks and leaves a child holding the output pipes would
+	// otherwise hold the install open past the smoke-test deadline.
+	script.SetProcessGroup(cmd)
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("selfupdate: the downloaded binary does not run: %w", err)

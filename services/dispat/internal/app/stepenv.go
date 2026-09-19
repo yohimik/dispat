@@ -218,7 +218,7 @@ func (a *App) alignStep(pl *plan.Plan, env *runEnv) error {
 		return nil
 	}
 	rel := pl.Releases[env.pkg]
-	if rel == nil || !rel.Releasing() {
+	if rel == nil || !rel.IsReleasing() {
 		err := fmt.Errorf("the run releases %s, but the step's own plan does not", env.pkg)
 		a.log.Error().Err(err).Str("code", plan.CodeStepUnalignable).Str("package", env.pkg).
 			Msg("step cannot align to the run, nothing written")

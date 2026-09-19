@@ -3,9 +3,9 @@
 #
 #   run.sh <experiment> <tool> [scenario]
 #
-# experiments: orphan, midrelease   tools: lerna, nx, changesets, dispat
-# scenarios: midrelease takes clean (default) or conflict; orphan takes none,
-# and records an empty scenario rather than a name it never used.
+# experiments: orphan, midrelease, propagation
+# scenarios: midrelease takes clean (default) or conflict; propagation takes
+# build (default) or publish; orphan records no scenario.
 #
 # Everything the run leaves behind goes under /results/<experiment>[-<scenario>]-<tool>/:
 # the transcript, every step's output, one observation per step, the git
@@ -27,8 +27,8 @@ TOOL=${2:?tool}
 # environment, and an experiment that interpolated them unchecked would run
 # whatever it was handed.
 case "$EXPERIMENT" in
-  orphan|midrelease) ;;
-  *) echo "no such experiment: $EXPERIMENT (orphan, midrelease)" >&2; exit 2 ;;
+  orphan|midrelease|propagation) ;;
+  *) echo "no such experiment: $EXPERIMENT (orphan, midrelease, propagation)" >&2; exit 2 ;;
 esac
 case "$TOOL" in
   lerna|nx|changesets|dispat) ;;
@@ -39,11 +39,22 @@ if [ "$EXPERIMENT" = orphan ]; then
   # rather than "clean", which would claim a choice the experiment never made.
   SCENARIO=""
   OUT=/results/$EXPERIMENT-$TOOL
-else
+elif [ "$EXPERIMENT" = midrelease ]; then
   SCENARIO=${3:-clean}
   case "$SCENARIO" in
     clean|conflict) ;;
     *) echo "no such scenario: $SCENARIO (clean, conflict)" >&2; exit 2 ;;
+  esac
+  OUT=/results/$EXPERIMENT-$SCENARIO-$TOOL
+else
+  SCENARIO=${3:-build}
+  case "$TOOL" in
+    dispat|lerna) ;;
+    *) echo "propagation supports dispat and lerna" >&2; exit 2 ;;
+  esac
+  case "$SCENARIO" in
+    build|publish) ;;
+    *) echo "no such scenario: $SCENARIO (build, publish)" >&2; exit 2 ;;
   esac
   OUT=/results/$EXPERIMENT-$SCENARIO-$TOOL
 fi

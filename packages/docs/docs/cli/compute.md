@@ -45,7 +45,8 @@ edges from that name.
 - `+ initial` for a package whose starting version only its manifests know, described below.
 
 A suggestion against a package-declared edge names its source (`[packages/core/dispat.json: dependencies[0]]`). The
-listing tells you exactly which file an applied change would touch.
+listing tells you exactly which file an applied change would touch. A
+[choreographed fleet](../choreographed-repositories.md) adds three more kinds, described below.
 
 **Baselines from manifest versions.** A repository adopting dispat already carries its versions in the manifests.
 Without an entry for them, dispat would start every package at `0.0.0` and release `0.0.1`, throwing away the history
@@ -94,8 +95,35 @@ keys written beside it belongs to two files at once, so `--write` refuses it rat
 wholly in a referenced file is written in that file at the key it holds there. The `$ref` survives the write, and the
 backup sits beside the file that changed.
 
+**Fleet links.** In a [choreographed fleet](../choreographed-repositories.md), the command also reads the fleet and
+proposes what joins it. The suggestions are independent of the package selection, because a fleet is either linked or
+it is not:
+
+```console
+$ dispat compute
++ link api sdk  connects sdk to the fleet
++ link api web  connects web to the fleet
+
+2 suggestion(s); apply all with --write, choose with --interactive
+```
+
+- `+ link <repository> <peer>` creates a missing link. dispat proposes the minimum set that connects everything the
+  rosters name, chosen so that no two repositories are ever joined twice. The same line also proposes the half of a
+  link only one of its two repositories declares, which is what `W332` reports: the pair is already joined, so nothing
+  is fetched and only the missing declaration is written.
+- `+ init <repository> <path>` materialises a link the fleet declares and this checkout does not have.
+- `+ repository <repository> <peer>` adds a roster entry a peer has not heard of, written into that peer's own file.
+  An entry no roster states a `url` for is reported rather than written.
+
+Links are applied after the configuration edits, because a link is created against the roster the file now holds. The
+forward half is a real checkout and the other half is declared inside it without cloning, pinned at a revision the
+declaring repository's own remote can serve. A declaring repository with no remote has that half withheld with a
+warning, and you add it by hand. Nothing is committed and no link is ever removed: each repository is left with
+staged changes for you to review and commit. A link URL carrying user information is refused, because `.gitmodules`
+is committed and pushed.
+
 The `--check` flag overrides both apply modes. It writes nothing and exits `1` when any suggestion exists across any
-source. Use this as the CI gate for a config lagging the manifests.
+source, fleet links included. Use this as the CI gate for a config lagging the manifests.
 
 ## Flags
 
@@ -130,5 +158,5 @@ Confirm each suggestion (`y`/`N` on stdin) before applying it for `compute` only
 ### `--check`
 
 Report only, change nothing, and exit `1` when there is something to do for `compute` and `self-update`. For `compute`,
-this triggers on any suggestion at all, edges and baselines alike. This is the CI gate for a config lagging the
-manifests, and it overrides both apply modes.
+this triggers on any suggestion at all: edges, baselines and fleet links alike. This is the CI gate for a config
+lagging the manifests, and it overrides both apply modes.

@@ -56,8 +56,8 @@ func TestSpacePathsMultiFolderLifecycle(t *testing.T) {
 	r.Commit("feat(a,b): one space, two folders")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0"), "the second folder's package releases with the space; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"), "the second folder's package releases with the space; tags: %v", r.TagList())
 
 	data, err := os.ReadFile(r.Path("pkgs", "login.cwd"))
 	require.NoError(t, err, "the login ran in the first folder")
@@ -208,7 +208,7 @@ func TestSpacePathsNoneCombined(t *testing.T) {
 	r.Commit("feat(core,smoke,probe): everything changes at once")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, len(r.TagList()), "nothing under either none folder is ever tagged")
 
 	r.RunScriptOK("mark")

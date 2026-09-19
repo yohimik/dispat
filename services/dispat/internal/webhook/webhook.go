@@ -75,7 +75,7 @@ type worker struct {
 }
 
 // Dispatcher fans release events out to every subscribed endpoint. It
-// implements release.Observer; see the package comment for the contract.
+// implements release.Observerx; see the package comment for the contract.
 type Dispatcher struct {
 	client  *http.Client
 	log     zerolog.Logger
@@ -143,12 +143,17 @@ func (d *Dispatcher) Event(ev release.Event) {
 			body = []byte(public.ExpandWebhookFormat(w.ep.Format, func(f string) string { return fields[f] }))
 		}
 		del := delivery{event: ev.Name, id: deliveryID(), body: body}
+		// Counted before the send: the worker may receive and finish the
+		// delivery before this goroutine runs again, and decrementing a
+		// counter that had not been incremented yet would make the abandoned
+		// count reported at shutdown understate — or go below zero.
+		d.pending.Add(1)
 		select {
 		case w.queue <- del:
-			d.pending.Add(1)
 			d.log.Debug().Str("webhook", w.ep.Name).Str("event", ev.Name).Str("delivery", del.id).
 				Msg("webhook delivery enqueued")
 		default:
+			d.pending.Add(-1)
 			d.log.Warn().Str("code", plan.CodeWebhookFailed).Str("webhook", w.ep.Name).
 				Str("event", ev.Name).
 				Msg("webhook delivery dropped, queue is full")
@@ -254,11 +259,22 @@ func retryableStatus(status int) bool {
 // built fresh per attempt — the body bytes are immutable, so each attempt
 // reads them from the start.
 func (d *Dispatcher) attempt(ep Endpoint, del delivery) (status int, err error) {
-	ctx, cancel := context.WithTimeout(d.ctx, ep.Timeout)
+	// Configuration resolution supplies the default, but Dispatcher is
+	// exported and an Endpoint can be built directly. A zero timeout would
+	// make every attempt expire before it was sent, so the bound is applied
+	// here too rather than assumed.
+	timeout := ep.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(d.ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, ep.Method, ep.URL, bytes.NewReader(del.body))
 	if err != nil {
-		return 0, fmt.Errorf("invalid webhook request")
+		// The cause carries the endpoint URL, which frequently carries
+		// credentials, so it is traced rather than returned.
+		d.log.Trace().Str("webhook", ep.Name).Err(err).Msg("webhook request could not be built")
+		return 0, errors.New("invalid webhook request")
 	}
 	// The defaults first, then the configured headers — which may override
 	// them — then dispat's own delivery headers, which nothing overrides: a

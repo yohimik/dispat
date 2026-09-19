@@ -4,9 +4,9 @@ The `scanner` package is a lightweight manifest reader. It parses dependency man
 shape: the package's declared identity (name and version) and its declared dependencies with their ranges, manifest
 fields, and local-path signals. It does not resolve lockfiles, build SBOMs, or make network calls.
 
-The parser recognizes thirty-five formats across twenty ecosystems at build time. Fence tests keep the reader and the
-writer aligned on the same list. Shared rules and dependency kinds live in [`pkg/manifest`](../manifest) so this reader
-and [`pkg/writer`](../writer) never drift apart. `scanner` only reads manifests; use `writer` to update them.
+The parser recognizes thirty-six formats across twenty-one ecosystems at build time. Fence tests keep the reader and the
+writer aligned on the same list. Shared rules and dependency kinds live in [`pkg/manifest`](../manifest) for this reader
+and [`pkg/writer`](../writer). `scanner` only reads manifests; use `writer` to update them.
 
 This package powers `dispat compute` when it derives your dependency graph, and it drives native auto-versioning.
 
@@ -120,10 +120,10 @@ The scanner exposes shared helper functions:
 - `NameIndex`: maps manifest names to owning packages, prioritizing explicit names, then root manifests, then nested
   files, and reporting same-rank collisions.
 - `ResolveLocalDir`: resolves a declared local path to its owning package folder.
-- `SkipDir`: lists dependency directories, virtual environments, build outputs, and hidden folders to ignore when
+- `IsSkippedDir`: lists dependency directories, virtual environments, build outputs, and hidden folders to ignore when
   walking trees.
-- `SkipWorkspaceDir`: includes everything in `SkipDir` plus engine-generated folders, matching the walk rules in
-  `Scan`.
+- `IsSkippedWorkspaceDir`: includes everything in `IsSkippedDir` plus engine-generated folders, matching the walk rules
+  in `Scan`.
 
 Use `Owner.Names` to register packages that lack readable manifest identities, such as Makefile projects or certain
 Gradle modules. Stated names in `Owner.Names` take precedence over any identity read from disk.
@@ -195,3 +195,9 @@ Go 1.25 or later.
 ## Licence
 
 MIT. See [LICENSE](./LICENSE).
+
+## API naming
+
+Use `Scannerx` for the interface and `LocalScannerx` for its filesystem implementation. `New()` returns that interface.
+Predicate names begin with `Is`, such as `IsSkippedDir` and `Manifest.IsAtPackageRoot`. Earlier exported names remain available as
+deprecated aliases or forwarding functions for source compatibility.

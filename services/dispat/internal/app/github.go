@@ -73,7 +73,7 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 		if a.workspace != nil {
 			if rel := pl.Releases[env.pkg]; rel != nil {
 				if repo := a.workspace.RepositoryForPackage(rel.Pkg); repo != nil {
-					git = &gitx.CLI{Dir: repo.Root, Log: a.log}
+					git = &gitx.LocalGitx{Dir: repo.Root, Log: a.log}
 				}
 			}
 		}
@@ -118,7 +118,7 @@ func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 		return nil, nil
 	}
 	spec := w.app.githubSpec(rel.Pkg.GitHub, w.opts)
-	if !spec.Records(rel.Channel) {
+	if !spec.IsRecorded(rel.Channel) {
 		github.LogSkip(w.app.log, spec, rel)
 		return nil, nil
 	}

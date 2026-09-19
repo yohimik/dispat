@@ -56,7 +56,7 @@ type ForOptions struct {
 	// Runner executes the scripts. Nil means a plain ShellRunner, which is
 	// /bin/sh -c: the config-free path has no configuration to take a shell
 	// from.
-	Runner         script.Runner
+	Runner         script.Runnerx
 	Stdout, Stderr io.Writer
 	Log            zerolog.Logger
 }

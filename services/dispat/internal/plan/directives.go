@@ -81,7 +81,7 @@ func unitReleaseAs(u *ccme.Unit) (releaseAs, bool) {
 //
 // targets is the resolved Propagate-Scope (§8.5); nil means "every package",
 // which is the default. kinds is the set of dependency edges the propagation
-// travels (§8.4); nil means every kind.
+// travels (§8.4); nil means every kind, and an empty set means none.
 type propagation struct {
 	Bump  ccme.Bump
 	Depth int
@@ -120,10 +120,18 @@ func (p channelPropagation) inert() bool {
 }
 
 // kindSet maps ccme's dependency kinds onto the graph's. A nil result means
-// every kind, which is what the "*" wildcard and an unrecognised list both
-// denote.
+// every kind, which is what the "*" wildcard denotes; a non-nil result names
+// the kinds the walk may cross, and an empty one therefore names none.
+//
+// The two empty shapes say opposite things, which is why the nil check is on
+// the slice rather than on its length (§8.4, and pkg/ccme's PropagationConfig
+// on the same distinction). A nil slice is a configuration that said nothing
+// about kinds, and ccme fills it with the specification default before the
+// planner ever sees it; a present empty list — `kinds: []` — is a repository
+// asking for no traversal at all, and reading it as "every kind" would turn
+// the narrowest instruction into the widest behaviour.
 func kindSet(kinds []ccme.DependencyKind) map[model.DepKind]bool {
-	if len(kinds) == 0 {
+	if kinds == nil {
 		return nil
 	}
 	out := make(map[model.DepKind]bool, len(kinds))

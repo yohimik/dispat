@@ -296,7 +296,7 @@ func jsonDescend(data []byte, dec *json.Decoder, keys []string) (jsonObject, boo
 				return jsonObject{}, false, err
 			}
 			if open != json.Delim('{') {
-				return jsonObject{}, false, nil // present but not an object
+				return jsonObject{}, false, fmt.Errorf("%q is not an object", key)
 			}
 			return jsonDescend(data, dec, keys[1:])
 		}

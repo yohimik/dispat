@@ -195,7 +195,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	if cp.log.Trace().Enabled() {
 		cp.log.Trace().Str("group", groupName).Strs("members", members).
 			Int("depth", depth).Str("target", g.Next.String()).
-			Bool("moves", g.Changed() && groupMoves(g, depth)).
+			Bool("moves", g.IsChanged() && groupMoves(g, depth)).
 			Bool("absorbed", g.absorbed).
 			Msg("plan: fixed group unified")
 	}
@@ -204,7 +204,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	// states (heterogeneous member baselines) leave a member changed while the
 	// aggregate is not — one member graduating while the max baseline is
 	// already stable. Both cases take the per-member path.
-	if !g.Changed() || !groupMoves(g, depth) {
+	if !g.IsChanged() || !groupMoves(g, depth) {
 		for _, name := range members {
 			cp.versionOne(name, cp.rel[name])
 		}
@@ -231,11 +231,11 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 			rel.Next = g.Next
 			continue
 		}
-		own := rel.Changed()
+		own := rel.IsChanged()
 		if _, ok := cp.pinned[name]; ok {
 			own = true // the member's pin has not been applied to it, only to the group
 		}
-		if rel.Pkg.Space.Versioning.Sparse() && !own {
+		if rel.Pkg.Space.Versioning.IsSparse() && !own {
 			continue // sparse: an unchanged member keeps its previous version
 		}
 		if !own {
@@ -293,7 +293,7 @@ func (cp *computation) reportMajorSpread(g *Release, groupName string, members [
 		}
 		// Falling behind, on the other hand, is a sparse mode working as
 		// promised, so a sparse member is never what the warning reports on.
-		if behind == "" && !rel.Pkg.Space.Versioning.Sparse() {
+		if behind == "" && !rel.Pkg.Space.Versioning.IsSparse() {
 			behind = name
 		}
 	}
@@ -488,7 +488,7 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 		}
 		if !resolved {
 			cp.err(CodeRepositoryPrecedence, g.Pkg.Name, "",
-				"conflicting fixed-group pins come from incomparable revisions; add a causally applicable control directive")
+				"conflicting fixed-group pins come from incomparable revisions"+cp.precedenceRemedy())
 		}
 	}
 	groupPin.packages = 1
@@ -530,13 +530,13 @@ func (cp *computation) alignFixedGroup(groupName string, g *Release, members []s
 		if rel.Held {
 			continue
 		}
-		if rel.Releasing() {
+		if rel.IsReleasing() {
 			if (depth < model.SharedVersioningDepth || g.absorbed) && versionLess(rel.Next, target) {
 				rel.Next, rel.Channel = target, channel
 			}
 			continue
 		}
-		if rel.Pkg.Space.Versioning.Sparse() {
+		if rel.Pkg.Space.Versioning.IsSparse() {
 			continue
 		}
 		if rel.HasBaseline && !versionLess(rel.Baseline, target) {

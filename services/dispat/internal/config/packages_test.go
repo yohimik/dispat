@@ -590,6 +590,121 @@ func TestVersionGroupPackageReference(t *testing.T) {
 	assert.Contains(t, err.Error(), "name that group directly")
 }
 
+// TestVersionGroupSurvivesOverrideLayers: a space's versionGroup answers for
+// every package of the space, the ones an override layer speaks about
+// included. A layer saying nothing about versioning changes nothing about it,
+// so the group has to reach the package through each layer a space package
+// can carry — and the ladder must never manufacture a `versioning` beside an
+// inherited group, because the next level down would then refuse the pair
+// nobody wrote.
+func TestVersionGroupSurvivesOverrideLayers(t *testing.T) {
+	dirs := []string{"packages/libs/core", "packages/libs/utils", "packages/apps/app"}
+	grouped := func() File {
+		cfg := validConfig()
+		cfg.VersionGroups = map[string]VersionGroupConfig{
+			"core-group": {Versioning: VersioningFixed},
+			"wide":       {Versioning: VersioningFixedMajor},
+		}
+		withLibs(&cfg, func(s *SpaceConfig) { s.VersionGroup = "core-group" })
+		return cfg
+	}
+	// Every member of the space is in the group its space joined, under the
+	// group's own mode.
+	assertGrouped := func(t *testing.T, root string) {
+		t.Helper()
+		pkgs, err := discoverPackages(t, root)
+		require.NoError(t, err)
+		byName := packagesByName(pkgs)
+		for _, name := range []string{"core", "utils"} {
+			assert.Equal(t, "core-group", byName[name].Space.VersionGroup, name)
+			assert.Equal(t, model.VersioningFixed, byName[name].Space.Versioning, name)
+		}
+	}
+	quiet := PackageConfig{RevertOnFail: models.Bool(true)}
+
+	t.Run("no layer at all", func(t *testing.T) {
+		assertGrouped(t, writeModelRepo(t, grouped(), dirs...))
+	})
+	t.Run("top-level packages entry", func(t *testing.T) {
+		cfg := grouped()
+		cfg.Packages = map[string]PackageConfig{"core": quiet}
+		assertGrouped(t, writeModelRepo(t, cfg, dirs...))
+	})
+	t.Run("the space's own packages entry", func(t *testing.T) {
+		cfg := grouped()
+		withLibs(&cfg, func(s *SpaceConfig) { s.Packages = map[string]PackageConfig{"core": quiet} })
+		assertGrouped(t, writeModelRepo(t, cfg, dirs...))
+	})
+	t.Run("the space file's packages entry", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writeSpaceFile(t, root, "packages/libs", SpaceFile{Packages: map[string]PackageConfig{"core": quiet}})
+		assertGrouped(t, root)
+	})
+	t.Run("the package folder's own file", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writePackageFile(t, root, "packages/libs/core", quiet)
+		assertGrouped(t, root)
+	})
+	t.Run("a space file saying nothing about versioning", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writeSpaceFile(t, root, "packages/libs", SpaceFile{RevertOnFail: models.Bool(true)})
+		assertGrouped(t, root)
+	})
+	t.Run("a space file and a package folder file", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writeSpaceFile(t, root, "packages/libs", SpaceFile{RevertOnFail: models.Bool(true)})
+		writePackageFile(t, root, "packages/libs/core", quiet)
+		assertGrouped(t, root)
+	})
+
+	// The nearest layer still decides, exactly as it does without a group in
+	// the picture: a package's own reference moves it to another group.
+	t.Run("a package layer joins another group", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writePackageFile(t, root, "packages/libs/core", PackageConfig{VersionGroup: "wide"})
+		pkgs, err := discoverPackages(t, root)
+		require.NoError(t, err)
+		byName := packagesByName(pkgs)
+		assert.Equal(t, "wide", byName["core"].Space.VersionGroup)
+		assert.Equal(t, model.VersioningFixedMajor, byName["core"].Space.Versioning)
+		assert.Equal(t, "core-group", byName["utils"].Space.VersionGroup, "its sibling stays where the space put it")
+	})
+	// And a package's own versioning supersedes the inherited group, which is
+	// how one package of a grouped space opts out.
+	t.Run("a package layer states its own versioning", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writePackageFile(t, root, "packages/libs/core", PackageConfig{Versioning: VersioningIndependent})
+		pkgs, err := discoverPackages(t, root)
+		require.NoError(t, err)
+		byName := packagesByName(pkgs)
+		assert.Equal(t, model.VersioningIndependent, byName["core"].Space.Versioning)
+		assert.Equal(t, "libs", byName["core"].Space.VersionGroup, "out of the group is into its space's own")
+		assert.Equal(t, "core-group", byName["utils"].Space.VersionGroup)
+	})
+	// Both axes in one layer is still the contradiction it always was, and the
+	// layer that wrote them is what the error names.
+	t.Run("a package layer states both", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writePackageFile(t, root, "packages/libs/core", PackageConfig{
+			Versioning: VersioningFixed, VersionGroup: "wide"})
+		_, err := discoverPackages(t, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "mutually exclusive")
+	})
+	// A space file stating a versioning beside the entry's group reference is
+	// a supersede, not a contradiction: it is the nearer of two layers.
+	t.Run("a space file states its own versioning", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writeSpaceFile(t, root, "packages/libs", SpaceFile{Versioning: VersioningFixedMajor})
+		writePackageFile(t, root, "packages/libs/core", quiet)
+		pkgs, err := discoverPackages(t, root)
+		require.NoError(t, err)
+		byName := packagesByName(pkgs)
+		assert.Equal(t, model.VersioningFixedMajor, byName["core"].Space.Versioning)
+		assert.Equal(t, "libs", byName["core"].Space.VersionGroup)
+	})
+}
+
 // TestVersionGroupUnifiesWhicheverSpellingReachesIt: a versionGroup reference
 // matches its entry case-insensitively, like every other name, and both sides
 // land under the entry's own key.
@@ -1083,7 +1198,7 @@ func TestOverlayRecordFields(t *testing.T) {
 	assert.Equal(t, "https://ghe2", gh.APIURL)
 	assert.Equal(t, "T2", gh.TokenEnv)
 	assert.False(t, gh.IsEnabled())
-	assert.True(t, gh.DraftEnabled(), "an unset draft inherits the base policy")
+	assert.True(t, gh.IsDraftEnabled(), "an unset draft inherits the base policy")
 }
 
 // TestPackageOverrideScriptsUnion: scripts merge name by name across all
@@ -2952,25 +3067,25 @@ func TestIgnoreChainLevelsConcatenate(t *testing.T) {
 	byName := packagesByName(pkgs)
 
 	core := byName["core"]
-	assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/docs/guide.md")),
+	assert.True(t, core.Ignore.IsIgnored(slash(root, "packages/libs/core/docs/guide.md")),
 		"the repository level reaches every package")
-	assert.False(t, core.Ignore.Ignores(slash(root, "packages/libs/core/README.md")),
+	assert.False(t, core.Ignore.IsIgnored(slash(root, "packages/libs/core/README.md")),
 		"and the package lifts it for itself")
-	assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/scratch/x.go")))
-	assert.False(t, core.Counts(slash(root, "packages/libs/core/scratch/x.go")))
-	assert.True(t, core.Counts(slash(root, "packages/libs/core/main.go")),
+	assert.True(t, core.Ignore.IsIgnored(slash(root, "packages/libs/core/scratch/x.go")))
+	assert.False(t, core.IsCounted(slash(root, "packages/libs/core/scratch/x.go")))
+	assert.True(t, core.IsCounted(slash(root, "packages/libs/core/main.go")),
 		"everything nobody excluded still counts")
 
 	utils := byName["utils"]
-	assert.True(t, utils.Ignore.Ignores(slash(root, "packages/libs/utils/README.md")),
+	assert.True(t, utils.Ignore.IsIgnored(slash(root, "packages/libs/utils/README.md")),
 		"a sibling does not inherit the package's re-inclusion")
-	assert.True(t, utils.Ignore.Ignores(slash(root, "packages/libs/utils/fixtures/a.json")),
+	assert.True(t, utils.Ignore.IsIgnored(slash(root, "packages/libs/utils/fixtures/a.json")),
 		"the space level reaches its own packages")
 
 	app := byName["app"]
-	assert.False(t, app.Ignore.Ignores(slash(root, "packages/apps/app/fixtures/a.json")),
+	assert.False(t, app.Ignore.IsIgnored(slash(root, "packages/apps/app/fixtures/a.json")),
 		"and not another space's")
-	assert.True(t, app.Ignore.Ignores(slash(root, "packages/apps/app/notes.md")))
+	assert.True(t, app.Ignore.IsIgnored(slash(root, "packages/apps/app/notes.md")))
 }
 
 // slash builds the absolute slash-separated path the planner asks about.
@@ -2994,12 +3109,12 @@ func TestIgnoreFileAndKeyAgree(t *testing.T) {
 	byName := packagesByName(pkgs)
 
 	core := byName["core"]
-	assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/docs/guide.md")),
+	assert.True(t, core.Ignore.IsIgnored(slash(root, "packages/libs/core/docs/guide.md")),
 		"the entry's key applies")
-	assert.False(t, core.Ignore.Ignores(slash(root, "packages/libs/core/docs/api.md")),
+	assert.False(t, core.Ignore.IsIgnored(slash(root, "packages/libs/core/docs/api.md")),
 		"and the folder's file has the last word at that level")
-	assert.True(t, byName["utils"].Ignore.Ignores(slash(root, "packages/libs/utils/fixtures/a.json")))
-	assert.True(t, byName["app"].Ignore.Ignores(slash(root, "packages/apps/app/notes.md")),
+	assert.True(t, byName["utils"].Ignore.IsIgnored(slash(root, "packages/libs/utils/fixtures/a.json")))
+	assert.True(t, byName["app"].Ignore.IsIgnored(slash(root, "packages/apps/app/notes.md")),
 		"the repository's own file reaches every space")
 }
 
@@ -3018,9 +3133,9 @@ func TestIgnorePackageLayersAccumulate(t *testing.T) {
 	require.NoError(t, err)
 	core := packagesByName(pkgs)["core"]
 	for _, rel := range []string{"docs/a.md", "fixtures/a.json", "scratch/a.go"} {
-		assert.True(t, core.Ignore.Ignores(slash(root, "packages/libs/core/"+rel)), rel)
+		assert.True(t, core.Ignore.IsIgnored(slash(root, "packages/libs/core/"+rel)), rel)
 	}
-	assert.True(t, core.Counts(slash(root, "packages/libs/core/main.go")))
+	assert.True(t, core.IsCounted(slash(root, "packages/libs/core/main.go")))
 }
 
 // TestIgnoreStandalonePackage: a package outside every space still sits under
@@ -3034,9 +3149,9 @@ func TestIgnoreStandalonePackage(t *testing.T) {
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	tool := packagesByName(pkgs)["tool"]
-	assert.True(t, tool.Ignore.Ignores(slash(root, "tools/tool/README.md")))
-	assert.True(t, tool.Ignore.Ignores(slash(root, "tools/tool/testdata/a.json")))
-	assert.True(t, tool.Counts(slash(root, "tools/tool/main.go")))
+	assert.True(t, tool.Ignore.IsIgnored(slash(root, "tools/tool/README.md")))
+	assert.True(t, tool.Ignore.IsIgnored(slash(root, "tools/tool/testdata/a.json")))
+	assert.True(t, tool.IsCounted(slash(root, "tools/tool/main.go")))
 }
 
 // TestIgnoreNothingDeclared: the common case costs nothing — no patterns
@@ -3047,7 +3162,7 @@ func TestIgnoreNothingDeclared(t *testing.T) {
 	require.NoError(t, err)
 	for _, p := range pkgs {
 		assert.Empty(t, p.Ignore, p.Name)
-		assert.True(t, p.Counts(slash(p.Dir, "anything.md")), p.Name)
+		assert.True(t, p.IsCounted(slash(p.Dir, "anything.md")), p.Name)
 	}
 }
 
@@ -3088,9 +3203,9 @@ func TestIgnoreFileInASpaceFolder(t *testing.T) {
 	require.NoError(t, err)
 	byName := packagesByName(pkgs)
 	for _, name := range []string{"core", "utils"} {
-		assert.True(t, byName[name].Ignore.Ignores(
+		assert.True(t, byName[name].Ignore.IsIgnored(
 			slash(root, "packages/libs/"+name+"/fixtures/a.json")), name)
 	}
-	assert.True(t, byName["app"].Counts(slash(root, "packages/apps/app/fixtures/a.json")),
+	assert.True(t, byName["app"].IsCounted(slash(root, "packages/apps/app/fixtures/a.json")),
 		"another space is untouched")
 }

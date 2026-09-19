@@ -105,7 +105,15 @@ func cleanCommitMessage(path, mode string) ([]byte, error) {
 	if mode == "scissors" && !edited {
 		mode = "whitespace"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// The validator is a commit-message hook and has no caller context to
+	// take: it is reached from Run before any command is chosen. The nearest
+	// thing to one is the invocation's own interrupt, so the bound that stops
+	// a hung `git config` is derived from it rather than from a detached
+	// context, and Ctrl-C at a commit prompt ends the hook instead of waiting
+	// out the half minute.
+	base, stop := signalCtx()
+	defer stop()
+	ctx, cancel := context.WithTimeout(base, 30*time.Second)
 	defer cancel()
 	if mode == "verbatim" {
 		return message, nil

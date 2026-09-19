@@ -77,7 +77,7 @@ var linkers = map[manifest.Format]linkFunc{
 //
 // A file name no manifest format claims gives ErrUnsupportedManifest, matching
 // Rewrite. A recognised manifest whose format has no redirect writes nothing
-// and reports every link skipped; SupportsLink answers that in advance.
+// and reports every link skipped; IsLinkSupported answers that in advance.
 func Relink(path string, links []Link) (LinkResult, error) {
 	for _, l := range links {
 		if l.Name == "" {
@@ -107,10 +107,10 @@ func Relink(path string, links []Link) (LinkResult, error) {
 	return res, err
 }
 
-// SupportsLink reports whether the manifest file name has a format that can
+// IsLinkSupported reports whether the manifest file name has a format that can
 // hold a redirect. It shares the linkers table with Relink, so the two can
 // never disagree.
-func SupportsLink(path string) bool {
+func IsLinkSupported(path string) bool {
 	format, ok := manifest.FormatOfPath(path)
 	if !ok {
 		return false

@@ -28,8 +28,8 @@ func TestMatchWebhookEvent(t *testing.T) {
 		"bare prefix is not a family":      {"package", "package.published", false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := MatchWebhookEvent(tc.pattern, tc.event); got != tc.want {
-				t.Errorf("MatchWebhookEvent(%q, %q) = %v, want %v", tc.pattern, tc.event, got, tc.want)
+			if got := IsWebhookEventAdmitted(tc.pattern, tc.event); got != tc.want {
+				t.Errorf("IsWebhookEventAdmitted(%q, %q) = %v, want %v", tc.pattern, tc.event, got, tc.want)
 			}
 		})
 	}
@@ -40,17 +40,17 @@ func TestKnownWebhookPattern(t *testing.T) {
 	// three family patterns; a typo is not, because a misspelled subscription
 	// would silence the webhook without a word.
 	for _, ev := range WebhookEvents() {
-		if !KnownWebhookPattern(ev) {
+		if !IsKnownWebhookPattern(ev) {
 			t.Errorf("event %q is listed but not accepted as a pattern", ev)
 		}
 	}
 	for _, p := range []string{"*", "release.*", "stage.*", "package.*", "script.*"} {
-		if !KnownWebhookPattern(p) {
+		if !IsKnownWebhookPattern(p) {
 			t.Errorf("pattern %q should be accepted", p)
 		}
 	}
 	for _, p := range []string{"", "packge.published", "package.publishd", "run.*", "plan.started", "package.", ".*"} {
-		if KnownWebhookPattern(p) {
+		if IsKnownWebhookPattern(p) {
 			t.Errorf("pattern %q should be refused", p)
 		}
 	}
@@ -58,12 +58,12 @@ func TestKnownWebhookPattern(t *testing.T) {
 	// `dispat trigger` may say is a valid subscription, because the config
 	// cannot know in advance what a script will call its events.
 	for _, p := range []string{"script.deployed", "script.smoke_passed", "script.e2e-green", "script.v2"} {
-		if !KnownWebhookPattern(p) {
+		if !IsKnownWebhookPattern(p) {
 			t.Errorf("script pattern %q should be accepted", p)
 		}
 	}
 	for _, p := range []string{"script.", "script.2fast", "script.has space", "script.a.b"} {
-		if KnownWebhookPattern(p) {
+		if IsKnownWebhookPattern(p) {
 			t.Errorf("script pattern %q should be refused", p)
 		}
 	}
@@ -94,12 +94,12 @@ func TestKnownWebhookFormatField(t *testing.T) {
 	// carry as a scalar — the packages list above all — is refused, so a
 	// template cannot silently render an empty hole forever.
 	for _, f := range WebhookFormatFields() {
-		if !KnownWebhookFormatField(f) {
+		if !IsKnownWebhookFormatField(f) {
 			t.Errorf("field %q is listed but not accepted", f)
 		}
 	}
 	for _, f := range []string{"", "packages", "Event", "pkg", "previousversion"} {
-		if KnownWebhookFormatField(f) {
+		if IsKnownWebhookFormatField(f) {
 			t.Errorf("field %q should be refused", f)
 		}
 	}

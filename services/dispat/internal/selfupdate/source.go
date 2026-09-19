@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -240,7 +241,7 @@ func (s *Source) Latest(ctx context.Context) (Release, error) {
 				best, found = rel, true
 			}
 		}
-		url = nextLink(header.Get("Link"))
+		url = s.nextPage(url, nextLink(header.Get("Link")))
 	}
 	if !found {
 		return Release{}, ErrNoRelease
@@ -364,6 +365,34 @@ func assets(raw []apiAsset) []Asset {
 		out = append(out, Asset{Name: a.Name, URL: a.URL, APIURL: a.APIURL, Size: a.Size, Digest: a.Digest})
 	}
 	return out
+}
+
+// nextPage accepts the Link header's next page only when it stays on the
+// scheme and host the listing was requested from.
+//
+// Every request this source makes carries the operator's token. The next
+// page's address is the server's own text, so following it wherever it points
+// would let a compromised or impersonated API host collect that token by
+// answering one listing with a Link to itself. Pagination that leaves the
+// endpoint ends the listing instead, and says so.
+func (s *Source) nextPage(current, next string) string {
+	if next == "" {
+		return ""
+	}
+	from, err := neturl.Parse(current)
+	if err != nil {
+		return ""
+	}
+	to, err := neturl.Parse(next)
+	if err != nil {
+		return ""
+	}
+	if !strings.EqualFold(from.Scheme, to.Scheme) || !strings.EqualFold(from.Host, to.Host) {
+		s.Log.Warn().Str("host", to.Host).
+			Msg(s.what() + ": the release listing's next page leaves the configured API host; listing stops here")
+		return ""
+	}
+	return next
 }
 
 // nextLink reads the next page's URL out of a Link header, which is how the

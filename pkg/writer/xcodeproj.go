@@ -19,6 +19,11 @@ const pbxKeyVersion = "MARKETING_VERSION"
 // definition, and CURRENT_PROJECT_VERSION is left alone: it is a monotonic
 // build counter rather than a semantic version.
 //
+// A setting deferring to another build setting (`MARKETING_VERSION =
+// "$(MARKETING_VERSION)"`) is left where it is, the same judgement every other
+// writer here makes about a value defined elsewhere: the reference is what
+// carries the version, and a literal in its place would freeze it.
+//
 // Unlike every other format here there is no cheap grammar to re-parse the
 // result against, so three guards stand in for one: the replacement may not
 // carry a byte that could close or open a token, the file's brace balance must
@@ -42,7 +47,7 @@ func rewriteXcodeProj(path, version string, edits []Edit) (Result, error) {
 	changed := false
 	for i, line := range lines {
 		key, value, span, ok := pbxSetting(line)
-		if !ok || key != pbxKeyVersion {
+		if !ok || key != pbxKeyVersion || isDeferredValue(value) {
 			continue
 		}
 		before++
@@ -75,7 +80,7 @@ func pbxVerify(before, after []byte, key, version string, count int) error {
 	seen := 0
 	for _, line := range strings.Split(string(after), "\n") {
 		k, value, _, ok := pbxSetting(line)
-		if !ok || k != key {
+		if !ok || k != key || isDeferredValue(value) {
 			continue
 		}
 		seen++

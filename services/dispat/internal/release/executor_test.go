@@ -249,7 +249,7 @@ func fillUpdates(p *plan.Plan) {
 			add(prov)
 		}
 		for _, prov := range p.Providers[name] {
-			if pr := p.Releases[prov]; pr != nil && pr.Releasing() {
+			if pr := p.Releases[prov]; pr != nil && pr.IsReleasing() {
 				add(prov)
 			}
 		}
@@ -277,7 +277,7 @@ func newExecutor(spec execSpec) *Executor {
 		e.Tagger = spec.Tagger
 	}
 	if spec.Changelog != nil {
-		e.Recorders = []ReleaseRecorder{spec.Changelog}
+		e.Recorders = []ReleaseRecorderx{spec.Changelog}
 	}
 	return e
 }
@@ -1057,7 +1057,7 @@ func TestRunNilTaggerDefersTagging(t *testing.T) {
 		PublishConcurrency: 1,
 		Runner:             &fakeRunner{},
 		Tagger:             nil,
-		Recorders:          []ReleaseRecorder{cl},
+		Recorders:          []ReleaseRecorderx{cl},
 		Log:                zerolog.New(&logs),
 	}
 	res := ex.Run(context.Background(), p)
@@ -1329,7 +1329,7 @@ func TestPublishRepositoryGuardCoversScriptAndRecording(t *testing.T) {
 			mu.Unlock()
 		}, nil
 	}
-	executor.Recorders = []ReleaseRecorder{recorderFunc(func(context.Context, *plan.Release) error {
+	executor.Recorders = []ReleaseRecorderx{recorderFunc(func(context.Context, *plan.Release) error {
 		mu.Lock()
 		recordedWhileHeld = held
 		mu.Unlock()

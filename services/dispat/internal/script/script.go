@@ -12,9 +12,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Runner executes a shell command inside a package folder. env entries
+// Runnerx executes a shell command inside a package folder. env entries
 // ("KEY=value") are added on top of the parent process environment.
-type Runner interface {
+type Runnerx interface {
 	Run(ctx context.Context, dir, command string, env []string, stdout, stderr io.Writer) error
 }
 
@@ -29,7 +29,7 @@ func DefaultShell() []string { return []string{"/bin/sh", "-c"} }
 //
 // Exported for the one command outside this package that runs a shell string
 // of its own: `dispat install --pipe` feeds the command it is given on the
-// standard input, which no Runner does, and an interrupt reaching an unpacker
+// standard input, which no Runnerx does, and an interrupt reaching an unpacker
 // halfway through a folder on PATH has to reach all of it.
 func SetProcessGroup(cmd *exec.Cmd) { setSysProcAttr(cmd) }
 
@@ -53,7 +53,7 @@ type ShellRunner struct {
 	Log zerolog.Logger
 }
 
-var _ Runner = (*ShellRunner)(nil)
+var _ Runnerx = (*ShellRunner)(nil)
 
 func (r *ShellRunner) Run(ctx context.Context, dir, command string, env []string, stdout, stderr io.Writer) error {
 	shell := r.Shell

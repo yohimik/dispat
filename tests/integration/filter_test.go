@@ -338,8 +338,8 @@ func TestFilterStepCommandsSelect(t *testing.T) {
 
 	res := r.Command("commit", "--package", "web", "--tag")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	assert.True(t, r.HasTag("web@0.1.0"), "tags: %v", r.TagList())
-	assert.False(t, r.HasTag("core@0.1.0"), "only the selected package is committed and tagged")
+	assert.True(t, r.IsTagged("web@0.1.0"), "tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("core@0.1.0"), "only the selected package is committed and tagged")
 
 	res = r.Command("changelog", "--space", "libs")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
@@ -466,7 +466,7 @@ func TestFilterReleaseWithholdsWhatTheOrderCannotReach(t *testing.T) {
 	r := filterRepo(t)
 
 	res := r.ReleaseOK("-p", "web")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W230", "web"),
 		"web must be reported as withheld, not silently skipped")
 	assert.Empty(t, r.TagList(), "web depends on a releasing core, so nothing may go out")
 
@@ -479,7 +479,7 @@ func TestFilterReleaseWithholdsWhatTheOrderCannotReach(t *testing.T) {
 	r.WriteFile("packages/web/feature.txt", "x")
 	r.Commit("feat(web): more web")
 	r.ReleaseOK("-p", "web")
-	assert.True(t, r.HasTag("web@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("web@0.2.0"), "tags: %v", r.TagList())
 }
 
 // TestFilterReleaseStrictRefusesBeforeAnythingRuns: --strict turns the
@@ -491,7 +491,7 @@ func TestFilterReleaseStrictRefusesBeforeAnythingRuns(t *testing.T) {
 
 	res := r.Release("-p", "web,site", "--strict")
 	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"))
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W230", "web"))
 	assert.Empty(t, r.TagList(), "site was releasable and must not have been released either")
 	assert.NotContains(t, res.Stdout, "building", "the refusal comes before any stage script")
 
@@ -525,11 +525,11 @@ func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
 
 	res := r.Release("-p", "one", "--strict")
 	require.Equal(t, 1, res.Code, "--strict refuses to split a group\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "W231"))
+	assert.True(t, harness.IsCodePresent(res.Events, "W231"))
 	assert.Empty(t, r.TagList())
 
 	res = r.ReleaseOK("-p", "one")
-	assert.True(t, harness.HasCode(res.Events, "W231"), "the split is reported, not refused")
+	assert.True(t, harness.IsCodePresent(res.Events, "W231"), "the split is reported, not refused")
 	assert.Equal(t, []string{"one@0.1.0"}, r.TagList())
 
 	// The next run puts the group back on one version: two catches up at the
@@ -537,7 +537,7 @@ func TestFilterReleaseSplitsAVersioningGroup(t *testing.T) {
 	// feat in its own changeset — and one, which published that work, is not
 	// dragged into an empty re-release at the next minor.
 	res = r.ReleaseOK()
-	assert.False(t, harness.HasCode(res.Events, "W234"),
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"),
 		"nobody rides: two's own commits are the whole cause")
 	assert.ElementsMatch(t, []string{"one@0.1.0", "two@0.1.0"}, r.TagList())
 
@@ -598,20 +598,20 @@ func TestFilterStatusSelects(t *testing.T) {
 		"every package is still printed, with the selection visible in the graph")
 
 	res = r.StatusOK("-p", "web")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"))
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W230", "web"))
 	assert.Equal(t, "⊘ withheld until its providers release",
 		harness.GraphLine(res.Events, "web").Str("message"))
 	assert.Empty(t, r.TagList(), "status writes nothing, whatever it selects")
 
 	res = r.Status("-p", "web", "--strict")
 	assert.Equal(t, 1, res.Code, "--strict gates a selection before a release is attempted")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W230", "web"),
 		"the refusal still explains itself")
 
 	// A space term that brings the provider along with the consumer is a
 	// selection the plan can release as it stands.
 	res = r.StatusOK("-s", "libs", "--strict")
-	assert.False(t, harness.HasCode(res.Events, "W230"))
+	assert.False(t, harness.IsCodePresent(res.Events, "W230"))
 	assert.Equal(t, "● changed", harness.GraphLine(res.Events, "web").Str("message"))
 
 	assert.Equal(t, 1, r.Status("-p", "ghost").Code, "an unmatched term is an error here too")
@@ -630,7 +630,7 @@ func TestFilterRequireReleaseCountsOnlyWhatShips(t *testing.T) {
 
 	res := r.Status("-p", "web", "--require-release")
 	assert.Equal(t, 3, res.Code, "web waits for core, so this run would ship nothing")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W230", "web"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W230", "web"),
 		"the refusal still explains itself")
 	assert.Equal(t, "⊘ withheld until its providers release",
 		harness.GraphLine(res.Events, "web").Str("message"))
@@ -753,11 +753,11 @@ func TestFilterReleaseByGroupNeverSplitsIt(t *testing.T) {
 
 	res := r.Release("-p", "core", "--strict")
 	require.Equal(t, 1, res.Code, "naming one member splits the group\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "W231"))
+	assert.True(t, harness.IsCodePresent(res.Events, "W231"))
 	assert.Empty(t, r.TagList())
 
 	res = r.ReleaseOK("-g", "shared", "--strict")
-	assert.False(t, harness.HasCode(res.Events, "W231"), "the whole group goes out at once")
+	assert.False(t, harness.IsCodePresent(res.Events, "W231"), "the whole group goes out at once")
 	assert.ElementsMatch(t, []string{"core@0.1.0", "web@0.1.0", "tool@0.1.0"}, r.TagList(),
 		"the group's members share one version, across the space and the standalone package")
 	assert.Equal(t, "⊝ not selected", harness.GraphLine(res.Events, "solo").Str("message"))

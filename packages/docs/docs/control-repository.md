@@ -12,6 +12,11 @@ Both modes preserve each source repository's ownership, review rules, and remote
 cross-repository pending windows and source-owned tags. Pointer-history mode keeps one simpler release history in the
 control repository.
 
+**Or without a control repository.** dispat calls the arrangement on this page the orchestration saga, and it is the
+default. Set `saga: choreography` instead to run the same combined graph with no control repository at all: every
+repository is a peer that keeps its own configuration and records, two-sided submodule links join the peers, and a
+release can start in any of them. See [A choreographed fleet](./choreographed-repositories.md).
+
 ## Source-history mode
 
 Set `polyrepo: true` or pass `--polyrepo` to read each linked source repository's own Git history. A non-empty
@@ -132,8 +137,9 @@ fixed or partly shared space declared centrally keeps its ordinary monorepositor
 `versionGroups` entry declared in the control file can likewise version packages from several sources together.
 
 You can mix this with source packages declared directly in the control file. Keep the declarations disjoint: importing
-a second definition of the same package or applying `repositoryOverrides` to that imported source is a configuration
-conflict.
+a second definition of the same package, or applying a `repositoryOverrides` commit policy to that imported source, is
+a configuration conflict. Central participation still applies to an imported source; see
+[Repository participation](#repository-participation).
 
 ### How commits reach packages
 
@@ -234,7 +240,8 @@ present, it replaces the whole object and omitted fields use their normal defaul
 for example, omitting `push` in the replacement means `false`.
 
 Overrides apply to centrally configured sources. An imported source owns its commit policy in its imported root, so a
-`repositoryOverrides` entry for that same source is a configuration conflict rather than another override layer.
+`commit` entry in `repositoryOverrides` for that same source is a configuration conflict rather than another override
+layer. Participation stays centrally owned for every source, imported or not.
 
 `commit.branch` names the existing branch that receives a release commit when a pinned source checkout is detached and
 needs a branch push. A detached tag-only operation or local commit that pushes no branch does not need it. Branches are
@@ -262,6 +269,42 @@ the control checkout and source pin agree again.
 
 The release lock covers the whole combined workspace, including active sources and standalone packages. Independent
 per-repository locks do not make two fleet runs safe.
+
+### Repository participation
+
+`repositoryOverrides.<source>.enabled` states whether one source repository takes part in the run. An absent key means
+`true`. An explicit `false` removes that repository's packages, commits, tags, baselines, scripts, records and locks
+from the run. The exclusion is read from `.gitmodules` before any repository work, so a disabled source needs no
+initialized checkout and is never inspected for history or pins, and an imported configuration under its path is not
+loaded.
+
+```yaml
+repositoryOverrides:
+  legacy-source:
+    enabled: false
+```
+
+A space path that lies inside a disabled repository stops contributing. The folders it names hold that repository's
+packages, so excluding the repository excludes the declaration with it, and a space whose every path is excluded is
+dropped together with its own `packages` entries. This is what lets a disabled source stay uninitialized while the rest
+of the fleet releases.
+
+A disabled repository keeps its filesystem boundary. Its path still belongs to that repository, so a control package
+declared inside it is refused as belonging to a nested repository rather than quietly becoming control-owned. The
+difference is what each declaration claims: a space path only hosts the packages of whoever owns the folders, while a
+package declared with a path claims those files for the control repository.
+
+A required dependency on a package of a disabled repository is an error that names the excluded repository, because
+that provider is no longer part of the composed workspace. A dependency declared `external: true` keeps the existing
+skipped-provider behavior instead. A `repositoryBaselines` entry naming a disabled repository is refused for the same
+reason.
+
+A `repositoryOverrides` key that matches no `.gitmodules` name is refused whichever value it carries. A misspelled
+exclusion would otherwise release the repository it was written to hold back.
+
+The composition log names what participation decided before any repository work starts: `polyrepo workspace composed`
+lists the participating repositories and the excluded ones, and one `repository excluded from the release` line follows
+for each exclusion.
 
 ### Keeping the plan fixed during release
 
@@ -960,6 +1003,7 @@ The identity lines are not optional. A runner has no git user configured, and th
 
 ## See also
 
+- [A choreographed fleet](./choreographed-repositories.md) for the same combined graph with no control repository.
 - [One repository or many](./monorepo.md) for the underlying decision, and for what changes if you ever do merge the
   repositories properly.
 - [Adopting dispat](./examples/adopting.md) for deriving the graph and the starting versions from manifests.

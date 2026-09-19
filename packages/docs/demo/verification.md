@@ -7,7 +7,7 @@ This patch restores the mobile documentation menu. The translated two-panel cont
 - TypeScript, all 19 documentation tests, and the production build pass.
 - An independent Playwright run passes all 24 combinations of 320/390/768/996px, light/dark themes, and landing/current/1.7 pages. It checks actual viewport intersection and hit testing for menu links, both panel transitions, keyboard navigation, close/reopen, and browser back. The previous visibility-only check could count links outside the viewport and missed this regression.
 - Screenshots and recordings are outside Git under `output/playwright/docs-1.8.4-menu/`.
-- Aqua installs the recorded Crier 1.1.0 and custom `yohimik/tinygo` 0.43.0-net.1 with required checksums on Darwin arm64. The release's Linux arm64 toolchain Docker stage also builds successfully, and its installed TinyGo compiles and runs a small Go program.
+- Aqua installs the recorded Crier 1.1.0 and custom `yohimik/tinygo` 0.43.0-net.2 with required checksums on Darwin arm64. The release's Linux arm64 toolchain Docker stage also builds successfully, and its installed TinyGo compiles and runs a small Go program.
 - The Docker shell/workflow checks and CI baseline scenarios pass. Changes under `.aqua/` select the full validation sweep. Tool management changes use a non-release maintenance commit; only the docs fix requests a patch.
 
 The earlier records below describe their respective releases. No historical documentation content before 1.8 was changed by this patch.

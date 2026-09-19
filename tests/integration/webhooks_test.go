@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -214,8 +215,8 @@ func TestWebhookFailingEndpointNeverAffectsTheRelease(t *testing.T) {
 	r.Commit("feat(core): bootstrap")
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@0.1.0"), "the release itself is untouched")
-	assert.True(t, harness.HasCode(res.Events, "W239"), "every failed delivery warns with its code")
+	assert.True(t, r.IsTagged("core@0.1.0"), "the release itself is untouched")
+	assert.True(t, harness.IsCodePresent(res.Events, "W239"), "every failed delivery warns with its code")
 	// The warning names the endpoint without repeating its path or query,
 	// which may contain credentials.
 	found := false
@@ -236,8 +237,8 @@ func TestWebhookUnreachableEndpointNeverAffectsTheRelease(t *testing.T) {
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): bootstrap")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"))
-	assert.True(t, harness.HasCode(res.Events, "W239"))
+	assert.True(t, r.IsTagged("core@0.1.0"))
+	assert.True(t, harness.IsCodePresent(res.Events, "W239"))
 }
 
 func TestWebhookSlowEndpointIsBounded(t *testing.T) {
@@ -260,8 +261,8 @@ func TestWebhookSlowEndpointIsBounded(t *testing.T) {
 	start := time.Now()
 	res := r.ReleaseOK()
 	assert.Less(t, time.Since(start), 30*time.Second, "the flush must not wait out a hanging endpoint")
-	assert.True(t, r.HasTag("core@0.1.0"))
-	assert.True(t, harness.HasCode(res.Events, "W239"))
+	assert.True(t, r.IsTagged("core@0.1.0"))
+	assert.True(t, harness.IsCodePresent(res.Events, "W239"))
 }
 
 func TestWebhookSignature(t *testing.T) {
@@ -325,7 +326,7 @@ func TestWebhookConfigRejections(t *testing.T) {
 			res := r.Release()
 			require.NotEqual(t, 0, res.Code)
 			assert.Contains(t, res.Stdout+res.Stderr, "webhooks[0]")
-			assert.False(t, r.HasTag("core@0.1.0"), "a refused load must release nothing")
+			assert.False(t, r.IsTagged("core@0.1.0"), "a refused load must release nothing")
 		})
 	}
 }
@@ -392,6 +393,25 @@ func TestWebhookFailedRunKeepsItsExitCode(t *testing.T) {
 	failed := sink.find(t, "package.failed")
 	assert.Equal(t, "build", failed["failedStage"])
 	assert.NotEmpty(t, failed["error"])
+}
+
+func TestWebhookReportsMonorepoFinalizeFailure(t *testing.T) {
+	sink := newWebhookSink(t)
+	r := harness.New(t)
+	cfg := webhooksConfig(echoBuild, models.WebhookConfig{URL: sink.srv.URL})
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+	cfg.UnsafeDisableLock = true
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+	hook := filepath.Join(r.Root, ".git", "hooks", "pre-commit")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code)
+	finished := sink.find(t, "release.finished")
+	assert.Equal(t, "failed", finished["status"])
+	assert.Equal(t, float64(1), finished["published"], "publication remains visible despite final recording failure")
 }
 
 func TestWebhookScriptProgressTrigger(t *testing.T) {
@@ -495,7 +515,7 @@ func TestWebhookTriggerOutsideARunIsHarmless(t *testing.T) {
 	dead.Commit("feat(core): bootstrap")
 	res = dead.Command("trigger", "progress", "50")
 	assert.Equal(t, 0, res.Code, "a dead endpoint is a warning, not an exit code")
-	assert.True(t, harness.HasCode(res.Events, "W239"))
+	assert.True(t, harness.IsCodePresent(res.Events, "W239"))
 
 	// With no webhooks configured at all, the command is a clean no-op: a
 	// script may carry its trigger lines into a repository that has not set

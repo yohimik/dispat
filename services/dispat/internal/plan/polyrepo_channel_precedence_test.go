@@ -46,7 +46,7 @@ func TestOwnerDirectChannelBeatsIncomparablePropagatedChannels(t *testing.T) {
 	pl := composedChannelPlan(t, "release(app)%canary: choose the app channel")
 
 	assert.False(t, hasCode(pl, CodeRepositoryPrecedence), "%v", pl.Diagnostics)
-	assert.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	assert.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	assert.Equal(t, "canary", pl.Releases["app"].Channel)
 	assert.Empty(t, pl.Releases["app"].ChannelFrom)
 }
@@ -55,7 +55,7 @@ func TestNoopOwnerDirectChannelLeavesPropagatedConflict(t *testing.T) {
 	pl := composedChannelPlan(t, "release(app)%beta>canary: unmatched app transition")
 
 	assert.True(t, hasCode(pl, CodeRepositoryPrecedence), "%v", pl.Diagnostics)
-	assert.True(t, pl.Fatal(), "%v", pl.Diagnostics)
+	assert.True(t, pl.IsFatal(), "%v", pl.Diagnostics)
 }
 
 func TestIncomparableDirectChannelsRemainConflicting(t *testing.T) {
@@ -79,5 +79,5 @@ func TestIncomparableDirectChannelsRemainConflicting(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, hasCode(pl, CodeRepositoryPrecedence), "%v", pl.Diagnostics)
-	assert.True(t, pl.Fatal(), "%v", pl.Diagnostics)
+	assert.True(t, pl.IsFatal(), "%v", pl.Diagnostics)
 }

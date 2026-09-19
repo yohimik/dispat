@@ -102,9 +102,9 @@ func TestFixedMajorPatchStaysWithItsPackage(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajor, git)
 
 	a, b := p.Releases["a"], p.Releases["b"]
-	require.True(t, a.Releasing())
+	require.True(t, a.IsReleasing())
 	assertVersion(t, v(1, 2, 4), a.Next, "a's own patch line, not the group's highest baseline")
-	assert.False(t, b.Releasing(), "a patch below the shared major moves nobody else")
+	assert.False(t, b.IsReleasing(), "a patch below the shared major moves nobody else")
 	assertVersion(t, v(1, 9, 0), b.Next)
 }
 
@@ -115,7 +115,7 @@ func TestFixedMajorMinorStaysWithItsPackage(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajor, git)
 
 	assertVersion(t, v(1, 3, 0), p.Releases["a"].Next)
-	assert.False(t, p.Releases["b"].Releasing(), "a minor is below the shared major")
+	assert.False(t, p.Releases["b"].IsReleasing(), "a minor is below the shared major")
 }
 
 func TestFixedMajorBreakingMovesTheWholeGroup(t *testing.T) {
@@ -130,7 +130,7 @@ func TestFixedMajorBreakingMovesTheWholeGroup(t *testing.T) {
 	assertVersion(t, v(2, 0, 0), a.Next)
 	assertVersion(t, v(2, 0, 0), b.Next, "the group shares one major")
 	assert.True(t, b.FixedRide)
-	assert.True(t, b.NoChanges())
+	assert.True(t, b.IsWithoutChanges())
 	assert.False(t, a.FixedRide)
 
 	found := false
@@ -151,7 +151,7 @@ func TestFixedMajorSparseLeavesTheUnchangedMemberBehind(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajorSparse, git)
 
 	assertVersion(t, v(2, 0, 0), p.Releases["a"].Next)
-	assert.False(t, p.Releases["b"].Releasing(), "sparse: b waits for a change of its own")
+	assert.False(t, p.Releases["b"].IsReleasing(), "sparse: b waits for a change of its own")
 	assertVersion(t, v(1, 9, 0), p.Releases["b"].Next)
 }
 
@@ -164,10 +164,10 @@ func TestFixedMajorSparseMemberJoinsTheSharedMajorWhenItChanges(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajorSparse, git)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing())
+	require.True(t, b.IsReleasing())
 	assertVersion(t, v(2, 0, 0), b.Next, "b joins the shared major at the start of its own line")
 	assert.False(t, b.FixedRide, "b has changes of its own; this is not a ride")
-	assert.False(t, p.Releases["a"].Releasing())
+	assert.False(t, p.Releases["a"].IsReleasing())
 }
 
 func TestFixedMajorLaggardCatchesUp(t *testing.T) {
@@ -180,7 +180,7 @@ func TestFixedMajorLaggardCatchesUp(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajor, git)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing(), "the laggard must catch up")
+	require.True(t, b.IsReleasing(), "the laggard must catch up")
 	assertVersion(t, v(2, 0, 0), b.Next)
 	assert.True(t, b.FixedRide)
 
@@ -222,7 +222,7 @@ func TestFixedMajorMinorPatchStaysWithItsPackage(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajorMinor, git)
 
 	assertVersion(t, v(1, 2, 4), p.Releases["a"].Next)
-	assert.False(t, p.Releases["b"].Releasing(), "a patch is below the shared minor")
+	assert.False(t, p.Releases["b"].IsReleasing(), "a patch is below the shared minor")
 	assertVersion(t, v(1, 2, 0), p.Releases["b"].Next)
 }
 
@@ -266,7 +266,7 @@ func TestFixedMajorMinorSparseMemberJoinsTheSharedPrefix(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajorMinorSparse, git)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing())
+	require.True(t, b.IsReleasing())
 	assertVersion(t, v(1, 3, 0), b.Next)
 	assert.False(t, b.FixedRide)
 }
@@ -314,7 +314,7 @@ func TestFixedMajorPatchTrainStaysLocal(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajor, git)
 
 	assert.Equal(t, "1.2.4-beta.0", p.Releases["a"].Next.String())
-	assert.False(t, p.Releases["b"].Releasing(), "b is not on a's train")
+	assert.False(t, p.Releases["b"].IsReleasing(), "b is not on a's train")
 	assert.Equal(t, ccme.ChannelStable, p.Releases["b"].Channel)
 }
 
@@ -339,10 +339,10 @@ func TestFixedMajorPinBelowTheMajorMovesOnlyItsPackage(t *testing.T) {
 	).tag("a", "1.2.3", "").tag("b", "1.9.0", "")
 	p := computeFixed(t, model.VersioningFixedMajor, git)
 
-	assert.False(t, p.HasErrors(), "the group's guards must not answer a member's pin: %v", p.Diagnostics)
+	assert.False(t, p.IsInvalid(), "the group's guards must not answer a member's pin: %v", p.Diagnostics)
 	assertVersion(t, v(1, 5, 0), p.Releases["a"].Next)
 	assert.True(t, p.Releases["a"].Pinned)
-	assert.False(t, p.Releases["b"].Releasing())
+	assert.False(t, p.Releases["b"].IsReleasing())
 }
 
 func TestFixedMajorLocalPinsDoNotCompete(t *testing.T) {
@@ -455,7 +455,7 @@ func TestSparsenessAloneIsNotADepthConflict(t *testing.T) {
 	for _, d := range p.Diagnostics {
 		assert.NotEqual(t, CodeFixedDepthConflict, d.Code, "same depth, no conflict: %v", d)
 	}
-	assert.False(t, p.Releases["b"].Releasing(), "the sparse member still stays behind")
+	assert.False(t, p.Releases["b"].IsReleasing(), "the sparse member still stays behind")
 }
 
 // ---------------------------------------------------------------------------
@@ -470,7 +470,7 @@ func TestFixedMajorHoldWithholdsTheGroupVersion(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajor, git)
 
 	assert.True(t, p.Releases["b"].Held)
-	assert.False(t, p.Releases["b"].Releasing())
+	assert.False(t, p.Releases["b"].IsReleasing())
 	assertVersion(t, v(2, 0, 0), p.Releases["b"].Next, "the hold withholds the group version")
 	assertVersion(t, v(2, 0, 0), p.Releases["a"].Next)
 }
@@ -516,7 +516,7 @@ func TestFixedMajorGroupSpansSpaces(t *testing.T) {
 
 	assertVersion(t, v(2, 0, 0), p.Releases["l1"].Next)
 	assertVersion(t, v(2, 0, 0), p.Releases["r1"].Next, "one major across both spaces")
-	assert.False(t, p.Releases["c"].Releasing())
+	assert.False(t, p.Releases["c"].IsReleasing())
 }
 
 func TestPartialGroupNeverPublishedVersionsIndependently(t *testing.T) {
@@ -528,7 +528,7 @@ func TestPartialGroupNeverPublishedVersionsIndependently(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajor, git)
 
 	assertVersion(t, v(0, 1, 0), p.Releases["a"].Next)
-	assert.False(t, p.Releases["b"].Releasing(), "b has nothing to align to")
+	assert.False(t, p.Releases["b"].IsReleasing(), "b has nothing to align to")
 }
 
 // TestDocumentedWorkedExample replays the table on the "Shared versions"
@@ -585,10 +585,10 @@ func TestDocumentedWorkedExample(t *testing.T) {
 				for k, name := range []string{"core", "ui"} {
 					rel := p.Releases[name]
 					if want[k] == "" {
-						assert.Falsef(t, rel.Releasing(), "step %d: %s must not release", i+1, name)
+						assert.Falsef(t, rel.IsReleasing(), "step %d: %s must not release", i+1, name)
 						continue
 					}
-					require.Truef(t, rel.Releasing(), "step %d: %s must release", i+1, name)
+					require.Truef(t, rel.IsReleasing(), "step %d: %s must release", i+1, name)
 					assert.Equalf(t, want[k], rel.Next.String(), "step %d: %s", i+1, name)
 					at[k] = want[k]
 				}
@@ -615,7 +615,7 @@ func TestPartialModesNeverReleaseBelowTheirOwnBaseline(t *testing.T) {
 			p := computeFixed(t, mode, git)
 			for _, name := range []string{"a", "b"} {
 				rel := p.Releases[name]
-				if !rel.Releasing() {
+				if !rel.IsReleasing() {
 					continue
 				}
 				assert.Truef(t, versionLess(rel.Baseline, rel.Next),
@@ -643,11 +643,11 @@ func TestFixedMajorMinorPartialReleaseCatchesUpAtThePublishedVersion(t *testing.
 	p := computeFixed(t, model.VersioningFixedMajorMinor, git)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing(), "the failed leg must catch up")
+	require.True(t, b.IsReleasing(), "the failed leg must catch up")
 	assertVersion(t, v(1, 3, 0), b.Next, "the published version already carries b's work")
 	assert.False(t, b.FixedRide, "b releases its own commits; this is not a ride")
 	assert.NotEmpty(t, b.NotesUnits(), "the feat is b's own changeset")
-	assert.False(t, p.Releases["a"].Releasing(),
+	assert.False(t, p.Releases["a"].IsReleasing(),
 		"a published this work already; re-counting it would drag a into an empty release")
 }
 
@@ -674,7 +674,7 @@ func TestFixedMajorMinorNewerWorkStillMovesThePrefix(t *testing.T) {
 
 	assertVersion(t, v(1, 4, 0), p.Releases["b"].Next, "fresh work owns the next minor")
 	a := p.Releases["a"]
-	require.True(t, a.Releasing(), "the moved prefix takes a along")
+	require.True(t, a.IsReleasing(), "the moved prefix takes a along")
 	assertVersion(t, v(1, 4, 0), a.Next)
 	assert.True(t, a.FixedRide)
 }
@@ -692,9 +692,9 @@ func TestFixedPartialReleaseRaisesTheCatcherToThePublishedVersion(t *testing.T) 
 	p := computeFixed(t, model.VersioningFixed, git)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing())
+	require.True(t, b.IsReleasing())
 	assertVersion(t, v(1, 2, 0), b.Next, "fixed: the whole version is shared")
-	assert.False(t, p.Releases["a"].Releasing())
+	assert.False(t, p.Releases["a"].IsReleasing())
 }
 
 func TestFixedMajorMinorSparsePartialReleaseCatchesUp(t *testing.T) {
@@ -707,9 +707,9 @@ func TestFixedMajorMinorSparsePartialReleaseCatchesUp(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedMajorMinorSparse, git)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing())
+	require.True(t, b.IsReleasing())
 	assertVersion(t, v(1, 3, 0), b.Next)
-	assert.False(t, p.Releases["a"].Releasing())
+	assert.False(t, p.Releases["a"].IsReleasing())
 }
 
 func TestRideCatchUpUpdatesSpanTheMovementItRodeFor(t *testing.T) {
@@ -729,7 +729,7 @@ func TestRideCatchUpUpdatesSpanTheMovementItRodeFor(t *testing.T) {
 	require.NoError(t, err)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing(), "the ride catches up")
+	require.True(t, b.IsReleasing(), "the ride catches up")
 	assertVersion(t, v(1, 3, 0), b.Next)
 	require.True(t, b.FixedRide)
 	require.Len(t, b.Updates, 1, "the ride documents the movement it rode for")

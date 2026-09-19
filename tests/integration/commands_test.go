@@ -82,7 +82,7 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 
 	r.CommitEmpty("feat(core)%beta: feature A")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.2.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0-beta.0"), "tags: %v", r.TagList())
 	assert.Contains(t, entry("core@0.2.0-beta.0"), "feature A")
 
 	r.CommitEmpty("fix(core): fix B")
@@ -93,14 +93,14 @@ func TestCommandsPreviewNotesWindowing(t *testing.T) {
 	assert.NotContains(t, res.Stdout, "feature A",
 		"the preview of a prerelease must not repeat the train's published notes")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.2.0-beta.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0-beta.1"), "tags: %v", r.TagList())
 	beta1 := entry("core@0.2.0-beta.1")
 	assert.Contains(t, beta1, "fix B")
 	assert.NotContains(t, beta1, "feature A", "a prerelease entry contains only its own changeset")
 
 	r.CommitEmpty("release(core)%stable: graduate")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0"), "tags: %v", r.TagList())
 	graduated := entry("core@0.2.0")
 	assert.Contains(t, graduated, "feature A", "the graduation collects the whole train")
 	assert.Contains(t, graduated, "fix B")

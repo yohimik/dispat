@@ -219,8 +219,8 @@ func (r *Result) filter(s Severity) []Diagnostic {
 	return out
 }
 
-// HasErrors reports whether any error-severity diagnostic was raised.
-func (r *Result) HasErrors() bool {
+// IsInvalid reports whether any error-severity diagnostic was raised.
+func (r *Result) IsInvalid() bool {
 	for _, d := range r.Diagnostics {
 		if d.Severity == SeverityError {
 			return true

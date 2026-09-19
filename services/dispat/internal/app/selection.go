@@ -121,7 +121,7 @@ func (a *App) narrow(pl *plan.Plan, f filter.Filter) (plan.Narrowing, error) {
 		a.log.Error().Err(err).Msg("cannot narrow the release")
 		return plan.Narrowing{}, err
 	}
-	if !sel.Active() {
+	if !sel.IsActive() {
 		return plan.Narrowing{}, nil
 	}
 	n := pl.Narrow(sel.Names)
@@ -140,7 +140,7 @@ func (a *App) narrow(pl *plan.Plan, f filter.Filter) (plan.Narrowing, error) {
 	// A selected none package vanishes from the narrowed plan by design;
 	// saying why beats a silent drop when someone names one directly.
 	for _, name := range sel.Names {
-		if rel := pl.Releases[name]; rel != nil && !rel.Releasable() {
+		if rel := pl.Releases[name]; rel != nil && !rel.IsReleasable() {
 			a.log.Info().Str("package", name).
 				Msg("package has versioning \"none\" and is never released")
 		}
@@ -238,10 +238,10 @@ func (a *App) windowPackages(ctx context.Context, pl *plan.Plan, opts WindowOpti
 	var window []string
 	for _, name := range pl.Order {
 		rel := pl.Releases[name]
-		if rel == nil || !rel.RunsScripts() {
+		if rel == nil || !rel.IsInScriptWindow() {
 			continue
 		}
-		if !rel.Releasing() {
+		if !rel.IsReleasing() {
 			a.log.Debug().Str("package", name).
 				Msg("changed package joins the window without releasing (versioning: none)")
 		}
@@ -260,7 +260,7 @@ func (a *App) reportOutsideWindow(sel filter.Result, covered []string) {
 // complement leaves a named package out for the opposite reason, and "I asked
 // for core and nothing happened" deserves an answer there too.
 func (a *App) reportUncovered(sel filter.Result, covered []string, msg string) {
-	if !sel.Active() {
+	if !sel.IsActive() {
 		return
 	}
 	kept := make(map[string]bool, len(covered))
@@ -409,7 +409,7 @@ func (a *App) sincePackages(ctx context.Context, pl *plan.Plan, rev string) ([]s
 	if rev == SinceAll {
 		return append([]string(nil), pl.Order...), nil
 	}
-	opts, err := a.planOptions()
+	opts, err := a.planOptions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +428,7 @@ func (a *App) selectPackages(ws filter.Workspace, f filter.Filter) (filter.Resul
 	if err != nil {
 		return filter.Result{}, err
 	}
-	if res.Active() {
+	if res.IsActive() {
 		a.log.Debug().Str("selection", res.Description).Strs("packages", res.Names).
 			Msg("selection narrowed")
 	}

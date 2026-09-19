@@ -20,10 +20,17 @@ type RepositoryHistory struct {
 	Name             string
 	Root             string
 	Path             string
-	Git              gitx.Git
+	Git              gitx.Gitx
 	ParserConfig     ccme.Config
 	NonPackageScopes []string
 	Control          bool
+	// Linker is the repository whose fleet link reached this one in a
+	// choreographed fleet. Exactly one participant has none: the entry.
+	Linker string
+	// Links maps each linked peer to the path holding it in this repository.
+	// It is empty for an orchestrated fleet, whose one inventory is the
+	// control repository's `.gitmodules`.
+	Links map[string]string
 }
 
 // RepositoryBaseline is an explicit cross-repository release boundary. Its
@@ -33,8 +40,8 @@ type RepositoryBaseline struct {
 	Consumer, ReleaseTag, Repository, Revision string
 }
 
-// HistoryStats exposes operation counts for planner scale tests and
-// benchmarks. Counters are safe under the bounded concurrent tag reads.
+// HistoryStats exposes operation counts for debug diagnostics, scale tests
+// and benchmarks. Counters are safe under the bounded concurrent tag reads.
 type HistoryStats struct {
 	TagInventories         atomic.Int64
 	CommitWindows          atomic.Int64
@@ -46,6 +53,10 @@ type HistoryStats struct {
 	PersistentLinkNodes    atomic.Int64
 	ReachabilityEdges      atomic.Int64
 	ChannelFrontierEntries atomic.Int64
+	// LinkReads counts the Git reads a choreographed fleet's boundary
+	// evidence makes: one per repository for the release subjects, and one
+	// per (repository, revision) whose links a route passes through.
+	LinkReads atomic.Int64
 }
 
 type historyCommit struct {
@@ -147,27 +158,50 @@ func checkpointTagKey(repository, tag string) string {
 // loadRepositoryTagsAndWindows is the composed-history form of §13.2-13.3.
 // It retains one graph and one unit stream while isolating tag namespaces,
 // windows, parsers and ancestry by repository.
+// loadRepositoryTagsAndWindows is §13.2 and §13.3 over a composed workspace.
+// It runs as three phases, in the order each one's inputs become available:
+// the repositories' tag inventories, the baselines those tags resolve to, and
+// the pending windows those baselines bound.
 func (cp *computation) loadRepositoryTagsAndWindows() error {
+	if err := cp.loadRepositoryTags(); err != nil {
+		return err
+	}
+	if err := cp.resolveTagBaselines(); err != nil {
+		return err
+	}
+	return cp.loadRepositoryWindows()
+}
+
+// loadRepositoryTags is §13.2 phase one: every participating repository's tag
+// inventory, partitioned onto its own packages.
+//
+// A real CLI inventories one repository's refs in a single git process.
+// Lightweight Git implementations retain the bounded per-package fallback,
+// which is also the path an interrupt has to be able to stop.
+func (cp *computation) loadRepositoryTags() error {
 	packagesByRepo := make(map[string][]*model.Package)
 	for _, p := range cp.pkgs {
-		packagesByRepo[strings.ToLower(p.Repository)] = append(packagesByRepo[strings.ToLower(p.Repository)], p)
+		key := strings.ToLower(p.Repository)
+		packagesByRepo[key] = append(packagesByRepo[key], p)
 	}
-
-	aliases := make(map[string]AliasFilter, len(packagesByRepo))
-	for repository, packages := range packagesByRepo {
-		aliases[repository] = NewAliasFilter(packages)
+	// Sorted, so which repository a failure names and the order the trace
+	// reads in are properties of the workspace rather than of a map walk.
+	repositories := make([]string, 0, len(packagesByRepo))
+	for repository := range packagesByRepo {
+		repositories = append(repositories, repository)
 	}
+	slices.Sort(repositories)
 
-	// A real CLI inventories one repository's refs once. Lightweight Git
-	// implementations retain the bounded per-package fallback.
-	for repository, packages := range packagesByRepo {
+	for _, repository := range repositories {
+		packages := packagesByRepo[repository]
 		history, ok := cp.histories[repository]
 		if !ok {
 			return fmt.Errorf("plan: repository history %q is missing", repository)
 		}
+		aliases := NewAliasFilter(packages)
 		formats := make(map[string]gitx.TagFormat, len(packages))
 		for _, p := range packages {
-			if (&Release{Pkg: p}).Releasable() {
+			if (&Release{Pkg: p}).IsReleasable() {
 				formats[p.Name] = (&Release{Pkg: p}).TagFormat()
 			}
 		}
@@ -182,31 +216,50 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 				cp.stats.TagInventories.Add(1)
 			}
 			for _, p := range packages {
-				cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases[repository].Without(all[p.Name], p.Name, cp.log))
+				cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases.Without(all[p.Name], p.Name, cp.log))
 			}
-			cp.log.Debug().Str("repository", history.Name).Int("packages", len(packages)).
-				Int("tags", repositoryTagCount(cp.tags, packages)).Msg("plan: repository tag inventory loaded")
-			continue
-		}
-		for _, p := range packages {
-			if !(&Release{Pkg: p}).Releasable() {
-				continue
-			}
-			tags, err := history.Git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
-			if err != nil {
-				return fmt.Errorf("plan: %s: %w", p.Name, err)
-			}
-			if cp.stats != nil {
-				cp.stats.TagInventories.Add(1)
-			}
-			cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases[repository].Without(tags, p.Name, cp.log))
+		} else if err := cp.loadRepositoryTagsPerPackage(history, packages, aliases); err != nil {
+			return err
 		}
 		cp.log.Debug().Str("repository", history.Name).Int("packages", len(packages)).
 			Int("tags", repositoryTagCount(cp.tags, packages)).Msg("plan: repository tag inventory loaded")
 	}
+	return nil
+}
 
-	// Resolve the public package baselines first. Commit fields stay raw for
-	// records and integrations; qualified keys remain internal.
+// loadRepositoryTagsPerPackage is the fallback for a repository whose Git
+// implementation offers no bulk inventory: one query per releasable package,
+// in order, stopping where the caller's cancellation found it.
+func (cp *computation) loadRepositoryTagsPerPackage(
+	history RepositoryHistory, packages []*model.Package, aliases AliasFilter) error {
+
+	for _, p := range packages {
+		if !(&Release{Pkg: p}).IsReleasable() {
+			continue
+		}
+		// A Git implementation that ignores its context would otherwise keep
+		// querying one package after another past an interrupt. The bulk
+		// inventory is a single call and needs no such check.
+		if err := cp.ctx.Err(); err != nil {
+			return fmt.Errorf("plan: repository %s loading tags: %w", history.Name, err)
+		}
+		tags, err := history.Git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
+		if err != nil {
+			return fmt.Errorf("plan: %s: %w", p.Name, err)
+		}
+		if cp.stats != nil {
+			cp.stats.TagInventories.Add(1)
+		}
+		cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases.Without(tags, p.Name, cp.log))
+	}
+	return nil
+}
+
+// resolveTagBaselines is §12.3 over the loaded inventories: each package's
+// newest tag and newest stable tag become its release's baseline and current
+// version. Commit fields stay raw for records and integrations; the qualified
+// keys beside them remain internal.
+func (cp *computation) resolveTagBaselines() error {
 	stableTags := make(map[string]gitx.Tag, len(cp.pkgs))
 	latestTags := make(map[string]gitx.Tag, len(cp.pkgs))
 	for _, p := range cp.pkgs {
@@ -239,7 +292,7 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 			} else if init, ok := cp.initials[p.Name]; ok {
 				rel.Current, rel.FromInitials = init, true
 			}
-		} else if init, ok := cp.initials[p.Name]; ok && rel.Releasable() {
+		} else if init, ok := cp.initials[p.Name]; ok && rel.IsReleasable() {
 			rel.Current, rel.FromInitials = init, true
 		}
 		rel.Next = rel.Current
@@ -248,82 +301,122 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 		}
 		cp.rel[p.Name] = rel
 	}
-	if err := cp.validateRepositoryBaselines(); err != nil {
-		return err
-	}
-
-	snapshots, ambiguous, err := cp.controlCheckpoints()
-	if err != nil {
-		return err
-	}
 	cp.stableTags, cp.latestTags = stableTags, latestTags
-	cp.controlSnapshots, cp.controlAmbiguous = snapshots, ambiguous
-	commitLists := make(map[string][]string)
-	windowSets := make(map[string]map[string]bool)
-	canonical := make(map[string]historyCommit)
-	internedKeys := make(map[string]string)
-	var lists [][]string
-	loadWindow := func(history RepositoryHistory, boundary string, pkg string) (map[string]bool, error) {
-		_, rawBoundary := splitHistoryKey(boundary)
-		cacheKey := historyKey(history.Name, rawBoundary)
-		keys, ok := commitLists[cacheKey]
-		if !ok {
-			var raw []gitx.Commit
-			var err error
-			if history.Control && cp.controlIndexed {
-				raw = cp.controlCommitsAfter(rawBoundary)
-			} else {
-				raw, err = history.Git.Commits(cp.ctx, rawBoundary)
-				if err != nil {
-					return nil, fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
-				}
-			}
-			if cp.stats != nil && pkg != "control intent" {
-				cp.stats.CommitWindows.Add(1)
-			}
-			keys = make([]string, 0, len(raw))
-			for _, commit := range raw {
-				item := historyCommit{repository: history.Name, root: history.Root, commit: commit}
-				key := commitHistoryKey(item)
-				if interned, exists := internedKeys[key]; exists {
-					key = interned
-				} else {
-					internedKeys[key] = key
-				}
-				keys = append(keys, key)
-				if _, exists := canonical[key]; !exists {
-					cloned := cloneHistoryCommit(history.Name, history.Root, commit)
-					canonical[key] = cloned
-					if cp.stats != nil {
-						cp.stats.CanonicalBytes.Add(int64(historyCommitBytes(cloned)))
-					}
-				}
-			}
-			commitLists[cacheKey] = keys
-			lists = append(lists, keys)
-			if cp.stats != nil && pkg != "control intent" {
-				cp.stats.WindowCommitRefs.Add(int64(len(keys)))
-			}
-			cp.log.Debug().Str("repository", history.Name).Str("boundary", rawBoundary).
-				Int("commits", len(keys)).Msg("plan: repository history window indexed")
-		}
-		set, ok := windowSets[cacheKey]
-		if !ok {
-			set = make(map[string]bool, len(keys))
-			for _, key := range keys {
-				set[key] = true
-			}
-			windowSets[cacheKey] = set
-		}
-		return set, nil
+	return cp.validateRepositoryBaselines()
+}
+
+// windowIndex is the shared state of one plan's window loading: the commit
+// lists already read per boundary, the immutable membership sets built from
+// them, the one canonical copy of each commit, and the interned keys that let
+// overlapping windows of one repository share their entries.
+//
+// It exists as a type rather than a closure's captured variables because
+// every window a package attaches is one of these entries, and the sharing —
+// not the reading — is what keeps a fleet's memory proportional to its
+// history rather than to its packages times its history.
+type windowIndex struct {
+	commitLists  map[string][]string
+	windowSets   map[string]map[string]bool
+	canonical    map[string]historyCommit
+	internedKeys map[string]string
+	lists        [][]string
+}
+
+func newWindowIndex() *windowIndex {
+	return &windowIndex{
+		commitLists:  make(map[string][]string),
+		windowSets:   make(map[string]map[string]bool),
+		canonical:    make(map[string]historyCommit),
+		internedKeys: make(map[string]string),
 	}
+}
+
+// load returns the immutable membership set of one repository's history after
+// boundary, together with the cache key naming that view. Packages released at
+// the same boundary share both.
+func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundary, pkg string) (
+	map[string]bool, string, error) {
+
+	_, rawBoundary := splitHistoryKey(boundary)
+	cacheKey := historyKey(history.Name, rawBoundary)
+	keys, ok := idx.commitLists[cacheKey]
+	if !ok {
+		var raw []gitx.Commit
+		var err error
+		if history.Control && cp.controlIndexed {
+			raw = cp.controlCommitsAfter(rawBoundary)
+		} else {
+			// Stop reading one window after another once the caller has gone,
+			// for the same reason the tag fallback does.
+			if err := cp.ctx.Err(); err != nil {
+				return nil, "", fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
+			}
+			raw, err = history.Git.Commits(cp.ctx, rawBoundary)
+			if err != nil {
+				return nil, "", fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
+			}
+		}
+		counted := pkg != controlIntentLabel
+		if cp.stats != nil && counted {
+			cp.stats.CommitWindows.Add(1)
+		}
+		keys = make([]string, 0, len(raw))
+		for _, commit := range raw {
+			item := historyCommit{repository: history.Name, root: history.Root, commit: commit}
+			key := commitHistoryKey(item)
+			if interned, exists := idx.internedKeys[key]; exists {
+				key = interned
+			} else {
+				idx.internedKeys[key] = key
+			}
+			keys = append(keys, key)
+			if _, exists := idx.canonical[key]; !exists {
+				cloned := cloneHistoryCommit(history.Name, history.Root, commit)
+				idx.canonical[key] = cloned
+				if cp.stats != nil {
+					cp.stats.CanonicalBytes.Add(int64(historyCommitBytes(cloned)))
+				}
+			}
+		}
+		idx.commitLists[cacheKey] = keys
+		idx.lists = append(idx.lists, keys)
+		if cp.stats != nil && counted {
+			cp.stats.WindowCommitRefs.Add(int64(len(keys)))
+		}
+		cp.log.Debug().Str("repository", history.Name).Str("boundary", rawBoundary).
+			Int("commits", len(keys)).Msg("plan: repository history window indexed")
+	}
+	set, ok := idx.windowSets[cacheKey]
+	if !ok {
+		set = make(map[string]bool, len(keys))
+		for _, key := range keys {
+			set[key] = true
+		}
+		idx.windowSets[cacheKey] = set
+	}
+	return set, cacheKey, nil
+}
+
+// controlIntentLabel names the control history's own window in the trace. It
+// is not a package, and it is deliberately left out of the per-package window
+// counts the scale tests read.
+const controlIntentLabel = "control intent"
+
+// loadRepositoryWindows is §13.3 over a composed workspace: each package's
+// pending window in every repository its plan reads, measured from the
+// boundary that repository's release checkpoint resolves to.
+func (cp *computation) loadRepositoryWindows() error {
+	if err := cp.evidenceFor().index(); err != nil {
+		return err
+	}
+	snapshots, ambiguous := cp.controlSnapshots, cp.controlAmbiguous
+
+	idx := newWindowIndex()
 	for _, p := range cp.pkgs {
-		repositories := cp.relevantRepositories(p.Name)
-		stable := stableTags[p.Name]
-		latest := latestTags[p.Name]
+		stable, latest := cp.stableTags[p.Name], cp.latestTags[p.Name]
 		cp.stableBoundaries[p.Name] = make(map[string]string)
 		cp.publishedBoundaries[p.Name] = make(map[string]string)
-		for _, repository := range repositories {
+		for _, repository := range cp.relevantRepositories(p.Name) {
 			boundary, err := cp.repositoryBoundary(p, stable, repository, snapshots, ambiguous)
 			if err != nil {
 				return err
@@ -336,11 +429,12 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 			cp.publishedBoundaries[p.Name][strings.ToLower(repository)] = published
 
 			history := cp.histories[strings.ToLower(repository)]
-			stableWindow, err := loadWindow(history, boundary, p.Name)
+			stableWindow, stableKey, err := cp.load(idx, history, boundary, p.Name)
 			if err != nil {
 				return err
 			}
 			cp.windowRefs[p.Name] = append(cp.windowRefs[p.Name], stableWindow)
+			cp.windowKeys[p.Name] = append(cp.windowKeys[p.Name], stableKey)
 
 			// Ordinarily the latest prerelease boundary descends from the stable
 			// boundary, making its window a subset. Explicit tuples may describe
@@ -348,21 +442,24 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 			// its stable tag. Retain that fresh window as a second shared view so
 			// the intervening provider work is visible as catch-up work.
 			if published != boundary {
-				freshWindow, err := loadWindow(history, published, p.Name)
+				freshWindow, freshKey, err := cp.load(idx, history, published, p.Name)
 				if err != nil {
 					return err
 				}
 				cp.windowRefs[p.Name] = append(cp.windowRefs[p.Name], freshWindow)
+				cp.windowKeys[p.Name] = append(cp.windowKeys[p.Name], freshKey)
 			}
 		}
 	}
 	if cp.controlIndexed {
 		control := cp.histories[strings.ToLower(cp.controlRepo)]
-		if _, err := loadWindow(control, "", "control intent"); err != nil {
+		if _, _, err := cp.load(idx, control, "", controlIntentLabel); err != nil {
 			return err
 		}
 	}
-	cp.buildRepositoryUnion(lists, canonical)
+	cp.buildRepositoryUnion(idx.lists, idx.canonical)
+	cp.log.Debug().Int("packages", len(cp.pkgs)).Int("windows", len(idx.commitLists)).
+		Int("commits", len(cp.commits)).Msg("plan: repository tags and windows loaded")
 	// Every retained commit, parent and control-state scalar has been cloned or
 	// interned by this point. Drop the bulk records so substring-backed fields
 	// cannot keep several overlapping git-log buffers live for the whole plan.
@@ -497,31 +594,27 @@ func (cp *computation) repositoryBoundary(pkg *model.Package, tag gitx.Tag, repo
 			Msg("plan: explicit repository baseline resolved")
 		return revision, nil
 	}
-	checkpointKey := checkpointTagKey(pkg.Repository, tag.Name)
-	if ambiguous[checkpointKey] {
-		cp.err(CodeRepositoryBoundary, pkg.Name, "", fmt.Sprintf("release %s has ambiguous control checkpoint association; add repositoryBaselines for repository %s", tag.Name, repository))
-		return "", errFatalPlan
-	}
-	snapshot, ok := snapshots[checkpointKey]
-	if !ok {
-		cp.err(CodeRepositoryBoundary, pkg.Name, "", fmt.Sprintf("release %s has no verifiable control checkpoint association; add repositoryBaselines for repository %s", tag.Name, repository))
-		return "", errFatalPlan
-	}
-	if strings.EqualFold(repository, cp.controlRepo) {
-		cp.log.Trace().Str("consumer", pkg.Name).Str("releaseTag", tag.Name).
-			Str("repository", repository).Str("revision", snapshot.commit).
-			Msg("plan: control checkpoint boundary resolved")
-		return historyKey(repository, snapshot.commit), nil
-	}
-	revision := cp.controlSnapshotLink(snapshot, repository)
+	// What is left is the saga's own question — which revision of that
+	// repository this release already carried — and each saga proves it from
+	// what it records. The remedy is the same tuple either way, so the
+	// diagnostic is raised here rather than in each of them.
+	revision, remedy := cp.evidenceFor().resolve(boundaryQuery{
+		pkg: pkg, tag: tag, repository: repository, snapshots: snapshots, ambiguous: ambiguous})
 	if revision == "" {
-		cp.err(CodeRepositoryBoundary, pkg.Name, "", fmt.Sprintf("release %s control checkpoint has no gitlink for repository %s; add repositoryBaselines", tag.Name, repository))
+		cp.err(CodeRepositoryBoundary, pkg.Name, "", remedy)
 		return "", errFatalPlan
 	}
-	cp.log.Trace().Str("consumer", pkg.Name).Str("releaseTag", tag.Name).
-		Str("repository", repository).Str("revision", revision).
-		Msg("plan: control checkpoint source boundary resolved")
-	return historyKey(repository, revision), nil
+	return revision, nil
+}
+
+// evidenceFor answers which boundary evidence this computation reads. The
+// choice is made once, when the computation is set up; a computation a test
+// assembled by hand falls back to the control checkpoints it always read.
+func (cp *computation) evidenceFor() boundaryEvidence {
+	if cp.evidence == nil {
+		cp.evidence = checkpointEvidence{cp: cp}
+	}
+	return cp.evidence
 }
 
 func (cp *computation) controlCheckpoints() (map[string]controlSnapshot, map[string]bool, error) {
@@ -619,17 +712,11 @@ func (cp *computation) controlCheckpoints() (map[string]controlSnapshot, map[str
 		for _, key := range controlTags[commit.SHA] {
 			assign(key, snapshotFor(commit.SHA))
 		}
-		subject := strings.SplitN(commit.Message, "\n", 2)[0]
-		const prefix = "chore(release): "
-		if !strings.HasPrefix(subject, prefix) {
-			continue
-		}
 		var named []struct {
 			tag   string
 			owner owner
 		}
-		for _, token := range strings.Split(strings.TrimPrefix(subject, prefix), ",") {
-			tag := strings.TrimSpace(token)
+		for _, tag := range releaseSubjectTags(strings.SplitN(commit.Message, "\n", 2)[0]) {
 			for _, candidate := range tagOwners[tag] {
 				if candidate.path != "" {
 					named = append(named, struct {
@@ -788,6 +875,178 @@ func (cp *computation) controlResolves(commit string, candidates []channelPick) 
 		}
 	}
 	return true
+}
+
+// validateControlProjectionHeads prevents fleet intent from being applied to
+// source code that did not yet contain the control commit's gitlink snapshot.
+// A sync:none workspace may deliberately keep control and source at different
+// revisions, so the mismatch alone is valid. It becomes unsafe only when an
+// actionable control unit actually resolves to a package in that source and
+// the control snapshot's pin is ahead of, or incomparable with, the active
+// source HEAD.
+//
+// "Actually resolves" is the same admission test every application pass uses,
+// and it has to be, or the guard refuses plans it has no stake in. cp.commits
+// is the *union* of every package's window (buildRepositoryUnion), so a
+// control commit one package discharged long ago is still in the list while
+// another package's window holds it. directBumps, sourcePackages,
+// resolveHolds, resolveChannels and both propagation passes all admit a
+// (commit, package) pair only while cp.inWindow(package, commit) holds and
+// the commit is not already contained in that package's baseline; a pair
+// failing either test contributes nothing to this run, so requiring its
+// source to carry the pin would block a release the directive cannot touch.
+// Propagation targets are admitted against the *target's* window in those
+// passes, which is why the same pair of tests covers the walked packages
+// controlProjectionPackages adds.
+func (cp *computation) validateControlProjectionHeads() error {
+	if cp.controlRepo == "" {
+		return nil
+	}
+	invalid := false
+	for _, rec := range cp.commits {
+		if !strings.EqualFold(rec.repository, cp.controlRepo) {
+			continue
+		}
+		for i, unit := range rec.units {
+			if !IsControlUnitAffectingRelease(unit) || i >= len(rec.scope) {
+				continue
+			}
+			checked := make(map[string]bool)
+			packageNames := cp.controlProjectionPackages(rec, i)
+			for _, packageName := range packageNames {
+				pkg := cp.byName[packageName]
+				if pkg == nil || pkg.Repository == "" || strings.EqualFold(pkg.Repository, cp.controlRepo) ||
+					checked[strings.ToLower(pkg.Repository)] || !cp.inWindow(packageName, rec.key) ||
+					cp.containedInBaseline(packageName, rec.key) ||
+					cp.cancelledFor(rec.key, packageName) || cp.held[packageName] {
+					continue
+				}
+				checked[strings.ToLower(pkg.Repository)] = true
+				history, ok := cp.history(pkg.Repository)
+				head := cp.repositoryHeads[history.Name]
+				pin := cp.controlLinkAt(rec.commit.SHA, history.Path)
+				if !ok || history.Path == "" || head == "" || pin == "" {
+					continue
+				}
+				contains, err := cp.sourceContainsPin(history, pin, head)
+				if err != nil {
+					return err
+				}
+				if contains {
+					continue
+				}
+				cp.err(CodeRepositoryBoundary, packageName, rec.key, fmt.Sprintf(
+					"control directive at %s targets repository %s at active revision %s, but its control snapshot pins %s; synchronize the source to include that pin or choose an earlier control revision",
+					rec.commit.SHA, history.Name, head, pin))
+				invalid = true
+			}
+		}
+	}
+	if err := cp.ancestryFailed(); err != nil {
+		return err
+	}
+	if invalid {
+		return errFatalPlan
+	}
+	return nil
+}
+
+// sourceContainsPin answers the guard's one question: does the active source
+// checkout already carry the revision this control snapshot pinned?
+//
+// The pin is read out of the control tree, so it is exactly the revision a
+// source clone can be missing — the scenario the guard exists for often *is*
+// a source that never fetched it. Ancestry alone cannot answer that: git
+// treats an unknown commit on the left of `merge-base --is-ancestor` as a
+// fatal error, cp.ancestorLookup records it in cp.ancErr, and Compute then
+// aborts with a git exit status in place of the diagnostic that names the
+// repository, the active revision, the pin and how to recover. Probing
+// presence first turns "not here" back into the ordinary answer false while
+// leaving an unreadable repository fatal, and a Git implementation without
+// the capability keeps the plain ancestry path it had before.
+func (cp *computation) sourceContainsPin(history RepositoryHistory, pin, head string) (bool, error) {
+	key := historyKey(history.Name, pin)
+	if probe, ok := history.Git.(gitx.CommitProbex); ok {
+		present, cached := cp.pinPresent[key]
+		if !cached {
+			answer, err := probe.IsCommitPresent(cp.ctx, pin)
+			if err != nil {
+				return false, fmt.Errorf("plan: repository %s: %w", history.Name, err)
+			}
+			if cp.pinPresent == nil {
+				cp.pinPresent = make(map[string]bool)
+			}
+			cp.pinPresent[key] = answer
+			present = answer
+		}
+		if !present {
+			return false, nil
+		}
+	}
+	return cp.ancestorOrSelf(key, historyKey(history.Name, head)), nil
+}
+
+func (cp *computation) controlProjectionPackages(rec *commitRec, i int) []string {
+	affected := make(map[string]bool, len(rec.scope[i]))
+	for name := range rec.scope[i] {
+		affected[name] = true
+	}
+	if i < len(rec.propagations) {
+		propagation := rec.propagations[i]
+		if !propagation.inert() {
+			for _, target := range cp.walk(rec.scope[i], propagation.Depth, propagation.kinds) {
+				if propagation.allowsTarget(target.name) {
+					affected[target.name] = true
+				}
+			}
+		}
+	}
+	if i < len(rec.channelPropagations) {
+		channel := rec.channelPropagations[i]
+		if !channel.inert() {
+			for _, target := range cp.walk(rec.scope[i], channel.Depth, channel.kinds) {
+				if channel.allowsTarget(target.name) {
+					affected[target.name] = true
+				}
+			}
+		}
+	}
+	packageNames := make([]string, 0, len(affected))
+	for packageName := range affected {
+		packageNames = append(packageNames, packageName)
+	}
+	slices.Sort(packageNames)
+	return packageNames
+}
+
+// IsControlUnitAffectingRelease reports whether a control unit can change what
+// a source repository publishes, which is what makes the projection guard's
+// question worth asking about it at all.
+//
+// The one directive deliberately left out is a bumpless `Release-As: none`.
+// It holds the package (§8.6.1): it can only remove a release, never create
+// one or move a version, so projecting it onto a source older than the
+// control snapshot's pin publishes nothing that source did not already carry.
+// Refusing the plan for it would turn the safest possible fleet statement
+// into a fatal error. `Release-As: auto` and an exact pin stay in, because
+// both do produce a release, at a version the control author chose while
+// looking at the pinned source.
+//
+// A bumpless `Channel:` stays in as well, and that is not symmetry for its
+// own sake: resolveChannels pushes a candidate from every non-cancel unit
+// whose ChannelSet is true regardless of its bump, and channel(P) decides
+// whether a package releasing for some other reason publishes 1.2.0 or
+// 1.2.0-beta.1. The directive therefore changes a real release and needs the
+// source it was written against.
+func IsControlUnitAffectingRelease(unit *ccme.Unit) bool {
+	if unit == nil {
+		return false
+	}
+	if unit.Bump != ccme.BumpNone || unit.IsCancel() || unit.Directives.ChannelSet ||
+		len(unit.Directives.Edits) > 0 || len(unit.Directives.Deletes) > 0 {
+		return true
+	}
+	return unit.Directives.ReleaseAs != nil && unit.Directives.ReleaseAs.Kind != ccme.ReleaseAsNone
 }
 
 // controlCommitsAfter reuses the single bulk control inventory. The excluded
@@ -1056,7 +1315,7 @@ func repositoryWordsKey(words []uint64) string {
 	return string(key)
 }
 
-func (cp *computation) gitForKey(key string) (gitx.Git, string, bool) {
+func (cp *computation) gitForKey(key string) (gitx.Gitx, string, bool) {
 	repository, raw := splitHistoryKey(key)
 	h, ok := cp.history(repository)
 	if !ok || h.Git == nil {

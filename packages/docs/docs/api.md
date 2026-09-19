@@ -28,6 +28,11 @@ runtime and recovery contract is in [A control repository](./control-repository.
 Go shapes are in [models](./go/models.md). The CLI exposes the same composition through `--polyrepo` and repeatable
 `--configs` global flags.
 
+A fleet with no control repository adds three more: `saga`, `repository`, and the `repositories` roster of
+`{name, url, path, branch}` entries. Their contract is in
+[A choreographed fleet](./choreographed-repositories.md), and the `--saga` global flag selects the protocol for one
+invocation.
+
 ## The Go packages
 
 Read [Go packages](./go/README.md) for details on the six modules dispat uses. You can import each module on its own.

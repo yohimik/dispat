@@ -62,9 +62,9 @@ func (u *Unit) IsRelease() bool { return u.Header.Type == TypeRelease }
 // bump of its own (§7.1).
 func (u *Unit) IsControl() bool { return u.IsCancel() || u.IsRelease() }
 
-// HasExplicitScope reports whether the header carried a scope-set. When it did
+// IsScopeExplicit reports whether the header carried a scope-set. When it did
 // not, the unit's packages are derived from the commit's changed files (§6.2).
-func (u *Unit) HasExplicitScope() bool { return u.Header.HasScopeSet }
+func (u *Unit) IsScopeExplicit() bool { return u.Header.HasScopeSet }
 
 // Scopes returns the unit's scope terms.
 func (u *Unit) Scopes() ScopeSet { return u.Header.Scopes }

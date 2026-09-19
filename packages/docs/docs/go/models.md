@@ -54,6 +54,25 @@ cfg := models.File{
 active normally when the provider is imported. See [A control repository](../control-repository.md#source-history-mode)
 for the runtime rules behind these values.
 
+A peer of a fleet with no control repository states the same contract through three fields:
+
+```go
+cfg := models.File{
+	Saga:       models.SagaChoreography,
+	Repository: "api",
+	Repositories: []models.RepositoryLinkConfig{
+		{Name: "sdk", URL: "git@github.com:acme/sdk.git", Branch: "main"},
+		{Name: "web", URL: "git@github.com:acme/web.git", Path: "vendor/web", Branch: "main"},
+	},
+}
+```
+
+`Saga` is `models.SagaOrchestration` or `models.SagaChoreography`, and an empty value is the orchestrated default.
+`File.IsChoreographed` is the nil-safe predicate for it, and it compares the value without regard to case, like every
+other configured value. `RepositoryLinkConfig.Path` is where a link to that peer lives inside this repository and
+defaults to `.links/<name>`; `Branch` is the peer's release branch, which a created link follows and a recorded pin is
+verified against. See [A choreographed fleet](../choreographed-repositories.md) for the runtime rules.
+
 ## The contract
 
 Every field carries one `json` tag, and that tag is both halves of the contract: the key the CLI decodes the file by,

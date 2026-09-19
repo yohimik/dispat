@@ -128,6 +128,13 @@ SHA spelling; use an applicable control directive or stop on the reported confli
 An applicable direct channel directive takes precedence over conflicting propagated channels; an unmatched or
 otherwise inert direct directive does not resolve their conflict.
 
+Read `repositoryOverrides` before trusting a package list. A source whose `enabled` is `false` takes no part in the
+run: it supplies no package, commit, tag, baseline, script, record or lock, it needs no initialized checkout, and the
+control space paths inside it stop contributing. The composed and excluded repositories are named in the log line
+`polyrepo workspace composed`. An excluded repository still owns its paths, so a control package declared inside one
+is an ownership error, and a required dependency on one of its packages is refused by name. Do not restore a
+repository's participation to make a plan look complete; ask whether the exclusion was intended.
+
 An `external: true` dependency may name a provider omitted from the current imports. Confirm that the skipped-provider
 diagnostic is expected. If that provider is present, review the edge as an ordinary one: it affects cycles,
 propagation, ordering, failure blocking, reconciliation, `--consumers`, and scripts.
@@ -173,6 +180,46 @@ check.
 For `--since <control-revision>`, verify that the command projects that revision's gitlinks into one source range per
 repository; it must not scan the control history once per consumer or count pointer moves again. Package scripts and
 nested hooks share the combined workspace while retaining the triggering source context.
+
+### Choreographed fleets
+
+Identify the saga before anything else. `saga: choreography`, or a global `--saga choreography`, means there is no
+control repository: every participant states its own `repository` identity, carries its own configuration and release
+records, and is joined to its neighbours by two-sided submodule links. An absent `saga` key is the orchestrated saga
+above and nothing in this subsection applies. Reading the fleet starts from the repository you are standing in, not
+from a central inventory, so record which peer a plan was composed from; the `polyrepo workspace composed` line names
+the saga and the entry.
+
+Never run `git submodule update --recursive` in a linked fleet. Every peer carries a back-link to the repository that
+linked it, deliberately left as an empty folder, and recursion fills it with a second copy of the repository you are
+in. Update one declared path at a time. A link path holding no repository is `E330` and names the command that repairs
+exactly that link; a run started inside another peer's linked checkout meets the same diagnostic, which is expected
+rather than a broken fleet.
+
+`dispat compute --write` in a choreographed fleet touches Git and the network: it creates a checkout for one half of
+each link, declares the other half inside it, and stages `.gitmodules` and the gitlinks in both repositories. It also
+writes the missing half of a link only one end declares, which needs no fetch because that checkout already exists.
+That is a configuration change and needs the same authorization as any other; read-only inspection does not authorize
+it. The command never commits, never removes a link, and never recurses, so review and commit the staged result in
+each repository yourself. A roster entry with no url is reported rather than written, and a link URL carrying user
+information is refused. A repository with no remote has the half that would point at it withheld with a warning,
+because a pin has to be a revision its peer can fetch.
+
+Treat a settlement as a release record. Before a cross-repository consumer publishes, each repository on the route
+records the revision of its next hop as an ordinary commit carrying the release's own message, which is why two
+`chore(release): <tag>` commits can sit on top of each other. That commit's tree is the only evidence the next plan
+reads, so never rewrite, squash, amend or drop one, and never delete a link to tidy a history. A commit that only moved
+a fleet link is not a change to any package; do not report one as pending work.
+
+`E338` means the links do not form a tree and a pair is joined twice. Ask which link to remove rather than removing
+one: a link records what a release incorporated. `E339` means an identity cannot be trusted, usually because a peer's
+own `repository` value, the rosters naming it and the submodule name linking it do not agree, or because a linked
+repository does not state the choreographed saga itself. `W332` (a one-sided link) and `W333` (a roster missing a fleet
+member) do not stop a run and are what `dispat compute` repairs; report them rather than working around them.
+
+`--polyrepo=false` on a choreographed configuration releases that repository alone and composes no fleet. A consumer
+released that way writes its release commit without settling any link, so the next fleet-wide plan reports `E333` for
+that tag and needs an explicit `repositoryBaselines` tuple. Do not use the flag to get a release past a fleet problem.
 
 ## Share configuration across Windows and Linux
 

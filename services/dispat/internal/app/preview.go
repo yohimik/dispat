@@ -68,7 +68,7 @@ func (a *App) Preview(ctx context.Context, opts PreviewOptions) (PreviewResult, 
 		return PreviewResult{}, err
 	}
 	a.printDiagnostics(pl)
-	if pl.Fatal() {
+	if pl.IsFatal() {
 		a.log.Error().Msg("refusing to preview: the repository cannot produce a correct plan")
 		return PreviewResult{}, errors.New("no correct plan exists")
 	}
@@ -101,7 +101,7 @@ func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
 	// reason to release at all — the sections themselves never render empty,
 	// so they cannot be the gate. A workspace-wide footer would otherwise
 	// give every unchanged package a body and put it in the preview.
-	if !rel.Changed() && !rel.Releasing() {
+	if !rel.IsChanged() && !rel.IsReleasing() {
 		return ""
 	}
 	// The changelog entry's header carries the tag and a date; a preview has
@@ -162,7 +162,7 @@ func withheldReason(enabled bool, channels []string, channel string) string {
 	switch {
 	case !enabled:
 		return "disabled by config"
-	case !model.ChannelsAdmit(channels, channel):
+	case !model.IsChannelAdmitted(channels, channel):
 		return fmt.Sprintf("the channels do not admit %s", channel)
 	default:
 		return ""

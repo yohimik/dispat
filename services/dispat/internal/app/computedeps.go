@@ -118,7 +118,7 @@ func (a *App) detectEdges(scanned []scannedPackage) ([]detectedEdge, map[string]
 	unversioned := make(map[string]bool)
 	for _, s := range scanned {
 		byDir[filepath.Clean(s.pkg.Dir)] = s.pkg.Name
-		if s.pkg.Space != nil && !s.pkg.Space.Versioning.Releasable() {
+		if s.pkg.Space != nil && !s.pkg.Space.Versioning.IsReleasable() {
 			unversioned[s.pkg.Name] = true
 		}
 		// Every package is an owner, because one whose manifests declare no

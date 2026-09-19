@@ -84,7 +84,7 @@ type correctionRec struct {
 
 // commitResolver resolves an abbreviated sha against the whole repository.
 //
-// It is a capability rather than a method on gitx.Git because only the real
+// It is a capability rather than a method on gitx.Gitx because only the real
 // implementation can answer it: an in-memory fake knows the commits it was
 // given and nothing else. Without it the pass matches prefixes against the
 // commits it examined, which is exact for a full sha and for any target still

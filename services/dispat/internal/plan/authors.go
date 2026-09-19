@@ -4,6 +4,7 @@
 package plan
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -165,10 +166,37 @@ func (cp *computation) resolveAuthors(rec *commitRec) {
 // section. Only the primary author is taken — a message that did not parse has
 // no footers worth reading — and the newest-first order of cp.commits is kept,
 // which is the order rel.Units is built in.
+//
+// The collection reads every commit of the union once per package, which is
+// the workspace's whole history for a monorepo and every repository's history
+// for a fleet. Packages released at the same boundaries see the same commits
+// as pending and the same subset as fresh, so the answer is computed once per
+// window identity and shared: without that, the pass costs packages × commits,
+// which is what makes a large workspace's planning superlinear in its own size.
 func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author) {
+	// Sharing is worth its key only when the scan it replaces is long enough
+	// to pay for one. A workspace whose union holds a handful of commits scans
+	// them directly rather than identifying a window it would never look up
+	// twice.
+	shared := len(cp.commits) >= windowAuthorSharingMinimum
+	var identity windowIdentity
+	if shared {
+		identity = cp.windowIdentity(name)
+		if cached, ok := cp.windowAuthors[identity]; ok {
+			return cached.window, cached.fresh
+		}
+	}
 	windowSeen := make(map[string]bool)
 	freshSeen := make(map[string]bool)
+	reachable := cp.windowRepositories(name)
 	for _, rec := range cp.commits {
+		// A commit from a repository the package's window cannot reach is not
+		// pending for it, whatever its key says. Deciding that from the
+		// repository alone saves consulting every shared window view for
+		// every commit of every other repository in the fleet.
+		if reachable != nil && !reachable[strings.ToLower(rec.repository)] {
+			continue
+		}
 		if !cp.inWindow(name, rec.key) {
 			continue
 		}
@@ -181,7 +209,96 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 			fresh = appendUniqueAuthor(fresh, freshSeen, a)
 		}
 	}
+	// Clipped, so a consumer that appends to a shared list reallocates rather
+	// than writing into another release's attribution.
+	window, fresh = slices.Clip(window), slices.Clip(fresh)
+	if shared {
+		cp.windowAuthors[identity] = windowAuthorSet{window: window, fresh: fresh}
+	}
 	return window, fresh
+}
+
+// windowAuthorSharingMinimum is the union length from which one window's
+// attribution is worth identifying and sharing: below it, hashing the identity
+// costs more than scanning the commits it stands for.
+const windowAuthorSharingMinimum = 16
+
+// windowAuthorSet is one window identity's attribution: the authors of its
+// pending window and of the fresh part of it.
+type windowAuthorSet struct{ window, fresh []Author }
+
+// windowIdentity names every input inWindow and containedInBaseline read for a
+// package. Two packages with the same identity give the same answer to both
+// questions for every commit in the union, so they share one attribution.
+//
+// It is a comparable value rather than an assembled key because a single
+// history — the ordinary monorepo — identifies a window with three strings it
+// already holds, and building a key for each of a thousand packages would
+// cost more than the scan the sharing saves. Only a composed workspace, whose
+// window spans a variable set of repositories, assembles one.
+type windowIdentity struct {
+	// The single-history case: the window's shared boundary, and the two
+	// commits containedInBaseline compares against.
+	window, baseline, stable string
+	// The composed case: the package's repository role, the history views its
+	// window was attached from, and its boundary in each of them.
+	composed string
+}
+
+func (cp *computation) windowIdentity(name string) windowIdentity {
+	if len(cp.histories) == 0 {
+		id := windowIdentity{window: cp.windowKey[name]}
+		if rel := cp.rel[name]; rel != nil {
+			id.baseline, id.stable = rel.BaselineCommit, rel.StableCommit
+		}
+		return id
+	}
+	var b strings.Builder
+	switch p := cp.byName[name]; {
+	case p == nil:
+		b.WriteString("unknown")
+	case strings.EqualFold(p.Repository, cp.controlRepo):
+		b.WriteString("control")
+	default:
+		b.WriteString("source")
+	}
+	b.WriteByte(0x02)
+	for _, key := range cp.windowKeys[name] {
+		b.WriteString(key)
+		b.WriteByte(0x01)
+	}
+	b.WriteByte(0x02)
+	repositories := make([]string, 0, len(cp.stableBoundaries[name]))
+	for repository := range cp.stableBoundaries[name] {
+		repositories = append(repositories, repository)
+	}
+	slices.Sort(repositories)
+	for _, repository := range repositories {
+		b.WriteString(repository)
+		b.WriteByte(0x01)
+		b.WriteString(cp.stableBoundaries[name][repository])
+		b.WriteByte(0x01)
+		b.WriteString(cp.publishedBoundaries[name][repository])
+		b.WriteByte(0x02)
+	}
+	return windowIdentity{composed: b.String()}
+}
+
+// windowRepositories are the histories whose commits a package's window can
+// contain: the repositories its boundaries were resolved against, plus the
+// control repository, whose intent reaches a source package through its own
+// admission rule rather than through a shared window. A nil result means a
+// legacy single history, where every commit is a candidate.
+func (cp *computation) windowRepositories(name string) map[string]bool {
+	if len(cp.histories) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(cp.stableBoundaries[name])+1)
+	for repository := range cp.stableBoundaries[name] {
+		out[strings.ToLower(repository)] = true
+	}
+	out[strings.ToLower(cp.controlRepo)] = true
+	return out
 }
 
 func appendUniqueAuthor(out []Author, seen map[string]bool, author Author) []Author {

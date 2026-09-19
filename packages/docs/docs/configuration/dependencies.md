@@ -26,7 +26,8 @@ dependencies:
 
 Set `kind` to name the manifest field the edge stands for. This can be `dependencies` (the default), `devDependencies`,
 `peerDependencies` or `optionalDependencies`. Propagation follows or ignores the edge based on
-`parser.propagation.kinds`, which defaults to every kind except `devDependencies`.
+`parser.propagation.kinds`, which defaults to every kind except `devDependencies` and follows no edge at all when it is
+written as an empty list.
 
 Set `keep: true` to mark an edge [`dispat compute`](../cli/compute.md) must never suggest removing. Use this for
 deliberate relations no manifest declares, like a Docker base-image chain. The planner treats kept edges like any other

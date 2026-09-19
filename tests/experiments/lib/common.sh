@@ -336,9 +336,13 @@ verdict() {
   fi
   jq -n --arg experiment "$EXPERIMENT" --arg tool "$TOOL" --arg scenario "$SCENARIO" \
         --arg dispat "$(dispat_version)" \
+        --arg binaryId "${EXPERIMENTS_DISPAT_BINARY_ID:-unknown}" \
+        --arg binarySha256 "$(cat /etc/dispat-experiments-binary.sha256 2>/dev/null || echo unknown)" \
         --argjson checks "$checks" \
         --slurpfile steps "$OUT/steps.jsonl" \
         '{experiment: $experiment, tool: $tool, scenario: $scenario, dispat: $dispat,
+          binaryId: $binaryId,
+          binarySha256: $binarySha256,
           steps: $steps, checks: $checks,
           passed: ([$checks[] | select(.ok == false)] | length == 0)}' > "$OUT/verdict.json"
   jq -r 'if .passed then "VERDICT: all expectations hold" else "VERDICT: " + ([.checks[] | select(.ok == false) | .check] | join("; ")) end' "$OUT/verdict.json"

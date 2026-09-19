@@ -57,8 +57,8 @@ func TestTagFormatPrereleasePlaceholders(t *testing.T) {
 		// One glob must cover both shapes: baseline(P) is a selection over a
 		// single listing, and a pattern that misses the prerelease tags would
 		// silently restart every train at .0.
-		assert.True(t, tc.format.Matches(tc.pkg, tc.preTag), "matches %q", tc.preTag)
-		assert.True(t, tc.format.Matches(tc.pkg, tc.stableTag), "matches %q", tc.stableTag)
+		assert.True(t, tc.format.IsMatch(tc.pkg, tc.preTag), "matches %q", tc.preTag)
+		assert.True(t, tc.format.IsMatch(tc.pkg, tc.stableTag), "matches %q", tc.stableTag)
 	}
 }
 
@@ -255,7 +255,7 @@ func TestAliasFormatMatchesTheNamesItWrites(t *testing.T) {
 		"the suffix missing":                    {format: "v{major}-latest", pkg: "core", tag: "v1"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, tc.format.Matches(tc.pkg, tc.tag))
+			assert.Equal(t, tc.want, tc.format.IsMatch(tc.pkg, tc.tag))
 		})
 	}
 }
@@ -278,13 +278,13 @@ func TestAliasFormatMatchesItsOwnPrereleaseRenders(t *testing.T) {
 		{Major: 2, Prerelease: []string{"rc", "0"}},
 	} {
 		rendered := alias.Render("core", v)
-		assert.True(t, alias.Matches("core", rendered), "%s is a name this alias writes", rendered)
+		assert.True(t, alias.IsMatch("core", rendered), "%s is a name this alias writes", rendered)
 	}
 
-	assert.False(t, alias.Matches("core", "core-vgarbage"),
+	assert.False(t, alias.IsMatch("core", "core-vgarbage"),
 		"the version has to be a version, not merely bytes the class allows")
-	assert.False(t, alias.Matches("core", "core-v1.0.0.0"), "nor a release tag somebody mistyped")
-	assert.False(t, alias.Matches("core", "other-v1.4.2"), "nor another package's")
+	assert.False(t, alias.IsMatch("core", "core-v1.0.0.0"), "nor a release tag somebody mistyped")
+	assert.False(t, alias.IsMatch("core", "other-v1.4.2"), "nor another package's")
 }
 
 // TestAliasFormatMatchesAPrereleaseSpellingFormat: a format writing the
@@ -295,16 +295,16 @@ func TestAliasFormatMatchesAPrereleaseSpellingFormat(t *testing.T) {
 	stable := alias.Render("core", ccme.Version{Major: 1, Minor: 4, Patch: 2})
 	pre := alias.Render("core", ccme.Version{Major: 1, Minor: 4, Patch: 2, Prerelease: []string{"beta", "4"}})
 	assert.Equal(t, "v1.4.2", stable, "the stable render drops the section it cannot fill")
-	assert.True(t, alias.Matches("core", stable))
-	assert.True(t, alias.Matches("core", pre))
-	assert.False(t, alias.Matches("core", "v1.0.0.0"))
+	assert.True(t, alias.IsMatch("core", stable))
+	assert.True(t, alias.IsMatch("core", pre))
+	assert.False(t, alias.IsMatch("core", "v1.0.0.0"))
 }
 
 // TestAliasFormatMatchesNothingWithoutAPlaceholder: a format that writes a
 // constant has no shape to recognise, only a name. The alias validation
 // refuses those, so this is the guard rather than a case with behaviour.
 func TestAliasFormatMatchesNothingWithoutAPlaceholder(t *testing.T) {
-	assert.False(t, AliasFormat("latest").Matches("core", "latest"))
+	assert.False(t, AliasFormat("latest").IsMatch("core", "latest"))
 }
 
 // TestCompiledReadersOfAFormatThatDoesNotCompile: both compiled halves answer
@@ -320,5 +320,5 @@ func TestCompiledReadersOfAFormatThatDoesNotCompile(t *testing.T) {
 	_, ok = broken.ParseVersion("core", "1.2.3-1.2.3")
 	assert.False(t, ok, "the compiled reader and the format agree")
 
-	assert.False(t, AliasMatcher{}.Matches("v1"), "a matcher of nothing matches nothing")
+	assert.False(t, AliasMatcher{}.IsMatch("v1"), "a matcher of nothing matches nothing")
 }

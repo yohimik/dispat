@@ -58,18 +58,45 @@ func (c *coverage) addFile(name string) error {
 	return nil
 }
 
+// coverModes are the modes the toolchain writes: `go test -cover` produces one
+// of the three depending on its flags, and `go tool covdata textfmt` produces
+// `set`. Nothing here reads an execution count except to compare it with zero,
+// so which of the three a profile carries never matters — but a header naming
+// something else was not written by a coverage run at all, and folding its
+// blocks into a release gate would be counting evidence nobody produced.
+var coverModes = map[string]bool{"set": true, "count": true, "atomic": true}
+
 // add folds one coverage profile into the accumulator.
 //
 // The format is one block per line, `<file>:<from>,<to> <statements> <count>`,
-// under a single `mode:` header. Anything else is a corrupt profile and stops
-// the report rather than skewing it.
+// under a `mode:` header. Anything else is a corrupt profile and stops the
+// report rather than skewing it: an unparseable line, a header naming a mode
+// the toolchain does not write, and a block arriving before any header at all,
+// which is what a truncated file or a fragment of one looks like.
+//
+// A header may appear more than once, because a merged profile is a
+// concatenation of the profiles it merges and each of those carries its own.
+// The modes need not agree there, since the counts are only ever compared with
+// zero.
 func (c *coverage) add(r io.Reader) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	header := false
 	for line := 1; sc.Scan(); line++ {
 		text := strings.TrimSpace(sc.Text())
-		if text == "" || strings.HasPrefix(text, "mode:") {
+		if text == "" {
 			continue
+		}
+		if rest, isHeader := strings.CutPrefix(text, "mode:"); isHeader {
+			mode := strings.TrimSpace(rest)
+			if !coverModes[mode] {
+				return fmt.Errorf("line %d: %q is not a coverage mode: want set, count or atomic", line, mode)
+			}
+			header = true
+			continue
+		}
+		if !header {
+			return fmt.Errorf("line %d: coverage block %q before any mode header: the profile is truncated or is not one", line, text)
 		}
 		// Split from the right: the block key holds colons and commas, the
 		// two trailing fields are plain integers.
@@ -107,6 +134,28 @@ func (c *coverage) stats() Stats {
 	}
 	s.Percent = percent(s.Covered, s.Statements)
 	return s
+}
+
+func (c *coverage) missingProductionBlocks(inventory *coverage) []Package {
+	missing := map[string]*Stats{}
+	for key, statements := range inventory.statements {
+		pkg := packageOf(key)
+		if !IsProductionModule(moduleOf(pkg)) || c.statements[key] != 0 {
+			continue
+		}
+		s := missing[pkg]
+		if s == nil {
+			s = &Stats{}
+			missing[pkg] = s
+		}
+		s.Statements += statements
+	}
+	out := make([]Package, 0, len(missing))
+	for pkg, stats := range missing {
+		out = append(out, Package{Path: pkg, Stats: *stats})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
 }
 
 // modules groups the blocks into the workspace's modules and the packages

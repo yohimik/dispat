@@ -18,7 +18,7 @@ type GitlinkTransition struct {
 
 // GitlinksAt returns the full object id of every gitlink in one tree, keyed
 // by its control-repository path.
-func (c *CLI) GitlinksAt(ctx context.Context, revision string) (map[string]string, error) {
+func (c *LocalGitx) GitlinksAt(ctx context.Context, revision string) (map[string]string, error) {
 	if revision == "" {
 		revision = "HEAD"
 	}

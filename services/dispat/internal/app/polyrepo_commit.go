@@ -13,12 +13,13 @@ import (
 
 func (a *App) commitWorkspace(ctx context.Context, pl *plan.Plan, covered []string, opts CommitOptions) error {
 	w := a.newWorkspaceRecorder()
+	w.setLinkPlan(pl)
 	for _, r := range w.ordered {
 		r.expectedHead = pl.RepositoryHeads[r.repo.Name]
 	}
 	selected := make(map[string]bool)
 	for _, name := range covered {
-		if rel := pl.Releases[name]; rel != nil && rel.Releasing() {
+		if rel := pl.Releases[name]; rel != nil && rel.IsReleasing() {
 			selected[rel.Pkg.Repository] = true
 		}
 	}
@@ -60,7 +61,14 @@ func (a *App) commitWorkspace(ctx context.Context, pl *plan.Plan, covered []stri
 		}
 		repo.Commit = &policy
 		r.repo = &repo
-		r.git.Name, r.git.Email = policy.Name, policy.Email
+		// A fresh handle rather than a write into the one already in use.
+		// LocalGitx.run reads Name and Email on every invocation and the
+		// recorder's handles are shared across the goroutines a fleet runs,
+		// so writing the identity in place would be a write racing reads.
+		// Replacing the pointer is the same move newWorkspaceRecorder makes,
+		// and it is what makes the identity of a handle immutable once it
+		// exists.
+		r.git = &gitx.LocalGitx{Dir: r.git.Dir, Name: policy.Name, Email: policy.Email, Log: r.git.Log}
 		r.hooks.env = release.WorkspaceEnv(pl, a.log)
 	}
 	if opts.Push {
@@ -98,6 +106,13 @@ func (w *workspaceCommitWork) resolve(_ context.Context, rel *plan.Release) (tas
 		return nil, fmt.Errorf("missing repository owner for %s", rel.Pkg.Name)
 	}
 	return func(ctx context.Context) error {
+		// The fleet links this release depends on are recorded before the
+		// release commit, so the commit's own tree carries the evidence. It
+		// happens outside r.mu because settling takes each repository's own
+		// lock, this one included.
+		if err := w.settle(ctx, rel); err != nil {
+			return err
+		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		tag := w.opts.TagName
@@ -165,6 +180,22 @@ func (w *workspaceCommitWork) resolve(_ context.Context, rel *plan.Release) (tas
 		}
 		return nil
 	}, nil
+}
+
+// settle records the fleet links this release needs, reserving each
+// repository's publish lane for the settlement and giving them all back
+// afterwards: a step command publishes nothing itself.
+func (w *workspaceCommitWork) settle(ctx context.Context, rel *plan.Release) error {
+	lanes, err := w.records.settleLanes(rel)
+	if err != nil {
+		return err
+	}
+	held, err := w.records.takeLanes(ctx, lanes)
+	if err != nil {
+		return err
+	}
+	defer releaseLanes(held, "")
+	return w.records.settleLinks(ctx, rel, held)
 }
 
 type pinnedHead string

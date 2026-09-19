@@ -141,7 +141,7 @@ func TestHooksLoginOfAStandalonePackageRunsInItsOwnFolder(t *testing.T) {
 	r.Commit("feat(cli): a standalone package with a login")
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("cli@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("cli@0.1.0"), "tags: %v", r.TagList())
 
 	assertRanIn(t, r.Path("tools", "cli"), r.Path("tools", "cli", "login-cwd.txt"))
 	assert.NoFileExists(t, r.Path("tools", "login-cwd.txt"),
@@ -176,7 +176,7 @@ func TestHooksLoginFailureIsolatedToItsSpace(t *testing.T) {
 	require.Equal(t, 1, res.Code, "the broken space's login failure must fail its packages\nstdout:\n%s", res.Stdout)
 	assert.Zero(t, r.TagCount("b1@"))
 	assert.Zero(t, r.TagCount("b2@"))
-	assert.True(t, r.HasTag("f1@0.1.0"), "the unrelated space must still publish; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("f1@0.1.0"), "the unrelated space must still publish; tags: %v", r.TagList())
 }
 
 // TestHooksOnFailAndOnSkipOutcomeScripts covers the outcome scripts end to
@@ -215,7 +215,7 @@ func TestHooksOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "provider's publish failure must fail the run\nstdout:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("bystander@0.1.0"), "the unrelated package still publishes; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("bystander@0.1.0"), "the unrelated package still publishes; tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("provider@"))
 	assert.Zero(t, r.TagCount("consumer@"))
 
@@ -277,7 +277,7 @@ func TestHooksRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 	require.Equal(t, 1, res.Code, "provider's publish failure must fail the run\nstdout:\n%s", res.Stdout)
 	assert.Zero(t, r.TagCount("provider@"))
 	assert.Zero(t, r.TagCount("consumer@"))
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W194", "consumer"), "consumer must be reported blocked")
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "consumer"), "consumer must be reported blocked")
 
 	dir := r.Path("packages", "consumer", "consumer")
 	data, err := os.ReadFile(filepath.Join(dir, "main.txt"))
@@ -318,7 +318,7 @@ func TestHooksScriptOutputsCarryAcrossStagesAndHooks(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "bad's build failure must fail the run\nstdout:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("good@0.1.0"), "the independent good package still publishes")
+	assert.True(t, r.IsTagged("good@0.1.0"), "the independent good package still publishes")
 	assert.Zero(t, r.TagCount("bad@"))
 
 	// The hook's export and the build's export both reached good's publish.
@@ -408,7 +408,7 @@ func TestHooksRunLevelHookFailureSemantics(t *testing.T) {
 
 	res := r.ReleaseOK() // a failing run hook must not fail the run
 	assert.Contains(t, res.Stdout, "postAll script failed (not fatal)")
-	assert.True(t, r.HasTag("core@0.1.0"), "the release went out regardless; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "the release went out regardless; tags: %v", r.TagList())
 	data, err := os.ReadFile(r.Path("hooks.log"))
 	require.NoError(t, err)
 	assert.Equal(t, "postAll\n", string(data), "the sequence continued past the failure")
@@ -422,7 +422,7 @@ func TestHooksRunLevelHookFailureSemantics(t *testing.T) {
 	res = r.Release()
 	require.Equal(t, 1, res.Code, "a failing beforeAll must abort the run\nstdout:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, "beforeAll hook failed")
-	assert.False(t, r.HasTag("core@0.1.1"), "nothing may be tagged after the gate refused; tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("core@0.1.1"), "nothing may be tagged after the gate refused; tags: %v", r.TagList())
 }
 
 // hookLog builds the scripts map wiring every per-package stage hook (all
@@ -522,7 +522,7 @@ func TestHooksStageHookAuthoritySplit(t *testing.T) {
 		r.Commit("feat(core): ship it")
 
 		r.ReleaseOK() // exit 0 despite four failing warn-only sequences
-		assert.True(t, r.HasTag("core@0.1.0"),
+		assert.True(t, r.IsTagged("core@0.1.0"),
 			"the release is out; observers failing must not unreport it: %v", r.TagList())
 	})
 
@@ -593,7 +593,7 @@ func TestHooksRunLevelHooksAreTheReleasesOwn(t *testing.T) {
 	// annotated tag and the push.
 	res := r.Command("commit", "--tag", "--push")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	require.True(t, r.HasTag("core@0.1.0"), "the work really happened; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "the work really happened; tags: %v", r.TagList())
 	assert.Contains(t, r.Git("log", "-1", "--format=%s"), "chore(release): core@0.1.0")
 
 	assert.NoFileExists(t, r.Path("hooks.log"),

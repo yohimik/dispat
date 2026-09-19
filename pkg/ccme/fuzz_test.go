@@ -234,8 +234,8 @@ func FuzzNormalize(f *testing.F) {
 func checkResultInvariants(t *testing.T, res *Result, err error) {
 	t.Helper()
 
-	if (err != nil) != res.HasErrors() {
-		t.Errorf("err = %v but HasErrors() = %v", err, res.HasErrors())
+	if (err != nil) != res.IsInvalid() {
+		t.Errorf("err = %v but IsInvalid() = %v", err, res.IsInvalid())
 	}
 	if err != nil {
 		pe, ok := err.(*ParseError)

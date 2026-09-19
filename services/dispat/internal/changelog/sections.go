@@ -174,7 +174,7 @@ func renderSections(rel *plan.Release, f Format, look Lookup) string {
 	// A shared-versioning ride has no content to group: one line states that
 	// the version moved and nothing else did, in the changelog and in the
 	// GitHub release alike.
-	if rel.NoChanges() {
+	if rel.IsWithoutChanges() {
 		return noChangesLine(rel, f, look)
 	}
 	rc := renderCtx{f: f, look: look, base: autoBase(f)}
@@ -415,11 +415,11 @@ func isPublicGitHub(apiURL string) bool {
 // the same rules renderSections renders by, so the recorder speaks about the
 // entry that is actually written.
 //
-// rel.NoChanges() alone would not do it. That names one of the causes, the
+// rel.IsWithoutChanges() alone would not do it. That names one of the causes, the
 // shared-versioning ride; a pin, a channel transition and a window whose work
 // its reverts cancel out reach the same line by grouping into nothing at all.
 func carriesNoChangesLine(rel *plan.Release, f Format) bool {
-	if rel.NoChanges() {
+	if rel.IsWithoutChanges() {
 		return true
 	}
 	if len(rel.Updates) > 0 {

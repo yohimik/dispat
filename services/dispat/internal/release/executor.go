@@ -88,18 +88,18 @@ type Result struct {
 	RecordBlocked bool
 }
 
-// Tagger creates release tags; *gitx.CLI satisfies it. A nil Tagger on the
+// Taggerx creates release tags; *gitx.LocalGitx satisfies it. A nil Taggerx on the
 // Executor defers tagging to a later phase (release-commit mode, where tags
 // must point at the end-of-run commit). target is the commit the tag points
 // at; empty means HEAD.
-type Tagger interface {
+type Taggerx interface {
 	CreateTag(ctx context.Context, name, message, target string) error
 }
 
-// ReleaseRecorder records a successful release somewhere: a changelog file
+// ReleaseRecorderx records a successful release somewhere: a changelog file
 // (*changelog.FileWriter), a GitHub release (*github.Releaser), or any other
 // destination for the same release data.
-type ReleaseRecorder interface {
+type ReleaseRecorderx interface {
 	Record(ctx context.Context, rel *plan.Release) error
 }
 
@@ -107,14 +107,14 @@ type ReleaseRecorder interface {
 // observer lifetime. The first context survives interruption so a published
 // release is still recorded; the second is the live run context, allowing
 // recorder-owned hooks to stop with the operator's run. Recorders without
-// this extension retain the ReleaseRecorder contract above.
+// this extension retain the ReleaseRecorderx contract above.
 type postPublishRecorder interface {
 	RecordAfterPublish(recordCtx, observerCtx context.Context, rel *plan.Release) error
 }
 
-// Reverter rolls back local changes inside a package folder; *gitx.CLI
+// Reverterx rolls back local changes inside a package folder; *gitx.LocalGitx
 // satisfies it. Used for spaces with revertOnFail.
-type Reverter interface {
+type Reverterx interface {
 	RevertDir(ctx context.Context, dir string) error
 }
 
@@ -148,9 +148,9 @@ type Reverter interface {
 type Executor struct {
 	BuildConcurrency   int
 	PublishConcurrency int
-	Runner             script.Runner
-	Tagger             Tagger
-	Recorders          []ReleaseRecorder // run in order after each successful publish
+	Runner             script.Runnerx
+	Tagger             Taggerx
+	Recorders          []ReleaseRecorderx // run in order after each successful publish
 	// BeforePublish runs after the package's beforePublish hook and immediately
 	// before its publish command. Composed workspaces use it to revalidate the
 	// fixed fleet snapshot after arbitrary user hook code has run.
@@ -168,7 +168,7 @@ type Executor struct {
 	// Legacy runs leave this false; composed repositories enable it because
 	// a missing source record or control checkpoint invalidates consumption.
 	BlockOnRecordFailure bool
-	Reverter             Reverter // rolls back package folders for revertOnFail spaces
+	Reverter             Reverterx // rolls back package folders for revertOnFail spaces
 	// Force rewrites a tag the repository already carries instead of failing
 	// on it (commit.force, default true). The pre-existing-tag rules still
 	// come first: a tag already at the release commit is a skip, and one at a
@@ -176,11 +176,11 @@ type Executor struct {
 	Force bool
 	// Scanner reads manifests for the autoVersion spaces' native rewriting;
 	// nil defaults to the filesystem scanner.
-	Scanner scanner.Scanner
+	Scanner scanner.Scannerx
 	// Observer receives release-progress events (stage transitions, package
 	// outcomes); nil disables observation. It only observes: nothing it does
-	// with an event can affect the run. See Observer.
-	Observer Observer
+	// with an event can affect the run. See Observerx.
+	Observer Observerx
 	Log      zerolog.Logger
 }
 
@@ -252,7 +252,7 @@ type spaceLoginKey struct {
 // warned about — the mode of hooks that run after the thing they observe has
 // already happened, where stopping the sequence could not un-happen it.
 type Sequence struct {
-	Runner   script.Runner
+	Runner   script.Runnerx
 	Dir      string   // working directory (the package folder, or the repo root)
 	Stage    string   // what DISPAT_STAGE carries; also the log label
 	Commands []string // the commands, run in order
@@ -262,8 +262,18 @@ type Sequence struct {
 }
 
 // Run executes the sequence's commands in order inside its directory.
+//
+// A cancelled run stops the sequence where it is. A warn-only sequence does
+// not fail on an error, so without this check an interrupted run would go on
+// launching every remaining hook command, each one dying at once and each one
+// reporting a failure the operator did not cause.
 func (s Sequence) Run(ctx context.Context) error {
 	for index, command := range s.Commands {
+		if err := ctx.Err(); err != nil {
+			s.Log.Debug().Int("commandIndex", index+1).Str("stage", s.Stage).
+				Msg("run cancelled; remaining commands not started")
+			return err
+		}
 		// Announced before it runs, not only after it finished (the runner's
 		// own trace): a script that hangs forever must leave a record of what
 		// is hanging. The logger names the package and stage; the index locates
@@ -303,7 +313,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		// for the same reason. A channel-only release, conversely, has no bump
 		// at all and must still be executed: it is a release like any other
 		// (§13.9).
-		if rel.Releasing() {
+		if rel.IsReleasing() {
 			changed[name] = true
 			results[name] = &Result{
 				Name:    name,
@@ -488,7 +498,7 @@ type run struct {
 	// The native auto-versioning inputs, built once in Run when any releasing
 	// package's space enables it: the manifest scanner and the workspace's
 	// manifest-name and folder indexes (see workspaceNames).
-	scan    scanner.Scanner
+	scan    scanner.Scannerx
 	avNames map[string]string
 	avDirs  map[string]string
 	// avChanged (guarded by mu) records which packages' version stages
@@ -591,21 +601,20 @@ func (tc *taskCtx) hook(ctx context.Context, name string, commands []string, fai
 	return seq.RunMergingOutputs(ctx, tc.rel)
 }
 
-// execute runs a single version, build or publish task to completion.
-func (r *run) execute(ctx context.Context, t task) {
-	rel := r.plan.Releases[t.pkg]
-	res := r.results[t.pkg]
-	log := r.Log.With().
-		Str("package", t.pkg).
-		Str("stage", t.kind.String()).
-		Str("version", rel.Next.String()).
-		Logger()
-	tc := &taskCtx{run: r, t: t, rel: rel, log: log}
-
+// admit is a task's prelude: the questions asked under the run's lock before
+// any script exists. It settles whether this task runs at all — an earlier
+// stage already failed it, the run was interrupted before it started, or a
+// provider's outcome cascades a skip onto it — and, when it does run, resolves
+// which provider updates are still live for it.
+//
+// It reports whether the caller should proceed. Every path that answers false
+// has already recorded the outcome and told the observers about it.
+func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
+	t, rel, log := tc.t, tc.rel, tc.log
 	r.mu.Lock()
 	if res.Status != StatusPending { // failed or skipped at an earlier stage
 		r.mu.Unlock()
-		return
+		return false
 	}
 	if ctx.Err() != nil {
 		// Interrupted between scheduling and start: no scripts, no hooks.
@@ -614,7 +623,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		ev := packageEvent(t.pkg, rel, EventPackageCancelled)
 		ev.Status = StatusCancelled.String()
 		r.notify(ev)
-		return
+		return false
 	}
 	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results); skip {
 		res.Status = StatusSkipped
@@ -644,7 +653,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		// DISPAT_BLOCKED_BY names the provider responsible.
 		_ = tc.hook(ctx, "onSkip", rel.Pkg.Space.OnSkipScript, false,
 			"DISPAT_BLOCKED_BY="+blocker)
-		return
+		return false
 	}
 	if _, ok := r.started[t.pkg]; !ok {
 		r.started[t.pkg] = time.Now()
@@ -659,6 +668,78 @@ func (r *run) execute(ctx context.Context, t task) {
 	tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
 	r.mu.Unlock()
 
+	return true
+}
+
+// stageFor is the frame this task runs: the stage's own commands and the
+// hooks that bracket them, chosen by the task kind, plus the two cases where
+// a stage that exists has nothing to do.
+//
+// It is a decision rather than an action: nothing here runs, so the whole
+// question "what does this task consist of" is answerable in one place, which
+// is what the syncLock skip and the dead-provider version skip both turn on.
+func (tc *taskCtx) stageFor() stage {
+	r, t, rel, log := tc.run, tc.t, tc.rel, tc.log
+	space := rel.Pkg.Space
+	var frame stage
+	switch t.kind {
+	case taskVersion:
+		frame = stage{commands: space.VersionScript, before: space.BeforeVersionScript, after: space.PostVersionScript}
+		if space.AutoVersion != nil {
+			frame.native = func(ctx context.Context) error { return tc.autoVersion(ctx, space.AutoVersion) }
+		}
+	case taskBuild:
+		frame = stage{commands: space.BuildScript, before: space.BeforeBuildScript, after: space.PostBuildScript}
+	case taskSyncLock:
+		// The lock-sync sequence: no hooks of its own, budgeted separately —
+		// and skipped outright when this package's version stage changed no
+		// file, so a quiet release does not serialise one lock regeneration
+		// per package for nothing.
+		//
+		// A space that configured neither reconciling strategy is the
+		// exception: it never produces that signal, so gating on one would
+		// mean its scripts never ran at all.
+		r.mu.Lock()
+		filesChanged := r.avChanged[t.pkg]
+		r.mu.Unlock()
+		if filesChanged || !space.AutoVersion.IsReconciling() {
+			frame = stage{commands: space.AutoVersion.SyncLock}
+		} else {
+			log.Debug().Msg("syncLock: nothing was reconciled, nothing to regenerate")
+		}
+	default:
+		// postPublish is not part of this frame: it only runs after the
+		// package is fully published, further down.
+		frame = stage{commands: space.PublishScript, before: space.BeforePublishScript}
+	}
+	if t.kind == taskVersion && len(tc.updates) == 0 && len(rel.Updates) > 0 {
+		// Every provider this package picks up a version from failed or was
+		// skipped (the package itself proceeds on its own changes): there is
+		// nothing to sync manifests to, so the version scripts — hooks
+		// included — must not run. Native reconciliation is different: it
+		// compares against baselines too (§9.4) and never writes a dead
+		// provider's planned version, so it proceeds.
+		log.Info().Msg("version: no successfully updated providers, skipping scripts")
+		frame.commands, frame.before, frame.after = nil, nil, nil
+	}
+
+	return frame
+}
+
+// execute runs a single version, build or publish task to completion.
+func (r *run) execute(ctx context.Context, t task) {
+	rel := r.plan.Releases[t.pkg]
+	res := r.results[t.pkg]
+	log := r.Log.With().
+		Str("package", t.pkg).
+		Str("stage", t.kind.String()).
+		Str("version", rel.Next.String()).
+		Logger()
+	tc := &taskCtx{run: r, t: t, rel: rel, log: log}
+
+	if !r.admit(ctx, tc, res) {
+		return
+	}
 	fail := func(err error, msg string) {
 		// A task dying while the context is cancelled died *of* the
 		// cancellation (its script was killed mid-run): that is an
@@ -721,48 +802,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 	}
 
-	space := rel.Pkg.Space
-	var frame stage
-	switch t.kind {
-	case taskVersion:
-		frame = stage{commands: space.VersionScript, before: space.BeforeVersionScript, after: space.PostVersionScript}
-		if space.AutoVersion != nil {
-			frame.native = func(ctx context.Context) error { return tc.autoVersion(ctx, space.AutoVersion) }
-		}
-	case taskBuild:
-		frame = stage{commands: space.BuildScript, before: space.BeforeBuildScript, after: space.PostBuildScript}
-	case taskSyncLock:
-		// The lock-sync sequence: no hooks of its own, budgeted separately —
-		// and skipped outright when this package's version stage changed no
-		// file, so a quiet release does not serialise one lock regeneration
-		// per package for nothing.
-		//
-		// A space that configured neither reconciling strategy is the
-		// exception: it never produces that signal, so gating on one would
-		// mean its scripts never ran at all.
-		r.mu.Lock()
-		filesChanged := r.avChanged[t.pkg]
-		r.mu.Unlock()
-		if filesChanged || !space.AutoVersion.Reconciles() {
-			frame = stage{commands: space.AutoVersion.SyncLock}
-		} else {
-			log.Debug().Msg("syncLock: nothing was reconciled, nothing to regenerate")
-		}
-	default:
-		// postPublish is not part of this frame: it only runs after the
-		// package is fully published, further down.
-		frame = stage{commands: space.PublishScript, before: space.BeforePublishScript}
-	}
-	if t.kind == taskVersion && len(tc.updates) == 0 && len(rel.Updates) > 0 {
-		// Every provider this package picks up a version from failed or was
-		// skipped (the package itself proceeds on its own changes): there is
-		// nothing to sync manifests to, so the version scripts — hooks
-		// included — must not run. Native reconciliation is different: it
-		// compares against baselines too (§9.4) and never writes a dead
-		// provider's planned version, so it proceeds.
-		log.Info().Msg("version: no successfully updated providers, skipping scripts")
-		frame.commands, frame.before, frame.after = nil, nil, nil
-	}
+	frame := tc.stageFor()
 
 	// The event reports the task starting, not a script: a stage with no
 	// configured command still runs and still transitions, so it is still
@@ -864,6 +904,11 @@ type stage struct {
 // ("beforeBuild hook failed", "build script failed").
 func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err error) {
 	kind := tc.t.kind
+	// One line naming what the frame consists of, before any of it runs: a
+	// stage that hangs has to leave a record of what it was about to do.
+	tc.log.Trace().Int("before", len(s.before)).Int("commands", len(s.commands)).
+		Int("after", len(s.after)).Bool("native", s.native != nil).
+		Msg(kind.String() + ": stage frame resolved")
 	if err := tc.hook(ctx, "before"+stageTitle(kind), s.before, true); err != nil {
 		return "before" + stageTitle(kind) + " hook failed", err
 	}
@@ -876,6 +921,7 @@ func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err er
 		if err := s.native(ctx); err != nil {
 			return "auto-versioning failed", err
 		}
+		tc.log.Debug().Msg(kind.String() + ": native version edit applied")
 	}
 	if len(s.commands) == 0 {
 		// No script configured: the stage completes without running anything.
@@ -917,10 +963,16 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// the rest of the tail still runs, and the run exits non-zero at the end.
 	for _, rec := range tc.Recorders {
 		var err error
+		recorder := fmt.Sprintf("%T", rec)
 		if aware, ok := rec.(postPublishRecorder); ok {
 			err = aware.RecordAfterPublish(recCtx, ctx, rel)
 		} else {
 			err = rec.Record(recCtx, rel)
+		}
+		if err == nil {
+			// No tag field: in release-commit mode the tag does not exist
+			// yet, and a record line stating one would say it does.
+			tc.log.Debug().Str("recorder", recorder).Msg("release recorded")
 		}
 		if err != nil {
 			// The next recorder still runs: a changelog that could not be
@@ -935,6 +987,8 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
 		if err := CreateReleaseTag(recCtx, tc.Tagger, rel, tc.Force, tc.log); err != nil {
 			tc.critical(res, TagFailureCode(err), err, "tagging failed")
+		} else {
+			tc.log.Debug().Str("tag", rel.TagName()).Msg("release tag written")
 		}
 	}
 	tc.mu.Lock()
@@ -1011,8 +1065,8 @@ func TagFailureCode(err error) string {
 	return plan.CodeTagFailed
 }
 
-// tagInspector is the optional Tagger extension the same-commit tag skip
-// needs; *gitx.CLI implements it. A Tagger without it keeps the strict
+// tagInspector is the optional Taggerx extension the same-commit tag skip
+// needs; *gitx.LocalGitx implements it. A Taggerx without it keeps the strict
 // pre-existing-tag-is-an-error behaviour, which is the right default for test
 // doubles and custom taggers.
 type tagInspector interface {
@@ -1020,8 +1074,8 @@ type tagInspector interface {
 	ResolveCommit(ctx context.Context, rev string) (string, error)
 }
 
-// forceTagger is the optional Tagger extension that can rewrite a tag the
-// repository already carries; *gitx.CLI implements it. A Tagger without it
+// forceTagger is the optional Taggerx extension that can rewrite a tag the
+// repository already carries; *gitx.LocalGitx implements it. A Taggerx without it
 // simply never forces, which is the right default for a test double or a
 // custom tagger written before the option existed.
 type forceTagger interface {
@@ -1029,7 +1083,7 @@ type forceTagger interface {
 }
 
 // writeTag creates one tag, forcing when asked and the tagger can.
-func writeTag(ctx context.Context, tagger Tagger, force bool, name, message, target string) error {
+func writeTag(ctx context.Context, tagger Taggerx, force bool, name, message, target string) error {
 	if force {
 		if ft, ok := tagger.(forceTagger); ok {
 			return ft.CreateTagForce(ctx, name, message, target)
@@ -1048,7 +1102,7 @@ func writeTag(ctx context.Context, tagger Tagger, force bool, name, message, tar
 // stage script — and the durable record the tag exists to be is already
 // there. A tag at any other commit stays a hard error, because a wrong tag
 // silently accepted would corrupt every future baseline.
-func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, force bool, log zerolog.Logger) error {
+func CreateReleaseTag(ctx context.Context, tagger Taggerx, rel *plan.Release, force bool, log zerolog.Logger) error {
 	return CreateReleaseTagAs(ctx, tagger, rel, "", force, log)
 }
 
@@ -1060,13 +1114,23 @@ func CreateReleaseTag(ctx context.Context, tagger Tagger, rel *plan.Release, for
 // already tagged, and a version shared by a fixed versioning group moves under
 // it when they do. Naming the tag the outer run decided on is what keeps the
 // two agreeing.
-func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, name string, force bool, log zerolog.Logger) error {
+func CreateReleaseTagAs(ctx context.Context, tagger Taggerx, rel *plan.Release, name string, force bool, log zerolog.Logger) error {
 	tag := rel.TagName()
 	if name != "" {
 		tag = name
 	}
 	if insp, ok := tagger.(tagInspector); ok {
-		if tags, err := insp.Tags(ctx, rel.Pkg.Name, rel.TagFormat()); err == nil {
+		tags, err := insp.Tags(ctx, rel.Pkg.Name, rel.TagFormat())
+		if err != nil {
+			// Listing the tags is how the already-tagged case is told from a
+			// wrong tag. Failing to list them is not a reason to fail a
+			// package that has published, but it is the reason the write
+			// below may report a plain collision, so it is said out loud
+			// rather than dropped.
+			log.Warn().Err(err).Str("tag", tag).
+				Msg("existing tags could not be listed before tagging")
+		}
+		if err == nil {
 			for _, t := range tags {
 				if t.Name != tag {
 					continue
@@ -1092,7 +1156,8 @@ func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, n
 	if err := writeTag(ctx, tagger, force, tag, "release "+tag, rel.ExportedCommit()); err != nil {
 		return err
 	}
-	return createAliasTags(ctx, tagger, rel, log)
+	createAliasTags(ctx, tagger, rel, log)
+	return nil
 }
 
 // createAliasTags writes the extra names a release is published under, after
@@ -1102,14 +1167,17 @@ func CreateReleaseTagAs(ctx context.Context, tagger Tagger, rel *plan.Release, n
 // the one function every tagging path goes through; adding it anywhere else
 // would mean one of them silently not writing aliases.
 //
-// A failure is warned about and the remaining aliases are still attempted. An
-// alias is a convenience ref, not the record of the release: the release tag
-// is already written by the time this runs, and losing a "v1" is a thing to
-// re-point, not a reason to report a published release as broken.
-func createAliasTags(ctx context.Context, tagger Tagger, rel *plan.Release, log zerolog.Logger) error {
+// A failure is warned about and the remaining aliases are still attempted, so
+// there is nothing to return: an alias is a convenience ref, not the record of
+// the release. The release tag is already written by the time this runs, and
+// losing a "v1" is a thing to re-point, not a reason to report a published
+// release as broken. It returned an always-nil error until this was written
+// down, which read at every call site as a failure somebody had decided to
+// pass on.
+func createAliasTags(ctx context.Context, tagger Taggerx, rel *plan.Release, log zerolog.Logger) {
 	aliases := rel.AliasTags()
 	if len(aliases) == 0 {
-		return nil
+		return
 	}
 	_, canForce := tagger.(forceTagger)
 	for _, alias := range aliases {
@@ -1125,7 +1193,6 @@ func createAliasTags(ctx context.Context, tagger Tagger, rel *plan.Release, log 
 				Msg("alias tag failed")
 		}
 	}
-	return nil
 }
 
 // loginEnv is the space-scoped environment of a login script. Login is a
@@ -1208,7 +1275,7 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, str
 	if waitedProvider != "" {
 		return true, waitedProvider
 	}
-	if rel.FreshOwnBump() || rel.ChannelChanged() || anyPublished {
+	if rel.IsFreshOwnBump() || rel.IsChannelChanged() || anyPublished {
 		return false, ""
 	}
 	return true, badProvider

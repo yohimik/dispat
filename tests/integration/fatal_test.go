@@ -37,7 +37,7 @@ func TestFatalDependencyCycle(t *testing.T) {
 
 	res := r.Release()
 	assert.NotZero(t, res.Code, "a cyclic graph must refuse to release")
-	assert.True(t, harness.HasCode(res.Events, "E200"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E200"),
 		"the cycle must surface as E200, not a bare failure: %s", res.Stdout)
 	assert.Empty(t, r.TagList(), "nothing may release from an unplannable repository")
 	assert.Zero(t, buildRuns(r), "and no script may run")
@@ -62,14 +62,14 @@ func TestFatalDuplicateVersionTags(t *testing.T) {
 	r := singlePackageRepo(t, markerBuild)
 	r.Commit("feat(core): first release")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"))
+	assert.True(t, r.IsTagged("core@0.1.0"))
 
 	r.CommitEmpty("fix(core): pending work")
 	r.Git("tag", "-a", "core@0.1.0+dup", "-m", "duplicate version on a different commit")
 
 	res := r.Release()
 	assert.NotZero(t, res.Code)
-	assert.True(t, harness.HasCode(res.Events, "E191"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E191"),
 		"duplicate version tags must surface as E191: %s", res.Stdout)
 	assert.Equal(t, 1, buildRuns(r), "the pending fix must not have been released")
 }
@@ -87,6 +87,6 @@ func TestFatalShallowRepository(t *testing.T) {
 	r.Git("clone", "-q", "--depth", "1", "file://"+r.Root, r.Path("shallow-clone"))
 	res := r.CommandAt("shallow-clone", "release")
 	assert.NotZero(t, res.Code, "a shallow clone must refuse to release")
-	assert.True(t, harness.HasCode(res.Events, "E196"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E196"),
 		"shallowness must surface as E196: %s", res.Stdout)
 }

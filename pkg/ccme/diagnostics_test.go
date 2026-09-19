@@ -437,9 +437,9 @@ func TestEveryDiagnosticCodeIsReachable(t *testing.T) {
 			}
 			// An error code must invalidate something; a warning must not.
 			isError := strings.HasPrefix(tc.code, "E")
-			if isError != res.HasErrors() {
-				t.Errorf("%s: HasErrors() = %v, want %v (codes: %s)",
-					tc.code, res.HasErrors(), isError, codesOf(res))
+			if isError != res.IsInvalid() {
+				t.Errorf("%s: IsInvalid() = %v, want %v (codes: %s)",
+					tc.code, res.IsInvalid(), isError, codesOf(res))
 			}
 		})
 		covered[tc.code] = true

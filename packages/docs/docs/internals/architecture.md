@@ -548,8 +548,13 @@ history and report what the correction did (see [Correcting a record](../referen
 The optional polyrepository Git profile adds its own implemented diagnostic family. `E330` rejects an invalid or
 changed fleet repository snapshot, `E331` rejects ownership crossings and unlisted nested repositories, and `E332`
 rejects composition and override conflicts,
-`E333` reports a missing or ambiguous cross-repository boundary, and `E334` reports semantics that would require an
-order between incomparable source revisions. Publication and coordination failures use `E335`, `E336`, and `E337`.
+`E333` reports a missing or ambiguous cross-repository boundary, or a control directive whose own gitlink snapshot pins
+a source revision the active checkout of that source does not contain, and `E334` reports semantics that would require
+an order between incomparable source revisions. Publication and coordination failures use `E335`, `E336`, and `E337`.
+A fleet with no control repository adds two more: `E338` rejects links that do not form a tree, and `E339` rejects a
+repository identity that cannot be trusted to name one participant. Its two recoverable findings are `W332`, a link
+only one of its two repositories declares, and `W333`, a roster that does not name every member of the composed fleet.
+An explicit unsafe lock bypass emits `W331`, naming every repository it applies to.
 An absent provider explicitly declared with `external: true` emits `W330` and leaves that edge inactive for the current
 snapshot. The [diagnostic reference](../reference/plan-errors.md#polyrepository-snapshot-and-recording-diagnostics)
 gives the recovery for each code.

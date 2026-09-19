@@ -219,11 +219,33 @@ RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/write
 FROM scratch AS export-writer
 COPY --from=test-writer /src/coverage /
 
+# The shared tool bootstrap, exercised with the candidate CLI in a minimal
+# fixture. The mocks replace the two downloads and nothing else, so dispat
+# resolves and runs the config the release and the images actually use.
+#
+# python3 is installed rather than assumed. The golang image carries one only
+# because buildpack-deps pulls it in for mercurial, and a gate resting on
+# another package's dependency is a gate that disappears the day that
+# dependency does.
+FROM src-dispat AS test-bootstrap
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 \
+ && rm -rf /var/lib/apt/lists/*
+USER gopher
+COPY --chown=gopher:gopher scripts/install-tools.sh scripts/test-install-tools.py ./scripts/
+COPY --chown=gopher:gopher .aqua ./.aqua
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    go build -o /tmp/dispat-bootstrap ./services/dispat \
+ && DISPAT_TEST_BINARY=/tmp/dispat-bootstrap python3 scripts/test-install-tools.py \
+ && touch /tmp/bootstrap-tested
+
 # The repository tooling's own suite, profiled like every other module's. It
 # was the one suite that measured nothing, so testreport, which is what every
 # other number on the site comes out of, was the only Go in the workspace the
 # coverage page could not report on.
 FROM src-tools AS test-tools
+COPY --from=test-bootstrap /tmp/bootstrap-tested /tmp/bootstrap-tested
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd tools && go run github.com/yohimik/dispat/tools/testreport test tools -- \
     ./... -count=1 -covermode=atomic -coverprofile=/src/coverage/tools.out
@@ -251,9 +273,14 @@ RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 <<'
 set -eu
 cd services/dispat
 export DISPAT_COVERDIR=/src/coverage/covdata
+export DISPAT_COVERPKG='github.com/yohimik/dispat/services/dispat/...,github.com/yohimik/dispat/pkg/ccme/v2/...,github.com/yohimik/dispat/pkg/config/...,github.com/yohimik/dispat/pkg/manifest/...,github.com/yohimik/dispat/pkg/models/...,github.com/yohimik/dispat/pkg/scanner/...,github.com/yohimik/dispat/pkg/writer/...'
 rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
-go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... -count=1 -timeout 20m
-go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/integration.out
+go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... \
+  -count=1 -timeout 20m -covermode=atomic -coverpkg="$DISPAT_COVERPKG" \
+  -coverprofile=/src/coverage/publicapi.out
+go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/cli-integration.out
+{ head -n 1 /src/coverage/cli-integration.out; tail -q -n +2 /src/coverage/cli-integration.out /src/coverage/publicapi.out; } \
+  > /src/coverage/integration.out
 # Every black-box CLI is race-instrumented. Go's default one-second race
 # runtime exit sleep would therefore be paid hundreds of times. Reports go
 # to a shared directory so TestMain can fail even when a scenario expects the
@@ -336,6 +363,30 @@ COPY --chown=gopher:gopher packages/docs/demo ./packages/docs/demo
 FROM src-all AS gofmt
 RUN out=$(gofmt -l .); [ -z "$out" ] || { printf '%s\n' "$out" >&2; exit 1; }
 
+# The two document gates, on the same sweep-wide source stage: both read the
+# whole first-party tree and neither writes anything.
+#
+# testplan holds the integration test plan and the release-candidate
+# requirement matrix to the tree — every reference resolves, every integration
+# test carries one goal, every requirement row's status is the one its named
+# assertions support — and enforces the RC thresholds on the matrix
+# percentages. namingcheck holds exported declarations to the naming rules in
+# CONTRIBUTING.md, with tools/namingcheck/naming-exceptions.txt as the written
+# record of what is excused and why.
+#
+# In Go rather than in shell because this stage carries no ripgrep and because
+# a coverage percentage nobody can recompute is not evidence.
+#
+# The thresholds are policy: at least 95% of the matrix's requirements and
+# every critical release-safety requirement mapped to a test that exists.
+FROM src-all AS repo-checks
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 <<'EOF'
+set -eu
+go run github.com/yohimik/dispat/tools/testreport testplan \
+  -minimum-mapped 95 -minimum-critical 100 .
+go run github.com/yohimik/dispat/tools/namingcheck .
+EOF
+
 # go.mod tidying as a build: the syncLock step regenerates a releasing
 # module's go.mod and go.sum in here and exports the pair back over the
 # working tree's. GOWORK off for the same reason as release-test — during a
@@ -354,8 +405,8 @@ COPY --from=tidy /src/${MODULE}/go.mod /src/${MODULE}/go.su[m] /
 # which is why the release workflow is the one caller.
 #
 # Three views of the suite — the unit layer (the workspace modules' own
-# tests), the integration layer (the black-box suite's instrumented binary —
-# CLI module scope, since that is the binary) — with only the combined total
+# tests), the integration layer (the black-box CLI and public API scenarios
+# across all seven production modules, with no unit-test counters), with only the combined total
 # across every profile (go tool cover merges the overlapping blocks) becoming
 # the README badge. The summary table goes to coverage/summary.md rather than
 # $GITHUB_STEP_SUMMARY, which cannot cross a build boundary; the
@@ -414,14 +465,8 @@ merge coverage.out      "$@" integration.out
 UNIT=$(pct coverage-unit.out)
 INTEGRATION=$(pct integration.out)
 TOTAL=$(pct coverage.out)
-set -- $(go run github.com/yohimik/dispat/tools/testreport coverage -coverage . -commit "$TESTREPORT_COMMIT")
-COVERED=$1
-STATEMENTS=$2
-TOTAL=$3
-if [ $((COVERED * 100)) -lt $((STATEMENTS * 95)) ]; then
-  echo "combined coverage ${COVERED}/${STATEMENTS} is below 95%" >&2
-  exit 1
-fi
+go run github.com/yohimik/dispat/tools/testreport coverage -coverage . \
+  -commit "$TESTREPORT_COMMIT" -minimum-total 95 -minimum-integration 95
 echo "unit ${UNIT} / integration ${INTEGRATION} / total ${TOTAL}"
 
 {
@@ -430,7 +475,7 @@ echo "unit ${UNIT} / integration ${INTEGRATION} / total ${TOTAL}"
   echo '| Layer | Statement coverage |'
   echo '|---|---|'
   echo "| unit (all modules) | ${UNIT} |"
-  echo "| integration (CLI module, via the instrumented binary) | ${INTEGRATION} |"
+  echo "| integration (black-box CLI and public API scenarios across all seven production modules) | ${INTEGRATION} |"
   echo "| **combined total** | **${TOTAL}** |"
 } > summary.md
 
@@ -506,13 +551,8 @@ COPY --from=bench-dispat /src/coverage/benchlog ./coverage/benchlog
 COPY --chown=gopher:gopher coverag[e]/experiment[s] ./coverage/experiments
 RUN <<'EOF'
 set -eu
-set -- $(go run github.com/yohimik/dispat/tools/testreport coverage -coverage coverage -commit "$COMMIT")
-covered=$1
-statements=$2
-if [ $((covered * 100)) -lt $((statements * 95)) ]; then
-  echo "combined coverage ${covered}/${statements} is below 95%" >&2
-  exit 1
-fi
+go run github.com/yohimik/dispat/tools/testreport coverage -coverage coverage \
+  -commit "$COMMIT" -minimum-total 95 -minimum-integration 95
 go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" \
   -require-fresh -modules packages/docs/data/benchmarked.txt
 EOF
@@ -609,4 +649,33 @@ the observer never fetches into the clone" \
   echo "announce/notes.sh: the sample parses"
   python3 scripts/announce-test.py
 fi
+EOF
+
+# The shell inside the configuration, swept the same way. Every `scripts`
+# entry of a dispat config is a shell command — the tool bootstrap, the image
+# builds, the site deploy, the badge push — and none of it was checked by
+# anything: the sweep above reads files, and these are values inside YAML.
+#
+# The context is mounted rather than copied because the sweep is over whatever
+# configs exist, and a COPY list is one more list to keep in step with the
+# repository. It costs this layer its cache whenever anything in the context
+# changes, which for an alpine stage and a few seconds of shellcheck is the
+# cheaper of the two mistakes. What the context itself leaves out is decided
+# by Dockerfile.gotest.dockerignore, which names every config for this reason.
+RUN --mount=type=bind,target=/repo <<'EOF'
+set -eu
+python3 scripts/lint-config-scripts.py --self-test
+cd /repo
+set --
+if [ -f tools/bootstrap.yaml ]; then set -- "$@" tools/bootstrap.yaml; fi
+# One word per path, which every path in this repository is.
+for f in $(find . \( -name dispat.yaml -o -name dispat.json \) | sort); do
+  set -- "$@" "$f"
+done
+if [ "$#" -eq 0 ]; then
+  echo "no dispat configuration reached the build context" >&2
+  exit 1
+fi
+echo "config scripts: $*"
+python3 /src/scripts/lint-config-scripts.py "$@"
 EOF

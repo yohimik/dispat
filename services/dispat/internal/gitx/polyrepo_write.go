@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -9,7 +10,7 @@ import (
 // PushRelease writes a repository's branch and release refs without forcing
 // immutable tags. Only explicitly moving aliases may replace a remote ref.
 // An empty branch pushes tags only, including from a detached checkout.
-func (c *CLI) PushRelease(ctx context.Context, remote, branch string, tags, moving []string) error {
+func (c *LocalGitx) PushRelease(ctx context.Context, remote, branch string, tags, moving []string) error {
 	refs := make([]string, 0, len(tags)+len(moving))
 	branchRef := ""
 	if branch != "" {
@@ -44,7 +45,7 @@ func (c *CLI) PushRelease(ctx context.Context, remote, branch string, tags, movi
 
 // VerifyRemoteRelease proves the immutable source tag is remotely available
 // at the exact recorded revision before a control checkpoint can reference it.
-func (c *CLI) VerifyRemoteRelease(ctx context.Context, remote, tag, revision string) error {
+func (c *LocalGitx) VerifyRemoteRelease(ctx context.Context, remote, tag, revision string) error {
 	ref := "refs/tags/" + tag
 	out, err := c.run(ctx, "ls-remote", "--", remote, ref, ref+"^{}")
 	if err != nil {
@@ -74,7 +75,7 @@ func (c *CLI) VerifyRemoteRelease(ctx context.Context, remote, tag, revision str
 
 // VerifyRemoteBranch proves a source revision is the configured remote branch
 // tip before a control push makes a gitlink to it durable.
-func (c *CLI) VerifyRemoteBranch(ctx context.Context, remote, branch, revision string) error {
+func (c *LocalGitx) VerifyRemoteBranch(ctx context.Context, remote, branch, revision string) error {
 	ref := "refs/heads/" + branch
 	out, err := c.run(ctx, "ls-remote", "--heads", "--", remote, ref)
 	if err != nil {
@@ -91,7 +92,7 @@ func (c *CLI) VerifyRemoteBranch(ctx context.Context, remote, branch, revision s
 
 // GitlinkCommit resolves one exact gitlink entry from a tree without treating
 // the repository-relative path as revision syntax.
-func (c *CLI) GitlinkCommit(ctx context.Context, revision, path string) (string, error) {
+func (c *LocalGitx) GitlinkCommit(ctx context.Context, revision, path string) (string, error) {
 	out, err := c.run(ctx, "ls-tree", "-z", revision, "--", path)
 	if err != nil {
 		return "", err
@@ -110,7 +111,36 @@ func (c *CLI) GitlinkCommit(ctx context.Context, revision, path string) (string,
 }
 
 // RemoteURL returns the configured destination for a repository's records.
-func (c *CLI) RemoteURL(ctx context.Context, remote string) (string, error) {
+func (c *LocalGitx) RemoteURL(ctx context.Context, remote string) (string, error) {
 	out, err := c.run(ctx, "remote", "get-url", remote)
 	return strings.TrimSpace(out), err
+}
+
+// ErrAmbiguousPushDestination reports a configured remote whose pushes reach
+// more than one URL. A lock taken on such a remote would exist in several
+// places at once and coordinate nothing, so callers refuse rather than choose.
+var ErrAmbiguousPushDestination = errors.New("release locking requires exactly one push destination")
+
+// RemotePushURL resolves the single URL a remote pushes to, so a later cleanup
+// cannot follow a mutated alias to a different destination. A remote Git
+// cannot resolve by name at all is the caller's decision to make: the error is
+// returned as written. An ambiguous remote wraps ErrAmbiguousPushDestination.
+func (c *LocalGitx) RemotePushURL(ctx context.Context, remote string) (string, error) {
+	out, err := c.run(ctx, "remote", "get-url", "--push", "--all", remote)
+	if err != nil {
+		return "", err
+	}
+	seen := map[string]bool{}
+	var urls []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !seen[line] {
+			seen[line] = true
+			urls = append(urls, line)
+		}
+	}
+	if len(urls) != 1 {
+		return "", fmt.Errorf("remote %q has %d push destinations: %w", RedactURL(remote), len(urls), ErrAmbiguousPushDestination)
+	}
+	return urls[0], nil
 }

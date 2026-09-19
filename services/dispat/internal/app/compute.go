@@ -53,10 +53,11 @@ type change interface {
 type changeSet struct {
 	deps     []suggestion
 	initials []initialSuggestion
+	links    []linkSuggestion
 }
 
 // len is the number of proposed changes.
-func (c changeSet) len() int { return len(c.deps) + len(c.initials) }
+func (c changeSet) len() int { return len(c.deps) + len(c.initials) + len(c.links) }
 
 // all is every change in listing order.
 func (c changeSet) all() []change {
@@ -65,6 +66,9 @@ func (c changeSet) all() []change {
 		out = append(out, s)
 	}
 	for _, s := range c.initials {
+		out = append(out, s)
+	}
+	for _, s := range c.links {
 		out = append(out, s)
 	}
 	return out
@@ -78,6 +82,8 @@ func (c *changeSet) add(ch change) {
 		c.deps = append(c.deps, v)
 	case initialSuggestion:
 		c.initials = append(c.initials, v)
+	case linkSuggestion:
+		c.links = append(c.links, v)
 	}
 }
 
@@ -117,22 +123,22 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	scanned := a.scanPackages(ctx, pkgs)
 	detected, hasManifest := a.detectEdges(scanned)
 	scoped, scopedManifest, scopedDeclared := detected, hasManifest, declared
-	if sel.Active() {
+	if sel.IsActive() {
 		scoped = nil
 		for _, e := range detected {
-			if sel.Has(e.dep.Consumer) {
+			if sel.IsSelected(e.dep.Consumer) {
 				scoped = append(scoped, e)
 			}
 		}
 		scopedManifest = make(map[string]bool, len(hasManifest))
 		for name := range hasManifest {
-			if sel.Has(name) {
+			if sel.IsSelected(name) {
 				scopedManifest[name] = true
 			}
 		}
 		scopedDeclared = nil
 		for _, d := range declared {
-			if sel.Has(d.Consumer) {
+			if sel.IsSelected(d.Consumer) {
 				scopedDeclared = append(scopedDeclared, d)
 			}
 		}
@@ -154,6 +160,10 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	}
 	initials, baselines := a.suggestInitials(ctx, scanned, sel)
 	sugs.initials = initials
+	// The fleet's own shape is not a package's business, so it is proposed
+	// whatever the selection narrows to: a fleet is either linked or it is
+	// not.
+	sugs.links = a.suggestLinks()
 
 	out := opts.Out
 	if out == nil {
@@ -161,12 +171,15 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	}
 	if sugs.len() == 0 {
 		scope := ""
-		if sel.Active() {
+		if sel.IsActive() {
 			scope = " for " + sel.Description
 		}
 		subject := "dependencies"
 		if baselines {
 			subject = "dependencies and baselines"
+		}
+		if a.workspace.IsChoreographed() {
+			subject += " and fleet links"
 		}
 		fmt.Fprintf(out, "%s are in sync%s: %d detected edge(s), %d declared\n",
 			subject, scope, len(scoped), len(scopedDeclared))
@@ -174,12 +187,13 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	}
 	apply, err := a.selectSuggestions(sugs, opts, out)
 	if err != nil {
+		a.log.Error().Err(err).Msg("reading the compute selection failed")
 		return sugs.len(), err
 	}
 	if apply.len() == 0 {
 		return sugs.len(), nil
 	}
-	if err := a.applySuggestions(cfgPath, apply, declared, out); err != nil {
+	if err := a.applySuggestions(ctx, cfgPath, apply, declared, out); err != nil {
 		return sugs.len(), err
 	}
 	return sugs.len() - apply.len(), nil
@@ -298,11 +312,13 @@ func (f *fileEdits) add(path string, e config.Edit) error {
 // applySuggestions writes the accepted changes, one pass per affected file. A
 // TOML file cannot be edited format-preservingly, so it gets a rendered block
 // to paste and an error.
-func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []config.DeclaredDependency, out io.Writer) error {
+func (a *App) applySuggestions(ctx context.Context, cfgPath string, apply changeSet,
+	declared []config.DeclaredDependency, out io.Writer) error {
 	var edits fileEdits
 	for _, collect := range []func() error{
 		func() error { return a.collectDepEdits(&edits, cfgPath, apply.deps, declared) },
 		func() error { return a.collectInitialEdits(&edits, cfgPath, apply.initials) },
+		func() error { return a.collectLinkEdits(&edits, cfgPath, apply.links) },
 	} {
 		err := collect()
 		if errors.Is(err, config.ErrRefEdit) || errors.Is(err, config.ErrMultiRefEdit) {
@@ -367,9 +383,29 @@ func (a *App) applySuggestions(cfgPath string, apply changeSet, declared []confi
 		edited = append(edited, displays[i])
 	}
 
-	fmt.Fprintf(out, "\napplied %d change(s) to %s (previous copies carry the %s suffix)\n",
-		apply.len(), strings.Join(edited, ", "), config.BackupSuffix)
-	return nil
+	// The summary says what was done, and a run that edited no file says
+	// nothing about backups: the fleet changes below report themselves, and a
+	// sentence naming no file and a copy nobody made is worse than silence.
+	if len(edited) > 0 {
+		fmt.Fprintf(out, "\napplied %d change(s) to %s (previous copies carry the %s suffix)\n",
+			configuredChanges(apply), strings.Join(edited, ", "), config.BackupSuffix)
+	}
+	// The fleet links come last: a link is created against the configuration
+	// that describes it, so the file has to hold the roster first.
+	return a.applyLinkChanges(ctx, cfgPath, apply.links, out)
+}
+
+// configuredChanges counts the accepted changes that land in a configuration
+// file. A fleet link is a checkout and a staged pin, not a key, so it is
+// reported where it happens rather than counted here.
+func configuredChanges(apply changeSet) int {
+	n := len(apply.deps) + len(apply.initials)
+	for _, change := range apply.links {
+		if change.kind == linkChangeRepository {
+			n++
+		}
+	}
+	return n
 }
 
 // tomlFallback is what a refused TOML edit prints: the block to paste and the

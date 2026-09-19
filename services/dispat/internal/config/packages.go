@@ -85,7 +85,7 @@ func validateVersionGroups(c *File) error {
 				name, taken)
 		}
 		mode, ok := normalizeVersioning(g.Versioning)
-		if !ok || !model.Versioning(mode).Shared() {
+		if !ok || !model.Versioning(mode).IsShared() {
 			return fmt.Errorf("versionGroups[%q]: versioning %q is invalid (a group exists to share versions; want %s)",
 				name, g.Versioning, quotedNames(sharedVersioningNames()))
 		}
@@ -119,7 +119,7 @@ func resolveVersionGroup(c *File, ref string) (key, mode string, err error) {
 		if mode == "" {
 			mode = c.Versioning
 		}
-		if !model.Versioning(mode).Shared() {
+		if !model.Versioning(mode).IsShared() {
 			if mode == "" {
 				mode = VersioningIndependent
 			}
@@ -946,8 +946,8 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 	return model.GitHubSpec{
 		Enabled:     gc.IsEnabled(),
 		Channels:    gc.RecordChannels(),
-		AllPackages: gc.AllPackagesEnabled(),
-		Draft:       gc.DraftEnabled(),
+		AllPackages: gc.IsAllPackagesEnabled(),
+		Draft:       gc.IsDraftEnabled(),
 		Owner:       gc.Owner,
 		Repo:        gc.Repo,
 		APIURL:      gc.APIURL,
@@ -1150,7 +1150,7 @@ func sameDir(a, b string) bool {
 // .dispatexclude patterns.
 func excludedName(patterns []string, name string) bool {
 	for _, p := range patterns {
-		if globx.Match(p, name) {
+		if globx.IsMatch(p, name) {
 			return true
 		}
 	}

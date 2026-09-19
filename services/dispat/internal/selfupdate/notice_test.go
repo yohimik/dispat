@@ -35,7 +35,7 @@ func TestCheckAnswersWhenTheServerDoes(t *testing.T) {
 	case res := <-ch:
 		assert.Equal(t, "1.0.0", res.Current.String())
 		assert.Equal(t, "1.2.0", res.Latest.String())
-		assert.True(t, res.Behind())
+		assert.True(t, res.IsBehind())
 	case <-time.After(5 * time.Second):
 		t.Fatal("the check never answered")
 	}

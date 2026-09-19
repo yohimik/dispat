@@ -46,12 +46,12 @@ func TestComposedUnparseableTagUsesInitialWithoutReplayingHistory(t *testing.T) 
 	source := newFakeGit(commit{sha: "c1", message: "feat(app): already published"}).tag("app", "garbage", "c1")
 	pl, err := Compute(t.Context(), newFakeGit(), composedHistoryFailureOptions(source))
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	rel := pl.Releases["app"]
 	assert.Equal(t, v(1, 0, 0), rel.Current)
 	assert.True(t, rel.FromInitials)
 	assert.Equal(t, "c1", rel.StableCommit)
-	assert.False(t, rel.Releasing(), "the malformed tag is still the history boundary")
+	assert.False(t, rel.IsReleasing(), "the malformed tag is still the history boundary")
 }
 
 func TestComposedVersioningNoneSkipsReleaseTagInventory(t *testing.T) {
@@ -62,8 +62,8 @@ func TestComposedVersioningNoneSkipsReleaseTagInventory(t *testing.T) {
 
 	pl, err := Compute(t.Context(), newFakeGit(), opts)
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	assert.False(t, pl.Releases["app"].Releasable())
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.False(t, pl.Releases["app"].IsReleasable())
 }
 
 func TestComposedControlCheckpointReadFailureStopsPlanning(t *testing.T) {
@@ -125,7 +125,7 @@ func TestComposedPrereleaseRequiresItsOwnProviderBaseline(t *testing.T) {
 
 	pl, err := Compute(t.Context(), control, opts)
 	require.NoError(t, err)
-	require.True(t, pl.Fatal())
+	require.True(t, pl.IsFatal())
 	assert.True(t, hasCode(pl, CodeRepositoryBoundary))
 	assert.Contains(t, pl.Diagnostics[0].Message, "app@1.1.0-beta.0",
 		"the stable tuple cannot silently stand in for the prerelease boundary")
@@ -197,7 +197,7 @@ func TestPackagesChangedSinceComposedFailures(t *testing.T) {
 	packageOnly := []*model.Package{{
 		Name: "app", Dir: "/w/source/app", RepoRoot: "/w/source", Repository: "source", Space: &model.Space{Name: "apps"},
 	}}
-	base := func(control, source gitx.Git) Options {
+	base := func(control, source gitx.Gitx) Options {
 		return Options{Packages: packageOnly, Repositories: map[string]RepositoryHistory{
 			"control": {Name: "control", Root: "/w", Control: true, Git: control},
 			"source":  {Name: "source", Root: "/w/source", Path: "source", Git: source},
@@ -263,12 +263,12 @@ func TestPossiblyBehindUsesRepositoryQualifiedConsumerBoundary(t *testing.T) {
 		},
 	}
 
-	assert.True(t, pl.PossiblyBehind("app", "lib"), "a missing provider boundary means the consumer may be behind")
+	assert.True(t, pl.IsPossiblyBehind("app", "lib"), "a missing provider boundary means the consumer may be behind")
 	pl.stableBoundaries["app"]["lib-source"] = historyKey("lib-source", "l2")
-	assert.False(t, pl.PossiblyBehind("app", "lib"), "provider history proves the consumer includes the stable tag")
+	assert.False(t, pl.IsPossiblyBehind("app", "lib"), "provider history proves the consumer includes the stable tag")
 	pl.ancestor = func(string, string) bool { return false }
-	assert.True(t, pl.PossiblyBehind("app", "lib"), "a known but non-descendant provider boundary remains behind")
-	assert.False(t, pl.PossiblyBehind("missing", "lib"))
+	assert.True(t, pl.IsPossiblyBehind("app", "lib"), "a known but non-descendant provider boundary remains behind")
+	assert.False(t, pl.IsPossiblyBehind("missing", "lib"))
 }
 
 func TestControlRevisionCannotOrderAnUnpinnedSourceCommit(t *testing.T) {

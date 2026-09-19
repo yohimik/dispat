@@ -28,8 +28,8 @@ const (
 	OnErrorContinue = "continue"
 )
 
-// ValidOnError reports whether the value is a known error policy.
-func ValidOnError(v string) bool { return v == OnErrorSkip || v == OnErrorContinue }
+// IsValidOnError reports whether the value is a known error policy.
+func IsValidOnError(v string) bool { return v == OnErrorSkip || v == OnErrorContinue }
 
 // SinceAll is the reserved --since value selecting every package, changed or
 // not — "do this everywhere".
@@ -85,7 +85,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	if err != nil {
 		return err
 	}
-	if pl.Fatal() {
+	if pl.IsFatal() {
 		a.log.Error().Msg("refusing to run: the repository cannot produce a correct plan")
 		return errors.New("no correct plan exists")
 	}
@@ -134,7 +134,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 // window that happens to hold only packages outside the script's reach is an
 // honest no-op, said out loud at info so a green sweep still explains itself.
 func (a *App) reportNothingResolved(name string, sel filter.Result, covered []string) error {
-	if sel.Active() {
+	if sel.IsActive() {
 		err := fmt.Errorf("no selected package defines script %q (selected: %s)",
 			name, strings.Join(covered, ", "))
 		a.log.Error().Err(err).Msg("nothing to run")
@@ -229,7 +229,7 @@ type scriptWork struct {
 	name    string
 	args    []string // what followed `--`, appended to every package's command
 	wsVars  []string // the shared workspace listing, built once per run
-	runner  script.Runner
+	runner  script.Runnerx
 	covered map[string]*plan.Release
 }
 

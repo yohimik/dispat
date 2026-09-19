@@ -19,6 +19,7 @@ test('packed global install recovers from npm 12 blocking its postinstall', { sk
   const source = path.join(work, 'package source')
   await mkdir(source)
   await cp(path.join(PACKAGE_ROOT, 'build'), path.join(source, 'build'), { recursive:true })
+  await cp(path.join(PACKAGE_ROOT, 'postinstall.mjs'), path.join(source, 'postinstall.mjs'))
   const manifest = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'package.json'), 'utf8')) as { version:string; scripts:Record<string,string>; dependencies?:Record<string,string> }
   manifest.version = '1.10.99'
   manifest.dependencies = {}
@@ -64,4 +65,5 @@ test('packed global install recovers from npm 12 blocking its postinstall', { sk
     DISPAT_FIXTURE_BINARY:native, DISPAT_FIXTURE_SIZE:String(body.length) }
   await execute('/bin/sh', ['-c', repair], { cwd:work, env, timeout:30_000 })
   assert.match((await execute(command, ['--version'], { cwd:work, timeout:30_000 })).stdout, /^dispat 1\.10\.99/m)
+  await execute(process.execPath, [path.join(installed, 'postinstall.mjs')], { cwd:work, env, timeout:30_000 })
 })

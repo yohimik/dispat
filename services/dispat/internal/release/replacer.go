@@ -330,7 +330,7 @@ func selectFiles(ctx context.Context, dir string, globs [][]string,
 			return nil
 		}
 		if d.IsDir() {
-			if path != dir && scanner.SkipDir(d.Name()) {
+			if path != dir && scanner.IsSkippedDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil

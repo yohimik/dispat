@@ -76,6 +76,11 @@ integration suite itself.
     (Go, npm, Docker; real manifests; a version group; edges in both ecosystems) released through six cycles with the
     full status graph, the tags, every entry and every manifest byte asserted at each step, and convergence proven
     between steps. Includes the reconciliation pickup (W197) and its deliberately silent changelog.
+54. **The edges a propagation walks** (`propagation_kinds_test.go`): the three states of
+    `parser.propagation.kinds` over one history and one graph holding a runtime consumer and a development one. An
+    absent key is the specification default (every field but `devDependencies`), a list names the fields walked, and a
+    list written empty walks nothing at all, on the channel axis as much as on the bump axis. "Absent" and "empty" are
+    opposite instructions, so the file exists to keep them from collapsing into one another.
 
 ### Scheduling and execution
 
@@ -84,10 +89,15 @@ integration suite itself.
    concurrently while dependants are awaited.
 7. **Execution order by dependency graph** (`order_test.go`): scripts run in the order the graph dictates, under both
    `isBuildWaitingPublish` settings.
-8. **Interruption** (`interrupt_test.go`): a SIGINT mid-run shuts the run down gracefully through the real signal
-   handler: the in-flight script is killed, remaining packages report `cancelled` rather than `failed` or `skipped`,
-   nothing is tagged for work that did not finish, and the next run releases the cancelled packages at the version they
-   were owed.
+8. **Interruption** (`interrupt_test.go`, `cancel_resources_test.go`, `cancel_workspace_test.go`): a SIGINT mid-run
+   shuts the run down gracefully
+   through the real signal handler: the in-flight script is killed, remaining packages report `cancelled` rather than
+   `failed` or `skipped`, nothing is tagged for work that did not finish, and the next run releases the cancelled
+   packages at the version they were owed. The resource half of the same goal lives in `cancel_resources_test.go`: an
+   interrupted run stops launching the commands still ahead of it, leaves none of its working files behind, and does
+   not disturb a second run covering the same repository. `cancel_workspace_test.go` covers the phase before any of
+   that: composing an inherited workspace can queue behind another run's Git mutation lock, and that wait answers the
+   interrupt rather than its own bound.
 9. **The script frames** (`hooks_test.go`): every stage sits inside a frame of hooks, and the frames nest: nine
    per-package hooks around the version, build and publish stages, the announce frame after a publish, the
    `flow.onFail` / `flow.onSkip` outcome scripts, the once-per-space login gate, and the run-level bracket around the
@@ -133,7 +143,12 @@ integration suite itself.
     failures *after* the point of no return, where the artefact is already in a registry and nothing dispat does can
     take it back: a tag (E220), a tag at a foreign commit (E221), a record (E222), the release commit (E223) and the
     push (E224) each failing there, plus the alias tag (W232) that deliberately is not one of them. None of them fails
-    a package or stops the run; each is recorded and the run finishes what else it owed.
+    the package, which stays `published`, and none of them abandons the work the run still owed: the packages after it
+    carry on and their records are written. Each one does fail the *run*. A critical recording failure exits non-zero
+    and the completion webhook reports `release.finished` as `failed` with the published count preserved
+    (`TestWebhookReportsMonorepoFinalizeFailure`), because a publication nobody recorded is the state the next run
+    cannot recover from on its own. The alias tag is the exception that proves the split: W232 counts no critical and
+    the run exits green.
 46. **Draft GitHub releases** (`draft_test.go`): `github.draft` and the `--draft` flag that overrides it either way.
     What is pinned here is the half a draft makes hard: a draft carries no tag ref, so GitHub's by-tag lookup cannot
     see one, and the re-run skip every other release relies on has to come from the release listing instead. The fake
@@ -168,7 +183,8 @@ integration suite itself.
     shares: the term spellings and their globs, the invocation folder standing in for the terms nobody typed, the
     filter narrowing a window and never widening it, and partial releases, where publish order withholds a consumer
     whose provider was left out (`W230`) and a split versioning group is warned about and released (`W231`).
-21. **The shell helpers** (`if_test.go`, `if_changed_test.go`, `for_test.go`, `for_changed_test.go`, `exec_test.go`):
+21. **The shell helpers** (`if_test.go`, `if_changed_test.go`, `for_test.go`, `for_changed_test.go`, `exec_test.go`,
+    `exec_space_test.go`):
     the three commands that run one script instead of sweeping a selection. `dispat if` picks a shell string from a
     condition on the environment, the filesystem (`--file`/`--dir`) or the repository (`--changed`); `dispat for` runs
     a script once per item of a list; `dispat exec` runs one *declared* script, where one subject decides both which
@@ -193,12 +209,23 @@ integration suite itself.
     release's files is the binary, what the result is called and where it goes, whether it is a binary at all
     (`--pipe`), and the idempotence the destination's own checksum decides. The idempotence and the usage exits are
     what make a list of pinned installs a shell script, which one scenario runs as one.
-52. **Repository-aware histories** (`polyrepo_test.go`): central and imported configurations compose one package graph
+52. **Repository-aware histories** (`polyrepo*_test.go`): central and imported configurations compose one package graph
     over real Git submodules while every package keeps its owning repository's commits, tags and release baseline.
     The black-box fixtures cover central ownership ignoring implicit child configs, repository-local scope resolution
     followed by explicit cross-repository propagation, file and repeated CLI imports, mixed central/imported source packages,
     optional external providers, identical object and tag names in different repositories, an interleaved A -> B -> A
-    release, source-integrity refusals, and the evidence boundary for cross-repository consumer baselines.
+    release, source-integrity refusals, and the evidence boundary for cross-repository consumer baselines. They also
+    own the fleet's release-safety protocols, which is where the composition either holds or publishes something
+    wrong: remote lock acquisition and unwinding across several repositories, the drift guards before planning and
+    before publication, and the recovery protocols where a source publication is durable and the record, checkpoint or
+    push that should have followed it is not.
+55. **Choreographed fleets** (`choreography_*_test.go`): the second polyrepository saga, where no repository is the
+    control repository. Every peer states its own identity and the roster of the fleet, the peers are joined by
+    two-sided submodule links, and a release can start in any of them. The fixtures cover what a fleet composes to from
+    either end and what it refuses — a second route between two repositories, an identity a link contradicts, a link
+    nobody materialized — the boundary a release records in the links themselves and what a plan does when the links
+    cannot prove one, the settlement that writes those revisions before a package publishes, and the `compute` pass
+    that turns a roster into the links a release walks.
 
 ### Manifests and editing
 
@@ -384,8 +411,20 @@ tests/integration/
   for_test.go               goal 21 (dispat for)
   for_changed_test.go       goal 21 (dispat for --changed/--unchanged)
   exec_test.go              goal 21 (dispat exec)
+  exec_space_test.go        goal 21 (dispat exec, space subjects)
   selfupdate_test.go        goal 22
   install_test.go           goal 45
+
+  choreographed fleets
+  choreography_fixture_test.go   the fleet builder: peers, remotes, two-sided
+                            links, enter() clones and the file-protocol env
+  choreography_compose_test.go   goal 55 (what a fleet composes to)
+  choreography_plan_test.go      goal 55 (boundaries read from the links)
+  choreography_release_test.go   goal 55 (settling, recording, converging)
+  choreography_compute_test.go   goal 55 (turning a roster into links)
+  choreography_commands_test.go  goal 55 (the other commands)
+  choreography_faults_test.go    goal 55 (what a fleet does when Git refuses,
+                            through the harness's stand-in git)
 
   manifests and editing
   compute_test.go           goal 23
@@ -463,6 +502,12 @@ repeated runs under `-count` and `-race`.
 | `TestPlanPrereleaseTrainWeirdCases`                       | `^%beta` cannot drag a stable consumer (W208); `^%beta++1` brings it onto the train; a multi-package direct transition graduates the whole train; the graduated train converges.                                                                            |
 | `TestPlanPropagatedGraduationTransitionGraduatesTheTrain` | A propagated `beta>stable` *transition* graduates the dependants still on the named train (the `release(core)%beta>stable%%beta>stable++N` form configuration.md documents), and the graduated train converges (a regression fence; see Regression fences). |
 | `TestPlanChannelOnlyReleaseAndEntryPatch`                 | A release directive that only moves the channel is still a release, explained by W202; entering a prerelease channel with nothing pending takes the §11.4 entry patch, explained by W204, and its scripts execute.                                          |
+
+### Goal 54: the edges a propagation walks (`propagation_kinds_test.go`)
+
+| Test                                              | Claims proven                                                                                                                                                                                                                                                       |
+|---------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestPropagationKindsSelectTheEdgesTraversed`     | The three states of `parser.propagation.kinds` over one graph holding a runtime consumer and a development one: an absent key walks the §8.4 default and leaves the `devDependencies` edge alone, `[]` walks no edge at all while the changed package still releases, `["*"]` walks both, and a list naming `devDependencies` walks that edge alone. |
 
 ### Goal 2: space versioning modes (`versioning_test.go`)
 
@@ -557,6 +602,10 @@ plausible release instead of an error, so dispat tracks them together in one sui
 |---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestInterruptGracefulShutdown` | Sending a SIGINT mid-build (via `harness.StartRelease`/`Proc`) exits non-zero and marks both packages as `cancelled` in summary events. dispat creates no tags, treats killed builds as interruptions rather than failures, and releases both packages at their owed version on the next run. |
 | `TestInterruptStopsARunCommand`  | Because `dispat run` shares the release scheduler, a SIGINT during script execution exits non-zero, prevents subsequent packages from starting, and tags nothing. |
+| `TestCancelStopsTheRemainingCommandsOfAWarnOnlySequence` | The announce frame only warns, so nothing downstream would notice it running on after an interrupt. A SIGINT inside the first announce command leaves the release published and reports exactly one failed command: the two behind it are never launched. |
+| `TestCancelledRunsLeaveNoTemporaryFiles` | Three interrupted runs in a row, each with its own `TMPDIR`, leave no `dispat-*` working file behind: the output staging file of every hook and stage sequence is removed on the cancellation path as well as the successful one. |
+| `TestCancelDoesNotDisturbAConcurrentRun` | An interruption reaches its own run's script tree and nothing else: a second invocation covering the same repository at the same moment finishes its script and exits zero. |
+| `TestCancelWorkspaceCompositionStopsOnInterrupt` | Composing an inherited workspace queues behind the source repository's Git mutation lock, and the wait is the invocation's own rather than a detached one: a SIGINT ends it within seconds instead of sitting out the thirty-second bound, and the refusal names the wait and reports `context canceled` rather than `context deadline exceeded`. |
 
 ### Goal 9: the script frames (`hooks_test.go`)
 
@@ -630,6 +679,8 @@ version from one versioning mode, or a file preserved by one `revertOnFail` sett
 | `TestLevelsRootVersioningAppliesPerSpace` | Setting `versioning: fixed` at the root groups packages per space: packages in one space bump together while an opted-out space remains unaffected, unlike repository-wide `versionGroups`. |
 | `TestLevelsRootReachesAStandalonePackage` | Standalone packages outside spaces act as their own space, inheriting root `tagFormat` and `flow` configurations. |
 | `TestLevelsSpaceRecordsAndSrc`            | Spaces configure `changelog` defaults (which packages can override) and `src` boundaries (where changes outside the path leave the package inert with W131). |
+| `TestSpaceVersionGroupReachesPackagesWithOverrideLayers` | A space-level `versionGroup` reaches every member package, including one the space file configures and one that carries its own folder file: the plan loads, names the group for each member, and versions them as one instead of refusing a `versioning` nobody wrote. |
+| `TestSpaceVersionGroupIsStillSupersededPerPackage` | A package that states its own `versioning` leaves the space's group: the group still moves its remaining members while the detached package versions independently. |
 
 ### Goal 13: per-package overrides, versioning groups and `.dispatexclude` (`overrides_test.go`)
 
@@ -866,7 +917,7 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestFilterReleaseByGroupNeverSplitsIt`         | Naming a member of a group under `--strict` is refused (`W231`) while naming the group releases every member at once, clean under `--strict`, across a space and a standalone package alike; a later unfiltered run finishes the rest.            |
 | `TestFilterPositionalPackagesAreAUsageError`    | A bare package name after `run`, `preview`, `changelog`, `autoversion`, `commit` or `compute` is a usage error (exit 2): the selection is a flag.                                                                                                 |
 
-### Goal 21: the shell helpers (`if_test.go`, `for_test.go`, `exec_test.go`)
+### Goal 21: the shell helpers (`if_test.go`, `for_test.go`, `exec_test.go`, `exec_space_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                        |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -926,6 +977,8 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestExecComposesInsideARunScript`              | The in-flow case: a `run` script calling `dispat exec` hands the inner script the run's `DISPAT_*` variables through the process environment, with no flag.                                                            |
 | `TestExecIsReservedAndRefusesBadFlags`          | Every malformed invocation is decided by the flags alone and exits 2, the replaced `--for-package` and `--for-space` among them, while an unknown package, space or folder is a runtime failure instead, because those flags were well formed. |
 | `TestExecForwardsArgumentsAfterTheDash` | `dispat exec` runs one declared script once, so the arguments after `--` reach it unambiguously and a script in the config takes a terminal value with no config edit. `--on-failure` is proven not to receive them: that script is about the failure, not about the work. |
+| `TestExecForSpaceReadsTheSpaceFoldersConfig` | A space subject reads the space as it effectively is, so a script written only in the space folder's own config file resolves for `dispat exec --for space:` exactly as it does for `dispat run`, the folder's layer still beats the root file's `spaces` entry, `--for cwd` in the space folder answers the same, the env layers the same way, and a name no layer of the space declares is still a reported miss. |
+| `TestExecInSpaceIsStillTheSpacesPrimaryFolder` | Widening what a space's scripts are moves nothing else: `--in space:<name>` is still the space's first configured folder, which no space folder file can restate, and it moves neither the script nor the environment. |
 ### Goal 22: self-update (`selfupdate_test.go`)
 
 dispat builds two binaries at two versions and exercises them against a fake releases API. This tests the real
@@ -945,11 +998,11 @@ binary-swapping flow on disk rather than mocking the filesystem.
 | `TestSelfUpdateWithoutAStableRelease` | Where every tag is a candidate, "no matching release" naming the flag that would find one beats "you are up to date". |
 | `TestSelfUpdateCommandWordKeepsItsScript` | Every command word permanently shadows a run script of the same name, which is why the word is `self-update` and not `update`. A deliberate, tested fact rather than a surprise. |
 | `TestSelfUpdatePrintsWhatChanged` | An update answers the question it raises. The change sections of the release body reach the terminal, the install commands and footer links the same body carries do not, and the changelog is linked at the tag that was installed so the link keeps saying what it said today. |
-| `TestSelfUpdateCheckShowsWhatWouldArrive` | `--check` shows the notes it would install while still installing nothing and still exiting 1, which is what makes it the invocation you run while deciding rather than a bare version comparison. |
+| `tests/integration/selfupdate_test.go::TestSelfUpdateCheckShowsWhatWouldArrive` | `--check` shows the notes it would install while still installing nothing and still exiting 1, which is what makes it the invocation you run while deciding rather than a bare version comparison. |
 | `TestSelfUpdateNotesNeverBlockTheUpdate` | An empty body, a body that is only a footer, markup dispat reads nothing in, and a body far past the parser's cap all end with the new binary in place and the link left to carry the answer. The notes are a courtesy; the binary is the point. |
 | `TestSelfUpdateReadsNotesFromTheCurrentRenderer` | The notes parser is fed a body this build's own renderer produced rather than a fixture written by hand: the sections and the indented commit bodies reach the terminal, and the cut still lands on the footer's rule, so an indented body does not carry the release details and the links out with it. |
 | `TestSelfUpdateReadsTheNotesBeforeTheDownload` | The fake records the order it was asked, proving the notes ride off the response that chose the release rather than a second call afterwards, and that the binary is fetched exactly once. |
-| `TestSelfUpdateNotesReachTheJSONStream` | Under `--log-format json` every line is an event and the `update installed` event carries the notes and the changelog as fields, so a job that updates dispat can post what changed without scraping stdout. |
+| `tests/integration/selfupdate_test.go::TestSelfUpdateNotesReachTheJSONStream` | Under `--log-format json` every line is an event and the `update installed` event carries the notes and the changelog as fields, so a job that updates dispat can post what changed without scraping stdout. |
 | `TestSelfUpdateFromAPrivateRepository` | A fork released only inside a company: the fake publishes nothing without the credential and answers the public download URL with a sign-in page, so a binary that has actually been replaced proves `GITHUB_TOKEN` reached both the listing and the asset's API endpoint, and the public URL was never asked. |
 | `TestSelfUpdateFromAPrivateRepositoryWithANamedToken` | `--token-env` names the variable holding the credential, and the conventional one is not consulted once it does: a wrong `GITHUB_TOKEN` beside the named one changes nothing, and the asset still arrives through its API endpoint. |
 | `TestSelfUpdateWithoutATokenStaysOnThePublicURL` | Every release the fake publishes names an asset endpoint, as every real one does, and without a token the download still goes to the browser URL and never touches the endpoint that wants one. |
@@ -968,7 +1021,7 @@ tool is a script that reports its own version, so every claim about which file l
 | `TestInstallNamesTheFileAndTheFolder` | A project whose binary is not called after its repository, installed somewhere the reader chose: `--as` and `--bin-dir` are both honoured, the folder is created on the way, and a folder that is not on `PATH` is said out loud while one that is says nothing, because a tool the shell cannot find is a successful install that looks like a failed one. |
 | `TestInstallRefusesToGuessWhichFileIsTheBinary` | Which of a release's files is the binary is never inferred, with one exception that is a convention rather than a guess: `{name}-{os}-{arch}` is looked for first and exactly, needs no `--asset`, and is the file that actually lands on `PATH` and runs. A release naming its files anything else is refused with the name dispat tried and everything it found, exactly one file needs no flag, a glob reaches a name nobody wants to type, a glob matching two is refused, and a release with nothing for this platform names what it does have. |
 | `TestInstallRefusesWhatItCannotTrust` | A checksum that does not describe what arrived is refused with the folder untouched and the staged file cleaned up, and the failure names `install` rather than the package doing the work. |
-| `TestInstallRefusesADestinationItMustNotReplace` | A name that is already a directory belongs to somebody. Installing over it would rename that directory aside to put a binary where it stood, so it is refused instead. |
+| `tests/integration/install_test.go::TestInstallRefusesADestinationItMustNotReplace` | A name that is already a directory belongs to somebody. Installing over it would rename that directory aside to put a binary where it stood, so it is refused instead. |
 | `TestInstallRefusesAFolderItCannotWriteTo` | The first failure a real install meets, since /usr/local/bin belongs to root on most machines: the refusal arrives before the transfer rather than after it, and says what to do about it. |
 | `TestInstallWithoutAPublishedChecksum` | A release publishing no digest is installed with the size check standing alone, said out loud, and never reported as already installed: the guess that skips the install is the one that leaves a machine on an old binary forever. |
 | `TestInstallReachesAnyPublishedVersion` | A prerelease is not an update by default, `--prerelease` opts into the candidates, `--release` reaches any published version going backwards, and one nobody published changes nothing. |
@@ -1135,7 +1188,12 @@ the tag object on the remote instead.
 | `TestReleaseLockConfigSwitch`              | Setting `unsafeDisableLock: true` in config permits releases without remotes even when environment variables set it to `false`. Reverting the config key to `false` restores the remote requirement.                          |
 | `TestReleaseLockClearedWhateverHappens`    | dispat releases the lock on all exit paths, including failed packages, guard failures, and interrupt signals (SIGINT or SIGTERM). Tests verify the lock was *held* when signals arrived and removed afterward.                                                                                                      |
 | `TestReleaseLockStaleLocalTag`             | Stale lock tags left in local clones from terminated runs are overwritten locally on the next run, allowing the release to continue.                                                                                              |
-| `TestReleaseLockCleanupFailureIsNotFatal`  | If a remote becomes unreachable at the end of a run, dispat prints remediation steps and returns the exit code of the release (0), leaving the lock tag on the remote.                                                       |
+| `TestReleaseLockCleanupFailureFailsTheCompletedRun`  | If the remote refuses final lock deletion, dispat reports E336 and remediation, exits nonzero, and sends a failed completion webhook while preserving the published package and its release tag.                                                       |
+| `TestReleaseLockPrecedesPlanning`          | Every participating repository of a fleet is locked, in `.gitmodules` name order, before the first planning event; `status` plans the same fleet and acquires nothing.                                                       |
+| `TestReleaseLockBypassWarnsWithItsScope`   | An explicit unsafe bypass emits one `W331` warning naming every repository releasing without a lock and the setting that asked for it, and no remote receives a lock tag.                                                    |
+| `TestReleaseLockRefusedRemoteUnwindsEarlierLocks` | A remote that answers but refuses the write stops the fleet with `E336` before any package script, and every earlier lock this run owned is given back.                                                               |
+| `TestReleaseLockCancelledAcquisitionUnwinds` | SIGINT during fleet lock acquisition never reaches planning and leaves no lock behind, including when the interrupt lands after a lock push is already on the remote.                                                      |
+| `TestReleaseLockCleanupPreservesAReplacedLock` | A lock replaced by another run while this one worked belongs to that run: cleanup verifies ownership, leaves the replacement alone, reports E336 for the refused delete and exits nonzero.                                                      |
 | `TestReleaseLockAppliesOnlyToRelease`      | Commands like `status`, `preview`, `run`, `changelog`, `autoversion`, `commit`, and `scanner` acquire no remote locks and function in repositories without remotes.                                                                                  |
 | `TestReleaseLockIsNotAReleaseTag`          | The lock tag targets HEAD during plan computation. Broad tag formats like `{version}` still read 0.1.0 as the baseline and increment to 0.2.0.                                                                                |
 | `TestReleaseLockTakenEvenWhenNothingToRelease` | The lock is unconditional. A `--require-release` run with nothing to publish takes the lock, gives it straight back and exits 3, building and tagging nothing. A lock already held refuses such a run on the lock rather than on the empty plan, which is what proves the lock precedes planning; `dispat status --require-release` remains the lock-free way to ask the same question. |
@@ -1344,6 +1402,7 @@ the command exits with — plus the wire details only a real HTTP server can wit
 | `TestWebhookConfigRejections`                       | A broken declaration — unknown event, missing url, bad method — stops the load naming `webhooks[0]`, and nothing is released.                                                                                 |
 | `TestWebhookInterruptedRunStillReportsTheOutcome`   | The flush is detached from cancellation: a SIGINT mid-build still delivers the `package.cancelled` events and a `release.finished` saying `interrupted` before the process exits.                             |
 | `TestWebhookFailedRunKeepsItsExitCode`              | The exit-code fence: a run with a failing package exits with exactly the code its webhook-less twin exits with, while `release.finished` reports the failure honestly.                                        |
+| `TestWebhookReportsMonorepoFinalizeFailure`         | A successful publication followed by a monorepository release-commit failure exits non-zero and reports `release.finished` as failed while preserving the published count.                                  |
 | `TestWebhookRefusedRunEmitsNothing`                 | A run refused before execution (the branch guard) makes no delivery at all: webhooks begin only once the run is committed to execute.                                                                         |
 | `TestWebhookPackageOverrideRouting`                 | The ladder's replace-wholesale rule on the wire: a package stating its own list routes its events to its endpoint alone, the root endpoint keeps the run brackets and the other packages.                     |
 | `TestWebhookEmptyListOptsOutOnTheWire`              | `webhooks: []` at a package silences that package while the root endpoint keeps the brackets and the sibling — raw config, because the typed model's omitempty cannot write an empty list.                    |
@@ -1394,13 +1453,14 @@ until two commits are by two different people; the repository's own fixed identi
 | Test | Claim proven |
 | --- | --- |
 | `TestCheckRaceReports` | Any recorded subprocess race fails the suite, even when a behavioral scenario accepts a nonzero exit. Unconfigured normal runs and empty report directories pass; unrelated files do not count as race reports. |
+| `TestGitFaultSelectsMatchesAndPassesTheRestThrough` | The stand-in `git` is the real Git for every invocation a scenario did not name, fails exactly the selected matches — every one, only the Nth, or the Nth onward — with the configured exit status and a recognisable marker, counts every match whether it failed it or not, and can answer with a reply of its own instead of running Git at all. |
 
 Compiler selection and version-stamped fixtures have separate checks:
 
 | Test | Claim proven |
 | --- | --- |
 | `TestCompilerSelection` | Explicit TinyGo selection supplies the expected compiler and build flags. |
-| `TestUsesTinyGoRequiresExplicitCompiler` | An opaque prebuilt binary path does not establish its compiler. |
+| `TestIsTinyGoRequiresExplicitCompiler` | An opaque prebuilt binary path does not establish its compiler. |
 | `TestBuildSelectionRejectsMixedToolchains` | Incompatible prebuilt, compiler, race, and coverage settings fail before the suite builds. |
 | `TestVersionedPrebuiltName` | Version-stamped fixtures select the exact prebuilt filename. |
 | `TestPrebuiltWithSelectedCompilerBuildsVersionedFixtures` | A selected compiler builds stamped fixtures even when the ordinary binary is prebuilt. |
@@ -1474,6 +1534,8 @@ timestamps to relate histories.
 | `TestPolyrepoMixedCentralAndImportedPackages` | A centrally declared source package and an imported source package keep disjoint histories while participating in one plan and one selector surface. |
 | `TestPolyrepoSinceControlRevisionProjectsSourceGitlinks` | `--since` at a historical control revision projects each source's old gitlink into its own range, and the later control pointer commit is snapshot evidence rather than a duplicate package change. |
 | `TestPolyrepoImportedDefaultsAndNestedCommandContext` | An imported repository keeps its own shell, environment and scripts, and a nested dispat process launched from its package directory retains the outer composed workspace and can select a package from another import. |
+| `TestPolyrepoStatusRejectsFutureControlIntentForOlderSourceCheckout` | A control rewind leaves pending intent whose own snapshot pins a revision the accepted checkout does not contain; status projects that intent onto the active source history and refuses it with the plan-level `E333` guard rather than a boundary lookup. |
+| `TestPolyrepoStatusRejectsControlIntentPinningAnUnfetchedSourceRevision` | Pending control intent whose snapshot pins a revision the source clone never fetched reports the same `E333` projection guard with the pin named, rather than aborting planning with the `merge-base --is-ancestor` failure an unknown object produces. |
 | `TestPolyrepoNestedStepsReadLiveCommitPin` | A source-owned script runs nested changelog and commit steps followed by a nested fleet plan in the same shell; the plan reads the exact source SHA just appended to the live `DISPAT_OUTPUT` file before any control gitlink checkpoint exists. |
 | `TestPolyrepoNestedInterleavedOwnerPinsRetainEveryCandidate` | Nested commits across A/lib -> B/service -> A/tool retain exact candidate SHA sets per owner, so returning to source A after source B neither deadlocks nor loses the newer source-A pin. |
 | `TestPolyrepoNestedCommitTagsSerializePerOwnerAndRunOwnersInParallel` | With publish concurrency 2, two independent packages in one source serialize their nested commit/tag Git writes while a bounded handshake proves another source can publish concurrently. |
@@ -1501,6 +1563,10 @@ timestamps to relate histories.
 | `TestPolyrepoSourceRecordFailureBlocksConsumerAndRetries` | A failed source release commit creates neither source tag nor control checkpoint and blocks dependent publication; after the operator removes the failure and explicitly cleans the retained generated source state, retry records both repositories. |
 | `TestPolyrepoPartialReleasePreservesIndependentSuccessOnRetry` | An unrelated source failure blocks its consumer while independent source publication remains tagged; retry reads that durable tag and publishes only the unfinished source work. |
 | `TestPolyrepoSourcePushFailureDoesNotAdvanceControl` | E335 on a rejected source branch/tag push may retain local source state but cannot create or push a control checkpoint pointing at the unreachable commit. |
+| `TestPolyrepoExcludedRepositoryIsAbsentFromEveryPhase` | `repositoryOverrides.<source>.enabled: false` removes a repository before initialization, history checks, planning, hooks and locking: the checkout may be missing or shallow, composition names the exclusion, no selector or control directive reaches its packages, and its remote receives no lock or tag. |
+| `TestPolyrepoExcludedRepositoryReservesItsBoundary` | An excluded repository keeps its filesystem boundary: a control package declared inside it is refused as belonging to a nested Git repository rather than becoming control-owned. |
+| `TestPolyrepoExcludedProviderIsRefusedUnlessExternal` | A required dependency on a package of an excluded repository is a hard error naming that repository, while an `external: true` edge keeps the ordinary `W330` inactive-edge warning. |
+| `TestPolyrepoExcludedImportedSourceKeepsOwnedCommitPolicy` | Participation metadata excludes an explicitly imported source, a central `commit` override for an imported source stays `E332`, and an override key naming no `.gitmodules` repository is refused whether it enables or disables. |
 | `TestPolyrepoReleaseLockGuardsAndCleansSourceWork` | The control repository's held remote lock refuses the whole fleet, an uncoordinated source reports E336 before mutation, contention in a later source preserves its foreign lock while unwinding already-acquired source and control locks, and an interrupted admitted source build clears the fleet lock without recording a release. |
 | `TestPolyrepoReleaseCleansLivePinContext` | A real package shell receives the outer release's private live-pin directory, and the outer release removes it after both successful publication and a gating failure before publication. |
 | `TestPolyrepoRefusesUninitializedPinnedMismatchAndShallowSources` | An uninitialized submodule, a checkout whose HEAD differs from its control gitlink, and a shallow source all fail before planning. |
@@ -1511,6 +1577,642 @@ timestamps to relate histories.
 | `TestPolyrepoCustomCheckpointMessageProvesNoBaseline` | A control commit that moves matching provider and consumer gitlinks under an opaque custom message is not automatic release-checkpoint evidence and reports E333 when later provider work needs a consumer boundary. |
 | `TestPolyrepoReleaseCheckpointProvidesNextConsumerBaseline` | A normal control release checkpoint that names exact source tags and carries their matching gitlink transitions is sufficient evidence for the consumer's next cross-repository baseline after the bootstrap tuple is removed. |
 | `TestPolyrepoImportedConsumerBaselineRequiresEvidence` | Importing an already-tagged standalone consumer after the provider pointer advanced does not prove the old consumer release adopted that provider snapshot; ambiguity is refused until an explicit baseline tuple identifies its actual provider revision. |
+
+### Goal 55: choreographed fleets (`choreography_*_test.go`)
+
+Every peer is a disposable initialized Git repository with a bare remote of its own, configured through the typed
+`pkg/models` values and joined to its neighbours by real two-sided submodule links. The suite drives the compiled
+binary only. Link creation goes through plain Git everywhere except the compute scenarios, so a defect in `compute`
+cannot make the rest of the goal pass.
+
+| Test | Invariant |
+| --- | --- |
+| `TestChoreographyComposesOneFleetFromAnyEntry` | A run started in either peer composes the same repositories and plans the same packages, naming the saga and the entry, and a two-sided pair reports nothing. |
+| `TestChoreographyRefusesASecondLinkPath` | Three repositories linked in a ring give two routes between two of them, which `E338` refuses rather than choosing one. |
+| `TestChoreographyRefusesAnIdentityItCannotTrust` | A linked checkout that calls itself something else, or releases under another saga, is `E339`; a peer whose own configuration states the identity keys without the saga is `E332`. |
+| `TestChoreographyRefusesALinkNobodyMaterialized` | A clone whose links were never initialized is `E330` naming the command that repairs it, and the same checkout composes the whole fleet once they are. |
+| `TestChoreographyIgnoresASubmoduleTheRosterDoesNotName` | A vendored submodule takes no part in the fleet: only the roster makes one a peer. |
+| `TestChoreographyReportsAOneSidedLinkAndARosterGap` | A link only one end declares is `W332` and a peer that has not heard of a fleet member is `W333`; neither refuses the run. |
+| `TestChoreographyRefusesTheKeysOnlyAControlRepositoryOwns` | `configs`, a central commit override, a baseline naming `control` and the identity keys without the saga are `E332`; a reserved or self-naming identity is `E339`. |
+| `TestChoreographyAbsentKeysKeepSingleRepositoryBehaviour` | A configuration naming no saga composes nothing and plans its own packages alone, submodules and all. |
+| `TestChoreographyReleasesOnePeerWithPolyrepoFalse` | `--polyrepo=false` is the standalone escape hatch, said out loud in the log. |
+| `tests/integration/choreography_compose_test.go::TestChoreographyExcludesADisabledPeer` | `repositoryOverrides.<peer>.enabled: false` removes a peer from the whole run, and an override naming no roster entry is refused. |
+| `TestChoreographySelectsTheSagaFromTheCommandLine` | `--saga` is applied while the file is validated, so it settles a file whose keys the saga contradicts, and an unknown value is refused. |
+| `TestChoreographyPlansAFirstReleaseWithoutEvidence` | A fleet that has never released has no boundary to prove and needs no tuple to say so. |
+| `TestChoreographyReadsTheBoundaryFromTheReleasedLink` | The pin a release recorded is where the consumer's window in the provider starts: work it incorporated is not counted again and work after it is. |
+| `TestChoreographyRelaysTheBoundaryAlongTheRoute` | Two repositories that do not link each other are comparable one hop at a time along the one route between them. |
+| `TestChoreographyNeedsATupleWithoutAReleaseCommit` | A tag attached by hand proves nothing, stops the plan with `E333` naming `repositoryBaselines`, and the tuple the diagnostic names resolves it. |
+| `TestChoreographyReadsABaselineDeclaredByThePeerThatKnowsIt` | A boundary declared in the provider's own configuration is read by a run started anywhere in the fleet. |
+| `TestChoreographyDoesNotCountALinkMoveAsAChange` | A settlement writes a pointer to another repository; the next plan has nothing pending because of it. |
+| `TestChoreographySinceProjectsThroughTheFleet` | `--since <entry revision>` is one range per repository, projected through the links, and `--since all` still sweeps everything. |
+| `TestChoreographyRefusesAnUnprovableBoundaryRatherThanGuessing` | A pin no repository holds is `E333`, never a Git failure. |
+| `TestChoreographyRecordsEveryPeerLocallyAndConverges` | Each repository tags, writes its changelog and commits its own release, and a second run of the same command publishes and settles nothing. |
+| `TestChoreographySettlesTheProviderRevisionBeforePublishing` | The settlement precedes the release commit, so the commit the tag names carries the revision the release incorporated. |
+| `TestChoreographyRefusesAPackageWhoseRouteCannotRecord` | A route repository that cannot record its hop refuses the package before it publishes. |
+| `TestChoreographyRecordsNothingForATagOnlyConsumer` | A consumer that writes no release commit records no evidence and says so at info rather than failing. |
+| `TestChoreographyRunsTheEntryHooksOnce` | Every peer is an imported configuration, the entry included, and the entry's own run hooks fire exactly once. |
+| `TestChoreographyRevertsInTheRepositoryThatOwnsTheFolder` | A failed package is rolled back through the repository whose history the files belong to, not through the checkout containing it. |
+| `TestChoreographyBypassesTheLockPerRepository` | An unsafe lock setting is the repository's own: one peer cannot release another unlocked. |
+| `TestChoreographyConcurrentConsumersSettleInLaneOrder` | Two consumers whose settlements overlap take the same lanes in the same order, proven to overlap by a bounded file handshake and to finish by both publishing. |
+| `TestChoreographyRunsTheSettlingRepositoryHooks` | A settlement is a commit dispat makes, so that repository's commit hooks bracket it. |
+| `TestChoreographyPushesEveryRepositoryItRecorded` | With pushing on, each repository's branch and tags reach its own remote and a second run pushes nothing new. |
+| `TestChoreographyComputeLinksAnUnlinkedFleet` | `compute --check` reports an unlinked fleet as pending work and `--write` creates the forward checkout and the other half, without committing either. |
+| `TestChoreographyComputeConnectsWithoutASecondPath` | Three repositories are connected by exactly two links, and the fleet composes without `E338`. |
+| `TestChoreographyComputeInitializesADeclaredLink` | A declared link whose checkout is missing is its own change, and initializing it composes the fleet. |
+| `TestChoreographyComputeWritesARosterEntryIntoItsOwnerConfig` | A roster entry lands in the configuration of the peer that has to state it, which clears `W333`. |
+| `TestChoreographyComputeWithholdsARosterEntryWithNoURL` | An entry no roster states a url for is reported rather than written. |
+| `TestChoreographyComputeAsksBeforeEachLink` | Interactive mode asks per suggestion; a refusal leaves the fleet exactly as it was. |
+| `TestChoreographyComputeChangesNothingWithoutAnApplyFlag` | Reading a fleet is not repairing one. |
+| `TestChoreographyRunSweepsEveryRepository` | A script sweep covers the whole fleet and each package runs in its own repository's folder. |
+| `TestChoreographyPreviewReadsTheWholeFleet` | `preview` renders notes for a package in another repository, which means it composed the fleet. |
+| `TestChoreographyNestedCommandComposesTheSameFleet` | A command a package script starts inherits the entry, the saga and the repositories, and composes the fleet the release is holding. |
+| `TestChoreographyDiagnosticsReadsAConfigWithoutAFleet` | Validating a message is a parser question and needs no fleet to answer it. |
+| `TestChoreographyStatusFromInsideALinkedCheckout` | A run started in a peer's nested copy cannot compose the fleet and says which command repairs it. |
+| `TestChoreographyRefusesAFleetInventoryItCannotRead` | A `.gitmodules` Git cannot parse is `E330` naming the file, never a fleet read as having no links. |
+| `TestChoreographyRefusesALinkPathThatIsNotARepository` | A link path holding an ordinary folder is the same `E330` as a link nobody materialized, because Git answers from the repository around it. |
+| `TestChoreographySinceARevisionThatPinsNothing` | A revision from before a link existed projects that repository to its whole history, as an absent gitlink always has. |
+| `TestChoreographyReadsEveryReleaseSubjectOfARepositoryAtOnce` | Two released packages in one repository have their release subjects read in one pass, and both boundaries resolve from them. |
+| `TestChoreographyComputeReadsAFleetThatDoesNotCompose` | A ring stops a release with `E338` and is a finding to `dispat compute`, which still reads the fleet and proposes no further link. |
+| `TestChoreographyRefusesToPushASettlementFromADetachedCheckout` | A repository that will push what it records needs `commit.branch`, and `E337` stops the release before publication. |
+| `TestChoreographyRefusesAPinItsTargetHasNotPushed` | A revision the provider's own remote does not hold stops the consumer before it publishes, so a recorded link never outruns its target. |
+| `TestChoreographyConvergesAfterARejectedSettlementPush` | A settlement whose push is rejected fails the run leaving only ordinary commits, and the next run finishes the job, releasing each package exactly once. |
+| `TestChoreographyNestedCommitStepRecordsTheEvidence` | A package recording through a nested `dispat commit` step still settles first, so the commit its tag names carries the revision it incorporated. |
+| `TestChoreographyLocksEveryRepositoryInNameOrder` | The fleet lock covers every participating repository, taken in repository-name order. |
+| `TestChoreographyVerifiesADetachedPeerAgainstTheRoster` | A linked checkout sits on no branch, so the revision a settlement will pin is verified against the branch the roster states for that repository, from the repository that links it or from any roster that states one. |
+| `TestChoreographySettlementAlreadyOnItsRemotePushesNothing` | A consumer releasing again while its provider has not moved records nothing new and pushes nothing the remote already holds. |
+| `TestChoreographyIncomparableDirectivesStayE334` | Two repositories writing intent no history orders is `E334`, and the remedy names what a fleet with no control repository can actually do. |
+| `TestChoreographyNamesTheEntryRootForWhatItIs` | The composed line calls its anchor `root` where there is no control repository to name. |
+| `TestChoreographyComputeSummarisesWhatItActuallyDid` | A compute run that edited no file claims no file and no backup; one that edited a file names it. |
+| `TestChoreographyFaultRefusesASettlementItCannotRecord` | Every Git call the settlement makes is a way it can stop: the tree read, the temporary index, the pins written into it, the tree, the commit, the reference and the index refresh afterwards each refuse the package before it publishes, and a retry without the fault releases it exactly once onto a commit carrying the revision it incorporated. |
+| `TestChoreographyFaultCannotReadTheRevisionToSettle` | The far end of a route contributes the revision its parent has to pin, and a repository that cannot say which revision that is stops the consumer before publication rather than pinning a guess. |
+| `TestChoreographyFaultReadsAReplyItCannotParse` | A tree listing that is not in Git's plumbing format is reported as the malformed record it is rather than parsed into a pin nobody wrote. |
+| `TestChoreographyFaultCannotReadTheReleaseSubjects` | A repository whose release-tag subjects cannot be read, or answers in a format the parser cannot read, stops the plan naming that repository instead of answering that its tags prove nothing. |
+| `TestChoreographyFaultCannotReadTheConsumersOwnRevision` | The repository recording a settlement reads its own HEAD to know what it settles on top of and again inside the commit it builds; either read failing refuses the package before publication and the retry releases it once. |
+| `TestChoreographyFaultCannotReadALinkTreeWhilePlanning` | A link tree a boundary walk cannot read is an unproven boundary — `E333` naming `repositoryBaselines`, never a Git status escaping as a fatal — and the tuple resolves it without reading any tree. |
+| `TestChoreographyFaultCannotComposeTheFleet` | The three questions composition asks each repository through Git — its revision, whether a link path is its own repository, and whether it holds its whole history — are each `E330` when unanswerable, and the same checkout composes once Git answers again. |
+| `TestChoreographyFaultCannotReadTheLinkInventory` | The statuses `git config` answers `.gitmodules` with mean different things: "no key matched" is a repository with no fleet links, and anything else, including an answer that is not the format, is a file that cannot be read and is refused by name. |
+| `TestChoreographyFaultStopsComputeAndConvergesOnASecondRun` | A fleet link `compute` could not create is reported with the repository and the peer named and nothing cloned, and the same command without the fault completes the fleet. |
+| `TestChoreographyFaultStopsComputeDeclaringTheOtherHalf` | The declaration, the pin and the revision to pin it at are each a way the back half of a link fails; each says which repository it was for, none of what it left behind is committed in the peer, and running the same command again without the fault finishes the half and clears `W332`. |
+| `TestChoreographyFaultStopsComputeInitializingADeclaredLink` | A declared link whose checkout cannot be made names the repository and the path rather than reporting a repaired fleet, and a second run materializes it. |
+| `TestChoreographyRefusesAShallowCheckout` | A checkout holding only its tip cannot answer for any window, at either end of a link: the repository the run started in and a peer fetched with `--depth 1` are both `E330`. |
+| `TestChoreographyRefusesARosterNameThatOnlyFoldsOntoItsLink` | A roster entry differing from the submodule only in case is a near-miss the walk names as `E339`, not a peer it quietly fails to find. |
+| `TestChoreographyOverridesDecideWhoTakesPart` | An override may enable a peer, may exclude several at once, and may not exclude the repository the run started in. |
+| `TestChoreographyReadsOneBoundaryTwoPeersBothState` | The same `repositoryBaselines` tuple written in two peers' configurations is one boundary, not a duplicate to refuse. |
+| `TestChoreographyRefusesALinkedPeerWithNoConfiguration` | A linked checkout with no dispat file of its own is `E330` by name rather than composed against its linker's configuration. |
+| `TestChoreographyRefusesALinkPathItCannotEnter` | A declared link path that leaves the repository, and one nothing was ever made at, are each `E330`. |
+| `TestChoreographyRefusesAnInventoryItCannotLookAt` | A `.gitmodules` the filesystem will not answer about at all is neither an absent inventory nor a readable one, and is refused by name. |
+| `TestChoreographyReadsAnInventoryThatNamesNoLinks` | A `.gitmodules` with no entries, and one whose entry names no identity, are each a repository with no fleet links rather than a file that cannot be read. |
+| `TestChoreographyNeedsATupleForALinkAddedAfterTheRelease` | A release made before two repositories were linked recorded no hop between them, which is `E333` rather than an absent pin read as the empty revision, and the tuple states what that release actually had. |
+| `TestChoreographyRefusesAPinTheProviderMovedBehind` | A pin the provider's active revision no longer descends from is an unprovable boundary — `E333`, never a Git failure. |
+| `TestChoreographyRefusesASettlementTheConsumerDoesNotDeclare` | A link only the provider declares joins the two for reading but gives the consumer nowhere to record the hop; the release stops before a lane is taken and the consumer publishes nothing. |
+| `TestChoreographySettlesTwoProvidersInOneCommit` | A consumer reading two repositories records both hops in one commit, in a fixed order, and the tree its tag sits on carries both revisions. |
+| `TestChoreographyRefusesASettlementItsHeadMovedUnderneath` | A repository whose HEAD moves under its own settlement — before the commit, or between the commit and the push — is drift: the package is refused before publication and the next run releases it once. |
+| `TestChoreographyVerifiesAMovedDetachedPeerAgainstTheRoster` | With the settlement genuinely pending, the branch a detached peer's remote is asked about comes from the roster of the repository that links it, or from any roster that states one, and a fleet where none does refuses rather than guessing. |
+| `TestChoreographyComputeProposesNothingForAFleetOfOne` | A repository whose roster names nobody is already as linked as it can be. |
+| `TestChoreographyComputeLinksOnlyWhatItCanReach` | A pair of roster members this run walked into neither of is a pair it cannot join, and it proposes only the link it can make. |
+| `TestChoreographyComputeUsesTheLinkPathTheRosterAsks` | A roster entry stating a path of its own is where the link is made, cleaned to one spelling. |
+| `TestChoreographyComputeWithholdsALinkWithNoURL` | A roster entry nothing can be fetched from is reported rather than attempted, and no folder is made for it. |
+| `TestChoreographyComputePinsTheBackLinkAtWhatTheRemoteHolds` | The other half of a link carries the remote the configuration names; a remote that does not hold the branch yet falls back to this repository's own head with a warning, and no remote at all leaves the half to the operator and shows up as `W332`. |
+| `TestChoreographyComputeRefusesARosterURLCarryingASecret` | A roster URL carrying user information is refused before anything is written, and the secret never reaches the run's output. |
+| `TestChoreographyComputeRefusesALinkFolderOverAFile` | A peer already holding a file where the back link's folder belongs is reported by path rather than written around. |
+| `TestChoreographyComputeStopsWhenTheRepairedFleetCannotBeRead` | A peer whose configuration becomes readable only once the link exists, and which then describes a fleet this run cannot resolve, stops the repair loop with what it made kept. |
+| `TestChoreographyComputeDoesNotRepeatAnInitItAlreadyMade` | The repair loop applies each change once however often the recomposed fleet proposes it again. |
+| `TestChoreographyRefusesToRecordALinkOverATrackedFile` | A settlement records fleet links and nothing else: a path the repository tracks as an ordinary file refuses it rather than having that file deleted from the tree. |
+| `TestChoreographyComputeRefusesABackLinkURLCarryingASecret` | The remote written into the peer's `.gitmodules` is held to the same rule a roster URL is, and the secret never reaches the run's output. |
+| `TestChoreographyComputeDeclaresTheHalfOfAOneSidedLink` | A link one repository declares and its peer does not declare back is `+ link <peer> <repository>`: `--check` exits 1, `--write` writes the missing declaration into the checkout that already exists without cloning or adding a route, and the repaired fleet composes with no `W332` and no `E338`. |
+| `TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote` | The missing half pins the repository that holds the link at a revision its own remote can serve, so a repository with no remote has it withheld with a warning and `W332` stands. |
+
+### Goal 53: coverage scenarios: application and configuration (`cov_app_*`, `cov_cli_*`, `cov_config_*`, `cov_ignore_*`, `cov_fsx_*`)
+
+This goal owns the parts of the CLI, the configuration loader and the record writers that a successful release never
+reaches: what a configuration is refused for, what a command line is refused for, and what a step or a writer does when
+the filesystem, the environment or Git hands it something it cannot use. Each scenario asserts the diagnostic, the exit
+code and the on-disk state afterwards, because a refusal that leaves half a record behind is a different bug from a
+refusal that reports the wrong sentence. Goals 10 to 15 continue to own what a configuration *means*; goal 50 owns the
+ordinary authoring paths; nothing here repeats them.
+
+| Test | Invariant |
+| --- | --- |
+| `TestCovConfigRefusesUnusableScriptsAndReferences` | A `scripts` entry that binds no command, and a reference to one, are refused at whichever level holds them, with the level and the entry named. |
+| `TestCovConfigRefusesInvalidRepositorySettings` | Each root-level setting is held to its own vocabulary, and a refused configuration releases nothing. |
+| `TestCovConfigRefusesInvalidSpaceSettings` | A space's path list, versioning selection, tag format, `src` and concurrency weights are each refused with the space named. |
+| `TestCovConfigRefusesInvalidRecordFormats` | Every part of the shared changelog and GitHub entry format that the renderer cannot carry out is refused before a release is planned. |
+| `TestCovConfigRefusesInvalidWebhookDeclarations` | A webhook that could never deliver is refused with the entry and the field named. |
+| `TestCovConfigRefusesInvalidAutoVersionRules` | A manifest reconciliation rule dispat cannot apply is refused rather than quietly writing nothing. |
+| `TestCovConfigRefusesInvalidParserSettings` | A parser value the parser itself would refuse is refused while the configuration is still being loaded, `propagation.kinds: ["all"]` among them: the wildcard is spelled `*`, and a plausible guess at it is named rather than ignored. |
+| `TestCovConfigRefusesInvalidAliasTags` | An alias naming no part of the version, a moving alias pinned against moving, and an alias readable back as a release tag are each refused. |
+| `TestCovConfigRefusesInvalidPackageDeclarations` | A package's `src`, `manifestNames` and dependency declarations are held against the packages discovery actually found. |
+| `TestCovConfigRefusesUnreadableFolderInputs` | An ignore file at any of the three levels that cannot be carried out, and an exclude file that is a folder, stop the run naming that folder. |
+| `TestCovConfigRefusesCollidingPackageIdentities` | Two folders that fold onto one package name are refused wherever they sit, and a declared package path is held to the level that may state it. |
+| `TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel` | A folder's own config file may not move its package, declare a repository-wide commit type, or carry spaces and packages of somewhere else. |
+| `TestCovConfigRefusesUnusableSpaceDependencyObjects` | A space's own dependency object and a package's provider list are held to the same two rules the root object is. |
+| `TestCovConfigSpaceAtTheRepositoryRootKeepsOneConfiguration` | A space whose path is the repository root reads the root config once rather than as a folder override, and releases its direct sub-folders. |
+| `TestCovConfigPackageOverridesReplaceEveryInheritedRecordField` | Every field of the changelog and GitHub objects overlays independently: one package restates them all, including its file name and its release destination, while its sibling keeps the root's. |
+| `TestCovConfigScalarSpellingsRelease` | A configuration written entirely in the one-value spellings loads, discovers, plans and releases exactly as its long-form twin does. |
+| `TestCovConfigRefusesValuesNeitherSpellingCanRead` | A value that is neither the one thing nor a list of them names the key it was written under. |
+| `TestCovIgnoreBareNameReachesAnyDepth` | A change-scope pattern with no separator matches a path's last segment at any depth, and nothing else. |
+| `TestCovIgnoreNestedFolderPatternCoversEverythingUnderIt` | A folder named with a path excludes that folder and everything below it while its siblings keep counting. |
+| `TestCovIgnoreEscapedBangNamesALiteralCharacter` | A pattern beginning with an escaped bang names a file whose name begins with one rather than re-including anything. |
+| `TestCovIgnoreCommentsAloneSayNothing` | A pattern list of nothing but comments and blank lines compiles to no rules, so the level is dropped and every file keeps counting. |
+| `TestCovAtomicWriteRefusesToReplaceASymlink` | A record or config file that is a symlink is refused by name, the link survives, and what it points at is never written through. |
+| `TestCovAtomicWriteStopsWhenTheFolderTakesNoTemporaryFile` | A folder that cannot take the neighbouring temporary file stops the write before any part of the record exists. |
+| `TestCovInitWritesJSONByDefaultAndRefusesTheRest` | `dispat init` writes JSON when no format is asked for, and refuses a format it cannot write and a folder that is not a repository root. |
+| `TestCovCommitScissorsCleanupCutsAtTheRepositoryCommentCharacter` | The scissors cleanup cuts at a line spelled with the repository's own comment character or string, and degrades to the whitespace cleanup when no editor ran. |
+| `TestCovCommitRefusesCleanupItCannotCarryOut` | A cleanup mode dispat cannot reproduce, from the command line or the repository configuration, and an automatic comment character, are refused before Git creates anything. |
+| `TestCovCommitRefusesCommandLinesItCannotForward` | A Git option dispat cannot reason about, and an option missing the value it needs, are refused with HEAD and the staged diff untouched. |
+| `TestCovCommitMessageGateRefusesUnusableHookInput` | Every way Git's commit-msg invocation contract can be broken is refused by name, and an accepted message is rewritten in place under the requested cleanup. |
+| `TestCovCommitAuthoringKeepsGitsOwnShortOptions` | Git's short options survive the argv split, an inline global flag still applies, and a release-step flag cannot ride along with an authoring commit. |
+| `TestCovCommitAuthoringHandlesTheRepositoryItFinds` | An oversized Git configuration value is refused rather than truncated, and a repository with no hooks folder or with a folder among its hooks authors normally. |
+| `TestCovUsageRefusalsExitTwo` | Every arity rule, foreign flag and enumerated flag value is refused with exit code 2 and a sentence naming the mistake. |
+| `TestCovNestedWorkspaceContextIsRefusedWhenItCannotBeRead` | A nested workspace context that does not decode is a usage refusal rather than a silent fall back to this folder's own configuration. |
+| `TestCovShellHelperRefusesAWorkingDirectoryItCannotEnter` | A `--in` value naming no folder is refused by the flag, for both shell helpers, rather than left to whatever the shell says. |
+| `TestCovShellRunSeparatesAScriptItCannotRunFromOneThatFailed` | A missing interpreter and a script killed by a signal are dispat's own failure, while a script's own exit code is propagated unchanged. |
+| `TestCovStepRefusesARunEnvironmentItCannotHonor` | A run environment a step cannot read, or a plan it cannot align to that environment, stops the step with nothing written (E219). |
+| `TestCovStepAlignsItsPlanToTheRunAndSaysSo` | A replan that drifted from the run is corrected to the run's version and provider movements, reported as W228, and recorded at the run's answers. |
+| `TestCovComputeRendersAPasteableBlockForTOMLConfigs` | A TOML config is never rewritten: compute renders the block to paste for the root dependency object and for a package entry's provider list, and leaves the file byte-identical. |
+| `TestCovComputeTOMLRefusalStillReportsTheSuggestion` | The TOML refusal is about writing rather than detecting, so the suggestion is printed exactly as the preview prints it. |
+| `TestCovChangelogOpensTheRecordUnderAHandWrittenPreamble` | A changelog with no entry headings of its own is all preamble, a heading inside a fenced block is not an entry, and the next entry still lands above the previous one. |
+
+## Coverage scenarios: polyrepository composition and recording
+
+These scenarios (`cov_polyrepo_*_test.go`) reach the answers goal 52 leaves out: what a composed fleet is refused
+for before it exists, and what a repository looks like afterwards when one step of recording a release into it
+failed. Every fixture is the same one goal 52 uses — a control repository with real submodule gitlinks and real
+source repositories — and every assertion names the diagnostic, the exit code and the state left on disk and on the
+remotes, because a refusal that leaves half a record behind is a different bug from a refusal that reports the wrong
+sentence. Goal 52 continues to own what a composition *means*; nothing here repeats it.
+
+### Composing the fleet
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovPolyrepoRefusesAControlCheckoutItCannotRead` | Composition starts at the control checkout, so a repository that has never committed has no gitlinks to read and an inventory that is a folder is not a file Git's config reader can parse; both are refused before a source is touched. |
+| `TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead` | The `.gitmodules` inventory decides which repositories exist: no inventory at all, two identities that fold onto one, a path whose checkout resolves outside the control workspace, and two checkouts that nest are each refused with the identity that caused them. |
+| `TestCovPolyrepoRefusesADeclaredSourceItCannotUse` | Every part of a submodule declaration is checked before it may own a package: a path above the control root, a path with nothing checked out, a path that is a folder of the control repository itself, a repository the control HEAD does not pin, and one with no HEAD of its own. |
+| `TestCovPolyrepoRefusesAnImportItCannotAttributeToARepository` | An import establishes its declaring repository as a participant, so a path outside the control root, a file inside the control metadata, a file the control repository itself owns, two files claiming one repository, and an import that imports further configurations are each refused with the path named. |
+| `TestCovPolyrepoImportListComposesFromEverySpelling` | The same two imports reach the same two repositories written as a list, as one value carrying both, or assembled from `$ref` fragments (one of them named absolutely) whose own paths are read relative to the fragment; a value naming no file is refused with the value quoted. |
+| `TestCovPolyrepoRefusesABaselineTupleItCannotResolve` | An explicit `repositoryBaselines` entry is resolved while the configuration loads: all four fields present, the repository a participant rather than an excluded or unknown one, and the revision a commit reachable from that repository's HEAD. |
+| `TestCovPolyrepoExclusionTakesTheDeclarationsItOwns` | A space path inside an excluded repository stops contributing while the space's other path keeps working; a space left with no path goes with its own package entries, and a top-level entry configuring one of those packages goes with it rather than being reported as matching no folder. |
+| `TestCovPolyrepoExcludedDependencyEndpointsSayWhatIsMissing` | An endpoint an exclusion accounts for names the repository to re-enable; one it cannot account for lists what this run excluded, so participation is never left as a guess. |
+| `TestCovPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes` | Each source resolves its record destination from its own remote before the plan is reported: every spelling (https, scp-like, ssh URL) reaches the same two path segments, a foreign host, an over-deep path, an unparseable URL and an absent remote resolve to nothing, and a configured enterprise API host moves the expected host with it. |
+
+### Recording a release into a fleet
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovPolyrepoPreflightRefusesARepositoryItCannotRecordInto` | Each participating repository is checked once before planning: work already sitting in a release path, a branch the `run.allowBranch` policy does not admit, and a `commit.branch` that is not a writable ref name are refused with the repository named and nothing mutated. |
+| `TestCovPolyrepoCommitIncludeIsHeldToItsOwner` | A `commit.include` path inside its own source rides in that source's release commit (a path that does not exist warning instead of staging), while a path that leaves its owner, an absolute path, and a control path reaching into a source are refused before any package work. |
+| `TestCovPolyrepoChangelogPathIsHeldToItsOwner` | A `changelog.file` spelling that climbs out of its owning repository is refused while the run is still preparing, so no repository writes a record into another's working tree. |
+| `TestCovPolyrepoRefusesARecordPathThatIsNotAPath` | Record paths are resolved through their ancestors, so a component that is an ordinary file stops the run for both the changelog destination and a `commit.include` entry. |
+| `TestCovPolyrepoIncludePathCannotChangeOwnerMidRun` | Include paths are resolved again immediately before staging, so a link a hook moved into another repository is refused at the pre-publish check with the path named, and neither the source commit nor the gitlink advances. |
+| `TestCovPolyrepoDetachedSourcePushesOnlyWhatItCanName` | A detached source pushes its immutable tag and moves no branch; a publish that writes into the package folder turns the same release into one that needs a commit, and the record fails (E335 carrying E337) rather than committing to a destination nobody named. |
+| `TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush` | A detached control checkout configured to push is told before publication that its checkpoint has nowhere to go, while a gitlink that already names the recorded revision needs no checkpoint and releases normally. |
+| `TestCovPolyrepoAliasTagsFollowTheirOwnForcePolicy` | The push separates the refs it may replace from the ones it may not: a moving alias is overwritten on the source remote at the newer release while a fixed alias of the earlier release stays where it was. |
+| `TestCovPolyrepoSourceRecordReportsEveryFailureItCollected` | A changelog the recorder cannot write does not withhold the release tag, which is the only durable statement that the package published; the run still fails naming the repository and tag, and the incomplete source record withholds the control checkpoint. |
+| `TestCovPolyrepoRemoteVerificationRefusesWhatItCannotPushTo` | With pushing on, a remote that answers nothing and a checkout behind its remote branch are both refused in the upfront check, naming the repository, rather than after publication. |
+| `TestCovPolyrepoAmbiguousLockDestinationRefusesTheFleet` | A remote with two push destinations is a fleet lock that would exist in two places and coordinate nothing, so the run is refused with E336 before planning and no repository is mutated. |
+| `TestCovPolyrepoRevertOnFailRestoresTheOwningRepository` | `revertOnFail` restores a failed package's folder inside the repository that owns it — the source for a source package and the control checkout for a control-owned one — and neither revert reaches into the other. |
+| `TestCovPolyrepoSnapshotNoticesARelevantTagThatDisappeared` | A baseline tag deleted while the run is building changes the fixed inventory as much as one that moved, and is reported as a ref that is gone, before the publish command runs. |
+| `TestCovPolyrepoExportThatIsNotACommitIsNotAdmitted` | A package export the right length but not an object id is neither admitted into the fixed snapshot nor usable as the revision to tag: the record fails and no tag or gitlink names a revision that does not exist. |
+| `TestCovPolyrepoCheckpointRefusesARevisionTheSourceRemoteLacks` | The checkpoint push is preceded by proof that the source tag is on the source remote, so a source that records without publishing keeps its own record while the control branch is left untouched. |
+| `TestCovPolyrepoCheckpointRefusesASourceRemoteItCannotAsk` | A source remote that cannot be asked is not proof either: the checkpoint is withheld and the control repository's local and pushed HEADs both stay where they were. |
+| `TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision` | The pin is re-proved under the repository's mutation lock after the `beforePush` hook and before the push, so a hook that commits in the repository stops the push and the tag still names the planned revision. |
+| `TestCovPolyrepoCommitStepOwnsItsWholeTransaction` | Invoked from a shell rather than a release stage, `dispat commit` applies its identity, remote, message-format and include overrides for that invocation alone, pushes the branch and tags it wrote, and moves and pushes the control gitlink itself — tagged against the pushed tag, untagged against the pushed branch, and writing a first moving alias even when told not to force. |
+
+### The live pin coordinator
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovPolyrepoNestedCommandRefusesALivePinContextItCannotTrust` | Every part of an inherited coordinator is proved before it is believed: a context that is not a directory, is absent, has no context file, has one that is a link or is not readable JSON, or belongs to another workspace; and a pin record with trailing data, another owner's name, a revision that is not a commit, an oversized or unreadable body, or a file that is a link. An owner with no record yet is no refusal, and the untouched coordinator still composes the whole fleet. |
+| `TestCovPolyrepoNestedCommandRefusesARepositoryTheRunNeverComposed` | The coordinator is bound to the exact source identities the release started with, so a repository linked into the control working tree mid-run cannot have a pin resolved for it, and the outer release is unaffected by the refusal. |
+
+## Coverage scenarios: execution and distribution long tail
+
+These scenarios (`cov_tail_release_*_test.go`, `cov_tail_app_*_test.go`, `cov_tail_dist_*_test.go`) reach the answers
+the goals above leave to the unit suites on the execution and distribution side: the stage frames the executor decides
+not to run, the manifests auto-versioning cannot read and the declarations its selectors leave alone, the
+configuration the loader refuses before anything has run, and the machine-readable half of the two download commands.
+Each one is a real invocation of the compiled binary, and each asserts what the folder or the manifest holds
+afterwards as well as what the operator was told, because a stage that silently did not run and a rewrite that
+silently did nothing both read as success in a log.
+
+### Stage frames and the release environment
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailBeforeAllFailureEndsThePackageBeforeItsFirstStage` | beforeAll runs before a package has a stage at all, so its failure ends the package there, with no build, no publish and no tag, while the packages beside it release, and the outcome hook names the stage the package never entered. |
+| `TestCovTailVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not skipped when its provider fails, but its version stage then has nothing to sync manifests to, so the stage's scripts and their hooks do not run; the same fixture with the provider alive runs both. |
+| `TestCovTailSyncLockSkippedWhenNothingWasReconciled` | A release that rewrote no manifest has no lock to regenerate, so syncLock is not run; a space that configured no reconciling strategy at all never produces that signal and runs its lock scripts regardless. |
+| `TestCovTailRefusesAnExportNameItReserves` | The `DISPAT_` namespace is dispat's own, so a stage exporting a name inside it is refused rather than allowed to redefine a computed variable, and a line with no name and an export file the script removed are refused the same way. |
+| `TestCovTailStaticEnvExpandsAgainstTheComputedSet` | A static env value is never shell-expanded by exec, so dispat expands it itself: against the computed release variables first, then the process environment, with `$$` a literal dollar and an unknown name expanding to nothing. |
+| `TestCovTailChangelogRefusesAPathItCannotWriteAtomically` | A changelog is rewritten whole through a temporary file and a rename, so a configured path whose parent is a file cannot be examined at all and the write is refused, leaving nothing written anywhere near it. |
+
+### Native auto-versioning
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailAutoVersionReportsManifestsItCannotParse` | A manifest that does not parse is missing from the name index every later reconciliation reads, so it is a warning where the index is built and again where the package is reconciled, and the manifests that did parse are still rewritten. |
+| `TestCovTailAutoVersionDerivesNothingFromAnAmbiguousName` | Two packages declaring one manifest name make that name answer to nothing (W220), so a declaration naming it is left exactly as written while the packages' own versions still advance. |
+| `TestCovTailAutoVersionSelectorsNarrowTheRewrite` | `kinds`, `only` and `match` each leave a declaration alone for their own reason (the wrong field, a provider outside the list, a range the globs do not claim) next to one nothing narrows, which is the rewrite that proves the others were narrowed rather than broken. |
+| `TestCovTailAutoVersionResolvesAProviderByItsDeclaredPath` | A declaration naming a package by a name no manifest in the workspace carries is still a workspace edge when its `file:` range points at the folder, which is what a workspace whose declared and folder names disagree needs. |
+| `TestCovTailAutoVersionOnlyUpdatedLeavesTheRestBehind` | `--only-updated` keeps a run to its own updates: a range that had fallen behind a provider released earlier stays behind and a replace rule scoped to that provider expands into nothing, while the same command without it catches both up. |
+| `TestCovTailAutoVersionRangePolicySpellsEachEcosystem` | The keyword policies are npm's, so an ecosystem with no caret cannot be handed one: a Python specifier pins with `==` whatever keyword was asked for, and a policy that is neither keyword nor template is written through verbatim. |
+| `TestCovTailReplaceRuleStepsOverAFolderItCannotEnter` | A replace rule reaches any file at all, so it also reaches what the filesystem will not let it read: the folder is named in a warning and skipped whole, and everything the rule could reach is still rewritten. |
+
+### The configuration a run is refused for
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailConfigRefusesAVersionGroupItCannotResolve` | A versionGroup shares one namespace with the spaces and may name only a group or a space that versions as one: a nameless group, a group named after a space, a space that versions independently and a space already in a group are each refused, and a space that does version as one is accepted. |
+| `TestCovTailConfigRefusesAnAutoVersionOnlyNamingNoPackage` | `autoVersion.only` narrows a rewrite to named providers, so a name that is no package narrows it to nothing and is refused wherever the block was written, on the space or on one package of it. |
+| `TestCovTailConfigRefusesACommitTypeWithTwoBumps` | A section's bump merges into the one commit parser the whole repository shares, so the fold runs across every layer that may declare one and a type two of them disagree about is refused naming the layer it was read in. |
+| `TestCovTailConfigRefusesAnEnvNameAScriptCouldNotRead` | Static env becomes real environment variables, so a key inside dispat's own reserved prefix is refused where it was written rather than exported over a computed variable a script depends on. |
+| `TestCovTailConfigReadsTheScalarShorthands` | The keys that take a list are read from the one value they are nearly always written as, and a section from the built-in's name alone; an element holding nothing at all is read as the empty thing it is and refused by the validation. |
+| `TestCovTailConfigRefusesAnIgnoreFileItCannotRead` | `.dispatignore` decides what a package is changed by, so a path of that name that is not a readable file is refused rather than read as "no patterns", which would silently widen every package's window. |
+
+### The step commands and the notifications around them
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailStepCommandsSummariseForAPerson` | The step commands are run by hand as often as by CI, so a workspace whose log format is the readable one gets its tally printed on standard output instead of logged as a JSON line nobody asked for. |
+| `TestCovTailAutoWriterDropsWhatThisRunDoesNotUpdate` | `--only-updated` drops every edit and every link naming a package this run leaves where it is, and the same command line without it writes both, which is what says the flag did the dropping. |
+| `TestCovTailAutoWriterLeavesTheVersionOfAPackageNobodyVersions` | `{version}` resolves to the covered package's planned version and a package under versioning "none" has none, so the own-version write is skipped and said out loud rather than writing "0.0.0" into a manifest nobody versions. |
+| `TestCovTailComputeStopsWhenTheAnswersRunOut` | `--interactive` asks per suggestion, and a stream that ends is an answer of its own: the remaining suggestions stay unapplied and the config is left byte for byte as it was. |
+| `TestCovTailWorkspaceLogNamesTheFoldersItExcluded` | A `.dispatexclude` takes a folder out of a space, which is a silent thing to do to a release plan, so the folder and the space are said at debug and the folder appears in no plan line. |
+| `TestCovTailWebhookGivesUpOnAStatusNoRetryWouldChange` | A 5xx and a 429 are answers a later attempt could outlive and a 400 is not, so the ladder stops at the first non-retryable status, reports the ordinary W239, and leaves the command's exit code alone. |
+| `TestCovTailExecRefusesAPlaceItCannotRunIn` | `--in` takes a folder or a level, and each way of naming neither, a space the configuration does not declare or a path that is there but is a file, is refused before the script is handed to a shell. |
+| `TestCovTailWebhookFormatRendersTheProgressValue` | A rendered payload is for an endpoint that wants its own shape, and `progress` is the one event carrying a number: it renders as the number for that event and as nothing for every event without one, so the template stays valid JSON throughout a run. |
+
+### The GitHub recorder's unreadable answers
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailGitHubRefusesALookupItCannotRead` | "Does this tag already have a release" decides whether anything is created, so a refusal, a body that is not JSON and a body past the bound are each a hard error naming the call, never a shrug that reads as "nothing published yet". |
+| `TestCovTailGitHubDraftSearchReadsOnlyWhatItCanTrust` | A draft has no tag ref, so the listing is the only thing that can see one: a listing that does not parse fails the record rather than creating a second draft, and one that simply does not carry it within the searched pages says so and creates the release. |
+| `TestCovTailGitHubCannotAttachAFileItCannotRead` | A path that passed the upfront checks can still refuse to open, and the release is already out by then, so the upload is what fails, named by the file, with the tag standing. |
+| `TestCovTailGitHubCannotParseTheReleaseItCreated` | The asset endpoint comes out of the created release's own response, so a create answering 201 with a body nobody can parse fails the attachment naming the parse, and the release itself stands. |
+
+### The download commands
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailInstallRefusesWhatItCannotResolve` | The repository reference, the asset pattern and the destination are read before any request: a reference with an empty part, a placeholder that never closes and a destination that cannot even be examined are each refused naming the part that was wrong. |
+| `TestCovTailInstallRefusesAReleaseThatCarriesNothing` | A release with no files attached is a tag cut before the build finished rather than an asset-name mismatch, so the refusal names the release and not the pattern. |
+| `TestCovTailSelfUpdateRollbackChecksTheBackupFirst` | A rollback is only worth doing if the file it would put back runs, and finding otherwise afterwards means finding out with no dispat left: a backup that is not a program refuses the rollback, and one that runs without naming a version rolls back with the version unstated. |
+| `TestCovTailSelfUpdateRefusesAnAnswerThatIsNotARelease` | Each way somebody else's server can fail to answer with a release is refused on its own terms: a listing that is not a listing, a name that is not a version, a version nobody published, and a lookup body that is not a release. |
+| `TestCovTailSelfUpdateReadsItsOwnRepositoryByDefault` | `--owner` and `--repo` exist for a fork, so leaving them out reaches dispat's own repository rather than an empty pair, which is what a real run depends on. |
+| `TestCovTailSelfUpdateRefusesADownloadThatIsShort` | The release states the size of the asset it publishes, so a transfer that ended early is knowable before the digest is considered, and a truncated binary that happened to run is the worst thing there is to swap in. |
+| `TestCovTailSelfUpdateReportsItselfAsJSON` | The update check is a CI gate as often as a person's question, so each outcome (something to install, nothing to install, a rollback with a backup and one without) is one structured line carrying the versions and the pending flag the gate exits on. |
+| `TestCovTailInstallReportsItselfAsJSON` | The same for `dispat install`, whose reader is nearly always a provisioning script: every outcome carries the destination path, and a piped install names the folder the command runs in. |
+| `TestCovTailSelfUpdateCheckCarriesTheNotesAsFields` | A check that found something to install carries the release's notes as fields, so a job opening a pull request with them does not fetch the release twice, and the install footer is no more notes there than on a terminal. |
+
+## Coverage scenarios: planning and git long tail
+
+These scenarios (`cov_tail_plan_*_test.go`, `cov_tail_gitx_*_test.go`, `cov_tail_script_*_test.go`) reach the answers
+the goals above leave to the unit suites on the planning and git side: the tag names a format would have written, the
+channel directives that propose nothing, the shapes a correction footer can be typed in, the propagation a scope term
+walks past, and the two repositories that can address one package in a composed fleet. Each one is a real invocation
+of the compiled binary, and each asserts on the diagnostics as well as on the plan, because a directive that quietly
+did nothing and a directive that worked produce the same version.
+
+### The tag names a format writes and reads
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailTagFormatStructureIsRefusedWithTheRuleItBroke` | Every structural rule a release tag format is held to, each refused naming the rule it broke: a second `{version}`, a `{channel}` with no `{counter}` and the reverse, a duplicated placeholder, the three of them out of order, and something other than literal text between the last two. |
+| `TestCovTailTagFormatIsRefusedWhenGitWouldRefuseTheName` | A format is only exercised after the artefact is published, so a rendered name git would reject is refused at load time instead: a leading slash, dash or dot, a `.lock` suffix, a doubled separator, an unknown placeholder left as text, and a character git reserves. |
+| `TestCovTailAliasFormatKeepsItsOwnStructuralRules` | An alias is written and never read back, which lets it spell a fragment of the version and keeps only the rules about rendering: one of each placeholder, a channel and a counter together or not at all, and a name git will accept. |
+| `TestCovTailPrereleaseSpellingFormatRendersBothShapes` | One format renders both shapes without being told which: a stable release drops the channel, the counter and the separators around them from the tag and from the version a script is handed, while the prerelease carries all three and the alias beside it still names the version's parts. |
+| `TestCovTailTagInventoryIsNotTheGlobThatFetchedIt` | The glob a format produces is a filter and not a decision: dispat's own release-lock ref and a ref that is the format's literal prefix with nothing where the version goes both come back from it, and neither may become a package's baseline. |
+| `TestCovTailTagInventoryWalksRefsShorterThanAPrefix` | The listing is dispatched to package matchers through a trie over their literal prefixes, so a ref shorter than the prefix it shares characters with runs the walk off the end of the name, belongs to no package, and leaves the real release tag as the baseline. |
+| `TestCovTailAncestryAcrossAMergeVisitsEachCommitOnce` | A merge gives the commit graph two paths to the same commit, and a correction naming a commit both paths reach gets the answer a linear history would have given rather than a repeated walk or a refusal. |
+| `TestCovTailFailedPushRedactsTheCredentialInItsOwnArguments` | A remote may be a URL rather than a name, which is how a CI runner is handed a credential, so a push that fails with that URL among its arguments reports the failure with the credential taken out of the text it quotes back. |
+
+### The planner's channel axis
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailDirectChannelDirectivesReportWhatTheyProposedNothingFor` | A direct channel directive is written by hand, so one that proposes nothing is reported: graduating a package already stable, naming the channel it is already on, and a transition whose two sides are the same. A transition that does not match the package's channel stays silent, because that is the mechanism working. |
+| `TestCovTailAnyPrereleaseTransitionEndsWhateverTrainItFinds` | The `*` from-side matches any prerelease and never matches stable, so one directive ends whichever train a package landed on and is inert for the package that already graduated. |
+| `TestCovTailPrereleaseBaselineWithoutACounterStopsTheTrain` | A prerelease counter is a separate numeric identifier because numeric identifiers compare numerically, so a hand-written baseline with no counter, or one whose counter is not a number, stops the train instead of having a counter invented for it. |
+| `TestCovTailComputedVersionMustExceedItsBaseline` | Versions are computed from the stable baseline, so a repository whose newest tag is a prerelease of a higher core computes something SemVer ranks below what the package published, and releasing that would make the tag order lie about which release came last. |
+| `TestCovTailPropagatedStableWouldGraduateADependent` | Graduation publishes under the version consumers resolve by default, so it never happens because an unrelated package's commit propagated stable down an edge, and the suppression is reported because it is a decision. |
+| `TestCovTailPropagatedTransitionThatMatchesNoDependent` | A propagated transition is matched against each dependent's own baseline, and when none of them is on the train it names the unit is told once rather than once per dependent. |
+| `TestCovTailInheritedChannelFromDisagreeingSources` | "Inherit" means the channel of the originating package, and a unit naming two packages on different channels has two answers; the run takes the first by name and says which, since choosing silently would make the result depend on an ordering the message does not show. |
+| `TestCovTailTwoProvidersProposeDifferentChannels` | A dependent of two providers can be handed two channels in one run: the newer commit wins and the conflict is reported against the dependent. |
+
+### Corrections and reverts
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailWildcardDeleteSkipsWhatIsAlreadyClaimed` | `Deletes: *` discards every pending record its commit descends from, except a record a newer narrower correction already claimed and except control units, which carry no record and whose directives the later phases run on. |
+| `TestCovTailUnitSelectorNamesOneRecordInsideACommit` | The `#n` selector corrects one record of a commit carrying several, visible as the bump when the breaking third record is restated as a fix; a selector past the end of the commit is an error naming how many records there are. |
+| `TestCovTailRestatementThatChangesNothingIsReported` | An `Edits` restating its target as the same type, marker and description leaves the record as it was, which is almost always an author who edited the footer and forgot the subject line. |
+| `TestCovTailCorrectionReachesOnlyProperAncestors` | A correction rewrites a record its commit descends from, so a sha that exists in the repository but sits on a branch this one never merged is refused rather than reached across. |
+| `TestCovTailAbbreviatedTargetsAreResolvedOnce` | A target may be written abbreviated, the way a sha is copied out of a log, and the same abbreviation written twice costs one lookup; the newer correction wins and the older reports that it was superseded. |
+| `TestCovTailUnresolvableTargetIsRememberedAsUnresolvable` | A sha that resolves to nothing is asked about once: two corrections naming the same missing commit both report it, and the second reads the remembered answer. |
+| `TestCovTailTwoCorrectionsInOneCommit` | A correction is a record like any other, so one commit can carry two of them, correcting two different targets in one message. |
+| `TestCovTailWildcardEditStandsInForEverythingItClaimed` | `Edits: *` is a restatement rather than a discard, so the carrying unit stands in for every record the wildcard reached, under the type the correction was written as. |
+| `TestCovTailCorrectionOfACommitThatCarriesNoRecord` | A commit whose message is not a release record is still in the window, and naming it as a target is a no-op rather than an error: there is nothing there to correct. |
+| `TestCovTailRevertsFooterDegradedForms` | `Reverts` is informational, so a value that is not a sha, a target on the other side of a release and a target whose records belong to another package each leave the changelog alone rather than failing. |
+| `TestCovTailRevertsTakesBothEntriesOutTogether` | A revert naming a record in the same pending window takes that record's entry and its own out of the changelog, while both still count toward the bump, and the same target written twice is resolved once. |
+| `TestCovTailRevertLeavesTheRestOfTheChangelogAlone` | The suppression is a pair of entries and not a release's notes: everything else the window carries is still documented in the entry the release writes. |
+
+### Propagation, holds and version groups
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailPropagationIsTraceableEndToEnd` | A run at trace level accounts for every step: the scope the commit's own files decided, each edge the walk crossed, and where each package's channel came from, which is where an operator goes when a release did not bump what they expected. |
+| `TestCovTailChannelPropagationSkipsWhatItCannotAdmit` | A propagated channel is admitted against the target's window: a unit whose scope resolves to no package proposes nothing, a target whose window is past the proposal does not move, and a target behind a cancel barrier has had the commit discarded. |
+| `TestCovTailChannelPropagationHonoursItsScope` | `Propagate-Channel-Scope` restricts the channel axis the way `Propagate-Scope` restricts the bump axis: a scope naming one dependent reaches that one alone, and a scope naming a package the traversal never reaches is reported rather than silent. |
+| `TestCovTailPropagationScopeExcludesByName` | A scope-set may be written as the workspace less a package, and the exclusion is applied after the inclusion and wins. |
+| `TestCovTailBumpPropagationScopeThatExcludesEveryone` | The same finding on the bump axis, which has its own code because the two scopes are written separately and a repository may restrict one without the other. |
+| `TestCovTailPropagationKindsSelectTheEdgesTraversed` | Which manifest fields imply "must be republished" is a fact about the repository, so the wildcard traverses every field and a list may name the one field the default deliberately leaves out. |
+| `TestCovTailExactPinNamingSeveralPackages` | An exact version names one package, and a glob's breadth is invisible in the message text, so the workspace is what decides it; the rejected pin has a unit's blast radius and the packages still release at their computed version. |
+| `TestCovTailTwoReleaseAsDirectivesInOneWindow` | A hold and a later resume are both in force until one of them is released: the newest wins, the pair is reported, and a resume that did lift a hold is not the redundant kind. |
+| `TestCovTailCancelClearsAHoldByDiscardingIt` | A cancel is a barrier over the commits behind it and a hold is a record like any other, so the cancel takes the hold with everything else and work written afterwards releases with nothing holding it. |
+| `TestCovTailFixedGroupWithAHeldMember` | A fixed group moves its members together and a member held by `Release-As: none` stays behind: holding one member does not stop the group, and the group's target does not lift the hold. |
+| `TestCovTailCoAuthorTrailersInEveryShape` | `Co-authored-by` is free text, so a bare name and a bare address are both accepted while empty angle brackets are dropped, the trailer naming the git author again is deduplicated, and the username format renders a name when there is no address to take a part of. |
+| `TestCovTailAuthorIdentityWithNoAddress` | Git accepts a commit whose author has a name and no address, and the attribution survives it in what it renders and in deciding that two such commits are by one person. |
+
+### Two repositories deciding one package
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailIncomparableExactPinsNeedCausalControlResolution` | An exact version written in a package's own source and another written in the control repository are two answers with no shared clock, so the run refuses until a control revision whose gitlink snapshot observes the source revision settles it. |
+| `TestCovTailIncomparableDirectChannelsNeedCausalControlResolution` | The same rule for the channel a package chooses about itself: two direct choices from two repositories conflict exactly when no control revision observes both. |
+| `TestCovTailIncomparableFixedGroupPinsNeedCausalControlResolution` | A fixed group holds one shared version, so an exact pin on any member is a pin on the group, and two members pinned to different versions from two repositories are the same standoff one level up. |
+| `TestCovTailControlDirectivesProjectPropagationOntoSources` | A control directive reaches a package it does not hold and that package's dependents, so the guard keeping it honest accounts for the packages its scope names and the packages its propagation walks to alike. |
+
+### The shell a script runs under
+
+| Test | Claim proven |
+|------|--------------|
+| `TestCovTailScriptExecutionIsRecordedAtTrace` | What a run may say about a script is deliberately narrow, because the command text can contain a literal credential: the shell, the folder, the size of the command and how long it took, and never the command line itself. |
+| `TestCovTailScriptThatLeavesAChildHoldingTheOutputPipes` | Backgrounding a process is a legitimate thing for a release script to do, and a child that outlives the shell inherits the output pipes, so the wait for them is bounded and a script whose own process exited successfully has succeeded. |
+
+## Production finalization regressions
+
+These cases extend the existing planning, configuration, publication, command and observability goals. Each owns a distinct boundary or failure outcome. Injected Git failures pass unrelated operations through to real Git; the assertions check exit status, diagnostics and durable state rather than implementation call order.
+
+### Planning inputs and repository boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot` | completeness, tag inventory, and pending history Git failures abort a monorepo status without a plan or release record. |
+| `TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder` | correction ancestry requires the repository DAG and never falls back to log order. |
+| `TestFinalPlanFaultStopsRunSinceBeforeTheScript` | an unreadable selection window prevents the selected script from running. |
+| `TestFinalPolyrepoCompositionFaultsNameTheUntrustedBoundary` | each control/source identity, completeness, inventory, pin, and HEAD inquiry fails closed and a healed retry composes the same fleet. |
+| `TestFinalPolyrepoMalformedSubmoduleInventoryCannotEraseARepository` | corrupt successful git-config output cannot shrink the source inventory. |
+| `TestFinalPolyrepoMalformedRepositoryFactsFailClosed` | invalid completeness booleans, HEAD object ids, and blank control logs fail at their trust boundary. |
+| `TestFinalPolyrepoBaselineFaultsRefuseAnUnprovenRevision` | a baseline revision must resolve and be reachable in the named source. |
+| `TestFinalPolyrepoPlanningFaultsDoNotShrinkTheFleetSnapshot` | source completeness, HEAD, refs, commits, and control-history failures abort planning. |
+| `TestFinalPolyrepoImportedConfigFaultRefusesUnattributedOwnership` | imported configuration ownership requires a successful Git-root proof and a healed retry converges. |
+| `TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder` | source correction ancestry remains repository-scoped and fail-closed. |
+| `TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex` | corrupt control-history framing cannot become an empty checkpoint index. |
+| `TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow` | truncated or invalid commit-log framing is rejected by gitx and propagates through the real CLI. |
+| `TestFinalPolyrepoMalformedTagInventoryCannotEraseThePublishedBaseline` | malformed ref framing cannot erase a published version or its history boundary; a healthy retry plans the pending fix. |
+| `TestFinalPolyrepoRunSinceFaultStopsBeforeTheSelectedScript` | control projection, source selection, and malformed control snapshots all stop before side effects. |
+| `TestFinalPolyrepoProjectionFaultsDoNotBecomeARepositoryBoundaryDiagnostic` | object-presence and ancestry I/O failures stay operational errors rather than false stale-pin diagnostics. |
+| `TestFinalPolyrepoRepositoryBaselinesMustNameTheComposedReleaseSnapshot` | planner validation rejects unknown consumers and non-reachable release tags even after config validates repository/revision. |
+| `TestFinalPlanRefusesTwoRefsForOnePublishedVersion` | equal-precedence version tags on different commits are fatal ambiguity. |
+| `TestFinalPolyrepoControlHistoryToleratesATemporaryUnlink` | historical gitlink deletion is represented as absence and a restored current fleet plans normally. |
+| `TestFinalPolyrepoRefusesAmbiguousReleaseCheckpointAssociation` | two plausible checkpoints for one consumer tag with different fleet snapshots require explicit boundary evidence. |
+| `TestFinalPolyrepoRefusesReleaseCheckpointWithoutProviderPin` | restoring a provider later cannot retroactively add it to a consumer release checkpoint. |
+| `TestFinalImportedConfigRefusesACanonicalPathItCannotResolve` | an imported path whose canonical target cannot be resolved is named and refused before package discovery. |
+| `TestFinalImportedConfigRefusesAGitRootThatDisappeared` | a successful Git-root reply still has to resolve to a real repository boundary. |
+| `TestFinalImportedConfigRefusesAGitRootFromAnotherDeclaredSource` | an imported file can only be attributed to a Git root that contains its canonical path. |
+| `TestFinalImportedConfigAllowsASymlinkWithinItsOwningRepository` | a valid in-repository configuration alias preserves source identity and composes the expected package. |
+| `TestFinalImportedConfigSchemaFailureCannotBecomeAnEmptySource` | invalid imported policy aborts composition instead of silently retaining a source under control defaults. |
+| `TestFinalChoreographyRefusesControlStyleConfigImports` | a choreography peer refuses a second control authority before its fleet walk and planning. |
+
+### Release locks and durable records
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalReleaseLockObjectFailureCleansOrReportsTheAttemptRef` | If Git cannot resolve the private attempt tag's object, release stops before planning, cleans the attempt with a live bounded context, and leaves no remote lock; if Git also refuses that cleanup, the warning names the one stranded local attempt ref. |
+| `TestFinalOrchestratedSourceCommitFaultNeedsAReviewedRetry` | A real Git failure creating the source release commit occurs after publication but before the source tag: the package stays reported as published, no control checkpoint is written, retained generated state requires explicit review, and a clean retry records the release once. |
+| `TestFinalOrchestratedTagVerificationFaultNeverAdvancesControl` | A real Git failure reading the new source tag after publication keeps that truthful local tag and source commit while advancing neither remote nor the control gitlink; after the retained source refs and checkpoint are explicitly repaired, retry does not republish the provider. |
+| `TestFinalOrchestratedCheckpointCommitFaultPreservesTheRemoteSourceRecord` | A real Git failure creating the control checkpoint preserves the already pushed source commit, branch, and immutable tag while leaving the old control gitlink truthful; explicit checkpoint repair followed by retry does not publish the provider again. |
+| `TestFinalOrchestratedControlPushFaultKeepsTheLocalCheckpoint` | A real Git failure in the final control push leaves the source remote complete and the local control checkpoint available for repair while the control remote stays unchanged; pushing that checkpoint and retrying does not republish the provider. |
+| `TestFinalTagSnapshotReadFaultsRefuseAnUnprovenFleet` | A real relevant-tag read failure at either initial snapshot capture or pre-publish revalidation is E330, publishes nothing, writes no source/control record, and a healthy retry publishes exactly once. |
+| `TestFinalCheckpointTreeRepliesCannotInventAControlRecord` | A failed or malformed control `ls-tree` reply after the source release is durable cannot be treated as a changed gitlink: E335 preserves the remote source tag/branch and old control checkpoint, and explicit checkpoint repair makes retry a publication no-op. |
+| `TestFinalLivePinWriteFaultsStopBeforeTagAndCheckpoint` | If the private live-pin coordinator becomes unwritable or its atomic destination is replaced after publication, the truthful source commit remains but no tag or control checkpoint advances; explicitly recording that exact commit makes retry a publication no-op. |
+| `TestFinalMutationLockPathCollisionRefusesBeforePlanning` | A real directory collision at the repository mutation-lock path is E330 before planning or publication; removing the collision lets the unchanged fleet publish exactly once. |
+| `TestFinalImmutableBaselineRefDriftNeedsExactRepair` | Deleting an immutable baseline tag or replacing only its annotated tag object at the same peeled commit is detected before publication; restoring the exact original ref object makes retry safe. |
+| `TestFinalSourceRecordPreflightGitFaultsRefuseBeforePublication` | Failures reading a pushable source's current branch, remote branch position, or protected release paths refuse before publication and mutation; a healthy retry publishes and records exactly once. |
+| `TestFinalMutationLockBreakAfterPublicationLeavesNoFalseRecord` | Mutation-lock path damage after upload but before native source recording leaves no source commit, tag, or checkpoint; after filesystem/generated-state repair, the absent durable baseline makes retry upload again. |
+| `TestFinalSourceTagWriteFaultKeepsCommitBelowTheCheckpoint` | A direct source-tag Git failure after the source commit leaves that commit reviewable while control remains old; explicitly publishing the exact source tag/branch and checkpoint makes retry a no-op. |
+| `TestFinalCheckpointMutationLockFailurePreservesTheRemoteSource` | Damage to the control mutation-lock path after source push preserves the remote source commit, branch, and tag while withholding the control checkpoint; explicit gitlink repair prevents duplicate publication on retry. |
+| `TestFinalRecoveryReadFaultsKeepThePublishedRecordLocal` | After publication and a concurrent remote advance, failure reading remote tags or fetching for recovery is E224; the immutable tag and release commit remain local, the foreign remote commit remains durable, and explicit merge/ref repair makes retry a publication no-op. |
+| `TestFinalConflictSettlementFaultsKeepBothDurableInputs` | Git failures resolving the release side, pushing the quarantine branch, staging the audit note, or committing the settlement are E224; the local immutable release tag, remote foreign commit, visible merge state, and any successfully pushed quarantine ref truthfully describe how far recovery reached. |
+| `TestFinalDeferredTagWriteFaultRetainsTheReleaseCommit` | A direct Git failure writing a finalize-deferred tag is E220 after publication; the release commit and changelog remain for review, no false baseline exists, and a healthy retry republishes once before establishing the missing immutable tag. |
+
+### Commands and manifest updates
+
+| Test | Claim proven |
+| --- | --- |
+| `tests/integration/final_command_faults_test.go::TestFinalCommitRefusesUnreadableRepositoryMetadataBeforeMutation` | `commit` refuses unreadable cleanup, comment-character, or hook-location metadata before delegating to `git commit`, preserving HEAD, the index, and the working copy. |
+| `tests/integration/final_command_faults_test.go::TestFinalComputeKeepsReadableEvidenceBesideAMalformedManifest` | `compute` reports a malformed sibling manifest without discarding readable dependency evidence, and repairs an invalid declared kind to the strongest of runtime, peer, optional, and development declarations. |
+| `tests/integration/final_command_faults_test.go::TestFinalWriterBatchContainsAMalformedOverrideWithoutLosingOtherEdits` | A malformed npm override container is preserved byte for byte and reported as a failure while independent valid manifests in the same writer batch still receive their requested links. |
+| `tests/integration/final_command_faults_test.go::TestFinalInstallRechecksTheFilesystemAfterReleaseDiscovery` | `install` safely refuses a destination that becomes a folder or an install directory that becomes a file after release discovery, preserving the new filesystem object and downloading no asset. |
+| `tests/integration/final_command_faults_test.go::TestFinalStepCommandsStopWhenPlanningOrSelectionCannotReadGit` | `autowriter` and `autoreplacer` refuse unreadable planning and explicit-window Git inputs before opening any target, preserving every selected file. |
+| `tests/integration/final_command_faults_test.go::TestFinalAutoWriterUsesHealthyManifestBesideBrokenAndDifferentFormats` | `autowriter` keeps a healthy npm edit beside malformed Cargo and different-format manifests; a link-unsupported Dockerfile cannot satisfy strict mode, while a converged link in a supported npm manifest still can. |
+| `tests/integration/final_command_faults_test.go::TestFinalAutoReplacerKeepsProviderFactsFromAHealthySibling` | `autoreplacer` reports a malformed sibling while retaining provider facts resolved from a healthy manifest's aliased local path and applying the provider-version replacement. |
+| `tests/integration/final_command_faults_test.go::TestFinalExecFailsClosedWhenLayeredConfigurationCannotBeDiscovered` | `exec` refuses before starting a root-level script when the package or space environment it needs comes from a malformed layered configuration. |
+| `tests/integration/final_command_faults_test.go::TestFinalExecComputedEnvironmentNeedsNoDeclaredPairs` | `exec --env dispat` supplies computed package release variables even when there are no configured environment pairs to remove. |
+| `tests/integration/final_command_faults_test.go::TestFinalRecursiveEditorsStopBetweenAtomicFileWrites` | Ctrl-C during `autowriter` or `autoreplacer` preserves completed atomic writes, stops before every later file is changed, and reports interruption rather than successful partial completion. |
+
+### Public writer contracts
+
+| Test | Claim proven |
+| --- | --- |
+| `tests/integration/publicapi/final_writer_safety_test.go::TestPublicAPIWriterRefusesNonObjectNpmOverrideContainers` | `Relink` refuses a selected npm, Yarn, or pnpm override container that exists as a non-object, and the refusal preserves the manifest byte for byte instead of introducing a duplicate JSON key. |
+| `tests/integration/publicapi/final_writer_safety_test.go::TestPublicAPIWriterDropsOnlyLocalPubspecOverrides` | `Links`, empty-path `Relink`, and `DropLinks` recognize only top-level `path` mappings in Dart `dependency_overrides` as local redirects, remove block and quoted flow-map paths, and preserve scalar version constraints and nested or flow-map Git metadata unchanged. |
+
+### Execution boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalInterruptedBuildRevertsBeforeExitAndRetriesCleanly` | Ctrl-C after a build has changed tracked and untracked package files marks the package cancelled, suppresses failure hooks and tags, completes `revertOnFail` cleanup on a detached context before process exit, and leaves the same release safely retryable. |
+| `TestFinalRollbackGitFailureLeavesVisibleRepairState` | If Git refuses a failing build's `revertOnFail` restore, the run reports the cleanup failure, retains tracked and untracked residue for review, creates no release tag, and succeeds only after explicit repair. |
+| `TestFinalFleetRollbackRefusesARepositoryThatMovedDuringTheBuild` | A failing source build that commits its own edits moves HEAD outside the accepted fleet snapshot; rollback refuses to clean through that unplanned commit, preserves it for review, advances no source tag or control checkpoint, and permits retry after an explicit reset. |
+| `TestFinalPostPublishTagInventoryFailureStillWritesTheReleaseTag` | A transient failure of the executor's post-publication tag inventory is warned rather than losing the release record: the immutable tag is still written, and retry converges without publishing twice. |
+| `TestFinalExistingTagTargetReadFailurePreservesThePublishedRecord` | When a release stage has already created its immutable tag but Git cannot prove that tag's target, the outer run refuses to guess and reports a post-publication critical while retaining the truthful tag so retry performs no second upload. |
+
+### Public API boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `tests/integration/final_api_boundaries_test.go::TestFinalManifestCommandsRejectIncompleteEditSpecificationsBeforeWriting` | The `writer` and `replacer` command grammars reject every missing half of `--set`, `--link`, and `--replace` before opening the manifest, so an earlier valid edit on the same command line cannot leak through. |
+| `tests/integration/final_api_boundaries_test.go::TestFinalComputeDerivesDependenciesWithoutInventingGitBaselines` | In an adopting source tree with no Git repository, `compute` still derives objective manifest dependency edges while explicitly omitting release initials that have no tag history, in preview and write modes. |
+| `tests/integration/final_api_boundaries_test.go::TestFinalAutoWriterLeavesANestedPackageManifestToItsOwner` | A recursive `autowriter --manifests all` scan for an outer package does not rewrite a nested manifest owned by another configured package. |
+| `tests/integration/final_api_boundaries_test.go::TestFinalInstallExplainsAnUnprefixedListingWithNoVersions` | An empty install tag prefix is reported as an intentional unprefixed release listing when no tag is a valid version, and the refusal names the flags that can broaden the listing. |
+| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIWriterPreservesUnaddressedPubspecYAMLSyntax` | A public `writer.Rewrite` call edits an ordinary Pub dependency while preserving a YAML document marker, explicit mapping key, and quoted nondependency key byte for byte. |
+| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIWriterDropsAMiddlePubspecOverrideBlock` | Public `writer.DropLinks` removes the last local override together with blank padding while preserving a following top-level Pubspec section. |
+| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIWriterRefusesAnIncompatibleGoModuleMajorBeforeWriting` | `writer.Rewrite` applies x/mod semantic validation after formatting and preserves `go.mod` when a requested v2 requirement lacks the required `/v2` module-path suffix. |
+| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIConfigRefusesAnUnencodableYAMLValueBeforeWriting` | A YAML `config.ApplyEdits` batch returns an error for an unsupported Go value instead of panicking; an earlier valid edit in the same batch, source bytes, and backup state remain unchanged. |
+| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIScannerDoesNotTreatRubyOptionSuffixesAsLocalPaths` | The Ruby scanner does not shorten a plugin-specific `subpath:` option into the standard `path:` local-dependency option. |
+| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIScannerReportsAnEmptyAquaDocument` | An empty conventional Aqua file is reported as a malformed manifest rather than silently becoming an empty dependency inventory. |
+
+### History boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalHistoryRejectsDuplicateVersionsInsideAComposedSource` | equal-precedence release refs on different commits are fatal in the composed LocalGitx tag path, with no package plan rows or release mutation. |
+| `TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow` | an active prerelease requires its distinct fresh history window; failure of that second LocalGitx log read aborts planning and a healthy retry resumes the train correctly. |
+| `TestFinalHistoryRequiresTheLatestPrereleaseBoundarySeparately` | a valid stable cross-repository tuple cannot substitute for missing evidence at the consumer's newer prerelease tag. |
+| `TestFinalHistorySharesAControlCheckpointAcrossSourceReleases` | two source release tags recorded by one canonical control commit resolve through the same immutable fleet snapshot. |
+| `TestFinalHistoryAppliesControlCancellationWithoutPropagatingIt` | a bounded control cancel clears newer source work without becoming a cross-repository release proposal. |
+| `TestFinalHistoryExcludesBothParentsOfAReleasedControlMerge` | a source release checkpoint excludes both sides and the shared ancestry of an already-shipped control merge. |
+| `TestFinalHistoryUsesInitialVersionsForComposedSourceBaselines` | composed source planning uses configured initials for both an opaque newest tag and an untagged package while retaining the correct history windows. |
+| `TestFinalHistoryRequiresAControlBoundaryForControlIntent` | a source tag made before composition cannot bound later control intent without explicit control-snapshot evidence. |
+| `TestFinalHistoryReportsChoreographedLinkReads` | debug workload diagnostics count real release-subject and gitlink-tree reads while preserving the settled choreography plan. |
+
+### Ownership boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalOwnershipRefusesAControlUmbrellaContainingASource` | a configured control package may not wrap a composed source checkout, even when its own source scope does not directly enter that checkout; refusal preserves every repository HEAD and writes no tags or script markers. |
+| `TestFinalOwnershipCanonicalizesImportedPackageBoundaries` | an imported package path and its source scope are checked after symlink resolution; neither may claim a sibling source repository. |
+| `TestFinalOwnershipRefusesADanglingImportedSourceScope` | a dangling imported `src` symlink is rejected by package-folder validation before ownership planning, while all repository state remains unchanged. |
+| `TestFinalOwnershipRefusesNestedConfiguredScopes` | two configured package identities cannot own nested scopes in one composed history; the ambiguity is fatal before planning or mutation. |
+| `TestFinalOwnershipRefusesASymlinkedNestedGitMarker` | a symlink cannot impersonate a nested `.git` marker and alter the repository identity assigned to a configured package. |
+
+### GitHub step boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `tests/integration/final_github_step_boundaries_test.go::TestFinalGitHubStepRefusesForeignRunStateBeforeTheAPI` | The standalone GitHub step rejects an unparseable run version and a tag that disagrees with the run version before making even a verification request, so malformed inherited `DISPAT_*` state cannot create a plausible external release. |
+| `tests/integration/final_github_step_boundaries_test.go::TestFinalPolyrepoGitHubStepChecksTheOwnerForItsTag` | In a polyrepo stage, the GitHub step checks the package owner's source repository for the run tag. A tag present only in the source suppresses W229 while the command creates exactly one GitHub release; the control repository remains tag-free. |
+
+### Final lock cleanup
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalFleetUnlockMutationDamageFailsAfterPublishing` | If `postAll` damages one source repository's local mutation-lock path after publication and durable source/control recording, fleet cleanup reports E336, preserves the published result, source tag, source commit and control checkpoint, continues releasing the remaining control lock, leaves only the affected source lock visible for repair, exits nonzero, and emits one failed `release.finished` webhook with `published=1`. |
+
+### Command failure recovery
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalAuthorCommitPreservesWorkWhenValidationCannotStart` | Unavailable temporary storage or a non-directory hooks path refuses authoring before Git mutates HEAD, the index or the working copy. |
+| `TestFinalComputeRejectsBrokenInputBeforeApplyingAcceptedChanges` | An oversized interactive answer reports its read error and discards earlier accepted suggestions before changing configuration or backups. |
+| `TestFinalComputeRefusesAnUnavailableBackupAndCanRetry` | An occupied backup path refuses a compute write without changing configuration or existing backup data; moving the obstruction allows a convergent retry. |
+| `TestFinalStandaloneCommitRetainsItsRecordWhenPinExportFails` | A commit-pin export failure returns an error while preserving the completed release commit, tag and existing output-directory data. |
+
+### Remaining planning boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalRemainingExecUsesTheControlSpaceAuthority` | in a composed workspace where control and an imported source use the same local space name, `exec --for space:` resolves the control-owned folder layer, environment, and working directory rather than importing another repository's command authority. |
+| `TestFinalRemainingImportedFolderConfigFailsClosed` | a valid imported root configuration cannot hide a malformed space-folder layer; discovery refuses the complete package graph and preserves both repository heads and tags. |
+| `TestFinalRemainingExecCwdDiscoveryFailuresNameTheUnreadableLayer` | both inferred subject sites (`--for cwd` and `--script-from cwd`) fail before a root script can run when package discovery cannot read the current folder's layer. |
+| `TestFinalRemainingPrivatePinStoreCreationFailureStopsBeforeScripts` | an unusable TMPDIR/TMP/TEMP prevents creation of the private composed-release pin coordinator before build, publish, tags, or repository mutation. |
+| `TestFinalRemainingRepositoryInputClosureCrossesGroupsAndDependencies` | an indirect provider input carried through a dependency, a fixed group, and another dependency remains in the consumer's release guard; an unplanned provider advance stops that consumer before publication. |
+
+### Remaining release boundaries
+
+| Test | Claim proven |
+| --- | --- |
+| `TestFinalConflictInspectionFailureAbortsBeforeSettlement` | If Git cannot enumerate the unmerged paths of a real recovery conflict, dispat refuses to guess, aborts the merge, preserves the published local immutable tag and the exact foreign remote commit/file, and creates no quarantine branch. |
+| `TestFinalRecoveryAbortFailureReportsTheRetainedObstacle` | If an untracked local file makes recovery refuse before merging and `merge --abort` consequently fails, dispat reports the cleanup failure while E224 remains the release outcome; the published tag, untracked local input and foreign remote input remain reviewable. |
+| `TestFinalConflictQuarantineLookupRefusalsPreserveBothSides` | If the quarantine-name lookup fails or reports the generated name occupied, conflict settlement stops before any quarantine push, keeps the merge open, and preserves the exact published local file and foreign remote commit/file. |
+| `TestFinalSourceTagPushFailureKeepsTheAlreadyPushedBranch` | If an orchestrated source branch push succeeds and the following immutable-tag push fails, E335 preserves the advanced source remote branch and local release tag while withholding the remote tag and control checkpoint; explicitly pushing that exact tag and checkpoint makes retry a publication no-op. |
+
+### Configuration and diagnostics
+
+| Test | Claim proven |
+| --- | --- |
+| `TestChoreographyRefusesAmbiguousOrEscapingRoster` | Malformed own or peer identities, duplicate peer names and absolute or escaping link paths stop composition before any plan or repository mutation. |
+| `TestFinalPlanningWorkloadIsDebugOnlyAndPreservesThePlan` | Debug reports actual history workload counts for one repository and a source-history fleet while preserving versions, reasons and selected packages; info output remains quiet. |
+| `TestFinalStandaloneFolderPolicyControlsItsRelease` | A standalone package's folder config controls its case-insensitive build override, version rewrite, budget and changelog; the release and retry prove it runs once. |
+| `TestFinalSelfUpdateRefusesIncompleteHTTPResponses` | Truncated listing and asset transports fail without replacing the running binary or leaving staged files. |
+| `TestFinalSelfUpdateCannotInstallANamedDraftOrFailedLookup` | Naming a version does not allow installation of a draft or a failed API lookup. |
+| `TestFinalSelfUpdateReportsBothDownloadFailures` | Failure of both authenticated download and public fallback preserves both causes, keeps credentials out of the fallback and logs, and leaves the binary unchanged. |
+| `TestFinalSelfUpdateNotesPreserveUnicodeAndSkipBothFenceStyles` | Preview skips both Markdown fence styles and nested fence-like text, preserves visible notes, and clips long Unicode text at a complete rune. |
+| `TestFinalSharedMovingAliasRefusesBothOwners` | Two packages cannot share a moving alias; the refusal writes neither build outputs nor tags, and separate alias namespaces allow both releases. |
+| `TestFinalFolderRecordPresentationKeepsRootCommitPolicy` | A package may customize changelog sections and commit links while its release version follows the root commit policy. |
+| `TestFinalStandaloneFolderRefusalsPreventAnyRelease` | Invalid standalone folder policy stops both status and release before scripts or records, including syntax, types, nested ownership, versioning, budgets, script references, ignores and version rules. |
+
+## Requirement traceability
+
+This plan says what each test proves. The [release-candidate requirement matrix](./qa-requirements.md) says which
+released behavior that is evidence for, and it is the single place a requirement identifier is defined: every row
+there names its assertions by test function name, qualified with the repository-relative file that declares it
+(written *file*::*function*) wherever the bare name is not globally unique. Nothing here repeats those identifiers, so
+the two documents cannot drift into disagreeing about which test carries which requirement.
+
+`go run ./tools/testreport testplan .` reads both and fails on a reference to a test that does not exist, an ambiguous
+bare name, an integration test with no goal here, and a matrix row whose recorded status its own references do not
+support. It is the `repo-checks` target of `Dockerfile.gotest` in CI and `scripts/check-test-plan.sh` locally.
+
+| Matrix section | Goals that carry it |
+| --- | --- |
+| Configuration (`CFG`) | 10, 11, 12, 13, 14, 15, 32, 35, 52 |
+| Planning (`PLN`) | 1, 3, 4, 5, 20, 23, 31, 52 |
+| Versioning (`VER`) | 2, 24, 34, 36, 38 |
+| Execution (`EXE`) | 6, 7, 8, 9, 18, 19, 21, 29, 37, 52 |
+| Publication and recovery (`PUB`) | 16, 29, 30, 46, 47, 48, 52 |
+| Distribution (`DST`) | 22, 25, 26, 27, 28, 36, 45 |
+| Observability (`OBS`) | 17, 33, 39, 40, 42, 43, 44, 51 |
+
+## Coverage scenarios: release execution and distribution
+
+These scenarios (`cov_*_test.go`) reach the answers the goals above leave to the unit suites: the response, filesystem
+and remote shapes a release meets when something is wrong with them. Each one is a real invocation of the compiled
+binary, and each one asserts what the operator is told as well as what is left on disk, because the whole subject here
+is failure that must be legible.
+
+### Self-update and install
+
+| Test | Claim proven |
+|------|--------------|
+| `TestSelfUpdateVersionReportsTheCheckOutcome` | `--version` is the one invocation that states the check's answer either way: the ordinary notice when a release is out, and a plain statement when there is nothing to install, so the command answers "am I up to date" as well as "what am I running". |
+| `TestSelfUpdateWalksAPaginatedListing` | A repository with more releases than one page holds still answers which version is current, following the `Link` header to the page the release is on; a next page addressed to another host ends the listing instead, because the address is the server's own text and every request carries the operator's token. |
+| `TestSelfUpdateFallsBackToThePublicDownloadURL` | A credential that reads the listing and not the assets is a real shape, so an endpoint that refuses is said out loud and the public address tried once with no credential, with the staged file emptied first so the refusal's own body cannot reach the installed binary. |
+| `TestSelfUpdateNotesAreSafeToPrint` | Release notes are somebody else's markdown: whole escape sequences are removed rather than the escape that opens them, bare control bytes go, an overlong line is cut on a rune boundary, and a body past the summary's bounds points at the changelog. |
+| `TestSelfUpdateRollbackNeedsAFolderItCanWriteTo` | A rollback is three renames in the binary's own folder, so a folder that will not take a file is refused before anything moves, naming the rights the reader has to have, and the binary that was running still runs. |
+| `TestSelfUpdateReadsOnlyTheReleasesItCanInstall` | A monorepo listing carries other modules' releases, drafts nobody published and tags that are not versions, and each is passed over for its own reason rather than failing the check; a listing past the bound is refused by size before it is parsed. |
+| `TestSelfUpdateRefusesABinaryThatIsNotTheRelease` | A file that downloaded intact can still be the wrong thing entirely, so the candidate is run before it takes the running binary's place: a file that is not a program and a program answering with another version are both refused, with the working binary untouched and the staged download removed. |
+| `TestInstallFolderRuleFallsThroughUntilSomethingAnswers` | Where a download goes when no flag says: `DISPAT_BIN_DIR` first, a relative answer made absolute before it is reported, and with nothing naming one the fall-through from the shared folder to the user's own, down to the refusal a machine with neither has to be told. |
+| `TestInstallRefusesALinkToSomethingThatIsNotAFile` | A link on `PATH` pointing at a binary is an ordinary way to install one and is replaced; a link to a folder is that folder, and an install would rename it out of the way to stand a binary where it stood. |
+| `TestInstallRefusesADestinationThatBelongsToSomethingElse` | The same rule for the destinations only a unix filesystem has: a named pipe and a device are each named back by what they are, before any request, because "not a regular file" tells a reader nothing they can act on. |
+| `TestInstallReadsARepositoryHoweverItIsSpelled` | Every spelling a reader has at hand (the shorthand, the clone URL, an SSH remote, a page inside the repository, an enterprise host with or without a scheme) reaches the same two path segments, and every spelling that names no repository is refused with the spelling that would, before a single request. |
+| `TestInstallReadsAPortFromASchemeQualifiedURL` | An enterprise URL carrying a scheme, a credential and an explicit port together reaches the repository and the host, port included, that it names. It used to reach another one: the scp-like `host:path` split ran even after a scheme was consumed, so `ssh://git@host:22/acme/tool` queried `/repos/22/acme`. Dropping either the credential or the port hid it, which is why it survived, so both are present in each row. |
+
+### Release execution, webhooks and the GitHub recorder
+
+| Test | Claim proven |
+|------|--------------|
+| `TestReleaseTruncatesAnOverlongOutputLine` | A stage that writes a megabyte with no newline in it has its line cut with a marker, the rest of that line dropped rather than logged as a line of its own, and the stage's later output still arrives; a line that never ends is dropped on the flush. |
+| `TestReleaseRefusesAMalformedExport` | An export line that is not `NAME=value` is a typo that would silently drop the export, so before the point of no return it fails its package and after it, where nothing can be taken back, it is a warning and the release stands. |
+| `TestAutoVersionSubstringNameMatchReachesAPackageWithNoManifest` | The substring fallback connects a declared name's last segment to a package's folder name, which is what a workspace whose packages declare no name of their own needs; `exact`, the default, leaves the same declaration alone. |
+| `TestAutoVersionReplaceRewritesOnlyWhatItMay` | A replace rule walks the package folder and skips what a workspace walk never enters and what is not a file to rewrite: the version text inside `node_modules` belongs to somebody else's code, and a link is not rewritten through. |
+| `TestWebhookTriggerFallsBackWhenTheWorkspaceCannotBeWalked` | A trigger is a leaf command and must not fail over what a release would refuse: with the workspace unreadable the top-level list is resolved unrestricted, the event is still delivered, and the run says why it could do no better. |
+| `TestWebhookAbandonsDeliveriesAtTheFlushDeadline` | An endpoint whose own timeout outlasts the flush deadline is exactly what the deadline exists for: the deliveries in flight are abandoned and counted under the ordinary webhook warning, and the command still exits 0. |
+| `TestWebhookWithoutItsSecretDeliversUnsigned` | A secret named in the configuration and missing from the environment still delivers, because a notification is not a security boundary, and the run says out loud that nothing is signing the deliveries rather than letting a receiver quietly stop verifying. |
+| `TestGitHubReissuesAReadOnlyCallThatFailedTransiently` | A 5xx and a rate limit are answers a later attempt can outlive, so a read-only call is re-issued with backoff, honouring a `Retry-After` named in whole seconds and ignoring one that is not; the ladder is finite and a repository that never answers refuses the run. |
+| `TestGitHubSkipsTheAttachmentsItCannotMake` | The release is already out by the time the attachments run, so a relative path, a path naming no file, a directory and a name repeated in the export are each a line saying what was skipped, a failed upload does not take the release back, and the sound files are still attached. |
+| `TestGitHubFindsADraftPastTheFirstPageOfTheListing` | A draft creates no tag ref, so the listing is the only thing that can see one; a full page is not the end of the listing, and stopping there would leave a second draft behind on every run of a repository that has released a hundred times since. |
+| `TestGitHubRefusesToAttachWithoutAnUploadURL` | The asset endpoint comes from the created release itself, so a response carrying none is not an endpoint to guess at: the release stands and the attachment says what it could not find. |
+
+### The git layer and the planner
+
+| Test | Claim proven |
+|------|--------------|
+| `TestGitRemoteCredentialsNeverReachTheLog` | A release's error text reaches hook scripts and its log reaches whatever CI ingests, so a remote is recorded with its user information, query and fragment taken out and the rest of the URL kept. |
+| `TestGitDirtyGuardReadsARenameAsOneEntry` | Machine-readable status writes a rename as the destination followed by the source, and only the first carries a status prefix; reading the second as an entry of its own would name a file nobody has in a refusal telling somebody to go and commit it. |
+| `TestGitPushSaysWhatItDidAboutATagTheRemoteAlreadyHad` | A re-run after a partly pushed release converges instead of dying on "already exists": a tag the remote carries is left alone and reported as skipped, and with force it is overwritten and said so, because replacing a published ref is worth saying out loud. |
+| `TestGitReleaseCommitIsSkippedWhenNothingWasStaged` | With the changelog off and no manifest to rewrite the release commit would hold nothing, so none is made and the tag names the commit the release was planned on, which is where it would have pointed with no commit stage at all. |
+| `TestPolyrepoRefGuardWatchesAliasNamespaces` | The guard reads every ref a configured package may write before planning, so a space that writes alias tags widens that namespace beyond the release tag and an alias is not a ref nobody was watching. |
+| `TestPolyrepoCheckpointVerifiesTheSourceBranchItPinsTo` | A control checkpoint is a gitlink, and a gitlink to a revision the source's own remote does not carry is a pointer into nothing for everybody who clones the fleet next. A checkpoint made with no release tag has only the source branch to prove the revision is durable, so that is what it reads before the control push makes the pointer permanent. |
+| `TestReleaseSettlesAConflictOverAFileItDeleted` | The conflict with no file to take: this side removed what the commits that landed mid-release edited, so this side is the absence and the path is removed from the merge, with their edit kept on the quarantine branch and both halves named in the record. |
+| `TestPlanAuthorsShareOneWindowAcrossPackages` | Two packages released at the same boundaries ask the same question of every commit, so the attribution is computed once and shared; over a history long enough for the sharing to engage, the shared answer is the one an unshared scan would have given. |
+| `TestPlanAuthorsAcrossAComposedFleet` | The same sharing where a window is one boundary per repository the package's history was attached from, so two packages whose windows differ only in a source repository's boundary are not given each other's authors. |
+| `TestPlanCorrectionDiagnosticsNameWhatTheyCouldNotReach` | A correction whose targets have all left the pending window addresses no package at all, and reporting it against nothing is the whole point of the no-op diagnostic being unsuppressible; a correction that does reach its target names the targets it resolved at trace. |
+| `TestPlanScopeTermsReachTheirPackages` | Every shape a scope term takes in one history: a glob reaching what it matches and reported when it matches none, `.` for the commit's own files, `*` for the workspace, an exclusion naming nothing as a warning and an inclusion naming nothing as an error. |
+| `TestRunQuotesForwardedArgumentsTheShellWouldOtherwiseRead` | Arguments typed after `--` are appended to a script's command text, so an ordinary flag goes through verbatim while an argument a shell would split, unquote or lose entirely is quoted and arrives as the one word it was typed as. |
 
 ## Regression fences
 
@@ -1569,9 +2271,159 @@ than showing up as a puzzling behaviour change somewhere downstream.
 | **A unit naming one target twice reported `W210` against itself.** §7.4.1 collapses several targets into the one carrying record, so the second mention is redundant rather than superseded; the warning told the operator a newer commit had overridden their correction and named the correction's own commit as the culprit. | `TestCorrectionNamingOneTargetTwiceIsNotSuperseded`                                                                       | `internal/plan` |
 | **An imports-only control configuration was rejected before workspace composition.** The legacy single-repository validator required a local space or package even when `configs` supplied every package in the fleet, so the new import path was unreachable without a dummy local declaration. | `TestPolyrepoOwnershipValidation` (`duplicate package identity across sources`, `imported path escapes its owner`) | `polyrepo_test.go`; `internal/config` |
 | **An imported source's top-level run script was rejected as undefined.** The early typo guard searched only the control config and rediscovered packages only from the control root, so execution never reached the imported package that resolved the script. | `TestPolyrepoImportedDefaultsAndNestedCommandContext` | `polyrepo_test.go`; `internal/app` |
+| **`compute --write` summarised changes it had not written.** The summary line was printed unconditionally, so a run that only created fleet links claimed to have applied changes to an empty list of files and pointed at backup copies nobody had made. | `TestChoreographyComputeSummarisesWhatItActuallyDid` | `choreography_compute_test.go`; `internal/app` |
+| **`E334` advised writing a control directive in a fleet with no control repository.** The remedy was one literal string shared by the four precedence refusals, written when the orchestrated saga was the only one. | `TestChoreographyIncomparableDirectivesStayE334` | `choreography_plan_test.go`; `internal/plan` |
+| **The composed line logged a choreographed fleet's entry root as `control`.** The field was named for the orchestrated anchor and never revisited, so the one repository a choreographed fleet does not have was the one the log named. | `TestChoreographyNamesTheEntryRootForWhatItIs` | `choreography_compose_test.go`; `internal/cli` |
+| **A rollback reverted through the repository that merely contained the folder.** `RevertDir` searched the participating repositories in name order and took the first whose root contained the path, which in a nested checkout is the repository around it, and fell back to the control repository — which a choreographed fleet does not have — when no root matched. | `TestChoreographyRevertsInTheRepositoryThatOwnsTheFolder`, `services/dispat/internal/app/polyrepo_revert_test.go::TestRevertDirRestoresThroughTheDeepestOwner` | `choreography_release_test.go`; `internal/app` |
+| **One repository's unsafe lock setting released the whole fleet unlocked.** The bypass ORed the entry configuration's `unsafeDisableLock` into every repository, so a peer that never asked for it released without its own remote lock. | `TestChoreographyBypassesTheLockPerRepository` | `choreography_release_test.go`; `internal/app` |
+| **The entry repository's run hooks fired twice.** Every peer of a choreographed fleet is an imported configuration, the entry included, so the loop over imported repositories ran the entry's own `beforeAll` and `postAll` a second time. | `TestChoreographyRunsTheEntryHooksOnce` | `choreography_release_test.go`; `internal/app` |
+| **A nested command could not compose the fleet around it.** The workspace context handed a nested `dispat` the peers' configuration paths as config imports, which a choreographed fleet refuses, so every command a package script started failed with `E332`. | `TestChoreographyNestedCommandComposesTheSameFleet` | `choreography_commands_test.go`; `internal/app` |
+| **`compute --write` proposed the links it had just created.** Remaining work was derived from the workspace composed before anything was written, so a freshly linked fleet still looked unlinked and the second attempt at the same link failed. | `TestChoreographyComputeLinksAnUnlinkedFleet`, `TestChoreographyComputeAsksBeforeEachLink` | `choreography_compute_test.go`; `internal/app` |
 | **`compute --write` ignored imported repositories.** It rediscovered packages from the control config and root instead of the composed workspace, so an imports-only run exited successfully without scanning source manifests, deriving cross-source edges, or writing the consumer owner's config and backup. | `TestPolyrepoComputeWritesImportedOwnerConfig` | `polyrepo_test.go`; `internal/app` |
+| **`dispat compute` could not repair a one-sided fleet link.** The docs and the saga's own findings say `W332` is what the command repairs, but the link set was derived from a union-find seeded with the links that exist: once one end declared the link the pair counted as joined, so the missing half was never proposed and a run interrupted between the two halves could only be finished by hand. | `TestChoreographyComputeDeclaresTheHalfOfAOneSidedLink`, `TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote`, `TestChoreographyFaultStopsComputeDeclaringTheOtherHalf`; `services/dispat/internal/app/computelinks_test.go::TestSuggestLinksProposesTheHalfOfAOneSidedLink` | `choreography_compute_test.go`, `choreography_faults_test.go`; `internal/app` |
+| **A fleet change `compute --write` could not make failed the run silently.** Every other refusal in that command reports itself before returning and the dispatcher only turns an error into an exit status, so a link that could not be created, declared or pinned left the operator with exit 1, no diagnostic, and no sentence naming the repository, the peer or the cause. | `TestChoreographyFaultStopsComputeAndConvergesOnASecondRun`, `TestChoreographyFaultStopsComputeDeclaringTheOtherHalf`, `TestChoreographyFaultStopsComputeInitializingADeclaredLink` | `choreography_faults_test.go`; `internal/app` |
 
 ## Running
+
+Coverage infrastructure is guarded by
+`tests/integration/internal/harness/binary_test.go::TestProductionCoverpkgIncludesEveryProductionModule`: the
+instrumented CLI build must include the CLI and all six public modules, so the integration percentage cannot improve
+by quietly dropping first-party code from its denominator.
+`tests/integration/internal/harness/binary_test.go::TestProductionCoverpkgAcceptsTheRunnerScope` keeps the subprocess
+and public-API test binaries on one explicit package set. `TestPublicAPIScannerWriterScannerLifecycle`,
+`TestPublicAPIConfigReferenceEditAndReload`, and `TestPublicAPICCMEModelConsumptionContract` exercise current public
+modules through cross-component contracts; their profile is merged with the instrumented CLI subprocess counters.
+`TestPublicAPIExtendedManifestLifecycles` walks every supported ecosystem and engine manifest through the public
+scanner, writer, and scanner again, checking each requested dependency survives in canonical form.
+`TestPublicAPICCMEConformanceVectors` runs scoped, unscoped, multi-unit, escaped-separator, strict-type, and invalid
+UTF-8 messages through the current v2 public parser and its preferred validity/scope predicates.
+`TestPublicAPIConfigWatchReloadsAnAtomicEdit` covers the optional config/watch subpackage so it remains part of the
+integration denominator and proves an atomic config edit is observed as a new successfully parsed value.
+`TestPublicAPIRefusalsPreserveInputsAndBoundResources` exercises malformed manifests, the public size limit,
+filesystem boundary types, unsafe versions, and conflicting shared ranges; every refusal checks that the original
+bytes remain intact. `TestPublicAPIConfigAndModelRejectMalformedBoundaries` checks reference cycles, malformed config
+documents, and invalid public model shapes without mutating their inputs.
+`TestPublicAPILinkAndBuildWriterLifecycles` round-trips local redirects through all five link-capable formats, removes
+them again, rescans the manifests, and updates all nine build-counter formats while proving rejected integer counters
+leave the files unchanged. `TestPublicAPIConfigResolutionSettersAndDependencyModels` resolves an owned nested folder,
+applies an override, decodes the public setter shapes, and round-trips canonical typed dependency models while proving
+a failed decode leaves the receiver unchanged.
+Eight conformance drivers carry `pkg/ccme/v2` through its published parser, which the CLI never reaches because the
+CLI consumes v1 from the module cache. `TestPublicAPICCMEHeaderGrammarConformance` walks the type charset, the
+scope-set grammar and its term cap, the breaking marker and the separator rules of §5 under both strictness modes.
+`TestPublicAPICCMEDirectiveAxesConformance` walks both propagation axes of §5.3, every doubled-sigil guard, the
+channel grammar of §11.2 and the footer reconciliation of §8.3. `TestPublicAPICCMEFooterRegistryConformance` walks the
+§8.1 registry, the two breaking-change silent failures of §8.1.1, the correction footers of §7.4 and the control types
+of §7 and §10. `TestPublicAPICCMEMessageStructureConformance` walks normalisation, unit splitting, escaped separators
+and the message-scoped bounds of §14.1 through both entry points, and `TestPublicAPICCMENormalizationIsIdempotent`
+checks the exported normaliser directly, including the fast path that returns its input untouched.
+`TestPublicAPICCMEVersionArithmetic` covers the exported semver surface the release engine shares with the parser, and
+`TestPublicAPICCMEValueTypeContracts` and `TestPublicAPICCMEConfigurationSurface` cover the value types a consumer of
+a result reads and every configuration the constructors accept or refuse.
+Seven drivers carry `pkg/models`, the published configuration model, through its own surface rather than through a
+loaded configuration. `TestPublicAPIModelOptionPredicates` drives every tri-state option field through its nil, false
+and true states and checks each deprecated spelling against its preferred one; `TestPublicAPIModelFoldLookups` drives
+the case-insensitive name resolution at each level a package resolves a script through;
+`TestPublicAPIModelScriptShapes` and `TestPublicAPIModelDependencyShapes` round-trip the `scripts` and `dependencies`
+keys through both written shapes and every error their normalisers report, including the map shape a YAML reader
+produces; `TestPublicAPIModelPathListShapes` round-trips a space's `path` key; `TestPublicAPIModelWebhookVocabulary`
+drives the event vocabulary, the subscription grammar and the format tokenizer; and `TestPublicAPIModelFileRoundTrip`
+authors a whole configuration as typed values and checks that marshalling it twice is stable.
+Fifteen drivers carry `pkg/config`, the published configuration library, and its optional `watch` subpackage.
+`TestPublicAPIConfigFoldingAndKeyPaths`, `TestPublicAPIConfigErrorVocabulary` and `TestPublicAPIConfigEventSurface`
+cover what a name means, every error value a caller matches on, and the logging surface a caller wires its own logging
+package in through. `TestPublicAPIConfigWeakTyping` and `TestPublicAPIConfigDecodeRules` cover the weakly typed
+readers and the object rules, including the unknown key, the two spellings of one name in one object at both object
+sizes, and every setter shape. `TestPublicAPIConfigSettingsRendering` covers the pruning of empty objects, the
+delimiter that names levels, the overrides written over the result and the deep clone. `TestPublicAPIConfigEnvLayers`
+and `TestPublicAPIConfigEnvBinding` cover the env-layer helpers and the opt-in environment binding including its
+strict refusal. `TestPublicAPIConfigLoaderOptions` covers the format table, a caller's own reader, and the nil loader;
+`TestPublicAPIConfigReferenceComposition` covers the `$ref` key, the keys written beside it, the several files it may
+merge, and every way it can be written wrong; `TestPublicAPIConfigAscent` covers the walk up the directory tree;
+`TestPublicAPIConfigEditWriting`, `TestPublicAPIConfigEditResolution` and `TestPublicAPIConfigStringMapReading` cover
+writing one key back, choosing which file holds it, and reading the entries a write starts from.
+`TestPublicAPIConfigWatchLifecycle` covers the watch subpackage: the first load a program exits on, the reloads a
+change produces, the failure that keeps the last good value, the watch set moving with the files each load reports,
+and the two ways a watcher stops.
+Seventy-six drivers carry the three manifest modules, `pkg/manifest`, `pkg/scanner` and `pkg/writer`, through their
+own exported surfaces on realistic files rather than through a release.
+Six of them cover the vocabulary the reading and writing halves share.
+`TestPublicAPIManifestFormatClassification`, `TestPublicAPIManifestKindVocabulary` and
+`TestPublicAPIManifestNameNormalisation` cover the file-name and folder-qualified format tables, the four dependency
+kinds and their spellings, and the name-splitting rules both halves resolve names through.
+`TestPublicAPIManifestImageReferences` splits every shape of image reference and checks the tag grammar a writer
+validates against; `TestPublicAPIManifestDockerfileReferences` locates the references `FROM`, `COPY --from` and
+`RUN --mount` carry, including continuations, stage aliases and carriage returns; and
+`TestPublicAPIManifestComposeIdentity` covers both rules by which a compose file names its own image, and their
+tie-breaks.
+Twelve drivers read manifests. `TestPublicAPIScannerReadsGradleBuildScripts`,
+`TestPublicAPIScannerReadsGradleVersionCatalog`, `TestPublicAPIScannerReadsRubyManifests`,
+`TestPublicAPIScannerReadsPythonManifests`, `TestPublicAPIScannerReadsPubspecAndCargo`,
+`TestPublicAPIScannerReadsAquaConfigurations`, `TestPublicAPIScannerReadsAppleManifests`,
+`TestPublicAPIScannerReadsDotNetAndMavenManifests`, `TestPublicAPIScannerReadsEngineManifests` and
+`TestPublicAPIScannerReadsNodeGoAndCompose` walk each ecosystem's own syntax: comments, quoting styles,
+interpolations, dependency groups, inline tables, nested documents, legacy encodings and the entries a reader
+deliberately drops. `TestPublicAPIScannerReportsUnreadableManifests` proves every reader names a malformed file in its
+error and leaves it as it was, and `TestPublicAPIScannerEcosystemsCoverEveryFormat` fences the ecosystem table against
+the format list.
+Eleven drivers cover the walk itself. `TestPublicAPIScannerWalkSkipsAndReportsWithoutStopping` fixes which folders a
+manifest walk enters and which a literal-text walk still sees;
+`TestPublicAPIScannerReportsUnreadableEntriesAndKeepsGoing` and
+`TestPublicAPIScannerRefusesAnOversizedManifestInAWalk` prove the partial-result contract for an unreadable folder, an
+unreadable file and the read cap; `TestPublicAPIScannerHonoursACancelledContext` covers both entry points under
+cancellation; and `TestPublicAPIScannerRootScanReadsOnlyTheFolderItself` covers the root-only scan, its aqua
+exception, and the folder wearing a manifest's name that it steps over.
+`TestPublicAPIScannerFollowsLocalAquaImports`, `TestPublicAPIScannerRefusesAquaImportsThatLeaveTheTree` and
+`TestPublicAPIScannerPrefersTheRealAquaFileOverItsAlias` cover the local import walk, every way a pattern or a
+symbolic link can leave the scanned tree, and the rule that prefers a real configuration over an alias for it.
+`TestPublicAPIScannerPackageRootRule`, `TestPublicAPIScannerNameIndexBindsByRank` and
+`TestPublicAPIScannerResolvesDeclaredLocalPaths` cover the three helpers a caller builds a dependency graph with.
+Six drivers cover the writer's entry points. `TestPublicAPIWriterReplacesLiteralText` covers the literal replacer
+including its binary, size and empty-pattern refusals; `TestPublicAPIWriterSwappableValueCoversEveryEntryPoint` drives
+all six methods of the swappable writer; `TestPublicAPIWriterFormatForcedRewrite` covers the format-forced rewrite and
+the kind canonicalisation that never touches the caller's own slice;
+`TestPublicAPIWriterRefusesToFollowASymbolicLink` and `TestPublicAPIWriterSupportTablesAgreeWithTheScanner` fence the
+symbolic-link refusal and the two support tables against the scanner's formats; and
+`TestPublicAPIWriterLinkRefusalsAndUnlinkableFormats` covers every refusal the three link entry points share.
+Nine drivers write one format each. `TestPublicAPIWriterRewritesJSONManifests`,
+`TestPublicAPIWriterRewritesXMLManifests`, `TestPublicAPIWriterRewritesTOMLManifests`,
+`TestPublicAPIWriterRewritesLineManifests`, `TestPublicAPIWriterRewritesYAMLManifests`,
+`TestPublicAPIWriterRewritesGradleBuildScripts`, `TestPublicAPIWriterRewritesEngineManifests` and
+`TestPublicAPIWriterRewritesGoModules` check each format's applied, missing and skipped outcomes, the values a writer
+declines because they defer to something outside the file, and the bytes around every change; and
+`TestPublicAPIWriterLifecycleAcrossEveryFormat` reads each of them back through the scanner.
+Ten drivers assert the properties every format writer shares.
+`TestPublicAPIWriterRewritingTheSameValuesTwiceWritesNothing` and
+`TestPublicAPIWriterWithNothingToWriteLeavesTheFileAlone` prove idempotence and the empty rewrite across every
+supported format; `TestPublicAPIWriterRefusesEveryFormatThroughASymbolicLink`,
+`TestPublicAPIWriterRefusesBuildCountersThroughASymbolicLink` and
+`TestPublicAPIWriterRefusesLinksThroughASymbolicLink` prove the same for the symbolic-link refusal across every
+rewrite, counter and link format; `TestPublicAPIWriterRefusesVersionsAFormatCannotHold` covers the versions each
+line-structured format declines rather than splice. `TestPublicAPIWriterLeavesEveryTruncatedManifestIntact`,
+`TestPublicAPIWriterLeavesEveryTruncatedLinkableManifestIntact` and
+`TestPublicAPIWriterLeavesEveryTruncatedCounterManifestIntact` cut each manifest at every byte and prove no prefix
+makes a writer leave a half-written file.
+Eighteen drivers cover the syntax and the shapes a real checkout carries.
+`TestPublicAPIWriterSurvivesTOMLQuoting`, `TestPublicAPIWriterSurvivesRubyQuoting`,
+`TestPublicAPIWriterSurvivesYAMLQuoting`, `TestPublicAPIWriterSurvivesPlistAndProjectShapes`,
+`TestPublicAPIWriterSurvivesEngineDocumentShapes`, `TestPublicAPIWriterSurvivesGradleCommentsAndClosures`,
+`TestPublicAPIWriterSurvivesComposeAndDockerShapes` and `TestPublicAPIWriterSurvivesAttributeSpelling` cover the
+comments, escapes, quoting styles and attribute spellings a hand-written manifest carries;
+`TestPublicAPIWriterRefusesAquaShapesItCannotSplice` covers the document shapes the aqua writer declines outright; and
+`TestPublicAPIWriterStepsOverUnreadablePluginEntries`,
+`TestPublicAPIWriterStepsOverRubyStatementsThatAreNotDeclarations`,
+`TestPublicAPIWriterHandlesNestedAndCompactOverrideMaps`, `TestPublicAPIWriterHandlesPubspecShapesItCannotSplice`,
+`TestPublicAPIWriterHandlesTOMLValuesItCannotSplice`, `TestPublicAPIWriterHandlesComposeFlowSequences`,
+`TestPublicAPIWriterHandlesMalformedCatalogEntries`, `TestPublicAPIWriterHandlesCarriageReturnsAndNamelessLines`,
+`TestPublicAPIWriterHandlesPubspecOverrideShapes` and `TestPublicAPIWriterHandlesLargeFilesAndKotlinBuildScripts`
+cover the declarations a writer steps over, the nesting and line endings a real file uses, and the values no splice
+can reach.
+Four drivers cover the two writes that are not version rewrites. `TestPublicAPIWriterManagesNpmOverrides`,
+`TestPublicAPIWriterManagesTOMLAndPubspecLinks` and `TestPublicAPIWriterManagesGoModuleReplaces` cover the whole life
+of a local redirect in each linkable format: the field each package manager spells it in, the map or table created and
+dropped with it, repointing, removal, and the directives a listing must not claim as local links.
+`TestPublicAPIWriterSetsBuildCounters` covers all nine counter formats, the counters a writer never creates because
+the project never declared one, and every refusal an integer counter carries.
 
 ```sh
 cd tests/integration

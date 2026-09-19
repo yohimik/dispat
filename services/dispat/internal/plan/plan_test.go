@@ -358,7 +358,7 @@ func testPackages() ([]*model.Package, []model.Dependency) {
 	return pkgs, deps
 }
 
-func compute(t *testing.T, git gitx.Git, initials map[string]ccme.Version) *Plan {
+func compute(t *testing.T, git gitx.Gitx, initials map[string]ccme.Version) *Plan {
 	t.Helper()
 	pkgs, deps := testPackages()
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Initials: initials, Root: "/r"})
@@ -417,7 +417,7 @@ func TestPropagationRequiresADepth(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.Equal(t, ccme.BumpMinor, p.Releases["core"].Bump)
-	assert.False(t, p.Releases["app"].Changed(), "a caret-less feat must not reach consumers")
+	assert.False(t, p.Releases["app"].IsChanged(), "a caret-less feat must not reach consumers")
 }
 
 func TestPropagationWithCaret(t *testing.T) {
@@ -470,8 +470,8 @@ func TestPropagationDepthIsShortestPath(t *testing.T) {
 		p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Initials: nil, Root: "/r"})
 		require.NoError(t, err, tc.header)
 
-		assert.True(t, p.Releases["b"].Changed(), "%s: b is a direct consumer", tc.header)
-		assert.Equal(t, tc.reachC, p.Releases["c"].Changed(), "%s: c at depth 2", tc.header)
+		assert.True(t, p.Releases["b"].IsChanged(), "%s: b is a direct consumer", tc.header)
+		assert.Equal(t, tc.reachC, p.Releases["c"].IsChanged(), "%s: c at depth 2", tc.header)
 	}
 }
 
@@ -482,8 +482,8 @@ func TestPropagateNoneReachesNobody(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.True(t, p.Releases["core"].Changed())
-	assert.False(t, p.Releases["app"].Changed(), "^none propagates nothing")
+	assert.True(t, p.Releases["core"].IsChanged())
+	assert.False(t, p.Releases["app"].IsChanged(), "^none propagates nothing")
 }
 
 func TestPropagateScopeRestrictsTargets(t *testing.T) {
@@ -501,8 +501,8 @@ func TestPropagateScopeRestrictsTargets(t *testing.T) {
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Initials: nil, Root: "/r"})
 	require.NoError(t, err)
 
-	assert.True(t, p.Releases["utils"].Changed(), "utils is inside Propagate-Scope")
-	assert.False(t, p.Releases["app"].Changed(), "app is outside Propagate-Scope")
+	assert.True(t, p.Releases["utils"].IsChanged(), "utils is inside Propagate-Scope")
+	assert.False(t, p.Releases["app"].IsChanged(), "app is outside Propagate-Scope")
 }
 
 func TestDevDependencyEdgesDoNotPropagate(t *testing.T) {
@@ -544,7 +544,7 @@ func TestPropagateScopeExcludingEverythingWarns(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, hasCode(p, CodeScopeExcludedAll), "W135, got %v", codes(p))
-	assert.False(t, p.Releases["app"].Changed())
+	assert.False(t, p.Releases["app"].IsChanged())
 }
 
 func TestGlobMatchingNothingWarns(t *testing.T) {
@@ -554,7 +554,7 @@ func TestGlobMatchingNothingWarns(t *testing.T) {
 
 	p := compute(t, git, nil)
 	assert.True(t, hasCode(p, CodeEmptyGlob), "W134, got %v", codes(p))
-	assert.False(t, p.HasErrors(), "a glob that matches nothing is not the E130 typo")
+	assert.False(t, p.IsInvalid(), "a glob that matches nothing is not the E130 typo")
 }
 
 // TestScopesMatchAPackageWhicheverCase: a scope is typed into a commit message
@@ -569,9 +569,9 @@ func TestScopesMatchAPackageWhicheverCase(t *testing.T) {
 	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
 
 	p := compute(t, git, nil)
-	assert.False(t, p.HasErrors(), "a folded match is a match, not the E130 typo: %v", codes(p))
-	assert.True(t, p.Releases["core"].Changed(), "the exact term addressed core")
-	assert.True(t, p.Releases["utils"].Changed(), "and the glob addressed utils")
+	assert.False(t, p.IsInvalid(), "a folded match is a match, not the E130 typo: %v", codes(p))
+	assert.True(t, p.Releases["core"].IsChanged(), "the exact term addressed core")
+	assert.True(t, p.Releases["utils"].IsChanged(), "and the glob addressed utils")
 }
 
 func TestGlobalIsAnOrdinaryScopeName(t *testing.T) {
@@ -586,7 +586,7 @@ func TestGlobalIsAnOrdinaryScopeName(t *testing.T) {
 	p := compute(t, git, nil)
 	assert.True(t, hasCode(p, CodeUnknownInclude), "E130, got %v", codes(p))
 	for _, name := range []string{"core", "utils", "app"} {
-		assert.False(t, p.Releases[name].Changed(), "%s must not be addressed by 'global'", name)
+		assert.False(t, p.Releases[name].IsChanged(), "%s must not be addressed by 'global'", name)
 	}
 
 	git = newFakeGit(
@@ -594,7 +594,7 @@ func TestGlobalIsAnOrdinaryScopeName(t *testing.T) {
 	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
 	p = compute(t, git, nil)
 	for _, name := range []string{"core", "utils", "app"} {
-		assert.True(t, p.Releases[name].Changed(), "%s must be addressed by '*'", name)
+		assert.True(t, p.Releases[name].IsChanged(), "%s must be addressed by '*'", name)
 	}
 }
 
@@ -750,7 +750,7 @@ func TestDerivedScopeFromChangedFiles(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.Equal(t, ccme.BumpPatch, p.Releases["core"].OwnBump, "the file names core")
-	assert.False(t, p.Releases["utils"].Changed(), "utils owns no changed file")
+	assert.False(t, p.Releases["utils"].IsChanged(), "utils owns no changed file")
 }
 
 func TestDerivedScopeLongestPrefixWins(t *testing.T) {
@@ -767,8 +767,8 @@ func TestDerivedScopeLongestPrefixWins(t *testing.T) {
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: nil, Initials: nil, Root: "/r"})
 	require.NoError(t, err)
 
-	assert.True(t, p.Releases["theme"].Changed(), "the inner package owns the file")
-	assert.False(t, p.Releases["ui"].Changed(), "the outer package does not")
+	assert.True(t, p.Releases["theme"].IsChanged(), "the inner package owns the file")
+	assert.False(t, p.Releases["ui"].IsChanged(), "the outer package does not")
 }
 
 func TestScopeGlobAndExclusion(t *testing.T) {
@@ -778,9 +778,9 @@ func TestScopeGlobAndExclusion(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.True(t, p.Releases["core"].Changed())
-	assert.True(t, p.Releases["utils"].Changed())
-	assert.False(t, p.Releases["app"].Changed(), "an exclusion always wins")
+	assert.True(t, p.Releases["core"].IsChanged())
+	assert.True(t, p.Releases["utils"].IsChanged())
+	assert.False(t, p.Releases["app"].IsChanged(), "an exclusion always wins")
 }
 
 func TestUnknownIncludeIsAnError(t *testing.T) {
@@ -791,7 +791,7 @@ func TestUnknownIncludeIsAnError(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.True(t, hasCode(p, CodeUnknownInclude), "E130 for an unknown include, got %v", codes(p))
-	assert.True(t, p.HasErrors(), "a typo must not silently drop a release")
+	assert.True(t, p.IsInvalid(), "a typo must not silently drop a release")
 }
 
 func TestNonPackageScopeIsExempt(t *testing.T) {
@@ -814,7 +814,7 @@ func TestNonPackageScopeIsExempt(t *testing.T) {
 
 	assert.False(t, hasCode(p, CodeUnknownInclude), "no E130, got %v", codes(p))
 	assert.False(t, hasCode(p, CodeInertUnit), "nor W131: resolving to nothing is the point")
-	assert.False(t, p.HasErrors())
+	assert.False(t, p.IsInvalid())
 	assert.Equal(t, ccme.BumpMinor, p.Releases["core"].Bump, "the real commit still counts")
 }
 
@@ -840,8 +840,8 @@ func TestUnknownExcludeIsAWarning(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.True(t, hasCode(p, CodeUnknownScope), "W130, got %v", codes(p))
-	assert.False(t, p.HasErrors(), "excluding something already deleted is harmless")
-	assert.True(t, p.Releases["core"].Changed())
+	assert.False(t, p.IsInvalid(), "excluding something already deleted is harmless")
+	assert.True(t, p.Releases["core"].IsChanged())
 }
 
 // ---------------------------------------------------------------------------
@@ -925,10 +925,10 @@ func TestCatchUpAfterConsumerFailure(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.False(t, p.Releases["core"].Changed(), "core has already released c1")
+	assert.False(t, p.Releases["core"].IsChanged(), "core has already released c1")
 
 	app := p.Releases["app"]
-	assert.True(t, app.Changed(), "app must catch up: c1 is still in its window")
+	assert.True(t, app.IsChanged(), "app must catch up: c1 is still in its window")
 	assert.Equal(t, ccme.BumpPatch, app.Bump)
 	assertVersion(t, v(1, 0, 1), app.Next)
 	assert.Equal(t, []string{"core"}, app.DueTo)
@@ -956,8 +956,8 @@ func TestNoCatchUpWhenConsumerIsFresh(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.False(t, p.Releases["core"].Changed())
-	assert.False(t, p.Releases["app"].Changed(), "a fresh consumer must not release")
+	assert.False(t, p.Releases["core"].IsChanged())
+	assert.False(t, p.Releases["app"].IsChanged(), "a fresh consumer must not release")
 }
 
 func TestCatchUpForNeverReleasedConsumer(t *testing.T) {
@@ -968,11 +968,11 @@ func TestCatchUpForNeverReleasedConsumer(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	assert.True(t, app.Changed(), "a never-released consumer still has the commit pending")
+	assert.True(t, app.IsChanged(), "a never-released consumer still has the commit pending")
 	assertVersion(t, v(0, 0, 1), app.Next, "0.0.0 + patch")
 	assert.Equal(t, []string{"core"}, app.DueTo)
 
-	assert.False(t, p.Releases["utils"].Changed(), "utils has no providers and stays untouched")
+	assert.False(t, p.Releases["utils"].IsChanged(), "utils has no providers and stays untouched")
 }
 
 // G4 / G6: once discharged, a contribution is not re-admitted, so repeated
@@ -983,12 +983,12 @@ func TestCatchUpDischargesExactlyOnce(t *testing.T) {
 		{sha: "c1", message: "feat(core)^: streaming"},
 	}
 	before := newFakeGit(history...).tag("core", "1.1.0", "c1").tag("app", "1.0.0", "c0")
-	assert.True(t, compute(t, before, nil).Releases["app"].Changed(), "owed before")
+	assert.True(t, compute(t, before, nil).Releases["app"].IsChanged(), "owed before")
 
 	// The catch-up run publishes app at c1; the tag advances and the window
 	// no longer contains the commit.
 	after := newFakeGit(history...).tag("core", "1.1.0", "c1").tag("app", "1.0.1", "c1")
-	assert.False(t, compute(t, after, nil).Releases["app"].Changed(),
+	assert.False(t, compute(t, after, nil).Releases["app"].IsChanged(),
 		"the contribution must not be re-admitted after discharge (G4)")
 }
 
@@ -1009,8 +1009,8 @@ func TestCatchUpNeverWidensBlastRadius(t *testing.T) {
 	first := newFakeGit(history...).tag("a", "1.0.0", "").tag("b", "1.0.0", "").tag("c", "1.0.0", "")
 	p1, err := Compute(context.Background(), first, Options{Packages: pkgs, Dependencies: deps, Initials: nil, Root: "/r"})
 	require.NoError(t, err)
-	assert.True(t, p1.Releases["b"].Changed())
-	assert.False(t, p1.Releases["c"].Changed())
+	assert.True(t, p1.Releases["b"].IsChanged())
+	assert.False(t, p1.Releases["c"].IsChanged())
 
 	// a published, b failed. The catch-up run must reach b and still not c:
 	// depth is measured from the originating source set, never re-based on
@@ -1018,8 +1018,8 @@ func TestCatchUpNeverWidensBlastRadius(t *testing.T) {
 	second := newFakeGit(history...).tag("a", "1.1.0", "c1").tag("b", "1.0.0", "").tag("c", "1.0.0", "")
 	p2, err := Compute(context.Background(), second, Options{Packages: pkgs, Dependencies: deps, Initials: nil, Root: "/r"})
 	require.NoError(t, err)
-	assert.True(t, p2.Releases["b"].Changed(), "b still owed")
-	assert.False(t, p2.Releases["c"].Changed(), "c must not be dragged in by the catch-up")
+	assert.True(t, p2.Releases["b"].IsChanged(), "b still owed")
+	assert.False(t, p2.Releases["c"].IsChanged(), "c must not be dragged in by the catch-up")
 }
 
 // §13.7b: the upward walk and the downward one are duals and MUST agree.
@@ -1040,7 +1040,7 @@ func TestStaleSourcesAgreesWithPropagation(t *testing.T) {
 	assert.Equal(t, p.Releases["app"].PropagatedBump, best, "max() over the rows equals the propagated bump")
 
 	// The cheap tag-level screen agrees here, but is only ever a screen.
-	assert.True(t, p.PossiblyBehind("app", "core"))
+	assert.True(t, p.IsPossiblyBehind("app", "core"))
 	assert.Empty(t, p.StaleSources("utils"))
 }
 
@@ -1056,7 +1056,7 @@ func TestCancelDiscardsPendingWork(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.False(t, p.Releases["app"].Changed(), "the cancel discarded the feat")
+	assert.False(t, p.Releases["app"].IsChanged(), "the cancel discarded the feat")
 }
 
 func TestCancelOnConsumerStopsCatchUp(t *testing.T) {
@@ -1069,7 +1069,7 @@ func TestCancelOnConsumerStopsCatchUp(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.False(t, p.Releases["app"].Changed(), "the pending propagated contribution is discarded")
+	assert.False(t, p.Releases["app"].IsChanged(), "the pending propagated contribution is discarded")
 }
 
 func TestCancelOnPublishedProviderIsANoOp(t *testing.T) {
@@ -1084,7 +1084,7 @@ func TestCancelOnPublishedProviderIsANoOp(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.True(t, p.Releases["app"].Changed(), "the consumer is still owed its release")
+	assert.True(t, p.Releases["app"].IsChanged(), "the consumer is still owed its release")
 	assert.True(t, hasCode(p, CodeEmptyCancel), "W170, got %v", codes(p))
 }
 
@@ -1102,8 +1102,8 @@ func TestHoldIsPlannedButNotReleased(t *testing.T) {
 
 	app := p.Releases["app"]
 	assert.True(t, app.Held)
-	assert.True(t, app.Changed(), "the bump is retained, not discarded")
-	assert.False(t, app.Releasing(), "a held package is excluded from the plan")
+	assert.True(t, app.IsChanged(), "the bump is retained, not discarded")
+	assert.False(t, app.IsReleasing(), "a held package is excluded from the plan")
 	assertVersion(t, v(1, 1, 0), app.Next, "W154 must carry the withheld version")
 	assert.True(t, hasCode(p, CodeHeldVersion), "W154, got %v", codes(p))
 	assert.Equal(t, []string{"app"}, p.Held())
@@ -1118,7 +1118,7 @@ func TestHeldProviderDoesNotBumpDependents(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.True(t, p.Releases["core"].Held)
-	assert.False(t, p.Releases["app"].Changed(),
+	assert.False(t, p.Releases["app"].IsChanged(),
 		"a held package must not bump dependents with work it has not released")
 }
 
@@ -1141,7 +1141,7 @@ func TestReleaseAsHoldThenResume(t *testing.T) {
 		commit{sha: "c4", message: "release(app): ship it\n\nRelease-As: auto\n"},
 	)...).tag("app", "1.0.0", ""), nil).Releases["app"]
 	assert.False(t, resumed.Held, "auto clears the hold")
-	assert.True(t, resumed.Releasing())
+	assert.True(t, resumed.IsReleasing())
 	assertVersion(t, v(1, 1, 0), resumed.Next, "released at the max() of everything accumulated")
 }
 
@@ -1154,7 +1154,7 @@ func TestReleaseAsAutoWithNoHoldWarns(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.True(t, hasCode(p, CodeAutoNoHold), "W158, got %v", codes(p))
-	assert.True(t, p.Releases["app"].Releasing())
+	assert.True(t, p.Releases["app"].IsReleasing())
 }
 
 func TestReleaseAsExactPin(t *testing.T) {
@@ -1169,7 +1169,7 @@ func TestReleaseAsExactPin(t *testing.T) {
 	assert.True(t, app.Pinned)
 	assertVersion(t, v(2, 0, 0), app.Next)
 	assert.Equal(t, ccme.BumpPatch, app.Bump, "the pin sets the version, never the bump")
-	assert.False(t, p.HasErrors(), "got %v", codes(p))
+	assert.False(t, p.IsInvalid(), "got %v", codes(p))
 }
 
 func TestReleaseAsExactPinOntoAPrereleaseLine(t *testing.T) {
@@ -1202,7 +1202,7 @@ func TestReleaseAsPinMajorJump(t *testing.T) {
 
 	p := compute(t, git, nil)
 	assert.True(t, hasCode(p, CodePinMajorJump), "E157, got %v", codes(p))
-	assert.False(t, p.Fatal(), "a bad footer is an authoring mistake, not a repository failure")
+	assert.False(t, p.IsFatal(), "a bad footer is an authoring mistake, not a repository failure")
 }
 
 func TestReleaseAsPinOnMultiplePackages(t *testing.T) {
@@ -1240,7 +1240,7 @@ func TestExactPinIsGuarded(t *testing.T) {
 
 	// The pin is below what the accumulated units require (1.1.0).
 	assert.True(t, hasCode(p, CodePinBelowBump), "E156, got %v", codes(p))
-	assert.True(t, p.HasErrors())
+	assert.True(t, p.IsInvalid())
 }
 
 func TestExactPinMayBeAPrereleaseOfTheRequiredBump(t *testing.T) {
@@ -1259,7 +1259,7 @@ func TestExactPinMayBeAPrereleaseOfTheRequiredBump(t *testing.T) {
 
 	app := p.Releases["app"]
 	assert.False(t, hasCode(p, CodePinBelowBump), "no E156, got %v", codes(p))
-	assert.False(t, p.HasErrors(), "got %v", codes(p))
+	assert.False(t, p.IsInvalid(), "got %v", codes(p))
 	assert.True(t, app.Pinned)
 	assertVersion(t, pre(1, 1, 0, "rc", "0"), app.Next)
 	assert.Equal(t, "rc", app.Channel, "the version states the channel (§11.1)")
@@ -1364,7 +1364,7 @@ func TestTransitionIsIdempotent(t *testing.T) {
 
 	core := p.Releases["core"]
 	assert.Equal(t, "stable", core.Channel)
-	assert.False(t, core.Changed(), "an already-graduated package proposes nothing")
+	assert.False(t, core.IsChanged(), "an already-graduated package proposes nothing")
 	assert.False(t, hasCode(p, CodeGraduateStable),
 		"a stable package does not match a prerelease <from>, so not even W185 arises")
 }
@@ -1380,7 +1380,7 @@ func TestCaretAloneDoesNotDragConsumersOntoATrain(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.Equal(t, "beta", p.Releases["core"].Channel)
-	assert.False(t, p.Releases["app"].Changed(), "the consumer is suppressed by §9.3a")
+	assert.False(t, p.Releases["app"].IsChanged(), "the consumer is suppressed by §9.3a")
 	assert.True(t, hasCode(p, CodeBumpSuppressed), "W208, got %v", codes(p))
 }
 
@@ -1431,7 +1431,7 @@ func TestChannelOnlyReleaseGetsTheEntryPatch(t *testing.T) {
 
 	core := p.Releases["core"]
 	assert.Equal(t, ccme.BumpNone, core.Bump, "a release unit carries no bump")
-	assert.True(t, core.Releasing(), "a channel change is a reason to release")
+	assert.True(t, core.IsReleasing(), "a channel change is a reason to release")
 	assert.True(t, core.ChannelOnly)
 	assertVersion(t, pre(1, 2, 1, "beta", "0"), core.Next, "the entry patch lifts it above 1.2.0")
 	assert.True(t, hasCode(p, CodeChannelEntryPatch), "W204, got %v", codes(p))
@@ -1463,14 +1463,14 @@ func TestChannelAxisConverges(t *testing.T) {
 	history := []commit{{sha: "c1", message: "release(core)%beta: start the train"}}
 
 	first := newFakeGit(history...).tag("core", "1.2.0", "")
-	assert.True(t, compute(t, first, nil).Releases["core"].Releasing(), "moves onto beta")
+	assert.True(t, compute(t, first, nil).Releases["core"].IsReleasing(), "moves onto beta")
 
 	// Having arrived on beta, the same directive proposes nothing.
 	second := newFakeGit(history...).tag("core", "1.2.0", "").tag("core", "1.2.1-beta.0", "c1")
 	core := compute(t, second, nil).Releases["core"]
 	assert.Equal(t, "beta", core.Channel)
-	assert.False(t, core.ChannelChanged(), "it is already there")
-	assert.False(t, core.Releasing(), "nothing further is proposed (G7)")
+	assert.False(t, core.IsChannelChanged(), "it is already there")
+	assert.False(t, core.IsReleasing(), "nothing further is proposed (G7)")
 }
 
 func TestDirectChannelBeatsPropagated(t *testing.T) {
@@ -1519,7 +1519,7 @@ func TestComputedVersionMustExceedTheBaseline(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.True(t, hasCode(p, CodeVersionNotGreater), "E195, got %v", codes(p))
-	assert.True(t, p.Fatal(), "an integrity failure aborts the run")
+	assert.True(t, p.IsFatal(), "an integrity failure aborts the run")
 }
 
 func TestGraduationMustNotGoBackwards(t *testing.T) {
@@ -1533,7 +1533,7 @@ func TestGraduationMustNotGoBackwards(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.True(t, hasCode(p, CodeGraduateNoIncrease), "E185, got %v", codes(p))
-	assert.True(t, p.Fatal())
+	assert.True(t, p.IsFatal())
 }
 
 func TestRedundantChannelDirectiveProposesNothing(t *testing.T) {
@@ -1547,7 +1547,7 @@ func TestRedundantChannelDirectiveProposesNothing(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.True(t, hasCode(p, CodeChannelRedundant), "W199, got %v", codes(p))
-	assert.False(t, p.Releases["core"].Releasing(), "and nothing is released")
+	assert.False(t, p.Releases["core"].IsReleasing(), "and nothing is released")
 }
 
 func TestContainedChannelDirectiveIsSilent(t *testing.T) {
@@ -1563,7 +1563,7 @@ func TestContainedChannelDirectiveIsSilent(t *testing.T) {
 
 	assert.False(t, hasCode(p, CodeChannelRedundant), "no W199, got %v", codes(p))
 	assert.Equal(t, "beta", p.Releases["core"].Channel, "the baseline carries the channel")
-	assert.False(t, p.Releases["core"].Releasing())
+	assert.False(t, p.Releases["core"].IsReleasing())
 }
 
 func TestInertTransitionIsReported(t *testing.T) {
@@ -1573,7 +1573,7 @@ func TestInertTransitionIsReported(t *testing.T) {
 
 	p := compute(t, git, nil)
 	assert.True(t, hasCode(p, CodeTransitionInert), "W207, got %v", codes(p))
-	assert.False(t, p.Releases["core"].ChannelChanged())
+	assert.False(t, p.Releases["core"].IsChannelChanged())
 }
 
 func TestPropagatedTransitionMatchingNothingIsReported(t *testing.T) {
@@ -1633,8 +1633,8 @@ func TestErrorBlastRadius(t *testing.T) {
 	).tag("core", "1.0.0", "")
 
 	p := compute(t, unitScoped, nil)
-	assert.True(t, p.HasErrors(), "E130 was raised")
-	assert.False(t, p.Fatal(), "but a typo does not stop the repository from having a plan")
+	assert.True(t, p.IsInvalid(), "E130 was raised")
+	assert.False(t, p.IsFatal(), "but a typo does not stop the repository from having a plan")
 	assert.Equal(t, ccme.BumpMinor, p.Releases["core"].Bump, "the sibling commit still applies")
 
 	// A tag that cannot be continued from is an integrity failure with no
@@ -1647,7 +1647,7 @@ func TestErrorBlastRadius(t *testing.T) {
 
 	p = compute(t, repoScoped, nil)
 	assert.True(t, hasCode(p, CodeBadPrereleaseTag), "E182, got %v", codes(p))
-	assert.True(t, p.Fatal(), "repository-scoped errors abort whatever the policy")
+	assert.True(t, p.IsFatal(), "repository-scoped errors abort whatever the policy")
 }
 
 // ---------------------------------------------------------------------------
@@ -1679,7 +1679,7 @@ func TestCycleIsRejected(t *testing.T) {
 	// repository-scoped diagnostic, so the code reaches the events stream.
 	p, err := Compute(context.Background(), newFakeGit(), Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
 	require.NoError(t, err)
-	require.True(t, p.Fatal(), "a cyclic graph must make the plan fatal")
+	require.True(t, p.IsFatal(), "a cyclic graph must make the plan fatal")
 	require.Len(t, p.Diagnostics, 1)
 	assert.Equal(t, CodeDependencyCycle, p.Diagnostics[0].Code)
 	assert.Contains(t, p.Diagnostics[0].Message, "cycle")
@@ -1702,7 +1702,7 @@ func TestDuplicateVersionTagsAreRejected(t *testing.T) {
 	pkgs, _ := testPackages()
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
 	require.NoError(t, err)
-	require.True(t, p.Fatal())
+	require.True(t, p.IsFatal())
 	require.Len(t, p.Diagnostics, 1)
 	assert.Equal(t, CodeDuplicateVersionTag, p.Diagnostics[0].Code)
 	assert.Equal(t, "core", p.Diagnostics[0].Pkg)
@@ -1714,7 +1714,7 @@ func TestShallowRepositoryIsRejected(t *testing.T) {
 	pkgs, _ := testPackages()
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
 	require.NoError(t, err)
-	require.True(t, p.Fatal())
+	require.True(t, p.IsFatal())
 	require.Len(t, p.Diagnostics, 1)
 	assert.Equal(t, CodeShallowRepository, p.Diagnostics[0].Code)
 }
@@ -1737,7 +1737,7 @@ func TestPrereleaseTrainConvergesAfterRelease(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	assert.False(t, app.Changed(), "published train content must not re-release")
+	assert.False(t, app.IsChanged(), "published train content must not re-release")
 	assert.Empty(t, p.Releasing(), "the plan must be empty")
 	assertVersion(t, pre(1, 0, 0, "beta", "0"), app.Next,
 		"an unchanged package reports its baseline")
@@ -1761,7 +1761,7 @@ func TestPrereleaseTrainNewWorkContinuesTheCounter(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	assert.True(t, app.Changed(), "new work releases the train")
+	assert.True(t, app.IsChanged(), "new work releases the train")
 	assert.True(t, app.NewWork)
 	assert.Equal(t, ccme.BumpMajor, app.Bump, "max over the whole train, not just the new fix")
 	assertVersion(t, pre(1, 0, 0, "beta", "1"), app.Next, "the counter continues")
@@ -1779,7 +1779,7 @@ func TestTrainGraduationCountsPublishedWork(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	assert.True(t, app.Changed(), "a graduation is a channel change")
+	assert.True(t, app.IsChanged(), "a graduation is a channel change")
 	assert.Equal(t, "beta -> stable", app.ChannelTransition())
 	assertVersion(t, v(1, 0, 0), app.Next,
 		"applyBump(stable baseline, effective) with the train's major, no suffix")
@@ -1798,9 +1798,9 @@ func TestPinDischargedByPrereleaseRelease(t *testing.T) {
 
 	app := p.Releases["app"]
 	assert.False(t, app.Pinned, "the pin was consumed by the release that shipped it")
-	assert.False(t, app.Changed())
+	assert.False(t, app.IsChanged())
 	assert.False(t, hasCode(p, CodePinNotGreater), "no E153, got %v", codes(p))
-	assert.False(t, p.HasErrors())
+	assert.False(t, p.IsInvalid())
 }
 
 func TestCancelCannotRetractPublishedPrerelease(t *testing.T) {
@@ -1837,7 +1837,7 @@ func TestPropagatedTrainWorkConverges(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	assert.False(t, app.Changed(), "published propagated work must not re-release the train")
+	assert.False(t, app.IsChanged(), "published propagated work must not re-release the train")
 	assert.Equal(t, ccme.BumpMinor, app.PropagatedBump, "still computed for the window")
 	assert.Empty(t, app.DueTo,
 		"a delivered blast keeps counting toward the train's target, but it is not a reason to release: reported once, in the release that shipped it")
@@ -1853,7 +1853,7 @@ func TestPropagatedTrainWorkConverges(t *testing.T) {
 
 	p2 := compute(t, git2, nil)
 	app2 := p2.Releases["app"]
-	assert.True(t, app2.Changed(), "fresh propagated work releases the train")
+	assert.True(t, app2.IsChanged(), "fresh propagated work releases the train")
 	assertVersion(t, pre(1, 3, 0, "beta", "1"), app2.Next)
 }
 
@@ -1871,7 +1871,7 @@ func TestReasonSpeaksOfFreshWorkOnly(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	assert.True(t, app.Changed())
+	assert.True(t, app.IsChanged())
 	assert.Equal(t, ccme.BumpMinor, app.OwnBump, "the published feat still decides the train's target")
 	assert.Equal(t, "propagated from core", app.Reason())
 }
@@ -1891,7 +1891,7 @@ func TestCatchUpOnATrainWithPublishedOwnWork(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	require.True(t, app.Changed(), "the published propagation still owes app a release")
+	require.True(t, app.IsChanged(), "the published propagation still owes app a release")
 	assert.Equal(t, ccme.BumpMinor, app.OwnBump, "the published feat still decides the train's target")
 	assert.True(t, app.CatchUp, "the release must be labelled a catch-up")
 	assert.True(t, hasCode(p, CodeCatchUp), "W193, got %v", codes(p))
@@ -1922,7 +1922,7 @@ func TestRecordsSpeakInDirectProviders(t *testing.T) {
 	require.NoError(t, err)
 
 	top := p.Releases["top"]
-	assert.True(t, top.Changed(), "the blast reaches two hops")
+	assert.True(t, top.IsChanged(), "the blast reaches two hops")
 	assert.Equal(t, []string{"lib"}, top.DueTo, "the origin answers why")
 	names := make([]string, 0, len(top.Updates))
 	for _, u := range top.Updates {
@@ -1948,7 +1948,7 @@ func TestDeliveredBlastNamesOnlyTheFreshOrigin(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	assert.True(t, app.Changed(), "the fresh blast releases the train")
+	assert.True(t, app.IsChanged(), "the fresh blast releases the train")
 	assertVersion(t, pre(1, 3, 0, "beta", "1"), app.Next)
 	assert.Equal(t, []string{"utils"}, app.DueTo,
 		"only the origin the baseline has not answered yet")
@@ -1974,7 +1974,7 @@ func TestGraduationUpdatesSpanTheTrain(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	require.True(t, app.Changed(), "the direct directive graduates the train")
+	require.True(t, app.IsChanged(), "the direct directive graduates the train")
 	assertVersion(t, v(1, 3, 0), app.Next)
 	assert.Empty(t, app.DueTo, "the blast was delivered by beta.1 and is not re-reported")
 	require.Len(t, app.Updates, 1, "the stable entry still documents what moved underneath")
@@ -1999,7 +1999,7 @@ func TestCatchUpUpdatesSpanFromTheConsumersLastRelease(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	require.True(t, app.Changed(), "the missed blast is still owed")
+	require.True(t, app.IsChanged(), "the missed blast is still owed")
 	assert.True(t, app.CatchUp, "and it is a catch-up: core is not in the plan")
 	require.Len(t, app.Updates, 1)
 	assert.Equal(t, "core", app.Updates[0].Name)
@@ -2025,7 +2025,7 @@ func TestSpentCancelIsNotReported(t *testing.T) {
 
 	assert.False(t, hasCode(p, CodeEmptyCancel),
 		"a cancel discharged for every package it names is spent, not misaimed; got %v", codes(p))
-	assert.False(t, p.Releases["core"].Changed())
+	assert.False(t, p.Releases["core"].IsChanged())
 }
 
 func TestSpentCancelInsideATrainIsNotReported(t *testing.T) {
@@ -2039,7 +2039,7 @@ func TestSpentCancelInsideATrainIsNotReported(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.False(t, hasCode(p, CodeEmptyCancel), "no W170, got %v", codes(p))
-	assert.False(t, p.Releases["app"].Changed(), "the train is converged")
+	assert.False(t, p.Releases["app"].IsChanged(), "the train is converged")
 }
 
 func TestReleaseUpdatesCarryProviderVersions(t *testing.T) {
@@ -2093,7 +2093,7 @@ func TestPropagatedTransitionGraduatesTheDependant(t *testing.T) {
 
 	assert.Equal(t, ccme.ChannelStable, app.Channel, "the propagated transition graduates the dependant")
 	assert.Equal(t, "core", app.ChannelFrom)
-	require.True(t, app.Releasing())
+	require.True(t, app.IsReleasing())
 	assertVersion(t, v(1, 0, 1), app.Next, "graduated at the train's target")
 	assert.False(t, hasCode(p, CodeChannelNoGraduate), "no W200 for a transition, got %v", codes(p))
 	assert.False(t, hasCode(p, CodeTransitionUnmatched), "the transition matched, got %v", codes(p))
@@ -2111,7 +2111,7 @@ func TestPropagatedTransitionStillSkipsPackagesOffTheTrain(t *testing.T) {
 
 	assert.Equal(t, ccme.ChannelStable, p.Releases["core"].Channel)
 	app := p.Releases["app"]
-	assert.False(t, app.Releasing(), "a stable dependant is not on the train and must not move")
+	assert.False(t, app.IsReleasing(), "a stable dependant is not on the train and must not move")
 	assert.Equal(t, ccme.ChannelStable, app.Channel)
 }
 
@@ -2191,7 +2191,7 @@ func TestUpdatesCoverAReleasingProviderThatPropagatedNothing(t *testing.T) {
 	p := compute(t, git, nil)
 
 	app := p.Releases["app"]
-	require.True(t, app.Releasing())
+	require.True(t, app.IsReleasing())
 	assert.Empty(t, app.DueTo, "nothing propagated: DueTo answers a different question")
 	require.Len(t, app.Updates, 1, "got %+v", app.Updates)
 	assert.Equal(t, "core", app.Updates[0].Name)
@@ -2232,8 +2232,8 @@ func TestUpdatesKeepACatchUpProviderThatIsNotReleasing(t *testing.T) {
 	p := compute(t, git, nil)
 
 	core, app := p.Releases["core"], p.Releases["app"]
-	require.False(t, core.Releasing(), "core already published this work")
-	require.True(t, app.Releasing(), "app is the catch-up")
+	require.False(t, core.IsReleasing(), "core already published this work")
+	require.True(t, app.IsReleasing(), "app is the catch-up")
 	assert.Equal(t, []string{"core"}, app.DueTo)
 	require.Len(t, app.Updates, 1)
 	assert.Equal(t, "core", app.Updates[0].Name)

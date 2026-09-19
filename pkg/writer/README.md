@@ -15,8 +15,8 @@ res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
 })
 // res.Applied, res.Skipped, res.Missing, res.VersionWritten, res.Path
 
-w := writer.New() // the same entry points behind one Writer value,
-                  // mirroring scanner.Scanner, so a caller wiring the two
+w := writer.New() // the same entry points behind one Writerx value,
+                  // mirroring scanner.Scannerx, so a caller wiring the two
                   // halves together can fake the writes in tests
 res, err = w.Rewrite("packages/web/package.json", "1.3.0", nil)
 ```
@@ -81,7 +81,7 @@ read valid YAML aliases.
 
 Use `Relink` to manage the directive that points a dependency at a folder in your repository instead of a registry.
 Only five formats support this directive, while formats like NuGet and Maven name packages without any local redirect
-syntax. Call `SupportsLink` at runtime to check whether a format supports these directives.
+syntax. Call `IsLinkSupported` at runtime to check whether a format supports these directives.
 
 Docker images are named by registry coordinates rather than file paths. You do not manage redirects for Docker
 references because a compose file's `build:` key already defines local build paths.
@@ -183,7 +183,7 @@ consumers do not receive unresolvable local paths.
 Set `Link.Version` to restrict the redirect to a specific required version, which only `go.mod` supports. Other formats
 match on name alone and ignore this field.
 
-Call `SupportsLink` to verify whether a file format supports redirect directives. Unsupported formats make no changes
+Call `IsLinkSupported` to verify whether a file format supports redirect directives. Unsupported formats make no changes
 on disk and report each link in `Skipped`.
 
 Call `Links` to inspect all active redirects across the five supported formats, which allows CI pipelines to verify
@@ -194,9 +194,13 @@ links, err := writer.Links("services/svc/go.mod")   // what the file redirects t
 res, err := writer.DropLinks("services/svc/go.mod") // remove them all
 ```
 
+In `pubspec.yaml`, `Links` and `DropLinks` recognize an override's own `path` field, in block or inline-map form.
+They preserve version constraints, hosted and SDK overrides, and paths nested inside Git sources.
+
 In `package.json`, dispat selects the redirect field by inspecting your manifest. It prioritises existing `resolutions`
 or `pnpm.overrides` fields, checks `packageManager` for yarn or pnpm, and defaults to npm's `overrides`. All three
-managers accept `file:` specifiers, which the scanner reads as local paths.
+managers accept `file:` specifiers, which the scanner reads as local paths. A selected override container that exists
+as a scalar or array is refused without modifying the file.
 
 Be aware of npm's override rule: npm rejects overrides for direct dependencies unless the target specifier matches
 exactly, making it suitable primarily for transitive dependencies. Yarn and pnpm impose no such restriction.
@@ -269,3 +273,9 @@ catalog before it is written) and the workspace's own `pkg/manifest`.
 ## Licence
 
 MIT. See [LICENSE](./LICENSE).
+
+## API naming
+
+Use `Writerx` for the interface and `LocalWriterx` for its filesystem implementation. `New()` returns that interface.
+Predicate names begin with `Is`, such as `IsSupported` and `IsLinkSupported`. Earlier exported names remain available as
+deprecated aliases or forwarding functions for source compatibility.

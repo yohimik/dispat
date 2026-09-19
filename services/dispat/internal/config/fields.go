@@ -45,6 +45,9 @@ func fileFields(dst *File) fields {
 		"configs":               strs(&dst.Configs),
 		"repositoryoverrides":   objMap(&dst.RepositoryOverrides, repositoryOverrideFields),
 		"repositorybaselines":   objList(&dst.RepositoryBaselines, repositoryBaselineFields),
+		"saga":                  str(&dst.Saga),
+		"repository":            str(&dst.Repository),
+		"repositories":          objList(&dst.Repositories, repositoryLinkFields),
 		"scripts":               scriptMap(&dst.Scripts),
 		"spaces":                objMap(&dst.Spaces, spaceConfigFields),
 		"packages":              objMap(&dst.Packages, packageConfigFields),
@@ -322,7 +325,10 @@ func commitFields(dst *CommitConfig) fields {
 }
 
 func repositoryOverrideFields(dst *RepositoryOverrideConfig) fields {
-	return fields{"commit": obj(&dst.Commit, commitFields)}
+	return fields{
+		"enabled": flagPtr(&dst.Enabled),
+		"commit":  obj(&dst.Commit, commitFields),
+	}
 }
 
 func repositoryBaselineFields(dst *RepositoryBaselineConfig) fields {
@@ -331,6 +337,17 @@ func repositoryBaselineFields(dst *RepositoryBaselineConfig) fields {
 		"releasetag": str(&dst.ReleaseTag),
 		"repository": str(&dst.Repository),
 		"revision":   str(&dst.Revision),
+	}
+}
+
+// repositoryLinkFields is one entry of the choreographed `repositories`
+// roster: a peer of this fleet, and where a link to it lives and comes from.
+func repositoryLinkFields(dst *RepositoryLinkConfig) fields {
+	return fields{
+		"name":   str(&dst.Name),
+		"url":    str(&dst.URL),
+		"path":   str(&dst.Path),
+		"branch": str(&dst.Branch),
 	}
 }
 

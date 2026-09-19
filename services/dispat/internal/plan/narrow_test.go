@@ -57,7 +57,7 @@ func TestNarrowReleasesTheSelectionAndDeselectsTheRest(t *testing.T) {
 	p := chainPlan(nil)
 	n := p.Narrow([]string{"a"})
 
-	assert.True(t, n.Clean(), "a provider selected on its own costs nothing")
+	assert.True(t, n.IsClean(), "a provider selected on its own costs nothing")
 	assert.Equal(t, []string{"a"}, n.Release)
 	assert.Equal(t, []string{"a"}, releasing(p))
 	assert.Equal(t, []string{"b", "c"}, p.Deselected())
@@ -73,7 +73,7 @@ func TestNarrowWithholdsAConsumerWhoseProviderIsLeftOut(t *testing.T) {
 
 	require.Len(t, n.Withheld, 1)
 	assert.Equal(t, Withheld{Pkg: "c", Waiting: []string{"b"}}, n.Withheld[0])
-	assert.False(t, n.Clean())
+	assert.False(t, n.IsClean())
 	assert.Empty(t, n.Release, "releasing c before b is the one thing publish order forbids")
 	assert.Empty(t, releasing(p))
 	assert.Equal(t, []string{"b"}, p.Releases["c"].WaitingFor)
@@ -108,7 +108,7 @@ func TestNarrowIgnoresProvidersThatAreNotReleasing(t *testing.T) {
 			tc.provide(p.Releases["b"])
 			n := p.Narrow([]string{"c"})
 
-			assert.True(t, n.Clean())
+			assert.True(t, n.IsClean())
 			assert.Equal(t, []string{"c"}, n.Release)
 			assert.Equal(t, []string{"c"}, releasing(p))
 		})
@@ -134,7 +134,7 @@ func TestNarrowIgnoresSelectedPackagesThatAreNotReleasing(t *testing.T) {
 	p.Releases["a"].Bump, p.Releases["a"].NewWork = ccme.BumpNone, false
 	n := p.Narrow([]string{"a"})
 
-	assert.True(t, n.Clean())
+	assert.True(t, n.IsClean())
 	assert.Empty(t, n.Release)
 	assert.Empty(t, releasing(p))
 }
@@ -148,7 +148,7 @@ func TestNarrowReportsAVersioningGroupItSplits(t *testing.T) {
 	p.Providers = nil // an independent group, so only the split is in play
 	n := p.Narrow([]string{"a", "b"})
 
-	assert.False(t, n.Clean())
+	assert.False(t, n.IsClean())
 	assert.Equal(t, []string{"a", "b"}, n.Release, "the split members still release")
 	require.Len(t, n.Split, 1)
 	assert.Equal(t, SplitGroup{Name: "libs", Releasing: []string{"a", "b"}, LeftBehind: []string{"c"}},
@@ -178,7 +178,7 @@ func TestNarrowWholeGroupSelectedIsClean(t *testing.T) {
 	p := chainPlan(map[string]*model.Space{"a": group("libs"), "b": group("apps"), "c": group("apps")})
 	n := p.Narrow([]string{"a", "b", "c"})
 
-	assert.True(t, n.Clean())
+	assert.True(t, n.IsClean())
 	assert.Empty(t, n.Split)
 	assert.Equal(t, []string{"a", "b", "c"}, n.Release)
 	assert.Empty(t, p.Deselected())

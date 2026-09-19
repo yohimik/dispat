@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -65,6 +66,7 @@ type (
 	WebhookHeader            = public.WebhookHeader
 	RepositoryOverrideConfig = public.RepositoryOverrideConfig
 	RepositoryBaselineConfig = public.RepositoryBaselineConfig
+	RepositoryLinkConfig     = public.RepositoryLinkConfig
 
 	ParserConfig            = public.ParserConfig
 	ParserPropagationConfig = public.ParserPropagationConfig
@@ -79,6 +81,16 @@ const (
 	CommitErrorsWarn  = public.CommitErrorsWarn
 	CommitErrorsError = public.CommitErrorsError
 )
+
+// Values of the polyrepository saga key; see the public package for semantics.
+const (
+	SagaOrchestration = public.SagaOrchestration
+	SagaChoreography  = public.SagaChoreography
+)
+
+// sagaNames lists every accepted saga value in the order an error spells them:
+// the default an absent key keeps, then the choreographed protocol.
+var sagaNames = []string{SagaOrchestration, SagaChoreography}
 
 // Versioning values of a space; see the public package for semantics.
 const (
@@ -114,7 +126,7 @@ var versioningNames = []string{
 func sharedVersioningNames() []string {
 	out := make([]string, 0, len(versioningNames)-1)
 	for _, name := range versioningNames {
-		if model.Versioning(name).Shared() {
+		if model.Versioning(name).IsShared() {
 			out = append(out, name)
 		}
 	}
@@ -948,6 +960,9 @@ func validate(c *File, allowEmpty bool) error {
 	if err := validateWebhooks(c); err != nil {
 		return err
 	}
+	if err := validateSaga(c); err != nil {
+		return err
+	}
 	if c.CommitErrors == "" {
 		c.CommitErrors = CommitErrorsWarn
 	}
@@ -1250,7 +1265,7 @@ func validateWebhookList(where string, hooks []WebhookConfig) error {
 		}
 		hooks[i].Method = method
 		for j, ev := range w.Events {
-			if !public.KnownWebhookPattern(ev) {
+			if !public.IsKnownWebhookPattern(ev) {
 				return fmt.Errorf("%s: events[%d]: unknown event %q (want %s, a wildcard like \"*\" or \"package.*\", or a script-raised name like \"script.deployed\")",
 					label, j, ev, quotedNames(public.WebhookEvents()))
 			}
@@ -1280,7 +1295,7 @@ func validateWebhookList(where string, hooks []WebhookConfig) error {
 		// otherwise render an empty hole on every delivery, forever.
 		var badField string
 		public.ExpandWebhookFormat(w.Format, func(field string) string {
-			if badField == "" && !public.KnownWebhookFormatField(field) {
+			if badField == "" && !public.IsKnownWebhookFormatField(field) {
 				badField = field
 			}
 			return ""
@@ -1295,6 +1310,143 @@ func validateWebhookList(where string, hooks []WebhookConfig) error {
 			}
 			names[w.Name] = i
 		}
+	}
+	return nil
+}
+
+// validateSaga normalizes the polyrepository saga and checks the keys that
+// only the choreographed one gives meaning to: this repository's identity and
+// the roster of its peers.
+//
+// An absent saga is orchestration, and orchestration is exactly today's
+// configuration language, so a file that names no saga leaves here untouched.
+// The identity keys are refused outside choreography rather than ignored: a
+// key that quietly does nothing is how a fleet ends up believing it is linked
+// when nothing reads the link.
+func validateSaga(c *File) error {
+	switch {
+	case c.Saga == "":
+	case strings.EqualFold(c.Saga, SagaOrchestration):
+		c.Saga = SagaOrchestration
+	case strings.EqualFold(c.Saga, SagaChoreography):
+		c.Saga = SagaChoreography
+	default:
+		return fmt.Errorf("saga %q is invalid (want %s)", c.Saga, quotedNames(sagaNames))
+	}
+	if !c.IsChoreographed() {
+		key := ""
+		switch {
+		case c.Repository != "":
+			key = "repository"
+		case len(c.Repositories) > 0:
+			key = "repositories"
+		default:
+			return nil
+		}
+		return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
+			"%s states a choreographed fleet and needs `saga: %s`; the orchestrated saga identifies a repository by its .gitmodules name",
+			key, SagaChoreography))
+	}
+	if strings.TrimSpace(c.Repository) == "" {
+		return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+			"saga %s requires `repository`: this repository's own identity, which its peers link it under", SagaChoreography))
+	}
+	// A choreographed fleet is a polyrepository fleet: its packages belong to
+	// the repository holding them and release under that repository's own
+	// records. Stating the saga states that, so the flag follows the saga and
+	// nobody has to write both. An explicit `--polyrepo=false` still clears it,
+	// which is how one peer is released on its own.
+	c.Polyrepo = true
+	if err := validateRepositoryIdentity("repository", c.Repository); err != nil {
+		return err
+	}
+	// The central keys of the orchestrated saga have no owner here. Refusing
+	// them is a safety boundary rather than tidiness: a fleet with no control
+	// repository cannot honour policy written for one, and silently dropping
+	// it would release under a policy nobody stated.
+	if len(c.Configs) > 0 {
+		return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
+			"saga %s composes through fleet links and cannot import `configs`; every peer carries its own configuration", SagaChoreography))
+	}
+	for _, name := range sortedKeys(c.RepositoryOverrides) {
+		if c.RepositoryOverrides[name].Commit != nil {
+			return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
+				"repositoryOverrides[%q]: commit policy belongs to repository %q's own configuration under saga %s",
+				name, name, SagaChoreography))
+		}
+	}
+	for i := range c.RepositoryBaselines {
+		if strings.EqualFold(c.RepositoryBaselines[i].Repository, ControlRepository) {
+			return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
+				"repositoryBaselines[%d]: repository %q is the orchestrated control identity, which saga %s has no participant for",
+				i, c.RepositoryBaselines[i].Repository, SagaChoreography))
+		}
+	}
+	return validateRepositoryRoster(c)
+}
+
+// validateRepositoryRoster checks the peers a choreographed repository names:
+// one entry per peer, none of them this repository, and a link path that stays
+// inside the repository declaring it.
+func validateRepositoryRoster(c *File) error {
+	seen := make(map[string]int, len(c.Repositories))
+	for i := range c.Repositories {
+		entry := &c.Repositories[i]
+		where := fmt.Sprintf("repositories[%d]", i)
+		if err := validateRepositoryIdentity(where+": name", entry.Name); err != nil {
+			return err
+		}
+		if strings.EqualFold(entry.Name, c.Repository) {
+			return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+				"%s: name %q is this repository; the roster names the other peers of the fleet", where, entry.Name))
+		}
+		fold := strings.ToLower(entry.Name)
+		if previous, duplicate := seen[fold]; duplicate {
+			return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+				"%s: name %q repeats repositories[%d] (identities are compared without case)", where, entry.Name, previous))
+		}
+		seen[fold] = i
+		if err := validateLinkPath(where, entry.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateRepositoryIdentity checks one fleet identity. The character set is
+// what a `.gitmodules` name, a filesystem path and a log field can all carry
+// unambiguously, and the orchestrated control identity stays reserved because
+// the workspace environment hands it to nested commands as a fixed word.
+func validateRepositoryIdentity(where, name string) error {
+	if !repositoryIdentity.MatchString(name) {
+		return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+			"%s: %q is not a repository identity (letters, digits, dot, underscore and hyphen)", where, name))
+	}
+	if strings.EqualFold(name, ControlRepository) {
+		return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+			"%s: %q is reserved for the orchestrated control repository", where, name))
+	}
+	return nil
+}
+
+// repositoryIdentity is the whole vocabulary of a fleet identity.
+var repositoryIdentity = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// validateLinkPath checks where a roster entry puts its link: a
+// repository-relative path that cannot reach outside the repository that
+// declares it. An empty path takes the default, DefaultLinkPath.
+func validateLinkPath(where, path string) error {
+	if path == "" {
+		return nil
+	}
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
+		return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+			"%s: path %q must be relative to the repository root", where, path))
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+			"%s: path %q escapes the repository root", where, path))
 	}
 	return nil
 }
@@ -1341,12 +1493,21 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 	if s.VersionGroup != "" && s.Versioning != "" {
 		return s, fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)
 	}
-	versioning, ok := normalizeVersioning(s.Versioning)
-	if !ok {
-		return s, fmt.Errorf("%s: unknown versioning %q (want %s)",
-			label, s.Versioning, quotedNames(versioningNames))
+	// Beside a group reference the absent versioning stays absent. Normalizing
+	// it would write the default next to the reference, and this same function
+	// validates the next level down — a package's merged override — where the
+	// pair it had just created would be refused as a contradiction nobody
+	// wrote. Nothing downstream needs a value here either: the group's own
+	// mode is what resolveSpaceVersioning answers with, and a layer stating a
+	// versioning of its own supersedes the reference before it is read.
+	if s.VersionGroup == "" {
+		versioning, ok := normalizeVersioning(s.Versioning)
+		if !ok {
+			return s, fmt.Errorf("%s: unknown versioning %q (want %s)",
+				label, s.Versioning, quotedNames(versioningNames))
+		}
+		s.Versioning = versioning
 	}
-	s.Versioning = versioning
 	if err := checkScriptValues(label, s.Scripts); err != nil {
 		return s, err
 	}
@@ -1501,7 +1662,7 @@ func resolveAutoVersion(scope scriptScope, av *public.AutoVersionConfig) *model.
 		NameSubstring:       av.NameMatch == "substring",
 		Match:               av.Match,
 		Range:               av.Range,
-		WriteVersion:        av.WriteVersionEnabled(),
+		WriteVersion:        av.IsWriteVersionEnabled(),
 		SyncLock:            scope.commands(av.SyncLock),
 		SyncLockConcurrency: av.SyncLockConcurrency,
 	}
@@ -1669,16 +1830,27 @@ func Discover(c *File, root string) ([]*model.Package, []model.Dependency, []Exc
 }
 
 func validateDependencies(pkgs []*model.Package, declared []DeclaredDependency) ([]model.Dependency, error) {
-	active, _, err := validateDependenciesForPlan(pkgs, declared)
+	active, _, err := validateDependenciesForPlan(pkgs, declared, nil)
 	return active, err
 }
 
-func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDependency) ([]model.Dependency, []model.Dependency, error) {
+// validateDependenciesForPlan turns declared edges into the active graph.
+// excluded, when present, explains an endpoint a repository exclusion removed,
+// so a dependency on a package of a repository this run left out names that
+// repository instead of reading like a typo.
+func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDependency,
+	excluded func(name string) string) ([]model.Dependency, []model.Dependency, error) {
+	remedy := func(name string) string {
+		if excluded == nil {
+			return ""
+		}
+		return excluded(name)
+	}
 	owner := make(map[string]string, len(pkgs))
 	unversioned := make(map[string]bool)
 	for _, p := range pkgs {
 		owner[strings.ToLower(p.Name)] = p.Name
-		if p.Space != nil && !p.Space.Versioning.Releasable() {
+		if p.Space != nil && !p.Space.Versioning.IsReleasable() {
 			unversioned[strings.ToLower(p.Name)] = true
 		}
 	}
@@ -1689,7 +1861,7 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 	for _, d := range declared {
 		consumer, consumerOK := owner[strings.ToLower(d.Consumer)]
 		if !consumerOK {
-			return nil, nil, fmt.Errorf("config: %s: unknown consumer package %q", d.Source.Label(), d.Consumer)
+			return nil, nil, fmt.Errorf("config: %s: unknown consumer package %q%s", d.Source.Label(), d.Consumer, remedy(d.Consumer))
 		}
 		kind, err := DepKind(d.Kind)
 		if err != nil {
@@ -1705,7 +1877,7 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 			continue
 		}
 		if !providerOK {
-			return nil, nil, fmt.Errorf("config: %s: unknown provider package %q", d.Source.Label(), d.Provider)
+			return nil, nil, fmt.Errorf("config: %s: unknown provider package %q%s", d.Source.Label(), d.Provider, remedy(d.Provider))
 		}
 		if unversioned[strings.ToLower(provider)] && !unversioned[strings.ToLower(consumer)] {
 			return nil, nil, fmt.Errorf(
@@ -1853,7 +2025,7 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 	}
 	// Against every package's release format, not just the alias owner's: a
 	// tag is read back per package, so an alias of A that reads as a tag of B
-	// corrupts B. Readable is ParseVersion rather than Matches: a name that
+	// corrupts B. Readable is ParseVersion rather than IsMatch: a name that
 	// only has the shape carries no version and is skipped when the tags are
 	// read, which is what makes the "v1" convention legal.
 	// One compiled format per package rather than one per package per alias
@@ -2009,12 +2181,12 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
-	force := c.Commit.ForceEnabled()
+	force := c.Commit.IsForceEnabled()
 	resolvedAliases := make([]model.AliasTag, 0, len(sc.AliasTags))
 	for _, a := range sc.AliasTags {
 		resolvedAliases = append(resolvedAliases, model.AliasTag{
 			Format: a.Format, Moving: a.Moving, Channels: a.Channels,
-			Force: a.ForceEnabled(force),
+			Force: a.IsForceEnabled(force),
 		})
 	}
 	return &model.Space{

@@ -108,7 +108,7 @@ func (a *App) releaseStartedEvent(pl *plan.Plan) release.Event {
 	ev := release.Event{Name: release.EventReleaseStarted, Time: time.Now(), Root: a.root}
 	for _, name := range pl.Order {
 		rel := pl.Releases[name]
-		if !rel.Releasing() {
+		if !rel.IsReleasing() {
 			continue
 		}
 		ev.Packages = append(ev.Packages, release.EventPackage{

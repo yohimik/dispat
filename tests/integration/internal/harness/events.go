@@ -48,22 +48,23 @@ func ParseEvents(stdout string) []Event {
 }
 
 // GraphLine returns the plan-graph line for one package: the event naming it
-// that also carries its space and no stage, which is the shape only the graph
-// print has. Its "message" is the verdict the graph rendered — "● changed",
+// at info level that also carries its space and no stage. Debug discovery
+// events also carry package and space, but are not plan verdicts.
+// Its "message" is the verdict the graph rendered — "● changed",
 // "‖ held (Release-As: none)", "⊝ not selected" — so a test can assert on what
 // the operator was actually shown. The zero Event when the package has no
 // graph line at all.
 func GraphLine(events []Event, pkg string) Event {
 	for _, e := range events {
-		if e.Package() == pkg && e.Str("space") != "" && e.Str("stage") == "" {
+		if e.Package() == pkg && e.Str("level") == "info" && e.Str("space") != "" && e.Str("stage") == "" {
 			return e
 		}
 	}
 	return Event{}
 }
 
-// HasCode reports whether any event carries the given diagnostic code.
-func HasCode(events []Event, code string) bool {
+// IsCodePresent reports whether any event carries the given diagnostic code.
+func IsCodePresent(events []Event, code string) bool {
 	for _, e := range events {
 		if e.Code() == code {
 			return true
@@ -72,11 +73,11 @@ func HasCode(events []Event, code string) bool {
 	return false
 }
 
-// HasCodeForPackage reports whether any event carries both the given
+// IsCodePresentForPackage reports whether any event carries both the given
 // diagnostic code and the given package — the form to prefer whenever the
 // diagnostic names one, so a test cannot pass on the right code raised
 // against the wrong package.
-func HasCodeForPackage(events []Event, code, pkg string) bool {
+func IsCodePresentForPackage(events []Event, code, pkg string) bool {
 	for _, e := range events {
 		if e.Code() == code && e.Package() == pkg {
 			return true

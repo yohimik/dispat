@@ -136,7 +136,7 @@ func TestAutoVersionDiagnosticsAndCommitInclude(t *testing.T) {
 	// Run 1: no dependencies edge is configured, so the rewrite of web's
 	// range is optimistic about core's in-flight publish — W221.
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W221", "web"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W221", "web"),
 		"a rewritten edge with no configured counterpart must be reported")
 	staged := r.Git("show", "--name-only", "--format=", "HEAD")
 	assert.Contains(t, staged, "package-lock.json",
@@ -149,9 +149,9 @@ func TestAutoVersionDiagnosticsAndCommitInclude(t *testing.T) {
 		`{"name": "@acme/web", "version": "9.9.9", "dependencies": {"@acme/core": "^0.0.9"}}`)
 	r.Commit("fix(web): regressed manifest committed by hand")
 	res = r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W192", "web"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W192", "web"),
 		"the drifted manifest version must be reported")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W197", "web"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W197", "web"),
 		"the caught-up range must be reported: core released in an earlier run")
 	web, err := os.ReadFile(r.Path("packages", "web", "package.json"))
 	require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestAutoVersionDiagnosticsAndCommitInclude(t *testing.T) {
 	// Run 3: core moves to beta, web releases stable ranging over it — W203.
 	r.CommitEmpty("feat(core)%beta: risky rewrite\n---\nfix(web): stable work of its own")
 	res = r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W203", "web"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W203", "web"),
 		"a stable release ranging over a prerelease provider must be reported")
 }
 
@@ -219,7 +219,7 @@ func TestAutoVersionReplaceStrategy(t *testing.T) {
 	png, err := os.ReadFile(r.Path("packages", "web", "logo.png"))
 	require.NoError(t, err)
 	assert.Contains(t, string(png), "0.0.0", "a binary file is skipped, not corrupted")
-	assert.False(t, harness.HasCodeForPackage(res.Events, "W222", "web"),
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W222", "web"),
 		"both rules matched, so nothing is reported stale")
 }
 
@@ -245,7 +245,7 @@ func TestAutoVersionReplaceRuleMatchedNothing(t *testing.T) {
 	r.Commit("feat(core): bootstrap")
 
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W222", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W222", "core"),
 		"a rule that matched nothing must be reported")
 }
 

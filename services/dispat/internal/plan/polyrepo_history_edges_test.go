@@ -54,7 +54,7 @@ func (g *failingRepositoryHistoryGit) HeadSHA(context.Context) (string, error) {
 	return g.head, nil
 }
 
-func composedHistoryFailureOptions(source gitx.Git) Options {
+func composedHistoryFailureOptions(source gitx.Gitx) Options {
 	return Options{
 		Packages: []*model.Package{{
 			Name: "app", Dir: "/w/source/app", RepoRoot: "/w/source", Repository: "source",
@@ -137,7 +137,7 @@ func TestComposedHistorySurfacesRepositoryReadFailures(t *testing.T) {
 		pl, err := Compute(t.Context(), newFakeGit(), composedHistoryFailureOptions(source))
 		require.NoError(t, err)
 		require.NotNil(t, pl)
-		assert.True(t, pl.Fatal())
+		assert.True(t, pl.IsFatal())
 		assert.True(t, hasCode(pl, CodeDuplicateVersionTag))
 	})
 
@@ -148,7 +148,7 @@ func TestComposedHistorySurfacesRepositoryReadFailures(t *testing.T) {
 		opts.Repositories["source"] = source
 		pl, err := Compute(t.Context(), newFakeGit(), opts)
 		require.NoError(t, err)
-		require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+		require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 		assert.Contains(t, pl.RepositoryInputOrder, "source")
 	})
 }
@@ -237,8 +237,8 @@ func TestPropagatedControlIntentIsAConsumerHistoryInput(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	assert.True(t, pl.Releases["app"].Releasing())
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.True(t, pl.Releases["app"].IsReleasing())
 	assert.Equal(t, "beta", pl.Releases["app"].Channel)
 	assert.ElementsMatch(t, []string{"app-source", "control", "lib-source"}, repositoryInputNames(pl, "app"))
 }

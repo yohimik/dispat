@@ -1,0 +1,46 @@
+# The written-down exceptions to the naming rules in CONTRIBUTING.md, read by
+# `go run ./tools/namingcheck`.
+#
+# One exception per line:
+#
+#     <rule> <path> <name>   # reason
+#
+# rule is predicate, interface or type. path is the repository-relative file,
+# a shell pattern over it, or "*" for every file. name is the declaration, or
+# "*" for every declaration in that file. The reason is required: an exception
+# nobody can explain is a rule nobody has.
+#
+# A reason starting with "pending" means the name should still change; the
+# declaration belongs to a tree another review owns, and this line is the
+# backlog entry. `namingcheck -pending` lists them and the summary counts them
+# separately, so the backlog cannot quietly become the policy.
+#
+# A single declaration may instead carry "//namingcheck:exempt <reason>" in its
+# own doc comment, which is what a one-off external contract should use.
+#
+# Error() string, String() string and Swap(i, j int) need no line: none of them
+# returns a single bool, so no rule applies to them.
+
+# --- Deprecated forwarders -------------------------------------------------
+# These files exist because a published name cannot change. Each declaration
+# forwards to the preferred Is... spelling that lives beside it.
+predicate pkg/*/compatibility.go                               *                      # deprecated forwarder; the preferred Is... name is in the same package
+interface pkg/*/compatibility.go                               *                      # deprecated forwarder; the preferred name is in the same package
+type      pkg/*/compatibility.go                               *                      # deprecated alias; the preferred name is in the same package
+predicate services/dispat/internal/gitx/compatibility.go       *                      # deprecated forwarder kept while internal callers migrate
+interface services/dispat/internal/gitx/compatibility.go       *                      # deprecated forwarder kept while internal callers migrate
+type      services/dispat/internal/gitx/compatibility.go       *                      # deprecated alias kept while internal callers migrate
+
+# --- External contracts ----------------------------------------------------
+# Names a standard-library or cross-package interface fixes for us.
+predicate services/dispat/internal/graph/graph.go              Less                   # sort.Interface, through container/heap
+predicate pkg/config/log.go                                    Enabled                # the Loggerx contract this package declares
+predicate services/dispat/internal/config/logger.go            Enabled                # the pkg/config Loggerx contract
+predicate pkg/config/log.go                                    Flag                   # a KindBool field's value, beside Text, Number and Cause
+
+# --- Pending renames -------------------------------------------------------
+# Empty. A declaration that breaks a rule and should still be renamed gets a
+# line here naming the review that owns the tree it lives in, because a rename
+# there is that review's change to make; `namingcheck -pending` lists them and
+# the summary counts them apart, so the backlog cannot quietly become the
+# policy. The line goes with the rename.

@@ -11,14 +11,14 @@ import (
 )
 
 func TestVersioningShared(t *testing.T) {
-	assert.False(t, VersioningIndependent.Shared())
-	assert.False(t, Versioning("").Shared(), "the zero value is independent")
-	assert.True(t, VersioningFixed.Shared())
-	assert.True(t, VersioningFixedSparse.Shared())
-	assert.True(t, VersioningFixedMajorMinor.Shared())
-	assert.True(t, VersioningFixedMajorMinorSparse.Shared())
-	assert.True(t, VersioningFixedMajor.Shared())
-	assert.True(t, VersioningFixedMajorSparse.Shared())
+	assert.False(t, VersioningIndependent.IsShared())
+	assert.False(t, Versioning("").IsShared(), "the zero value is independent")
+	assert.True(t, VersioningFixed.IsShared())
+	assert.True(t, VersioningFixedSparse.IsShared())
+	assert.True(t, VersioningFixedMajorMinor.IsShared())
+	assert.True(t, VersioningFixedMajorMinorSparse.IsShared())
+	assert.True(t, VersioningFixedMajor.IsShared())
+	assert.True(t, VersioningFixedMajorSparse.IsShared())
 }
 
 // TestVersioningDepthAndSparseness pins the two numbers every other layer
@@ -43,8 +43,8 @@ func TestVersioningDepthAndSparseness(t *testing.T) {
 	for _, c := range cases {
 		t.Run(string(c.mode), func(t *testing.T) {
 			assert.Equal(t, c.depth, c.mode.SharedDepth())
-			assert.Equal(t, c.sparse, c.mode.Sparse())
-			assert.Equal(t, c.depth > 0, c.mode.Shared(), "sharing is having a depth")
+			assert.Equal(t, c.sparse, c.mode.IsSparse())
+			assert.Equal(t, c.depth > 0, c.mode.IsShared(), "sharing is having a depth")
 		})
 	}
 	assert.Equal(t, SharedVersioningDepth, VersioningFixed.SharedDepth(),
@@ -63,8 +63,8 @@ func TestSparseModesPairWithAPlainMode(t *testing.T) {
 	for plain, sparse := range pairs {
 		assert.Equal(t, string(plain)+"Sparse", string(sparse))
 		assert.Equal(t, plain.SharedDepth(), sparse.SharedDepth(), "a pair shares one depth")
-		assert.False(t, plain.Sparse())
-		assert.True(t, sparse.Sparse())
+		assert.False(t, plain.IsSparse())
+		assert.True(t, sparse.IsSparse())
 	}
 }
 
@@ -102,7 +102,7 @@ func TestChannelsAdmit(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, ChannelsAdmit(c.channels, c.channel))
+			assert.Equal(t, c.want, IsChannelAdmitted(c.channels, c.channel))
 		})
 	}
 }
@@ -133,8 +133,8 @@ func TestRecordSpecsGateOnChannels(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			cl := ChangelogSpec{Enabled: c.enabled, Channels: c.channels}
 			gh := GitHubSpec{Enabled: c.enabled, Channels: c.channels}
-			assert.Equal(t, c.want, cl.Records(c.channel))
-			assert.Equal(t, c.want, gh.Records(c.channel), "both specs answer alike")
+			assert.Equal(t, c.want, cl.IsRecorded(c.channel))
+			assert.Equal(t, c.want, gh.IsRecorded(c.channel), "both specs answer alike")
 		})
 	}
 }

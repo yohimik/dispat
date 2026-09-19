@@ -148,7 +148,7 @@ func SelectAsset(rel selfupdate.Release, pattern string, f Fields) (selfupdate.A
 	}
 	var matched []selfupdate.Asset
 	for _, a := range rel.Assets {
-		if globx.Match(want, a.Name) {
+		if globx.IsMatch(want, a.Name) {
 			matched = append(matched, a)
 		}
 	}

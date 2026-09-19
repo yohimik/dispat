@@ -81,16 +81,16 @@ func TestWorkspaceFolderInputsFollowTheirRepositoryOwner(t *testing.T) {
 	require.Contains(t, byName, "imported")
 	assert.Equal(t, "control-central-{name}@{version}", string(byName["central"].Space.TagFormat),
 		"centrally managed source space and package files are ignored through a canonical symlink")
-	assert.True(t, byName["central"].Counts(filepath.ToSlash(filepath.Join(byName["central"].Dir, "ignored.txt"))),
+	assert.True(t, byName["central"].IsCounted(filepath.ToSlash(filepath.Join(byName["central"].Dir, "ignored.txt"))),
 		"a centrally managed source package cannot add its own ignore rules")
 
 	assert.Equal(t, "control-package-{name}@{version}", string(byName["control"].Space.TagFormat),
 		"a control-owned package keeps its in-folder layer")
-	assert.False(t, byName["control"].Counts(filepath.ToSlash(filepath.Join(byName["control"].Dir, "ignored.txt"))),
+	assert.False(t, byName["control"].IsCounted(filepath.ToSlash(filepath.Join(byName["control"].Dir, "ignored.txt"))),
 		"a control-owned package keeps its .dispatignore")
 	assert.Equal(t, "imported-package-{name}@{version}", string(byName["imported"].Space.TagFormat),
 		"an imported package keeps its repository-local space and package layers")
-	assert.False(t, byName["imported"].Counts(filepath.ToSlash(filepath.Join(byName["imported"].Dir, "ignored.txt"))),
+	assert.False(t, byName["imported"].IsCounted(filepath.ToSlash(filepath.Join(byName["imported"].Dir, "ignored.txt"))),
 		"an imported package keeps its repository-local .dispatignore")
 
 	assert.ElementsMatch(t, []ExcludedDir{

@@ -47,7 +47,7 @@ func (ep *Endpoint) subscribes(event string) bool {
 		return true
 	}
 	for _, pattern := range ep.Events {
-		if public.MatchWebhookEvent(pattern, event) {
+		if public.IsWebhookEventAdmitted(pattern, event) {
 			return true
 		}
 	}
@@ -161,7 +161,7 @@ func resolveOne(c public.WebhookConfig, log zerolog.Logger) (Endpoint, bool) {
 			log.Warn().Str("webhook", ep.Name).Err(err).Msg("webhook env condition is invalid, webhook disabled")
 			return ep, false
 		}
-		if !gate.Match(os.Getenv) {
+		if !gate.IsMatch(os.Getenv) {
 			log.Debug().Str("webhook", ep.Name).Str("env", c.Env).
 				Msg("webhook env condition not met, webhook disabled for this run")
 			return ep, false

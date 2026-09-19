@@ -29,6 +29,9 @@ permissions:
 # dispat the changes describe. With 1.0.0 out, the
 # bootstrap resolves the latest stable release itself.
 env:
+  # Missing credentials must fail unattended jobs instead of opening a prompt.
+  GIT_TERMINAL_PROMPT: "0"
+  GIT_ASKPASS: ""
   # Our own modules come directly from the repository, skipping the proxy
   # and the sum database, exactly as in the release workflow: both lag
   # fresh tags, and a tag ever recreated at different content leaves the
@@ -81,10 +84,24 @@ jobs:
       - name: shellcheck
         run: dispat exec shellcheck
 
-      - name: CI selection and test-plan references
-        run: |
-          sh scripts/ci-base-test.sh
-          sh scripts/check-test-plan.sh
+      # The effective-configuration check: the scripts the packages resolve
+      # through the root, space and package ladder, asserted against what the
+      # configuration is meant to say, so a move between layers cannot change
+      # a package's command unnoticed.
+      - name: Effective configuration
+        run: dispat exec config-check
+
+      - name: CI selection
+        run: sh scripts/ci-base-test.sh
+
+      # The two document gates, as a build like the rest: the test plan and the
+      # requirement matrix against the tree, and exported declarations against
+      # the naming rules. The runner carries no Go toolchain and no ripgrep,
+      # which is why both are Go programs run inside the image rather than a
+      # shell sweep run here. scripts/check-test-plan.sh is the same check for
+      # a local shell that does have Go.
+      - name: Test-plan references and naming rules
+        run: dispat exec repo-checks --for pkg:tools --in pkg:tools
 
       # One name swept across the monorepo instead of a module list to keep in
       # step by hand: each Go space defines what `vet` means for its packages,

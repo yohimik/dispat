@@ -58,10 +58,10 @@ func fixture(t *testing.T) Workspace {
 func TestResolveInactiveWithoutTermsOrDir(t *testing.T) {
 	res, err := Resolve(Filter{}, fixture(t))
 	require.NoError(t, err)
-	assert.False(t, res.Active())
+	assert.False(t, res.IsActive())
 	assert.Nil(t, res.Names)
 	assert.Empty(t, res.Description)
-	assert.True(t, res.Has("anything"), "an inactive result selects everything")
+	assert.True(t, res.IsSelected("anything"), "an inactive result selects everything")
 	in := []string{"web", "core"}
 	assert.Equal(t, in, res.Keep(in), "and keeps every name, in the caller's order")
 }
@@ -81,7 +81,7 @@ func TestResolvePackageTerms(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			res, err := Resolve(Filter{Packages: tc.terms}, ws)
 			require.NoError(t, err)
-			assert.True(t, res.Active())
+			assert.True(t, res.IsActive())
 			assert.Equal(t, tc.want, res.Names, "the selection comes out in workspace order")
 		})
 	}
@@ -156,7 +156,7 @@ func TestResolveGroupTerms(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			res, err := Resolve(Filter{Groups: tc.terms}, ws)
 			require.NoError(t, err)
-			assert.True(t, res.Active())
+			assert.True(t, res.IsActive())
 			assert.Equal(t, tc.want, res.Names, "the selection comes out in workspace order")
 		})
 	}
@@ -294,7 +294,7 @@ func TestResolveInfersFromTheInvocationFolder(t *testing.T) {
 			dir := filepath.Join(ws.Root, filepath.FromSlash(tc.dir))
 			res, err := Resolve(Filter{Dir: dir}, ws)
 			require.NoError(t, err)
-			assert.Equal(t, tc.active, res.Active())
+			assert.Equal(t, tc.active, res.IsActive())
 			assert.Equal(t, tc.want, res.Names)
 			assert.Equal(t, tc.descr, res.Description)
 		})
@@ -354,7 +354,7 @@ func TestResolveInferenceSkipsASpaceRootedAtTheMonorepoRoot(t *testing.T) {
 
 	res, err := Resolve(Filter{Dir: ws.Root}, ws)
 	require.NoError(t, err)
-	assert.False(t, res.Active(), "standing at the top must not narrow anything")
+	assert.False(t, res.IsActive(), "standing at the top must not narrow anything")
 
 	res, err = Resolve(Filter{Spaces: []string{"top"}}, ws)
 	require.NoError(t, err)
@@ -409,8 +409,8 @@ func TestResolveMatchesRelativePathsAgainstAbsoluteOnes(t *testing.T) {
 func TestKeepAndHas(t *testing.T) {
 	res, err := Resolve(Filter{Packages: []string{"core", "tool"}}, fixture(t))
 	require.NoError(t, err)
-	assert.True(t, res.Has("core"))
-	assert.False(t, res.Has("web"))
+	assert.True(t, res.IsSelected("core"))
+	assert.False(t, res.IsSelected("web"))
 	assert.Equal(t, []string{"tool", "core"}, res.Keep([]string{"tool", "web", "core"}),
 		"Keep preserves the caller's order, not the workspace's")
 	assert.Empty(t, res.Keep([]string{"web"}))

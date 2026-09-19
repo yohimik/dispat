@@ -27,6 +27,7 @@ const sidebars: SidebarsConfig = {
     {type: 'doc', id: 'comparison', label: 'Beside other release tools'},
     {type: 'doc', id: 'monorepo', label: 'One repository or many'},
     {type: 'doc', id: 'control-repository', label: 'A control repository'},
+    {type: 'doc', id: 'choreographed-repositories', label: 'A choreographed fleet'},
     {
       type: 'category',
       label: 'Examples',

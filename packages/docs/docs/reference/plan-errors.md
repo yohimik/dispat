@@ -64,29 +64,43 @@ tags are stale and the plan would use an outdated view. Run `git pull --rebase` 
 
 ## Polyrepository snapshot and recording diagnostics
 
-These codes apply only when [source-history mode](../control-repository.md#source-history-mode) is active. `E330` through
-`E334` prevent publication from an untrustworthy combined snapshot. Initial failures stop the run; drift found in a
+These codes apply only when [source-history mode](../control-repository.md#source-history-mode) or a
+[choreographed fleet](../choreographed-repositories.md) is active. `E330` through `E334`, `E338` and `E339` prevent
+publication from an untrustworthy combined snapshot. Initial failures stop the run; drift found in a
 package's final pre-publish check fails that package before its publish command and gates its consumers. `E335` reports
 a post-publication record failure, `E336` prevents uncoordinated mutation, and `E337` prevents a publish or record path
 that needs an unavailable branch. Packages already published and durably recorded remain successful, and failed or
-unrecorded providers continue to block dependent work. `W330` does not stop the run.
+unrecorded providers continue to block dependent work. `W330`, `W332` and `W333` do not stop the run.
 
 | Code | Means | What to do |
 |------|-------|------------|
 | `E330` | A linked source is missing, uninitialized, shallow, duplicated, outside the workspace, or checked out at a commit other than the control gitlink; or a relevant planned head, release tag, or pin changes before publication. | Initialize every listed submodule, fetch complete history, and check out the exact commit pinned by control `HEAD`. Remove unplanned Git writes from build and hook commands or use the native record step with its exact exported commit. After a partial recording failure, inspect the durable source result before changing the gitlink. |
 | `E331` | A package or space crosses repository ownership, a source-local path escapes its source repository, or a package is inside an unlisted nested Git repository. | Keep the package path, `src`, manifests, and release writes inside one listed owner. Check symlinks and the closest Git worktree as well as the paths written in the config. |
 | `E332` | Imported declarations conflict, or `repositoryOverrides` does not name one exact `.gitmodules` source identity. | Remove duplicate package/config ownership. Copy the source name exactly, including case, and do not apply a central override to an imported source that owns its own commit policy. |
-| `E333` | A cross-repository consumer boundary is missing, ambiguous, conflicting, or unreachable. | Preserve an ordinary control release checkpoint that identifies the exact consumer tag and matching gitlink transition, or add the required `repositoryBaselines` tuple. Never choose a boundary by date. |
+| `E333` | A cross-repository consumer boundary is missing, ambiguous, conflicting, or unreachable; or an applicable control directive's own gitlink snapshot pins a source revision the active checkout of that source does not contain. | Preserve an ordinary control release checkpoint that identifies the exact consumer tag and matching gitlink transition, or add the required `repositoryBaselines` tuple. Never choose a boundary by date. For the projection case, synchronize the source to include the pin the directive was written against, or select a control revision the checkout already carries. |
 | `E334` | Two incomparable source revisions require one semantic winner. | Add an explicit control directive at a commit whose gitlinks observe the source work it is intended to resolve. Dates, traversal order, repository names, and SHA spelling cannot order separate histories. |
 | `E335` | A source record, source push, or control gitlink checkpoint failed after publication. | Inspect which source tags and revisions reached their remotes and preserve those successes. If the source is durable but its checkpoint failed, explicitly commit or reconcile the ordinary control gitlink to that revision, or restore the intended pin. Do not republish the source or wait for dispat to create the repair. |
-| `E336` | The release lock cannot coordinate every participating repository and standalone package. | Stop competing fleet runs and restore the shared lock configuration before retrying. Independent source locks are insufficient for one combined release. |
+| `E336` | A release lock cannot be acquired or returned, so dispat cannot prove exclusive release ownership is cleanly coordinated. | Stop competing runs. If cleanup failed, inspect the published results and every remote lock before retrying; remove a stranded lock only after confirming its owner has ended. For a fleet, restore the shared lock and local mutation-lock paths in every repository. |
 | `E337` | A configured release branch is absent, or a detached source needs a branch push without `commit.branch`. | Create or select the configured existing branch. Set `commit.branch` when a detached checkout must push a release commit; a tag-only or local no-branch-push operation does not need it. |
 | `W330` | An `external: true` provider is absent from this snapshot, so the edge is inactive. | Include the provider's source config when it should participate. Otherwise confirm the omission is intentional; the edge activates and receives full validation when the provider is present. |
+| `E338` | A [choreographed fleet](../choreographed-repositories.md)'s links do not form a tree: a second route reaches a repository the walk already entered. | Remove one link so exactly one route joins every pair. `dispat compute` proposes the minimum set that connects the roster and never a second route; it reports an existing ring rather than deleting a link, because a link records what a release incorporated. |
+| `E339` | A repository identity cannot be trusted to name one participant: `repository` is missing, reserved, malformed, repeated in a roster or self-naming, or a linked checkout contradicts the name it was linked as or does not state `saga: choreography`. | Spell the identity the same in the peer's own `repository` key, in every roster naming it, and as the submodule name linking it. Keep `control` for the orchestration saga. A fleet link may not cross sagas, so a linked repository must state the choreographed saga itself. |
+| `W331` | The release lock is switched off by an explicit unsafe setting. The warning names every repository releasing without a lock and which setting asked for it. | Confirm nothing else can release these repositories at the same time. Remove `unsafeDisableLock` and `DISPAT_UNSAFE_DISABLE_LOCK` for any repository that has a remote to coordinate through. In a choreographed fleet, a configuration setting speaks for the repository stating it alone. |
+| `W332` | A fleet link is declared by only one of its two repositories. The fleet composes from the declaring end, and a release started at the other end would compose a smaller fleet. | Run `dispat compute --write` from either end. It proposes the missing half and writes the declaration inside the checkout the declaring repository already holds, without fetching anything; commit it in that repository. A declaring repository with no remote has the half withheld with a warning, because the pin has to be a revision the peer can fetch, so add that one by hand. |
+| `W333` | A peer's roster does not name every member of the composed fleet, so a release started there plans without them. | Add the missing `repositories` entries to that peer's own configuration, with the url the fleet is fetched from. `dispat compute` writes them into the owning file once a url is known. |
 
 Boundary lookup is lazy for each consumer tag and repository. A tag-only release remains usable when no applicable
 control intent affects that package. If an explicit control directive does affect it and must be ordered across the
 tag, dispat needs either the ordinary checkpoint association or an explicit tuple whose `repository` is `control`;
 otherwise it reports `E333`.
+
+`E333` also covers the opposite mismatch. A control directive is written against the exact source revisions its own
+commit pinned, so applying it to a source checkout that does not contain that pin would project the intent onto code
+which never carried it. A control repository whose pointer is rewound after the directive landed produces this, and so
+does a source clone that has not fetched the pinned revision. dispat reports it only for a package the directive can
+actually reach in this run: the commit must still be in that package's pending window, undischarged by its baseline,
+and neither cancelled nor held. Differing control and source revisions are ordinary and are not an error by
+themselves.
 
 ## Repository-scoped errors: no correct plan exists
 
@@ -194,6 +208,11 @@ These are not errors, but they read like errors.
 Pass `--log-level debug` to see how the run decided. This shows which config file dispat read, which folder it treated
 as the monorepo root, and which folder each package is scoped to. It also prints the plan's phases as dispat works
 through them.
+
+Debug output also includes one `planning workload` event with elapsed time and counts of history reads, commits,
+ancestry queries and fleet-link reads. Compare these counts when a larger workspace starts planning slowly.
+`canonicalBytes` measures the retained commit payload, not the process's total memory use. These counters are enabled
+only at debug or trace level.
 
 Pass `--log-level trace` to add every git command with its arguments and duration. This prints every dependency edge,
 baseline, window size, computed bump, and next version. It is verbose on purpose. Attach this level if you open an

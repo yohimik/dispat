@@ -28,6 +28,6 @@ func TestMatch(t *testing.T) {
 		{"", "", true},
 		{"", "x", false},
 	} {
-		assert.Equalf(t, tc.want, Match(tc.pattern, tc.s), "Match(%q, %q)", tc.pattern, tc.s)
+		assert.Equalf(t, tc.want, IsMatch(tc.pattern, tc.s), "IsMatch(%q, %q)", tc.pattern, tc.s)
 	}
 }

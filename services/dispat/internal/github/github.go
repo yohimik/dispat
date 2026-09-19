@@ -3,7 +3,7 @@
 
 // Package github creates a GitHub release for every published package that
 // opted in by exporting DISPAT_EXPORT_GITHUB. It is the same changelog data
-// as the file writer, delivered through a different release.ReleaseRecorder
+// as the file writer, delivered through a different release.ReleaseRecorderx
 // implementation.
 package github
 
@@ -236,10 +236,15 @@ func (r *Releaser) do(ctx context.Context, call apiCall) ([]byte, int, error) {
 		if retryAfter > wait {
 			wait = min(retryAfter, maxRetryAfter)
 		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
-			return data, status, err
-		case <-time.After(wait):
+			timer.Stop()
+			// The transient failure is what the reader needs to see, but a
+			// run cancelled while waiting to retry must still answer
+			// context.Canceled to anything asking whether it was interrupted.
+			return data, status, errors.Join(err, ctx.Err())
+		case <-timer.C:
 		}
 	}
 }
@@ -277,6 +282,13 @@ func (r *Releaser) once(ctx context.Context, call apiCall, attempt int) ([]byte,
 	resp, err := client.Do(req)
 	if err != nil {
 		r.logCall(call, 0, attempt, start)
+		// net/http wraps a transport failure with the full request URL. The
+		// endpoint is operator-supplied and a release's error text reaches
+		// hook scripts, so the URL is taken out and the cause kept.
+		var requestErr *neturl.Error
+		if errors.As(err, &requestErr) {
+			err = requestErr.Err
+		}
 		return nil, 0, 0, fmt.Errorf("github: %s: %w", call.What, err)
 	}
 	defer resp.Body.Close()
@@ -296,10 +308,29 @@ func (r *Releaser) once(ctx context.Context, call apiCall, attempt int) ([]byte,
 		return nil, resp.StatusCode, 0, fmt.Errorf("github: %s: response exceeds %d bytes", call.What, limit)
 	}
 	if resp.StatusCode != call.WantStatus && resp.StatusCode != call.TolerateStatus {
-		return nil, resp.StatusCode, retryAfterOf(resp), fmt.Errorf("github: %s: unexpected status %s: %s",
-			call.What, resp.Status, strings.TrimSpace(string(data)))
+		return nil, resp.StatusCode, retryAfterOf(resp), &StatusError{
+			What: call.What, Status: resp.StatusCode, Reason: resp.Status,
+			Body: strings.TrimSpace(string(data)),
+		}
 	}
 	return data, resp.StatusCode, 0, nil
+}
+
+// StatusError is a GitHub response whose status was not the one the call
+// wanted. Typed because the status is the whole difference between the
+// outcomes a caller has to tell apart — a 401 is a token to fix, a 422 is a
+// release that already exists, a 503 is a retry — and reading the number back
+// out of a sentence is not something a caller should have to do. The message
+// is unchanged: it is what a release reports and what hook scripts receive.
+type StatusError struct {
+	What   string // the call, as it appears in the log
+	Status int    // the HTTP status code
+	Reason string // the status line, e.g. "422 Unprocessable Entity"
+	Body   string // the response body, already trimmed and bounded
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("github: %s: unexpected status %s: %s", e.What, e.Reason, e.Body)
 }
 
 // logCall is the one debug line every request attempt leaves behind; status 0
@@ -338,7 +369,7 @@ func (r *Releaser) Verify(ctx context.Context) error {
 	return err
 }
 
-// Record implements release.ReleaseRecorder. A package whose scripts did not
+// Record implements release.ReleaseRecorderx. A package whose scripts did not
 // export plan.GitHubExport gets no GitHub release unless AllPackages is set:
 // the export is the per-package opt-in, and its value names the files to
 // attach.

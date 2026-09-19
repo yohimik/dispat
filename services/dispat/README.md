@@ -1,7 +1,8 @@
 # dispat <img alt="dispat logo" align="right" width="128" height="128" src="../../imgs/logo.png" />
 
 The dispat command line tool is a single Go binary that plans and runs releases of a monorepo, a polyrepo or a single
-package from conventional commits. It runs a release as a saga, so an interrupted one recovers by being run again.
+package from conventional commits. Its saga model records completed publications so a retry can plan unfinished work.
+If publication may have succeeded without a release record, inspect the destination before retrying.
 Read the [repository README](../../README.md) to learn why dispat exists, or follow this guide to start using it.
 
 ## In the terminal
@@ -86,10 +87,11 @@ $ dispat                            # releases core@1.6.0-beta.0; graduate later
   Use `%beta` to start one and `%beta>stable` to graduate it. `Release-As: none` holds a package, `Release-As: auto`
   resumes releases, and `Release-As: 2.0.0` selects an exact version. See
   [release controls](https://dispat.dev/reference/commits/#release-control) for the full syntax.
-- **Keep your existing tools.** Configure shell commands for each package's build and publish stages. dispat reads
-  dependency manifests across Go, npm, Python, Cargo, Docker, mobile, and game projects. `dispat compute` can derive
-  the graph and starting versions from these files. Your existing build caches continue to work inside those commands.
-  [Aqua tool pins](https://dispat.dev/next/editing/manifests/#aqua) are supported in the unreleased version.
+- **Keep your existing tools.** Each package's build and publish stages are shell commands you configure, so any
+  language can release through dispat. Reading manifests is separate and covers a
+  [defined list of formats](https://dispat.dev/editing/manifests/) across Go, npm, Python, Cargo, Docker, mobile, game
+  and [Aqua](https://dispat.dev/editing/manifests/#aqua) projects. `dispat compute` can derive the graph and starting
+  versions from those files. Your existing build caches continue to work inside the commands.
 - **Run release steps separately.** Generate changelogs, create tags, write GitHub releases, or make release commits with
   standalone commands. Preview the plan with `dispat status`, select a subset with `dispat release -p core`, and use
   `dispat if`, `exec`, `autowriter`, or `autoreplacer` to compose your own workflow. The
@@ -105,6 +107,8 @@ needed:
 |------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [Getting started](https://dispat.dev/getting-started/)                                  | Install, first config, commit convention, commands, CI setup.                                                                                                                              |
 | [Concepts](https://dispat.dev/concepts/)                                                | The mental model: baselines, propagation, trains, catch-up, the pipeline.                                                                                                                  |
+| [One repository or many](https://dispat.dev/monorepo/)                                  | What a monorepo and a repository-per-project each cost, which of those costs dispat removes, and how to move between them.                                                                  |
+| [A control repository](https://dispat.dev/control-repository/)                          | Releasing several repositories from one control checkout: source-history mode, pointer-history mode, the layouts, and the recovery rules.                                                   |
 | [Beside other release tools](https://dispat.dev/comparison/)                            | lerna, nx, release-please and changesets on the same failure, and the experiments that observed it.                                                                                        |
 | [Examples](https://dispat.dev/examples/)                                                | A complete setup per package manager, each with real terminal output: npm, pnpm, Docker, Android, the mixed graph, adoption.                                                               |
 | [Manifest tools](https://dispat.dev/editing/manifests/)                        | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                                                                                                          |
@@ -173,8 +177,8 @@ Every release calculates fresh test metrics and publishes them directly to the d
 
 ## On the roadmap
 
-These planned features outline future development. Nothing described below exists yet, and current releases do not
-depend on them.
+These are directions for future development. Each item states what exists today and what is still missing. No current
+release depends on the missing half.
 
 **Managing the tools a release needs.** [`dispat install`](https://dispat.dev/cli/install/) already fetches one tool
 from any GitHub release, verifies it, and installs it, which is the same engine
@@ -185,14 +189,14 @@ What is still missing is the declarative half. Your configuration cannot yet lis
 is a line in a setup script rather than a pinned entry dispat resolves and installs on its own, and a tool published
 anywhere other than a GitHub release still has to be fetched by hand.
 
-**A native package in every ecosystem.** dispat currently ships as a standalone static binary, requiring manual
-installation outside of standard language managers. The goal is to distribute wrapper packages across native
-ecosystems, such as an **npm package** that you can add as a development dependency, pin in your lockfile, and run with
-`npx dispat`. Go projects already support this workflow through `go install`.
+**A native package in every ecosystem.** Two ecosystems already have one. Go projects install the binary with
+`go install`, and Node projects install [`@dispat/bin`](../../packages/cli/README.md) as a development dependency,
+pin it in the lockfile, and run it with `npm exec -- dispat`. Every other ecosystem still installs the standalone
+binary through the install script, the container images, or a release asset.
 
-Each package wrapper will also handle ecosystem-specific workflows, such as npm publish expectations around
-`package.json` and workspace structures. Because dispat already reads and rewrites these manifests, native wrappers
-will fit smoothly into your existing project conventions.
+What is missing is a wrapper for the remaining package managers, each handling its own conventions the way the npm
+distribution handles script approval and lockfile pinning. Because dispat already reads and rewrites these manifests,
+further wrappers can follow the same shape.
 
 ## Projects using dispat
 

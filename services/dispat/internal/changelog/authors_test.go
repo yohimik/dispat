@@ -175,7 +175,7 @@ func TestAuthorsSectionOnANoChangesRelease(t *testing.T) {
 	// whose body says only that the version moved.
 	rel := authored(nil, nil, ada)
 	rel.FixedRide = true
-	require.True(t, rel.NoChanges())
+	require.True(t, rel.IsWithoutChanges())
 
 	assert.Equal(t, "", authorsSection(rel,
 		SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection}).withDefaults()))

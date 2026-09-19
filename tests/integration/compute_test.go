@@ -128,7 +128,7 @@ func TestComputeAmbiguousNameReportsW220(t *testing.T) {
 
 	res := r.Command("compute", "--check")
 	assert.Zero(t, res.Code, "an ambiguous name derives nothing: no drift, exit 0; stdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "W220"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W220"),
 		"the ambiguity must reach the events: %s", res.Stdout)
 }
 
@@ -329,7 +329,7 @@ func TestComputeVersionsItCannotUse(t *testing.T) {
 
 	res := r.Command("compute", "--check")
 	assert.Zero(t, res.Code, "nothing derivable is no drift; stdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W225", "split"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W225", "split"),
 		"the disagreement must reach the events: %s", res.Stdout)
 	assert.NotContains(t, res.Stdout, "+ initial")
 }

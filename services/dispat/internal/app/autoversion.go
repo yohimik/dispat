@@ -129,7 +129,7 @@ func (w *autoVersionWork) needSyncLock(pl *plan.Plan, covered []string) []string
 		if av == nil || len(av.SyncLock) == 0 {
 			continue
 		}
-		if !w.versioner.Changed(name) && av.Reconciles() {
+		if !w.versioner.IsChanged(name) && av.IsReconciling() {
 			w.app.log.Debug().Str("package", name).
 				Msg("syncLock: nothing was reconciled, nothing to regenerate")
 			continue

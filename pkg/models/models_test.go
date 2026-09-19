@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -30,13 +31,13 @@ func TestEnabledDefaults(t *testing.T) {
 	if !(&CommitConfig{Enabled: Bool(true)}).IsEnabled() {
 		t.Error("the release commit can be enabled")
 	}
-	if (&CommitConfig{Enabled: Bool(true)}).PushEnabled() {
+	if (&CommitConfig{Enabled: Bool(true)}).IsPushEnabled() {
 		t.Error("push needs its own flag")
 	}
-	if !(&CommitConfig{Enabled: Bool(true), Push: true}).PushEnabled() {
+	if !(&CommitConfig{Enabled: Bool(true), Push: true}).IsPushEnabled() {
 		t.Error("push follows commit")
 	}
-	if (&CommitConfig{Push: true}).PushEnabled() {
+	if (&CommitConfig{Push: true}).IsPushEnabled() {
 		t.Error("push without commit is inert")
 	}
 	if len((&ChangelogConfig{}).RecordChannels()) != 0 {
@@ -58,23 +59,23 @@ func TestEnabledDefaults(t *testing.T) {
 	if nilChangelog.RecordChannels() != nil || nilGitHub.RecordChannels() != nil {
 		t.Error("an absent object means every default, every channel included")
 	}
-	if !(&CommitConfig{}).VerifyEnabled() {
+	if !(&CommitConfig{}).IsVerifyEnabled() {
 		t.Error("push verification defaults to enabled")
 	}
-	if !(&CommitConfig{Verify: Bool(true)}).VerifyEnabled() {
+	if !(&CommitConfig{Verify: Bool(true)}).IsVerifyEnabled() {
 		t.Error("verification can be stated explicitly")
 	}
-	if (&CommitConfig{Verify: Bool(false)}).VerifyEnabled() {
+	if (&CommitConfig{Verify: Bool(false)}).IsVerifyEnabled() {
 		t.Error("verification can be disabled")
 	}
-	if !(&File{}).UpdateCheckEnabled() {
+	if !(&File{}).IsUpdateCheckEnabled() {
 		t.Error("the update check defaults to enabled")
 	}
-	if (&File{UpdateCheck: Bool(false)}).UpdateCheckEnabled() {
+	if (&File{UpdateCheck: Bool(false)}).IsUpdateCheckEnabled() {
 		t.Error("the update check can be disabled")
 	}
 	var nilFile *File
-	if !nilFile.UpdateCheckEnabled() {
+	if !nilFile.IsUpdateCheckEnabled() {
 		t.Error("an absent file means every default")
 	}
 }
@@ -377,12 +378,69 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 	}
 }
 
+// TestChoreographyModelRoundTrip: the choreographed keys survive the trip a
+// config file makes, and the saga predicate reads the value the file wrote
+// whatever case it wrote it in — an absent key is orchestration, which is what
+// keeps every existing configuration on its current path.
+func TestChoreographyModelRoundTrip(t *testing.T) {
+	f := File{
+		Polyrepo:   true,
+		Saga:       SagaChoreography,
+		Repository: "api",
+		Repositories: []RepositoryLinkConfig{
+			{Name: "sdk", URL: "https://example.test/sdk.git", Path: ".links/sdk", Branch: "main"},
+			{Name: "web"},
+		},
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got File
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, f) {
+		t.Fatalf("round trip:\n got %#v\nwant %#v", got, f)
+	}
+	if !got.IsChoreographed() {
+		t.Errorf("saga %q must read as choreographed", got.Saga)
+	}
+	for _, spelling := range []string{"Choreography", "CHOREOGRAPHY"} {
+		mixed := File{Saga: spelling}
+		if !mixed.IsChoreographed() {
+			t.Errorf("saga %q must read as choreographed", spelling)
+		}
+	}
+	for _, other := range []*File{nil, {}, {Saga: SagaOrchestration}, {Polyrepo: true}} {
+		if other.IsChoreographed() {
+			t.Errorf("saga %#v must not read as choreographed", other)
+		}
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"saga", "repository", "repositories"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("key %q must marshal back into a loadable file: %s", key, data)
+		}
+	}
+	empty, err := json.Marshal(File{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(empty), "saga") || strings.Contains(string(empty), "repositor") {
+		t.Errorf("an orchestrated config must not marshal the choreographed keys: %s", empty)
+	}
+}
+
 func TestPolyrepoModelRoundTrip(t *testing.T) {
 	f := File{
 		Polyrepo: true,
 		Configs:  []string{"../api/dispat.yaml"},
 		RepositoryOverrides: map[string]RepositoryOverrideConfig{
-			"sdk": {Commit: &CommitConfig{Enabled: Bool(true), Push: true, Branch: "main"}},
+			"sdk": {Enabled: Bool(false), Commit: &CommitConfig{Enabled: Bool(true), Push: true, Branch: "main"}},
 		},
 		RepositoryBaselines: []RepositoryBaselineConfig{{
 			Consumer: "web", ReleaseTag: "sdk@1.2.3", Repository: "sdk", Revision: "abc123",
@@ -466,7 +524,7 @@ func TestAutoVersionConfigAccessors(t *testing.T) {
 	if nilAV.IsEnabled() {
 		t.Error("a nil autoVersion block is off")
 	}
-	if nilAV.WriteVersionEnabled() {
+	if nilAV.IsWriteVersionEnabled() {
 		t.Error("a nil block writes nothing")
 	}
 	if !(&AutoVersionConfig{}).IsEnabled() {
@@ -475,42 +533,42 @@ func TestAutoVersionConfigAccessors(t *testing.T) {
 	if (&AutoVersionConfig{Enabled: Bool(false)}).IsEnabled() {
 		t.Error("enabled:false turns the block off")
 	}
-	if !(&AutoVersionConfig{}).WriteVersionEnabled() {
+	if !(&AutoVersionConfig{}).IsWriteVersionEnabled() {
 		t.Error("writeVersion defaults to true")
 	}
-	if (&AutoVersionConfig{WriteVersion: Bool(false)}).WriteVersionEnabled() {
+	if (&AutoVersionConfig{WriteVersion: Bool(false)}).IsWriteVersionEnabled() {
 		t.Error("writeVersion can be disabled")
 	}
 }
 
 func TestGitHubAllPackagesEnabled(t *testing.T) {
 	var nilCfg *GitHubConfig
-	if nilCfg.AllPackagesEnabled() {
+	if nilCfg.IsAllPackagesEnabled() {
 		t.Error("nil config: disabled")
 	}
-	if (&GitHubConfig{}).AllPackagesEnabled() {
+	if (&GitHubConfig{}).IsAllPackagesEnabled() {
 		t.Error("unset field: disabled")
 	}
-	if !(&GitHubConfig{AllPackages: Bool(true)}).AllPackagesEnabled() {
+	if !(&GitHubConfig{AllPackages: Bool(true)}).IsAllPackagesEnabled() {
 		t.Error("set true: enabled")
 	}
-	if (&GitHubConfig{AllPackages: Bool(false)}).AllPackagesEnabled() {
+	if (&GitHubConfig{AllPackages: Bool(false)}).IsAllPackagesEnabled() {
 		t.Error("set false: disabled")
 	}
 }
 
 func TestGitHubDraftEnabled(t *testing.T) {
 	var nilCfg *GitHubConfig
-	if nilCfg.DraftEnabled() {
+	if nilCfg.IsDraftEnabled() {
 		t.Error("nil config: disabled")
 	}
-	if (&GitHubConfig{}).DraftEnabled() {
+	if (&GitHubConfig{}).IsDraftEnabled() {
 		t.Error("unset field: disabled")
 	}
-	if !(&GitHubConfig{Draft: Bool(true)}).DraftEnabled() {
+	if !(&GitHubConfig{Draft: Bool(true)}).IsDraftEnabled() {
 		t.Error("set true: enabled")
 	}
-	if (&GitHubConfig{Draft: Bool(false)}).DraftEnabled() {
+	if (&GitHubConfig{Draft: Bool(false)}).IsDraftEnabled() {
 		t.Error("set false: disabled")
 	}
 }

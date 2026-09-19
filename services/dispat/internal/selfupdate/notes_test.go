@@ -241,12 +241,12 @@ func TestParseNotesShapes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			notes := ParseNotes(tc.body)
 			if tc.sections == nil {
-				assert.True(t, notes.Empty(), "nothing to print")
+				assert.True(t, notes.IsEmpty(), "nothing to print")
 				assert.Empty(t, notes.Render("1.0.0"), "and nothing printed")
 				return
 			}
 			assert.Equal(t, tc.sections, notes.Sections)
-			assert.False(t, notes.Empty())
+			assert.False(t, notes.IsEmpty())
 		})
 	}
 }

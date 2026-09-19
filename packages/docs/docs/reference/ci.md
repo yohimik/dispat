@@ -284,7 +284,7 @@ Pin the version with `--release` for a reproducible job, and put `--check` in fr
 `1` only when the destination does not already hold that exact file, so a warm cache costs no transfer.
 
 dispat itself uses Aqua for the tools shared by its workflows and build probes. `.aqua/aqua.yaml` records crier 1.1.0
-and the `yohimik/tinygo` fork at 0.43.0-net.1, `.aqua/registry.yaml` describes their release assets, and
+and the `yohimik/tinygo` fork at 0.43.0-net.2, `.aqua/registry.yaml` describes their release assets, and
 `.aqua/aqua-checksums.json` records the GitHub release digests. `.aqua/aqua-policy.yaml` admits that local registry.
 [`scripts/install-tools.sh`](https://github.com/yohimik/dispat/blob/main/scripts/install-tools.sh) bootstraps the newest
 Aqua with `dispat install`, then accepts `[all|crier|tinygo] [destination]`. It writes the Aqua executable and the selected tools
@@ -307,6 +307,26 @@ rather than set by a flag, so `GITHUB_TOKEN` alone is deliberately not sent to i
     GITHUB_TOKEN: ${{ secrets.TOOLS_READ_TOKEN }}
   run: dispat install acme/internal-tool --asset 'tool-{os}-{arch}'
 ```
+
+## Git credentials on the runner
+
+dispat drives the `git` on the runner's `PATH` and hands it the environment the job already has. It does not set
+`GIT_TERMINAL_PROMPT` for you. A local run is a place where being asked for a password is the right behaviour: a
+developer standing at the terminal can answer, and answering no on their behalf would turn an answerable question into
+a failure.
+
+A runner is the opposite case. Nobody is there to answer, so a fetch or a push against a remote whose credential is
+missing or expired waits for input that never arrives. dispat bounds its own waits; it does not bound git's prompt.
+Set the variable in the job:
+
+```yaml
+env:
+  GIT_TERMINAL_PROMPT: 0
+```
+
+An unauthenticated remote then fails immediately and the job reports which credential is missing, instead of running
+until the pipeline's own timeout. If the runner image ships a graphical credential helper, set `GIT_ASKPASS` to an
+empty value as well, so the helper cannot answer the prompt with a dialog nobody will see.
 
 ## Somewhere other than GitHub Actions
 

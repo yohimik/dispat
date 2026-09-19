@@ -53,7 +53,22 @@ func rewriteGoMod(path string, edits []Edit) (Result, error) {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
 	sp.setWhole(out)
-	return res, sp.commit(nil)
+	return res, sp.commit(verifyGoMod(path))
+}
+
+// verifyGoMod is the go.mod writers' proof that a rewrite still parses. The
+// formatter accepts a version the module graph does not (a v2 requirement on a
+// path that does not end in /v2 is the ordinary way to meet one), and a
+// go.mod the toolchain refuses is worse than a refused write, so the result is
+// re-read before a byte lands on disk, exactly as every other writer here
+// re-reads its own.
+func verifyGoMod(path string) func(out []byte) error {
+	return func(out []byte) error {
+		if _, err := modfile.Parse(path, out, nil); err != nil {
+			return fmt.Errorf("rewrite produced an unparseable go.mod: %w", err)
+		}
+		return nil
+	}
 }
 
 // linkGoMod adds, repoints and removes replace directives. x/mod's modfile
@@ -113,5 +128,5 @@ func linkGoMod(path string, links []Link) (LinkResult, error) {
 		return res, fmt.Errorf("%s: %w", path, err)
 	}
 	sp.setWhole(out)
-	return res, sp.commit(nil)
+	return res, sp.commit(verifyGoMod(path))
 }

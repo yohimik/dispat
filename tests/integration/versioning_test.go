@@ -55,10 +55,10 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	// Run 1: a change scoped to a alone moves the whole fixed space.
 	r.Commit("feat(a): only a changes")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0"), "the ride shares the version; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"), "the ride shares the version; tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("app@"), "the independent space must not move")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"),
 		"the ride must be explained by W234")
 
 	aLog, err := os.ReadFile(r.Path("packages", "a", "CHANGELOG.md"))
@@ -77,9 +77,9 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	// Run 3: the roles reverse — b's fix rides a to the same next version.
 	r.CommitEmpty("fix(b): now only b changes")
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.1"), "tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "a"))
+	assert.True(t, r.IsTagged("a@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "a"))
 	aLog, err = os.ReadFile(r.Path("packages", "a", "CHANGELOG.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(aLog), "No changes: a version bump", "this time a carries the bump-only entry")
@@ -87,7 +87,7 @@ func TestVersioningFixedSpaceLifecycle(t *testing.T) {
 	// Run 4: the independent space still versions alone.
 	r.CommitEmpty("feat(app): the app moves by itself")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("app@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("a@"), "the fixed space must not move for an app change")
 	assert.Equal(t, 2, r.TagCount("b@"))
 }
@@ -107,9 +107,9 @@ func TestVersioningFixedSparseLifecycle(t *testing.T) {
 	// Run 1: only the changed member releases; no ride, no W234.
 	r.Commit("feat(x): only x changes")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("x@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("x@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("y@"), "sparse: the unchanged member stays put")
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride in sparse mode")
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "no ride in sparse mode")
 
 	// Run 2: converged.
 	r.ReleaseOK()
@@ -119,14 +119,14 @@ func TestVersioningFixedSparseLifecycle(t *testing.T) {
 	// the space's highest baseline (x's 0.1.0), not over y's own history.
 	r.CommitEmpty("fix(y): y catches its first change")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("y@0.1.1"), "y aligns to the space version; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("y@0.1.1"), "y aligns to the space version; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("x@"), "x has no changes and must not move")
 
 	// Run 4: both change — one shared next version for both, then converge.
 	r.CommitEmpty("feat(x): x again\n---\nfix(y): y again")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("x@0.2.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("y@0.2.0"), "both land on the shared version; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("x@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("y@0.2.0"), "both land on the shared version; tags: %v", r.TagList())
 	r.ReleaseOK()
 	assert.Equal(t, 4, len(r.TagList()), "converged")
 }
@@ -146,18 +146,18 @@ func TestVersioningFixedSharedPrereleaseTrain(t *testing.T) {
 
 	r.Commit("feat(a)%beta: start the train from a alone")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0-beta.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0-beta.0"), "one train for the space; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0-beta.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0-beta.0"), "one train for the space; tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(b): more work while on the train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0-beta.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0-beta.1"), "the train continues as one; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0-beta.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0-beta.1"), "the train continues as one; tags: %v", r.TagList())
 
 	r.CommitEmpty("release(a)%beta>stable: graduate the space via one member")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0"), "graduation moves the whole space; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"), "graduation moves the whole space; tags: %v", r.TagList())
 
 	before := len(r.TagList())
 	r.ReleaseOK()
@@ -196,34 +196,34 @@ func TestVersioningFixedRideFailureMidTrainHealsOntoTheTrain(t *testing.T) {
 	// Run 1: the whole group boards the train together.
 	r.Commit("feat(a)%beta: start the train")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("a@0.1.0-beta.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("b@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("a@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("b@0.1.0-beta.0"), "tags: %v", r.TagList())
 
 	// Run 2: the train moves on and b's ride fails, leaving it a beta behind.
 	r.WriteFile("packages/b/FAIL", "x")
 	r.CommitEmpty("fix(a): more work on the train")
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "the failed ride must fail the run\nstdout:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("a@0.1.0-beta.1"), "the changed member continues; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0-beta.1"), "the changed member continues; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("b@"), "the failed ride is not tagged; tags: %v", r.TagList())
 
 	// Run 3: b heals. It must land on the train's current position, not on the
 	// stable core the group has not reached.
 	r.Remove("packages/b/FAIL")
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("b@0.1.0-beta.1"),
+	assert.True(t, r.IsTagged("b@0.1.0-beta.1"),
 		"the laggard joins the train rather than jumping past it; tags: %v", r.TagList())
-	assert.False(t, r.HasTag("b@0.1.0"), "and must not land on a stable version nobody published")
+	assert.False(t, r.IsTagged("b@0.1.0"), "and must not land on a stable version nobody published")
 	assert.Equal(t, 2, r.TagCount("a@"), "a must not be re-released by the catch-up")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"),
 		"the ride is explained, events:\n%s", res.Stdout)
 
 	// Run 4: graduation takes both members off the train together, which only
 	// holds if run 3 really put b on it.
 	r.CommitEmpty("release(a)%beta>stable: graduate the group")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0"), "the healed member graduates with the group; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"), "the healed member graduates with the group; tags: %v", r.TagList())
 
 	before := len(r.TagList())
 	r.ReleaseOK()
@@ -258,9 +258,9 @@ func TestVersioningCrossSpaceDependencyIntoFixedSpace(t *testing.T) {
 	r.Commit("feat(core)^: reaches widgets in the fixed ui space")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("widgets@0.0.1"), "the consumer picks up the propagated patch; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("themes@0.0.1"), "the space mate rides to the shared version; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("widgets@0.0.1"), "the consumer picks up the propagated patch; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("themes@0.0.1"), "the space mate rides to the shared version; tags: %v", r.TagList())
 
 	data, err := os.ReadFile(r.Path("ui", "widgets", envFile))
 	require.NoError(t, err, "the member that picks up core's version runs its version task")
@@ -282,15 +282,15 @@ func TestVersioningFixedHoldAndResume(t *testing.T) {
 	r.Commit("feat(a): work\n---\nrelease(b): keep b back\n\nRelease-As: none\n")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("b@"), "the held member must not release, fixed space or not")
 
 	r.CommitEmpty("release(b): resume\n\nRelease-As: auto\n")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("b@0.1.0"),
+	assert.True(t, r.IsTagged("b@0.1.0"),
 		"the resumed member aligns to the space's published version; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("a@"), "a must not move for b's resume")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"))
 }
 
 // TestVersioningFixedExactPinMovesTheSpace: an exact Release-As naming one
@@ -307,12 +307,12 @@ func TestVersioningFixedExactPinMovesTheSpace(t *testing.T) {
 	r.Commit("feat(a): work\n---\nrelease(a): ship it as 1.0.0\n\nRelease-As: 1.0.0\n")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0"), "the pin moves the whole space; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.0"), "the pin moves the whole space; tags: %v", r.TagList())
 
 	r.CommitEmpty("release(a): try to go backwards\n\nRelease-As: 0.5.0\n")
 	res := r.ReleaseOK() // commitErrors: warn — the rejected pin releases nothing
-	assert.True(t, harness.HasCode(res.Events, "E153"), "the not-greater guard applies to the space version")
+	assert.True(t, harness.IsCodePresent(res.Events, "E153"), "the not-greater guard applies to the space version")
 	assert.Equal(t, 1, r.TagCount("a@"))
 	assert.Equal(t, 1, r.TagCount("b@"))
 }
@@ -341,7 +341,7 @@ func TestVersioningRideExecutesEveryMemberScript(t *testing.T) {
 			r.Commit(tc.commit)
 
 			r.ReleaseOK()
-			assert.True(t, r.HasTag(tc.tag), "the ride shares the version; tags: %v", r.TagList())
+			assert.True(t, r.IsTagged(tc.tag), "the ride shares the version; tags: %v", r.TagList())
 			assert.Equal(t, 2, buildRuns(r), "both members build: the ride is a real release")
 		})
 	}
@@ -365,11 +365,11 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 		r.CommitEmpty("release(b): pin b, later\n\nRelease-As: 0.9.0\n")
 
 		res := r.ReleaseOK()
-		assert.True(t, harness.HasCode(res.Events, "W235"),
+		assert.True(t, harness.IsCodePresent(res.Events, "W235"),
 			"competing pins in one fixed space must be reported")
-		assert.True(t, r.HasTag("a@0.9.0"), "the newest pin moves the space: %v", r.TagList())
-		assert.True(t, r.HasTag("b@0.9.0"), "tags: %v", r.TagList())
-		assert.False(t, r.HasTag("a@0.5.0"), "the losing pin must not also release")
+		assert.True(t, r.IsTagged("a@0.9.0"), "the newest pin moves the space: %v", r.TagList())
+		assert.True(t, r.IsTagged("b@0.9.0"), "tags: %v", r.TagList())
+		assert.False(t, r.IsTagged("a@0.5.0"), "the losing pin must not also release")
 	})
 
 	t.Run("W236_divergent_channels", func(t *testing.T) {
@@ -382,7 +382,7 @@ func TestVersioningFixedConflictResolutions(t *testing.T) {
 		r.Commit("feat(a)%beta: a wants beta\n---\nfeat(b)%rc: b wants rc")
 
 		res := r.ReleaseOK()
-		assert.True(t, harness.HasCode(res.Events, "W236"),
+		assert.True(t, harness.IsCodePresent(res.Events, "W236"),
 			"divergent member channels must be reported")
 		tags := r.TagList()
 		require.Len(t, tags, 2, "both members release once: %v", tags)
@@ -414,29 +414,29 @@ func TestVersioningFixedMajorLifecycle(t *testing.T) {
 	// Run 1: both members start their own lines.
 	r.Commit("feat(a,b): bootstrap both members")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"), "tags: %v", r.TagList())
 
 	// Run 2: a patch is below the shared major, so it moves nobody else.
 	r.CommitEmpty("fix(a): a patch of a's own")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.1.1"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("b@"), "a patch must not move the group")
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride below the shared major")
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "no ride below the shared major")
 
 	// Run 3: a minor is below it too — the two members diverge legitimately.
 	r.CommitEmpty("feat(b): b's own minor")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("b@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.2.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("a@"), "a minor must not move the group either")
 
 	// Run 4: the breaking change reaches the shared part. Both members land on
 	// the same next major, computed over the group's highest baseline (0.2.0).
 	r.CommitEmpty("feat(a)!: a breaking change")
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0"), "the group shares one major; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"),
+	assert.True(t, r.IsTagged("a@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.0"), "the group shares one major; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"),
 		"the ride must be explained by W234")
 	assert.Zero(t, r.TagCount("app@"), "the independent space must not move")
 
@@ -454,7 +454,7 @@ func TestVersioningFixedMajorLifecycle(t *testing.T) {
 	// Run 6: below the shared major the members are free to diverge again.
 	r.CommitEmpty("fix(b): back to b's own line")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("b@1.0.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.1"), "tags: %v", r.TagList())
 	assert.Equal(t, 3, r.TagCount("a@"), "a stays where it is")
 }
 
@@ -473,20 +473,20 @@ func TestVersioningFixedMajorSparseLifecycle(t *testing.T) {
 	// Run 1: a minor is x's own under fixedMajor, and y has nothing pending.
 	r.Commit("feat(x): only x changes")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("x@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("x@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("y@"))
 
 	// Run 2: the shared major moves, and sparse leaves y exactly where it is.
 	r.CommitEmpty("feat(x)!: x breaks compatibility")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("x@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("x@1.0.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("y@"), "sparse: an unchanged member never rides")
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride in a sparse mode")
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "no ride in a sparse mode")
 
 	// Run 3: y's first change joins it to the shared major.
 	r.CommitEmpty("fix(y): y catches its first change")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("y@1.0.0"),
+	assert.True(t, r.IsTagged("y@1.0.0"),
 		"y joins the shared major at the start of its own line; tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("x@"), "x has no changes and must not move")
 
@@ -509,21 +509,21 @@ func TestVersioningFixedMajorMinorLifecycle(t *testing.T) {
 	// Run 1: both start their own patch lines.
 	r.Commit("fix(a,b): bootstrap both members")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.0.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.0.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.0.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.0.1"), "tags: %v", r.TagList())
 
 	// Run 2: a patch stays with its package.
 	r.CommitEmpty("fix(a): a patch of a's own")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.0.2"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@0.0.2"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("b@"), "a patch must not move the group")
 
 	// Run 3: a minor reaches the shared part and moves everyone.
 	r.CommitEmpty("feat(a): a new minor")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0"), "the group shares the minor; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"), "the group shares the minor; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"))
 
 	bLog, err := os.ReadFile(r.Path("packages", "b", "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -532,8 +532,8 @@ func TestVersioningFixedMajorMinorLifecycle(t *testing.T) {
 	// Run 4: a breaking change moves everyone too.
 	r.CommitEmpty("feat(b)!: b breaks compatibility")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.0"), "tags: %v", r.TagList())
 
 	// Run 5: converged.
 	r.ReleaseOK()
@@ -555,26 +555,26 @@ func TestVersioningFixedMajorMinorSparseLifecycle(t *testing.T) {
 	// Run 1: the minor moves the shared part; sparse leaves y behind.
 	r.Commit("feat(x): only x changes")
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("x@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("x@0.1.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("y@"))
-	assert.False(t, harness.HasCode(res.Events, "W234"))
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"))
 
 	// Run 2: y's own patch joins it to the shared major and minor.
 	r.CommitEmpty("fix(y): y catches its first change")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("y@0.1.0"), "y joins the shared prefix; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("y@0.1.0"), "y joins the shared prefix; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("x@"))
 
 	// Run 3: below the shared minor the two are independent again.
 	r.CommitEmpty("fix(x): x's own patch")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("x@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("x@0.1.1"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("y@"), "a patch moves nobody else")
 
 	// Run 4: a minor moves the shared part again, and sparse leaves x behind.
 	r.CommitEmpty("feat(y): y needs a minor")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("y@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("y@0.2.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("x@"), "sparse: x keeps 0.1.1 until it changes")
 
 	// Run 5: converged.
@@ -616,7 +616,7 @@ func TestVersioningAllModesSideBySide(t *testing.T) {
 		"mjs1@0.1.0",
 		"ind1@0.1.0",
 	} {
-		assert.True(t, r.HasTag(tag), "expected %s; tags: %v", tag, r.TagList())
+		assert.True(t, r.IsTagged(tag), "expected %s; tags: %v", tag, r.TagList())
 	}
 	for _, pkg := range []string{"fxs2@", "mms2@", "mj2@", "mjs2@", "ind2@"} {
 		assert.Zerof(t, r.TagCount(pkg), "%s must not have moved for a minor; tags: %v", pkg, r.TagList())
@@ -634,7 +634,7 @@ func TestVersioningAllModesSideBySide(t *testing.T) {
 		"mjs1@1.0.0",
 		"ind1@1.0.0",
 	} {
-		assert.True(t, r.HasTag(tag), "expected %s; tags: %v", tag, r.TagList())
+		assert.True(t, r.IsTagged(tag), "expected %s; tags: %v", tag, r.TagList())
 	}
 	for _, pkg := range []string{"fxs2@", "mms2@", "mjs2@", "ind2@"} {
 		assert.Zerof(t, r.TagCount(pkg), "%s is sparse or independent and never rides; tags: %v", pkg, r.TagList())
@@ -648,7 +648,7 @@ func TestVersioningAllModesSideBySide(t *testing.T) {
 	// a newcomer's first release adopts the group's position instead.
 	r.CommitEmpty("fix(ind2): the independent newcomer's first change")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("ind2@0.0.1"),
+	assert.True(t, r.IsTagged("ind2@0.0.1"),
 		"an independent newcomer versions from its own empty history; tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("ind1@"), "and takes its space mate nowhere; tags: %v", r.TagList())
 
@@ -676,18 +676,18 @@ func TestVersioningFixedMajorSharedTrain(t *testing.T) {
 
 	r.CommitEmpty("feat(a)%beta!: a breaking change on the beta line")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0-beta.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0-beta.0"), "the shared major runs one train; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.0-beta.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.0-beta.0"), "the shared major runs one train; tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(b): more work while on the train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0-beta.1"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0-beta.1"), "the train continues as one; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.0-beta.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.0-beta.1"), "the train continues as one; tags: %v", r.TagList())
 
 	r.CommitEmpty("release(a)%beta>stable: graduate the group via one member")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0"), "the graduation moves the whole group; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.0"), "the graduation moves the whole group; tags: %v", r.TagList())
 
 	before := len(r.TagList())
 	r.ReleaseOK()
@@ -697,7 +697,7 @@ func TestVersioningFixedMajorSharedTrain(t *testing.T) {
 	// versions are.
 	r.CommitEmpty("fix(a)%beta: a's own train")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.1-beta.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.1-beta.0"), "tags: %v", r.TagList())
 	assert.Equal(t, before/2, r.TagCount("b@"), "b is not on a's train; tags: %v", r.TagList())
 }
 
@@ -719,15 +719,15 @@ func TestVersioningPartialPinScope(t *testing.T) {
 	// Crossing the major: the pin names the group's shared part.
 	r.CommitEmpty("release(a): ship the group as 1.0.0\n\nRelease-As: 1.0.0\n")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("a@1.0.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@1.0.0"), "the pin moves the whole group; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@1.0.0"), "the pin moves the whole group; tags: %v", r.TagList())
 
 	// Inside the major: the pin is a's alone.
 	r.CommitEmpty("release(a): a's own next minor\n\nRelease-As: 1.5.0\n")
 	res := r.ReleaseOK()
-	assert.False(t, harness.HasCode(res.Events, "E153"),
+	assert.False(t, harness.IsCodePresent(res.Events, "E153"),
 		"a member's own pin must not be measured against the group: %s", res.Stdout)
-	assert.True(t, r.HasTag("a@1.5.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.5.0"), "tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("b@"), "a pin below the shared major moves nobody else")
 
 	r.ReleaseOK()
@@ -749,21 +749,21 @@ func TestVersioningFixedMajorRideFailureThenAlignment(t *testing.T) {
 
 	r.Commit("feat(a,b): bootstrap both members")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("b@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"), "tags: %v", r.TagList())
 
 	r.WriteFile("packages/b/FAIL", "x")
 	r.CommitEmpty("feat(a)!: a breaks, b's ride is about to fail")
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "the failed ride must fail the run\nstdout:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("a@1.0.0"), "the changed member still publishes; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("a@1.0.0"), "the changed member still publishes; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("b@"), "the failed ride must not be tagged")
 
 	r.Remove("packages/b/FAIL")
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("b@1.0.0"),
+	assert.True(t, r.IsTagged("b@1.0.0"),
 		"the laggard catches up to the shared major; tags: %v", r.TagList())
 	assert.Equal(t, 2, r.TagCount("a@"), "a must not be re-released by the catch-up; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "b"))
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"))
 
 	before := len(r.TagList())
 	r.ReleaseOK()
@@ -792,10 +792,10 @@ func TestVersioningMixedDepthGroupUsesTheDeepest(t *testing.T) {
 
 	r.Commit("feat(a): a minor only the deeper mode shares")
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCode(res.Events, "W237"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W237"),
 		"the mixed depth must be reported: %s", res.Stdout)
-	assert.True(t, r.HasTag("a@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("b@0.1.0"),
+	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("b@0.1.0"),
 		"the group versions at the deepest depth, so the minor is shared; tags: %v", r.TagList())
 
 	r.ReleaseOK()

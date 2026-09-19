@@ -94,13 +94,13 @@ type Result struct {
 	set    map[string]bool
 }
 
-// Active reports whether any narrowing is in force. An inactive result is what
+// IsActive reports whether any narrowing is in force. An inactive result is what
 // no terms and an uninformative folder produce.
-func (r Result) Active() bool { return r.active }
+func (r Result) IsActive() bool { return r.active }
 
-// Has reports whether the named package is selected — true for every name
+// IsSelected reports whether the named package is selected — true for every name
 // when the result is inactive.
-func (r Result) Has(name string) bool {
+func (r Result) IsSelected(name string) bool {
 	if !r.active {
 		return true
 	}
@@ -141,7 +141,7 @@ func Resolve(f Filter, ws Workspace) (Result, error) {
 	for _, term := range f.Packages {
 		matched := false
 		for _, pkg := range ws.Packages {
-			if globx.Match(fold(term), fold(pkg.Name)) {
+			if globx.IsMatch(fold(term), fold(pkg.Name)) {
 				res.set[pkg.Name] = true
 				matched = true
 			}
@@ -309,7 +309,7 @@ func infer(dir string, ws Workspace) Filter {
 func spaceNames(term string, ws Workspace) map[string]bool {
 	out := make(map[string]bool)
 	for name := range ws.Spaces {
-		if globx.Match(fold(term), fold(name)) {
+		if globx.IsMatch(fold(term), fold(name)) {
 			out[name] = true
 		}
 	}
@@ -495,7 +495,7 @@ func sortedSet(m map[string]bool) []string {
 func sortedMatches(term string, candidates []string) []string {
 	var out []string
 	for _, c := range candidates {
-		if globx.Match(fold(term), fold(c)) {
+		if globx.IsMatch(fold(term), fold(c)) {
 			out = append(out, c)
 		}
 	}

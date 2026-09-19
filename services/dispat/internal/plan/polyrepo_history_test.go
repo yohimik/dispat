@@ -59,9 +59,9 @@ func TestComposedHistoryPropagatesSourceWorkAcrossRepositories(t *testing.T) {
 		HistoryStats: stats,
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	assert.True(t, pl.Releases["lib"].Releasing())
-	assert.True(t, pl.Releases["app"].Releasing())
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.True(t, pl.Releases["lib"].IsReleasing())
+	assert.True(t, pl.Releases["app"].IsReleasing())
 	require.NotEmpty(t, pl.Releases["app"].Sources)
 	assert.Equal(t, "a1", pl.Releases["app"].Sources[0].Commit, "public provenance keeps the raw source SHA")
 	assert.EqualValues(t, 1, stats.ReachabilityEdges.Load())
@@ -146,7 +146,7 @@ func TestComposedHistorySharesRepositoryInventoryAndWindows(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	assert.EqualValues(t, 1, stats.TagInventories.Load(), "one complete source tag inventory")
 	assert.EqualValues(t, 1, stats.CommitWindows.Load(), "one immutable source boundary window")
 	assert.EqualValues(t, 1, stats.UniqueCommits.Load(), "the source record is parsed once")
@@ -231,7 +231,7 @@ func TestComposedPrereleaseUsesItsOwnProviderBoundary(t *testing.T) {
 		HistoryStats: stats,
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	app := pl.Releases["app"]
 	require.NotNil(t, app)
 	assert.True(t, app.CatchUp)
@@ -263,7 +263,7 @@ func TestRepositoryBaselineMustNameExactConsumerReleaseTag(t *testing.T) {
 			opts.RepositoryBaselines = []RepositoryBaseline{tc.baseline}
 			pl, err := Compute(context.Background(), control, opts)
 			require.NoError(t, err)
-			require.True(t, pl.Fatal())
+			require.True(t, pl.IsFatal())
 			assert.True(t, hasCode(pl, CodeRepositoryBoundary))
 		})
 	}
@@ -274,7 +274,7 @@ func TestRepositoryBaselineMustNameExactConsumerReleaseTag(t *testing.T) {
 	}
 	pl, err := Compute(context.Background(), control, duplicate)
 	require.NoError(t, err)
-	assert.True(t, pl.Fatal())
+	assert.True(t, pl.IsFatal())
 	assert.True(t, hasCode(pl, CodeRepositoryBoundary))
 }
 
@@ -302,20 +302,20 @@ func TestControlHistoryAdmissionIsLazyAndRequiresAProvenBoundary(t *testing.T) {
 	options.Repositories["control"] = RepositoryHistory{Name: "control", Root: "/w", Git: &withoutIntent, Control: true}
 	pl, err := Compute(context.Background(), &withoutIntent, options)
 	require.NoError(t, err)
-	assert.False(t, pl.Fatal(), "a tag-only source release does not require an artificial control tuple")
+	assert.False(t, pl.IsFatal(), "a tag-only source release does not require an artificial control tuple")
 	assert.ElementsMatch(t, []string{"source"}, repositoryInputNames(pl, "app"),
 		"control history which cannot affect the package is not a publication input")
 
 	options.Repositories["control"] = RepositoryHistory{Name: "control", Root: "/w", Git: control, Control: true}
 	pl, err = Compute(context.Background(), control, options)
 	require.NoError(t, err)
-	assert.True(t, pl.Fatal())
+	assert.True(t, pl.IsFatal())
 	assert.True(t, hasCode(pl, CodeRepositoryBoundary))
 
 	options.RepositoryBaselines = []RepositoryBaseline{{Consumer: "app", ReleaseTag: "app@1.0.0", Repository: "control", Revision: c0}}
 	pl, err = Compute(context.Background(), control, options)
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	assert.Equal(t, v(1, 0, 1), pl.Releases["app"].Next)
 	assert.ElementsMatch(t, []string{"control", "source"}, repositoryInputNames(pl, "app"))
 	encoded, err := json.Marshal(&Plan{
@@ -345,7 +345,7 @@ func TestHeldControlIntentRemainsARepositoryInput(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	assert.Equal(t, []string{"lib"}, pl.Held())
 	assert.ElementsMatch(t, []string{"app-source", "control", "lib-source"}, repositoryInputNames(pl, "app"),
 		"a held provider's control input remains relevant to its consumer")
@@ -365,8 +365,8 @@ func TestCanceledControlIntentRemainsARepositoryInput(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	assert.False(t, pl.Releases["app"].Releasing())
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.False(t, pl.Releases["app"].IsReleasing())
 	assert.ElementsMatch(t, []string{"control", "source"}, repositoryInputNames(pl, "app"),
 		"a cancellation still consults control history even when no work survives")
 }
@@ -431,7 +431,7 @@ func TestDistinctBoundaryWindowsRetainCanonicalPayloadOnce(t *testing.T) {
 		HistoryStats: stats,
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	assert.EqualValues(t, 2, stats.UniqueCommits.Load())
 	assert.EqualValues(t, 3, stats.WindowCommitRefs.Load(), "overlapping windows retain only compact canonical keys")
 	assert.Less(t, stats.CanonicalBytes.Load(), int64(2*len(large)+500), "each unique commit payload is cloned once")
@@ -458,7 +458,7 @@ func TestRepositoryLocalNonPackageScopesAndEqualSHAsStayIsolated(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	for _, diagnostic := range pl.Diagnostics {
 		assert.NotEqual(t, CodeUnknownInclude, diagnostic.Code)
 		assert.NotEqual(t, CodeInertUnit, diagnostic.Code)
@@ -491,13 +491,13 @@ func TestReleaseAsAcrossRepositoriesNeedsCausalControl(t *testing.T) {
 	}
 	pl, err := Compute(context.Background(), control, options)
 	require.NoError(t, err)
-	assert.True(t, pl.Fatal())
+	assert.True(t, pl.IsFatal())
 	assert.True(t, hasCode(pl, CodeRepositoryPrecedence))
 
 	control.control[0].Gitlinks = map[string]gitx.GitlinkTransition{"source": {To: s1}}
 	pl, err = Compute(context.Background(), control, options)
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
 	assert.Equal(t, "2.0.0", pl.Releases["app"].Next.String())
 }
 
@@ -519,7 +519,7 @@ func TestFixedGroupPinsAcrossSourcesNeedCausalControl(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	assert.True(t, pl.Fatal())
+	assert.True(t, pl.IsFatal())
 	assert.True(t, hasCode(pl, CodeRepositoryPrecedence))
 	assert.True(t, hasCode(pl, CodeFixedPinConflict), "legacy fixed-group warning remains alongside fatal causal ambiguity")
 }
@@ -540,9 +540,9 @@ func TestFixedGroupAcrossSourcesWithNoPins(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	assert.False(t, pl.Releases["a"].Releasing())
-	assert.False(t, pl.Releases["b"].Releasing())
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.False(t, pl.Releases["a"].IsReleasing())
+	assert.False(t, pl.Releases["b"].IsReleasing())
 }
 
 func TestFixedGroupCarriesRepositoryInputsWithoutADependencyEdge(t *testing.T) {
@@ -561,8 +561,8 @@ func TestFixedGroupCarriesRepositoryInputsWithoutADependencyEdge(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.False(t, pl.Fatal(), "%v", pl.Diagnostics)
-	require.True(t, pl.Releases["a"].Releasing())
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	require.True(t, pl.Releases["a"].IsReleasing())
 	require.True(t, pl.Releases["b"].FixedRide)
 	assert.Empty(t, pl.Providers["b"], "the shared group is the only relationship")
 	assert.ElementsMatch(t, []string{"source-a", "source-b"}, repositoryInputNames(pl, "b"))

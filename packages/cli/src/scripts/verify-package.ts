@@ -14,7 +14,7 @@ function verify(root = PACKAGE_ROOT) {
     throw new Error(`npm ${pkg.version} and binary ${release.version} must share the cli group's major/minor`)
   }
   for (const key of ['darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64', 'win32-x64', 'win32-arm64']) validateMetadata(release, key)
-  for (const file of ['build/bin/dispat.js', 'build/bin/postinstall.js', 'README.md', 'LICENSE']) {
+  for (const file of ['build/bin/dispat.js', 'build/bin/postinstall.js', 'postinstall.mjs', 'README.md', 'LICENSE']) {
     if (!fs.existsSync(path.join(root, file))) throw new Error(`package is missing ${file}`)
   }
 }

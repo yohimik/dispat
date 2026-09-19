@@ -117,7 +117,7 @@ func TestCorrectionMayNotWidenItsTargetsScope(t *testing.T) {
 	assert.True(t, hasCode(p, CodeCorrectionWidens), "widening must be refused: %v", codes(p))
 	assert.Equal(t, ccme.BumpMinor, p.Releases["core"].Bump, "the target's record survives")
 	assert.Equal(t, []string{"feat: a feature"}, unitsOf(p.Releases["core"]))
-	assert.False(t, p.Releases["utils"].Changed(), "a voided correction contributes nothing")
+	assert.False(t, p.Releases["utils"].IsChanged(), "a voided correction contributes nothing")
 }
 
 func TestCorrectionNarrowsAWildcardScopedRecord(t *testing.T) {
@@ -132,7 +132,7 @@ func TestCorrectionNarrowsAWildcardScopedRecord(t *testing.T) {
 
 		p := compute(t, git, nil)
 
-		assert.False(t, p.Releases["core"].Changed(), "core's record went, and chore bumps nothing")
+		assert.False(t, p.Releases["core"].IsChanged(), "core's record went, and chore bumps nothing")
 		assert.Equal(t, ccme.BumpMinor, p.Releases["utils"].Bump, "the record stands elsewhere")
 		assert.Equal(t, ccme.BumpMinor, p.Releases["app"].Bump)
 	})
@@ -164,7 +164,7 @@ func TestCorrectionWildcardClearsItsScopeOnly(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.False(t, p.Releases["core"].Changed(), "every pending record for core is discarded")
+	assert.False(t, p.Releases["core"].IsChanged(), "every pending record for core is discarded")
 	assert.Equal(t, ccme.BumpMinor, p.Releases["utils"].Bump, "the wildcard reaches only its own scope")
 }
 
@@ -215,7 +215,7 @@ func TestCorrectionScopelessUnitInheritsItsTargetsPackages(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	assert.False(t, p.Releases["utils"].Changed(), "the record was found through the target's scope")
+	assert.False(t, p.Releases["utils"].IsChanged(), "the record was found through the target's scope")
 	assert.False(t, hasCode(p, CodeInertUnit), "a correction is not inert for lacking a scope-set: %v", codes(p))
 }
 
@@ -231,11 +231,11 @@ func TestCorrectionDiscardsPropagatedContributions(t *testing.T) {
 	}
 
 	p := compute(t, base(), nil)
-	assert.False(t, p.Releases["app"].Changed(), "the propagation went with the record")
+	assert.False(t, p.Releases["app"].IsChanged(), "the propagation went with the record")
 
 	uncorrected := compute(t, newFakeGit(history[0]).
 		tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", ""), nil)
-	assert.True(t, uncorrected.Releases["app"].Changed(), "the same history without the correction does propagate")
+	assert.True(t, uncorrected.Releases["app"].IsChanged(), "the same history without the correction does propagate")
 }
 
 func TestCorrectionVoidChains(t *testing.T) {
@@ -289,7 +289,7 @@ func TestCorrectionVoidChains(t *testing.T) {
 		)), nil)
 
 		// D voids C, so C never voids B, so B's delete of A stands.
-		assert.False(t, p.Releases["core"].Changed(), "the innermost delete is back in force")
+		assert.False(t, p.Releases["core"].IsChanged(), "the innermost delete is back in force")
 	})
 }
 
@@ -319,7 +319,7 @@ func TestCorrectionTargetErrors(t *testing.T) {
 			commit{sha: shaA, message: "fix(core): x\n\nEdits: " + shaA},
 		)), nil)
 		assert.True(t, hasCode(p, CodeCorrectionUnknownTarget), "codes: %v", codes(p))
-		assert.False(t, p.Releases["core"].Changed(), "a voided unit contributes nothing")
+		assert.False(t, p.Releases["core"].IsChanged(), "a voided unit contributes nothing")
 	})
 
 	t.Run("a descendant is E210", func(t *testing.T) { // 117
@@ -374,7 +374,7 @@ func TestCorrectionSelectorNamesAUnitOfAMultiUnitCommit(t *testing.T) {
 	p := compute(t, git, nil)
 
 	assert.Equal(t, ccme.BumpMajor, p.Releases["core"].Bump, "the first unit is untouched")
-	assert.False(t, p.Releases["utils"].Changed(), "the second unit's record went")
+	assert.False(t, p.Releases["utils"].IsChanged(), "the second unit's record went")
 }
 
 func TestCorrectionResolvesAnAbbreviatedSHA(t *testing.T) {
@@ -391,7 +391,7 @@ func TestCorrectionResolvesAnAbbreviatedSHA(t *testing.T) {
 		).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
 
 		p := compute(t, git, nil)
-		assert.False(t, p.Releases["core"].Changed(), "the abbreviation found the record")
+		assert.False(t, p.Releases["core"].IsChanged(), "the abbreviation found the record")
 	})
 
 	t.Run("an ambiguous abbreviation is E210", func(t *testing.T) {
@@ -416,7 +416,7 @@ func TestCorrectionResolvesAnAbbreviatedSHA(t *testing.T) {
 		).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
 
 		p := compute(t, &plainGit{inner: inner}, nil)
-		assert.False(t, p.Releases["core"].Changed(), "the prefix scan found the record")
+		assert.False(t, p.Releases["core"].IsChanged(), "the prefix scan found the record")
 	})
 }
 

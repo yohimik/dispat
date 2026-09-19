@@ -31,6 +31,8 @@ type fakeLockGit struct {
 	failures       map[string]error
 	deleteOID      string
 	deleteDeadline bool
+	cancelResolve  context.CancelFunc
+	deleteLive     bool
 }
 
 func (f *fakeLockGit) record(call string) error {
@@ -44,6 +46,9 @@ func (f *fakeLockGit) CreateTag(_ context.Context, _, message, _ string) error {
 }
 
 func (f *fakeLockGit) TagObject(_ context.Context, _ string) (string, error) {
+	if f.cancelResolve != nil {
+		f.cancelResolve()
+	}
 	err := f.record("resolve")
 	return "object-id", err
 }
@@ -52,7 +57,10 @@ func (f *fakeLockGit) PushObjectToTag(_ context.Context, _, _, _ string) error {
 	return f.record("push")
 }
 
-func (f *fakeLockGit) DeleteTag(_ context.Context, _ string) error { return f.record("delete") }
+func (f *fakeLockGit) DeleteTag(ctx context.Context, _ string) error {
+	f.deleteLive = ctx.Err() == nil
+	return f.record("delete")
+}
 
 func (f *fakeLockGit) TagExists(context.Context, string) (bool, error) { return false, nil }
 
@@ -77,7 +85,7 @@ func TestLockRoundTrip(t *testing.T) {
 	require.NoError(t, lock.Acquire(context.Background()))
 	assert.Equal(t, []string{"create", "resolve", "push"}, git.calls)
 
-	lock.Release(context.Background())
+	require.NoError(t, lock.Release(context.Background()))
 	assert.Equal(t, []string{"create", "resolve", "push", "deleteRemote", "delete"}, git.calls,
 		"the remote copy goes first: it is the one another run is waiting on")
 	assert.Equal(t, "object-id", git.deleteOID, "unlock carries the immutable acquisition object")
@@ -132,6 +140,24 @@ func TestLockCreateFailureIsReported(t *testing.T) {
 	assert.Equal(t, []string{"create"}, git.calls)
 }
 
+// TestLockResolveFailureCleansWithALiveContext: resolving the private attempt
+// tag can be the Git call that observes cancellation. The tag still belongs
+// to this acquisition, so its cleanup must outlive that cancellation and stay
+// bounded rather than silently leaving a ref that looks like lock state.
+func TestLockResolveFailureCleansWithALiveContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	git := &fakeLockGit{
+		failures:      map[string]error{"resolve": context.Canceled},
+		cancelResolve: cancel,
+	}
+	lock := newLock(git, &bytes.Buffer{})
+
+	err := lock.Acquire(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, []string{"create", "resolve", "delete"}, git.calls)
+	assert.True(t, git.deleteLive, "attempt cleanup must not inherit the failed run's cancellation")
+}
+
 // TestLockMessagesAreUniquePerAttempt: two runs must never produce the same
 // tag object. If they did, the second push would be a no-op that succeeds and
 // both runs would hold the lock — the one failure mode that would make the
@@ -142,7 +168,7 @@ func TestLockMessagesAreUniquePerAttempt(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, lock.Acquire(ctx))
-	lock.Release(ctx)
+	require.NoError(t, lock.Release(ctx))
 	require.NoError(t, lock.Acquire(ctx))
 
 	require.Len(t, git.messages, 2)
@@ -166,12 +192,15 @@ func TestLockReleaseReportsFailuresAndCarriesOn(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, lock.Acquire(ctx))
-	lock.Release(ctx)
+	err := lock.Release(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no such remote")
 
 	assert.Equal(t, []string{"create", "resolve", "push", "deleteRemote", "delete"}, git.calls,
 		"the local tag goes even when the remote one would not")
 	logged := out.String()
 	assert.Contains(t, logged, `"level":"error"`)
+	assert.Contains(t, logged, `"code":"E336"`)
 	assert.Contains(t, logged, "no such remote")
 	assert.Contains(t, logged, LockTagName)
 	assert.Contains(t, logged, "delete the tag on the remote",
@@ -187,8 +216,8 @@ func TestLockReleaseIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, lock.Acquire(ctx))
-	lock.Release(ctx)
-	lock.Release(ctx)
+	require.NoError(t, lock.Release(ctx))
+	require.NoError(t, lock.Release(ctx))
 
 	assert.Equal(t, 1, strings.Count(strings.Join(git.calls, " "), "deleteRemote"))
 }
@@ -202,9 +231,12 @@ func TestLockLocalDeleteFailureIsReported(t *testing.T) {
 	ctx := context.Background()
 
 	require.NoError(t, lock.Acquire(ctx))
-	lock.Release(ctx)
+	err := lock.Release(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 
 	assert.Contains(t, out.String(), "local release lock tag")
+	assert.Contains(t, out.String(), `"code":"E336"`)
 }
 
 // inspectingLockGit is fakeLockGit plus the optional capability the holder
@@ -242,7 +274,7 @@ func TestLockRefusalNamesTheHolder(t *testing.T) {
 // TestLockRefusalDegradesWithoutAMessage: an unreadable or unparseable tag
 // message costs nothing but the holder line.
 func TestLockRefusalDegradesWithoutAMessage(t *testing.T) {
-	for name, git := range map[string]LockGit{
+	for name, git := range map[string]LockGitx{
 		"no capability": &fakeLockGit{failures: map[string]error{"push": errors.New("refused")}},
 		"read fails":    &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}}, msgErr: errors.New("no fetch")},
 		"not dispat's":  &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}}, message: "some other tag"},
@@ -255,4 +287,74 @@ func TestLockRefusalDegradesWithoutAMessage(t *testing.T) {
 			assert.NotContains(t, err.Error(), "held for")
 		})
 	}
+}
+
+// inspectableLockGit is a fake that can also answer what the remote's lock tag
+// says, which is how an interrupted or unanswered push is told apart from a
+// lock somebody else holds.
+type inspectableLockGit struct {
+	*fakeLockGit
+	remoteMessage func() string
+	probeLive     bool
+}
+
+func (f *inspectableLockGit) RemoteTagMessage(ctx context.Context, _, _ string) (string, error) {
+	f.probeLive = ctx.Err() == nil
+	if f.remoteMessage == nil {
+		return "", errors.New("no remote tag")
+	}
+	return f.remoteMessage(), nil
+}
+
+// TestLockAcquireRecoversALostPushResponse: a push whose answer never came
+// back still put the tag on the remote. The attempt id in the tag's message is
+// this call's alone, so finding it there proves this run owns the lock — and
+// owning it is what lets Release give it back instead of stranding it.
+//
+// The probe runs on a context of its own, so the one case that produces a lost
+// response most often — a cancelled run — is also the one it can answer.
+func TestLockAcquireRecoversALostPushResponse(t *testing.T) {
+	var out bytes.Buffer
+	git := &inspectableLockGit{fakeLockGit: &fakeLockGit{
+		failures: map[string]error{"push": errors.New("connection reset")},
+	}}
+	lock := newLock(git.fakeLockGit, &out)
+	lock.Git = git
+	git.remoteMessage = func() string { return git.messages[0] }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.NoError(t, lock.Acquire(ctx), "the tag is on the remote and carries this attempt")
+	assert.True(t, git.probeLive, "the ownership probe must outlive the run's cancellation")
+	assert.NotContains(t, git.calls, "delete", "an owned attempt keeps its local tag")
+	assert.Contains(t, out.String(), "this run owns the lock")
+
+	lock.Release(context.Background())
+	assert.Contains(t, git.calls, "deleteRemote", "the recovered lock is given back")
+	assert.Equal(t, "object-id", git.deleteOID, "and only while it still names this run's object")
+}
+
+// TestLockAcquireKeepsAnotherRunsLock: the same failed push against a remote
+// whose lock belongs to somebody else is a refusal, and the refusal names the
+// holder rather than adopting the tag.
+func TestLockAcquireKeepsAnotherRunsLock(t *testing.T) {
+	var out bytes.Buffer
+	git := &inspectableLockGit{fakeLockGit: &fakeLockGit{
+		failures: map[string]error{"push": errors.New("rejected")},
+	}}
+	lock := newLock(git.fakeLockGit, &out)
+	lock.Git = git
+	git.remoteMessage = func() string {
+		return "dispat release lock\n\nhost ci-7\npid 4242\nat " +
+			time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano) +
+			"\nattempt dispat-release-lock-attempt-someone-else\n"
+	}
+
+	err := lock.Acquire(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "host ci-7")
+	assert.Contains(t, git.calls, "delete", "a refused attempt removes its own local tag")
+
+	lock.Release(context.Background())
+	assert.NotContains(t, git.calls, "deleteRemote", "another run's lock is never deleted")
 }

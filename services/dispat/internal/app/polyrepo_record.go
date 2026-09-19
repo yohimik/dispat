@@ -23,7 +23,7 @@ import (
 // protects complete commit/tag transactions, not the package dependency graph.
 type repositoryRecord struct {
 	repo   *config.Repository
-	git    *gitx.CLI
+	git    *gitx.LocalGitx
 	hooks  *runHooks
 	branch string
 	mu     sync.Mutex
@@ -55,6 +55,15 @@ type workspaceRecorder struct {
 	gh       *ghDispatch
 	snapshot *workspaceSnapshotGuard
 	pins     *workspacePins
+	// linkPlan is each releasing package's foreign history inputs, which are
+	// the repositories its release has to record fleet links for. Empty for
+	// every saga but the choreographed one.
+	linkPlan map[string][]string
+	// routes memoises each release's settlement route tree. Packages publish
+	// concurrently, so the map is guarded; it is emptied when a new plan
+	// arrives and goes with the recorder at the end of the run.
+	routesMu sync.Mutex
+	routes   map[*plan.Release]*settlePlan
 }
 
 func (a *App) newWorkspaceRecorder() *workspaceRecorder {
@@ -62,7 +71,7 @@ func (a *App) newWorkspaceRecorder() *workspaceRecorder {
 	for i := range a.workspace.Repositories {
 		repo := &a.workspace.Repositories[i]
 		log := a.log.With().Str("repository", repo.Name).Logger()
-		g := &gitx.CLI{Dir: repo.Root, Log: log}
+		g := &gitx.LocalGitx{Dir: repo.Root, Log: log, LinkPaths: linkPathsOf(repo)}
 		if repo.Commit != nil {
 			g.Name, g.Email = repo.Commit.Name, repo.Commit.Email
 		}
@@ -76,47 +85,119 @@ func (a *App) newWorkspaceRecorder() *workspaceRecorder {
 	return w
 }
 
-func (w *workspaceRecorder) acquire(ctx context.Context) (func(), error) {
-	type heldLock struct {
-		repository *repositoryRecord
-		lock       *release.Lock
-	}
+// heldLock is one repository's acquired remote lock, with the position it was
+// taken at. The index is carried rather than recomputed so the release log can
+// be read against the acquisition log without counting lines.
+type heldLock struct {
+	repository *repositoryRecord
+	lock       *release.Lock
+	order      int
+}
+
+// acquire takes every participating repository's remote release lock before
+// the run plans anything, and returns the function that gives them back.
+//
+// The order is the repositories' exact `.gitmodules` identities sorted by
+// name, with the reserved control identity holding no special position: two
+// runs of the same fleet therefore contend in the same order and cannot
+// deadlock against each other. Cleanup runs in reverse, so a failure partway
+// down the list unwinds exactly what it took. A repository this run excluded
+// is not in w.ordered at all and is never locked.
+func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 	var held []heldLock
-	unlock := func() {
+	unlock := func() error {
+		var cleanupErrs []error
 		for i := len(held) - 1; i >= 0; i-- {
 			owned := held[i]
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			releaseMutation, err := owned.repository.git.AcquireMutation(cleanupCtx)
 			if err != nil {
-				owned.repository.git.Log.Error().Err(err).Str("code", "E336").Str("remedy", release.LockRemedy).
+				owned.repository.git.Log.Error().Err(err).Str("code", "E336").Int("order", owned.order).
+					Str("remedy", release.LockRemedy).
 					Msg("unable to acquire local mutation lock for fleet lock cleanup")
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("repository %s: acquiring local mutation lock for release-lock cleanup: %w",
+					owned.repository.repo.Name, err))
 			} else {
-				owned.lock.Release(cleanupCtx)
+				owned.repository.git.Log.Debug().Int("order", owned.order).
+					Msg("releasing repository release lock")
+				if err := owned.lock.Release(cleanupCtx); err != nil {
+					cleanupErrs = append(cleanupErrs, fmt.Errorf("repository %s: %w", owned.repository.repo.Name, err))
+				}
 				releaseMutation()
 			}
 			cancel()
 		}
+		return config.WithDiagnostic("E336", errors.Join(cleanupErrs...))
+	}
+	var bypassed []string
+	byConfig := false
+	for _, r := range w.ordered {
+		if skipped, byConfiguration := w.lockBypass(r); skipped {
+			bypassed = append(bypassed, r.repo.Name)
+			byConfig = byConfig || byConfiguration
+		}
+	}
+	if len(bypassed) > 0 {
+		warnLockDisabled(w.app.log, bypassed, byConfig)
 	}
 	for _, r := range w.ordered {
-		if w.app.lockDisabled() || r.repo.Config.UnsafeDisableLock {
-			r.git.Log.Debug().Msg("fleet release lock disabled by configured policy")
+		if skipped, _ := w.lockBypass(r); skipped {
 			continue
 		}
-		r.git.Log.Debug().Msg("acquiring repository release lock")
-		lock := &release.Lock{Git: r.git, Remote: r.remote(), Log: r.git.Log}
+		order := len(held)
+		r.git.Log.Debug().Int("order", order).Msg("acquiring repository release lock")
+		lockRemote, resolveErr := lockDestination(ctx, r.git, r.remote(), r.git.Log)
+		if resolveErr != nil {
+			_ = unlock()
+			return nil, config.WithDiagnostic("E336", fmt.Errorf(
+				"E336: repository %s: resolve release-lock push destination: %w", r.repo.Name, resolveErr))
+		}
+		lock := &release.Lock{Git: r.git, Remote: lockRemote, Log: r.git.Log}
 		releaseMutation, err := r.git.AcquireMutation(ctx)
 		if err == nil {
 			err = lock.Acquire(ctx)
 			releaseMutation()
 		}
 		if err != nil {
-			unlock()
+			w.app.log.Error().Err(err).Str("code", "E336").Str("repository", r.repo.Name).
+				Int("order", order).Int("released", len(held)).
+				Msg("fleet release lock acquisition failed; releasing the locks this run owns")
+			_ = unlock()
 			return nil, config.WithDiagnostic("E336", fmt.Errorf("E336: repository %s: acquiring fleet release lock: %w", r.repo.Name, err))
 		}
-		held = append(held, heldLock{repository: r, lock: lock})
+		held = append(held, heldLock{repository: r, lock: lock, order: order})
 	}
-	w.app.log.Debug().Int("repositories", len(w.ordered)).Int("locks", len(held)).Msg("fleet release locks acquired")
+	w.app.log.Debug().Int("repositories", len(w.ordered)).Int("locks", len(held)).
+		Strs("order", w.repositoryNames()).Msg("fleet release locks acquired")
 	return unlock, nil
+}
+
+// lockBypass decides whether one repository releases without its remote lock,
+// and whether a configuration said so.
+//
+// An orchestrated fleet releases under one repository's policy: the control
+// configuration is the run's configuration, and its unsafeDisableLock speaks
+// for every source. A choreographed peer owns its policy as it owns everything
+// else, so the entry's setting speaks for the entry alone and one peer cannot
+// unlock another. The environment kill switch is the invocation's, and applies
+// to whatever that invocation releases.
+func (w *workspaceRecorder) lockBypass(r *repositoryRecord) (bypassed, byConfig bool) {
+	if r.repo.Config != nil && r.repo.Config.UnsafeDisableLock {
+		return true, true
+	}
+	if !w.app.workspace.IsChoreographed() && w.app.cfg.UnsafeDisableLock {
+		return true, true
+	}
+	return lockDisabledByEnv(), false
+}
+
+// repositoryNames lists the participating repositories in lock order.
+func (w *workspaceRecorder) repositoryNames() []string {
+	names := make([]string, 0, len(w.ordered))
+	for _, r := range w.ordered {
+		names = append(names, r.repo.Name)
+	}
+	return names
 }
 
 func (w *workspaceRecorder) selectedRepositories(pl *plan.Plan) map[string]bool {
@@ -128,8 +209,25 @@ func (w *workspaceRecorder) selectedRepositories(pl *plan.Plan) map[string]bool 
 				selected[config.ControlRepository] = true
 			}
 		}
+		// A repository this release settles a fleet link in commits and
+		// pushes exactly as the control repository of an orchestrated fleet
+		// does, so it is verified with the same checks.
+		for _, name := range w.routeRepositories(rel) {
+			selected[name] = true
+		}
 	}
 	return selected
+}
+
+// routeRepositories names the repositories one release records fleet links
+// in, its own included. A route that cannot be planned answers nothing here;
+// settling reports it, once, where it happens.
+func (w *workspaceRecorder) routeRepositories(rel *plan.Release) []string {
+	route, err := w.planLinks(rel)
+	if err != nil || route == nil {
+		return nil
+	}
+	return route.order
 }
 
 func (w *workspaceRecorder) verify(ctx context.Context, pl *plan.Plan) error {
@@ -164,7 +262,7 @@ func (w *workspaceRecorder) verifyPlannedHeads(pl *plan.Plan) error {
 
 func (w *workspaceRecorder) verifySelected(ctx context.Context, selected map[string]bool) error {
 	for _, r := range w.ordered {
-		if !selected[r.repo.Name] || !r.repo.Commit.PushEnabled() {
+		if !selected[r.repo.Name] || !r.repo.Commit.IsPushEnabled() {
 			continue
 		}
 		branch, err := r.git.CurrentBranch(ctx)
@@ -180,7 +278,7 @@ func (w *workspaceRecorder) verifySelected(ctx context.Context, selected map[str
 			}
 		}
 		r.branch = branch
-		if r.repo.Commit.VerifyEnabled() {
+		if r.repo.Commit.IsVerifyEnabled() {
 			if err := r.git.VerifyRemote(ctx, r.remote()); err != nil {
 				return fmt.Errorf("repository %s: %w", r.repo.Name, err)
 			}
@@ -202,7 +300,7 @@ func (w *workspaceRecorder) verifySelected(ctx context.Context, selected map[str
 }
 
 func requireReleaseCommitBranch(ctx context.Context, r *repositoryRecord, dirs []string) error {
-	if !r.repo.Commit.PushEnabled() || r.branch != "" {
+	if !r.repo.Commit.IsPushEnabled() || r.branch != "" {
 		return nil
 	}
 	dirty, err := r.git.DirtyPaths(ctx, dirs)
@@ -233,14 +331,17 @@ func (w *workspaceRecorder) verifyPublishBranch(ctx context.Context, rel *plan.R
 	if err != nil {
 		return err
 	}
-	if sourceCommit && source.repo.Commit.PushEnabled() && source.branch == "" {
+	if sourceCommit && source.repo.Commit.IsPushEnabled() && source.branch == "" {
 		return config.WithDiagnostic("E337", fmt.Errorf("E337: repository %s is detached; set commit.branch before publishing a release that needs a source commit", source.repo.Name))
 	}
-	if source.repo.Control {
+	if source.repo.Control || w.app.workspace.IsChoreographed() {
+		// A choreographed fleet writes no checkpoint after the record. What
+		// its release needs from other repositories is settled before
+		// publication, and reports its own E337 there.
 		return nil
 	}
 	control := w.byName[config.ControlRepository]
-	if control == nil || !control.repo.Commit.PushEnabled() || control.branch != "" {
+	if control == nil || !control.repo.Commit.IsPushEnabled() || control.branch != "" {
 		return nil
 	}
 	control.mu.Lock()
@@ -308,7 +409,7 @@ func (w *workspaceRecorder) prepare(ctx context.Context, pl *plan.Plan) error {
 			continue
 		}
 		r.git.Log.Debug().Str("revision", r.expectedHead).
-			Bool("commit", r.repo.Commit.IsEnabled()).Bool("push", r.repo.Commit.PushEnabled()).
+			Bool("commit", r.repo.Commit.IsEnabled()).Bool("push", r.repo.Commit.IsPushEnabled()).
 			Msg("preparing repository release records")
 		r.hooks.env = env
 		owner := &App{root: r.repo.Root, cfg: r.repo.Config, git: r.git, log: r.git.Log}
@@ -402,14 +503,18 @@ func (w *workspaceRecorder) validateInclude(r *repositoryRecord, path string) (s
 		return "", fmt.Errorf("repository %s commit.include path %q escapes its owner", r.repo.Name, path)
 	}
 	for _, other := range w.ordered {
-		// The control root contains every source checkout. Its containment
-		// does not change ownership of a path already inside this source.
-		if other == r || (other.repo.Control && !r.repo.Control) {
+		if other == r {
 			continue
 		}
 		otherRoot, err := resolveWritePath(other.repo.Root)
 		if err != nil {
 			return "", err
+		}
+		// A repository that contains this one does not own a path already
+		// inside it: the control checkout of an orchestrated fleet holds every
+		// source, and a choreographed peer sits inside whatever linked it.
+		if pathWithin(otherRoot, ownerRoot) {
+			continue
 		}
 		if pathWithin(resolved, otherRoot) || pathWithin(otherRoot, resolved) {
 			return "", fmt.Errorf("repository %s commit.include path %q spans repository %s", r.repo.Name, path, other.repo.Name)
@@ -453,11 +558,11 @@ func validateRecordPath(r *repositoryRecord, rel *plan.Release) error {
 	}
 	path, err := resolveWritePath(filepath.Join(rel.Pkg.Dir, filepath.FromSlash(file)))
 	if err != nil {
-		return err
+		return fmt.Errorf("repository %s package %s changelog path %q: %w", r.repo.Name, rel.Pkg.Name, file, err)
 	}
 	ownerRoot, err := resolveWritePath(r.repo.Root)
 	if err != nil {
-		return err
+		return fmt.Errorf("repository %s root %q: %w", r.repo.Name, r.repo.Root, err)
 	}
 	if filepath.IsAbs(file) || !pathWithin(ownerRoot, path) {
 		return fmt.Errorf("repository %s package %s changelog path %q escapes its owner", r.repo.Name, rel.Pkg.Name, file)
@@ -481,6 +586,10 @@ type recordHooks struct {
 
 func (h recordHooks) run(hooks *runHooks, name string, refs []string) {
 	if h.ctx.Err() != nil || h.observer.Err() != nil {
+		if len(refs) > 0 {
+			hooks.log.Debug().Str("hook", name).
+				Msg("cancelled: skipping record hook while the native record completes")
+		}
 		return
 	}
 	hooks.run(h.ctx, name, refs)
@@ -518,6 +627,8 @@ func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *
 	}
 	var failures []error
 	if err := (&changelog.Dispatcher{Log: r.git.Log}).Record(ctx, rel); err != nil {
+		r.git.Log.Warn().Err(err).Str("package", rel.Pkg.Name).
+			Msg("source changelog record failed; the release tag decides the run outcome")
 		failures = append(failures, err)
 	}
 	var pin string
@@ -536,7 +647,7 @@ func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *
 		return fmt.Errorf("repository %s tag %s: %w", r.repo.Name, rel.TagName(), errors.Join(failures...))
 	}
 	r.admitRecordedRelease(pinned)
-	if r.repo.Commit.PushEnabled() {
+	if r.repo.Commit.IsPushEnabled() {
 		hooks.run(r.hooks, "beforePush", r.repo.Config.Run.BeforePush)
 		tags := []string{rel.TagName()}
 		var moving []string
@@ -547,16 +658,23 @@ func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *
 				tags = append(tags, alias.Name)
 			}
 		}
-		unlock, err := gitx.AcquireMutations(ctx, r.git)
-		if err == nil {
-			err = verifyPinnedSource(ctx, r, pinned, rel.TagName())
-		}
-		if err == nil {
-			err = r.git.PushRelease(ctx, r.remote(), r.branch, tags, moving)
-		}
-		if unlock != nil {
-			unlock()
-		}
+		// The lock is held across the verification and the push and released
+		// before the afterPush hook, which is a user script. An inner
+		// function rather than unlock calls on each path: this runs inside a
+		// release, and a panic that left the flock held would make every
+		// later dispat process in this repository wait for a descriptor
+		// nobody will close.
+		err := func() error {
+			unlock, err := gitx.AcquireMutations(ctx, r.git)
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			if err := verifyPinnedSource(ctx, r, pinned, rel.TagName()); err != nil {
+				return err
+			}
+			return r.git.PushRelease(ctx, r.remote(), r.branch, tags, moving)
+		}()
 		if err != nil {
 			return fmt.Errorf("repository %s tag %s: source push failed; repair source records before advancing the control gitlink: %w", r.repo.Name, rel.TagName(), errors.Join(append(failures, err)...))
 		}
@@ -586,39 +704,44 @@ func (w *workspaceRecorder) commit(ctx context.Context, r *repositoryRecord, dir
 
 func (w *workspaceRecorder) commitWithHooks(ctx context.Context, hooks recordHooks, r *repositoryRecord, dirs []string, rel *plan.Release, tag string) (string, error) {
 	hooks.run(r.hooks, "beforeCommit", r.repo.Config.Run.BeforeCommit)
-	unlock, err := gitx.AcquireMutations(ctx, r.git)
-	if err != nil {
-		return "", err
-	}
-	if err := r.verifyExpectedHead(ctx); err != nil {
-		unlock()
-		return "", err
-	}
-	dirs, err = w.includeDirs(r, dirs)
 	msg := renderCommitMessage(r.repo.Commit.MessageFormat, []string{rel.Pkg.Name}, []string{tag})
 	var committed bool
-	if err == nil {
-		err = requireReleaseCommitBranch(ctx, r, dirs)
-	}
-	if err == nil {
-		committed, err = r.git.CommitDirs(ctx, dirs, msg)
-	}
 	var pin string
-	if err == nil {
-		pin, err = r.git.HeadSHA(ctx)
-		if err == nil {
-			r.expectedHead = pin
+	// The lock covers the head check, the commit and the pin that records it,
+	// and is released before the afterCommit and postCommit hooks, which are
+	// user scripts. An inner function rather than an unlock on each path: a
+	// panic between the two would hold the flock for the life of the process
+	// and every later dispat in this repository would wait for it.
+	err := func() error {
+		unlock, err := gitx.AcquireMutations(ctx, r.git)
+		if err != nil {
+			return err
 		}
-	}
-	if err == nil {
-		err = w.pins.remember(r.repo.Name, rel, pin)
-	}
-	unlock()
+		defer unlock()
+		if err := r.verifyExpectedHead(ctx); err != nil {
+			return err
+		}
+		dirs, err = w.includeDirs(r, dirs)
+		if err != nil {
+			return err
+		}
+		if err := requireReleaseCommitBranch(ctx, r, dirs); err != nil {
+			return err
+		}
+		if committed, err = r.git.CommitDirs(ctx, dirs, msg); err != nil {
+			return err
+		}
+		if pin, err = r.git.HeadSHA(ctx); err != nil {
+			return err
+		}
+		r.expectedHead = pin
+		return w.pins.remember(r.repo.Name, rel, pin)
+	}()
 	if err != nil {
 		return "", err
 	}
 	if committed {
-		r.git.Log.Info().Str("message", msg).Msg("created release commit")
+		r.git.Log.Info().Str("commitMessage", msg).Msg("created release commit")
 	}
 	hooks.run(r.hooks, "afterCommit", r.repo.Config.Run.AfterCommit)
 	hooks.run(r.hooks, "postCommit", r.repo.Config.Run.PostCommit)
@@ -723,7 +846,7 @@ func (w *workspaceRecorder) checkpointWithHooks(ctx context.Context, hooks recor
 	defer control.mu.Unlock()
 	pin := rel.ExportedCommit()
 	controlPin, err := w.commitCheckpoint(ctx, hooks, control, source, rel, tag)
-	if err == nil && controlPin != "" && control.repo.Commit.PushEnabled() {
+	if err == nil && controlPin != "" && control.repo.Commit.IsPushEnabled() {
 		hooks.run(control.hooks, "beforePush", control.repo.Config.Run.BeforePush)
 		var unlock func()
 		unlock, err = gitx.AcquireMutations(ctx, source.git, control.git)
@@ -774,15 +897,17 @@ func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, hooks recordHo
 		return "", err
 	}
 	if !needed {
+		control.git.Log.Debug().Str("repository", source.repo.Name).Str("revision", rel.ExportedCommit()).
+			Msg("control gitlink already names the recorded source revision; no checkpoint needed")
 		unlock()
 		hooks.run(control.hooks, "afterCommit", control.repo.Config.Run.AfterCommit)
 		hooks.run(control.hooks, "postCommit", control.repo.Config.Run.PostCommit)
 		return "", nil
 	}
-	if control.repo.Commit.PushEnabled() && control.branch == "" {
+	if control.repo.Commit.IsPushEnabled() && control.branch == "" {
 		return "", config.WithDiagnostic("E337", fmt.Errorf("E337: repository %s is detached; set commit.branch before creating and pushing a control checkpoint", control.repo.Name))
 	}
-	if control.repo.Commit.PushEnabled() {
+	if control.repo.Commit.IsPushEnabled() {
 		if err := verifyRemoteSource(ctx, source, tag, rel.ExportedCommit()); err != nil {
 			return "", fmt.Errorf("control checkpoint cannot be pushed for source %s: %w", source.repo.Name, err)
 		}
@@ -806,7 +931,7 @@ func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, hooks recordHo
 	}
 	control.expectedHead = controlPin
 	if committed {
-		control.git.Log.Info().Str("message", msg).Msg("created release commit")
+		control.git.Log.Info().Str("commitMessage", msg).Msg("created release commit")
 	}
 	// Hooks observe the commit and must never run under the advisory lock.
 	unlock()
@@ -848,14 +973,36 @@ func controlGitlinkPath(control, source *repositoryRecord) (string, error) {
 	return path, nil
 }
 
+// RevertDir restores a folder through the repository that owns it.
+//
+// Ownership is the deepest participating root containing the folder, because
+// every composed fleet nests: an orchestrated source sits inside the control
+// checkout, and a choreographed peer sits inside the checkout of whatever
+// linked it. Reverting through a container would run `git checkout` in a
+// repository whose history those files do not belong to, which restores
+// nothing and, for a fleet with no control repository, used to dereference a
+// repository that does not exist.
 func (w *workspaceRecorder) RevertDir(ctx context.Context, dir string) error {
+	r := w.owner(dir)
+	if r == nil {
+		return fmt.Errorf("no participating repository owns %s", dir)
+	}
+	return r.revertDir(ctx, dir)
+}
+
+// owner answers the deepest participating repository containing dir, or nil
+// when the path belongs to none of them.
+func (w *workspaceRecorder) owner(dir string) *repositoryRecord {
+	var best *repositoryRecord
 	for _, r := range w.ordered {
-		if pathWithin(r.repo.Root, dir) && (r.repo.Control == false || filepath.Clean(dir) == filepath.Clean(r.repo.Root)) {
-			return r.revertDir(ctx, dir)
+		if !pathWithin(r.repo.Root, dir) {
+			continue
+		}
+		if best == nil || len(r.repo.Root) > len(best.repo.Root) {
+			best = r
 		}
 	}
-	r := w.byName[config.ControlRepository]
-	return r.revertDir(ctx, dir)
+	return best
 }
 
 func (r *repositoryRecord) revertDir(ctx context.Context, dir string) error {

@@ -94,14 +94,14 @@ func TestPossiblyBehind(t *testing.T) {
 		ancestor: func(a, b string) bool { return a == b || (a == "c2" && b == "c9") },
 	}
 
-	assert.False(t, p.PossiblyBehind("ghost", "provider"), "unknown consumer")
-	assert.False(t, p.PossiblyBehind("consumer", "untagged"), "a never-released provider owes nothing")
-	assert.True(t, p.PossiblyBehind("untagged", "provider"), "never released while the provider has been")
-	assert.True(t, p.PossiblyBehind("consumer", "provider"), "provider's tag is not an ancestor of the consumer's")
-	assert.False(t, p.PossiblyBehind("provider", "unrelated"), "the ancestor relation clears it")
+	assert.False(t, p.IsPossiblyBehind("ghost", "provider"), "unknown consumer")
+	assert.False(t, p.IsPossiblyBehind("consumer", "untagged"), "a never-released provider owes nothing")
+	assert.True(t, p.IsPossiblyBehind("untagged", "provider"), "never released while the provider has been")
+	assert.True(t, p.IsPossiblyBehind("consumer", "provider"), "provider's tag is not an ancestor of the consumer's")
+	assert.False(t, p.IsPossiblyBehind("provider", "unrelated"), "the ancestor relation clears it")
 
 	p.ancestor = nil
-	assert.False(t, p.PossiblyBehind("consumer", "provider"), "no ancestry available: no claim")
+	assert.False(t, p.IsPossiblyBehind("consumer", "provider"), "no ancestry available: no claim")
 }
 
 func TestNewerCommitOrdering(t *testing.T) {
@@ -199,7 +199,7 @@ func TestGlobMatch(t *testing.T) {
 		{"", "", true},
 		{"", "x", false},
 	} {
-		assert.Equalf(t, tc.want, GlobMatch(tc.pattern, tc.s), "GlobMatch(%q, %q)", tc.pattern, tc.s)
+		assert.Equalf(t, tc.want, IsGlobMatch(tc.pattern, tc.s), "IsGlobMatch(%q, %q)", tc.pattern, tc.s)
 	}
 }
 
@@ -273,7 +273,21 @@ func TestCommitKey(t *testing.T) {
 func TestKindSet(t *testing.T) {
 	assert.Nil(t, kindSet(nil), "no list means every kind")
 	assert.Nil(t, kindSet([]ccme.DependencyKind{ccme.KindDependencies, ccme.KindAll}),
-		"'all' anywhere in the list widens to every kind")
+		"the '*' wildcard anywhere in the list widens to every kind")
+	// The two empty shapes are opposite instructions: a configuration that
+	// said nothing about kinds arrives here as nil, while `kinds: []` is a
+	// repository asking for no traversal at all (pkg/ccme's PropagationConfig,
+	// §8.4). A non-nil empty set admits no edge, since walk() filters every
+	// edge against a set that is not nil.
+	empty := kindSet([]ccme.DependencyKind{})
+	require.NotNil(t, empty, "a present empty list is not an absent one")
+	assert.Empty(t, empty, "and it names no kind, so no edge is traversed")
+	for _, kind := range []model.DepKind{
+		model.KindDependencies, model.KindDevDependencies,
+		model.KindPeerDependencies, model.KindOptionalDependencies,
+	} {
+		assert.False(t, empty[kind], "%s is not traversed under an empty list", kind)
+	}
 	assert.Equal(t, map[model.DepKind]bool{
 		model.KindDependencies:         true,
 		model.KindDevDependencies:      true,

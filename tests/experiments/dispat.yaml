@@ -3,27 +3,44 @@ versioning: none
 scripts:
   # The version under test is the one the caller names, else the newest
   # published image: an experiment runs the bytes a release shipped,
-  # never a build of the checkout, so a planned version nobody published
-  # is never a candidate, and the prerelease tags are not either.
+  # never an implicit build of the checkout. Candidate mode below requires
+  # both an explicit executable and identity; automatic selection uses only
+  # published stable image tags.
   build: |
     set -eu
     version=${EXPERIMENTS_DISPAT_VERSION:-$(git tag -l 'docker/dispat-alpine/v*' --sort=-v:refname | sed 's|.*/v||; /-/d' | head -n 1)}
-    : "${version:?no published dispat-alpine image to build the experiments on}"
-    echo "building the experiments on yohimik/dispat-alpine:$version"
-    docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
-      $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
+    if [ -n "${EXPERIMENTS_DISPAT_ARTIFACT:-}" ]; then
+      : "${EXPERIMENTS_DISPAT_ID:?EXPERIMENTS_DISPAT_ID is required with EXPERIMENTS_DISPAT_ARTIFACT}"
+      [ -f "$EXPERIMENTS_DISPAT_ARTIFACT" ] || { echo "candidate binary not found: $EXPERIMENTS_DISPAT_ARTIFACT" >&2; exit 2; }
+      candidate=$(mktemp -d)
+      trap 'rm -rf "$candidate"' EXIT
+      cp "$EXPERIMENTS_DISPAT_ARTIFACT" "$candidate/dispat"
+      chmod +x "$candidate/dispat"
+      echo "building the experiments on candidate $EXPERIMENTS_DISPAT_ID"
+      docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=${version:-1.7.1}" \
+        --build-arg DISPAT_BINARY_SOURCE=candidate-binary \
+        --build-arg "DISPAT_BINARY_ID=$EXPERIMENTS_DISPAT_ID" \
+        --build-context "candidate-binary=$candidate" \
+        $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
+    else
+      : "${version:?no published dispat-alpine image to build the experiments on}"
+      echo "building the experiments on yohimik/dispat-alpine:$version"
+      docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
+        --build-arg "DISPAT_BINARY_ID=shipped:$version" \
+        $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
+    fi
   # One cell, named the way run.sh takes it: EXPERIMENT and TOOL, and
   # SCENARIO where the experiment has more than one. The image is assumed
   # built, so a sweep pays for it once; `experiment` below is the form
   # that builds first.
   #
   # The console goes to <cell>.log rather than to the terminal, because
-  # twelve of these run at once and interleaved transcripts are a record
+  # several of these run at once and interleaved transcripts are a record
   # of nothing. The exit code is the harness verdict: the cell's own file
   # says what happened, and the caller only needs to know whether it held.
   cell: |
     set -eu
-    : "${EXPERIMENT:?EXPERIMENT is required (orphan, midrelease)}"
+    : "${EXPERIMENT:?EXPERIMENT is required (orphan, midrelease, propagation)}"
     : "${TOOL:?TOOL is required (lerna, nx, changesets, dispat)}"
     ROOT=$(git rev-parse --show-toplevel)
     RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
@@ -36,7 +53,7 @@ scripts:
     echo "$cell: exit $rc"
     exit "$rc"
   # One cell, built first: the by-hand form, for re-recording a single
-  # protocol without paying for the other eleven.
+  # protocol without paying for the rest of the campaign.
   experiment: |
     set -eu
     dispat exec build --for pkg:experiments --in pkg:experiments
@@ -45,7 +62,7 @@ scripts:
   # scenario where the experiment has more than one, which is the argument
   # order `cell` and run.sh take.
   #
-  # This is the only place the twelve are enumerated. The sweep below pipes
+  # This is the only place the cells are enumerated. The sweep below pipes
   # it into xargs and the Experiments workflow turns it into its matrix, so
   # a cell added here is a cell both runs, and neither can drift into
   # measuring a different campaign than the other.
@@ -57,6 +74,11 @@ scripts:
     for scenario in clean conflict; do
       for tool in dispat lerna nx changesets; do
         echo "midrelease $tool $scenario"
+      done
+    done
+    for scenario in build publish; do
+      for tool in dispat lerna; do
+        echo "propagation $tool $scenario"
       done
     done
   # Every cell of the campaign, four at a time. A completed campaign can be
@@ -81,12 +103,12 @@ scripts:
       NF == 3 { print $1 "-" $3 "-" $2 }
     ' | sort)
     if experiment_cache_valid "$RESULTS" "$image" "$expected"; then
-      echo "reusing twelve complete cells from the identical experiments image $image"
+      echo "reusing $(printf '%s\n' "$expected" | sed '/^$/d' | wc -l | tr -d ' ') complete cells from the identical experiments image $image"
       exit 0
     fi
     docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
       /results -mindepth 1 -delete
-    echo "running twelve cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
+    echo "running $(printf '%s\n' "$expected" | sed '/^$/d' | wc -l | tr -d ' ') cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
     rc=0
     dispat exec cells --for pkg:experiments --in pkg:experiments \
     | EXPERIMENTS_RESULTS="$RESULTS" xargs -P "${EXPERIMENTS_JOBS:-4}" -L 1 sh -c \

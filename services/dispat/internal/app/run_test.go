@@ -51,7 +51,7 @@ func TestReportNothingResolved(t *testing.T) {
 
 	sel, err := filter.Resolve(filter.Filter{Packages: []string{"a"}}, a.planWorkspace(pl))
 	require.NoError(t, err)
-	require.True(t, sel.Active())
+	require.True(t, sel.IsActive())
 	err = a.reportNothingResolved("stamp", sel, []string{"a"})
 	require.Error(t, err, "an explicit selection without the script is a refusal")
 	assert.EqualError(t, err, `no selected package defines script "stamp" (selected: a)`)

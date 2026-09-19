@@ -59,7 +59,7 @@ func TestCorrectionEditRestatesTheRecordBeforeRelease(t *testing.T) {
 	r := correctionsRepo(t)
 	r.Commit("feat(core): bootstrap\n\n---\n\nfeat(utils): bootstrap")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	r.Commit("chore(release): record the changelog")
 
 	r.WriteFile("packages/core/main.txt", "a defensive fix, not a rewrite\n")
@@ -69,9 +69,9 @@ func TestCorrectionEditRestatesTheRecordBeforeRelease(t *testing.T) {
 	r.CommitEmpty("fix(core): rewrite internals\n\nThe change is a refactor with a defensive fix.\n\nEdits: " + mistake)
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@0.1.1"), "the major left with the record carrying it; tags: %v", r.TagList())
-	assert.False(t, r.HasTag("core@1.0.0"), "tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W209"), "the target was pending: %s", res.Stdout)
+	assert.True(t, r.IsTagged("core@0.1.1"), "the major left with the record carrying it; tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("core@1.0.0"), "tags: %v", r.TagList())
+	assert.False(t, harness.IsCodePresent(res.Events, "W209"), "the target was pending: %s", res.Stdout)
 
 	log := changelogOf(t, r, "core")
 	assert.Contains(t, log, "The change is a refactor", "the restatement is the entry")
@@ -97,22 +97,22 @@ func TestCorrectionAfterReleaseIsAVisibleNoop(t *testing.T) {
 	r.Commit("feat(core)!: rewrite internals")
 	shipped := r.Git("rev-parse", "HEAD")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@1.0.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.0.0"), "tags: %v", r.TagList())
 	r.Commit("chore(release): record the changelog")
 
 	r.CommitEmpty("fix(core): too late to restate it\n\nEdits: " + shipped)
 	res := r.ReleaseOK()
 
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W209", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W209", "core"),
 		"the operator has to see that the correction did not take: %s", res.Stdout)
-	assert.True(t, r.HasTag("core@1.0.1"), "the carrying unit still releases; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@1.0.1"), "the carrying unit still releases; tags: %v", r.TagList())
 
 	// W209 is non-suppressible (§17.1), and dispat gets that by owning the
 	// code: --quiet-parser hides only the codes the parser itself defines.
 	r.Commit("chore(release): record the changelog")
 	r.CommitEmpty("fix(core): still too late\n\nEdits: " + shipped)
 	quiet := r.ReleaseOK("--quiet-parser")
-	assert.True(t, harness.HasCodeForPackage(quiet.Events, "W209", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(quiet.Events, "W209", "core"),
 		"--quiet-parser must not be able to hide it: %s", quiet.Stdout)
 }
 
@@ -134,9 +134,9 @@ func TestCorrectionPrecedenceAndVoiding(t *testing.T) {
 	r.CommitEmpty("fix(core): restate it instead\n\nEdits: " + original)
 	res := r.ReleaseOK()
 
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W210", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W210", "core"),
 		"the superseded delete must be reported: %s", res.Stdout)
-	assert.True(t, r.HasTag("core@0.1.1"), "the restatement decides the bump; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.1"), "the restatement decides the bump; tags: %v", r.TagList())
 	assert.Contains(t, changelogOf(t, r, "core"), "restate it instead")
 	r.Commit("chore(release): record the changelog")
 
@@ -150,9 +150,9 @@ func TestCorrectionPrecedenceAndVoiding(t *testing.T) {
 	r.CommitEmpty("chore(utils): that correction was wrong\n\nDeletes: " + restatement)
 	res = r.ReleaseOK()
 
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W215", "utils"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W215", "utils"),
 		"the voiding must be reported: %s", res.Stdout)
-	assert.True(t, r.HasTag("utils@1.0.0"), "the original record returns; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("utils@1.0.0"), "the original record returns; tags: %v", r.TagList())
 }
 
 // TestCorrectionScopeIsContainedNotCombined: a correction may narrow a record
@@ -172,9 +172,9 @@ func TestCorrectionScopeIsContainedNotCombined(t *testing.T) {
 	r.CommitEmpty("fix(core): smaller than that, for core\n\nEdits: " + shared)
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@0.1.1"), "core carries the narrowed restatement; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("utils@1.0.0"), "utils keeps the original record; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "E213"), "narrowing is legal: %s", res.Stdout)
+	assert.True(t, r.IsTagged("core@0.1.1"), "core carries the narrowed restatement; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("utils@1.0.0"), "utils keeps the original record; tags: %v", r.TagList())
+	assert.False(t, harness.IsCodePresent(res.Events, "E213"), "narrowing is legal: %s", res.Stdout)
 	r.Commit("chore(release): record the changelog")
 
 	// The other direction: a correction naming a package its target's record
@@ -185,9 +185,9 @@ func TestCorrectionScopeIsContainedNotCombined(t *testing.T) {
 	r.CommitEmpty("fix(*): restate it everywhere\n\nEdits: " + coreOnly)
 	res = r.Release()
 
-	assert.True(t, harness.HasCode(res.Events, "E213"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E213"),
 		"a correction may not extend someone else's record: %s", res.Stdout)
-	assert.True(t, r.HasTag("core@1.0.0"), "the target's record survives the void; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@1.0.0"), "the target's record survives the void; tags: %v", r.TagList())
 }
 
 // TestCorrectionWildcardClearsAScope: `Deletes: *` discards every pending
@@ -211,8 +211,8 @@ func TestCorrectionWildcardClearsAScope(t *testing.T) {
 	res := r.ReleaseOK()
 
 	assert.Equal(t, 1, r.TagCount("core@"), "core has nothing left to release; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("utils@0.1.1"), "the wildcard reaches only its own scope; tags: %v", r.TagList())
-	assert.False(t, harness.HasCodeForPackage(res.Events, "W209", "core"),
+	assert.True(t, r.IsTagged("utils@0.1.1"), "the wildcard reaches only its own scope; tags: %v", r.TagList())
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W209", "core"),
 		"the wildcard did discard something: %s", res.Stdout)
 }
 
@@ -228,7 +228,7 @@ func TestCorrectionTargetsMustResolve(t *testing.T) {
 	t.Run("a commit that is not an earlier one is E210", func(t *testing.T) {
 		r.CommitEmpty("fix(core): correcting the future\n\nEdits: 1234567abcdef")
 		res := r.Release()
-		assert.True(t, harness.HasCode(res.Events, "E210"), "events:\n%s", res.Stdout)
+		assert.True(t, harness.IsCodePresent(res.Events, "E210"), "events:\n%s", res.Stdout)
 	})
 
 	t.Run("a bare sha on a multi-unit commit is E211", func(t *testing.T) {
@@ -237,7 +237,7 @@ func TestCorrectionTargetsMustResolve(t *testing.T) {
 		multi := r.Git("rev-parse", "HEAD")
 		r.CommitEmpty("fix(core): which one?\n\nDeletes: " + multi)
 		res := r.Release()
-		assert.True(t, harness.HasCode(res.Events, "E211"), "events:\n%s", res.Stdout)
+		assert.True(t, harness.IsCodePresent(res.Events, "E211"), "events:\n%s", res.Stdout)
 	})
 
 	t.Run("a control unit is E212", func(t *testing.T) {
@@ -245,7 +245,7 @@ func TestCorrectionTargetsMustResolve(t *testing.T) {
 		barrier := r.Git("rev-parse", "HEAD")
 		r.CommitEmpty("fix(utils): correcting a barrier\n\nEdits: " + barrier)
 		res := r.Release()
-		assert.True(t, harness.HasCode(res.Events, "E212"), "events:\n%s", res.Stdout)
+		assert.True(t, harness.IsCodePresent(res.Events, "E212"), "events:\n%s", res.Stdout)
 	})
 }
 
@@ -294,7 +294,7 @@ func TestCorrectionRidesAVersioningGroupOnlyWhenARecordSurvives(t *testing.T) {
 
 	assert.Equal(t, 1, r.TagCount("core@"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("utils@"), "no member rides a version nothing caused; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride to explain: %s", res.Stdout)
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "no ride to explain: %s", res.Stdout)
 }
 
 // TestRevertTakesBothEntriesOutOfTheChangelog: the revert trap and its
@@ -315,8 +315,8 @@ func TestRevertTakesBothEntriesOutOfTheChangelog(t *testing.T) {
 	r.Commit("revert(core): a bad idea\n\nReverts: " + bad)
 	res := r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@1.0.0"), "the major is still owed; tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W212", "core"),
+	assert.True(t, r.IsTagged("core@1.0.0"), "the major is still owed; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W212", "core"),
 		"the plan accounts for the absent entries: %s", res.Stdout)
 
 	log := changelogOf(t, r, "core")
@@ -342,8 +342,8 @@ func TestRevertWithAnUnreachableTargetStaysInformational(t *testing.T) {
 	r.Commit("revert(core): something from elsewhere\n\nReverts: 1234567abcdef")
 	res := r.ReleaseOK()
 
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W213", "core"), "events:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("core@0.1.1"), "the revert releases as usual; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W213", "core"), "events:\n%s", res.Stdout)
+	assert.True(t, r.IsTagged("core@0.1.1"), "the revert releases as usual; tags: %v", r.TagList())
 	assert.Contains(t, changelogOf(t, r, "core"), "something from elsewhere",
 		"and is documented as usual")
 	r.Commit("chore(release): record the changelog")
@@ -351,8 +351,8 @@ func TestRevertWithAnUnreachableTargetStaysInformational(t *testing.T) {
 	r.WriteFile("packages/utils/main.txt", "undone\n")
 	r.Commit("revert(utils): something\n\nReverts: not-a-sha")
 	res = r.ReleaseOK()
-	assert.True(t, harness.HasCode(res.Events, "W214"), "the parser's diagnostic: %s", res.Stdout)
-	assert.False(t, harness.HasCodeForPackage(res.Events, "W213", "utils"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W214"), "the parser's diagnostic: %s", res.Stdout)
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W213", "utils"),
 		"one mistake, one code: %s", res.Stdout)
 }
 
@@ -377,7 +377,7 @@ func TestRevertSuppressionIsVoidedByACorrectionThroughTheBinary(t *testing.T) {
 	r.Commit("chore(core): the revert was the mistake\n\nDeletes: " + revert)
 	res := r.ReleaseOK()
 
-	assert.False(t, harness.HasCodeForPackage(res.Events, "W212", "core"),
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W212", "core"),
 		"there is no suppression left to report: %s", res.Stdout)
 	assert.Contains(t, changelogOf(t, r, "core"), "a good idea after all",
 		"the entry the revert hid is back")
@@ -399,7 +399,7 @@ func TestCorrectionEditOfPublishedTrainWorkIsANoOp(t *testing.T) {
 	r.Commit("feat(core)%beta: board the train\n\n---\n\nfeat(utils): bootstrap")
 	shipped := r.Git("rev-parse", "HEAD")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0-beta.0"), "tags: %v", r.TagList())
 	r.Commit("chore(release): record the changelog")
 
 	// The bootstrap commit carries two units, so the target needs its unit
@@ -407,9 +407,9 @@ func TestCorrectionEditOfPublishedTrainWorkIsANoOp(t *testing.T) {
 	r.CommitEmpty("fix(core): too late, beta.0 shipped it\n\nEdits: " + shipped + "#1")
 	res := r.ReleaseOK()
 
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W209", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W209", "core"),
 		"the operator has to see the correction did not take: %s", res.Stdout)
-	assert.True(t, r.HasTag("core@0.1.0-beta.1"),
+	assert.True(t, r.IsTagged("core@0.1.0-beta.1"),
 		"the carrying fix still releases on its own account; tags: %v", r.TagList())
 	log := changelogOf(t, r, "core")
 	assert.NotContains(t, entryOf(t, log, "core@0.1.0-beta.1"), "board the train",
@@ -431,8 +431,8 @@ func TestCorrectionDeleteStopsATrainAdvance(t *testing.T) {
 	r.SeedPackage("packages", "utils")
 	r.Commit("feat(core)%beta: board the train\n\n---\n\nfeat(utils): bootstrap")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("utils@0.1.0-beta.0"), "the group rides the train; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("utils@0.1.0-beta.0"), "the group rides the train; tags: %v", r.TagList())
 	r.Commit("chore(release): record the changelog")
 
 	r.WriteFile("packages/core/main.txt", "the train's only fresh cause\n")
@@ -443,7 +443,7 @@ func TestCorrectionDeleteStopsATrainAdvance(t *testing.T) {
 
 	assert.Equal(t, 1, r.TagCount("core@"), "the train does not advance; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("utils@"), "no member rides a step nothing caused; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(res.Events, "W234"), "no ride to explain: %s", res.Stdout)
+	assert.False(t, harness.IsCodePresent(res.Events, "W234"), "no ride to explain: %s", res.Stdout)
 }
 
 // TestRevertPairOnATrainRendersCancelLine: a feature and its revert land
@@ -454,7 +454,7 @@ func TestRevertPairOnATrainRendersCancelLine(t *testing.T) {
 	r := correctionsRepo(t)
 	r.Commit("feat(core)%beta: board the train\n\n---\n\nfeat(utils): bootstrap")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0-beta.0"), "tags: %v", r.TagList())
 	r.Commit("chore(release): record the changelog")
 
 	r.WriteFile("packages/core/main.txt", "a bad idea\n")
@@ -464,9 +464,9 @@ func TestRevertPairOnATrainRendersCancelLine(t *testing.T) {
 	r.Commit("revert(core): a bad idea\n\nReverts: " + bad)
 	res := r.ReleaseOK()
 
-	require.True(t, r.HasTag("core@1.0.0-beta.0"),
+	require.True(t, r.IsTagged("core@1.0.0-beta.0"),
 		"the reverted major still counts toward the train's target (§7.3); tags: %v", r.TagList())
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W212", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W212", "core"),
 		"the plan accounts for the absent entries: %s", res.Stdout)
 	entry := entryOf(t, changelogOf(t, r, "core"), "core@1.0.0-beta.0")
 	assert.NotContains(t, entry, "a bad idea", "neither entry is documented")

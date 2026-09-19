@@ -53,6 +53,12 @@ func xmlEscape(text string) []byte {
 // holding anything other than text.
 func xmlElementTextSpan(dec *xml.Decoder, data []byte) (s span, text string, spliceable bool, err error) {
 	start := dec.InputOffset()
+	// A self-closing element has no content bytes at all. The decoder reports
+	// one as a start tag followed immediately by an end tag at the same offset,
+	// so the closing-tag test below cannot tell it from a real empty element
+	// when the next bytes happen to be a closing tag; the element's own last
+	// two bytes can.
+	selfClosing := start >= 2 && bytes.HasSuffix(data[:start], []byte("/>"))
 	var (
 		b      []byte
 		nested bool
@@ -76,7 +82,7 @@ func xmlElementTextSpan(dec *xml.Decoder, data []byte) (s span, text string, spl
 				return span{}, "", false, err
 			}
 		case xml.EndElement:
-			if nested || !bytes.HasPrefix(data[prev:], []byte("</")) {
+			if nested || selfClosing || !bytes.HasPrefix(data[prev:], []byte("</")) {
 				return span{}, "", false, nil // nested markup, or self-closing
 			}
 			return span{start: start, end: prev}, string(b), true, nil

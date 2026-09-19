@@ -53,11 +53,11 @@ func TestRideOnATrainWithHistoryIsStillNoChanges(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixed, git)
 
 	b := p.Releases["b"]
-	require.True(t, b.Releasing(), "fixed: b rides the train")
+	require.True(t, b.IsReleasing(), "fixed: b rides the train")
 	assert.True(t, b.FixedRide)
 	assert.NotEmpty(t, b.Units, "the train history is still counted")
 	assert.Empty(t, b.NotesUnits(), "nothing fresh of b's own")
-	assert.True(t, b.NoChanges(), "an empty fresh changeset is a no-changes ride")
+	assert.True(t, b.IsWithoutChanges(), "an empty fresh changeset is a no-changes ride")
 }
 
 func TestFixedChangeReleasesWholeSpace(t *testing.T) {
@@ -71,14 +71,14 @@ func TestFixedChangeReleasesWholeSpace(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixed, git)
 
 	a, b, c := p.Releases["a"], p.Releases["b"], p.Releases["c"]
-	require.True(t, a.Releasing())
-	require.True(t, b.Releasing(), "fixed: b must ride along")
+	require.True(t, a.IsReleasing())
+	require.True(t, b.IsReleasing(), "fixed: b must ride along")
 	assertVersion(t, v(0, 1, 0), a.Next)
 	assertVersion(t, v(0, 1, 0), b.Next, "one shared version for the space")
 	assert.True(t, b.FixedRide)
-	assert.True(t, b.NoChanges(), "the ride carries no content of its own")
+	assert.True(t, b.IsWithoutChanges(), "the ride carries no content of its own")
 	assert.False(t, a.FixedRide, "the package with the change is an ordinary release")
-	assert.False(t, a.NoChanges())
+	assert.False(t, a.IsWithoutChanges())
 	assert.Equal(t, "fixed group versioning", b.Reason())
 
 	found := false
@@ -89,7 +89,7 @@ func TestFixedChangeReleasesWholeSpace(t *testing.T) {
 	}
 	assert.True(t, found, "the ride must be explained by W234: %v", p.Diagnostics)
 
-	assert.False(t, c.Releasing(), "an independent space must not be dragged along")
+	assert.False(t, c.IsReleasing(), "an independent space must not be dragged along")
 }
 
 func TestFixedSharedVersionIsMaxOfMembers(t *testing.T) {
@@ -113,9 +113,9 @@ func TestFixedSparseUnchangedMemberKeepsItsVersion(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixedSparse, git)
 
 	a, b := p.Releases["a"], p.Releases["b"]
-	require.True(t, a.Releasing())
+	require.True(t, a.IsReleasing())
 	assertVersion(t, v(2, 3, 1), a.Next, "the changed member releases at the shared version")
-	assert.False(t, b.Releasing(), "fixedSparse: an unchanged member stays put")
+	assert.False(t, b.IsReleasing(), "fixedSparse: an unchanged member stays put")
 	assertVersion(t, v(2, 3, 0), b.Next, "at its previous version")
 	assert.False(t, b.FixedRide)
 }
@@ -171,10 +171,10 @@ func TestFixedHeldMemberStaysBehind(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixed, git)
 
 	a, b := p.Releases["a"], p.Releases["b"]
-	require.True(t, a.Releasing())
+	require.True(t, a.IsReleasing())
 	assertVersion(t, v(1, 1, 0), a.Next)
 	assert.True(t, b.Held)
-	assert.False(t, b.Releasing(), "a held member must not be released")
+	assert.False(t, b.IsReleasing(), "a held member must not be released")
 	assertVersion(t, v(1, 1, 0), b.Next, "the hold withholds the group version")
 }
 
@@ -187,8 +187,8 @@ func TestFixedConvergesWhenNothingPending(t *testing.T) {
 	).tag("a", "0.1.0", "c1").tag("b", "0.1.0", "c1")
 	p := computeFixed(t, model.VersioningFixed, git)
 
-	assert.False(t, p.Releases["a"].Releasing())
-	assert.False(t, p.Releases["b"].Releasing())
+	assert.False(t, p.Releases["a"].IsReleasing())
+	assert.False(t, p.Releases["b"].IsReleasing())
 	assert.Empty(t, p.Releasing())
 }
 
@@ -201,7 +201,7 @@ func TestFixedRideIsNotACatchUp(t *testing.T) {
 	).tag("a", "1.0.0", "").tag("b", "1.0.0", "")
 	p := computeFixed(t, model.VersioningFixed, git)
 
-	require.True(t, p.Releases["b"].Releasing())
+	require.True(t, p.Releases["b"].IsReleasing())
 	assert.False(t, p.Releases["b"].CatchUp)
 	for _, d := range p.Diagnostics {
 		assert.NotEqual(t, CodeCatchUp, d.Code, "no catch-up in a pure fixed ride: %v", d)
@@ -227,8 +227,8 @@ func TestTwoFixedSpacesVersionSeparately(t *testing.T) {
 
 	assertVersion(t, v(1, 1, 0), p.Releases["l1"].Next)
 	assertVersion(t, v(1, 1, 0), p.Releases["l2"].Next)
-	assert.False(t, p.Releases["r1"].Releasing())
-	assert.False(t, p.Releases["r2"].Releasing())
+	assert.False(t, p.Releases["r1"].IsReleasing())
+	assert.False(t, p.Releases["r2"].IsReleasing())
 }
 
 func TestFixedGroupSpansSpaces(t *testing.T) {
@@ -252,7 +252,7 @@ func TestFixedGroupSpansSpaces(t *testing.T) {
 	assertVersion(t, v(1, 1, 0), p.Releases["l1"].Next)
 	assertVersion(t, v(1, 1, 0), p.Releases["r1"].Next, "one version across both spaces")
 	assert.True(t, p.Releases["r1"].FixedRide)
-	assert.False(t, p.Releases["c"].Releasing())
+	assert.False(t, p.Releases["c"].IsReleasing())
 }
 
 func TestFixedGroupMixedModes(t *testing.T) {
@@ -276,7 +276,7 @@ func TestFixedGroupMixedModes(t *testing.T) {
 	assertVersion(t, v(1, 1, 0), p.Releases["a"].Next)
 	assertVersion(t, v(1, 1, 0), p.Releases["b"].Next, "the fixed sibling rides")
 	assert.True(t, p.Releases["b"].FixedRide)
-	assert.False(t, p.Releases["s"].Releasing(), "the sparse member stays behind")
+	assert.False(t, p.Releases["s"].IsReleasing(), "the sparse member stays behind")
 	assertVersion(t, v(1, 0, 0), p.Releases["s"].Next)
 }
 
@@ -298,10 +298,10 @@ func TestFixedGroupMixedModeLaggards(t *testing.T) {
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
 	require.NoError(t, err)
 
-	assert.False(t, p.Releases["a"].Releasing(), "a already published")
-	require.True(t, p.Releases["b"].Releasing(), "the fixed laggard catches up")
+	assert.False(t, p.Releases["a"].IsReleasing(), "a already published")
+	require.True(t, p.Releases["b"].IsReleasing(), "the fixed laggard catches up")
 	assertVersion(t, v(0, 1, 0), p.Releases["b"].Next)
-	assert.False(t, p.Releases["s"].Releasing(), "the sparse member never aligns")
+	assert.False(t, p.Releases["s"].IsReleasing(), "the sparse member never aligns")
 }
 
 func TestFixedGroupNeverPublishedHasNothingToAlign(t *testing.T) {
@@ -323,9 +323,9 @@ func TestFixedGroupHeldLaggardStaysHeld(t *testing.T) {
 	).tag("a", "0.1.0", "c1")
 	p := computeFixed(t, model.VersioningFixed, git)
 
-	assert.False(t, p.Releases["a"].Releasing(), "a already published")
+	assert.False(t, p.Releases["a"].IsReleasing(), "a already published")
 	assert.True(t, p.Releases["b"].Held)
-	assert.False(t, p.Releases["b"].Releasing(), "a hold beats the alignment")
+	assert.False(t, p.Releases["b"].IsReleasing(), "a hold beats the alignment")
 }
 
 func TestFixedGroupRepositoryScopedPinErrorAbortsTheGroup(t *testing.T) {
@@ -337,9 +337,9 @@ func TestFixedGroupRepositoryScopedPinErrorAbortsTheGroup(t *testing.T) {
 	).tag("a", "1.0.0", "").tag("b", "1.0.0", "")
 	p := computeFixed(t, model.VersioningFixed, git)
 
-	assert.True(t, p.HasErrors())
-	assert.False(t, p.Releases["a"].Releasing())
-	assert.False(t, p.Releases["b"].Releasing())
+	assert.True(t, p.IsInvalid())
+	assert.False(t, p.Releases["a"].IsReleasing())
+	assert.False(t, p.Releases["b"].IsReleasing())
 	assertVersion(t, v(1, 0, 0), p.Releases["a"].Next, "reporting stays at the baseline")
 }
 
@@ -385,7 +385,7 @@ func TestPackageOptsOutOfFixedSpace(t *testing.T) {
 
 	assertVersion(t, v(1, 1, 0), p.Releases["a"].Next)
 	assertVersion(t, v(1, 1, 0), p.Releases["b"].Next)
-	assert.False(t, p.Releases["o"].Releasing(), "the opted-out package is independent")
+	assert.False(t, p.Releases["o"].IsReleasing(), "the opted-out package is independent")
 	assertVersion(t, v(5, 0, 0), p.Releases["o"].Next)
 }
 
@@ -426,8 +426,8 @@ func TestFixedLaggardMemberCatchesUpToSpaceBaseline(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixed, git)
 
 	a, b := p.Releases["a"], p.Releases["b"]
-	assert.False(t, a.Releasing(), "a already published the work")
-	require.True(t, b.Releasing(), "the laggard must catch up")
+	assert.False(t, a.IsReleasing(), "a already published the work")
+	require.True(t, b.IsReleasing(), "the laggard must catch up")
 	assertVersion(t, v(0, 1, 0), b.Next, "at exactly the space's published version")
 	assert.True(t, b.FixedRide)
 
@@ -465,8 +465,8 @@ func TestFixedNewcomerWithNoVersionJoinsAtTheGroupVersion(t *testing.T) {
 	p := computeFixed(t, model.VersioningFixed, git)
 
 	a, b := p.Releases["a"], p.Releases["b"]
-	require.True(t, a.Releasing())
-	require.True(t, b.Releasing(), "the newcomer joins the group's release")
+	require.True(t, a.IsReleasing())
+	require.True(t, b.IsReleasing(), "the newcomer joins the group's release")
 	assertVersion(t, v(1, 2, 1), a.Next)
 	assertVersion(t, v(1, 2, 1), b.Next, "at the group's version, not at 0.0.1")
 	assert.False(t, b.HasBaseline, "it really has never published")
@@ -579,7 +579,7 @@ func TestRejectedPinFallsBackToTheComputedVersion(t *testing.T) {
 	}
 	require.True(t, found, "the below-bump guard still fires: %v", p.Diagnostics)
 	assert.False(t, a.Pinned, "a rejected pin is not a pin")
-	require.True(t, a.Releasing(), "the sibling feat still releases")
+	require.True(t, a.IsReleasing(), "the sibling feat still releases")
 	assertVersion(t, v(1, 1, 0), a.Next, "at the computed version, not the baseline")
 }
 
@@ -592,7 +592,7 @@ func TestRejectedPinAloneReleasesNothing(t *testing.T) {
 	p, err := Compute(context.Background(), git, Options{Packages: fixedPkgs(model.VersioningIndependent), Root: "/r"})
 	require.NoError(t, err)
 
-	assert.False(t, p.Releases["a"].Releasing())
+	assert.False(t, p.Releases["a"].IsReleasing())
 	assertVersion(t, v(1, 0, 0), p.Releases["a"].Next, "reporting stays at the baseline")
 }
 

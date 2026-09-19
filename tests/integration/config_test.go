@@ -167,13 +167,13 @@ func TestConfigNonPackageScopesReplacesDefault(t *testing.T) {
 	// unknown-package error.
 	r.CommitEmpty("chore(infra): touch up the pipeline config")
 	res := r.StatusOK()
-	assert.False(t, harness.HasCode(res.Events, "E130"), "infra is exempt by explicit configuration")
+	assert.False(t, harness.IsCodePresent(res.Events, "E130"), "infra is exempt by explicit configuration")
 
 	// "release" is no longer exempt, because setting the key replaced the
 	// built-in default rather than adding to it.
 	r.CommitEmpty("chore(release): pretend to be dispat's own commit")
 	res = r.StatusOK()
-	assert.True(t, harness.HasCode(res.Events, "E130"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E130"),
 		"release must no longer be exempt once nonPackageScopes was set explicitly")
 }
 
@@ -195,8 +195,8 @@ func TestConfigFusedPrereleaseTagFormatRoundTrips(t *testing.T) {
 	r.SeedPackage("apps", "web")
 	r.Commit("feat(core)%beta: start the train\n---\nfeat(web)%beta: ride along in the other space")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@v0.1.0-beta0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("web@0.1.0-beta.0"),
+	require.True(t, r.IsTagged("core@v0.1.0-beta0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("web@0.1.0-beta.0"),
 		"the space override keeps the normative spelling; tags: %v", r.TagList())
 
 	// A run with no new commits must read v0.1.0-beta0 back and find
@@ -209,7 +209,7 @@ func TestConfigFusedPrereleaseTagFormatRoundTrips(t *testing.T) {
 	// run parsed "beta0" back into channel "beta", counter "0".
 	r.CommitEmpty("fix(core): tweak")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@v0.1.0-beta1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@v0.1.0-beta1"), "tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("web@"), "the other space had no new work")
 }
 
@@ -236,15 +236,15 @@ func TestConfigParserOptions(t *testing.T) {
 	// default depth reaches app without a caret anywhere in the message.
 	r.Commit("docs(core): documentation now ships")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.0.1"), "docs bumps patch under the custom table; tags: %v", r.TagList())
-	assert.True(t, r.HasTag("app@0.0.1"),
+	assert.True(t, r.IsTagged("core@0.0.1"), "docs bumps patch under the custom table; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app@0.0.1"),
 		"the configured propagation depth carries the bump with no caret; tags: %v", r.TagList())
 
 	// strictTypes: an unknown type is an error, not a shrug — reported, and
 	// under the default commitErrors policy the unit just contributes nothing.
 	r.CommitEmpty("wat(core): a type nobody declared")
 	res := r.StatusOK()
-	assert.True(t, harness.HasCode(res.Events, "E140"), "strictTypes raises E140 for the unknown type")
+	assert.True(t, harness.IsCodePresent(res.Events, "E140"), "strictTypes raises E140 for the unknown type")
 	r.ReleaseOK()
 	assert.Equal(t, 1, r.TagCount("core@"), "the invalid unit releases nothing")
 
@@ -269,8 +269,8 @@ func TestConfigCommitErrorsPolicy(t *testing.T) {
 		r.CommitEmpty("fix(nosuch): typo in the scope")
 
 		res := r.ReleaseOK()
-		assert.True(t, harness.HasCode(res.Events, "E130"), "the diagnostic is reported even when tolerated")
-		assert.True(t, r.HasTag("core@0.1.0"), "the sibling work still releases; tags: %v", r.TagList())
+		assert.True(t, harness.IsCodePresent(res.Events, "E130"), "the diagnostic is reported even when tolerated")
+		assert.True(t, r.IsTagged("core@0.1.0"), "the sibling work still releases; tags: %v", r.TagList())
 	})
 	t.Run("error", func(t *testing.T) {
 		r := harness.New(t)
@@ -282,11 +282,11 @@ func TestConfigCommitErrorsPolicy(t *testing.T) {
 		r.CommitEmpty("fix(nosuch): typo in the scope")
 
 		status := r.StatusOK()
-		assert.True(t, harness.HasCode(status.Events, "E130"), "status reports the plan it would refuse")
+		assert.True(t, harness.IsCodePresent(status.Events, "E130"), "status reports the plan it would refuse")
 
 		res := r.Release()
 		require.Equal(t, 1, res.Code, "commitErrors=error must refuse the release\nstdout:\n%s", res.Stdout)
-		assert.True(t, harness.HasCode(res.Events, "E130"))
+		assert.True(t, harness.IsCodePresent(res.Events, "E130"))
 		assert.Empty(t, r.TagList(), "nothing may be released under a refused plan")
 	})
 }
@@ -311,7 +311,7 @@ func TestConfigInitialsBaselines(t *testing.T) {
 	r.CommitEmpty("fix(core): repair")
 
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@1.0.1"),
+	assert.True(t, r.IsTagged("core@1.0.1"),
 		"initials 1.0.0 + only the fix since the unparseable tag; tags: %v", r.TagList())
 	assert.Contains(t, res.Stdout, "baselineFromInitials")
 	assert.Contains(t, res.Stdout, "initials entry matches no discovered package",
@@ -320,7 +320,7 @@ func TestConfigInitialsBaselines(t *testing.T) {
 	// Converged: the new tag is parseable, initials no longer apply to core.
 	r.CommitEmpty("fix(core): once more")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@1.0.2"), "the next bump reads the real tag back; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@1.0.2"), "the next bump reads the real tag back; tags: %v", r.TagList())
 }
 
 // TestConfigFormatsSmoke: one minimal end-to-end smoke per supported config
@@ -336,7 +336,7 @@ func TestConfigFormatsSmoke(t *testing.T) {
 		r.StatusOK()
 		assert.Empty(t, r.TagList(), "status must not tag")
 		r.ReleaseOK()
-		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
 	t.Run("yaml", func(t *testing.T) {
 		r := harness.New(t)
@@ -346,7 +346,7 @@ func TestConfigFormatsSmoke(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		r.Commit("feat(core): first release")
 		r.ReleaseOK()
-		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
 	t.Run("toml", func(t *testing.T) {
 		// The starter leaves GitHub at its enabled default; blank the env so
@@ -359,7 +359,7 @@ func TestConfigFormatsSmoke(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		r.Commit("feat(core): first release")
 		r.ReleaseOK()
-		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
 }
 
@@ -380,7 +380,7 @@ func TestConfigResolutionAscendsToTheMonorepoRoot(t *testing.T) {
 
 	res = r.CommandAt("packages/core", "release")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, r.HasTag("core@0.1.0"),
+	assert.True(t, r.IsTagged("core@0.1.0"),
 		"the tag lands in the monorepo's repository, not a nested one; tags: %v", r.TagList())
 	assert.FileExists(t, r.Path("packages", "core", "CHANGELOG.md"),
 		"the changelog lands under the resolved root")
@@ -443,7 +443,7 @@ func TestConfigDispatexcludeSelectsTheConfigFile(t *testing.T) {
 		r.Commit("feat(core): first release")
 
 		r.ReleaseOK()
-		assert.True(t, r.HasTag("yaml-core@0.1.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("yaml-core@0.1.0"), "tags: %v", r.TagList())
 	})
 
 	t.Run("space folder", func(t *testing.T) {
@@ -456,7 +456,7 @@ func TestConfigDispatexcludeSelectsTheConfigFile(t *testing.T) {
 		r.Commit("feat(core): first release")
 
 		r.ReleaseOK()
-		assert.True(t, r.HasTag("yaml-core@0.1.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("yaml-core@0.1.0"), "tags: %v", r.TagList())
 	})
 
 	t.Run("package folder", func(t *testing.T) {
@@ -469,7 +469,7 @@ func TestConfigDispatexcludeSelectsTheConfigFile(t *testing.T) {
 		r.Commit("feat(core): first release")
 
 		r.ReleaseOK()
-		assert.True(t, r.HasTag("yaml-core@0.1.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("yaml-core@0.1.0"), "tags: %v", r.TagList())
 	})
 }
 
@@ -494,7 +494,7 @@ func TestConfigResolutionAscendsPastASpaceFile(t *testing.T) {
 
 	res := r.CommandAt("packages/core", "release")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, r.HasTag("space-core@0.1.0"),
+	assert.True(t, r.IsTagged("space-core@0.1.0"),
 		"the space file's entry applied and the tag landed in the monorepo's repository: %v", r.TagList())
 }
 
@@ -610,12 +610,12 @@ func TestConfigParserQuiet(t *testing.T) {
 	}
 
 	loud := seed(t, false, "").StatusOK()
-	require.True(t, harness.HasCode(loud.Events, "E140"), "the parser finding prints by default")
-	require.True(t, harness.HasCode(loud.Events, "E130"), "so does the planner's")
+	require.True(t, harness.IsCodePresent(loud.Events, "E140"), "the parser finding prints by default")
+	require.True(t, harness.IsCodePresent(loud.Events, "E130"), "so does the planner's")
 
 	quiet := seed(t, true, "").StatusOK()
-	assert.False(t, harness.HasCode(quiet.Events, "E140"), "parser.quiet hides the parser's finding")
-	assert.True(t, harness.HasCode(quiet.Events, "E130"),
+	assert.False(t, harness.IsCodePresent(quiet.Events, "E140"), "parser.quiet hides the parser's finding")
+	assert.True(t, harness.IsCodePresent(quiet.Events, "E130"),
 		"a planner finding explains a release outcome and is never hidden")
 	assert.Contains(t, quiet.Stdout, `"hidden":1`,
 		"a hidden diagnostic is still counted, and the count says how many")
@@ -624,17 +624,17 @@ func TestConfigParserQuiet(t *testing.T) {
 	r := seed(t, true, "")
 	shown := r.Command("status", "--quiet-parser=false")
 	require.Equal(t, 0, shown.Code, "stderr:\n%s", shown.Stderr)
-	assert.True(t, harness.HasCode(shown.Events, "E140"), "--quiet-parser=false brings the findings back")
+	assert.True(t, harness.IsCodePresent(shown.Events, "E140"), "--quiet-parser=false brings the findings back")
 
 	r = seed(t, false, "")
 	hushed := r.Command("status", "--quiet-parser")
 	require.Equal(t, 0, hushed.Code, "stderr:\n%s", hushed.Stderr)
-	assert.False(t, harness.HasCode(hushed.Events, "E140"), "--quiet-parser hides them for one invocation")
+	assert.False(t, harness.IsCodePresent(hushed.Events, "E140"), "--quiet-parser hides them for one invocation")
 
 	// Display only: a hidden error still refuses the release.
 	blocked := seed(t, true, "error").Release()
 	assert.Equal(t, 1, blocked.Code, "a hidden error still blocks under commitErrors=error")
-	assert.False(t, harness.HasCode(blocked.Events, "E140"))
+	assert.False(t, harness.IsCodePresent(blocked.Events, "E140"))
 	assert.Contains(t, blocked.Stdout, "refusing to release",
 		"the refusal itself is never hidden, or the run would stop for no stated reason")
 }
@@ -656,7 +656,7 @@ func TestConfigCustomObjectIsIgnored(t *testing.T) {
 	r.Commit("feat(core): custom data")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 }
 
 // TestConfigRefSplitsTheFile: a configuration split across files with `$ref`
@@ -682,7 +682,7 @@ func TestConfigRefSplitsTheFile(t *testing.T) {
 	r.Commit("feat(core): first release")
 
 	res := r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Contains(t, res.Stdout, "building", "the referenced scripts ran")
 
 	// The files it was made of are on the record, which is how a split
@@ -775,8 +775,8 @@ func TestConfigNamesKeepTheirCaseEndToEnd(t *testing.T) {
 	r.ReleaseOK()
 
 	// The tags carry the names the config wrote, not folded ones.
-	assert.True(t, r.HasTag("Core@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.HasTag("MyLib@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("Core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("MyLib@0.1.0"), "tags: %v", r.TagList())
 
 	// The environment a script runs with reports the same names. The build
 	// script is declared as `Build` and referenced as `build` and `BUILD`, so
@@ -798,8 +798,8 @@ func TestConfigNamesKeepTheirCaseEndToEnd(t *testing.T) {
 	// A commit scope addresses it the same way.
 	r.CommitEmpty("fix(MYLIB): addressed by a third spelling")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("MyLib@0.1.1"), "tags: %v", r.TagList())
-	assert.False(t, r.HasTag("Core@0.1.1"), "and nothing else was dragged along")
+	assert.True(t, r.IsTagged("MyLib@0.1.1"), "tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("Core@0.1.1"), "and nothing else was dragged along")
 }
 
 // TestConfigRefusesTwoSpellingsOfOneName: the other half of the rule at the

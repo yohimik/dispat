@@ -1,15 +1,9 @@
 # Release scripts
 
-You will find four standalone shell scripts here: two for CI glue and checks shared across workflows, one tool
-installer backed by the repository's Aqua manifest, and one
-host-run half of the TinyGo spike, which is not CI glue at all — buildx reaches only linux, so the darwin probes run
-on a Mac by hand. Smaller scripts
-live directly in dispat configuration files as script entries, such as `push-badge` in the root
-[`dispat.yaml`](../dispat.yaml), `deploy-docs` in [`packages/docs/dispat.yaml`](../packages/docs/dispat.yaml), the link
-bracket in [`services/dispat/dispat.yaml`](../services/dispat/dispat.yaml), and `push-readme` in
-[`docker/dispat.yaml`](../docker/dispat.yaml), while test records live in [`tools/testreport`](../tools/testreport) as
-`testreport test`. Each script entry sits beside the code it configures, so the root file holds shared space settings,
-each space carries a `<space>/dispat.yaml`, and two exception packages carry their own package files.
+These scripts provide shared CI checks, compatibility entry points, and toolchain probes. Package-specific commands
+live beside their packages in `dispat.yaml`. Shared configuration stays at the root only when several packages need it.
+The tool installer is a thin entry point to [`tools/bootstrap.yaml`](../tools/bootstrap.yaml), which owns the Aqua version
+and installation steps. Both Docker builds and local installs use that same policy.
 
 Package scripts run **inside the releasing package's folder**, while root scripts run at the repository root. Scripts
 receive everything they need through environment variables: the
@@ -20,8 +14,9 @@ exported by CI.
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
 | [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its write scope and optional read-only scopes | `TEST_COMMIT`, plus the Actions cache flags in CI. Aggregate builds can import package scopes while updating only their own. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
-| [`install-tools.sh`](./install-tools.sh)   | the release job; the ping and replay jobs, the `tiny-toolchain` stage of [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), the `tinygo-spike-fork` stage of [`Dockerfile.tinygo`](../Dockerfile.tinygo) and `tinygo-spike-darwin.sh` | `GITHUB_TOKEN`, `DISPAT_BIN_DIR`; optionally `[all\|crier\|tinygo] [destination]` | Installs the newest Aqua with dispat, then the repository-recorded crier and TinyGo fork through `.aqua/aqua.yaml`. The destination receives `aqua` and the selected tools: a real `crier` binary and/or a link to the complete TinyGo tree at `tinygo`. |
-| [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike — build, run, net and self-update probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`, with `darwin-selfupdate.log` carrying the real-TLS update matrix and the platform verifier's answer about `SSL_CERT_FILE`. |
+| [`install-tools.sh`](./install-tools.sh)   | the release job; the ping and replay jobs, the `tiny-toolchain` stage of [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), the `tinygo-spike-fork` stage of [`Dockerfile.tinygo`](../Dockerfile.tinygo) and `tinygo-spike-darwin.sh` | `GITHUB_TOKEN`, `DISPAT_BIN_DIR`; optionally `[all\|crier\|tinygo] [destination]` | Installs the pinned Aqua with dispat, then the repository-recorded crier and TinyGo fork through `.aqua/aqua.yaml`. The destination receives `aqua` and the selected tools: a real `crier` binary and/or a link to the complete TinyGo tree at `tinygo`. |
+| [`lint-config-scripts.py`](./lint-config-scripts.py) | the `shellcheck` target of [`Dockerfile.gotest`](../Dockerfile.gotest) | every committed dispat config named on its command line | Each `scripts` entry as one shell file, held to `sh -n` and to shellcheck. It refuses a configuration shape it cannot read rather than skipping it, and `--self-test` holds the reader to the four shapes an entry is written in. |
+| [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike: build, run, net and self-update probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`, with `darwin-selfupdate.log` carrying the real-TLS update matrix and the platform verifier's answer about `SSL_CERT_FILE`. |
 
 Repository gates run inside Docker, so the commit CI jobs need Docker, git and dispat itself. The release job also
 installs Node and pnpm to compile, pack and publish the npm distribution through npm trusted publishing. Terraform
@@ -51,7 +46,7 @@ summary to your terminal. It displays full failure output so you do not lose det
 the exit status of the underlying test run. Pass a `<log-name>` that matches the target coverage profile (`ccme`,
 `dispat`, `integration`), and append `-race` to mark race-detector passes.
 
-Run `dispat exec coverage-badge` to merge the generated profiles in `coverage/` and produce the badge JSON — the merge
+Run `dispat exec coverage-badge` to merge the generated profiles in `coverage/` and produce the badge JSON; the merge
 logic lives in the `badge` target of [`Dockerfile.gotest`](../Dockerfile.gotest), and the summary table it writes to
 `coverage/summary.md` is what the script appends to the job summary. The `test-report` root script (the `report`
 target) then compiles those profiles and logs into
@@ -65,7 +60,7 @@ Run these commands to reproduce the entire test and report pipeline locally:
 ```sh
 dispat run tests --since all      # ~6 min: every module's profile and log
 dispat exec coverage-badge        # the merged profiles and the badge JSON
-dispat exec experiments --for pkg:experiments --in pkg:experiments   # ~15 min: the twelve release experiment cells
+dispat exec experiments --for pkg:experiments --in pkg:experiments   # the release experiment matrix
 dispat exec test-report           # packages/docs/data/report.json
 ```
 
@@ -85,5 +80,15 @@ dispat run build --since all -s docker     # docker compose build, all four imag
 The publish scripts `deploy-docs` and `push-badge` are dangerous exceptions: **do not run them** by hand or through
 dispat. They publish directly to the live site and badge records, so both scripts abort unless `CI=true`.
 
-All scripts use POSIX `sh` with `set -eu`. Test changes to release scripts carefully, because only the
+All scripts use POSIX `sh` with `set -eu`, and so does the shell inside every `scripts` entry of a dispat config: the
+`shellcheck` target reads those entries out of the configuration files and holds them to the same two checks it holds
+a file to. Test changes to release scripts carefully, because only the
 [Release workflow](../.github/workflows/release.yml) exercises the full release path.
+
+## What the override ladder resolves to
+
+The release calls some scripts by name from one package, so a name that moves a level fails at release time rather
+than in a gate. Run `dispat exec config-check` to assert the resolutions that matter: the package gates that override
+their space's, the record step the services space names in `flow.publish`, and a root script reaching a package that
+declares none of its own. The check reads this repository's configuration through dispat itself, with `shell` replaced
+by a printer, so every resolution it asserts is printed rather than run.

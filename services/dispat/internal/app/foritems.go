@@ -67,7 +67,7 @@ func (a *App) ForItems(ctx context.Context, sel ForSelection) ([]ForItem, error)
 		}
 		items := make([]ForItem, 0, len(res.Names))
 		for _, p := range pkgs {
-			if res.Has(p.Name) {
+			if res.IsSelected(p.Name) {
 				items = append(items, packageItem(p))
 			}
 		}

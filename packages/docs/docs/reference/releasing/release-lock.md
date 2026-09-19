@@ -31,6 +31,11 @@ Step 4 happens no matter what steps 2 and 3 did. A failed package, a guard refus
 trigger cleanup. Cleanup is detached from a cancelled release context and bounded to 30 seconds. If another owner has
 replaced the remote ref, the expected-object lease rejects the delete and preserves that owner's lock.
 
+If any repository's lock cannot be returned, dispat reports `E336` and exits nonzero. A publication that already
+succeeded remains published and is still counted that way in the summary; the closing `release.finished` webhook says
+`failed`, or `interrupted` if the run was cancelled. A refusal before execution emits no completion webhook. In a fleet, cleanup continues in reverse order so one damaged repository does not strand the locks of
+the remaining repositories too.
+
 The claim is unconditional. No flag moves the plan ahead of it, because whether there is work to do is not known
 until after planning, and planning is the thing the lock exists to serialise. A run that turns out to have nothing to
 publish therefore takes the lock, gives it straight back, and exits as it otherwise would. To ask whether a release
@@ -100,6 +105,11 @@ each other.
 **It is not a release tag.** The `dispat-release-lock` tag carries no version and dispat never reads it back as one. It
 stays out of every package's history even under a tag format broad enough to match the name.
 
+**A fleet is locked repository by repository.** A release run from a
+[control repository](../../control-repository.md#keeping-the-plan-fixed-during-release) takes the lock in every
+participating repository, in repository-name order, and gives them back in reverse. The lock covers the whole combined
+workspace, so independent per-repository locks do not make two fleet runs safe.
+
 ## Turning it off
 
 Turn the lock off in the config file for a repository that is always in this situation:
@@ -124,3 +134,7 @@ the lock off, nothing stops a second release starting beside the first.
 Only a value that plainly reads as true switches the variable on (`true`, `TRUE`, `1`). Anything else leaves the lock
 in place, including a typo, an empty value, or an unset variable. Releasing unguarded is not a state you want to end up
 in by accident.
+
+A run with the lock off says so. One `W331` warning names every repository releasing without a lock and which setting
+asked for it, so a fleet that meant to bypass one repository can see that it bypassed all of them. See
+[diagnostic codes](../plan-errors.md#polyrepository-snapshot-and-recording-diagnostics).

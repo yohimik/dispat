@@ -38,7 +38,7 @@ type IfOptions struct {
 	Dir string
 	// Runner executes the chosen script. Nil means a plain ShellRunner, which
 	// is /bin/sh -c: there is no configuration here to take a shell from.
-	Runner script.Runner
+	Runner script.Runnerx
 	Stdout io.Writer
 	Stderr io.Writer
 	Log    zerolog.Logger
@@ -61,7 +61,7 @@ func RunIf(ctx context.Context, opts IfOptions) (int, error) {
 	// to the else.
 	chosen, matched := "", false
 	for _, b := range opts.Branches {
-		if b.Cond.Match(lookup) {
+		if b.Cond.IsMatch(lookup) {
 			chosen, matched = b.Script, true
 			opts.Log.Debug().Str("condition", b.Cond.Spec).Msg("condition matched")
 			break

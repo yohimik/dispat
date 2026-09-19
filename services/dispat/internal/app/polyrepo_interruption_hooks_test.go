@@ -111,7 +111,7 @@ func TestInterruptedWorkspaceRecordingSkipsCommitAndPushHooks(t *testing.T) {
 
 		results := (&release.Executor{
 			BuildConcurrency: 1, PublishConcurrency: 1,
-			Runner: cancelSuccessfulPublishRunner{cancel: cancel}, Recorders: []release.ReleaseRecorder{w},
+			Runner: cancelSuccessfulPublishRunner{cancel: cancel}, Recorders: []release.ReleaseRecorderx{w},
 			BlockOnRecordFailure: true, AcquirePublish: w.acquirePublish,
 		}).Run(ctx, pl)
 
@@ -132,7 +132,7 @@ func TestInterruptedWorkspaceRecordingSkipsCommitAndPushHooks(t *testing.T) {
 
 		results := (&release.Executor{
 			BuildConcurrency: 1, PublishConcurrency: 1,
-			Runner: &pinCaptureRunner{}, Recorders: []release.ReleaseRecorder{w},
+			Runner: &pinCaptureRunner{}, Recorders: []release.ReleaseRecorderx{w},
 			BlockOnRecordFailure: true, AcquirePublish: w.acquirePublish,
 		}).Run(ctx, pl)
 

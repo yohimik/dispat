@@ -496,6 +496,7 @@ EOF
 FROM tinygo-spike-net AS tinygo-spike-fork
 COPY .aqua /opt/dispat-tools/.aqua
 COPY scripts/install-tools.sh /opt/dispat-tools/scripts/install-tools.sh
+COPY tools/bootstrap.yaml /opt/dispat-tools/tools/bootstrap.yaml
 ARG TARGETARCH
 RUN <<'EOF'
 set -u

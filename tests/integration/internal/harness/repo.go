@@ -53,6 +53,52 @@ func New(t testing.TB) *Repo {
 // on.
 const DefaultBranch = "main"
 
+// Clone makes a second working copy of a repository from a URL, on the same
+// footing as one New created: the binaries under test, the fixture identity
+// and the same invocation plumbing.
+//
+// It exists because some checkouts can only be made the way a CI runner makes
+// them. A fleet of linked repositories is one: what a release reads is the
+// tree a clone materializes, and a scenario that assembled that tree by hand
+// would be asserting about its own fixture rather than about the checkout an
+// operator actually releases from.
+func Clone(t testing.TB, url string) *Repo {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dispatBin, tsmarkBin := Build(t)
+	root := filepath.Join(t.TempDir(), "clone")
+	out, err := exec.Command("git", "clone", "-q", url, root).CombinedOutput()
+	require.NoError(t, err, "git clone %s: %s", url, out)
+	r := &Repo{T: t, Root: root, dispatBin: dispatBin, tsmarkBin: tsmarkBin}
+	r.Git("config", "user.email", "integration@dispat.test")
+	r.Git("config", "user.name", "dispat integration")
+	return r
+}
+
+// CloneShallow is Clone with only the tip commit fetched, which is the
+// checkout a CI runner that asked for a fast one gets.
+//
+// Git ignores --depth over a plain local path and says so, so the URL is
+// asked for over the file transport, where the depth is honoured. What it
+// produces is a repository dispat refuses to release from, and a refusal is
+// only worth asserting against a checkout that is genuinely shallow.
+func CloneShallow(t testing.TB, url string) *Repo {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dispatBin, tsmarkBin := Build(t)
+	root := filepath.Join(t.TempDir(), "clone")
+	out, err := exec.Command("git", "clone", "-q", "--depth", "1", "file://"+url, root).CombinedOutput()
+	require.NoError(t, err, "git clone --depth 1 %s: %s", url, out)
+	r := &Repo{T: t, Root: root, dispatBin: dispatBin, tsmarkBin: tsmarkBin}
+	r.Git("config", "user.email", "integration@dispat.test")
+	r.Git("config", "user.name", "dispat integration")
+	return r
+}
+
 // WorkFrom makes every later invocation run *from* this folder of the
 // repository, the way a shell in that folder would. Only what dispat reads
 // from the current directory notices — the `.env` file — since the harness
@@ -156,10 +202,10 @@ func (r *Repo) TagList() []string {
 	return strings.Split(out, "\n")
 }
 
-// HasTag reports whether the exact tag name exists. For "was this package
+// IsTagged reports whether the exact tag name exists. For "was this package
 // tagged at all", use TagCount with the "pkg@" prefix — an exact match
 // against a bare prefix is always false and would pass vacuously.
-func (r *Repo) HasTag(name string) bool {
+func (r *Repo) IsTagged(name string) bool {
 	for _, t := range r.TagList() {
 		if t == name {
 			return true
@@ -278,6 +324,13 @@ func (r *Repo) CommandEnv(env []string, args ...string) RunResult {
 func (r *Repo) CommandInput(stdin string, args ...string) RunResult {
 	r.T.Helper()
 	return r.runAtEnv(r.Root, nil, stdin, args...)
+}
+
+// CommandInputEnv is CommandInput with extra environment pairs, for a prompt
+// whose accepted answer then does work the environment has to permit.
+func (r *Repo) CommandInputEnv(env []string, stdin string, args ...string) RunResult {
+	r.T.Helper()
+	return r.runAtEnv(r.Root, env, stdin, args...)
 }
 
 // DispatCommand renders a shell command invoking the dispat binary under
@@ -479,6 +532,28 @@ func (r *Repo) StartReleaseEnv(env []string, flags ...string) *Proc {
 	r.T.Helper()
 	full := append(append([]string{}, flags...), "--root", r.Root)
 	cmd := exec.Command(r.dispatBin, full...)
+	cmd.Env = append(append(baseEnv(), defaultEnv...), env...)
+	if dir := coverDir(); dir != "" {
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	require.NoError(r.T, cmd.Start(), "launching dispat")
+	return &Proc{repo: r, cmd: cmd, stdout: &stdout, stderr: &stderr}
+}
+
+// StartCommandEnv launches dispat with exactly the given arguments, in the
+// repository folder, with extra environment pairs appended, and returns
+// without waiting.
+//
+// It appends no --root of its own, which is what separates it from
+// StartReleaseEnv: an inherited workspace context is carried in the
+// environment and an explicit --root is precisely the flag that refuses it,
+// so a scenario about a nested invocation cannot use a starter that adds one.
+func (r *Repo) StartCommandEnv(env []string, args ...string) *Proc {
+	r.T.Helper()
+	cmd := exec.Command(r.dispatBin, args...)
+	cmd.Dir = r.Root
 	cmd.Env = append(append(baseEnv(), defaultEnv...), env...)
 	if dir := coverDir(); dir != "" {
 		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)

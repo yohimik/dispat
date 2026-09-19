@@ -111,9 +111,9 @@ func ownCommitsOf(e harness.Event) int {
 // records must hold to the run's plan at every step of the train.
 func assertCleanWiring(t *testing.T, res harness.RunResult) {
 	t.Helper()
-	assert.False(t, harness.HasCode(res.Events, "W228"), "wired record drift: %s", res.Stdout)
-	assert.False(t, harness.HasCode(res.Events, "E219"), "wired record refusal: %s", res.Stdout)
-	assert.False(t, harness.HasCode(res.Events, "W193"), "nothing here is a catch-up: %s", res.Stdout)
+	assert.False(t, harness.IsCodePresent(res.Events, "W228"), "wired record drift: %s", res.Stdout)
+	assert.False(t, harness.IsCodePresent(res.Events, "E219"), "wired record refusal: %s", res.Stdout)
+	assert.False(t, harness.IsCodePresent(res.Events, "W193"), "nothing here is a catch-up: %s", res.Stdout)
 }
 
 // TestLongitudinalGroupTrainLifecycle walks the whole sequence. The steps
@@ -134,20 +134,20 @@ func TestLongitudinalGroupTrainLifecycle(t *testing.T) {
 	res := r.ReleaseOK()
 	assertCleanWiring(t, res)
 	for _, tag := range []string{"core@0.1.0", "app@0.1.0", "ccme@0.1.0"} {
-		require.True(t, r.HasTag(tag), "tags: %v", r.TagList())
+		require.True(t, r.IsTagged(tag), "tags: %v", r.TagList())
 	}
-	require.True(t, r.HasTag("cli-v0.1.0"), "app's exact alias; tags: %v", r.TagList())
-	require.True(t, r.HasTag("cli-v0"), "app's moving alias; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("cli-v0.1.0"), "app's exact alias; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("cli-v0"), "app's moving alias; tags: %v", r.TagList())
 	aliasAtBaseline := r.Git("rev-list", "-n1", "cli-v0")
 
 	// --- Step 1: core boards an rc train; the group rides with it. ---
 	r.CommitEmpty("feat(core)%rc: start the train")
 	res = r.ReleaseOK()
 	assertCleanWiring(t, res)
-	require.True(t, r.HasTag("core@0.2.0-rc.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.2.0-rc.0"), "the group shares the train; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0-rc.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.2.0-rc.0"), "the group shares the train; tags: %v", r.TagList())
 	assert.Equal(t, 1, r.TagCount("ccme@"), "the independent provider stays put")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "app"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "app"),
 		"the ride is explained: %s", res.Stdout)
 
 	core := harness.GraphLine(res.Events, "core")
@@ -180,8 +180,8 @@ func TestLongitudinalGroupTrainLifecycle(t *testing.T) {
 
 	res = r.ReleaseOK()
 	assertCleanWiring(t, res)
-	require.True(t, r.HasTag("core@0.2.0-rc.1"), "one shared counter; tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.2.0-rc.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0-rc.1"), "one shared counter; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.2.0-rc.1"), "tags: %v", r.TagList())
 
 	coreLog := spacedChangelog(t, r, "packages", "core")
 	rc1 := entryOf(t, coreLog, "core@0.2.0-rc.1")
@@ -198,14 +198,14 @@ func TestLongitudinalGroupTrainLifecycle(t *testing.T) {
 	r.CommitEmpty("fix(ccme)^: repair underneath")
 	res = r.ReleaseOK()
 	assertCleanWiring(t, res)
-	require.True(t, r.HasTag("ccme@0.1.1"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("core@0.2.0-rc.2"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.2.0-rc.2"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("ccme@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0-rc.2"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.2.0-rc.2"), "tags: %v", r.TagList())
 
 	app = harness.GraphLine(res.Events, "app")
 	assert.Equal(t, "propagated from ccme", app.Str("reason"))
 	assert.Equal(t, 0, ownCommitsOf(app))
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "core"),
 		"core rides its own group this time: %s", res.Stdout)
 
 	appRc2 := entryOf(t, spacedChangelog(t, r, "services", "app"), "app@0.2.0-rc.2")
@@ -219,8 +219,8 @@ func TestLongitudinalGroupTrainLifecycle(t *testing.T) {
 	r.CommitEmpty("fix(core)%rc>stable: graduate the train")
 	res = r.ReleaseOK()
 	assertCleanWiring(t, res)
-	require.True(t, r.HasTag("core@0.2.0"), "graduated; tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.2.0"), "the whole group graduates; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0"), "graduated; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.2.0"), "the whole group graduates; tags: %v", r.TagList())
 
 	coreStable := entryOf(t, spacedChangelog(t, r, "packages", "core"), "core@0.2.0")
 	assertOrderedIn(t, coreStable, "### Features", "start the train",
@@ -229,7 +229,7 @@ func TestLongitudinalGroupTrainLifecycle(t *testing.T) {
 	assert.Contains(t, appStable, "- ccme: 0.1.0 -> 0.1.1",
 		"the graduation still documents what moved underneath during the train")
 
-	require.True(t, r.HasTag("cli-v0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("cli-v0.2.0"), "tags: %v", r.TagList())
 	assert.NotEqual(t, aliasAtBaseline, r.Git("rev-list", "-n1", "cli-v0"),
 		"the moving alias follows the graduation")
 	assert.Equal(t, r.Git("rev-list", "-n1", "app@0.2.0"), r.Git("rev-list", "-n1", "cli-v0"))

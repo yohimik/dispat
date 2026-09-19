@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/manifest"
+	"gopkg.in/yaml.v3"
 )
 
 // pubspecTables maps a kind onto the top-level block its declarations live in.
@@ -257,7 +258,9 @@ func linkPubspec(path string, links []Link) (LinkResult, error) {
 	for _, r := range links {
 		entry, found := pubspecOverrideEntry(lines, r.Name)
 		switch {
-		case r.Path == "" && !found:
+		case r.Path == "" && (!found || entry.path == ""):
+			// A version, git, hosted or SDK override is not a local redirect.
+			// Empty Path removes only the redirects Relink can create.
 			res.Missing = append(res.Missing, r)
 		case r.Path == "":
 			lines = pubspecDropOverride(lines, entry)
@@ -329,23 +332,31 @@ func pubspecOverrideEntry(lines []string, name string) (pubspecOverride, bool) {
 			continue
 		}
 		entry := pubspecOverride{nameLine: i, indent: indent, pathLine: -1, end: i + 1}
-		// A path on the same line is legal YAML but not how pub writes it;
-		// either way the nested form is what follows.
-		if s, e, scalar := yamlScalarSpan(line, valueStart); scalar {
-			entry.pathLine, entry.pathStart, entry.pathEnd = i, s, e
-			entry.path = line[s:e]
+		// A scalar on the same line is a version constraint, not a folder.
+		// A flow mapping can still carry a path; repointing it regenerates the
+		// entry in the block form pub writes because it has no safe scalar span.
+		if _, _, scalar := yamlScalarSpan(line, valueStart); scalar {
+			entry.path = readPubspecInlinePath(line[valueStart:])
 			return entry, true
 		}
+		childDepth := -1
 		for j := i + 1; j < end; j++ {
 			nested := stripYAMLComment(lines[j])
 			if strings.TrimSpace(nested) == "" {
 				entry.end = j + 1
 				continue
 			}
-			if len(nested)-len(strings.TrimLeft(nested, " \t")) <= indent {
+			nestedIndent := len(nested) - len(strings.TrimLeft(nested, " \t"))
+			if nestedIndent <= indent {
 				break
 			}
 			entry.end = j + 1
+			if childDepth < 0 {
+				childDepth = nestedIndent
+			}
+			if nestedIndent != childDepth {
+				continue
+			}
 			k, vs, ok := yamlKey(nested)
 			if !ok || k != "path" {
 				continue
@@ -358,6 +369,26 @@ func pubspecOverrideEntry(lines []string, name string) (pubspecOverride, bool) {
 		return entry, true
 	}
 	return pubspecOverride{pathLine: -1}, false
+}
+
+// readPubspecInlinePath reads the one local shape a same-line override may hold:
+// a flow mapping such as {path: ../core}. A plain scalar is a version
+// constraint in pub's dependency grammar, even when its text resembles a
+// filesystem path.
+func readPubspecInlinePath(value string) string {
+	var decoded any
+	if err := yaml.Unmarshal([]byte(value), &decoded); err != nil {
+		return ""
+	}
+	fields, ok := decoded.(map[string]any)
+	if !ok {
+		return ""
+	}
+	path, ok := fields["path"].(string)
+	if !ok {
+		return ""
+	}
+	return path
 }
 
 // pubspecEntryIndent reports the column a block's own entries sit at, taken

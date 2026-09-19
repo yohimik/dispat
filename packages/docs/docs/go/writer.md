@@ -1,8 +1,8 @@
 # writer: the manifest writer
 
 Use `github.com/yohimik/dispat/pkg/writer` to bump versions in `package.json`, `go.mod`, `Cargo.toml`, and every other
-format [the scanner](./scanner.md) reads. The package updates files in place and preserves their format. It replaces
-only the version text and leaves every other byte verbatim, including indentation, key order, and comments.
+format [the scanner](./scanner.md) reads. Most formats use targeted byte edits that preserve indentation, key order
+and comments. Go modules use the Go module formatter.
 
 Every format writer goes through one internal splicer. This means the read cap, the splice, the proof that the result
 still parses, and the atomic write happen in the same place. Writes go through a same-folder temporary file, an fsync,
@@ -83,14 +83,14 @@ res, err := writer.Relink("services/svc/go.mod", []writer.Link{
 })
 ```
 
-Pass an empty `Path` to remove the redirect instead of adding one. A release removes redirects before publishing
-because a local link ships consumers a module they cannot resolve.
+Pass an empty `Path` to remove a local redirect instead of adding one. Configure an unlink step before publishing
+when your build creates temporary redirects; release execution does not remove them automatically.
 
 Five formats have such a directive. These are `go.mod` (`replace`), `Cargo.toml` (`[patch.crates-io]`), `pubspec.yaml`
 (`dependency_overrides`), `pyproject.toml` (`[tool.uv.sources]`), and `package.json` (`overrides`, `resolutions`, or
 `pnpm.overrides`). The `package.json` directive is chosen by reading the file rather than guessing.
 
-Call `SupportsLink` to report the same five formats at runtime. Every other format writes nothing and reports each link
+Call `IsLinkSupported` to report the same five formats at runtime. Every other format writes nothing and reports each link
 in `Skipped`.
 
 Call `Links` to read the other direction and enumerate the directives a file already carries. This lets a CI gate prove
@@ -101,6 +101,10 @@ matching removals:
 links, err := writer.Links("services/svc/go.mod")
 res, err := writer.DropLinks("services/svc/go.mod")
 ```
+
+In `pubspec.yaml`, only an override with its own `path` field is a local redirect. Version constraints and Git,
+hosted or SDK overrides remain intact, including a `path` nested inside a Git source. In `package.json`, a selected
+override container must be an object; a malformed container is refused without changing the file.
 
 ## Writing the build counter
 

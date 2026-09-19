@@ -47,10 +47,10 @@ type ScanOptions struct {
 	// per-manifest events in JSON mode.
 	Log zerolog.Logger
 	// Scanner reads the manifests; nil means the filesystem scanner.
-	Scanner scanner.Scanner
+	Scanner scanner.Scannerx
 	// Writer enumerates link directives for the verify gates; nil means the
 	// filesystem writer.
-	Writer writer.Writer
+	Writer writer.Writerx
 	// VerifyUnlinked fails the command when any scanned manifest still
 	// carries a local-link directive: exactly what --link-local can inject,
 	// nothing wider.
@@ -101,7 +101,7 @@ type WriteOptions struct {
 	// Log carries the per-manifest events in JSON mode.
 	Log zerolog.Logger
 	// Writer applies the edits; nil means the filesystem writer.
-	Writer writer.Writer
+	Writer writer.Writerx
 }
 
 // ReplaceOptions is one `dispat replacer` invocation.
@@ -123,7 +123,7 @@ type ReplaceOptions struct {
 	// Log carries the per-file events in JSON mode.
 	Log zerolog.Logger
 	// Writer applies the replacements; nil means the filesystem writer.
-	Writer writer.Writer
+	Writer writer.Writerx
 }
 
 // depView is one dependency declaration as the JSON output spells it.
@@ -242,7 +242,7 @@ func verifyScan(opts ScanOptions, dir string, mans []scanner.Manifest) error {
 		}
 		present := 0
 		for _, m := range mans {
-			if !writer.SupportsLink(m.Path) {
+			if !writer.IsLinkSupported(m.Path) {
 				continue
 			}
 			links, err := w.Links(filepath.Join(dir, filepath.FromSlash(m.Path)))
@@ -273,7 +273,7 @@ func verifyScan(opts ScanOptions, dir string, mans []scanner.Manifest) error {
 		matched := 0
 		for _, m := range mans {
 			for _, d := range m.Deps {
-				if !plan.GlobMatch(pattern, d.Range) {
+				if !plan.IsGlobMatch(pattern, d.Range) {
 					continue
 				}
 				matched++
@@ -291,7 +291,7 @@ func verifyScan(opts ScanOptions, dir string, mans []scanner.Manifest) error {
 		found := false
 		for _, m := range mans {
 			for _, d := range m.Deps {
-				if plan.GlobMatch(pattern, d.Range) {
+				if plan.IsGlobMatch(pattern, d.Range) {
 					found = true
 				}
 			}
@@ -460,7 +460,7 @@ type manifestEdit struct {
 	// DropLinks removes every local-link directive the manifest carries.
 	DropLinks bool
 	// Writer applies the edits; nil means the filesystem writer.
-	Writer writer.Writer
+	Writer writer.Writerx
 }
 
 // formatName is the manifest format a path resolves to, for the debug stream.

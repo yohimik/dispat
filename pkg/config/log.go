@@ -23,7 +23,7 @@ import (
 	"strconv"
 )
 
-// Level is how much an event matters. The zero value is Trace, so a Logger
+// Level is how much an event matters. The zero value is Trace, so a Loggerx
 // that answers Enabled for everything sees everything.
 type Level int8
 
@@ -189,13 +189,13 @@ func (f Field) Value() any {
 	}
 }
 
-// Logger is what this package writes its events to. Two methods, no
+// Loggerx is what this package writes its events to. Two methods, no
 // dependency: a caller wires its own logging package in around them.
 //
 // Enabled is asked before every event is built, so an implementation that
 // answers it cheaply is what makes the trace events free in a program that
 // does not want them.
-type Logger interface {
+type Loggerx interface {
 	Enabled(level Level) bool
 	Log(level Level, event string, fields ...Field)
 }
@@ -203,7 +203,7 @@ type Logger interface {
 // Nop returns the logger that is never enabled and records nothing. It is what
 // a call with no logger anywhere uses, so nothing in this package has to check
 // for nil.
-func Nop() Logger { return nopLogger{} }
+func Nop() Loggerx { return nopLogger{} }
 
 type nopLogger struct{}
 
@@ -217,7 +217,7 @@ type loggerKey struct{}
 // WithLogger returns a context carrying the logger, which every call taking a
 // context will write its events to. It is how a request-scoped or
 // command-scoped logger reaches a Loader that was built once at startup.
-func WithLogger(ctx context.Context, log Logger) context.Context {
+func WithLogger(ctx context.Context, log Loggerx) context.Context {
 	if log == nil {
 		log = Nop()
 	}
@@ -225,9 +225,9 @@ func WithLogger(ctx context.Context, log Logger) context.Context {
 }
 
 // GetLogger returns the logger a context carries, or the no-op.
-func GetLogger(ctx context.Context) Logger {
+func GetLogger(ctx context.Context) Loggerx {
 	if ctx != nil {
-		if log, ok := ctx.Value(loggerKey{}).(Logger); ok && log != nil {
+		if log, ok := ctx.Value(loggerKey{}).(Loggerx); ok && log != nil {
 			return log
 		}
 	}
@@ -238,7 +238,7 @@ func GetLogger(ctx context.Context) Logger {
 // the context's otherwise. A Loader built with a logger is a Loader that logs
 // wherever it is used, which is what a program with one logger wants; the
 // context is for the programs that have several.
-func (l *Loader) logger(ctx context.Context) Logger {
+func (l *Loader) logger(ctx context.Context) Loggerx {
 	if l != nil && l.opts.Logger != nil {
 		return l.opts.Logger
 	}

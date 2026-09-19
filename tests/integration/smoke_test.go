@@ -137,7 +137,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	assertGraph(t, g, "js", "0.0.0 -> 0.1.0", "direct")
 	assertGraph(t, g, "img", "0.0.0 -> 0.1.0", "direct")
 	for _, tag := range []string{"golib@0.1.0", "gocli@0.1.0", "js@0.1.0", "img@0.1.0"} {
-		require.True(t, r.HasTag(tag), "tags: %v", r.TagList())
+		require.True(t, r.IsTagged(tag), "tags: %v", r.TagList())
 	}
 	assert.Contains(t, readFile(t, r, "golibs", "gocli", "go.mod"),
 		"require example.com/toy/golib v0.1.0", "the go.mod follows the provider it released beside")
@@ -156,7 +156,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	assertGraph(t, g, "js", "0.1.0 -> 0.2.0", "direct")
 	assertGraph(t, g, "img", "0.1.0 -> 0.2.0", "fixed group versioning")
 	assertGraph(t, g, "golib", "0.1.0", "")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "img"), "the ride is explained")
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "img"), "the ride is explained")
 	assert.Contains(t, readFile(t, r, "images", "img", "Dockerfile"),
 		"FROM registry.example.com/js:0.2.0", "the rider's manifest follows the group")
 	assert.Contains(t, readFile(t, r, "images", "img", "compose.yaml"), "registry.example.com/img:0.2.0")
@@ -182,7 +182,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	g = graphOf(res.Events, "golib", "gocli")
 	assertGraph(t, g, "gocli", "0.1.0 -> 0.1.1", "direct")
 	assertGraph(t, g, "golib", "0.1.1", "")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W197", "gocli"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W197", "gocli"),
 		"the reconciliation pickup is reported: %s", res.Stdout)
 	assert.Contains(t, readFile(t, r, "golibs", "gocli", "go.mod"),
 		"require example.com/toy/golib v0.1.1", "the range catches up to the provider released without it")
@@ -248,7 +248,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	require.NoError(t, os.WriteFile(r.Path("fail-img"), nil, 0o644))
 	res = r.Release()
 	require.Equal(t, 1, res.Code, "img's leg must die\nstdout:\n%s", res.Stdout)
-	require.True(t, r.HasTag("js@0.4.0"), "js published before the death; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("js@0.4.0"), "js published before the death; tags: %v", r.TagList())
 	require.Zero(t, r.TagCount("img@0.4.0"), "img's leg died; tags: %v", r.TagList())
 
 	require.NoError(t, os.Remove(r.Path("fail-img")))
@@ -258,7 +258,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	assertGraph(t, g, "js", "0.4.0", "")
 	assert.Equal(t, 1, r.TagCount("js@0.4.0"),
 		"js published this work already and is not re-released; tags: %v", r.TagList())
-	assert.False(t, harness.HasCodeForPackage(res.Events, "W234", "img"),
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W234", "img"),
 		"the catch-up is img's own release, not a ride")
 	assert.Contains(t, readFile(t, r, "images", "img", "Dockerfile"),
 		"FROM registry.example.com/js:0.4.0", "the catch-up still performs the manifest pickup")
@@ -276,7 +276,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	require.NoError(t, os.WriteFile(r.Path("fail-js"), nil, 0o644))
 	res = r.Release()
 	require.Equal(t, 1, res.Code, "js's leg must die\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W194", "img"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "img"),
 		"img is skipped: its build installs the js publish that never happened")
 	require.Zero(t, r.TagCount("js@0.5.0"), "tags: %v", r.TagList())
 	require.Zero(t, r.TagCount("img@0.5.0"),
@@ -301,7 +301,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	require.NoError(t, os.WriteFile(r.Path("fail-img"), nil, 0o644))
 	res = r.Release()
 	require.Equal(t, 1, res.Code, "img's ride must die\nstdout:\n%s", res.Stdout)
-	require.True(t, r.HasTag("js@0.6.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("js@0.6.0"), "tags: %v", r.TagList())
 	require.Zero(t, r.TagCount("img@0.6.0"), "tags: %v", r.TagList())
 
 	require.NoError(t, os.Remove(r.Path("fail-img")))
@@ -309,7 +309,7 @@ func TestSmokeReleaseCycles(t *testing.T) {
 	g = graphOf(res.Events, "js", "img")
 	assertGraph(t, g, "img", "0.5.0 -> 0.6.0", "fixed group versioning")
 	assertGraph(t, g, "js", "0.6.0", "")
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W234", "img"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "img"),
 		"the cause-less catch-up is a ride, and the ride is explained")
 	assert.Equal(t, 1, r.TagCount("js@0.6.0"),
 		"js published this minor already and is not re-released; tags: %v", r.TagList())
@@ -341,14 +341,14 @@ func TestSmokeReleaseCycles(t *testing.T) {
 
 	res = r.Release()
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "W242"), "the pull is reported: %v", res.Events)
+	assert.True(t, harness.IsCodePresent(res.Events, "W242"), "the pull is reported: %v", res.Events)
 	release := releaseCommit(t, r, "chore(release): golib@0.1.3")
 	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "golib@0.1.3")),
 		"the tag names the commit the run planned, not the merge above it")
 	assert.Contains(t, firstParents(t, r), release)
 
 	res = r.ReleaseOK()
-	assert.True(t, r.HasTag("golib@0.2.0"), "what arrived releases next; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("golib@0.2.0"), "what arrived releases next; tags: %v", r.TagList())
 
 	// --- Cycle 10: and what arrived changed the same content. ---
 	//
@@ -366,12 +366,12 @@ func TestSmokeReleaseCycles(t *testing.T) {
 
 	res = r.Release()
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "W243"), "the conflict is reported: %v", res.Events)
+	assert.True(t, harness.IsCodePresent(res.Events, "W243"), "the conflict is reported: %v", res.Events)
 	quarantine := conflictBranchOf(t, r)
 	assert.Contains(t, quarantine, "release-conflicts/golib-0.2.1-")
 	log := readFile(t, r, "golibs", "golib", "CHANGELOG.md")
 	assert.NotContains(t, log, "written by somebody else", "their side did not overwrite the release")
 	assert.NotContains(t, log, "<<<<")
 	assert.Contains(t, log, quarantine, "and the entry says where their side is kept")
-	assert.True(t, r.HasTag("golib@0.2.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("golib@0.2.1"), "tags: %v", r.TagList())
 }

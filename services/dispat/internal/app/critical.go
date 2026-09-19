@@ -15,6 +15,7 @@ import (
 // package's publish script succeeded, or the release commit exists. From that
 // moment a run has nothing left to decide — the artefacts are out — and only
 // things left to record: the remaining tags, the push, the release records.
+// Returning an owned release lock is also critical, even when the plan was empty.
 //
 // So a critical never stops anything. It is logged with its diagnostic code,
 // collected, and the run continues to the end of everything it owed. What the
@@ -50,6 +51,18 @@ func (c *criticals) record(log zerolog.Logger, code string, err error, msg strin
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.errs = append(c.errs, fmt.Errorf("%s: %s: %w", code, msg, err))
+}
+
+// keep retains a critical that was already reported where it occurred. Lock
+// cleanup uses it so the same failure controls the final status without
+// printing a second error event for one failed operation.
+func (c *criticals) keep(err error) {
+	if c == nil || err == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.errs = append(c.errs, err)
 }
 
 // adopt takes in the criticals the executor recorded on each package's result.
@@ -90,6 +103,6 @@ func (c *criticals) err() error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return fmt.Errorf("%d step(s) failed after their release was already out: %w",
+	return fmt.Errorf("%d release finalization step(s) failed: %w",
 		len(c.errs), errors.Join(c.errs...))
 }

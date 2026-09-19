@@ -104,7 +104,7 @@ func TestCoveredSelectionReportsActivity(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			sel, covered, err := app.coveredSelection(ctx, pl, tc.opts)
 			require.NoError(t, err)
-			assert.Equal(t, tc.active, sel.Active())
+			assert.Equal(t, tc.active, sel.IsActive())
 			viaWrapper, err := app.coveredPackages(ctx, pl, tc.opts)
 			require.NoError(t, err)
 			assert.Equal(t, covered, viaWrapper, "the wrapper is the same selection minus the Result")

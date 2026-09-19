@@ -14,10 +14,6 @@ scripts:
     docker buildx build --file "$ROOT/packages/Dockerfile" --target lockfile-export \
       $(sh "$ROOT/scripts/buildx-cache.sh" packages-lockfile) \
       --output "type=local,dest=$ROOT" "$ROOT"
-# Every package of this space is gated from its own Dockerfile, so the
-# command is the space's rather than any one package's: a second Node
-# package brings a Dockerfile and needs no new script and no new CI step.
-  # Inherited by the docs package; cli overrides it with its own package gate.
-  tests: >-
-    docker buildx build --file Dockerfile --target typecheck
-    $(sh ../../scripts/buildx-cache.sh docs) --output type=cacheonly ../..
+# Every package of this space is gated from its own Dockerfile, and each names
+# its own buildx cache, so the gate is the package's rather than the space's:
+# both members declare a `tests` of their own and neither inherits one here.

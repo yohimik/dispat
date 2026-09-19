@@ -13,6 +13,7 @@ package integration
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -74,7 +75,7 @@ func holdLock(t *testing.T, r *harness.Repo, bare string) string {
 // assertLockCleared fails unless the tag is gone from both copies.
 func assertLockCleared(t *testing.T, r *harness.Repo, bare string) {
 	t.Helper()
-	assert.False(t, r.HasTag(lockTag), "the local lock tag outlived the run: %v", r.TagList())
+	assert.False(t, r.IsTagged(lockTag), "the local lock tag outlived the run: %v", r.TagList())
 	assert.False(t, remoteHoldsLock(t, bare), "the lock tag outlived the run on the remote")
 }
 
@@ -111,7 +112,7 @@ func TestReleaseLockRoundTrip(t *testing.T) {
 	res := releaseLocked(r)
 	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
 	assert.True(t, heldDuringRun(t, r), "the run held the lock while it worked")
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Contains(t, bareGit(t, bare, "tag"), "core@0.1.0", "the release still reached the remote")
 	assertLockCleared(t, r, bare)
 
@@ -146,7 +147,7 @@ func TestReleaseLockHeldElsewhere(t *testing.T) {
 	assert.Equal(t, 0, buildRuns(r), "nothing was built")
 	assert.Equal(t, 0, r.TagCount("core@"), "nothing was tagged")
 	assert.Equal(t, held, lockObject(t, bare), "the holder's lock is untouched")
-	assert.False(t, r.HasTag(lockTag), "and the refused run kept no local lock either")
+	assert.False(t, r.IsTagged(lockTag), "and the refused run kept no local lock either")
 
 	// The holder finishes and drops the lock; the same repository releases.
 	bareGit(t, bare, "tag", "-d", lockTag)
@@ -239,7 +240,7 @@ func TestReleaseLockIndependentOfPush(t *testing.T) {
 	res := releaseLocked(r)
 	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
 	assert.True(t, heldDuringRun(t, r), "the lock is taken with the push turned off")
-	assert.True(t, r.HasTag("core@0.1.0"), "the release tag is local, as configured")
+	assert.True(t, r.IsTagged("core@0.1.0"), "the release tag is local, as configured")
 	assertLockCleared(t, r, bare)
 	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "tag")), "no release tag was pushed")
 	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "branch", "--list")),
@@ -258,7 +259,7 @@ func TestReleaseLockWithoutRemote(t *testing.T) {
 	assert.Contains(t, res.Stdout, "unable to create the release lock tag")
 	assert.Equal(t, 0, buildRuns(r))
 	assert.Equal(t, 0, r.TagCount("core@"))
-	assert.False(t, r.HasTag(lockTag), "the failed attempt left no tag behind")
+	assert.False(t, r.IsTagged(lockTag), "the failed attempt left no tag behind")
 }
 
 // TestReleaseLockKillSwitch: the escape hatch, through the binary. Only a
@@ -289,7 +290,7 @@ func TestReleaseLockKillSwitch(t *testing.T) {
 			}
 			require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
 			assert.Equal(t, 1, r.TagCount("core@"), "the release ran unguarded, as asked")
-			assert.False(t, r.HasTag(lockTag), "and took no lock at all")
+			assert.False(t, r.IsTagged(lockTag), "and took no lock at all")
 		})
 	}
 }
@@ -312,7 +313,7 @@ func TestReleaseLockConfigSwitch(t *testing.T) {
 	res := r.CommandEnv(harness.LockEnabled)
 	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, 1, r.TagCount("core@"), "the release ran unguarded, as the config asked")
-	assert.False(t, r.HasTag(lockTag), "and took no lock at all")
+	assert.False(t, r.IsTagged(lockTag), "and took no lock at all")
 
 	// Turning it back off in the config brings the lock back, remote or no
 	// remote.
@@ -414,28 +415,46 @@ func TestReleaseLockStaleLocalTag(t *testing.T) {
 	assertLockCleared(t, r, bare)
 }
 
-// TestReleaseLockCleanupFailureIsNotFatal: the release is over by the time the
-// lock is given back, and nothing that happens then can un-publish it. A
-// remote that has become unreachable is reported, loudly, and the run still
-// exits on the strength of the release itself.
-func TestReleaseLockCleanupFailureIsNotFatal(t *testing.T) {
+// TestReleaseLockCleanupFailureFailsTheCompletedRun: the release is out by the
+// time the lock is given back, so its published result stays true. A remote
+// that stops accepting writes is reported with E336 and makes the completed
+// run fail rather than concealing the lock the next run will meet.
+//
+// The remote refuses the delete itself rather than being re-pointed: the lock
+// is given back at the destination resolved when it was taken, so a mutated
+// alias no longer reaches the cleanup at all (see
+// `TestFleetLockCleanupUsesRemoteResolvedAtAcquisition`).
+func TestReleaseLockCleanupFailureFailsTheCompletedRun(t *testing.T) {
+	sink := newWebhookSink(t)
 	r := harness.New(t)
+	bare := r.AddBareRemote()
+	hook := filepath.Join(bare, "hooks", "pre-receive")
 	cfg := libsConfig(markerBuild, 1)
+	cfg.Webhooks = []models.WebhookConfig{{URL: sink.srv.URL, Events: []string{"release.finished"}}}
 	// postAll runs after the task graph and before the lock is given back.
-	cfg.Scripts["break"] = models.Script{"git remote set-url origin " + r.Path("gone.git")}
+	cfg.Scripts["break"] = models.Script{
+		"printf '#!/bin/sh\nexit 1\n' > " + hook,
+		"chmod +x " + hook,
+	}
 	cfg.Run = &models.RunConfig{PostAll: []string{"break"}}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")
-	bare := r.AddBareRemote()
 
 	res := releaseLocked(r)
-	assert.Equal(t, 0, res.Code, "a released package is not un-released by a stuck cleanup")
+	assert.NotZero(t, res.Code, "a stranded release lock makes the completed run fail")
 	assert.Equal(t, 1, r.TagCount("core@"))
+	assert.Contains(t, res.Stdout, `"code":"E336"`)
 	assert.Contains(t, res.Stdout, "could not remove the release lock tag from the remote")
 	assert.Contains(t, res.Stdout, "delete the tag on the remote",
 		"the log says what the next run will run into, and what to do")
 	assert.True(t, remoteHoldsLock(t, bare), "the lock really is stranded, as reported")
+	finished := sink.find(t, "release.finished")
+	assert.Equal(t, "failed", finished["status"])
+	assert.Equal(t, float64(1), finished["published"])
+	packages := finished["packages"].([]any)
+	require.Len(t, packages, 1)
+	assert.Equal(t, "published", packages[0].(map[string]any)["status"])
 }
 
 // TestReleaseLockAppliesOnlyToRelease: everything else dispat does is
@@ -461,7 +480,7 @@ func TestReleaseLockAppliesOnlyToRelease(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			res := r.CommandEnv(harness.LockEnabled, args...)
 			assert.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.False(t, r.HasTag(lockTag), "%s took the release lock", name)
+			assert.False(t, r.IsTagged(lockTag), "%s took the release lock", name)
 		})
 	}
 }
@@ -529,7 +548,7 @@ func TestReleaseLockIsNotAReleaseTag(t *testing.T) {
 
 	res := releaseLocked(r)
 	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	require.True(t, r.HasTag("0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("0.1.0"), "tags: %v", r.TagList())
 
 	// The second run plans with the lock tag in view and still reads 0.1.0 as
 	// the baseline.
@@ -537,6 +556,6 @@ func TestReleaseLockIsNotAReleaseTag(t *testing.T) {
 	r.Commit("feat(core): more")
 	res = releaseLocked(r)
 	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("0.2.0"), "tags: %v", r.TagList())
 	assertLockCleared(t, r, bare)
 }

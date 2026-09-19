@@ -200,7 +200,7 @@ type Manifest struct {
 	Root bool
 }
 
-// AtPackageRoot reports that the manifest is the scanned folder's own rather
+// IsAtPackageRoot reports that the manifest is the scanned folder's own rather
 // than one belonging to something nested inside it.
 //
 // Root answers that for every format whose location its author chose. The
@@ -210,7 +210,7 @@ type Manifest struct {
 // version under Config/ because the engine says so, not because somebody
 // filed them away there. Such a manifest is nested and still the scanned
 // folder's own. A copy deeper in the tree is not, and stays excluded.
-func (m Manifest) AtPackageRoot() bool {
+func (m Manifest) IsAtPackageRoot() bool {
 	if m.Root {
 		return true
 	}
@@ -228,13 +228,13 @@ func (m Manifest) AtPackageRoot() bool {
 	return ok && m.Path == suffix
 }
 
-// Scanner turns a folder into its parsed manifests. Both methods share one
+// Scannerx turns a folder into its parsed manifests. Both methods share one
 // error contract: a manifest that fails to parse is skipped, its error joined
 // into the returned error, and the successfully parsed manifests are returned
 // either way, so callers may report the error and keep the partial result. A
 // folder Scan cannot read is stepped over on the same terms, so one
 // unreadable sub-tree costs its own manifests and no others.
-type Scanner interface {
+type Scannerx interface {
 	// Scan returns every recognised manifest under dir in deterministic
 	// (path-sorted) order, descending into sub-folders but skipping
 	// dependency and build-output folders (node_modules, vendor, dist, ...,
@@ -360,25 +360,25 @@ var engineDirs = map[string]bool{
 	"Builds": true,
 }
 
-// SkipDir reports a folder name a workspace walk must not enter: the
+// IsSkippedDir reports a folder name a workspace walk must not enter: the
 // dependency trees, virtual environments and build output listed above, plus
 // every dot-folder. It is exported so a caller walking a package folder for
 // some other reason stays out of exactly the same places rather than keeping a
 // second list that drifts from this one.
 //
-// It is not the rule Scan follows; SkipWorkspaceDir is. The two differ by the
+// It is not the rule Scan follows; IsSkippedWorkspaceDir is. The two differ by the
 // engine output folders, which hold generated copies of real manifests but may
 // still hold a file a caller means to read. A tool replacing literal text uses
 // this one, because a version string under Build/ is still a version string.
-func SkipDir(name string) bool {
+func IsSkippedDir(name string) bool {
 	return strings.HasPrefix(name, ".") || skipDirs[name]
 }
 
-// SkipWorkspaceDir reports a folder no search for manifests should enter:
-// everything SkipDir names, plus the folders a game engine generates. It is
+// IsSkippedWorkspaceDir reports a folder no search for manifests should enter:
+// everything IsSkippedDir names, plus the folders a game engine generates. It is
 // the rule Scan follows.
-func SkipWorkspaceDir(name string) bool {
-	return SkipDir(name) || engineDirs[name]
+func IsSkippedWorkspaceDir(name string) bool {
+	return IsSkippedDir(name) || engineDirs[name]
 }
 
 // maxManifestBytes caps a single manifest read. A manifest is a hand-written
@@ -425,14 +425,14 @@ func readManifest(path string) ([]byte, error) {
 	return data, nil
 }
 
-// fsScanner is the filesystem Scanner.
-type fsScanner struct{}
+// LocalScannerx is the filesystem Scanner.
+type LocalScannerx struct{}
 
 // New returns the filesystem-backed Scanner.
-func New() Scanner { return fsScanner{} }
+func New() Scannerx { return LocalScannerx{} }
 
 // Scan implements Scanner.
-func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
+func (LocalScannerx) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 	var (
 		mans []Manifest
 		errs []error
@@ -458,7 +458,7 @@ func (fsScanner) Scan(ctx context.Context, dir string) ([]Manifest, error) {
 		if d.IsDir() {
 			// .aqua is a documented Aqua configuration directory, so it is
 			// the one dot-directory a manifest walk enters.
-			if path != dir && name != ".aqua" && SkipWorkspaceDir(name) {
+			if path != dir && name != ".aqua" && IsSkippedWorkspaceDir(name) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -670,7 +670,7 @@ func pathContained(root, path string) bool {
 }
 
 // ScanRoot implements Scanner.
-func (fsScanner) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
+func (LocalScannerx) ScanRoot(ctx context.Context, dir string) ([]Manifest, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err

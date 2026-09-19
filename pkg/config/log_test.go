@@ -259,7 +259,7 @@ func TestNopAndTheContextHelpers(t *testing.T) {
 		t.Error("a nil logger stored is the no-op read back")
 	}
 	rec := newRecorder(LevelTrace)
-	if GetLogger(WithLogger(t.Context(), rec)) != Logger(rec) {
+	if GetLogger(WithLogger(t.Context(), rec)) != Loggerx(rec) {
 		t.Error("what went in is what comes out")
 	}
 }

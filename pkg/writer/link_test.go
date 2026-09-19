@@ -241,7 +241,7 @@ func TestLinkOnFormatsWithoutRedirects(t *testing.T) {
 		{"composer.json", `{"name":"a/b","replace":{"c/d":"1.0"}}`},
 	} {
 		path := seed(t, tc.name, tc.src)
-		if SupportsLink(path) {
+		if IsLinkSupported(path) {
 			t.Errorf("%s should not report replace support", tc.name)
 		}
 		res, err := Relink(path, []Link{{Name: "b", Path: "../b"}})
@@ -266,8 +266,8 @@ func TestLinkGuards(t *testing.T) {
 	if _, err := Relink(path, []Link{{Path: "../x"}}); err == nil {
 		t.Error("a replacement with no name must be refused")
 	}
-	if !SupportsLink(path) || SupportsLink("pom.xml") {
-		t.Error("SupportsLink disagrees with the linkers table")
+	if !IsLinkSupported(path) || IsLinkSupported("pom.xml") {
+		t.Error("IsLinkSupported disagrees with the linkers table")
 	}
 	res, err := Relink(path, nil)
 	if err != nil {
@@ -551,11 +551,10 @@ func TestNpmLinkNoChangeLeavesFileAlone(t *testing.T) {
 	}
 }
 
-func TestPubspecLinkHandlesAnInlineOverride(t *testing.T) {
-	// pub writes an override as a nested `path:` line, but the inline form is
-	// legal YAML and appears in hand-written pubspecs. It has to be recognised
-	// as the redirect it is, repointed in place, and removable, rather than
-	// read as "no override here" and quietly duplicated.
+func TestPubspecLinkReplacesAnInlineVersionConstraint(t *testing.T) {
+	// A scalar dependency override is a version constraint, even when its text
+	// resembles a path. An explicit link request replaces that nonlocal shape
+	// with the nested path mapping pub uses, while preserving its siblings.
 	src := `name: app
 dependency_overrides:
   core: ../core
@@ -572,7 +571,7 @@ dependency_overrides:
 	}
 	got := read(t, path)
 	if !strings.Contains(got, "../vendor/core") || strings.Contains(got, "  core: ../core\n") {
-		t.Errorf("the inline override was not repointed:\n%s", got)
+		t.Errorf("the inline constraint was not replaced:\n%s", got)
 	}
 	if !strings.Contains(got, "path: ../other") {
 		t.Errorf("the sibling override was disturbed:\n%s", got)

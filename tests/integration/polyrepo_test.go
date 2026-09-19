@@ -177,7 +177,7 @@ func TestPolyrepoCentralOwnershipAndSourceScopedHistory(t *testing.T) {
 	checkpointPolyrepoSource(t, control, "sources/lib")
 	foreign := control.Status()
 	assert.Equal(t, 0, foreign.Code, "an invalid authored unit is discarded under the existing commit-error policy")
-	assert.True(t, harness.HasCode(foreign.Events, "E130"), "stdout:\n%s\nstderr:\n%s", foreign.Stdout, foreign.Stderr)
+	assert.True(t, harness.IsCodePresent(foreign.Events, "E130"), "stdout:\n%s\nstderr:\n%s", foreign.Stdout, foreign.Stderr)
 	assert.Equal(t, harness.GraphLine(propagated.Events, "app").Str("version"),
 		harness.GraphLine(foreign.Events, "app").Str("version"), "the foreign direct scope contributes no bump")
 	assert.Equal(t, "propagated from lib", harness.GraphLine(foreign.Events, "app").Str("reason"))
@@ -890,7 +890,7 @@ func TestPolyrepoExternalDependencyIsActiveWhenPresent(t *testing.T) {
 
 		status := control.StatusOK()
 		assert.Empty(t, dependsOn(status, "app"))
-		assert.True(t, harness.HasCodeForPackage(status.Events, "W330", "app"),
+		assert.True(t, harness.IsCodePresentForPackage(status.Events, "W330", "app"),
 			"the skipped optional provider remains visible in structured diagnostics")
 	})
 
@@ -966,7 +966,7 @@ func TestPolyrepoExternalDependencyIsActiveWhenPresent(t *testing.T) {
 
 		status := control.Status()
 		assert.NotZero(t, status.Code)
-		assert.True(t, harness.HasCode(status.Events, "E200"), "stdout:\n%s\nstderr:\n%s", status.Stdout, status.Stderr)
+		assert.True(t, harness.IsCodePresent(status.Events, "E200"), "stdout:\n%s\nstderr:\n%s", status.Stdout, status.Stderr)
 	})
 
 	t.Run("active edge preserves case selection propagation order and blocking", func(t *testing.T) {
@@ -1175,7 +1175,7 @@ func TestPolyrepoRejectsReservedControlRepositoryName(t *testing.T) {
 			res := control.Release("--log-format", "json")
 			assert.NotZero(t, res.Code)
 			events := harness.ParseEvents(res.Stderr) // composition fails before configured stdout logging
-			assert.True(t, harness.HasCode(events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.True(t, harness.IsCodePresent(events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			var diagnostic harness.Event
 			for _, event := range events {
 				if event.Code() == "E330" {
@@ -1290,7 +1290,7 @@ func TestPolyrepoOwnershipValidation(t *testing.T) {
 
 		polyrepo := control.Status()
 		assert.NotZero(t, polyrepo.Code)
-		assert.True(t, harness.HasCode(polyrepo.Events, "E331"), "stdout:\n%s\nstderr:\n%s", polyrepo.Stdout, polyrepo.Stderr)
+		assert.True(t, harness.IsCodePresent(polyrepo.Events, "E331"), "stdout:\n%s\nstderr:\n%s", polyrepo.Stdout, polyrepo.Stderr)
 
 		delete(cfg, "polyrepo")
 		writePolyrepoJSON(t, control, "dispat.json", cfg)
@@ -1471,7 +1471,7 @@ func TestPolyrepoFixedRideGuardsSourceHistoryWithoutDependency(t *testing.T) {
 
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.HasCode(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.FileExists(t, control.Path("a-recorded"), "source A completed its ordinary source record first")
 	assert.FileExists(t, control.Path("a-mutated-by-b"), "B's hook performed the unplanned mutation")
 	assert.FileExists(t, control.Path("a-published"))
@@ -1639,7 +1639,7 @@ func TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution(t *test
 
 	conflict := control.Status()
 	assert.NotZero(t, conflict.Code)
-	assert.True(t, harness.HasCode(conflict.Events, "E334"), "stdout:\n%s\nstderr:\n%s", conflict.Stdout, conflict.Stderr)
+	assert.True(t, harness.IsCodePresent(conflict.Events, "E334"), "stdout:\n%s\nstderr:\n%s", conflict.Stdout, conflict.Stderr)
 
 	control.CommitEmpty("release(a)%%beta++1: resolve observed proposals")
 	resolved := control.StatusOK()
@@ -1651,7 +1651,7 @@ func TestPolyrepoIncomparableSourceDirectivesNeedCausalControlResolution(t *test
 	checkpointPolyrepoSource(t, control, "sources/b")
 	later := control.Status()
 	assert.NotZero(t, later.Code)
-	assert.True(t, harness.HasCode(later.Events, "E334"),
+	assert.True(t, harness.IsCodePresent(later.Events, "E334"),
 		"the earlier control proposal cannot resolve source work outside its gitlink snapshot: stdout:\n%s\nstderr:\n%s",
 		later.Stdout, later.Stderr)
 }
@@ -1814,7 +1814,7 @@ func TestPolyrepoStableAndPrereleaseBaselineTuplesStaySeparate(t *testing.T) {
 	assert.Equal(t, "unchanged", harness.GraphLine(status.Events, "lib").Str("message"))
 	assert.Equal(t, "catch-up from lib", harness.GraphLine(status.Events, "app").Str("reason"),
 		"the current beta tag uses its own older provider tuple")
-	assert.True(t, harness.HasCodeForPackage(status.Events, "W193", "app"))
+	assert.True(t, harness.IsCodePresentForPackage(status.Events, "W193", "app"))
 }
 
 // TestPolyrepoInterleavedRepositoryGraphReleases releases A/lib -> B/service
@@ -1952,7 +1952,7 @@ func TestPolyrepoDetachedPushRequiresBranch(t *testing.T) {
 
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.HasCode(res.Events, "E337"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E337"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, sourceBefore, control.Git("-C", "sources/lib", "rev-parse", "HEAD"))
 	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))
@@ -2008,7 +2008,7 @@ func TestPolyrepoCheckpointFailurePreservesSourceAndBlocksConsumer(t *testing.T)
 	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 37\n"), 0o755))
 	failed := control.Release()
 	assert.Equal(t, 1, failed.Code, "the checkpoint failure fails the run")
-	assert.True(t, harness.HasCode(failed.Events, "E335"), "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.True(t, harness.IsCodePresent(failed.Events, "E335"), "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 	assert.Contains(t, strings.ToLower(failed.Stdout+failed.Stderr), "checkpoint")
 	assert.Contains(t, polyrepoTags(control, "sources/lib"), "lib@1.1.0",
 		"the provider's successful publication remains truthful")
@@ -2194,7 +2194,7 @@ func TestPolyrepoSourcePushFailureDoesNotAdvanceControl(t *testing.T) {
 
 	failed := control.Release()
 	assert.Equal(t, 1, failed.Code)
-	assert.True(t, harness.HasCode(failed.Events, "E335"), "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.True(t, harness.IsCodePresent(failed.Events, "E335"), "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
 	assert.Equal(t, pinnedBefore, control.Git("rev-parse", "HEAD:sources/lib"),
 		"the control checkpoint never advances to an unreachable source commit")
@@ -2234,7 +2234,7 @@ func TestPolyrepoReleaseLockGuardsAndCleansSourceWork(t *testing.T) {
 		assert.Contains(t, strings.ToLower(res.Stdout+res.Stderr), "release lock")
 		assert.Empty(t, polyrepoTags(control, "sources/lib"), "a refused fleet mutates no source")
 		assert.Equal(t, held, lockObject(t, bare), "the other run's control lock remains untouched")
-		assert.False(t, control.HasTag(lockTag))
+		assert.False(t, control.IsTagged(lockTag))
 	})
 
 	t.Run("uncoordinated source refuses the fleet", func(t *testing.T) {
@@ -2243,7 +2243,7 @@ func TestPolyrepoReleaseLockGuardsAndCleansSourceWork(t *testing.T) {
 
 		res := releaseLocked(control)
 		assert.Equal(t, 1, res.Code)
-		assert.True(t, harness.HasCode(res.Events, "E336"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.True(t, harness.IsCodePresent(res.Events, "E336"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Empty(t, polyrepoTags(control, "sources/lib"))
 		assertLockCleared(t, control, bare)
 	})
@@ -2453,7 +2453,7 @@ func TestPolyrepoBeforeAllTagDriftStopsBeforePublication(t *testing.T) {
 
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.HasCode(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Contains(t, polyrepoTags(control, "sources/lib"), "lib@9.0.0",
 		"the hook mutation proves the inventory really changed")
 	assert.NotContains(t, polyrepoTags(control, "sources/lib"), "lib@0.1.0")
@@ -2492,7 +2492,7 @@ func TestPolyrepoBeforePublishBaselineTagDriftStopsPublication(t *testing.T) {
 
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.HasCode(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.NotEqual(t, baselineBefore, control.Git("-C", "sources/lib", "rev-parse", "lib@1.0.0^{commit}"),
 		"the hook mutation proves the baseline tag moved")
 	assert.NotContains(t, polyrepoTags(control, "sources/lib"), "lib@1.1.0")
@@ -2539,7 +2539,7 @@ func TestPolyrepoBeforePublishControlDirectiveDriftStopsPublication(t *testing.T
 
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.HasCode(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.NotEqual(t, plannedControl, control.Git("rev-parse", "HEAD"),
 		"the hook mutation proves applicable control history changed")
 	assert.NotContains(t, polyrepoTags(control, "sources/lib"), "lib@1.0.1")
@@ -2604,7 +2604,7 @@ func TestPolyrepoCrossRepositoryBaselineRequiresEvidence(t *testing.T) {
 	recovered := control.StatusOK()
 	assert.Equal(t, "unchanged", harness.GraphLine(recovered.Events, "lib").Str("message"))
 	assert.Equal(t, "catch-up from lib", harness.GraphLine(recovered.Events, "app").Str("reason"))
-	assert.True(t, harness.HasCodeForPackage(recovered.Events, "W193", "app"))
+	assert.True(t, harness.IsCodePresentForPackage(recovered.Events, "W193", "app"))
 }
 
 // TestPolyrepoCustomCheckpointMessageProvesNoBaseline moves consumer and
@@ -2648,7 +2648,7 @@ func TestPolyrepoCustomCheckpointMessageProvesNoBaseline(t *testing.T) {
 
 	status := control.Status()
 	assert.NotZero(t, status.Code)
-	assert.True(t, harness.HasCode(status.Events, "E333"), "stdout:\n%s\nstderr:\n%s", status.Stdout, status.Stderr)
+	assert.True(t, harness.IsCodePresent(status.Events, "E333"), "stdout:\n%s\nstderr:\n%s", status.Stdout, status.Stderr)
 	assert.Contains(t, strings.ToLower(status.Stdout+status.Stderr), "baseline")
 }
 
@@ -2713,7 +2713,7 @@ func TestPolyrepoReleaseCheckpointProvidesNextConsumerBaseline(t *testing.T) {
 	status := control.StatusOK()
 	assert.Equal(t, "1.1.0 -> 1.1.1", harness.GraphLine(status.Events, "lib").Str("version"))
 	assert.Equal(t, "propagated from lib", harness.GraphLine(status.Events, "app").Str("reason"))
-	assert.False(t, harness.HasCodeForPackage(status.Events, "W193", "app"),
+	assert.False(t, harness.IsCodePresentForPackage(status.Events, "W193", "app"),
 		"the provider and consumer will move together; this is fresh propagation")
 }
 
@@ -2769,5 +2769,5 @@ func TestPolyrepoImportedConsumerBaselineRequiresEvidence(t *testing.T) {
 	recovered := control.StatusOK()
 	assert.Equal(t, "unchanged", harness.GraphLine(recovered.Events, "lib").Str("message"))
 	assert.Equal(t, "catch-up from lib", harness.GraphLine(recovered.Events, "app").Str("reason"))
-	assert.True(t, harness.HasCodeForPackage(recovered.Events, "W193", "app"))
+	assert.True(t, harness.IsCodePresentForPackage(recovered.Events, "W193", "app"))
 }

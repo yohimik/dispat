@@ -20,7 +20,7 @@ import (
 )
 
 // initRepo creates a git repo with one committed package file.
-func initRepo(t *testing.T) (string, *CLI) {
+func initRepo(t *testing.T) (string, *LocalGitx) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -41,12 +41,12 @@ func initRepo(t *testing.T) (string, *CLI) {
 	git("config", "user.name", "Test")
 	git("add", ".")
 	git("commit", "-qm", "feat(core): initial")
-	return root, &CLI{Dir: root}
+	return root, &LocalGitx{Dir: root}
 }
 
 // tagsOf lists a package's tags, which is the single query planning makes; the
 // baselines are selections over the result.
-func tagsOf(t *testing.T, cli *CLI, ctx context.Context, pkg string, format TagFormat) Tags {
+func tagsOf(t *testing.T, cli *LocalGitx, ctx context.Context, pkg string, format TagFormat) Tags {
 	t.Helper()
 	tags, err := cli.Tags(ctx, pkg, format)
 	require.NoError(t, err)
@@ -226,12 +226,12 @@ func TestTagFormatRejectsForeignTags(t *testing.T) {
 	assert.False(t, ok, "a tag missing the format's literal text is not ours")
 
 	// A tag for a different package never matches the shape at all.
-	assert.False(t, f.Matches("core", "other@v1.2.3"))
+	assert.False(t, f.IsMatch("core", "other@v1.2.3"))
 
 	// Matching the shape and carrying a readable version are separate
 	// questions: this is the tag that puts a package on the initials fallback
 	// rather than out of the listing entirely.
-	assert.True(t, f.Matches("core", "core@v0.0.1.0"), "the shape matches")
+	assert.True(t, f.IsMatch("core", "core@v0.0.1.0"), "the shape matches")
 	_, ok = f.ParseVersion("core", "core@v0.0.1.0")
 	assert.False(t, ok, "but the version does not parse")
 }
@@ -357,6 +357,43 @@ func TestIsAncestor(t *testing.T) {
 	ok, err := cli.IsAncestor(ctx, second, third)
 	require.NoError(t, err)
 	assert.True(t, ok, "the fallback answers for commits the cached DAG has never seen")
+}
+
+// TestIsCommitPresent covers the probe that lets a caller ask about an object
+// before asking where it sits. `merge-base --is-ancestor` answers an unknown
+// commit with a fatal error, so a control snapshot pinning a revision the
+// local clone never fetched would otherwise abort planning with a git exit
+// status rather than the diagnostic describing the fleet.
+func TestIsCommitPresent(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+
+	head, err := cli.HeadSHA(ctx)
+	require.NoError(t, err)
+
+	for name, tc := range map[string]struct {
+		rev  string
+		want bool
+	}{
+		"present":           {head, true},
+		"absent":            {"0123456789012345678901234567890123456789", false},
+		"unparsable":        {"not-a-revision", false},
+		"empty":             {"", false},
+		"present short sha": {head[:8], true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, perr := cli.IsCommitPresent(ctx, tc.rev)
+			require.NoError(t, perr, "an absent object is an answer, not a failure")
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	// A repository git cannot read at all is a real failure and stays one:
+	// "no such object here" is only meaningful from a repository.
+	broken := &LocalGitx{Dir: filepath.Join(root, "never-cloned")}
+	_, err = broken.IsCommitPresent(ctx, head)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "git rev-parse --verify")
 }
 
 func TestCommitsCarrySHAsParentsAndFullMessages(t *testing.T) {
@@ -875,7 +912,7 @@ func TestTagNameNormativeForm(t *testing.T) {
 }
 
 // bareRepo creates an empty repository with nothing committed.
-func bareRepo(t *testing.T) *CLI {
+func bareRepo(t *testing.T) *LocalGitx {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -884,7 +921,7 @@ func bareRepo(t *testing.T) *CLI {
 	cmd := exec.Command("git", "-C", root, "init", "-q")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git init: %s", out)
-	return &CLI{Dir: root}
+	return &LocalGitx{Dir: root}
 }
 
 func TestHeadSHANoCommits(t *testing.T) {
@@ -901,7 +938,7 @@ func TestPushNoRemote(t *testing.T) {
 }
 
 func TestTagsOutsideRepo(t *testing.T) {
-	cli := &CLI{Dir: t.TempDir()} // not a repository at all
+	cli := &LocalGitx{Dir: t.TempDir()} // not a repository at all
 	_, err := cli.Tags(context.Background(), "core", DefaultTagFormat)
 	require.Error(t, err)
 }
@@ -1024,7 +1061,7 @@ func TestIsShallowStates(t *testing.T) {
 	cmd := exec.Command("git", "clone", "-q", "--depth", "1", "file://"+root, cloneDir)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git clone: %s", out)
-	shallowClone := &CLI{Dir: cloneDir}
+	shallowClone := &LocalGitx{Dir: cloneDir}
 	shallow, err = shallowClone.IsShallow(context.Background())
 	require.NoError(t, err)
 	assert.True(t, shallow)
@@ -1042,14 +1079,14 @@ func TestPathspecInsideAndOutside(t *testing.T) {
 func TestGlobAndMatchesUnsplittableFormat(t *testing.T) {
 	f := TagFormat("no placeholders")
 	assert.Equal(t, "core*", f.Glob("core"), "an uncompilable format degrades to a name prefix")
-	assert.False(t, f.Matches("core", "core@1.0.0"))
+	assert.False(t, f.IsMatch("core", "core@1.0.0"))
 	if _, ok := f.ParseVersion("core", "core@1.0.0"); ok {
 		t.Error("an uncompilable format parses nothing")
 	}
 }
 
 func TestConfiguredCommitterIdentity(t *testing.T) {
-	// The configured identity covers every commit and annotated tag the CLI
+	// The configured identity covers every commit and annotated tag the LocalGitx
 	// creates, without any `git config` in the repository.
 	root, cli := initRepo(t)
 	cli.Name, cli.Email = "release bot", "bot@dispat.test"
@@ -1122,7 +1159,7 @@ func TestCurrentBranch(t *testing.T) {
 }
 
 func TestCurrentBranchOutsideRepo(t *testing.T) {
-	cli := &CLI{Dir: t.TempDir()}
+	cli := &LocalGitx{Dir: t.TempDir()}
 	_, err := cli.CurrentBranch(context.Background())
 	assert.Error(t, err, "a folder that is not a repository is an error, not an empty branch")
 }

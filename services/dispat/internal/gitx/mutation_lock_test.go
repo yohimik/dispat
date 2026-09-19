@@ -27,7 +27,7 @@ func TestMutationLockHelper(t *testing.T) {
 	}
 	repo, ready, stop := os.Getenv("DISPAT_TEST_MUTATION_REPO"),
 		os.Getenv("DISPAT_TEST_MUTATION_READY"), os.Getenv("DISPAT_TEST_MUTATION_STOP")
-	release, err := (&CLI{Dir: repo}).AcquireMutation(context.Background())
+	release, err := (&LocalGitx{Dir: repo}).AcquireMutation(context.Background())
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(ready, []byte("held"), 0o600))
 	for {
@@ -90,7 +90,7 @@ func TestMutationLockCoordinatesLinkedWorktreesAcrossProcesses(t *testing.T) {
 		t.Fatal("mutation-lock helper did not release")
 	}
 
-	linkedCLI := &CLI{Dir: linked}
+	linkedCLI := &LocalGitx{Dir: linked}
 	release, err = AcquireMutations(context.Background(), linkedCLI, cli, linkedCLI)
 	require.NoError(t, err)
 	release()

@@ -28,7 +28,7 @@ import (
 // every command of its sequence runs even when an earlier one failed.
 type runHooks struct {
 	cfg    *config.File
-	runner script.Runner
+	runner script.Runnerx
 	root   string
 	env    []string // WorkspaceEnv before the run, RunEnv after it
 	log    zerolog.Logger
@@ -167,7 +167,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		// had there been no release commit to make.
 		fin.crit.record(a.log, plan.CodeCommitFailed, err, "release commit failed", nil)
 	case committed:
-		a.log.Info().Str("message", msg).Msg("created release commit")
+		a.log.Info().Str("commitMessage", msg).Msg("created release commit")
 		fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
 	default:
 		fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
@@ -175,7 +175,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	for _, rel := range rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
-		if err := release.CreateReleaseTag(ctx, a.git, rel, a.cfg.Commit.ForceEnabled(), a.log); err != nil {
+		if err := release.CreateReleaseTag(ctx, a.git, rel, a.cfg.Commit.IsForceEnabled(), a.log); err != nil {
 			// One package's tag failing says nothing about the next one's.
 			fin.crit.record(a.log, release.TagFailureCode(err), err, "tagging failed",
 				func(e *zerolog.Event) *zerolog.Event {
@@ -190,9 +190,9 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	// recovery happens, so an ordinary run reads HEAD exactly as it always
 	// did.
 	var released string
-	if a.cfg.Commit.PushEnabled() {
+	if a.cfg.Commit.IsPushEnabled() {
 		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
-		report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
+		report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.IsForceEnabled())
 		if errors.Is(err, gitx.ErrRejected) {
 			// Somebody pushed to the branch while this run was working. The
 			// release still owes its commit and tags, and the way to deliver
@@ -227,7 +227,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		} else {
 			for _, gh := range fin.gh.all {
 				gh.CommitSHA = sha
-				if a.cfg.Commit.PushEnabled() {
+				if a.cfg.Commit.IsPushEnabled() {
 					gh.TargetCommitish = sha
 				}
 			}
@@ -280,7 +280,7 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 	if branch == "" {
 		return gitx.PushReport{}, "", fmt.Errorf(
 			"commits landed on %s during the release, and this is a detached HEAD with no branch to merge them into",
-			fin.remote)
+			gitx.RedactURL(fin.remote))
 	}
 	// Read before the merge, because afterwards HEAD is the merge itself and
 	// the release commit is only its first parent.
@@ -304,13 +304,13 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 		case err != nil:
 			return report, release, fmt.Errorf(
 				"commits landed on %s/%s during the release and could not be merged with it: %w",
-				fin.remote, branch, err)
+				gitx.RedactURL(fin.remote), branch, err)
 		}
 		a.log.Warn().Str("code", plan.CodePushMerged).Str("remote", gitx.RedactURL(fin.remote)).Str("branch", branch).
 			Int("attempt", attempt).
 			Msg("pulled the branch during the release to sync changes that landed while it ran; " +
 				"the release tags point at the tree that was planned and the release commit was merged on top")
-		report, err = a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.ForceEnabled())
+		report, err = a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.IsForceEnabled())
 		if !errors.Is(err, gitx.ErrRejected) || attempt >= mergeAttempts {
 			return report, release, err
 		}
@@ -345,14 +345,14 @@ func (a *App) settleConflict(ctx context.Context, fin finalizer, rels []*plan.Re
 	branch string, paths []string) error {
 	quarantine := conflictBranch(rels, time.Now())
 	if err := a.git.ResolveOurs(ctx, paths); err != nil {
-		return fmt.Errorf("settling the merge of %s/%s: %w", fin.remote, branch, err)
+		return fmt.Errorf("settling the merge of %s/%s: %w", gitx.RedactURL(fin.remote), branch, err)
 	}
 	// Pushed before the merge is committed, so a name that cannot be taken
 	// stops the run while the tree is still the one it can explain.
 	if err := a.git.PushBranchAt(ctx, fin.remote, "FETCH_HEAD", quarantine); err != nil {
 		return fmt.Errorf(
 			"commits landed on %s/%s during the release and conflicted with it, and the branch "+
-				"that would have kept them could not be pushed: %w", fin.remote, branch, err)
+				"that would have kept them could not be pushed: %w", gitx.RedactURL(fin.remote), branch, err)
 	}
 	note := conflictNote(fin.remote, quarantine, paths)
 	for _, rel := range rels {
@@ -368,7 +368,7 @@ func (a *App) settleConflict(ctx context.Context, fin finalizer, rels []*plan.Re
 		}
 	}
 	if err := a.git.CommitMerge(ctx); err != nil {
-		return fmt.Errorf("committing the settled merge of %s/%s: %w", fin.remote, branch, err)
+		return fmt.Errorf("committing the settled merge of %s/%s: %w", gitx.RedactURL(fin.remote), branch, err)
 	}
 	// The GitHub releases are created after the push, so they can still carry
 	// it; the changelog could not wait, because it has to be in the tree the
@@ -391,7 +391,7 @@ func conflictNote(remote, quarantine string, paths []string) string {
 		"Commits landed on %s while this release ran and changed %s, which this release "+
 			"changed too. This release's version of those files is what was published; the other "+
 			"side is kept on the branch %s, to be reconciled.",
-		remote, strings.Join(paths, ", "), quarantine)
+		gitx.RedactURL(remote), strings.Join(paths, ", "), quarantine)
 }
 
 // conflictBranch names the branch the other side of a conflict is kept on:
@@ -441,7 +441,7 @@ const mergeAttempts = 3
 func (a *App) refuseRepublishing(ctx context.Context, remote string, rels []*plan.Release) error {
 	existing, err := a.git.RemoteTags(ctx, remote)
 	if err != nil {
-		return fmt.Errorf("reading %s's tags before pushing the release again: %w", remote, err)
+		return fmt.Errorf("reading %s's tags before pushing the release again: %w", gitx.RedactURL(remote), err)
 	}
 	for _, rel := range rels {
 		tag := rel.TagName()
@@ -450,7 +450,7 @@ func (a *App) refuseRepublishing(ctx context.Context, remote string, rels []*pla
 				"commits landed on %s during the release, and %s already carries %s: "+
 					"this checkout planned a version that is already published, "+
 					"so pushing again would move a released tag. Pull and run again",
-				remote, remote, tag)
+				gitx.RedactURL(remote), gitx.RedactURL(remote), tag)
 		}
 	}
 	return nil
@@ -465,13 +465,17 @@ func (a *App) refuseRepublishing(ctx context.Context, remote string, rels []*pla
 // tags, because a merge nobody can attribute is a merge nobody can audit.
 func mergeMessage(remote, branch, release string, tags []string) string {
 	short := shortCommit(release)
+	// The remote is written into a commit message and, through conflictNote,
+	// into a changelog: both are durable, so the credentials a URL remote may
+	// carry come out here exactly as they do in a log line.
+	safe := gitx.RedactURL(remote)
 	return fmt.Sprintf(
 		"chore(release): merge %s/%s into the release commit\n\n"+
 			"Commits landed on %s/%s while the release ran, so the release\n"+
 			"commit %s was merged with them rather than replaced. The tags this\n"+
 			"release wrote (%s) still name that commit, so the commits\n"+
 			"that arrived are outside the release and belong to the next run.\n",
-		remote, branch, remote, branch, short, strings.Join(tags, ", "))
+		safe, branch, safe, branch, short, strings.Join(tags, ", "))
 }
 
 // reportPush logs what the push did about tags the remote already carried.

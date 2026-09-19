@@ -405,7 +405,7 @@ func (cp *computation) directChannelFor(pkg string, cands []channelCandidate, ba
 	}
 	if cp.channelFrontierConflict(proposals) {
 		cp.err(CodeRepositoryPrecedence, pkg, "",
-			"conflicting direct channel directives come from incomparable revisions; add a causally applicable control directive")
+			"conflicting direct channel directives come from incomparable revisions"+cp.precedenceRemedy())
 	}
 	if len(proposalChannels) > 1 {
 		cp.relWarn(pkg, CodeChannelConflict, winner.commit,
@@ -419,7 +419,7 @@ func (cp *computation) validateChannelPrecedence(pkg string) {
 	candidates := cp.proposedAll[pkg]
 	if cp.channelFrontierConflict(candidates) {
 		cp.err(CodeRepositoryPrecedence, pkg, "",
-			"conflicting channel directives come from incomparable source revisions; add a causally applicable control directive")
+			"conflicting channel directives come from incomparable source revisions"+cp.precedenceRemedy())
 	}
 }
 

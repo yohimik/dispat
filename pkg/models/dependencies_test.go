@@ -263,42 +263,42 @@ func TestStringKeyedShapes(t *testing.T) {
 
 func TestAliasTagConfigBehaviour(t *testing.T) {
 	// Force defaults to the run's setting and overrides it when set.
-	if !(AliasTagConfig{}).ForceEnabled(true) {
+	if !(AliasTagConfig{}).IsForceEnabled(true) {
 		t.Error("an alias with no opinion follows the run")
 	}
-	if (AliasTagConfig{}).ForceEnabled(false) {
+	if (AliasTagConfig{}).IsForceEnabled(false) {
 		t.Error("and follows it when it is off too")
 	}
-	if !(AliasTagConfig{Force: Bool(true)}).ForceEnabled(false) {
+	if !(AliasTagConfig{Force: Bool(true)}).IsForceEnabled(false) {
 		t.Error("an explicit true wins")
 	}
-	if (AliasTagConfig{Force: Bool(false)}).ForceEnabled(true) {
+	if (AliasTagConfig{Force: Bool(false)}).IsForceEnabled(true) {
 		t.Error("an explicit false wins")
 	}
 
 	// No channels means every channel; naming them is case-insensitive,
 	// because a channel is a name a commit message writes by hand.
-	if !(AliasTagConfig{}).AppliesTo("anything") {
+	if !(AliasTagConfig{}).IsApplicableTo("anything") {
 		t.Error("an alias with no channel list applies everywhere")
 	}
 	a := AliasTagConfig{Channels: []string{"stable"}}
-	if !a.AppliesTo("stable") || !a.AppliesTo("STABLE") {
+	if !a.IsApplicableTo("stable") || !a.IsApplicableTo("STABLE") {
 		t.Error("the named channel matches, case-insensitively")
 	}
-	if a.AppliesTo("rc") {
+	if a.IsApplicableTo("rc") {
 		t.Error("an unnamed channel does not")
 	}
 }
 
 func TestCommitForceEnabled(t *testing.T) {
 	var nilCfg *CommitConfig
-	if !nilCfg.ForceEnabled() {
+	if !nilCfg.IsForceEnabled() {
 		t.Error("force defaults to on, nil-safe")
 	}
-	if !(&CommitConfig{}).ForceEnabled() {
+	if !(&CommitConfig{}).IsForceEnabled() {
 		t.Error("and on an empty object")
 	}
-	if (&CommitConfig{Force: Bool(false)}).ForceEnabled() {
+	if (&CommitConfig{Force: Bool(false)}).IsForceEnabled() {
 		t.Error("and off when it says so")
 	}
 }

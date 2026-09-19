@@ -72,8 +72,8 @@ verdaccio behind a proxy that answers 502 to the upload of one named package and
 No cell shares a registry, a clone or an origin with another, and every commit is dated from a fixed clock, so a cell
 run twice produces the same shas and two transcripts that diff against each other.
 
-Every release reruns all twelve cells against the image it has just published, and what they recorded is on
-[release experiments](./internals/experiments.mdx). The same twelve run on demand, for any released version, through
+Every release reruns every cell of the campaign against the image it has just published, and what they recorded is on
+[release experiments](./internals/experiments.mdx). The same cells run on demand, for any released version, through
 the [Experiments workflow](https://github.com/yohimik/dispat/actions/workflows/experiments.yml). The harness that runs
 them, the fixture, the observer and the fault proxy are in
 [`tests/experiments`](https://github.com/yohimik/dispat/blob/main/tests/experiments/README.md).

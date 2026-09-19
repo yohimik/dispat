@@ -31,7 +31,7 @@ func TestRequiredRecordFailureBlocksConsumerClosure(t *testing.T) {
 			})
 			runner := &fakeRunner{}
 			reverter := &fakeReverter{}
-			ex := &Executor{Runner: runner, Recorders: []ReleaseRecorder{failingSourceRecorder{}},
+			ex := &Executor{Runner: runner, Recorders: []ReleaseRecorderx{failingSourceRecorder{}},
 				BlockOnRecordFailure: required, Reverter: reverter, Log: zerolog.Nop()}
 			results := ex.Run(context.Background(), pl)
 			require.Equal(t, StatusPublished, results["provider"].Status)

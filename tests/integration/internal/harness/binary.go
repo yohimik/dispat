@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -99,17 +100,17 @@ func compilerKind() (string, error) {
 	}
 }
 
-// UsesTinyGo reports whether the harness was explicitly told to build dispat
+// IsTinyGo reports whether the harness was explicitly told to build dispat
 // with TinyGo. Callers use this for platform expectations that differ between
 // the Go and TinyGo runtimes. A prebuilt binary alone is deliberately opaque;
 // set DISPAT_TEST_COMPILER=tinygo alongside it when its runtime matters.
-func UsesTinyGo() bool {
+func IsTinyGo() bool {
 	kind, err := compilerKind()
 	return err == nil && kind == "tinygo"
 }
 
 func compilerBuildArgs() []string {
-	if UsesTinyGo() {
+	if IsTinyGo() {
 		return []string{"-opt=z", "-no-debug", "-p", "2"}
 	}
 	return nil
@@ -119,6 +120,25 @@ func compilerBuildArgs() []string {
 // this harness. The race pass sets this flag so every dispat binary it drives
 // is instrumented too.
 func raceBuild() bool { return os.Getenv("DISPAT_TEST_RACE") == "1" }
+
+// productionCoverpkg is every first-party production module the CLI is made
+// from. Keep this explicit: ./... from services/dispat only instruments the
+// CLI module and silently leaves the public libraries out of the integration
+// denominator.
+func productionCoverpkg() string {
+	if configured := os.Getenv("DISPAT_COVERPKG"); configured != "" {
+		return configured
+	}
+	return strings.Join([]string{
+		"github.com/yohimik/dispat/services/dispat/...",
+		"github.com/yohimik/dispat/pkg/ccme/v2/...",
+		"github.com/yohimik/dispat/pkg/config/...",
+		"github.com/yohimik/dispat/pkg/manifest/...",
+		"github.com/yohimik/dispat/pkg/models/...",
+		"github.com/yohimik/dispat/pkg/scanner/...",
+		"github.com/yohimik/dispat/pkg/writer/...",
+	}, ",")
+}
 
 func validateBuildSelection() error {
 	prebuilt := prebuiltBin() != ""
@@ -157,10 +177,10 @@ func build() (dispat, tsmark string, err error) {
 	binaries.dir = dir
 
 	// atomic matches the unit profiles, so the text profiles concatenate into
-	// one; -coverpkg=./... mirrors the unit job's scope for the CLI module.
+	// one. The package set spans every production module used by the CLI.
 	var coverArgs []string
 	if coverDir() != "" {
-		coverArgs = []string{"-cover", "-covermode=atomic", "-coverpkg=./..."}
+		coverArgs = []string{"-cover", "-covermode=atomic", "-coverpkg=" + productionCoverpkg()}
 	}
 	if raceBuild() {
 		coverArgs = append(coverArgs, "-race")
@@ -254,7 +274,7 @@ func BuildVersioned(t testing.TB, version string) string {
 		"-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=" + version}
 	args = append(args, compilerBuildArgs()...)
 	if coverDir() != "" {
-		args = append(args, "-cover", "-covermode=atomic", "-coverpkg=./...")
+		args = append(args, "-cover", "-covermode=atomic", "-coverpkg="+productionCoverpkg())
 	}
 	if raceBuild() {
 		args = append(args, "-race")

@@ -62,12 +62,12 @@ func TestDraftReleasesWaitForAHumanToPublish(t *testing.T) {
 	second := r.Command("github", "--package", "core")
 	assert.Equal(t, 0, second.Code, "stderr: %s", second.Stderr)
 	assert.Len(t, bodies(), 1, "the draft is never created twice")
-	assert.True(t, harness.HasCode(second.Events, "W224"), "the skip says which code it is")
+	assert.True(t, harness.IsCodePresent(second.Events, "W224"), "the skip says which code it is")
 
 	// And the run itself converges on the draft its own step left behind.
 	r.ReleaseOK()
 	assert.Len(t, bodies(), 1)
-	assert.True(t, r.HasTag("core@0.1.0"), "the tag is dispat's, whoever publishes the release")
+	assert.True(t, r.IsTagged("core@0.1.0"), "the tag is dispat's, whoever publishes the release")
 }
 
 // TestDraftFlagHoldsBackAndTheFlipAbandonsTheDraft: --draft drafts a release

@@ -481,7 +481,7 @@ func TestLoadCommitDefaults(t *testing.T) {
 	cfg, err := loadModel(t, validConfig())
 	require.NoError(t, err)
 	assert.False(t, cfg.Commit.IsEnabled(), "commit defaults to disabled")
-	assert.False(t, cfg.Commit.PushEnabled(), "push defaults to disabled")
+	assert.False(t, cfg.Commit.IsPushEnabled(), "push defaults to disabled")
 	assert.Empty(t, cfg.Shell, "shell defaults to empty (runner falls back to /bin/sh -c)")
 }
 
@@ -497,7 +497,7 @@ func TestLoadCommitOptions(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, loaded.Commit.IsEnabled())
 	assert.Equal(t, "release: {packages} ({tags})", loaded.Commit.MessageFormat)
-	assert.True(t, loaded.Commit.PushEnabled())
+	assert.True(t, loaded.Commit.IsPushEnabled())
 	assert.Equal(t, "upstream", loaded.Commit.Remote)
 }
 
@@ -506,7 +506,7 @@ func TestLoadCommitPushWithoutCommitDisabled(t *testing.T) {
 	cfg.Commit = &CommitConfig{Push: true}
 	loaded, err := loadModel(t, cfg)
 	require.NoError(t, err)
-	assert.False(t, loaded.Commit.PushEnabled(), "push only applies when the commit is enabled")
+	assert.False(t, loaded.Commit.IsPushEnabled(), "push only applies when the commit is enabled")
 }
 
 func TestLoadShellOption(t *testing.T) {
@@ -996,7 +996,7 @@ func TestVersioningNamesCoverTheModel(t *testing.T) {
 		VersioningFixedMajor, VersioningFixedMajorSparse,
 	}, sharedVersioningNames(), "the shared list is the full one without independent and none")
 	for _, name := range versioningNames {
-		releasable := model.Versioning(name).Releasable()
+		releasable := model.Versioning(name).IsReleasable()
 		assert.Equal(t, name != VersioningNone, releasable,
 			"only none is excluded from the release flow, got Releasable()=%v for %q", releasable, name)
 	}
@@ -1464,6 +1464,58 @@ func TestLoadParserOptions(t *testing.T) {
 	assert.Equal(t, []string{"beta", "rc"}, pc.AllowedChannels)
 }
 
+// TestLoadPropagationKindsEmptyListIsNotAnAbsentOne: `propagation.kinds` has
+// three states, not two. An absent key leaves the slice nil, which ccme fills
+// with the specification default; a present empty list is a repository asking
+// for no traversal at all, and it has to reach the parser as a non-nil empty
+// slice for ccme to tell the two apart (pkg/ccme, PropagationConfig.Kinds).
+// The claim is made of every file format, because the distinction lives in the
+// readers as much as in the decoder: a format whose empty array arrived as nil
+// would quietly widen the traversal to every edge.
+func TestLoadPropagationKindsEmptyListIsNotAnAbsentOne(t *testing.T) {
+	// The model cannot express the empty list — the field's `omitempty` drops
+	// it — so the document is the marshalled model with the one key written
+	// back into it, and each format is produced by its own marshaller.
+	cfg := minimalConfig()
+	base, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	var tree map[string]any
+	require.NoError(t, json.Unmarshal(base, &tree))
+	tree["parser"] = map[string]any{"propagation": map[string]any{"kinds": []any{}}}
+
+	marshallers := map[string]func() ([]byte, error){
+		"json": func() ([]byte, error) { return json.MarshalIndent(tree, "", "  ") },
+		"yaml": func() ([]byte, error) { return yaml.Marshal(tree) },
+		"toml": func() ([]byte, error) { return toml.Marshal(tree) },
+	}
+	for format, marshal := range marshallers {
+		t.Run(format, func(t *testing.T) {
+			data, err := marshal()
+			require.NoError(t, err)
+			root := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "pkgs", "core"), 0o755))
+			path := filepath.Join(root, "dispat."+format)
+			require.NoError(t, os.WriteFile(path, data, 0o644))
+
+			loaded, err := Load(path, nil)
+			require.NoError(t, err)
+			require.NotNil(t, loaded.Parser.Propagation.Kinds,
+				"the list the file wrote is present, however this format spells an empty array")
+			assert.Empty(t, loaded.Parser.Propagation.Kinds, "and it names no kind")
+			require.NotNil(t, loaded.ResolvedParser.Propagation.Kinds,
+				"and it reaches the parser present, which is what tells ccme 'no edges' from 'unset'")
+			assert.Empty(t, loaded.ResolvedParser.Propagation.Kinds)
+		})
+	}
+
+	// The contrast, in the same shape: no key at all leaves the slice nil, so
+	// ccme substitutes the §8.4 default.
+	loaded, err := loadModel(t, minimalConfig(), "pkgs/core")
+	require.NoError(t, err)
+	assert.Nil(t, loaded.ResolvedParser.Propagation.Kinds,
+		"an absent key says nothing, and ccme fills it with the specification default")
+}
+
 // TestParserTypesReachTheParserFolded: the map keeps the case the file wrote,
 // and the table the commit parser is handed is folded into lower case, because
 // the parser matches a commit's type byte for byte and a commit writes `feat:`.
@@ -1551,7 +1603,7 @@ func TestAutoVersionResolution(t *testing.T) {
 		require.NotNil(t, av)
 		assert.Equal(t, model.ScopeRoot, av.Manifests, "manifests defaults to root")
 		assert.Empty(t, av.Replace, "no replace rules means the replacing strategy is off")
-		assert.True(t, av.Reconciles())
+		assert.True(t, av.IsReconciling())
 		assert.False(t, av.NameSubstring)
 		assert.True(t, av.WriteVersion, "writeVersion defaults on")
 		assert.Empty(t, av.SyncLock)
@@ -1695,13 +1747,13 @@ func TestAutoVersionStrategies(t *testing.T) {
 		assert.Equal(t, []string{"*.gradle"}, av.Replace[0].Files)
 		assert.Equal(t, "{provider}:{providerPrevious}", av.Replace[0].Find)
 		assert.Equal(t, "{provider}:{providerVersion}", av.Replace[0].Write)
-		assert.True(t, av.Reconciles(), "replace rules are work to do")
+		assert.True(t, av.IsReconciling(), "replace rules are work to do")
 	})
 
 	t.Run("syncLock only", func(t *testing.T) {
 		av := resolve(t, &AutoVersionConfig{Manifests: "none", SyncLock: []string{"lock"}})
 		require.NotNil(t, av, "a block with neither strategy still resolves")
-		assert.False(t, av.Reconciles())
+		assert.False(t, av.IsReconciling())
 		assert.Equal(t, []string{"go mod tidy"}, av.SyncLock)
 	})
 
@@ -1712,7 +1764,7 @@ func TestAutoVersionStrategies(t *testing.T) {
 		})
 		assert.Equal(t, model.ScopeAll, av.Manifests)
 		assert.Len(t, av.Replace, 1)
-		assert.True(t, av.Reconciles())
+		assert.True(t, av.IsReconciling())
 	})
 
 	t.Run("disabled", func(t *testing.T) {
@@ -2139,9 +2191,9 @@ func TestLoadRecordChannelsGateTheRecords(t *testing.T) {
 	core := packagesByName(pkgs)["core"]
 	assert.Equal(t, []string{"stable", "*"}, core.Changelog.Channels,
 		"the nearest layer states the whole restriction, which is how a package opts back in")
-	assert.True(t, core.Changelog.Records("beta"), "and both values together admit every release")
+	assert.True(t, core.Changelog.IsRecorded("beta"), "and both values together admit every release")
 	assert.Equal(t, []string{"beta"}, core.GitHub.Channels, "a scalar is the one-name list")
-	assert.False(t, core.GitHub.Records("stable"))
+	assert.False(t, core.GitHub.IsRecorded("stable"))
 }
 
 // TestLoadRecordChannelsRefusals: a restriction naming nothing is a mistake,

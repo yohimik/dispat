@@ -202,7 +202,7 @@ func (w *replacerWork) providers(ctx context.Context, rel *plan.Release) []relea
 			if pr == nil {
 				continue
 			}
-			if w.onlyUpdated && !pr.Releasing() {
+			if w.onlyUpdated && !pr.IsReleasing() {
 				w.app.log.Debug().Str("package", rel.Pkg.Name).Str("provider", provider).
 					Msg("provider dropped from the fan-out: this run does not update it")
 				continue
@@ -212,7 +212,7 @@ func (w *replacerWork) providers(ctx context.Context, rel *plan.Release) []relea
 				Name:       provider,
 				Version:    plannedVersion(pr),
 				Previous:   pr.Previous().String(),
-				Releasing:  pr.Releasing(),
+				Releasing:  pr.IsReleasing(),
 				Prerelease: pr.IsPrerelease(),
 			})
 		}

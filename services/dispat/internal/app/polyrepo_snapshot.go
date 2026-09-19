@@ -141,7 +141,7 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 		var words []uint64
 		plannerWords := planned && wordCount > 0 && matchingOrder && len(inputWords) == wordCount
 		addControl := false
-		if rel.Releasing() && controlEnabled && rel.Pkg.Repository != config.ControlRepository {
+		if rel.IsReleasing() && controlEnabled && rel.Pkg.Repository != config.ControlRepository {
 			controlWord, controlMask := control/64, uint64(1)<<uint(control%64)
 			addControl = !plannerWords || inputWords[controlWord]&controlMask == 0
 		}
@@ -150,7 +150,7 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 			plannerKey = plannerSetKey{first: &inputWords[0], addControl: addControl}
 			if closure := plannerSets[plannerKey]; closure != nil {
 				closures[name] = closure
-				if rel.Releasing() {
+				if rel.IsReleasing() {
 					guard.byRelease[rel] = closure
 				}
 				continue
@@ -181,7 +181,7 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 				}
 			}
 		}
-		if rel.Releasing() && controlEnabled && rel.Pkg.Repository != config.ControlRepository {
+		if rel.IsReleasing() && controlEnabled && rel.Pkg.Repository != config.ControlRepository {
 			controlWord, controlMask := control/64, uint64(1)<<uint(control%64)
 			if words[controlWord]&controlMask == 0 {
 				if plannerWords {
@@ -195,7 +195,7 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 			plannerSets[plannerKey] = closure
 		}
 		closures[name] = closure
-		if rel.Releasing() {
+		if rel.IsReleasing() {
 			guard.byRelease[rel] = closure
 		}
 	}
@@ -228,6 +228,13 @@ func (w *workspaceRecorder) verifySnapshot(ctx context.Context, rel *plan.Releas
 // one ordered lane. Separate repositories retain full publish concurrency;
 // packages sharing a Git HEAD cannot expose a half-admitted nested commit to
 // each other's pre-publish guard.
+// A choreographed release settles its fleet links here, inside the lane
+// acquisition, rather than in the pre-publish hook: the executor takes this
+// lane before it calls BeforePublish, so two cross-repository consumers
+// settling from there would each hold their own lane while waiting for the
+// other's. Taking every lane the settlement needs in repository-name order is
+// what makes the wait graph acyclic, and every lane but the package's own is
+// released again before publication begins.
 func (w *workspaceRecorder) acquirePublish(ctx context.Context, rel *plan.Release) (func(), error) {
 	if rel == nil || rel.Pkg == nil {
 		return func() {}, nil
@@ -236,12 +243,59 @@ func (w *workspaceRecorder) acquirePublish(ctx context.Context, rel *plan.Releas
 	if record == nil {
 		return nil, fmt.Errorf("no repository owner for package %s", rel.Pkg.Name)
 	}
-	select {
-	case record.publishGate <- struct{}{}:
-		var once sync.Once
-		return func() { once.Do(func() { <-record.publishGate }) }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	lanes, err := w.settleLanes(rel)
+	if err != nil {
+		return nil, err
+	}
+	held, err := w.takeLanes(ctx, lanes)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.settleLinks(ctx, rel, held); err != nil {
+		releaseLanes(held, "")
+		return nil, err
+	}
+	own := held[record.repo.Name]
+	releaseLanes(held, record.repo.Name)
+	if own == nil {
+		return func() {}, nil
+	}
+	return own, nil
+}
+
+// takeLanes reserves the publish lanes of the named repositories, in the
+// order they are given, which the caller sorts by name.
+func (w *workspaceRecorder) takeLanes(ctx context.Context, names []string) (map[string]func(), error) {
+	held := make(map[string]func(), len(names))
+	for _, name := range names {
+		record := w.byName[name]
+		if record == nil {
+			releaseLanes(held, "")
+			return nil, fmt.Errorf("no repository %s to reserve for publication", name)
+		}
+		if _, taken := held[name]; taken {
+			continue
+		}
+		select {
+		case record.publishGate <- struct{}{}:
+			gate := record.publishGate
+			var once sync.Once
+			held[name] = func() { once.Do(func() { <-gate }) }
+		case <-ctx.Done():
+			releaseLanes(held, "")
+			return nil, ctx.Err()
+		}
+	}
+	return held, nil
+}
+
+// releaseLanes gives back every reserved lane but the one named.
+func releaseLanes(held map[string]func(), keep string) {
+	for name, release := range held {
+		if name == keep {
+			continue
+		}
+		release()
 	}
 }
 

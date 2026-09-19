@@ -2,8 +2,22 @@
 # space, not to any one image, so docker-login lives here with the flow.login
 # slot that runs it once per space and run.
 tagFormat: docker/{name}/v{version}
+# Every image ships the dispat release it installs, so the four version with
+# that release rather than with one another. That is one statement about the
+# space, said once here; the ladder still lets any one image supersede it.
+versionGroup: cli
 autoVersion:
   enabled: true
+# The version of the dispat CLI the images install: the compose files hand it
+# to install.sh as the DISPAT_VERSION build arg. It defaults to the version
+# dispat carries at the end of the current run — the planned version when
+# dispat is releasing, which is right because the images build only after it
+# publishes, and its released baseline otherwise, so a docs- or image-only
+# release installs the CLI that is actually out. The build script below
+# overrides it for the one case the default cannot cover (a planned version
+# nobody published yet).
+env:
+  INSTALL_DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION}
 # The docs package depends on dispat-alpine and runs the release experiments
 # against the image before it builds the site, so the image's *publish* is the
 # input its build takes, not the image's build. Without this, a run whose push
@@ -32,7 +46,7 @@ github:
 # which the CI gate reaches only when a docker package actually changed.
 scripts:
   docker-login: printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-  # The compose files interpolate INSTALL_DISPAT_VERSION — the top-level env
+  # The compose files interpolate INSTALL_DISPAT_VERSION — this space's env
   # default, ${DISPAT_WORKSPACE_DISPAT_VERSION} — into the DISPAT_VERSION
   # build arg, and the Dockerfiles hand it to install.sh. The default is right
   # everywhere but one place: in a release the images build after the CLI
@@ -87,27 +101,27 @@ flow:
   # After a successful publish, warn-only: the images are out either way, and
   # a Hub API hiccup must not fail a release that already shipped.
   postPublish: push-readme
+# The images themselves. The group they version in is the space's, stated
+# once above, so each entry is left with what is only its own: the edge onto
+# the CLI it installs (`keep: true`, because no manifest of an image can state
+# it), and the Docker Hub repository its manifest names.
 packages:
   dispat-ubuntu:
-    versionGroup: cli
     dependencies:
       - provider: dispat
         keep: true
     manifestNames: [docker.io/yohimik/dispat-ubuntu]
   dispat-debian:
-    versionGroup: cli
     dependencies:
       - provider: dispat
         keep: true
     manifestNames: [docker.io/yohimik/dispat-debian]
   dispat-alpine:
-    versionGroup: cli
     dependencies:
       - provider: dispat
         keep: true
     manifestNames: [docker.io/yohimik/dispat-alpine]
   dispat-dind:
-    versionGroup: cli
     dependencies:
       - provider: dispat
         keep: true

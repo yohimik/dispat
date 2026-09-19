@@ -105,10 +105,10 @@ func TestMatchPatternForms(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := compile(t, tc.patterns...)
 			for _, hit := range tc.hits {
-				assert.True(t, r.Match(hit), "%q should be ignored", hit)
+				assert.True(t, r.IsMatch(hit), "%q should be ignored", hit)
 			}
 			for _, miss := range tc.misses {
-				assert.False(t, r.Match(miss), "%q should not be ignored", miss)
+				assert.False(t, r.IsMatch(miss), "%q should not be ignored", miss)
 			}
 		})
 	}
@@ -122,7 +122,7 @@ func TestCompileNothingToMatch(t *testing.T) {
 		r, err := Compile(patterns)
 		require.NoError(t, err)
 		assert.Nil(t, r, "patterns %v", patterns)
-		assert.False(t, r.Match("anything"), "a nil ruleset is safe to ask")
+		assert.False(t, r.IsMatch("anything"), "a nil ruleset is safe to ask")
 	}
 	matched, ignored := (*Rules)(nil).Decide("anything")
 	assert.False(t, matched)
@@ -145,7 +145,7 @@ func TestCompileRefusesWhatCannotBeCarriedOut(t *testing.T) {
 // TestMatchEmptyPath: the path of the declaring folder itself is not one of
 // its files, so nothing matches it.
 func TestMatchEmptyPath(t *testing.T) {
-	assert.False(t, compile(t, "*").Match(""))
+	assert.False(t, compile(t, "*").IsMatch(""))
 }
 
 func TestRelative(t *testing.T) {
@@ -181,21 +181,21 @@ func TestChainNearestLevelDecides(t *testing.T) {
 		{Dir: "/r/packages/core", Rules: compile(t, "!README.md", "scratch/")},
 	}
 
-	assert.True(t, chain.Ignores("/r/packages/core/docs/guide.md"), "the root level reaches down")
-	assert.False(t, chain.Ignores("/r/packages/core/README.md"), "the package lifts it")
-	assert.True(t, chain.Ignores("/r/packages/core/scratch/x.go"), "and adds its own")
-	assert.True(t, chain.Ignores("/r/packages/utils/fixtures/a.json"), "the space level reaches its own packages")
-	assert.False(t, chain.Ignores("/r/packages/core/main.go"), "everything else counts")
+	assert.True(t, chain.IsIgnored("/r/packages/core/docs/guide.md"), "the root level reaches down")
+	assert.False(t, chain.IsIgnored("/r/packages/core/README.md"), "the package lifts it")
+	assert.True(t, chain.IsIgnored("/r/packages/core/scratch/x.go"), "and adds its own")
+	assert.True(t, chain.IsIgnored("/r/packages/utils/fixtures/a.json"), "the space level reaches its own packages")
+	assert.False(t, chain.IsIgnored("/r/packages/core/main.go"), "everything else counts")
 
 	// A sibling package's README is still ignored: only the layer belonging to
 	// the package can lift the exclusion, and this chain is core's.
-	assert.True(t, chain.Ignores("/r/packages/utils/README.md"))
+	assert.True(t, chain.IsIgnored("/r/packages/utils/README.md"))
 }
 
 // TestChainOutsideItsLayers: a file under none of the chain's folders is
 // nobody's business here, and asking about it is not an error.
 func TestChainOutsideItsLayers(t *testing.T) {
 	chain := Chain{{Dir: "/r/packages/core", Rules: compile(t, "*")}}
-	assert.False(t, chain.Ignores("/elsewhere/a.go"))
-	assert.False(t, Chain(nil).Ignores("/r/a.go"))
+	assert.False(t, chain.IsIgnored("/elsewhere/a.go"))
+	assert.False(t, Chain(nil).IsIgnored("/r/a.go"))
 }

@@ -358,3 +358,6 @@ The parser, meaning all Go source in this package, is licensed under MIT. See [L
 
 The separate CCME specification, [SPEC.md](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md), is licensed under
 GPL-3.0-or-later. See its [LICENSE](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/LICENSE).
+
+Boolean predicates use `Is` names: `Result.IsInvalid()` reports error diagnostics, and `Unit.IsScopeExplicit()` checks
+for an authored scope. The earlier `HasErrors()` and `HasExplicitScope()` methods remain as deprecated forwarding methods.

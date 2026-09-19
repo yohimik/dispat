@@ -6,14 +6,19 @@ import {CoverageSummary, CoverageTable, ReportStamp} from '@site/src/components/
 
 <CoverageSummary />
 
-Every number on this page is measured rather than written. Each module's own tests produce one
-`go test -covermode=atomic` profile (with `-coverpkg=./...` for the CLI module). The black-box integration suite
-contributes one more: its harness builds the real dispat binary with `-cover` when `DISPAT_COVERDIR` is set and points
-every invocation's `GOCOVERDIR` there, so the flows only that suite exercises (the app/cli composition, the finalize
-phase, the commands, signal handling) count too. The profiles are then merged block by block, where a block compiled by
-two test binaries counts once and is covered if either reached it, and the merged total becomes the badge on the
-repository README.
+Every number on this page comes from a coverage profile. Module tests produce the unit profiles. Integration
+coverage comes from two sources: real CLI processes running against disposable repositories, and public API scenarios
+that combine parsing, configuration, scanning, and rewriting. The measured production scope includes the CLI and all
+six current public Go modules. The current CCME module has its own public API driver because the CLI still uses the
+previous major version internally.
 
+The report keeps unit, integration, and combined coverage separate. Combined coverage counts each statement once and
+marks it covered when either layer reaches it. It supplies the README badge. The integration gate uses only the
+integration profiles; unit tests cannot satisfy it. Both integration and combined coverage must reach 95%.
+
+Before calculating a total, the report checks that every expected module and production block is present and that
+profile provenance matches the run. Missing profiles, mixed revisions, and omitted subpackages fail the report rather
+than reducing its denominator.
 The badge and this page are therefore the same number, taken from the same run: the one that gated the release which
 published this site.
 
@@ -27,12 +32,10 @@ the cached layer and runs the suite before it can receive a fresh stamp.
 
 <CoverageTable />
 
-The statements still uncovered are almost entirely single-line defensive branches: a `write`/`fsync`/`chmod` failing
-mid-atomic-write, a git subprocess failing for a reason its caller cannot produce on purpose, the second half of a
-double failure (a rename that fails *and* the rename undoing it failing too), and internal "this cannot happen" guards
-behind data the same function already validated. Reaching them would mean asserting on
-error text rather than on behaviour, so they are left uncovered deliberately.
-
+Coverage measures executed statements, not whether every requirement is correct. The requirement matrix also
+tracks release-safety cases such as lock failure, interrupted publication, configuration inheritance, and consumer
+recovery. An uncovered statement may represent a missing workflow or an error path; inspect the profile before deciding
+whether a new test is useful. A high combined percentage does not prove the integration gate passed.
 The per-package test inventory (what each package's suite actually asserts) is in
 [Architecture / Testing](./architecture.md#testing), and what the suite did rather than what it reached is in
 [test results](./test-results.mdx).
@@ -58,14 +61,13 @@ one, the prose stays and the tables are left out.
 
 ## What each layer contributes
 
-The unit layer covers every package against in-memory fakes. On its own it stops short of the total, because the
-composition (the compiled binary, the finalize phase, the run/test/preview commands, real git over a process boundary,
-SIGINT handling) lives exclusively in the
-[black-box integration suite](https://github.com/yohimik/dispat/blob/main/tests/integration/README.md), which asserts
-behaviour (git state, JSON log events, execution timelines) rather than statements. Instrumenting the binary it drives
-is what folds that behaviour back into the statement numbers above without compromising the suite's black-box design:
-the harness only sets two environment knobs, and with `DISPAT_COVERDIR` unset (the default, and every local `go test`)
-the binary is built exactly as released.
+Module tests exercise focused behavior, using both real resources and test doubles where appropriate. The
+[CLI integration suite](https://github.com/yohimik/dispat/blob/main/tests/integration/README.md) drives the compiled binary
+and checks Git state, log events, execution order, signals, and recovery. Its public API scenarios scan manifests,
+rewrite them, and rescan the result, including failures that must preserve the original files.
 
+`DISPAT_COVERDIR` enables CLI coverage collection, while the test runner collects public API coverage. Without these
+settings, ordinary local tests run without coverage instrumentation. The release gate collects both sources into one
+integration profile and compares its production statement inventory with the unit profiles.
 The suite's own status and per-area summary are in [test results](./test-results.mdx), with the claim-by-claim matrix
 in the [test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md).

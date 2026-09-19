@@ -12,7 +12,8 @@ name: Experiments
 # experiments page is built from what it recorded. What this workflow is for
 # is asking the same question again, of any released version, without making
 # a release to ask it with, and the two runs' records are comparable cell by
-# cell because they are the same twelve cells through the same harness.
+# cell because both read the campaign from the one `cells` script rather than
+# from a count written down anywhere.
 #
 # The cells for dispat carry expectations and fail when one does not hold;
 # the cells for the other tools are records and pass either way. The summary
@@ -70,9 +71,10 @@ jobs:
       # the others.
       fail-fast: false
       matrix:
-        # include alone, so the cells are exactly the twelve the script
+        # include alone, so the cells are exactly the ones the script
         # printed rather than a product with the combinations it never
-        # names cut back out.
+        # names cut back out. Adding a cell to `cells` adds a job here;
+        # nothing in this file counts them.
         include: ${{ fromJSON(needs.cells.outputs.matrix) }}
     steps:
       - name: Checkout code

@@ -43,7 +43,7 @@ func TestStandaloneChangelogWritesAndIsIdempotent(t *testing.T) {
 	// A second invocation is a W226 skip and changes nothing.
 	res = r.Command("changelog", "--package", "core")
 	require.Equal(t, 0, res.Code)
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W226", "core"))
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W226", "core"))
 	after, err := os.ReadFile(log)
 	require.NoError(t, err)
 	assert.Equal(t, string(data), string(after), "a repeated write is byte-identical")
@@ -78,8 +78,8 @@ func TestStandaloneStepsInsideAReleaseFlow(t *testing.T) {
 	r.Commit("feat(core): flowing feature")
 
 	res := r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W226", "core"), "the recorder skipped the pre-written entry")
-	assert.True(t, harness.HasCode(res.Events, "W223"), "tagging skipped the pre-created tag")
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W226", "core"), "the recorder skipped the pre-written entry")
+	assert.True(t, harness.IsCodePresent(res.Events, "W223"), "tagging skipped the pre-created tag")
 	assert.Equal(t, 1, r.TagCount("core@"))
 
 	// THE fix: the tagged tree contains the changelog entry, because the
@@ -95,7 +95,7 @@ func TestStandaloneStepsInsideAReleaseFlow(t *testing.T) {
 	// Convergence: the next run releases nothing and creates nothing new.
 	quiet := r.ReleaseOK()
 	assert.Equal(t, 1, r.TagCount("core@"))
-	assert.False(t, harness.HasCode(quiet.Events, "W223"), "a converged run tags nothing, so it skips nothing")
+	assert.False(t, harness.IsCodePresent(quiet.Events, "W223"), "a converged run tags nothing, so it skips nothing")
 }
 
 func TestStandaloneCommitPushAndNothingToCommit(t *testing.T) {
@@ -586,7 +586,7 @@ func TestStandaloneStepsTakeTheWindowFlags(t *testing.T) {
 	// The pitfall: commit --tag, and the package stops being on the window.
 	res = r.Command("commit", "--package", "core", "--tag")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 
 	res = r.Command("autoversion", "--package", "core")
 	require.Equal(t, 0, res.Code, "a package with nothing pending is a no-op, not a failure")
@@ -624,8 +624,8 @@ func TestStandaloneCommitTagName(t *testing.T) {
 
 		res := r.Command("commit", "--package", "core", "--tag", "--tag-name", "core@0.5.0")
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.True(t, r.HasTag("core@0.5.0"), "the named tag is created; tags: %v", r.TagList())
-		assert.False(t, r.HasTag("core@0.1.0"), "the computed tag is not")
+		assert.True(t, r.IsTagged("core@0.5.0"), "the named tag is created; tags: %v", r.TagList())
+		assert.False(t, r.IsTagged("core@0.1.0"), "the computed tag is not")
 		assert.Contains(t, r.Git("log", "-1", "--format=%s"), "core@0.5.0",
 			"the release commit message carries the named tag too")
 	})
@@ -635,7 +635,7 @@ func TestStandaloneCommitTagName(t *testing.T) {
 		res := r.Command("commit", "--tag", "--tag-name", "whatever@1.0.0")
 		require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
 		assert.Contains(t, res.Stdout, "--tag-name names one tag")
-		assert.False(t, r.HasTag("whatever@1.0.0"), "nothing is written on refusal")
+		assert.False(t, r.IsTagged("whatever@1.0.0"), "nothing is written on refusal")
 		assert.Equal(t, 0, r.TagCount("core@"), "the refusal comes before any git work")
 	})
 
@@ -643,6 +643,6 @@ func TestStandaloneCommitTagName(t *testing.T) {
 		r := repo(t)
 		res := r.Command("commit", "--package", "core", "--tag")
 		require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-		assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
 }

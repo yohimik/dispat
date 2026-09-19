@@ -50,7 +50,7 @@ func ComposeIdentity(services []ComposeService) (repository, tag string) {
 	}
 	// An interpolated reference names nothing a workspace can match, so it can
 	// never be an identity however it was declared.
-	eligible := func(i int) bool { return refs[i].HasTag() && !refs[i].Interpolated() }
+	eligible := func(i int) bool { return refs[i].IsTagged() && !refs[i].IsInterpolated() }
 
 	for i, s := range sorted {
 		if s.Builds && eligible(i) {

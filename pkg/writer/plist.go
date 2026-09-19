@@ -175,6 +175,11 @@ func plistNextValue(dec *xml.Decoder, data []byte) (plistValue, error) {
 // are a closing tag.
 func plistStringValue(dec *xml.Decoder, data []byte) (plistValue, error) {
 	start := dec.InputOffset()
+	// The decoder reports <string/> as a start tag followed immediately by an
+	// end tag at the same offset, so the closing-tag test below cannot tell it
+	// from a real empty element when the next bytes happen to be a closing tag;
+	// the element's own last two bytes can.
+	selfClosing := start >= 2 && bytes.HasSuffix(data[:start], []byte("/>"))
 	var b strings.Builder
 	for {
 		prev := dec.InputOffset()
@@ -186,7 +191,7 @@ func plistStringValue(dec *xml.Decoder, data []byte) (plistValue, error) {
 		case xml.CharData:
 			b.Write(t)
 		case xml.EndElement:
-			if !bytes.HasPrefix(data[prev:], []byte("</")) {
+			if selfClosing || !bytes.HasPrefix(data[prev:], []byte("</")) {
 				return plistValue{open: true}, nil
 			}
 			return plistValue{

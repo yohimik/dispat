@@ -169,7 +169,7 @@ func TestRecordsStandaloneChangelogPreservesThePreamble(t *testing.T) {
 	// And the release that follows finds the entry and skips it, so the two
 	// doors do not each write one.
 	res = r.ReleaseOK()
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W226", "core"))
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W226", "core"))
 	assert.Equal(t, log, changelogOf(t, r, "core"), "the release rewrote nothing")
 }
 
@@ -187,7 +187,7 @@ func TestRecordsFirstReleaseCoversTheWholeHistory(t *testing.T) {
 	r.CommitEmpty("feat(core): the newest feature")
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 
 	entry := entryOf(t, changelogOf(t, r, "core"), "core@0.1.0")
 	assertOrderedIn(t, entry,
@@ -236,9 +236,9 @@ func TestRecordsHandWrittenHeadingCollidesWithTheTag(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W226", "core"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W226", "core"),
 		"the collision is reported under its own code, events:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("v1.2.0"), "the release itself goes through; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("v1.2.0"), "the release itself goes through; tags: %v", r.TagList())
 	assert.Equal(t, existing, changelogOf(t, r, "core"),
 		"a heading somebody wrote by hand is never rewritten")
 

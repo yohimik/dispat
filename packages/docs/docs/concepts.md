@@ -27,8 +27,8 @@ version and defaults to `0.0.0`, while commits are still scanned from the unpars
 ### Which is also why there is no cache
 
 Everything dispat needs is already in the repository, because tags say what published and commits say what changed. The
-plan is a pure function of those two things plus your config. dispat recomputes it from scratch on every run in
-milliseconds, so two runs on the same repository always agree.
+plan is computed from the selected history, release records and resolved configuration. Given the same inputs,
+dispat computes the same versions. Planning time depends on the size of the history and dependency graph.
 
 This removes the need for a task cache, which would otherwise require hashing inputs and offering you a way to clear
 invalid hits. dispat skips work a different way: a package with nothing in its window is not in the plan, so its

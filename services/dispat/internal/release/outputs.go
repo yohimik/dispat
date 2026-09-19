@@ -77,7 +77,7 @@ func normalizeOutputName(name string) (string, bool) {
 	case strings.HasPrefix(name, plan.ReservedEnvPrefix):
 		return "", false
 	}
-	return name, ValidEnvName(name)
+	return name, IsValidEnvName(name)
 }
 
 // MergeOutputs folds exports onto the release: first-export order is kept, a
@@ -103,11 +103,11 @@ func MergeOutputs(rel *plan.Release, outs []plan.Output) {
 	}
 }
 
-// ValidEnvName reports whether s is a portable environment variable name:
+// IsValidEnvName reports whether s is a portable environment variable name:
 // [A-Za-z_][A-Za-z0-9_]*. Exported because the conditions `dispat if` tests
 // name variables the same way, and one definition is what keeps a name dispat
 // accepts in an output and a name it accepts in a condition the same set.
-func ValidEnvName(s string) bool {
+func IsValidEnvName(s string) bool {
 	if s == "" {
 		return false
 	}
@@ -132,6 +132,9 @@ func (s Sequence) capture(ctx context.Context, source string) (outs []plan.Outpu
 		return nil, fmt.Errorf("creating the %s file: %w", OutputEnvVar, err), nil
 	}
 	file := f.Name()
+	// Closed immediately and reopened by parseOutputs: the script writes to
+	// the path, not to this handle. The close error is discarded because the
+	// file is still empty and the deferred remove takes it either way.
 	_ = f.Close()
 	defer os.Remove(file)
 

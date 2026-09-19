@@ -123,7 +123,7 @@ type itemRunner struct {
 	t        *testing.T
 }
 
-var _ script.Runner = (*itemRunner)(nil)
+var _ script.Runnerx = (*itemRunner)(nil)
 
 func (r *itemRunner) Run(_ context.Context, _, _ string, env []string, _, _ io.Writer) error {
 	item := envOf(r.t, env)[ItemEnvVar]

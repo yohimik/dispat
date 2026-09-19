@@ -13,9 +13,12 @@ scripts:
       --build-arg MODULE="$MODULE" \
       $(sh "$ROOT/scripts/buildx-cache.sh" "tidy-$DISPAT_PACKAGE") \
       --output type=local,dest=. "$ROOT"
+  # The two record steps more than one space writes mid-run: the pkg and
+  # services spaces and both specification packages name them in flow.publish.
+  # The third, `dispat github`, has one caller and lives with it, in
+  # services/dispat.yaml.
   changelog: dispat changelog
   commit: dispat commit --tag --push
-  github: dispat github
 
   # The format sweep the lint job runs, as a build like every other gate.
   gofmt-check: >-
@@ -30,6 +33,66 @@ scripts:
   shellcheck: >-
     docker buildx build --file Dockerfile.gotest --target shellcheck
     $(sh scripts/buildx-cache.sh shellcheck) --output type=cacheonly .
+
+  # What the override ladder actually resolves to, asserted rather than
+  # assumed. A script named by a release stage is looked up from one package,
+  # so a name that moved a level would surface at release time rather than
+  # here, and a package that stopped overriding an inherited gate would run
+  # the wrong one quietly.
+  #
+  # The assertions read this configuration through dispat itself: a copy of
+  # this file with `shell` replaced by /bin/echo, so every `dispat exec` below
+  # prints the command it resolved instead of running it. `shell` is
+  # repository-wide, which is why the override is a whole file rather than a
+  # flag. The copy lives at the repository root because --config is resolved
+  # against --root, and it is removed however the check ends.
+  config-check: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    check=dispat.resolution-check-$$.yaml
+    trap 'rm -f "$ROOT/$check"' EXIT INT TERM
+    { cat "$ROOT/dispat.yaml"; echo; echo 'shell: ["/bin/echo"]'; } > "$ROOT/$check"
+    resolve() { dispat --root "$ROOT" --config "$check" exec "$1" --for "pkg:$2" --fallback; }
+    holds() { # holds <script> <package> <expected text>
+      case "$(resolve "$1" "$2")" in
+        *"$3"*) echo "ok: $2 resolves $1 to the command holding \"$3\"" ;;
+        *) echo "$2 resolves $1 to something else than \"$3\"" >&2; exit 1 ;;
+      esac
+    }
+    absent() { # absent <script> <package>
+      if resolve "$1" "$2" >/dev/null 2>&1; then
+        echo "$1 must not resolve in $2" >&2; exit 1
+      fi
+      echo "ok: $2 resolves no $1"
+    }
+    # The versioning half of the same question: which group a package ends up
+    # in after the ladder has folded every layer. `dispat for` reads the
+    # discovered package rather than any one file, so a membership stated on
+    # the space and a membership stated on the package are indistinguishable
+    # here — which is the point, since the two have to mean the same thing.
+    # The subshell unsets DISPAT_GROUP first: a member's own value is set per
+    # item, and an inherited one would answer for a package that has none.
+    group() { # group <package> <expected group>
+      case "$( unset DISPAT_GROUP; dispat --root "$ROOT" for -p "$1" --do 'echo "<$DISPAT_GROUP>"' )" in
+        *"<$2>"*) echo "ok: $1 versions in the \"$2\" group" ;;
+        *) echo "$1 does not version in the \"$2\" group" >&2; exit 1 ;;
+      esac
+    }
+    # A package gate that overrides its space's, and the space gate beside it.
+    holds tests cli cli-npm
+    holds tests docs 'buildx-cache.sh docs'
+    # The record step the services space names in flow.publish, where it lives.
+    holds github dispat 'dispat github'
+    absent github docs
+    # A root script reaching a package that declares none of its own.
+    holds go-mod-tidy config tidy-export
+    # The four images state no group of their own: they take the docker
+    # space's, through the same ladder the gates above resolve a script with,
+    # and each of them carries an override layer while doing it.
+    group dispat-ubuntu cli
+    group dispat-debian cli
+    group dispat-alpine cli
+    group dispat-dind cli
 
   # The TinyGo spike, as a build like every other gate. Its targets never
   # abort: the logs are what it produces, so the export lands them in
@@ -148,18 +211,6 @@ packages:
     path: tests/experiments
   infra:
     path: infra
-
-# The version of the dispat CLI its in-repo consumers take: the docker images
-# hand it to install.sh, and anything else that needs the CLI's version reads
-# the same name instead of deriving its own. It defaults to the version dispat
-# carries at the end of the current run — the planned version when dispat is
-# releasing, which is right because the images build only after it publishes,
-# and its released baseline otherwise, so a docs- or image-only release
-# installs the CLI that is actually out. The docker build gate overrides it
-# for the one case the default cannot cover (a planned version nobody
-# published yet); see the build script in docker/dispat.yaml.
-env:
-  INSTALL_DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION}
 
 concurrency: [0, 1]
 

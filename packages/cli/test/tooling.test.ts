@@ -85,7 +85,7 @@ test('package verifier checks generated metadata and allowlisted files', async t
     ['linux-arm64','dispat-linux-arm64'],['win32-x64','dispat-windows-amd64.exe'],['win32-arm64','dispat-windows-arm64.exe']
   ].map(([key,name]) => [key, { name, size: 1, sha256: 'a'.repeat(64) }]))
   await fs.mkdir(path.join(root, 'build/bin'), { recursive: true })
-  await Promise.all(['build/bin/dispat.js','build/bin/postinstall.js','README.md','LICENSE'].map(file => fs.writeFile(path.join(root,file),'')))
+  await Promise.all(['build/bin/dispat.js','build/bin/postinstall.js','postinstall.mjs','README.md','LICENSE'].map(file => fs.writeFile(path.join(root,file),'')))
   await fs.writeFile(path.join(root,'package.json'), JSON.stringify({ name:'@dispat/bin', version:'1.10.2' }))
   await fs.writeFile(path.join(root,'release.json'), JSON.stringify({ version:'1.10.0', tag:'services/dispat/v1.10.0', assets }))
   verify(root)

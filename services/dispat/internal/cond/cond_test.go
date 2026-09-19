@@ -147,7 +147,7 @@ func TestConditionMatch(t *testing.T) {
 		t.Run(spec, func(t *testing.T) {
 			c, err := ParseCondition(spec)
 			require.NoError(t, err)
-			assert.Equal(t, want, c.Match(lookup))
+			assert.Equal(t, want, c.IsMatch(lookup))
 		})
 	}
 }
@@ -161,11 +161,11 @@ func TestResolvedConditionAnswersWithoutTheEnvironment(t *testing.T) {
 	lookup := func(string) string { looked = true; return "" }
 
 	held := ResolvedCondition("--changed", true)
-	assert.True(t, held.Match(lookup), "a condition resolved true matches")
+	assert.True(t, held.IsMatch(lookup), "a condition resolved true matches")
 	assert.Equal(t, "--changed", held.Spec, "the spec quotes what the user typed")
 
 	missed := ResolvedCondition("-f report.json", false)
-	assert.False(t, missed.Match(lookup), "a condition resolved false does not match")
+	assert.False(t, missed.IsMatch(lookup), "a condition resolved false does not match")
 	assert.Equal(t, "-f report.json", missed.Spec)
 
 	assert.False(t, looked, "the environment must not be consulted")
@@ -193,17 +193,17 @@ func TestFileConditionReadsTheFilesystem(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := FileCondition(dir, tc.path, tc.wantDir)
-			assert.Equal(t, tc.held, c.Match(func(string) string { return "" }))
+			assert.Equal(t, tc.held, c.IsMatch(func(string) string { return "" }))
 		})
 	}
 
 	// An absolute path ignores the folder it would otherwise be joined onto,
 	// and a relative one is read from that folder alone.
 	abs := FileCondition(t.TempDir(), filepath.Join(dir, "report.json"), false)
-	assert.True(t, abs.Match(func(string) string { return "" }),
+	assert.True(t, abs.IsMatch(func(string) string { return "" }),
 		"an absolute path is used as it is")
 	rel := FileCondition(t.TempDir(), "report.json", false)
-	assert.False(t, rel.Match(func(string) string { return "" }),
+	assert.False(t, rel.IsMatch(func(string) string { return "" }),
 		"a relative path resolves against the given folder, not the process cwd")
 
 	// The spec keeps the flag spelling, so logs quote the test as typed.

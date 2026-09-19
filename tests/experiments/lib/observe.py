@@ -16,6 +16,10 @@ observation and both sides are fetched into it under separate ref namespaces,
 so origin's refs and the clone's refs are distinguishable and neither
 repository under test is written to at all.
 
+Per package the record also carries the manifest the clone's working tree now
+holds, which is where a reconciled dependency range and a rolled back version
+rewrite are visible and nowhere else.
+
 Per package the three answers are joined into one state:
 
   consistent   the registry's version is tagged on origin and the tag is
@@ -44,6 +48,24 @@ REG = os.environ.get("REGISTRY", "http://127.0.0.1:4873")
 # merge them into a single answer that is neither.
 ORIGIN_NS = "refs/observed/origin"
 CLONE_NS = "refs/observed/clone"
+
+
+def manifest(repo, package):
+    """The package's manifest as the clone's working tree currently holds it.
+
+    The registry says what shipped and the tags say what was recorded; neither
+    says what the checkout now claims about its providers. A propagation run is
+    about exactly that claim, and a range rewritten or rolled back is invisible
+    in all three of the other readings. Read only, and a manifest that cannot
+    be read is reported as absent rather than as an empty one."""
+    path = os.path.join(repo, "packages", package, "package.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return {"version": data.get("version"),
+            "dependencies": data.get("dependencies", {})}
 
 
 def git(repo, *args):
@@ -159,7 +181,7 @@ def main():
         for t in list(clone_tags) + list(origin_tags):
             if t.startswith(p + "@"):
                 versions.add(t.split("@", 1)[1])
-        row = {"registry": reg, "tags": {}}
+        row = {"registry": reg, "manifest": manifest(repo, p), "tags": {}}
         if error:
             row["error"] = error
         for v in sorted(versions):

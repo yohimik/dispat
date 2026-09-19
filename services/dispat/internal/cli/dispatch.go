@@ -240,7 +240,7 @@ var foreignFlagHints = map[foreignFlag]string{
 // fills in write and reps for the commands whose flags carry a request.
 func (r *runner) validateFlags() (int, bool) {
 	cmd := r.inv.cmd
-	if sweepCommand(cmd) && !app.ValidOnError(*r.o.onError) {
+	if sweepCommand(cmd) && !app.IsValidOnError(*r.o.onError) {
 		r.boot.Error().Str("on-error", *r.o.onError).Msgf("unknown --on-error value (want %q or %q)",
 			app.OnErrorSkip, app.OnErrorContinue)
 		return 2, true
@@ -360,7 +360,7 @@ func (r *runner) runIf() (int, bool) {
 	}
 	r.ifBranches = branches
 	r.ifIn = in
-	if *r.o.ifChanged || (in != nil && in.Deferred()) {
+	if *r.o.ifChanged || (in != nil && in.IsDeferred()) {
 		return 0, false
 	}
 	dir := *r.o.root
@@ -449,7 +449,7 @@ func (r *runner) runIfIn(dir string) int {
 		cond := app.FileCondition(dir, r.ifFile.path, r.ifFile.wantDir)
 		r.ifBranches[0].Cond = cond
 		log.Debug().Str("condition", cond.Spec).Str("dir", dir).
-			Bool("held", cond.Match(os.Getenv)).Msg("file condition evaluated")
+			Bool("held", cond.IsMatch(os.Getenv)).Msg("file condition evaluated")
 	}
 	ctx, stop := signalCtx()
 	defer stop()
@@ -488,7 +488,7 @@ func (r *runner) runFor() (int, bool) {
 		Scripts: *r.o.forDo, KeepGoing: *r.o.forKeepGoing, RequireItems: *r.o.forRequire,
 		OnFailure: *r.o.onFailure, Stdout: r.stdout, Stderr: r.stderr,
 	}
-	if domain != "" || (in != nil && in.Deferred()) {
+	if domain != "" || (in != nil && in.IsDeferred()) {
 		return 0, false
 	}
 	dir := *r.o.root
@@ -572,7 +572,7 @@ func (r *runner) forSource() (app.ForDomain, int) {
 // runForItems performs the loop over a resolved list. Both callers reach the
 // command through here, so the options it runs with are written once.
 func (r *runner) runForItems(ctx context.Context, dir string, items []app.ForItem,
-	runner script.Runner, log zerolog.Logger) int {
+	runner script.Runnerx, log zerolog.Logger) int {
 	opts := r.forOpts
 	opts.Items, opts.Dir, opts.Runner, opts.Log = items, dir, runner, log
 	code, err := app.RunFor(ctx, opts)
@@ -953,6 +953,7 @@ func (r *runner) runConfigured() int {
 		}
 		cfg.Polyrepo = true
 	}
+	standalone := cfg.IsChoreographed() && !cfg.Polyrepo
 	var pins map[string][]string
 	var pinResolver config.SourcePinResolver
 	if r.o.nestedWorkspace {
@@ -971,7 +972,19 @@ func (r *runner) runConfigured() int {
 			pinResolver = live.Pins
 		}
 	}
-	workspace, err := config.ComposeWorkspaceWithPinResolver(cfg, cfgPath, resolvedRoot, *r.o.configs, pins, pinResolver)
+	// The interruptible context of everything below, opened here rather than
+	// at each command because composition itself can wait: validating a live
+	// pin takes the source repository's Git mutation lock, and a run queued
+	// behind another release's record has to stop when the operator does.
+	ctx, stop := signalCtx()
+	defer stop()
+	compose := config.ComposeWorkspaceWithPinResolver
+	if r.inv.cmd == cmdCompute {
+		// compute repairs the fleet, so it has to be able to read one that
+		// does not compose: a missing link is the finding it acts on.
+		compose = config.ComposeWorkspaceForRepair
+	}
+	workspace, err := compose(ctx, cfg, cfgPath, resolvedRoot, *r.o.configs, pins, pinResolver)
 	if err != nil {
 		logConfigError(r.boot, err).Msg("invalid polyrepo workspace")
 		return 1
@@ -983,9 +996,7 @@ func (r *runner) runConfigured() int {
 		// parser's findings back for one run without editing the config.
 		cfg.Parser.Quiet = *r.o.quietParser
 		if workspace != nil {
-			for _, repository := range workspace.Repositories {
-				repository.Config.Parser.Quiet = *r.o.quietParser
-			}
+			workspace.SetParserQuietOverride(*r.o.quietParser)
 		}
 	}
 	log := newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout)
@@ -1019,12 +1030,17 @@ func (r *runner) runConfigured() int {
 	for _, file := range cfg.SourceFiles {
 		log.Trace().Str("file", file).Msg("configuration file read")
 	}
+	if standalone {
+		// The escape hatch, said out loud: the fleet this repository belongs to
+		// is not composed, so nothing outside it is planned, locked or recorded.
+		log.Info().Str("saga", config.SagaChoreography).Str("repository", cfg.Repository).
+			Msg("fleet links skipped by --polyrepo=false; releasing this repository alone")
+	}
+	logWorkspaceComposition(log, r.workspace)
 
 	if r.inv.cmd == cmdExec {
 		// Straight after the config, which is all it needs: no plan unless
 		// --env asked for one, and no update check, for the same reason as if.
-		ctx, stop := signalCtx()
-		defer stop()
 		code, err := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log).Exec(ctx, r.execOpts)
 		if err != nil {
 			return 1
@@ -1057,8 +1073,6 @@ func (r *runner) runConfigured() int {
 				r.usage(cmdIf)
 				return 2
 			}
-			ctx, stop := signalCtx()
-			defer stop()
 			sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
 				Groups: *r.o.groupFilter, Dir: *r.o.root}
 			names, err := a.ChangedSelection(ctx, app.WindowOptions{
@@ -1079,8 +1093,6 @@ func (r *runner) runConfigured() int {
 		// this. Above the update check for the same reason `if` is: no loop path
 		// may cost a GitHub request, however much else it asked for.
 		a := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log)
-		ctx, stop := signalCtx()
-		defer stop()
 		dir := *r.o.root
 		if r.forIn != nil {
 			var err error
@@ -1113,10 +1125,8 @@ func (r *runner) runConfigured() int {
 	// Now that the configuration has spoken, the check can start: a run that
 	// switched it off must make no request at all, which means not making one
 	// before the option has been read.
-	*r.update = startUpdateCheck(r.checkCtx, r.o, r.fs, cfg.LogFormat, cfg.UpdateCheckEnabled())
+	*r.update = startUpdateCheck(r.checkCtx, r.o, r.fs, cfg.LogFormat, cfg.IsUpdateCheckEnabled())
 
-	ctx, stop := signalCtx()
-	defer stop()
 	return r.dispatch(ctx, cfg, resolvedRoot, cfgPath, log)
 }
 

@@ -2,30 +2,32 @@ import {ExperimentsSummary, ExperimentsTable, ReportStamp} from '@site/src/compo
 
 # Release experiments
 
-What the released binary does when a release goes wrong halfway through, as opposed to
-[what the suite reaches](./coverage.mdx), [what it did](./test-results.mdx) and
-[what the code costs](./benchmarks.mdx).
+These experiments run release tools against disposable Git repositories and a real local npm registry. They show
+what remains after a partial publication and what each tool does on retry. The separate [coverage](./coverage.mdx),
+[test results](./test-results.mdx), and [benchmarks](./benchmarks.mdx) pages describe the automated suite.
 
 <ReportStamp />
 
 <ExperimentsSummary />
 
-Two things can go wrong in the middle of a monorepo release that no unit test reaches. The registry refuses one package
-after others have gone out, leaving a version that is tagged but not published, or published but not tagged. And a
-colleague pushes to the branch while the release runs, so the branch the release means to push has moved underneath it.
-Both are ordinary. Neither is reachable from a test that stubs the registry or the remote, because what is under
-test is precisely what the tool does when the real ones refuse.
+The protocols cover three failures: a registry rejects one package, a colleague pushes while the release is running,
+or a consumer fails after its provider has published. Each experiment records the local checkout, remote Git refs,
+and registry versions before making a recovery claim.
 
-The fixture is six npm packages: `core`, with `cli`, `ui` and `api` depending on it, and `theme` and `docs` depending
-on `ui`. All six start at 1.0.0, tagged and published. One change is pending, a minor to `core`, told to each tool the
-way that tool reads: a conventional commit, or a changeset file. Dependencies are tilde ranges, so the minor reaches
-`core`'s consumers under every tool and each of them has a reason to release something.
+The fixture has six npm packages. `cli`, `ui`, and `api` depend on `core`; `theme` and `docs` depend on `ui`.
+All six start at version 1.0.0, tagged and published. The original publication and push-race protocols use a minor
+change to `core` with tilde dependency ranges. The propagation protocol uses a patch-compatible correction so it can
+separate explicit propagation intent from a dependency range that needs updating.
 
-The binary under test is the published image. Each cell copies `dispat` out of `yohimik/dispat-alpine:<version>`, so
-what runs is the exact bytes a release shipped, fetched through the channel it shipped by, and never a build of the
-checkout. The registry is a verdaccio that starts inside the container, behind a proxy the experiment is allowed to
-break: it answers 502 to the upload of one named package and forwards everything else untouched. Nothing here talks to
-a public registry, and no run shares a registry with another.
+Every package carries one `build` script. The propagation cells run that same script as dispat's build stage and as
+Lerna's `lerna run build`, so a build failure there is one fault seen through both tools rather than a different fault
+per tool. The baseline tags are annotated, because `git describe` ignores a lightweight tag and a tool that reads its
+previous release that way would otherwise find no release at all and treat every package as changed.
+
+By default, each cell runs the binary from `yohimik/dispat-alpine:<version>`. A prepublication run can supply a candidate
+executable and an explicit identity, which is recorded in its verdict. A local Verdaccio registry sits behind a proxy
+that can reject uploads for one named package while forwarding other requests. These runs use no public registry,
+and every cell has its own registry state.
 
 ## Records first, verdicts second
 
@@ -57,6 +59,35 @@ The final state column is the answer per package at the end of the run, in this 
 original, and the next plan of a tag-driven tool sees everything as changed again. `orphan` is what tagging before
 publishing produces: the tag says a version shipped that nobody can install.
 
+Each reading also records the manifest the checkout holds at that moment, its version and its dependency ranges. The
+registry says what shipped and the tags say what was recorded; a range a release reconciled, or a version rewrite it
+rolled back, appears in neither.
+
+The propagation experiment starts with a patch to `core` that remains inside the consumers' `~1.0.0` dependency
+range, so semver alone asks for no consumer release. Dispat receives `fix(core)^: correct reader`, whose caret is
+explicit propagation intent. Lerna receives the plain `fix(core): correct reader` and decides for itself: nothing is
+forced on its side, and what its version command selects is part of the record.
+
+The two answers differ. Dispat releases `core` and its three declared consumers, writing each consumer's range up to
+the provider it shipped with. Lerna releases all six, because it bumps every transitive dependent of a changed
+package, `theme` and `docs` included, although `~1.0.0` already accepted `core@1.0.1`.
+
+The provider is published, tagged and observed before the consumer's fault is injected. Under Lerna the protocol
+publishes `core` and reads the registry before arming the fault. Under dispat one command runs the whole release, so
+the fixture sets `isBuildWaitingPublish: true` on `core`, which holds every consumer's build until the provider is
+published; the protocol reads that ordering back out of the run's own log.
+
+The `build` scenario fails `cli`'s build script, and the record shows that `cli` never reached a publication attempt.
+The `publish` scenario lets the build succeed and has the registry refuse the upload. Both faults are the same script
+and the same registry under both tools, so the two scenarios separate a failed build from a refused publication rather
+than naming one failure twice.
+
+After the fault is removed, no commit is made and no new release intent is supplied. Dispat's next plan contains the
+owed `cli` catch-up alone, its recovery publishes `cli` without republishing `core`, and the plan after it is empty.
+Lerna's tag-based `lerna changed` is already empty, because its version command tagged every package before any was
+published; `lerna publish from-package` then queries the registry and republishes the five packages it finds missing,
+rather than the one that failed.
+
 The colleague's push lands at a point in the tool's own sequence rather than on a timer. A shim placed first on `PATH`
 for the duration of the release command records every git call the tool makes and fires the colleague's commit and push
 once, right before the first `git push` that is neither the release lock's nor a commit. The interleaving is therefore
@@ -86,6 +117,8 @@ EXPERIMENT=midrelease TOOL=dispat SCENARIO=conflict \
 | Variable                      | What it does                                                                    |
 |-------------------------------|---------------------------------------------------------------------------------|
 | `EXPERIMENTS_DISPAT_VERSION`  | the released version to run against; the newest published image when unset      |
+| `EXPERIMENTS_DISPAT_ARTIFACT` | an unpublished candidate executable to copy into the experiment image           |
+| `EXPERIMENTS_DISPAT_ID`       | required immutable identity recorded when a candidate executable is supplied    |
 | `EXPERIMENTS_RESULTS`         | where the records land; `coverage/experiments` at the repository root by default |
 | `EXPERIMENTS_JOBS`            | how many cells run at once, four by default                                     |
 | `EXPERIMENTS_EXPECT`          | `0` records a dispat cell without gating on its verdict                         |
@@ -98,8 +131,8 @@ fixture, the observer and the fault proxy are documented in
 The release workflow carries forward a completed campaign when the published native image and harness are identical.
 The docs package's `beforeBuild` hook checks the image id, exact cell list, every verdict and observation stream, and
 every dispat verdict before reuse. A new binary or protocol, or a missing, corrupt, partial or failed record, reruns
-all twelve cells. This page is built from the validated records. The
-[Experiments workflow](https://github.com/yohimik/dispat/actions/workflows/experiments.yml) is the same twelve cells on
+every campaign cell. This page is built from the validated records. The
+[Experiments workflow](https://github.com/yohimik/dispat/actions/workflows/experiments.yml) uses the same generated cell list on
 demand, for any released version.
 
 ## What this is for

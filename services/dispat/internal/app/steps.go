@@ -29,7 +29,7 @@ func (a *App) stepPlan(ctx context.Context) (*plan.Plan, error) {
 		return nil, err
 	}
 	a.printDiagnostics(pl)
-	if pl.Fatal() {
+	if pl.IsFatal() {
 		a.log.Error().Msg("refusing to run: the repository cannot produce a correct plan")
 		return nil, fmt.Errorf("no correct plan exists")
 	}
@@ -95,7 +95,7 @@ func (a *App) syncLock(ctx context.Context, pl *plan.Plan, pkgs []string) error 
 // pending in front of a step command; the default window is the releasing
 // packages themselves.
 func (a *App) releasing(rel *plan.Release) bool {
-	if rel.Releasing() {
+	if rel.IsReleasing() {
 		return true
 	}
 	a.log.Info().Str("package", rel.Pkg.Name).Msg("package is not releasing, nothing to do")

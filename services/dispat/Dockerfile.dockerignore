@@ -40,3 +40,8 @@ packages/docs/*
 !packages/docs/demo
 packages/docs/demo/*
 !packages/docs/demo/fixtures
+
+# Scoped tool bootstrap policy.
+!tools
+tools/*
+!tools/bootstrap.yaml

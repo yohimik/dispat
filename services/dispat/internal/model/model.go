@@ -84,9 +84,9 @@ func (v Versioning) SharedDepth() int {
 	}
 }
 
-// Sparse reports whether a member with no changes of its own stays at its
+// IsSparse reports whether a member with no changes of its own stays at its
 // previous version instead of riding along when the group's shared part moves.
-func (v Versioning) Sparse() bool {
+func (v Versioning) IsSparse() bool {
 	switch v {
 	case VersioningFixedSparse, VersioningFixedMajorMinorSparse, VersioningFixedMajorSparse:
 		return true
@@ -95,15 +95,15 @@ func (v Versioning) Sparse() bool {
 	}
 }
 
-// Shared reports whether the mode versions its package as part of a group,
+// IsShared reports whether the mode versions its package as part of a group,
 // which is exactly the modes that hold some leading part of the version in
 // common.
-func (v Versioning) Shared() bool { return v.SharedDepth() > 0 }
+func (v Versioning) IsShared() bool { return v.SharedDepth() > 0 }
 
-// Releasable reports whether the mode's packages take part in the release
+// IsReleasable reports whether the mode's packages take part in the release
 // flow at all. Only VersioningNone says no: its packages exist to run
 // scripts and are never versioned, tagged or published.
-func (v Versioning) Releasable() bool { return v != VersioningNone }
+func (v Versioning) IsReleasable() bool { return v != VersioningNone }
 
 // Space groups packages that share build and publish behaviour. A package
 // whose configuration overrides its space's carries its own Space value — a
@@ -330,11 +330,11 @@ type ReplaceRule struct {
 	Find, Write string
 }
 
-// Reconciles reports whether either strategy has work to do. When it does
+// IsReconciling reports whether either strategy has work to do. When it does
 // not, the version stage still runs and syncLock still runs with it: a space
 // asking only for a lock-file refresh has no manifest change to key off, so
 // gating on one would mean it never fired. Nil-safe.
-func (a *AutoVersion) Reconciles() bool {
+func (a *AutoVersion) IsReconciling() bool {
 	return a != nil && (a.Manifests != ScopeNone || len(a.Replace) > 0)
 }
 
@@ -386,11 +386,11 @@ type Package struct {
 	Ignore ignore.Chain
 }
 
-// Counts reports whether a changed file at the given absolute,
+// IsCounted reports whether a changed file at the given absolute,
 // slash-separated path counts as a change to this package. The caller has
 // already established that the file sits under ScopeDir; this is the second
 // question, and the only one the package's own patterns answer.
-func (p *Package) Counts(file string) bool { return !p.Ignore.Ignores(file) }
+func (p *Package) IsCounted(file string) bool { return !p.Ignore.IsIgnored(file) }
 
 // ScopeDir is the folder a changed file must sit under to count as a change
 // to this package: Dir narrowed by Src when the package declares one, and
@@ -409,7 +409,7 @@ func (p *Package) ScopeDir() string {
 // together, a selection can be pointed at one, and both have to agree on which
 // packages are in it. Nil-safe.
 func (p *Package) VersionGroupName() string {
-	if p == nil || p.Space == nil || !p.Space.Versioning.Shared() {
+	if p == nil || p.Space == nil || !p.Space.Versioning.IsShared() {
 		return ""
 	}
 	if p.Space.VersionGroup != "" {
@@ -563,11 +563,11 @@ type RecordSection struct {
 	Bump string
 }
 
-// ChannelsAdmit reports whether a channel restriction admits a release on
+// IsChannelAdmitted reports whether a channel restriction admits a release on
 // channel. An empty restriction admits every release. "stable" is the stable
 // line and "*" any prerelease channel; anything else is a channel name,
 // compared the case-insensitive way channel names are compared everywhere.
-func ChannelsAdmit(channels []string, channel string) bool {
+func IsChannelAdmitted(channels []string, channel string) bool {
 	if len(channels) == 0 {
 		return true
 	}
@@ -600,12 +600,12 @@ type ChangelogSpec struct {
 	Format       RecordFormat
 }
 
-// Records reports whether a release on this policy is written at all: enabled,
+// IsRecorded reports whether a release on this policy is written at all: enabled,
 // and on a channel the policy admits. The caller passes the release's resolved
 // channel rather than the release, so the domain model stays free of the
 // planner's types.
-func (s ChangelogSpec) Records(channel string) bool {
-	return s.Enabled && ChannelsAdmit(s.Channels, channel)
+func (s ChangelogSpec) IsRecorded(channel string) bool {
+	return s.Enabled && IsChannelAdmitted(s.Channels, channel)
 }
 
 // GitHubSpec is a package's resolved GitHub-release policy. Owner/Repo may
@@ -631,10 +631,10 @@ type GitHubSpec struct {
 	Format   RecordFormat
 }
 
-// Records reports whether a release on this policy is created at all, the
-// GitHub counterpart of ChangelogSpec.Records.
-func (s GitHubSpec) Records(channel string) bool {
-	return s.Enabled && ChannelsAdmit(s.Channels, channel)
+// IsRecorded reports whether a release on this policy is created at all, the
+// GitHub counterpart of ChangelogSpec.IsRecorded.
+func (s GitHubSpec) IsRecorded(channel string) bool {
+	return s.Enabled && IsChannelAdmitted(s.Channels, channel)
 }
 
 // Key identifies the releaser a policy needs: two packages whose specs share

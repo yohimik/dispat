@@ -20,13 +20,18 @@ const (
 	workspaceRootEnv    = "DISPAT_INTERNAL_WORKSPACE_ROOT"
 	workspaceConfigEnv  = "DISPAT_INTERNAL_WORKSPACE_CONFIG"
 	workspaceImportsEnv = "DISPAT_INTERNAL_WORKSPACE_CONFIGS"
+	// workspaceSagaEnv hands the saga down with the rest of the context. A
+	// choreographed fleet can be selected by `--saga` rather than by the file,
+	// and a nested command reading the file alone would compose a different
+	// fleet from the release running around it.
+	workspaceSagaEnv = "DISPAT_INTERNAL_WORKSPACE_SAGA"
 )
 
 // packageRunner dispatches every package or space script through the shell of
 // the config that owns its working directory. It also carries the composed
 // workspace into nested dispat commands, so a source-local script can invoke
 // a fleet command without rediscovering only its own config.
-func (a *App) packageRunner() script.Runner {
+func (a *App) packageRunner() script.Runnerx {
 	if a.workspace == nil {
 		return &script.ShellRunner{Shell: a.cfg.Shell, Log: a.log}
 	}
@@ -59,7 +64,7 @@ func (r *workspaceScriptRunner) Run(ctx context.Context, dir, command string, en
 	// A nested selection can contain fewer packages than its parent run. Its
 	// grandchildren must retain the original complete owner map that the live
 	// context was bound to, rather than replacing it with the narrow plan.
-	if !explicitLive && r.workspace.InheritedPinsEnabled() && os.Getenv(workspaceenv.LivePins) != "" {
+	if !explicitLive && r.workspace.IsInheritedPinsEnabled() && os.Getenv(workspaceenv.LivePins) != "" {
 		owners = os.Getenv(workspaceenv.Owners)
 	}
 	env = withoutEnvNames(env, workspaceRootEnv, workspaceConfigEnv, workspaceImportsEnv,
@@ -69,20 +74,25 @@ func (r *workspaceScriptRunner) Run(ctx context.Context, dir, command string, en
 	// Explicit global flags suppress inheritance even when they resolve to the
 	// same paths. Clear the ambient coordinator unless this call carries the
 	// parent release's explicit newly-created context.
-	if !explicitLive && !r.workspace.InheritedPinsEnabled() && os.Getenv(workspaceenv.LivePins) != "" {
+	if !explicitLive && !r.workspace.IsInheritedPinsEnabled() && os.Getenv(workspaceenv.LivePins) != "" {
 		env = append(env, workspaceenv.LivePins+"=")
 	}
 	return (&script.ShellRunner{Shell: shell, Log: r.log}).Run(ctx, dir, command, env, stdout, stderr)
 }
 
+// workspaceContextEnv is the composed run a nested dispat command inherits:
+// where it was anchored, which file it read, and which repositories took part.
+// The anchor is the entry repository — the control repository of an
+// orchestrated fleet, and the peer a choreographed run started in — because
+// that is the invocation a nested command has to reproduce.
 func workspaceContextEnv(workspace *config.Workspace) []string {
-	control := workspace.RepositoryByName(config.ControlRepository)
-	if control == nil {
+	entry := workspace.EntryRepository()
+	if entry == nil {
 		return nil
 	}
-	configPath, err := filepath.Rel(workspace.ControlRoot, control.ConfigPath)
+	configPath, err := filepath.Rel(workspace.ControlRoot, entry.ConfigPath)
 	if err != nil {
-		configPath = control.ConfigPath
+		configPath = entry.ConfigPath
 	}
 	var imports []string
 	var repositories []string
@@ -90,7 +100,12 @@ func workspaceContextEnv(workspace *config.Workspace) []string {
 		if !repo.Control {
 			repositories = append(repositories, repo.Name)
 		}
-		if !repo.Imported || repo.ConfigPath == "" {
+		if !repo.Imported || repo.ConfigPath == "" || workspace.IsChoreographed() {
+			// A choreographed fleet imports nothing: every peer carries its
+			// own configuration and is found by walking the links from the
+			// entry, which is what the nested command does with the root and
+			// the saga it inherits. Listing the peers as imports would hand
+			// it the one shape that saga refuses.
 			continue
 		}
 		path, err := filepath.Rel(workspace.ControlRoot, repo.ConfigPath)
@@ -102,12 +117,16 @@ func workspaceContextEnv(workspace *config.Workspace) []string {
 	sort.Strings(repositories)
 	encoded, _ := json.Marshal(imports)
 	encodedRepositories, _ := json.Marshal(repositories)
-	return []string{
+	env := []string{
 		workspaceRootEnv + "=" + workspace.ControlRoot,
 		workspaceConfigEnv + "=" + filepath.ToSlash(configPath),
 		workspaceImportsEnv + "=" + string(encoded),
 		workspaceenv.Repositories + "=" + string(encodedRepositories),
 	}
+	if workspace.IsChoreographed() {
+		env = append(env, workspaceSagaEnv+"="+config.SagaChoreography)
+	}
+	return env
 }
 
 func withoutEnvNames(env []string, names ...string) []string {

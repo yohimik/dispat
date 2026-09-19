@@ -301,7 +301,7 @@ func TestRenderBodyAroundASharedVersioningRide(t *testing.T) {
 	rel.Units, rel.DueTo, rel.Updates = nil, nil, nil
 	rel.FixedRide = true
 	rel.Pkg.Space.Versioning = model.VersioningFixed
-	require.True(t, rel.NoChanges(), "fixture must be a shared-versioning ride")
+	require.True(t, rel.IsWithoutChanges(), "fixture must be a shared-versioning ride")
 
 	out := RenderBody(rel, SpecFormat(model.RecordFormat{Header: titleLines("header"), Footer: titleLines("footer")}), nil)
 	assert.Equal(t, "header\n\nNo changes: a version bump to keep the versioning group on one version.\n\nfooter\n", out)
@@ -334,7 +334,7 @@ func TestRenderEntryCarriesTheBlocks(t *testing.T) {
 
 	assert.True(t, strings.HasPrefix(out, "## core@2.0.0 (2026-07-26)\n\n### Winter release\n"), out)
 	assert.True(t, strings.HasSuffix(out, "footer line\n"), out)
-	assert.True(t, HasEntry([]byte(out), "core@2.0.0"), "the tag line must stay findable")
+	assert.True(t, IsEntryPresent([]byte(out), "core@2.0.0"), "the tag line must stay findable")
 }
 
 // TestRenderEntryFilteredOutBlocksLeaveNothing: a header aimed at another

@@ -5,6 +5,7 @@ import type {Argument, ReadmeData} from '@site/plugins/readme/types';
 import DemoCarousel from '@site/src/components/DemoCarousel';
 import DownloadCounter from '@site/src/components/DownloadCounter';
 import Inlines from '@site/src/components/Inline';
+import {DESCRIPTION, PAGE_TITLE, TAGLINE_NOTE} from '@site/src/site-metadata';
 import CodeBlock from '@theme/CodeBlock';
 import Heading from '@theme/Heading';
 import Layout from '@theme/Layout';
@@ -26,13 +27,15 @@ import styles from './index.module.css';
 // See plugins/readme. What is still written here is the landing page's own:
 // the badges, the install blocks, the reading list and the invitation.
 //
-// Three strings here do restate something written elsewhere, and are the
-// whole of what a rewrite has to keep in step by hand:
+// Two strings here do restate something written elsewhere, and are the whole
+// of what a rewrite has to keep in step by hand:
 //   - MANIFESTS mirrors the format tables in pkg/scanner's README;
-//   - the three INSTALL_* commands repeat the repository README's install
-//     blocks and Getting started's;
-//   - <Layout> title and description restate the tagline and description in
-//     docusaurus.config.ts.
+//   - the two INSTALL_* commands repeat the repository README's install
+//     blocks and Getting started's.
+//
+// The page title, the hero's tagline note and the description are no longer
+// among them: they are imported from src/site-metadata, which
+// docusaurus.config.ts reads for the same strings.
 //
 // Every internal link goes through <Link> (or useBaseUrl for assets), never a
 // raw path: Docusaurus mounts its router without a `basename` and registers
@@ -101,16 +104,16 @@ function Hero(): React.ReactElement {
     <header className={styles.hero}>
       <div className="container">
         <Heading as="h1" className={styles.title}>
-          Release your packages together,<br className={styles.desktopBreak} /> across languages.
+          Autistic stability<br className={styles.desktopBreak} /> for ADHD projects.
         </Heading>
-        {repository.lead.slice(0, 2).map((paragraph, i) => (
+        {repository.lead.slice(1, 3).map((paragraph, i) => (
           <p className={styles.lead} key={i}><Inlines tokens={paragraph} /></p>
         ))}
         <div className={styles.buttons}>
           <Link className="button button--primary button--lg" to="#install">Install dispat</Link>
           <Link className="button button--secondary button--lg" to="/getting-started">Start your first release</Link>
         </div>
-        <p className={styles.heroNote}>One binary. Your build commands. A release plan you can inspect first.</p>
+        <p className={styles.heroNote}>{TAGLINE_NOTE}</p>
         <DownloadCounter />
       </div>
     </header>
@@ -143,12 +146,12 @@ function Workflows(): React.ReactElement {
         </div>
         <div className={styles.feature}>
           <Heading as="h3" id="multiple-repositories">Use one or several repositories</Heading>
-          <p>Start with a single package or a monorepo. For work spread across repositories, bring them together with Git submodules in a <Link to="/control-repository">control repository</Link>.</p>
+          <p>Start with a single package or a monorepo. For work spread across repositories, link them as Git submodules in a <Link to="/control-repository">control repository</Link>: it can read each linked repository&apos;s own commits and tags, or hold every release decision in its own history.</p>
         </div>
       </div>
       <div className={styles.recoveryNote}>
         <Heading as="h3" id="recovery">Know what to do when a release stops</Heading>
-        <p>dispat records successful publishes with Git tags. A later run uses those records to find unfinished work. If a publisher succeeded before its tag was written, check the destination before retrying. <Link to="/reference/releasing/recovery">Read the recovery guide</Link>.</p>
+        <p>dispat writes a Git tag after each successful publish. A package that fails leaves those publications in place, its consumers are held back rather than published from a stale plan, and the next run re-plans the remaining work from the tags. Uploads are never rolled back for you: if a publisher succeeded before its tag was written, check that destination before retrying. <Link to="/reference/releasing/recovery">Read the recovery guide</Link>.</p>
       </div>
     </Section>
   );
@@ -327,6 +330,10 @@ function Reference(): React.ReactElement {
           model.
         </li>
         <li>
+          <Link to="/monorepo">One repository or many</Link> and <Link to="/control-repository">A control
+          repository</Link>: what each layout costs, and the two ways several repositories release from one plan.
+        </li>
+        <li>
           <Link to="/examples">Examples</Link>: a complete setup per package manager, npm to Docker to Android, and{' '}
           <Link to="/editing/autowriter">editing every package at once</Link>.
         </li>
@@ -394,9 +401,7 @@ function Community(): React.ReactElement {
 
 export default function Home(): React.ReactElement {
   return (
-    <Layout
-      title="Release automation across languages and repositories"
-      description="dispat turns conventional commits into versions, changelogs, and ordered releases. Automate publishing across languages in one repository or several.">
+    <Layout title={PAGE_TITLE} description={DESCRIPTION}>
       <Hero />
       <main>
         <Demos />

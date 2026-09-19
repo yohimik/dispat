@@ -34,7 +34,9 @@ script, space, package or versioning group is therefore named once, in the case 
 map. The name itself travels as written, so it is what a tag, an event and the `DISPAT_*` variables report.
 
 Repository identities are the exception. A `repositoryOverrides` key must exactly match its `.gitmodules` name,
-including case, because that external name identifies the owning Git history.
+including case, because that external name identifies the owning Git history. A key matching no linked repository is
+refused whether it enables or disables one, so a misspelled exclusion cannot release the repository it was written to
+hold back.
 
 Two keys of one object that differ only by case are refused when the file loads, and the error names both. There is no
 lookup anywhere in dispat that could choose between them. The one exception is [`custom`](./custom.md), whose contents
@@ -80,8 +82,11 @@ full examples.
 | `versionGroups`    | map name → `{versioning}`                  | no       | Shared-versioning groups that cut across spaces. A space's or package's `versionGroup` key joins a group by name. A group may share the whole version, the major and minor, or the major alone. See [Versioning groups](./spaces.md#versioning-groups) and the [Shared versions](../reference/releasing/versioning.md) walkthrough. |
 | `dependencies`     | map consumer → providers                   | no       | Consumer → provider relations between packages. See [`dependencies`](./dependencies.md) below. Spaces and packages declare their own too.                                                                                |
 | `polyrepo`         | bool                                        | no       | Read each explicitly linked source repository's own Git history. The default is `false`; non-empty `configs` also enables it. See [Source-history mode](../control-repository.md#source-history-mode). |
+| `saga`             | string                                      | no       | Which polyrepository protocol releases the fleet. The options are `orchestration` (default, a control repository composes the linked sources) or `choreography` (this repository is one peer of a linked fleet). Choosing `choreography` also turns on `polyrepo`. See [A choreographed fleet](../choreographed-repositories.md). |
+| `repository`       | string                                      | see note | This repository's own identity in a choreographed fleet, written from letters, digits, dots, underscores and hyphens. It is required under `saga: choreography`, refused without it, and `control` is reserved. See [The three keys](../choreographed-repositories.md#the-three-keys). |
+| `repositories`     | array of objects                            | no       | The roster of a choreographed fleet: `{name, url, path, branch}` per peer, where `path` defaults to `.links/<name>`. Refused without `saga: choreography`. See [The three keys](../choreographed-repositories.md#the-three-keys). |
 | `configs`          | array of strings                            | no       | Source configuration files imported by the control file into the combined workspace. Paths are relative to the control file. Imports enable polyrepository mode and are never discovered implicitly; imported roots cannot declare another fleet import list. |
-| `repositoryOverrides` | map repository name → object             | no       | Release-commit policy overrides keyed by the exact `.gitmodules` name. See [Repository commit policy](../control-repository.md#repository-commit-policy). |
+| `repositoryOverrides` | map repository name → object             | no       | Participation (`enabled`, default `true`) and release-commit policy overrides keyed by the exact `.gitmodules` name. An excluded repository contributes no packages, commits, tags, baselines, scripts, records or locks, keeps its filesystem boundary, and takes the control space paths inside it out of the run. See [Repository commit policy](../control-repository.md#repository-commit-policy) and [Repository participation](../control-repository.md#repository-participation). |
 | `repositoryBaselines` | array of objects                          | no       | Explicit `{consumer, releaseTag, repository, revision}` boundaries for cross-repository history that a normal release checkpoint cannot prove. See [Ambiguous boundaries](../control-repository.md#when-a-boundary-needs-help). |
 | `concurrency`      | int or `[int, int]`                        | no       | One value for both stages, or `[build, publish]`. The value `0` or an omitted key means the number of CPUs. More than two values is an error.                                             |
 | `logLevel`         | string                                     | no       | Minimum log level. The options are `trace`, `debug`, `info` (default), `warn`, or `error`. See [what each level carries](#log-levels).                                                  |
@@ -123,8 +128,9 @@ what you want to find out:
 | `debug` | How the run decided. This shows which config file was read and which folder it treated as the monorepo root. It shows which folder each package is scoped to, and the plan's phases as dispat works through them. This is the level for finding out why dispat picked a specific plan. |
 | `trace` | Every operation, one line each. This logs every git command with its arguments and how long it took. It shows every dependency edge. It shows every package's baseline, window size, computed bump, next version, and whether it is releasing. This is verbose on purpose, so use this level to attach to a bug report. |
 
-Pass `--log-level` to override the configured value for one invocation. You can re-run a puzzling release with
-`--log-level trace` without editing anything.
+Pass `--log-level` to override the configured value for one invocation. Inspect a puzzling plan with
+`dispat status --log-level trace`. Debug and trace output include a `planning workload` event with elapsed time and
+history-operation counts to help diagnose slow planning.
 
 ## Where a setting can live
 
@@ -186,7 +192,8 @@ an absent key means 1. They are the two sides of the same number and they are no
 
 Everything else is repository-wide and only exists at the root. This includes `spaces`, `versionGroups`,
 `initials`, `commit`, `shell`, `run`, `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`,
-`updateCheck`, `unsafeDisableLock`, `polyrepo`, `configs`, `repositoryOverrides`, and `repositoryBaselines`.
+`updateCheck`, `unsafeDisableLock`, `polyrepo`, `saga`, `repository`, `repositories`, `configs`,
+`repositoryOverrides`, and `repositoryBaselines`.
 
 Read [the override ladder](./packages.md#the-override-ladder) to see the full order for one package from weakest to
 strongest.

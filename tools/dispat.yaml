@@ -11,3 +11,13 @@ scripts:
     docker buildx build --file ../Dockerfile.gotest --target export-tools
     $(sh ../scripts/buildx-cache.sh gotest-tools)
     --output type=local,dest=../coverage ..
+
+  # The two document gates the lint job runs, as a build like every other gate.
+  # They live here because the programs behind them are this package's:
+  # `testreport testplan` checks the integration test plan and the
+  # release-candidate requirement matrix against the tree and enforces the RC
+  # thresholds, and `namingcheck` checks exported declarations against the
+  # naming rules in CONTRIBUTING.md.
+  repo-checks: >-
+    docker buildx build --file ../Dockerfile.gotest --target repo-checks
+    $(sh ../scripts/buildx-cache.sh repo-checks) --output type=cacheonly ..

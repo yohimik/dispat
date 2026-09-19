@@ -9,6 +9,7 @@ package graph
 
 import (
 	"container/heap"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -85,6 +86,12 @@ func (g *Graph) TopoSort() ([]string, error) {
 	return order, nil
 }
 
+// ErrCycle is what every "this graph has no order" failure carries, whichever
+// of the two paths reports it: TopoSort's CycleError names the blocked nodes,
+// and Drain's refusal counts them, and a caller that only needs to know which
+// kind of failure it has can ask errors.Is about this one.
+var ErrCycle = errors.New("graph: dependency cycle")
+
 // CycleError reports that the graph has no topological order; Nodes are the
 // blocked nodes. Typed so a caller can enrich its diagnostic with what it
 // knows about the edges among them (the planner names each edge's manifest
@@ -94,6 +101,9 @@ type CycleError struct{ Nodes []string }
 func (e *CycleError) Error() string {
 	return "graph: dependency cycle involving: " + strings.Join(e.Nodes, ", ")
 }
+
+// Unwrap puts the named form and the counted form under one sentinel.
+func (e *CycleError) Unwrap() error { return ErrCycle }
 
 // stringHeap is a min-heap of node names.
 type stringHeap []string

@@ -47,6 +47,9 @@ permissions:
 # or the records it writes. With 1.0.0 out, the
 # bootstrap resolves the latest stable release itself.
 env:
+  # Missing credentials must fail unattended jobs instead of opening a prompt.
+  GIT_TERMINAL_PROMPT: "0"
+  GIT_ASKPASS: ""
   # Our own modules are fetched directly from the repository, skipping the
   # proxy and the sum database: both lag fresh tags, and both are immutable,
   # so a tag ever recreated at different content (a rolled-back run) leaves
@@ -67,6 +70,12 @@ jobs:
     outputs:
       releasing: ${{ steps.status.outputs.releasing }}
     steps:
+      - name: Require main for production releases
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Release from main after its review and required checks pass." >&2
+          exit 1
+
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -377,8 +386,9 @@ jobs:
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
-      # Bootstrap the latest Aqua through dispat, then install the pinned
-      # Crier executable. TinyGo is installed by Aqua inside its Docker stage.
+      # Bootstrap the Aqua version tools/bootstrap.yaml pins, through dispat,
+      # then install the pinned Crier executable. TinyGo is installed by Aqua
+      # inside its Docker stage.
       - name: Install the tools the release needs
         env:
           DISPAT_BIN_DIR: ${{ runner.temp }}/dispat-fresh

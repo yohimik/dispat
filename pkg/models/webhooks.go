@@ -99,13 +99,13 @@ func WebhookEvents() []string {
 	}
 }
 
-// KnownWebhookPattern reports whether p is something `events` accepts: an
+// IsKnownWebhookPattern reports whether p is something `events` accepts: an
 // exact event name, the "*" wildcard, a "<prefix>.*" family pattern over a
 // prefix at least one event uses, or a script-raised name — "script."
 // followed by a word a `dispat trigger` invocation may say. Anything else is
 // a typo the loader must refuse, because a misspelled subscription would
 // otherwise silence the webhook forever without a word.
-func KnownWebhookPattern(p string) bool {
+func IsKnownWebhookPattern(p string) bool {
 	if p == "*" {
 		return true
 	}
@@ -160,9 +160,9 @@ func WebhookFormatFields() []string {
 	}
 }
 
-// KnownWebhookFormatField reports whether a {field} token names a field
+// IsKnownWebhookFormatField reports whether a {field} token names a field
 // WebhookFormatFields lists.
-func KnownWebhookFormatField(name string) bool {
+func IsKnownWebhookFormatField(name string) bool {
 	for _, f := range WebhookFormatFields() {
 		if name == f {
 			return true
@@ -208,10 +208,10 @@ func isFormatLetter(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
-// MatchWebhookEvent reports whether one subscription pattern admits an event:
+// IsWebhookEventAdmitted reports whether one subscription pattern admits an event:
 // "*" admits every event, "<prefix>.*" admits the family, and anything else
 // must match exactly.
-func MatchWebhookEvent(pattern, event string) bool {
+func IsWebhookEventAdmitted(pattern, event string) bool {
 	if pattern == "*" {
 		return true
 	}

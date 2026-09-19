@@ -20,7 +20,7 @@ import (
 
 // shellCall is one script and everything needed to run it.
 type shellCall struct {
-	Runner script.Runner
+	Runner script.Runnerx
 	Dir    string // the working directory: --root, as the user spelled it
 	// Scripts is what the script binds: one shell string, or several run in
 	// order. `dispat if` always has exactly one, since a condition picks a

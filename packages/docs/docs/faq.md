@@ -61,11 +61,20 @@ the full guide.
 
 ## Can dispat release packages that live in different repositories?
 
-dispat cannot do this on its own, because the plan comes from one checkout with no graph spanning repositories and
-nothing to order them by. You can work around this by giving dispat a single checkout that holds every configuration
-and links the other repositories in as git submodules. Moving a submodule forward is a commit dispat reads like any
-other, so releases across the whole fleet get ordered, versioned, and changelogged from one place, as explained in
-[A control repository for many repositories](./control-repository.md).
+Yes, through one checkout that links the other repositories in as git submodules. A plan always comes from a single
+checkout, because there is otherwise no graph spanning the repositories and nothing to order them by.
+
+The usual arrangement puts the configuration in a control repository, which supplies the combined graph, the shared
+policy, and the fleet lock. It reads history in one of two modes. By default it reads its own commits: moving a
+submodule forward is a commit dispat reads like any other, and the control repository holds the versions, changelogs,
+tags, and records. With `polyrepo: true` it reads each linked repository's own conventional commits and release tags
+instead, and each of those repositories owns its records while the control repository checkpoints the pointers
+afterwards. [A control repository for many repositories](./control-repository.md) explains both.
+
+You can also do without the extra repository. With `saga: choreography`, every repository is a peer that states its own
+identity and roster, keeps its own configuration and records, and is linked to its neighbours both ways, so a run
+started in any of them composes the whole fleet. What a release incorporated is recorded in the links themselves rather
+than in a checkpoint. [A choreographed fleet](./choreographed-repositories.md) explains it.
 
 ## How do I stop something from releasing?
 

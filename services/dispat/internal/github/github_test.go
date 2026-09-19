@@ -321,13 +321,28 @@ func TestDoBodyReadError(t *testing.T) {
 	assert.Contains(t, err.Error(), "verifying acme/mono")
 }
 
-func TestRecordConnectionError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	srv.Close() // immediately closed: connection refused
+// disconnectServer holds its listening port until cleanup and drops each accepted
+// connection before an HTTP response. Closing the listener before the request
+// lets another parallel test reuse its port and receive these authenticated calls.
+func disconnectServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack test connection: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
 
+func TestRecordConnectionError(t *testing.T) {
+	srv := disconnectServer(t)
 	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn",
-		retryDelay: time.Millisecond}
-	assert.Error(t, rel.Record(context.Background(), testRelease()))
+		Client: srv.Client(), retryDelay: time.Millisecond}
+	assert.ErrorContains(t, rel.Record(context.Background(), testRelease()), "looking up release")
 }
 
 func TestRecordUploadsAttachments(t *testing.T) {
@@ -536,11 +551,10 @@ func TestAssetUploadURL(t *testing.T) {
 }
 
 func TestVerifyConnectionError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	srv.Close() // immediately closed: connection refused
-
-	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn"}
-	assert.Error(t, rel.Verify(context.Background()))
+	srv := disconnectServer(t)
+	rel := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn",
+		Client: srv.Client(), retryDelay: time.Millisecond}
+	assert.ErrorContains(t, rel.Verify(context.Background()), "verifying acme/mono")
 }
 
 // TestRecordNamesTheReleaseAfterTheTag: with no releaseName configured the

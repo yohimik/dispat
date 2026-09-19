@@ -215,7 +215,7 @@ func TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv(t *testing.T) {
 	r.Commit("feat(provider)^: reaches its one consumer")
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("consumer@0.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("consumer@0.0.1"), "tags: %v", r.TagList())
 	require.NoFileExists(t, r.Path("packages", "provider", envFile),
 		"the provider has no providers of its own, so it picks up nobody's version: its version task — and run.version script — must not run at all")
 
@@ -265,7 +265,7 @@ func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
 	r := failingRepo(true)
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "the provider's publish fails the run\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCodeForPackage(res.Events, "W194", "consumer"),
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "consumer"),
 		"the consumer is skipped, its own work notwithstanding: %s", res.Stdout)
 	assert.Zero(t, r.TagCount("consumer@"),
 		"nothing may publish against the missing artifact; tags: %v", r.TagList())
@@ -276,7 +276,7 @@ func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
 	r = failingRepo(false)
 	res = r.Release()
 	require.Equal(t, 1, res.Code, "the provider still fails the run\nstdout:\n%s", res.Stdout)
-	assert.False(t, harness.HasCode(res.Events, "W194"),
+	assert.False(t, harness.IsCodePresent(res.Events, "W194"),
 		"a fresh own bump proceeds when no build consumes the publish")
-	assert.True(t, r.HasTag("consumer@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("consumer@0.1.0"), "tags: %v", r.TagList())
 }

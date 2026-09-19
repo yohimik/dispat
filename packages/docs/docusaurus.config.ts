@@ -10,23 +10,24 @@ import binarySizes from './plugins/binary-sizes';
 import downloadCounter from './plugins/download-counter';
 import historicalLinks from './plugins/historical-links';
 import remarkHistoricalLinks from './plugins/historical-links/remark';
+// The landing page imports the same four strings, so the page a reader lands
+// on and the metadata a crawler reads cannot state different things.
+import {DESCRIPTION, TAGLINE, TITLE} from './src/site-metadata';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
 const DISCORD = 'https://discord.gg/83PwVSCCmk';
 const SITE = 'https://dispat.dev';
-
-// Shared metadata for search results and social previews.
-const TITLE = 'dispat: release automation across languages and repositories';
-const TAGLINE = 'Release your packages together, across languages';
-const DESCRIPTION =
-  'dispat turns conventional commits into versions, changelogs, and ordered releases. ' +
-  'Automate publishing across languages in one repository or several.';
 
 // What a reader types into a search engine when they are looking for this tool,
 // in the three shapes it is looked for under: the monorepo one, the
 // many-repositories one, and the pattern the run is built on. The list is one
 // place because the meta tag and both structured-data blocks read it.
 const KEYWORDS = [
+  'ADHD developers',
+  'autistic developers',
+  'autism',
+  'neurodivergent developers',
+  'deterministic releases',
   'monorepo release tool',
   'monorepo',
   'polyglot monorepo',

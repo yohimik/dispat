@@ -65,8 +65,8 @@ type Notes struct {
 	Truncated bool
 }
 
-// Empty reports whether there is anything to print.
-func (n Notes) Empty() bool { return len(n.Sections) == 0 }
+// IsEmpty reports whether there is anything to print.
+func (n Notes) IsEmpty() bool { return len(n.Sections) == 0 }
 
 // ParseNotes reduces a GitHub release body to its notes.
 //
@@ -162,7 +162,7 @@ func ParseNotes(body string) Notes {
 // The result ends in a newline when there is one, and is empty when there is
 // nothing to say, so a caller can print it unconditionally.
 func (n Notes) Render(version string) string {
-	if n.Empty() {
+	if n.IsEmpty() {
 		return ""
 	}
 	lines := make([]string, 0, maxNotesLines+1)

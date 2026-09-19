@@ -74,7 +74,7 @@ func (l *Loader) ReadTree(ctx context.Context, path string) (*Tree, error) {
 // closed it rather than as a stack overflow.
 type refResolver struct {
 	l     *Loader
-	log   Logger
+	log   Loggerx
 	chain []refFrame
 	files []string
 }
@@ -440,7 +440,7 @@ func documentObject(doc any, path string) (map[string]any, error) {
 
 // decodeFile parses one file with its format's own parser and returns whatever
 // the document holds.
-func (l *Loader) decodeFile(log Logger, path string) (any, error) {
+func (l *Loader) decodeFile(log Loggerx, path string) (any, error) {
 	data, err := l.opts.ReadFile(path)
 	if err != nil {
 		return nil, err

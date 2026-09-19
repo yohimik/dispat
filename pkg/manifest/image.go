@@ -64,30 +64,30 @@ func ParseImageRef(ref string) ImageRef {
 	return out
 }
 
-// HasTag reports a reference carrying a tag a writer could splice.
-func (r ImageRef) HasTag() bool { return r.TagStart >= 0 }
+// IsTagged reports a reference carrying a tag a writer could splice.
+func (r ImageRef) IsTagged() bool { return r.TagStart >= 0 }
 
-// Pinned reports a reference carrying a digest. The digest is what actually
+// IsPinned reports a reference carrying a digest. The digest is what actually
 // gets pulled, so the tag beside it is a label rather than a selector and
 // rewriting it would leave the file claiming a version it does not use.
-func (r ImageRef) Pinned() bool { return r.Digest != "" }
+func (r ImageRef) IsPinned() bool { return r.Digest != "" }
 
-// Interpolated reports a reference whose repository or tag defers to a build
+// IsInterpolated reports a reference whose repository or tag defers to a build
 // argument or an environment variable ("${BASE}:${TAG}", "$IMAGE"). The value
 // is resolved outside the file, and writing a literal over it would sever the
 // indirection it exists for.
-func (r ImageRef) Interpolated() bool {
+func (r ImageRef) IsInterpolated() bool {
 	return strings.ContainsRune(r.Repository, '$') || strings.ContainsRune(r.Tag, '$')
 }
 
 // maxTagLength is the tag limit the registry specification sets.
 const maxTagLength = 128
 
-// ValidTag reports text a registry would accept as a tag: up to 128 characters
+// IsValidTag reports text a registry would accept as a tag: up to 128 characters
 // of letters, digits, underscores, periods and dashes, not opening with a
 // separator. A writer checks it before splicing so a version that cannot be a
 // tag is refused outright instead of producing a file that no longer builds.
-func ValidTag(tag string) bool {
+func IsValidTag(tag string) bool {
 	if tag == "" || len(tag) > maxTagLength {
 		return false
 	}

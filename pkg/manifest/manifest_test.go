@@ -10,11 +10,11 @@ func TestKind(t *testing.T) {
 		t.Error("named kinds stringify verbatim")
 	}
 	for _, k := range []Kind{KindDependencies, KindDevDependencies, KindPeerDependencies, KindOptionalDependencies} {
-		if !k.Valid() {
+		if !k.IsValid() {
 			t.Errorf("%q must be valid", k)
 		}
 	}
-	if Kind("scripts").Valid() {
+	if Kind("scripts").IsValid() {
 		t.Error("a non-dependency field is not a kind")
 	}
 }

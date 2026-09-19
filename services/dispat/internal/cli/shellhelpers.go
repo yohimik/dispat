@@ -100,12 +100,12 @@ func helperIn(o *options, log zerolog.Logger) (*app.Location, bool) {
 // case is left to the same refusal on the app's side once the folder has been
 // read. Guessing here would refuse an invocation that is about to be correct.
 func checkExecEnv(o *options, subj app.Location, usage func(string), log zerolog.Logger) bool {
-	if !app.ValidEnvScope(*o.execEnv) {
+	if !app.IsValidEnvScope(*o.execEnv) {
 		log.Error().Str("env", *o.execEnv).Msgf("unknown --env value (want %s, %s or %s)",
 			app.EnvScopeStatic, app.EnvScopeDispat, app.EnvScopeBoth)
 		return false
 	}
-	if app.NeedsPlan(*o.execEnv) && subj.Deferred() && !subj.IsPackage() {
+	if app.IsPlanNeeded(*o.execEnv) && subj.IsDeferred() && !subj.IsPackage() {
 		log.Error().Str("env", *o.execEnv).Msgf(
 			"--env %s needs a package: the DISPAT_* variables describe one package's release, so name it with --for pkg:<name>",
 			*o.execEnv)

@@ -230,6 +230,11 @@ const (
 	nestedWorkspaceRootEnv    = "DISPAT_INTERNAL_WORKSPACE_ROOT"
 	nestedWorkspaceConfigEnv  = "DISPAT_INTERNAL_WORKSPACE_CONFIG"
 	nestedWorkspaceImportsEnv = "DISPAT_INTERNAL_WORKSPACE_CONFIGS"
+	// nestedWorkspaceSagaEnv carries which saga composed the enclosing run. A
+	// choreographed fleet can be selected by `--saga` rather than by the file,
+	// and a nested command that read the file alone would compose a different
+	// fleet from the release running around it.
+	nestedWorkspaceSagaEnv = "DISPAT_INTERNAL_WORKSPACE_SAGA"
 )
 
 // applyNestedWorkspace restores the composed control invocation carried by an
@@ -242,7 +247,7 @@ func applyNestedWorkspace(fs *pflag.FlagSet, o *options) error {
 	if root == "" || configPath == "" || rawImports == "" {
 		return nil
 	}
-	if fs.Changed("root") || fs.Changed("config") || fs.Changed("configs") || fs.Changed("polyrepo") {
+	if fs.Changed("root") || fs.Changed("config") || fs.Changed("configs") || fs.Changed("polyrepo") || fs.Changed("saga") {
 		return nil
 	}
 	var imports []string
@@ -255,6 +260,14 @@ func applyNestedWorkspace(fs *pflag.FlagSet, o *options) error {
 	*o.polyrepo = true
 	if err := fs.Set("polyrepo", "true"); err != nil {
 		return err
+	}
+	// The saga is restored only when the enclosing run exported one, so an
+	// orchestrated release keeps handing down exactly what it always has.
+	if saga := os.Getenv(nestedWorkspaceSagaEnv); saga != "" {
+		*o.saga = saga
+		if err := fs.Set("saga", saga); err != nil {
+			return err
+		}
 	}
 	o.nestedWorkspace = true
 	return nil
@@ -414,14 +427,14 @@ func shortGitOptionTakesFollowingValue(arg string) bool {
 
 func globalFlagTakesValue(arg string) bool {
 	switch arg {
-	case "--root", "--config", "--configs", "--env-file", "--concurrency", "--log-level", "--log-format":
+	case "--root", "--config", "--configs", "--env-file", "--concurrency", "--log-level", "--log-format", "--saga":
 		return true
 	}
 	return false
 }
 
 func globalFlagInline(arg string) bool {
-	for _, name := range []string{"--root=", "--config=", "--configs=", "--env-file=", "--concurrency=", "--log-level=", "--log-format=", "--quiet-parser=", "--polyrepo="} {
+	for _, name := range []string{"--root=", "--config=", "--configs=", "--env-file=", "--concurrency=", "--log-level=", "--log-format=", "--quiet-parser=", "--polyrepo=", "--saga="} {
 		if strings.HasPrefix(arg, name) {
 			return true
 		}

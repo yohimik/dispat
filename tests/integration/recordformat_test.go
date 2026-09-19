@@ -78,8 +78,8 @@ func TestRecordsDependencyLinksInBothDestinations(t *testing.T) {
 	r.ReleaseOK()
 	r.CommitEmpty("fix(core)^: close a leak")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.0.1"), "tags: %v", r.TagList())
 
 	want := "- [core](https://forge.test/core/tag/core@0.1.1): 0.1.0 -> 0.1.1"
 	log := changelogOf(t, r, "app")
@@ -112,7 +112,7 @@ func TestRecordsAutoDependencyLinksDeriveTheForgeURL(t *testing.T) {
 	r.ReleaseOK()
 	r.CommitEmpty("fix(core)^: close a leak")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("app@0.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.0.1"), "tags: %v", r.TagList())
 
 	assert.Contains(t, changelogOf(t, r, "app"),
 		"- [core](https://github.com/acme/mono/releases/tag/core@0.1.1): 0.1.0 -> 0.1.1",
@@ -150,7 +150,7 @@ func TestRecordsAutoLinksDeclineOutsideGitHubCom(t *testing.T) {
 	r.CommitEmpty("fix(core)^: close a leak")
 	sha := r.Git("rev-parse", "HEAD")
 	res := r.ReleaseOK("--log-level", "debug")
-	require.True(t, r.HasTag("app@0.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.0.1"), "tags: %v", r.TagList())
 
 	for name, text := range map[string]string{
 		"changelog": changelogOf(t, r, "app"),
@@ -287,7 +287,7 @@ func TestRecordsCustomNoChangesText(t *testing.T) {
 	// asked for the version, and there is nothing to list under it.
 	r.CommitEmpty("release(core): cut it exactly here\n\nRelease-As: 1.0.0")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@1.0.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.0.0"), "tags: %v", r.TagList())
 
 	want := "Nothing of its own: see the core release notes."
 	entry := entryOf(t, changelogOf(t, r, "core"), "core@1.0.0")
@@ -313,7 +313,7 @@ func TestRecordsNoChangesTextThatExpandsToNothingFallsBack(t *testing.T) {
 
 	r.CommitEmpty("release(core): cut it exactly here\n\nRelease-As: 1.0.0")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@1.0.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.0.0"), "tags: %v", r.TagList())
 
 	assert.Contains(t, entryOf(t, changelogOf(t, r, "core"), "core@1.0.0"),
 		"No changes: a version set by Release-As.",
@@ -349,7 +349,7 @@ func TestRecordsCustomTypeSectionsOrdered(t *testing.T) {
 	r.Commit("add(core): a brand new thing\n---\nfix(core): close a leak\n" +
 		"---\nfeat(core): add streaming\n---\nfeat(core)!: drop the old API")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@1.0.0"), "the breaking change majors it; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.0.0"), "the breaking change majors it; tags: %v", r.TagList())
 
 	for name, text := range map[string]string{
 		"changelog": entryOf(t, changelogOf(t, r, "core"), "core@1.0.0"),
@@ -370,7 +370,7 @@ func TestRecordsCustomTypeSectionsOrdered(t *testing.T) {
 	// the configuration mentions releases a minor on its own.
 	r.CommitEmpty("add(core): another new thing")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@1.1.0"),
+	assert.True(t, r.IsTagged("core@1.1.0"),
 		"the section's bump made the type releasable; tags: %v", r.TagList())
 }
 
@@ -390,7 +390,7 @@ func TestRecordsBreakingWinsOverACustomClaim(t *testing.T) {
 	r.SeedPackage("packages", "core")
 	r.Commit("add(core): an ordinary addition\n---\nadd(core)!: an addition that breaks you")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@1.0.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.0.0"), "tags: %v", r.TagList())
 
 	// "Added" is the only section the list names, so it renders first and the
 	// built-ins follow it. What this pins is not the order but the grouping:

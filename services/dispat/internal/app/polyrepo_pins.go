@@ -34,10 +34,12 @@ func newWorkspacePins(a *App) *workspacePins {
 	pins := &workspacePins{}
 	if a != nil && a.workspace != nil {
 		pins.log = a.log
-		pins.inherited = a.workspace.InheritedPinsEnabled()
+		pins.inherited = a.workspace.IsInheritedPinsEnabled()
 		pins.root = a.workspace.ControlRoot
-		if control := a.workspace.RepositoryByName(config.ControlRepository); control != nil {
-			pins.config = control.ConfigPath
+		// The entry repository's file is the invocation a nested command
+		// reproduces, whichever saga composed the fleet.
+		if entry := a.workspace.EntryRepository(); entry != nil {
+			pins.config = entry.ConfigPath
 		}
 	}
 	return pins
@@ -148,13 +150,13 @@ func (p *workspacePins) environment(env []string) []string {
 	return append(out, live.Environment())
 }
 
-func (p *workspacePins) runner(next script.Runner) script.Runner {
+func (p *workspacePins) runner(next script.Runnerx) script.Runnerx {
 	return &workspacePinRunner{pins: p, next: next}
 }
 
 type workspacePinRunner struct {
 	pins *workspacePins
-	next script.Runner
+	next script.Runnerx
 }
 
 func (r *workspacePinRunner) Run(ctx context.Context, dir, command string, env []string, stdout, stderr io.Writer) error {

@@ -1,6 +1,6 @@
 # CI tools
 
-dispat installs the latest Aqua CLI. Aqua installs the Crier and custom TinyGo versions recorded in `aqua.yaml`, using the asset digests in `aqua-checksums.json`.
+dispat installs the Aqua CLI version pinned in [`tools/bootstrap.yaml`](../tools/bootstrap.yaml). Aqua installs the Crier and custom TinyGo versions recorded in `aqua.yaml`, using the asset digests in `aqua-checksums.json`.
 
 From the repository root:
 
@@ -23,7 +23,7 @@ aqua -c .aqua/aqua.yaml update-checksum
 For the custom TinyGo fork, choose a published prerelease explicitly. Replace the example version with the intended release:
 
 ```sh
-aqua -c .aqua/aqua.yaml update tinygo@v0.43.0-net.1
+aqua -c .aqua/aqua.yaml update tinygo@v0.43.0-net.2
 aqua -c .aqua/aqua.yaml update-checksum
 ```
 

@@ -30,7 +30,7 @@ func TestIgnoreScopeKeepsAFolderFromTriggeringARelease(t *testing.T) {
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): bootstrap")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	// The changelog the release wrote is untracked, and a scopeless commit
 	// sweeping it in would derive the package it sits in. "release" is a
 	// declared non-package scope, so absorbing it says nothing about core.
@@ -39,15 +39,15 @@ func TestIgnoreScopeKeepsAFolderFromTriggeringARelease(t *testing.T) {
 	r.WriteFile("packages/core/docs/guide.md", "documentation only\n")
 	r.Commit("fix: rewrite the guide")
 	res := r.ReleaseOK()
-	assert.False(t, r.HasTag("core@0.1.1"), "an ignored file is not a change; tags: %v", r.TagList())
-	assert.True(t, harness.HasCode(res.Events, "W131"), "the unit resolved to no package")
+	assert.False(t, r.IsTagged("core@0.1.1"), "an ignored file is not a change; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresent(res.Events, "W131"), "the unit resolved to no package")
 
 	// One file outside the ignored folder is enough to bring the package back.
 	r.WriteFile("packages/core/docs/api.md", "more documentation\n")
 	r.WriteFile("packages/core/main.txt", "real work\n")
 	r.Commit("fix: the guide and the code")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
 }
 
 // TestIgnoreScopeDoesNotHideThePackage: ignoring is about what counts as a
@@ -66,7 +66,7 @@ func TestIgnoreScopeDoesNotHideThePackage(t *testing.T) {
 	r.WriteFile("packages/core/docs/guide.md", "documentation only\n")
 	r.Commit("fix(core): the guide is part of the package")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.1"), "a scope always addresses the package; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.1"), "a scope always addresses the package; tags: %v", r.TagList())
 
 	// The release commit stages the whole folder, so the changelog written
 	// next to the ignored docs is committed with everything else.
@@ -108,8 +108,8 @@ func TestIgnoreScopeLevelsConcatenate(t *testing.T) {
 	r.WriteFile("packages/utils/CHANGES.md", "utils did not\n")
 	r.Commit("fix: a change one package counts and the other does not")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
-	assert.False(t, r.HasTag("utils@0.1.1"), "the re-inclusion is the package's own")
+	assert.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
+	assert.False(t, r.IsTagged("utils@0.1.1"), "the re-inclusion is the package's own")
 }
 
 // TestIgnoreScopeFileAndKeyAgree: a .dispatignore file says exactly what the
@@ -129,7 +129,7 @@ func TestIgnoreScopeFileAndKeyAgree(t *testing.T) {
 	r.Commit("fix: a fixture and a readme")
 	res := r.ReleaseOK()
 	assert.Equal(t, 2, len(r.TagList()), "neither counted; tags: %v", r.TagList())
-	assert.True(t, harness.HasCode(res.Events, "W131"))
+	assert.True(t, harness.IsCodePresent(res.Events, "W131"))
 }
 
 // TestIgnoreScopeAppliesToSince: `--since` picks its packages from the same

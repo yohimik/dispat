@@ -10,19 +10,19 @@ versioning the specification does not change those types.
 
 ```go
 cfg := models.File{
-Scripts: map[string]models.Script{
-"build":   {"npm run build"},             // one command
-"release": {"npm ci", "npm publish"},     // or a sequence, run in order
-},
-Spaces: map[string]models.SpaceConfig{
-"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
-Build: []string{"build"}, Publish: []string{"publish"},
-}},
-},
-Packages: map[string]models.PackageConfig{
-"core": {RevertOnFail: models.Bool(false)}, // override for a space package
-"cli":  {Path: "tools/cli", Dependencies: models.Providers("core")}, // standalone package
-},
+    Scripts: map[string]models.Script{
+        "build":   {"npm run build"},             // one command
+        "release": {"npm ci", "npm publish"},     // or a sequence, run in order
+    },
+    Spaces: map[string]models.SpaceConfig{
+        "libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
+            Build: []string{"build"}, Publish: []string{"publish"},
+        }},
+    },
+    Packages: map[string]models.PackageConfig{
+        "core": {RevertOnFail: models.Bool(false)}, // override for a space package
+        "cli":  {Path: "tools/cli", Dependencies: models.Providers("core")}, // standalone package
+    },
 }
 data, _ := json.MarshalIndent(cfg, "", "  ") // a loadable dispat.json
 ```

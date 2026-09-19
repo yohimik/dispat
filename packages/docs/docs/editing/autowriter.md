@@ -222,6 +222,9 @@ ERR edits are not clean  error="1 edit(s) matched no manifest"
 An edit whose declaration already reads exactly as you asked counts as landed. A second run of a command that changed
 nothing is still clean.
 
+A format that cannot express a requested link does not count as a match. For example, a skipped Dockerfile cannot
+make `--link absent= --strict` succeed when no supported manifest contains that local link.
+
 A derived edit never fails this check. `--strict` asks whether something you asked for found a target. A derived edit
 comes from a declaration that already exists, so there is nothing for it to be stale about.
 

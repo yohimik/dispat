@@ -182,7 +182,7 @@ func TestAuthorsOnlyInvalidCommitsStillCredits(t *testing.T) {
 	r.CommitAs(adaName, adaMail, "chore(core): groundwork\n\nRelease-As: 0.1.0\n")
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 
 	entry := changelogOf(t, r, "core")
 	assert.Contains(t, entry, "### Authors\n\n- "+adaName+"\n",
@@ -427,7 +427,7 @@ func TestAuthorsPrereleaseFreshWindow(t *testing.T) {
 	r.SeedPackage("packages", "core")
 	r.CommitAs(adaName, adaMail, "feat(core)%beta: first beta work")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0-beta.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0-beta.0"), "tags: %v", r.TagList())
 
 	first := changelogOf(t, r, "core")
 	assert.Contains(t, first, "- "+adaName)
@@ -436,7 +436,7 @@ func TestAuthorsPrereleaseFreshWindow(t *testing.T) {
 	r.WriteFile("packages/core/more.txt", "x")
 	r.CommitAs(graceMsg, graceMl, "fix(core)%beta: second beta work")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0-beta.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0-beta.1"), "tags: %v", r.TagList())
 
 	second := changelogOf(t, r, "core")
 	betaOne := second[:len(second)-len(first)+len("# Changelog\n\n")]
@@ -447,7 +447,7 @@ func TestAuthorsPrereleaseFreshWindow(t *testing.T) {
 	// The graduation documents the whole train, so it credits the whole train.
 	r.CommitEmpty("chore(core)%beta>stable: graduate")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 
 	stable := changelogOf(t, r, "core")
 	graduation := stable[:len(stable)-len(second)+len("# Changelog\n\n")]

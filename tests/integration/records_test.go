@@ -50,8 +50,8 @@ func TestRecordsChangelogAccumulatesAcrossReleases(t *testing.T) {
 	// caret, so app releases with a dependencies section.
 	r.CommitEmpty("fix(core)^: close a leak\n---\nfeat(core)!: drop the old API")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@1.0.0"), "the breaking change majors core; tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.0.1"), "the caret reaches app; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@1.0.0"), "the breaking change majors core; tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.0.1"), "the caret reaches app; tags: %v", r.TagList())
 
 	data, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -118,7 +118,7 @@ func TestRecordsTagsAreAnnotatedWithReleaseMessages(t *testing.T) {
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): first release")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"))
+	require.True(t, r.IsTagged("core@0.1.0"))
 
 	assert.Equal(t, "tag", r.Git("cat-file", "-t", "core@0.1.0"),
 		"a release tag is an annotated tag object, not a lightweight ref")
@@ -164,7 +164,7 @@ func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 	// Published, and the log says both halves of the truth. E220 is
 	// CodeTagFailed; this module cannot import the CLI's internals, so the code
 	// travels as the literal CI would match on.
-	assert.True(t, harness.HasCode(res.Events, "E220"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E220"),
 		"the failure is reported under its own code, events:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, `"status":"published"`)
 	assert.NotContains(t, res.Stdout, `"status":"failed"`,
@@ -172,7 +172,7 @@ func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 	assert.Contains(t, res.Stdout, `"critical":1`, "and the totals account for it")
 
 	// The consumer had a published provider to build against and released.
-	assert.True(t, r.HasTag("consumer@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("consumer@0.1.0"), "tags: %v", r.TagList())
 
 	// The foreign tag was left exactly where it was: moving it would rewrite a
 	// record this run did not make.
@@ -229,7 +229,7 @@ func TestRecordsTagAtAnotherCommitIsLeftAlone(t *testing.T) {
 
 	res := r.Command("commit", "--tag", "--tag-name", "core@9.9.9", "--package", "core")
 	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "E221"), "events:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresent(res.Events, "E221"), "events:\n%s", res.Stdout)
 
 	assert.Equal(t, "someone else's tag",
 		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@9.9.9"),
@@ -264,7 +264,7 @@ func TestRecordsReleaseCommitTagsAndPush(t *testing.T) {
 	// The tags sit on the release commit, not on the released source commit.
 	head := r.Git("rev-parse", "HEAD")
 	for _, tag := range []string{"a@0.1.0", "b@0.1.0"} {
-		require.True(t, r.HasTag(tag), "tags: %v", r.TagList())
+		require.True(t, r.IsTagged(tag), "tags: %v", r.TagList())
 		assert.Equal(t, head, r.Git("rev-list", "-n1", tag), "%s must point at the release commit", tag)
 	}
 
@@ -461,9 +461,9 @@ func TestRecordsPushVerifyDisabled(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "the push itself still fails\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "E224"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E224"),
 		"the push failure is reported under its own code, events:\n%s", res.Stdout)
-	assert.True(t, r.HasTag("core@0.1.0"), "release work happened before the failing push; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "release work happened before the failing push; tags: %v", r.TagList())
 	assert.Equal(t, "chore(release): core@0.1.0", r.Git("log", "-1", "--format=%s"),
 		"the release commit exists")
 
@@ -495,7 +495,7 @@ func TestRecordsChangelogDisabled(t *testing.T) {
 	r.Commit("feat(core): no changelog wanted")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tagging is independent of the changelog; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tagging is independent of the changelog; tags: %v", r.TagList())
 	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
 }
 
@@ -622,7 +622,7 @@ func TestRecordsChannelsHoldPrereleasesBack(t *testing.T) {
 	r.Commit("feat(core,utils)%beta: first work")
 	r.ReleaseOK()
 
-	assert.True(t, r.HasTag("core@0.1.0-beta.0"), "the beta is still tagged and published")
+	assert.True(t, r.IsTagged("core@0.1.0-beta.0"), "the beta is still tagged and published")
 	assert.NoFileExists(t, r.Path("packages/core/CHANGELOG.md"),
 		"a changelog recording on the stable line alone leaves the beta unrecorded")
 	assert.FileExists(t, r.Path("packages/utils/CHANGELOG.md"),
@@ -678,13 +678,13 @@ func TestRecordsGitHubReleaseExistsIsASkip(t *testing.T) {
 	second := r.Command("github", "--package", "core")
 	assert.Equal(t, 0, second.Code, "stderr: %s", second.Stderr)
 	assert.Len(t, bodies(), 1, "the existing release is never created twice")
-	assert.True(t, harness.HasCode(second.Events, "W224"), "the skip says which code it is")
+	assert.True(t, harness.IsCodePresent(second.Events, "W224"), "the skip says which code it is")
 
 	// And the release that follows converges too, instead of failing on the
 	// API's 422 for a duplicate tag.
 	r.ReleaseOK()
 	assert.Len(t, bodies(), 1)
-	assert.True(t, r.HasTag("core@0.1.0"))
+	assert.True(t, r.IsTagged("core@0.1.0"))
 }
 
 // recordLines is the unfiltered line list a bare string in a config file
@@ -992,9 +992,9 @@ func TestRecordsAliasTags(t *testing.T) {
 	// Release 1: stable 0.1.0.
 	r.Commit("feat(core): first release")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("packages/core/v0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("v0.1.0"), "the exact alias, tags: %v", r.TagList())
-	require.True(t, r.HasTag("v0"), "the moving alias, tags: %v", r.TagList())
+	require.True(t, r.IsTagged("packages/core/v0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v0.1.0"), "the exact alias, tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v0"), "the moving alias, tags: %v", r.TagList())
 	firstMajor := r.Git("rev-list", "-n1", "v0")
 
 	// The aliases reach the remote too: a ref nobody can fetch is not a
@@ -1016,14 +1016,14 @@ func TestRecordsAliasTags(t *testing.T) {
 	// major onto a release candidate.
 	r.CommitEmpty("feat(core)%rc: a release candidate")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("v0.2.0-rc.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v0.2.0-rc.0"), "tags: %v", r.TagList())
 	assert.Equal(t, firstMajor, r.Git("rev-list", "-n1", "v0"),
 		"a prerelease leaves the moving alias where it is")
 
 	// Release 3: the next stable moves the major and leaves every exact ref.
 	r.CommitEmpty("feat(core)%rc>stable: graduate")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("v0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v0.2.0"), "tags: %v", r.TagList())
 	assert.NotEqual(t, firstMajor, r.Git("rev-list", "-n1", "v0"), "the moving alias followed")
 	assert.Equal(t, r.Git("rev-list", "-n1", "packages/core/v0.2.0"), r.Git("rev-list", "-n1", "v0"),
 		"and points at the release it names")
@@ -1066,8 +1066,8 @@ func TestRecordsAliasBesideABareVersionTag(t *testing.T) {
 	assert.Contains(t, status.Stdout, `"version":"0.0.0 -> 0.1.0"`, "status:\n%s", status.Stdout)
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("v0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("v0"), "the moving alias, tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v0"), "the moving alias, tags: %v", r.TagList())
 	assert.Equal(t, r.Git("rev-list", "-n1", "v0.1.0"), r.Git("rev-list", "-n1", "v0"),
 		"the alias points at the release it names")
 
@@ -1084,8 +1084,8 @@ func TestRecordsAliasBesideABareVersionTag(t *testing.T) {
 	// And it keeps working across a major, where the alias name changes.
 	r.CommitEmpty("feat(core)!: a breaking second release")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("v1.0.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("v1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v1.0.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("v1"), "tags: %v", r.TagList())
 	assert.Equal(t, r.Git("rev-list", "-n1", "v1.0.0"), r.Git("rev-list", "-n1", "v1"))
 	assert.Equal(t, r.Git("rev-list", "-n1", "v0.1.0"), r.Git("rev-list", "-n1", "v0"),
 		"a moving alias moves inside its own major and nowhere else")
@@ -1255,7 +1255,7 @@ func TestRecordsCommitFailureStillTags(t *testing.T) {
 
 	res := r.Release()
 	require.NotEqual(t, 0, res.Code, "a release missing its commit must not exit green\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "E223"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E223"),
 		"the commit failure is reported under its own code, events:\n%s", res.Stdout)
 
 	// Published, not failed: the artefact is out.
@@ -1264,7 +1264,7 @@ func TestRecordsCommitFailureStillTags(t *testing.T) {
 
 	// And the tag was still written, which is the whole reason tagging follows
 	// a failed commit instead of being abandoned with it.
-	assert.True(t, r.HasTag("core@0.1.0"),
+	assert.True(t, r.IsTagged("core@0.1.0"),
 		"the tag must survive the commit failure; tags: %v", r.TagList())
 }
 
@@ -1292,18 +1292,18 @@ func TestRecordsChangelogFailureIsCriticalNotFailure(t *testing.T) {
 
 	res := r.Release()
 	require.NotEqual(t, 0, res.Code, "a release missing a record must not exit green\nstdout:\n%s", res.Stdout)
-	assert.True(t, harness.HasCode(res.Events, "E222"),
+	assert.True(t, harness.IsCodePresent(res.Events, "E222"),
 		"the record failure is reported under its own code, events:\n%s", res.Stdout)
 
 	assert.Contains(t, res.Stdout, `"status":"published"`)
 	assert.NotContains(t, res.Stdout, `"status":"failed"`,
 		"a package whose changelog failed is still published")
-	assert.True(t, r.HasTag("core@0.1.0"),
+	assert.True(t, r.IsTagged("core@0.1.0"),
 		"the tag is written whatever the changelog did; tags: %v", r.TagList())
 
 	// The consumer is untouched by its provider's recording failure: the
 	// provider published, so there was nothing to hold app back.
-	assert.True(t, r.HasTag("app@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
 	assert.FileExists(t, r.Path("packages", "app", "CHANGELOG.md"),
 		"one package's failed record does not skip the next one's")
 }
@@ -1334,10 +1334,10 @@ func TestRecordsAliasTagFailureIsOnlyAWarning(t *testing.T) {
 
 	res := r.ReleaseOK()
 
-	assert.True(t, harness.HasCode(res.Events, "W232"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W232"),
 		"the alias failure is reported under its own code, events:\n%s", res.Stdout)
 	// Green: the release itself is complete.
-	assert.True(t, r.HasTag("core@0.1.0"),
+	assert.True(t, r.IsTagged("core@0.1.0"),
 		"the release tag is unaffected by the alias; tags: %v", r.TagList())
 	assert.Equal(t, "not dispat's",
 		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/v0.1.0"),
@@ -1372,19 +1372,19 @@ func TestRecordsCatchUpSpansEveryProviderOfAMultiScopeUnit(t *testing.T) {
 	r.SeedPackage("packages", "app")
 	r.Commit("feat(core, util)^: reaches app; all release once")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("util@0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("util@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.0.1"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(core, util)^: published alone; app catches up next run")
 	res := r.Command("release", "-p", "core,util")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("util@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("util@0.1.1"), "tags: %v", r.TagList())
 
 	res = r.ReleaseOK()
-	require.True(t, harness.HasCodeForPackage(res.Events, "W193", "app"), "the catch-up is labelled")
-	require.True(t, r.HasTag("app@0.0.2"), "tags: %v", r.TagList())
+	require.True(t, harness.IsCodePresentForPackage(res.Events, "W193", "app"), "the catch-up is labelled")
+	require.True(t, r.IsTagged("app@0.0.2"), "tags: %v", r.TagList())
 
 	data, err := os.ReadFile(r.Path("packages", "app", "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -1416,17 +1416,17 @@ func TestRecordsCatchUpGithubBodySpansTheProvidersMovement(t *testing.T) {
 	r.SeedPackage("packages", "app")
 	r.Commit("feat(core)^: reaches app; both release once")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
-	require.True(t, r.HasTag("app@0.0.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("app@0.0.1"), "tags: %v", r.TagList())
 
 	r.CommitEmpty("fix(core)^: published alone; app catches up next run")
 	res := r.Command("release", "-p", "core")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
-	require.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
 
 	res = r.ReleaseOK()
-	require.True(t, harness.HasCodeForPackage(res.Events, "W193", "app"), "the catch-up is labelled")
-	require.True(t, r.HasTag("app@0.0.2"), "tags: %v", r.TagList())
+	require.True(t, harness.IsCodePresentForPackage(res.Events, "W193", "app"), "the catch-up is labelled")
+	require.True(t, r.IsTagged("app@0.0.2"), "tags: %v", r.TagList())
 
 	var body string
 	for _, rel := range decodeAll[ghRelease](t, bodies()) {

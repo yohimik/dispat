@@ -1,15 +1,12 @@
 # config
 
-The `config` package reads configuration files the way a hand-written file wants to be read. It parses JSON, YAML and
-TOML into one tree, composes that tree from several files through a `$ref` key, finds the file a command was run
-beneath by walking up the directory tree, and turns the result into your own structs through a table of setters rather
-than through reflection.
+The `config` package loads JSON, YAML, and TOML, combines files through `$ref`, and decodes the result into Go structs.
+Callers can use its directory resolver to discover a configuration file and its editing API to update the file that
+owns a value.
 
-There is no reflection in the source at all. A decode is a map from key to closure, which is what makes the config
-surface of a struct a thing you can read, and what lets the package link under TinyGo.
-
-This package powers `dispat`'s own configuration: the `$ref` composition, the case-preserving keys, the unknown-key
-refusal and the ref-aware editing are all in production there.
+Decoding uses explicit field setters instead of reflection. The field table makes accepted keys visible in code and
+supports TinyGo builds. dispat uses this package for file composition, case-preserving map keys, unknown-key errors,
+and edits that follow references.
 
 ## Install
 
@@ -185,6 +182,12 @@ Two methods and no dependency, because a library that picks a logging package pi
 it. `WithLogger(ctx, …)` puts one on the context for the programs that have several. Every emit is guarded by
 `Enabled`, and the `Field` constructors keep scalars in typed slots, so an event nobody asked for costs an interface
 call and a comparison.
+
+## API naming
+
+The interface is `Loggerx`; `Logger` remains as a deprecated alias for source compatibility. `Options.Logger` and
+`WithLogger` are unchanged, because a field and a function are named for what they hold and what they do rather than
+for the capability the interface describes.
 
 ## Watching
 

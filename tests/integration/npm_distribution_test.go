@@ -71,7 +71,7 @@ func assertNPMDistribution(t *testing.T, r *harness.Repo, npmVersion, binaryVers
 	data, err = os.ReadFile(r.Path("packages", "cli", "binary-version.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, binaryVersion, string(data))
-	assert.True(t, r.HasTag("packages/cli/v"+npmVersion), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("packages/cli/v"+npmVersion), "tags: %v", r.TagList())
 }
 
 func TestNPMDistributionKeepsIndependentPatchesAndPinnedBinary(t *testing.T) {
@@ -88,12 +88,12 @@ func TestNPMDistributionKeepsIndependentPatchesAndPinnedBinary(t *testing.T) {
 	r.CommitEmpty("fix(dispat)^: repair the binary")
 	r.ReleaseOK()
 	assertNPMDistribution(t, r, "1.10.3", "1.10.2")
-	assert.True(t, r.HasTag("services/dispat/v1.10.2"))
+	assert.True(t, r.IsTagged("services/dispat/v1.10.2"))
 
 	r.CommitEmpty("feat(dispat): advance the shared minor")
 	r.ReleaseOK()
 	assertNPMDistribution(t, r, "1.11.0", "1.11.0")
-	assert.True(t, r.HasTag("services/dispat/v1.11.0"))
+	assert.True(t, r.IsTagged("services/dispat/v1.11.0"))
 	tags := r.TagList()
 	r.ReleaseOK()
 	assert.Equal(t, tags, r.TagList(), "a completed release converges")
@@ -112,7 +112,7 @@ func TestNPMDistributionWaitsForPublicationAndRetriesItsOwnFailure(t *testing.T)
 	r.WriteFile("fail-npm", "fail\n")
 	res = r.Release()
 	require.NotZero(t, res.Code)
-	assert.True(t, r.HasTag("services/dispat/v1.10.1"), "provider publication survives npm failure")
+	assert.True(t, r.IsTagged("services/dispat/v1.10.1"), "provider publication survives npm failure")
 	assert.Zero(t, r.TagCount("packages/cli/v"))
 
 	r.Remove("fail-npm")
@@ -127,12 +127,12 @@ func TestNPMDistributionPinsPrereleaseAndGraduatedBinaries(t *testing.T) {
 	r.CommitEmpty("feat(dispat)^%beta++1: begin a shared beta")
 	r.ReleaseOK()
 	assertNPMDistribution(t, r, "1.11.0-beta.0", "1.11.0-beta.0")
-	assert.True(t, r.HasTag("services/dispat/v1.11.0-beta.0"))
+	assert.True(t, r.IsTagged("services/dispat/v1.11.0-beta.0"))
 
 	r.CommitEmpty("fix(dispat)%beta>stable: graduate the shared beta")
 	r.ReleaseOK()
 	assertNPMDistribution(t, r, "1.11.0", "1.11.0")
-	assert.True(t, r.HasTag("services/dispat/v1.11.0"))
+	assert.True(t, r.IsTagged("services/dispat/v1.11.0"))
 }
 
 // A newly discovered distribution must not replay releases from before it
@@ -150,7 +150,7 @@ func TestNPMDistributionStartsOnExistingNativeLine(t *testing.T) {
 	r.SeedPackage("services", "dispat")
 	r.Commit("feat(dispat)^minor: publish the native line")
 	r.ReleaseOK()
-	require.True(t, r.HasTag("services/dispat/v1.10.0"))
+	require.True(t, r.IsTagged("services/dispat/v1.10.0"))
 
 	cfg.Spaces["packages"] = npmSpace
 	cfg.Dependencies = models.Dependencies{{Consumer: "cli", Provider: "dispat", Keep: true}}
@@ -203,9 +203,9 @@ func TestNPMDistributionFirstReleaseUsesExactVersionAndChoreCorrections(t *testi
 			r.ReleaseOK()
 			assertNPMDistribution(t, r, version, "1.10.0")
 			if version == "1.10.1" {
-				assert.False(t, r.HasTag("packages/cli/v1.10.0"), "recovery must not fabricate the failed attempt tag")
+				assert.False(t, r.IsTagged("packages/cli/v1.10.0"), "recovery must not fabricate the failed attempt tag")
 			}
-			assert.True(t, r.HasTag("packages/docs/v1.10.10"))
+			assert.True(t, r.IsTagged("packages/docs/v1.10.10"))
 			assert.Equal(t, 1, r.TagCount("services/dispat/v"))
 			assert.Equal(t, 4, len(r.TagList()), "only npm and docs may add release tags")
 			tags := r.TagList()
@@ -249,7 +249,7 @@ func TestNPMDistributionSeparatesCIBuildFromReleasePackaging(t *testing.T) {
 	calls, err = os.ReadFile(r.Path("tools.log"))
 	require.NoError(t, err)
 	assert.Equal(t, "pnpm build\nnode build/scripts/pack.js\npnpm compile:test\nnode test-build/smoke-artifact.js\nnode build/scripts/publish.js\n", string(calls))
-	assert.True(t, r.HasTag("packages/cli/v1.10.1"))
+	assert.True(t, r.IsTagged("packages/cli/v1.10.1"))
 }
 
 // The site's real dependency declarations must gate its expensive hooks and
@@ -308,7 +308,7 @@ flow:
 	r.Remove("fail-npm")
 	r.ReleaseOK()
 	assert.FileExists(t, r.Path("published", "docs"))
-	assert.True(t, r.HasTag("packages/docs/v1.10.1"))
+	assert.True(t, r.IsTagged("packages/docs/v1.10.1"))
 	assert.Equal(t, 1, r.TagCount("services/dispat/v"), "retry reuses native publication")
 
 	// Repeat after the initial release: an existing npm tag is not proof
@@ -325,12 +325,12 @@ flow:
 	assert.Equal(t, 1, r.TagCount("packages/docs/v"))
 	r.Remove("fail-npm")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("packages/docs/v1.10.2"))
+	assert.True(t, r.IsTagged("packages/docs/v1.10.2"))
 	assert.Equal(t, 1, r.TagCount("services/dispat/v"))
 
 	// A docs-only patch needs the already published CLI, not a new npm tag.
 	r.CommitEmpty("fix(docs): clarify installation")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("packages/docs/v1.10.3"))
+	assert.True(t, r.IsTagged("packages/docs/v1.10.3"))
 	assert.Equal(t, 2, r.TagCount("packages/cli/v"))
 }

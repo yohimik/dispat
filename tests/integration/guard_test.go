@@ -57,7 +57,7 @@ func TestGuardAllowBranch(t *testing.T) {
 	r.Commit("feat(core): first")
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 
 	r.Commit("feat(core): pending work")
 	r.Git("checkout", "-q", "-b", "feature/tryout")
@@ -65,7 +65,7 @@ func TestGuardAllowBranch(t *testing.T) {
 	require.Equal(t, 1, res.Code, "a foreign branch must refuse\nstdout:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, `branch \"feature/tryout\" is not allowed`)
 	assert.Contains(t, res.Stdout, "release/*", "the refusal names what would be allowed")
-	assert.False(t, r.HasTag("core@0.2.0"), "a refused run must not tag")
+	assert.False(t, r.IsTagged("core@0.2.0"), "a refused run must not tag")
 
 	// The guard gates releasing, not reading: the dry run works anywhere.
 	r.StatusOK()
@@ -73,7 +73,7 @@ func TestGuardAllowBranch(t *testing.T) {
 	// A slashed branch matching a glob may release.
 	r.Git("checkout", "-q", "-b", "release/v1")
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.2.0"), "tags: %v", r.TagList())
 }
 
 // TestGuardAllowBranchRefusesDetachedHead: a detached HEAD has no branch name,
@@ -90,7 +90,7 @@ func TestGuardAllowBranchRefusesDetachedHead(t *testing.T) {
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, "HEAD is detached")
-	assert.False(t, r.HasTag("core@0.1.0"), "a refused run must not tag")
+	assert.False(t, r.IsTagged("core@0.1.0"), "a refused run must not tag")
 }
 
 // TestGuardBehindRemote: in push mode a checkout whose branch tip is behind
@@ -108,7 +108,7 @@ func TestGuardBehindRemote(t *testing.T) {
 	bare := r.AddBareRemote()
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	require.Equal(t, 1, buildRuns(r), "the first release built once")
 
 	// The remote moves on without this checkout.
@@ -124,20 +124,20 @@ func TestGuardBehindRemote(t *testing.T) {
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "a stale checkout must refuse\nstdout:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, "behind origin/"+harness.DefaultBranch)
-	assert.False(t, r.HasTag("core@0.2.0"), "a refused run must not tag")
+	assert.False(t, r.IsTagged("core@0.2.0"), "a refused run must not tag")
 	assert.Equal(t, 1, buildRuns(r), "a refused run runs no build script")
-	assert.False(t, harness.HasCode(res.Events, "W131"),
+	assert.False(t, harness.IsCodePresent(res.Events, "W131"),
 		"the refusal precedes planning, so no planning diagnostic is reported: %v", res.Events)
 
 	// Catching up clears the guard and the release goes through, push and all.
 	r.Git("pull", "-q", "--rebase", "origin", harness.DefaultBranch)
 	caught := r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.2.0"), "tags: %v", r.TagList())
 	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.2.0")
 	// The witness, proved rather than assumed: the same window does report
 	// W131 once a plan is actually computed, so its absence above was the
 	// refusal's doing and not a code this repository never raises.
-	assert.True(t, harness.HasCode(caught.Events, "W131"),
+	assert.True(t, harness.IsCodePresent(caught.Events, "W131"),
 		"the inert unit is reported once planning happens: %v", caught.Events)
 	assert.Equal(t, 2, buildRuns(r), "and the caught-up run builds")
 }
@@ -157,7 +157,7 @@ func TestGuardBehindRemoteHonoursCommitVerify(t *testing.T) {
 	bare := r.AddBareRemote()
 
 	r.ReleaseOK()
-	require.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 
 	pushClone(t, bare, "chore: pushed elsewhere")
 
@@ -178,8 +178,8 @@ func TestGuardBehindRemoteHonoursCommitVerify(t *testing.T) {
 	// thing left saying the tree it went out on is not the one it was planned
 	// against.
 	assert.Contains(t, res.Stdout, "published")
-	assert.True(t, r.HasTag("core@0.2.0"), "the tag was created; tags: %v", r.TagList())
-	assert.True(t, harness.HasCode(res.Events, "W242"),
+	assert.True(t, r.IsTagged("core@0.2.0"), "the tag was created; tags: %v", r.TagList())
+	assert.True(t, harness.IsCodePresent(res.Events, "W242"),
 		"the release pulled what it could not see when it planned: %v", res.Events)
 	assert.Equal(t, 0, res.Code)
 }
@@ -198,7 +198,7 @@ func TestGuardsAreUnsetByDefault(t *testing.T) {
 	r.Git("checkout", "-q", "-b", "some/odd/branch")
 
 	r.ReleaseOK()
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 }
 
 // landAgainDuringTheRecovery arms the bare remote to move the branch once more
@@ -345,7 +345,7 @@ func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "W242"),
+	assert.True(t, harness.IsCodePresent(res.Events, "W242"),
 		"the pull during the release is reported: %v", res.Events)
 	assert.Contains(t, res.Stdout, "pulled the branch during the release")
 
@@ -354,7 +354,7 @@ func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 	// after the first has the previous merge as its first parent. What must
 	// never move is the tag.
 	release := releaseCommit(t, r, "chore(release): core@0.1.0")
-	assert.True(t, r.HasTag("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Equal(t, release, strings.TrimSpace(r.Git("rev-list", "-n", "1", "core@0.1.0")),
 		"the tag was written on the release commit and stayed there")
 	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0",
@@ -400,8 +400,8 @@ func TestReleaseMergesWhatLandedDuringTheRun(t *testing.T) {
 	// foreign feature, and it releases.
 	next := r.Release()
 	require.Equal(t, 0, next.Code, "stdout:\n%s\nstderr:\n%s", next.Stdout, next.Stderr)
-	assert.True(t, r.HasTag("core@0.2.0"), "what landed during the release is released next; tags: %v", r.TagList())
-	assert.False(t, harness.HasCode(next.Events, "W131"),
+	assert.True(t, r.IsTagged("core@0.2.0"), "what landed during the release is released next; tags: %v", r.TagList())
+	assert.False(t, harness.IsCodePresent(next.Events, "W131"),
 		"neither the release commit nor the merge resolves to nothing noisily: %v", next.Events)
 	after, err := os.ReadFile(r.Path("packages", "core", "CHANGELOG.md"))
 	require.NoError(t, err)
@@ -430,7 +430,7 @@ func TestReleaseMergesWhatLandedTwice(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "W242"), "events: %v", res.Events)
+	assert.True(t, harness.IsCodePresent(res.Events, "W242"), "events: %v", res.Events)
 
 	// Two merges, and the release commit is under both of them: neither round
 	// moved the tag onto a merge, and neither rewrote it.
@@ -512,7 +512,7 @@ func TestReleaseSettlesAConflictAndKeepsBothSides(t *testing.T) {
 
 	res := releaseLocked(r)
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.HasCode(res.Events, "W243"), "the conflict is reported: %v", res.Events)
+	assert.True(t, harness.IsCodePresent(res.Events, "W243"), "the conflict is reported: %v", res.Events)
 
 	// The tag is where it always is, on the commit the run planned.
 	release := releaseCommit(t, r, "chore(release): core@0.1.0")
@@ -553,9 +553,9 @@ func TestReleaseSettlesAConflictAndKeepsBothSides(t *testing.T) {
 	// both name no package, and what arrived releases on its own terms.
 	next := r.Release()
 	require.Equal(t, 0, next.Code, "stdout:\n%s\nstderr:\n%s", next.Stdout, next.Stderr)
-	assert.False(t, harness.HasCode(next.Events, "W131"),
+	assert.False(t, harness.IsCodePresent(next.Events, "W131"),
 		"the merge carries a changelog edit and still resolves to no package: %v", next.Events)
-	assert.True(t, r.HasTag("core@0.1.1"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core@0.1.1"), "tags: %v", r.TagList())
 }
 
 // conflictBranchOf is the quarantine branch the run pushed, read off the

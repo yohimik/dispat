@@ -524,9 +524,9 @@ func TestInstallFromAPublicRepositoryStaysOnThePublicURL(t *testing.T) {
 // which is the one case the install location cannot be guessed for.
 type emptyEnv struct{}
 
-func (emptyEnv) Getenv(string) string { return "" }
-func (emptyEnv) Writable(string) bool { return false }
-func (emptyEnv) GOOS() string         { return "linux" }
+func (emptyEnv) Getenv(string) string   { return "" }
+func (emptyEnv) IsWritable(string) bool { return false }
+func (emptyEnv) GOOS() string           { return "linux" }
 
 // noDigestSource is a release that publishes no checksum, as GitHub Enterprise
 // versions before asset digests existed do.

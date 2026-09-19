@@ -284,9 +284,11 @@ const EXTRA_SLIDES: ExtraSlide[] = [
     body: (
       <>
         A small <Link to="/control-repository">control repository</Link> holds the dispat configuration and a git
-        submodule per linked repository, which is the single checkout the graph needs. Moving a pointer is an ordinary
-        commit, so the fleet releases in dependency order while every team keeps its own repository, permissions, and
-        history.
+        submodule per linked repository, which is the single checkout the graph needs. In pointer-history mode, moving
+        a pointer is an ordinary commit and the control repository records the release, as the clip shows. Set{' '}
+        <code>polyrepo: true</code> for source-history mode instead, where dispat reads each linked repository&apos;s
+        own commits and tags and each one owns its records. Either way the fleet releases in dependency order while
+        every team keeps its own repository and permissions.
       </>
     ),
     media: {

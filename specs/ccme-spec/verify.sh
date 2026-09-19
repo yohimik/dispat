@@ -61,6 +61,7 @@ grep -Fq 'changing it is not allowed.' LICENSE
 grep -Fq '## 25. VCS adapters' SPEC.md
 grep -Fq '## 26. Explicit rollback' SPEC.md
 grep -Fq '## 27. Polyrepository Git profile' SPEC.md
+grep -Fq '### 27.11 Choreographed saga' SPEC.md
 grep -Fq '(./VCS-PROTOCOL.md)' SPEC.md
 grep -Fq '(./ROLLBACK.md)' SPEC.md
 grep -Fq '(./DESIGN-HISTORY.md)' SPEC.md

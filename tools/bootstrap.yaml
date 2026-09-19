@@ -1,0 +1,56 @@
+# Standalone tooling config for CI, Docker, and local installation.
+# No Git history is read by exec with static environment.
+versioning: none
+packages:
+  tools:
+    path: tools
+env:
+  AQUA_VERSION: v2.63.0
+scripts:
+  # Shared by CI and Docker through scripts/install-tools.sh. Paths are rooted
+  # here so the same config also works in the minimal Docker tool context.
+  install-tools: |
+    set -eu
+    tool=${DISPAT_TOOL_SELECTION:-all}
+    case "$tool" in all|crier|tinygo) ;; *) echo "unknown tool: $tool" >&2; exit 2 ;; esac
+    # A variable that is set says where to install, so an empty one is an
+    # expansion that failed rather than a caller asking for the default. The
+    # wrapper refuses the same thing for its second argument; a caller
+    # reaching this config directly gets the same answer.
+    if [ -n "${DISPAT_TOOL_DESTINATION+set}" ] && [ -z "$DISPAT_TOOL_DESTINATION" ]; then
+      echo "DISPAT_TOOL_DESTINATION is set but empty: unset it to take the default" >&2
+      exit 2
+    fi
+    if [ -n "${DISPAT_BIN_DIR+set}" ] && [ -z "$DISPAT_BIN_DIR" ]; then
+      echo "DISPAT_BIN_DIR is set but empty: unset it to take the default" >&2
+      exit 2
+    fi
+    destination=${DISPAT_TOOL_DESTINATION:-${DISPAT_BIN_DIR:-"$HOME/.local/bin"}}
+    mkdir -p "$destination"
+    destination=$(CDPATH='' cd -- "$destination" && pwd)
+    root=$PWD
+    "${DISPAT_BIN:-dispat}" install aquaproj/aqua --release "$AQUA_VERSION" \
+      --asset 'aqua_{os}_{arch}.tar.gz' --bin-dir "$destination" --pipe 'tar -xz aqua'
+    aqua="$destination/aqua"
+    export AQUA_POLICY_CONFIG="$root/.aqua/aqua-policy.yaml"
+    export AQUA_GITHUB_TOKEN="${AQUA_GITHUB_TOKEN:-${GITHUB_TOKEN:-}}"
+    config="$root/.aqua/aqua.yaml"
+    if [ "$tool" = all ]; then
+      "$aqua" -c "$config" install
+    else
+      "$aqua" -c "$config" install --tags "$tool"
+    fi
+    if [ "$tool" = all ] || [ "$tool" = crier ]; then
+      "$aqua" -c "$config" cp --tags crier -o "$destination"
+    fi
+    if [ "$tool" = all ] || [ "$tool" = tinygo ]; then
+      tinygo_executable=$("$aqua" -c "$config" which tinygo)
+      tinygo_root=$(dirname "$(dirname "$tinygo_executable")")
+      test -d "$tinygo_root/lib"
+      test -d "$tinygo_root/src"
+      if [ -e "$destination/tinygo" ] && [ ! -L "$destination/tinygo" ]; then
+        echo "refusing to replace an existing TinyGo directory: $destination/tinygo" >&2
+        exit 1
+      fi
+      ln -sfn "$tinygo_root" "$destination/tinygo"
+    fi

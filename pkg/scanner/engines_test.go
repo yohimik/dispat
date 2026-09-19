@@ -350,8 +350,8 @@ func TestAtPackageRootCountsAPathQualifiedManifestAsTheFolder(t *testing.T) {
 		{"nothing/we/parse.txt", false, false},
 	} {
 		m := Manifest{Path: tc.path, Root: tc.root}
-		if got := m.AtPackageRoot(); got != tc.want {
-			t.Errorf("Manifest{Path: %q, Root: %v}.AtPackageRoot() = %v, want %v",
+		if got := m.IsAtPackageRoot(); got != tc.want {
+			t.Errorf("Manifest{Path: %q, Root: %v}.IsAtPackageRoot() = %v, want %v",
 				tc.path, tc.root, got, tc.want)
 		}
 	}

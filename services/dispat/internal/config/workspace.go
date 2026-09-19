@@ -38,18 +38,50 @@ type SourcePinResolver func(repository string) ([]string, error)
 // command after an earlier nested commit advanced a source, while still
 // requiring the checkout to equal either control HEAD or that exact exported
 // revision.
+//
+// It takes no context because it supplies no pin resolver: without one,
+// composition waits on nothing. The resolver path is the only one that
+// acquires a Git mutation lock, and it is the one that takes a context.
 func ComposeWorkspaceWithPins(cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string) (*Workspace, error) {
-	return composeWorkspace(cfg, configPath, controlRoot, cliConfigs, runPins, nil)
+	return composeWorkspace(context.Background(), cfg, configPath, controlRoot, cliConfigs, runPins, nil, false)
 }
 
 // ComposeWorkspaceWithPinResolver additionally admits fresh run-scoped pins.
 // Static callers keep using ComposeWorkspaceWithPins; only a CLI invocation
 // that accepted an inherited workspace context supplies this resolver.
-func ComposeWorkspaceWithPinResolver(cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string, resolve SourcePinResolver) (*Workspace, error) {
-	return composeWorkspace(cfg, configPath, controlRoot, cliConfigs, runPins, resolve)
+//
+// ctx is the invocation's own cancellable context. Validating a live pin takes
+// the source repository's Git mutation lock, which waits for whatever release
+// is recording there, so the wait has to be interruptible: an operator who
+// presses Ctrl-C while composition is queued behind another run must stop.
+func ComposeWorkspaceWithPinResolver(ctx context.Context, cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string, resolve SourcePinResolver) (*Workspace, error) {
+	return composeWorkspace(ctx, cfg, configPath, controlRoot, cliConfigs, runPins, resolve, false)
 }
 
-func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string, resolve SourcePinResolver) (*Workspace, error) {
+// ComposeWorkspaceForRepair composes what it can and reports the rest as
+// findings, for `dispat compute`: the command whose whole purpose is to
+// repair a fleet that does not compose yet cannot need it to compose first.
+// Every other command gets the strict composition, because a plan computed
+// over half a fleet would be wrong rather than incomplete.
+func ComposeWorkspaceForRepair(ctx context.Context, cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string, resolve SourcePinResolver) (*Workspace, error) {
+	return composeWorkspace(ctx, cfg, configPath, controlRoot, cliConfigs, runPins, resolve, true)
+}
+
+func composeWorkspace(ctx context.Context, cfg *File, configPath, controlRoot string, cliConfigs []string,
+	runPins map[string][]string, resolve SourcePinResolver, lenient bool) (*Workspace, error) {
+	// The choreographed saga composes by following links rather than by
+	// reading one repository's inventory, so it is a different walk to the
+	// same result. Stating that saga sets the polyrepo flag, and
+	// `--polyrepo=false` clears it again to release one peer on its own,
+	// which is why the delegation asks for both.
+	if cfg != nil && cfg.IsChoreographed() && cfg.Polyrepo {
+		if len(cliConfigs) > 0 {
+			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf(
+				"choreography: --configs imports a repository-local configuration into a control run; every peer of a choreographed fleet carries its own"))
+		}
+		return ComposeChoreography(ctx, cfg, configPath, controlRoot,
+			ChoreographyOptions{InheritedPins: resolve != nil, Lenient: lenient})
+	}
 	if cfg == nil || (!cfg.Polyrepo && len(cfg.Configs) == 0 && len(cliConfigs) == 0) {
 		return nil, nil
 	}
@@ -70,12 +102,16 @@ func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []st
 		return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
 			fmt.Errorf("E330: polyrepo control repository has no HEAD: %w", err))
 	}
-	modules, err := loadSubmodules(root)
+	modules, disabled, err := loadSubmodules(root, cfg.RepositoryOverrides)
 	if err != nil {
 		return nil, err
 	}
+	// Participation settles before anything else: the control declarations an
+	// excluded repository owns are removed here, ahead of source
+	// initialization, history, pins, package discovery, hooks and locks.
+	participants := resolveParticipation(cfg, root, disabled)
 	repos := []Repository{{Name: ControlRepository, Root: root, ConfigPath: configPath, Config: cfg,
-		Control: true, Commit: cfg.Commit, CompositionHead: controlHead}}
+		Control: true, Entry: true, Commit: cfg.Commit, CompositionHead: controlHead}}
 
 	seenConfig := map[string]bool{}
 	if canonical, err := canonicalFile(configPath); err == nil {
@@ -98,6 +134,9 @@ func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []st
 		if err != nil {
 			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: config %q: %w", declared, err))
 		}
+		if participants.ownerOf(path) != nil {
+			continue
+		}
 		canonical, err := canonicalFile(path)
 		if err != nil {
 			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: config %q: %w", declared, err))
@@ -113,6 +152,10 @@ func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []st
 		repoRoot, err = filepath.EvalSymlinks(repoRoot)
 		if err != nil {
 			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: imported repository root %s: %w", repoRoot, err))
+		}
+		if !within(repoRoot, canonical) {
+			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf(
+				"polyrepo: Git root %s does not contain imported config %s", repoRoot, canonical))
 		}
 		module, ok := modulesByRoot[repoRoot]
 		if !ok {
@@ -138,11 +181,14 @@ func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []st
 		repos = append(repos, Repository{Name: name, Root: repoRoot, GitlinkPath: module.Path, ConfigPath: canonical, Config: imported, Imported: true, Commit: imported.Commit})
 	}
 	for key := range cfg.RepositoryOverrides {
+		if !cfg.RepositoryOverrides[key].IsEnabled() {
+			continue
+		}
 		module, ok := modulesByName[key]
 		if !ok {
 			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides names unknown source repository %q", key))
 		}
-		if importedRepo[module.Name] != "" {
+		if importedRepo[module.Name] != "" && cfg.RepositoryOverrides[key].Commit != nil {
 			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides[%q] cannot override imported repository config %s", key, importedRepo[module.Name]))
 		}
 	}
@@ -164,7 +210,7 @@ func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []st
 		if err := requireCompleteRepository(module.Root, module.Name); err != nil {
 			return nil, err
 		}
-		head, err := requirePinnedModuleResolved(root, controlHead, module, runPins[module.Name], resolve)
+		head, err := requirePinnedModuleResolved(ctx, root, controlHead, module, runPins[module.Name], resolve)
 		if err != nil {
 			return nil, err
 		}
@@ -173,10 +219,14 @@ func composeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []st
 	for i := range repos {
 		repos[i].CompositionHead = compositionHeads[repos[i].Name]
 	}
-	if err := resolveRepositoryBaselines(cfg, repos); err != nil {
+	if err := resolveRepositoryBaselines(cfg, repos, participants); err != nil {
 		return nil, err
 	}
 	workspace := newWorkspace(root, repos, modules)
+	workspace.Saga = SagaOrchestration
+	workspace.disabled = participants.disabled
+	workspace.excludedPackages = participants.packages
+	workspace.excludedSpaces = participants.spaces
 	workspace.inheritedPins = resolve != nil
 	return workspace, nil
 }
@@ -195,25 +245,77 @@ type Repository struct {
 	// gitlink and any inherited live pin were validated. Release planning must
 	// reproduce it before any hook or publication may run.
 	CompositionHead string
+	// Entry marks the repository the command was invoked in: the control
+	// repository of an orchestrated fleet, and the peer a choreographed run
+	// started from, which is any of them.
+	Entry bool
+	// Linker is the identity of the repository whose fleet link reached this
+	// one, in a choreographed fleet. The entry has none.
+	Linker string
+	// Links maps each fleet peer this repository links to the gitlink path
+	// holding it, relative to this repository's root. Orchestration links
+	// nothing: its inventory is the control repository's `.gitmodules`.
+	Links map[string]string
 }
 
 // Workspace is the repository ownership map shared by every command in one
 // run. It is immutable after composition.
 type Workspace struct {
-	ControlRoot   string
-	Repositories  []Repository
+	// ControlRoot is the root of the repository the run is anchored in: the
+	// control repository of an orchestrated fleet, and the entry repository of
+	// a choreographed one, which owns no other repository's configuration.
+	ControlRoot string
+	// Saga is the protocol that composed this workspace. The zero value is
+	// the orchestrated one, which is what a workspace built by hand — in a
+	// test, or by a caller that only needs the ownership map — behaves as.
+	Saga         string
+	Repositories []Repository
+	// Findings are the recoverable link problems composition observed.
+	// LinkFindings is the nil-safe way to read them.
+	Findings      []LinkFinding
 	modules       []submodule
 	byName        map[string]int
 	byFold        map[string]int
 	byRoot        map[string]int
 	sourceOrder   []int
 	inheritedPins bool
+	// disabled retains the boundaries of the repositories this run excluded.
+	disabled []DisabledRepository
+	// excludedPackages attributes a package name the exclusion removed to the
+	// repository that owned it, for diagnostics alone.
+	excludedPackages map[string]string
+	// excludedSpaces names the control space declarations the exclusion
+	// removed, for the composition log.
+	excludedSpaces []string
 }
 
-// InheritedPinsEnabled reports whether composition accepted a validated live
+// ExcludedSpaces returns the control space declarations that stopped
+// contributing because an excluded repository owned every path they named.
+func (w *Workspace) ExcludedSpaces() []string {
+	if w == nil {
+		return nil
+	}
+	return w.excludedSpaces
+}
+
+// SetParserQuietOverride applies the invocation's parser display override to
+// every participating repository configuration.
+func (w *Workspace) SetParserQuietOverride(quiet bool) {
+	if w == nil {
+		return
+	}
+	for i := range w.Repositories {
+		if w.Repositories[i].Config.Parser == nil {
+			w.Repositories[i].Config.Parser = &ParserConfig{}
+		}
+		w.Repositories[i].Config.Parser.Quiet = quiet
+	}
+}
+
+// IsInheritedPinsEnabled reports whether composition accepted a validated live
 // run context. It prevents an explicit --root/--config invocation from later
 // reopening a coincidentally matching inherited coordinator.
-func (w *Workspace) InheritedPinsEnabled() bool {
+func (w *Workspace) IsInheritedPinsEnabled() bool {
 	return w != nil && w.inheritedPins
 }
 
@@ -350,56 +452,80 @@ type submodule struct {
 	Root string
 }
 
-func loadSubmodules(controlRoot string) ([]submodule, error) {
+func loadSubmodules(controlRoot string, overrides map[string]RepositoryOverrideConfig) ([]submodule, []DisabledRepository, error) {
 	file := filepath.Join(controlRoot, ".gitmodules")
 	if _, err := os.Stat(file); err != nil {
 		if os.IsNotExist(err) {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: %s has no .gitmodules", controlRoot))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: %s has no .gitmodules", controlRoot))
 		}
-		return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: read .gitmodules: %w", err))
+		return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: read .gitmodules: %w", err))
 	}
 	out, err := gitOutput(controlRoot, "config", "--file", file, "--null", "--get-regexp", `^submodule\..*\.path$`)
 	if err != nil {
-		return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: read .gitmodules: %w", err))
+		return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: read .gitmodules: %w", err))
 	}
 	var modules []submodule
+	var disabled []DisabledRepository
 	seen := map[string]bool{}
+	exactSeen := map[string]bool{}
 	for _, record := range strings.Split(out, "\x00") {
 		if record == "" {
 			continue
 		}
 		key, path, ok := strings.Cut(record, "\n")
 		if !ok {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: malformed git config output for .gitmodules"))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: malformed git config output for .gitmodules"))
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(key, "submodule."), ".path")
 		if name == "" || strings.EqualFold(name, ControlRepository) {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: invalid or reserved submodule name %q", name))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: invalid or reserved submodule name %q", name))
 		}
 		if seen[strings.ToLower(name)] {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: duplicate submodule name %q (names are case-insensitive)", name))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: duplicate submodule name %q (names are case-insensitive)", name))
 		}
 		seen[strings.ToLower(name)] = true
+		exactSeen[name] = true
+		if override, ok := overrides[name]; ok && !override.IsEnabled() {
+			// Disabled repositories stop at the read-only .gitmodules inventory.
+			// In particular, do not require an initialized checkout or inspect its
+			// history/pin: exclusion precedes every repository operation. The
+			// declared boundary is retained so the paths stay reserved.
+			if reserved, err := containedPath(controlRoot, path); err == nil {
+				disabled = append(disabled, DisabledRepository{
+					Name: name, Path: filepath.ToSlash(filepath.Clean(path)), Root: filepath.Clean(reserved)})
+			}
+			continue
+		}
 		abs, err := containedPath(controlRoot, path)
 		if err != nil {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q path %q: %w", name, path, err))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q path %q: %w", name, path, err))
 		}
 		resolved, err := filepath.EvalSymlinks(abs)
 		if err != nil {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q is missing or uninitialized at %s", name, abs))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q is missing or uninitialized at %s", name, abs))
 		}
 		if resolved == controlRoot || !within(controlRoot, resolved) {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q path %s resolves outside the control workspace", name, resolved))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q path %s resolves outside the control workspace", name, resolved))
 		}
 		gitRoot, err := gitOutput(resolved, "rev-parse", "--show-toplevel")
 		if err != nil {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q is not initialized at %s", name, abs))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q is not initialized at %s", name, abs))
 		}
 		gitRoot, _ = filepath.EvalSymlinks(gitRoot)
 		if gitRoot != resolved {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q path %s resolves to Git root %s", name, resolved, gitRoot))
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule %q path %s resolves to Git root %s", name, resolved, gitRoot))
 		}
 		modules = append(modules, submodule{Name: name, Path: filepath.ToSlash(filepath.Clean(path)), Root: resolved})
+	}
+	// A disabled repository leaves the module list above, so its override must
+	// still be checked against the declared inventory here. An unknown name is
+	// refused whether it was written to enable or to disable a repository: a
+	// misspelled exclusion would otherwise release the repository it was meant
+	// to hold back.
+	for name := range overrides {
+		if !exactSeen[name] {
+			return nil, nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides names unknown source repository %q", name))
+		}
 	}
 	byRoot := append([]submodule(nil), modules...)
 	separator := string(filepath.Separator)
@@ -412,12 +538,13 @@ func loadSubmodules(controlRoot string) ([]submodule, error) {
 		previous := strings.TrimRight(filepath.Clean(byRoot[i-1].Root), separator) + separator
 		current := strings.TrimRight(filepath.Clean(byRoot[i].Root), separator) + separator
 		if strings.HasPrefix(current, previous) {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule roots overlap between %q (%s) and %q (%s)",
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: submodule roots overlap between %q (%s) and %q (%s)",
 				byRoot[i-1].Name, byRoot[i-1].Root, byRoot[i].Name, byRoot[i].Root))
 		}
 	}
 	sort.Slice(modules, func(i, j int) bool { return modules[i].Name < modules[j].Name })
-	return modules, nil
+	sort.Slice(disabled, func(i, j int) bool { return disabled[i].Name < disabled[j].Name })
+	return modules, disabled, nil
 }
 
 func requireCompleteRepository(root, name string) error {
@@ -425,10 +552,14 @@ func requireCompleteRepository(root, name string) error {
 	if err != nil {
 		return WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: repository %q at %s is not initialized: %w", name, root, err))
 	}
-	if shallow == "true" {
+	switch shallow {
+	case "true":
 		return WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: repository %q at %s is shallow; complete history is required", name, root))
+	case "false":
+		return nil
+	default:
+		return WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: repository %q at %s returned a malformed completeness reply", name, root))
 	}
-	return nil
 }
 
 func requirePinnedModule(controlRoot, controlRevision string, module submodule, runPins []string) (string, error) {
@@ -451,13 +582,24 @@ func requirePinnedModule(controlRoot, controlRevision string, module submodule, 
 	return head, nil
 }
 
-func requirePinnedModuleResolved(controlRoot, controlRevision string, module submodule, runPins []string, resolve SourcePinResolver) (string, error) {
+// requirePinnedModuleResolved validates one source checkout against control
+// HEAD, admitting the run-scoped pins a resolver reports.
+//
+// The resolver runs under the source's Git mutation lock, and acquiring that
+// lock waits for whatever release is recording there. The wait is bounded at
+// 30 seconds so a lock nobody will release cannot hang a command forever, and
+// it is derived from ctx so an interrupt stops it at once: a detached context
+// here would make Ctrl-C do nothing for up to half a minute.
+func requirePinnedModuleResolved(ctx context.Context, controlRoot, controlRevision string, module submodule, runPins []string, resolve SourcePinResolver) (string, error) {
 	if resolve == nil {
 		return requirePinnedModule(controlRoot, controlRevision, module, runPins)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	git := &gitx.CLI{Dir: module.Root}
+	git := &gitx.LocalGitx{Dir: module.Root}
 	unlock, err := git.AcquireMutation(ctx)
 	if err != nil {
 		return "", WithDiagnostic(DiagnosticRepositoryInvalid,
@@ -473,7 +615,7 @@ func requirePinnedModuleResolved(controlRoot, controlRevision string, module sub
 	return requirePinnedModule(controlRoot, controlRevision, module, pins)
 }
 
-func resolveRepositoryBaselines(cfg *File, repos []Repository) error {
+func resolveRepositoryBaselines(cfg *File, repos []Repository, participants *participation) error {
 	byName := make(map[string]Repository, len(repos))
 	for _, repo := range repos {
 		byName[repo.Name] = repo
@@ -493,6 +635,13 @@ func resolveRepositoryBaselines(cfg *File, repos []Repository) error {
 		}
 		repo, ok := byName[b.Repository]
 		if !ok {
+			for _, excluded := range participants.disabled {
+				if strings.EqualFold(excluded.Name, b.Repository) {
+					return WithDiagnostic(DiagnosticBoundary, fmt.Errorf(
+						"config: %s: repository %q is excluded by repositoryOverrides; an excluded repository supplies no baseline",
+						where, b.Repository))
+				}
+			}
 			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: unknown repository %q", where, b.Repository))
 		}
 		oid, err := gitOutput(repo.Root, "rev-parse", "--verify", b.Revision+"^{commit}")
@@ -549,6 +698,33 @@ func ResolvedWorkspaceSpaceConfigs(c *File, controlRoot string, workspace *Works
 	return out, nil
 }
 
+// ResolvedControlSpaceConfigs settles the control repository's spaces the way
+// ResolvedSpaceConfigs does and keys them by name, which is what a command
+// resolving one space the user named needs: `dispat exec --for space:<name>`
+// reads the control repository's configuration, and a space's scripts and env
+// live as much in the space folder's own config file as in the root file's
+// entry. ResolvedWorkspaceSpaceConfigs answers the other question — every
+// space of every participating repository, unkeyed, for a name that only has
+// to exist somewhere.
+//
+// The folder policy is the composed one when a workspace is present, so a file
+// belonging to a source repository never speaks for a control space.
+func ResolvedControlSpaceConfigs(c *File, controlRoot string, workspace *Workspace) (map[string]SpaceConfig, error) {
+	if workspace == nil {
+		return ResolvedSpaceConfigs(c, controlRoot)
+	}
+	for i := range workspace.Repositories {
+		repository := &workspace.Repositories[i]
+		if !repository.Control {
+			continue
+		}
+		gitRoots := &gitRootMemo{byDir: make(map[string]string)}
+		folderInputs := newWorkspaceFolderPolicy(workspace, repository, gitRoots)
+		return resolvedSpaceConfigsMode(c, controlRoot, folderInputs.allow)
+	}
+	return ResolvedSpaceConfigs(c, controlRoot)
+}
+
 // DiscoverWorkspacePlan returns both active dependency edges and declared
 // external edges whose provider is absent from this snapshot. Planning keeps
 // the latter out of the graph but reports their inactive state explicitly.
@@ -557,7 +733,7 @@ func DiscoverWorkspacePlan(c *File, controlRoot string, workspace *Workspace) ([
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	active, inactive, err := validateDependenciesForPlan(pkgs, declared)
+	active, inactive, err := validateDependenciesForPlan(pkgs, declared, workspace.unknownPackageRemedy)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -615,7 +791,7 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 			p.Repository, p.RepoRoot = owner, ownerRoot
 			if p.Space != nil && !repo.Control {
 				p.Space.Repository, p.Space.RepoRoot = owner, ownerRoot
-				if p.Space.Versioning.Shared() {
+				if p.Space.Versioning.IsShared() {
 					group := p.Space.VersionGroup
 					if group == "" {
 						group = p.Space.Name
@@ -628,7 +804,7 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 		declared = append(declared, deps...)
 		excluded = append(excluded, ex...)
 	}
-	if err := validatePackageOwnership(pkgs); err != nil {
+	if err := validatePackageOwnershipMode(pkgs, workspace.IsChoreographed()); err != nil {
 		return nil, nil, nil, err
 	}
 	return pkgs, declared, excluded, nil
@@ -787,6 +963,23 @@ func (m *gitRootMemo) nearest(path string) (string, error) {
 }
 
 func validatePackageOwnership(pkgs []*model.Package) error {
+	return validatePackageOwnershipMode(pkgs, false)
+}
+
+// validatePackageOwnershipMode is validatePackageOwnership with the scope
+// comparison scoped to one repository at a time.
+//
+// Package names stay one graph either way: two repositories may not both
+// declare `api`, whichever saga composed them. What differs is containment. An
+// orchestrated fleet is one tree of folders with every source inside the
+// control repository, so a scope containing another package's scope is always
+// an ownership mistake. A choreographed peer sits inside the checkout of the
+// repository that links it, so a repository whose own package covers its root
+// contains every peer linked beneath it, and comparing those scopes across
+// repositories would report an overlap that ownership does not have: the
+// deepest Git root already owns each of those folders, and the per-package
+// checks above have already refused any package that crosses that boundary.
+func validatePackageOwnershipMode(pkgs []*model.Package, perRepository bool) error {
 	byName := map[string]*model.Package{}
 	for _, p := range pkgs {
 		fold := strings.ToLower(p.Name)
@@ -810,10 +1003,16 @@ func validatePackageOwnership(pkgs []*model.Package) error {
 			return WithDiagnostic(DiagnosticOwnershipInvalid, fmt.Errorf("polyrepo: package %q src path %s: %w", p.Name, p.ScopeDir(), err))
 		}
 		key := strings.TrimRight(filepath.Clean(resolved), separator) + separator
+		if perRepository {
+			key = p.Repository + "\x00" + key
+		}
 		scopes[i] = scope{pkg: p, key: key}
 	}
 	sort.Slice(scopes, func(i, j int) bool { return scopes[i].key < scopes[j].key })
 	for i := 1; i < len(scopes); i++ {
+		if perRepository && scopes[i].pkg.Repository != scopes[i-1].pkg.Repository {
+			continue
+		}
 		if strings.HasPrefix(scopes[i].key, scopes[i-1].key) {
 			a, b := scopes[i-1].pkg, scopes[i].pkg
 			return WithDiagnostic(DiagnosticOwnershipInvalid, fmt.Errorf("polyrepo: package ownership overlaps between %q (%s) and %q (%s)", a.Name, a.ScopeDir(), b.Name, b.ScopeDir()))
@@ -1038,7 +1237,15 @@ func canonicalFile(path string) (string, error) {
 }
 
 func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	return gitOutputContext(context.Background(), dir, args...)
+}
+
+// gitOutputContext is gitOutput under the caller's context. Composition of a
+// linked fleet runs several Git processes per repository, and an operator who
+// interrupts a command queued behind them must stop at the current one rather
+// than at the end of the walk.
+func gitOutputContext(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -1047,7 +1254,20 @@ func gitOutput(dir string, args ...string) (string, error) {
 		if message == "" {
 			message = err.Error()
 		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), message)
+		return "", &gitError{text: fmt.Sprintf("git %s: %s", strings.Join(args, " "), message), err: err}
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// gitError is a failed Git invocation in the words this package has always
+// reported it in, with the process failure still reachable underneath. The
+// text is what a reader sees; the wrapped error is how a caller tells "the
+// key you asked about is not there" (status 1) from "this file cannot be read
+// at all" without parsing the message.
+type gitError struct {
+	text string
+	err  error
+}
+
+func (e *gitError) Error() string { return e.text }
+func (e *gitError) Unwrap() error { return e.err }

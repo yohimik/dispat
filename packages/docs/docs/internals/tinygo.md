@@ -280,6 +280,12 @@ should expect:
   this.
 - **`signal.Ignored` does not link.** The runtime has never implemented `os/signal.signal_ignored`, so a program
   calling it fails at link time. dispat's only signal call is `signal.NotifyContext`, so nothing in dispat reaches it.
+- **A script's bounded pipe wait does not fire.** A script may leave a child holding the pipes its output is read
+  through. The gc build stops waiting for those pipes after five seconds and reports the script by its own exit. The
+  scheduler here is single-threaded, so the blocking read of the inherited pipe stalls every goroutine, the timer
+  included, and the tiny binary returns when the child lets go. The outcome is the same; a daemon that never exits
+  would hold the run. `TestCovTailScriptThatLeavesAChildHoldingTheOutputPipes` asserts the bound under gc and the
+  outcome under both.
 
 ## Reading the logs
 

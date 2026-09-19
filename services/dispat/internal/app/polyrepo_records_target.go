@@ -29,7 +29,7 @@ func (a *App) resolveRepositoryRecords(ctx context.Context, pkgs []*model.Packag
 			if r.Commit != nil && r.Commit.Remote != "" {
 				remote = r.Commit.Remote
 			}
-			g := &gitx.CLI{Dir: r.Root, Log: a.log}
+			g := &gitx.LocalGitx{Dir: r.Root, Log: a.log}
 			raw, _ = g.RemoteURL(ctx, remote)
 			remotes[r.Name] = raw
 		}

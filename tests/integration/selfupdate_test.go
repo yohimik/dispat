@@ -573,7 +573,7 @@ func TestSelfUpdateOverTLS(t *testing.T) {
 	args := []string{"self-update", "--check", "--api-url", r.api, "--owner", "o", "--repo", "r"}
 
 	t.Run("trusting the authority", func(t *testing.T) {
-		if runtime.GOOS == "darwin" && !harness.UsesTinyGo() {
+		if runtime.GOOS == "darwin" && !harness.IsTinyGo() {
 			// Stock Go on darwin verifies through the platform's own verifier,
 			// which reads the system trust store and ignores SSL_CERT_FILE, so
 			// there is no way to make a test authority trusted for the child

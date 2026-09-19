@@ -102,7 +102,7 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		matched := false
 		pattern := strings.ToLower(t.Name)
 		for _, p := range cp.pkgs {
-			if cp.commitCanScope(rec, p) && GlobMatch(pattern, strings.ToLower(p.Name)) {
+			if cp.commitCanScope(rec, p) && IsGlobMatch(pattern, strings.ToLower(p.Name)) {
 				out[p.Name] = true
 				matched = true
 			}
@@ -210,6 +210,12 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 	out := make(map[string]bool)
 	firstFile := make(map[string]string)
 	for _, file := range rec.commit.Files {
+		// A commit that moved a fleet link changed a pointer to another
+		// repository, not a file of any package here. Counting it would make
+		// every settlement a change to whatever package encloses the link.
+		if cp.isLinkPath(rec.repository, filepath.ToSlash(file)) {
+			continue
+		}
 		root := rec.root
 		if root == "" {
 			root = cp.rootSlash()
@@ -228,7 +234,7 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 				owner = sd
 			}
 		}
-		if owner == nil || !owner.pkg.Counts(full) {
+		if owner == nil || !owner.pkg.IsCounted(full) {
 			continue
 		}
 		if !out[owner.pkg.Name] {
@@ -291,10 +297,10 @@ func underDir(file, dir string) bool {
 	return strings.HasPrefix(file, strings.TrimSuffix(clean, "/")+"/")
 }
 
-// GlobMatch reports whether s matches pattern, where "*" matches any run of
+// IsGlobMatch reports whether s matches pattern, where "*" matches any run of
 // bytes, path separators included. Exported so the executor's autoVersion
 // range matcher and scope resolution agree on what a glob means: a version
 // range is not a filesystem path, and filepath.Match's separator rules would
 // make `*` quietly miss `file:../core`. The matcher itself lives in globx,
 // where .dispatexclude patterns share it.
-func GlobMatch(pattern, s string) bool { return globx.Match(pattern, s) }
+func IsGlobMatch(pattern, s string) bool { return globx.IsMatch(pattern, s) }

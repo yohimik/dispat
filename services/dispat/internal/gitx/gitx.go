@@ -2,7 +2,7 @@
 // Copyright (c) 2026 yohimik
 
 // Package gitx wraps the git operations the tool needs behind an interface,
-// with a CLI implementation that shells out to the git binary (matching CI
+// with a local implementation that shells out to the git binary (matching CI
 // environments exactly).
 package gitx
 
@@ -19,11 +19,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // Tag is a "pkg@version" release tag. When the newest tag's version is not
@@ -214,7 +216,7 @@ func (f TagFormat) RenderVersion(v ccme.Version) string {
 // package.
 //
 // It is built from the stable shape, whose "*" spans the prerelease section
-// too, so one pattern covers both shapes. The pattern is only a filter: Matches
+// too, so one pattern covers both shapes. The pattern is only a filter: IsMatch
 // re-checks every candidate.
 func (f TagFormat) Glob(pkg string) string {
 	prefix, suffix, ok := f.split(pkg)
@@ -251,15 +253,15 @@ func (f TagFormat) ParseVersion(pkg, tag string) (ccme.Version, bool) {
 	return tpl.parseVersion(pkg, tag)
 }
 
-// Matches reports whether a tag belongs to a package under this format: the
+// IsMatch reports whether a tag belongs to a package under this format: the
 // literal prefix and suffix check, and deliberately not ParseVersion.
 //
 // A tag can match the shape and still carry an unparseable version, which is
 // the case the initials fallback exists for. It is also what a moving alias
 // looks like: "v1" beside a "v{version}" tagFormat has the shape and no
-// version in it. Telling those two apart is AliasFormat.Matches's job, not
+// version in it. Telling those two apart is AliasFormat.IsMatch's job, not
 // this one's.
-func (f TagFormat) Matches(pkg, tag string) bool {
+func (f TagFormat) IsMatch(pkg, tag string) bool {
 	prefix, suffix, ok := f.split(pkg)
 	if !ok {
 		return false
@@ -344,7 +346,7 @@ func (f AliasFormat) Render(pkg string, v ccme.Version) string {
 	return compileTagFormat(string(f)).render(pkg, v)
 }
 
-// Matches reports whether a name is one this alias format could have written
+// IsMatch reports whether a name is one this alias format could have written
 // for a package: its literal text in place, and a number where it writes one.
 //
 // It exists so that a reader of a tag listing can tell an alias apart from a
@@ -352,8 +354,8 @@ func (f AliasFormat) Render(pkg string, v ccme.Version) string {
 // call for opposite answers: an alias is not a release and belongs out of the
 // listing, while a release tag carrying an unreadable version is exactly what
 // the initials fallback is for and has to stay in.
-func (f AliasFormat) Matches(pkg, tag string) bool {
-	return f.Matcher(pkg).Matches(tag)
+func (f AliasFormat) IsMatch(pkg, tag string) bool {
+	return f.Matcher(pkg).IsMatch(tag)
 }
 
 // Matcher compiles this format for one package, so that a caller reading a tag
@@ -369,9 +371,9 @@ type AliasMatcher struct {
 	pkg string
 }
 
-// Matches reports whether the name is one this package's alias could have
-// written. See AliasFormat.Matches.
-func (m AliasMatcher) Matches(tag string) bool {
+// IsMatch reports whether the name is one this package's alias could have
+// written. See AliasFormat.IsMatch.
+func (m AliasMatcher) IsMatch(tag string) bool {
 	if m.tpl == nil {
 		return false
 	}
@@ -452,8 +454,8 @@ func (t Tags) highest(keep func(Tag) bool) (Tag, bool) {
 	return best, found
 }
 
-// Git abstracts the repository operations used by planning and publishing.
-type Git interface {
+// Gitx abstracts the repository operations used by planning and publishing.
+type Gitx interface {
 	// Tags returns every reachable tag of the package under format, newest
 	// first by creation date. Callers select a baseline from it with
 	// Tags.Baseline or Tags.StableBaseline. The planner calls it for many
@@ -494,8 +496,26 @@ func (NoAncestry) IsAncestor(context.Context, string, string) (bool, error) {
 	return false, ErrNoAncestry
 }
 
-// CLI is the Git implementation backed by the git executable.
-type CLI struct {
+// CommitProbex is the optional Gitx capability that answers whether a
+// repository holds an object at all, which is a different question from where
+// that object sits in the graph.
+//
+// The two are separate because a polyrepository control snapshot can pin a
+// source revision the local source clone has never held: the pointer lives in
+// the control tree, not in the source. Asking git an ancestry question about
+// such a revision fails the command, and that failure is the truth about the
+// command but not about the fleet — the answer planning needs is "this
+// checkout does not contain it". Implementations without the capability are
+// simply not asked; the caller keeps its ordinary ancestry path.
+type CommitProbex interface {
+	// IsCommitPresent reports whether rev resolves to a commit object in this
+	// repository. An absent or unparsable revision is the answer false with a
+	// nil error; only a repository that cannot be read at all is an error.
+	IsCommitPresent(ctx context.Context, rev string) (bool, error)
+}
+
+// LocalGitx implements Gitx through the local git executable.
+type LocalGitx struct {
 	Dir string // repository root
 	// Name and Email, when set, are the identity every commit and annotated
 	// tag is created under (passed as `-c user.name/-c user.email`), so a CI
@@ -504,7 +524,16 @@ type CLI struct {
 	Name  string
 	Email string
 
-	// Log traces every git invocation. The zero value discards, so a CLI
+	// LinkPaths are the repository-relative gitlink paths holding a
+	// choreographed fleet's links. They are excluded from every pathspec this
+	// type builds for the release's own work: a fleet link's pin is advisory
+	// between settlements, so a link left ahead of its committed value would
+	// otherwise make the whole repository look dirty and be swept into the
+	// next release commit. Empty for an orchestrated or single repository,
+	// which is what keeps their command lines exactly as they were.
+	LinkPaths []string
+
+	// Log traces every git invocation. The zero value discards, so a LocalGitx
 	// built without one still works; commands that have a logger set it, and
 	// what comes out is the single most useful thing in a bug report about a
 	// release: which git commands ran, in which order, and which one failed.
@@ -516,15 +545,19 @@ type CLI struct {
 	Log zerolog.Logger
 
 	// The ancestry DAG, loaded lazily by the first IsAncestor and shared by
-	// every later one. Loaded once per CLI value: a release run creates
+	// every later one. Loaded once per LocalGitx value: a release run creates
 	// commits after planning, but planning's ancestry questions are all
 	// asked against the history that existed when it started.
-	dagOnce sync.Once
-	dag     map[string][]string
-	dagErr  error
+	//
+	// A mutex rather than sync.Once because the load takes the caller's
+	// context: a first caller whose context is cancelled must not settle the
+	// answer for every later one.
+	dagMu  sync.Mutex
+	dag    map[string][]string
+	dagErr error
 }
 
-var _ Git = (*CLI)(nil)
+var _ Gitx = (*LocalGitx)(nil)
 
 // mutates reports whether a git invocation changes repository state — the
 // calls whose trace line rises to debug level. "tag --list" is the one
@@ -534,7 +567,13 @@ func mutates(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "push", "commit", "add", "checkout", "clean", "merge":
+	case "push", "commit", "add", "checkout", "clean", "merge",
+		// The plumbing a choreographed settlement writes with: the fleet
+		// links it stages, the commit object it creates, the ref it moves,
+		// and the checkout a link is materialized by. Each is O(few) per run
+		// and each changes the repository, so each belongs beside the other
+		// mutations a debug reader follows a release by.
+		"submodule", "update-index", "update-ref", "commit-tree":
 		return true
 	case "tag":
 		return len(args) > 1 && args[1] != "--list"
@@ -542,7 +581,34 @@ func mutates(args []string) bool {
 	return false
 }
 
-func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
+// gitInvocations counts every git subprocess this process has started.
+//
+// It exists because the cost of a run is mostly the number of git processes it
+// forks, and nothing else measures that: plan.HistoryStats counts the
+// planner's own calls and says nothing about discovery, recording or the
+// locks. A benchmark or a test that claims one part of the tool asks git less
+// often can read this and show it.
+//
+// It is a counter and not a cap. The pools that fork git are independent by
+// design, and a process-wide limit would couple them.
+var gitInvocations atomic.Uint64
+
+// GitInvocations reports how many git subprocesses this process has started.
+// Exported for benchmarks and for the tests that assert a call was not made.
+func GitInvocations() uint64 { return gitInvocations.Load() }
+
+func (c *LocalGitx) run(ctx context.Context, args ...string) (string, error) {
+	return c.runEnv(ctx, nil, args...)
+}
+
+// runEnv is run with extra environment variables for this invocation alone.
+//
+// It exists for the one thing git takes from the environment rather than from
+// its arguments: GIT_INDEX_FILE, which is how a commit can be built from a
+// temporary index without the repository's own index or worktree being touched
+// at all. The variables are appended, so they win over the inherited ones.
+func (c *LocalGitx) runEnv(ctx context.Context, env []string, args ...string) (string, error) {
+	gitInvocations.Add(1)
 	base := []string{"-C", c.Dir}
 	if c.Name != "" {
 		base = append(base, "-c", "user.name="+c.Name)
@@ -556,12 +622,16 @@ func (c *CLI) run(ctx context.Context, args ...string) (string, error) {
 	// branch that moved is recognised by its wording (see classifyPush). A
 	// localised checkout would defeat that silently, so every invocation asks
 	// for the C locale.
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	cmd.Env = append(append(os.Environ(), "LC_ALL=C", "LANG=C"), env...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-	// git spawns no long-lived children here, but if one ever held the output
-	// pipes past its exit, WaitDelay turns a silent hang into an error.
+	// A network call forks ssh, a credential helper or git-remote-https, and
+	// those inherit the output pipes. Killing git alone would leave them
+	// running and hold Wait until WaitDelay expired, so cancellation signals
+	// the whole group. WaitDelay remains the backstop for anything that
+	// escapes it.
+	script.SetProcessGroup(cmd)
 	cmd.WaitDelay = 10 * time.Second
 	started := time.Now()
 	err := cmd.Run()
@@ -634,7 +704,7 @@ func redactGitArgs(args []string) []string {
 // from HEAD are considered, so a tag on an unmerged branch does not affect
 // this branch's computation and per-branch release lines work with no
 // configuration.
-func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, error) {
+func (c *LocalGitx) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, error) {
 	format = format.WithDefault()
 	// The last --sort key is primary: creation date desc, name as tie-break.
 	// Tabs separate the fields; a ref name can contain neither a tab nor a
@@ -646,7 +716,7 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 	if err != nil {
 		return nil, err
 	}
-	return parseTags(out, pkg, format), nil
+	return parseTags(out, pkg, format)
 }
 
 // TagsForPackages returns the reachable tags for several packages from one
@@ -658,7 +728,7 @@ func (c *CLI) Tags(ctx context.Context, pkg string, format TagFormat) (Tags, err
 // applies its own format matcher and parser, including custom formats whose
 // globs overlap. Tags itself remains uncached and observes tags created after
 // an earlier call, which callers outside one planning snapshot rely on.
-func (c *CLI) TagsForPackages(ctx context.Context, formats map[string]TagFormat) (map[string]Tags, error) {
+func (c *LocalGitx) TagsForPackages(ctx context.Context, formats map[string]TagFormat) (map[string]Tags, error) {
 	if len(formats) == 0 {
 		return map[string]Tags{}, nil
 	}
@@ -668,7 +738,7 @@ func (c *CLI) TagsForPackages(ctx context.Context, formats map[string]TagFormat)
 	if err != nil {
 		return nil, err
 	}
-	return parseTagsForPackages(out, formats), nil
+	return parseTagsForPackages(out, formats)
 }
 
 type packageTagMatcher struct {
@@ -709,30 +779,34 @@ type tagInventoryEntry struct {
 	commit string
 }
 
-func parseTagInventoryLine(line string) (tagInventoryEntry, bool) {
+func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 	// strings.Lines retains the line ending. Remove only that framing: tabs
 	// and spaces are field contents here, and trimming the whole record would
 	// turn a missing leading or trailing tab into a different record shape.
 	line = strings.TrimSuffix(line, "\n")
 	line = strings.TrimSuffix(line, "\r")
 	if strings.TrimSpace(line) == "" {
-		return tagInventoryEntry{}, false
+		return tagInventoryEntry{}, nil
 	}
 	name, rest, ok := strings.Cut(line, "\t")
 	if !ok {
-		return tagInventoryEntry{}, false
+		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
 	}
-	object, peeled, hasPeeled := strings.Cut(rest, "\t")
+	object, peeled, ok := strings.Cut(rest, "\t")
+	if !ok || strings.Contains(peeled, "\t") {
+		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
+	}
 	entry := tagInventoryEntry{name: strings.TrimSpace(name), commit: strings.TrimSpace(object)}
-	if hasPeeled {
-		if before, _, found := strings.Cut(peeled, "\t"); found {
-			peeled = before
-		}
-		if peeled = strings.TrimSpace(peeled); peeled != "" {
-			entry.commit = peeled
-		}
+	if entry.name == "" || !fullObjectID(entry.commit) {
+		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory identity")
 	}
-	return entry, true
+	if peeled := strings.TrimSpace(peeled); peeled != "" {
+		if !fullObjectID(peeled) {
+			return tagInventoryEntry{}, fmt.Errorf("gitx: malformed peeled tag object id")
+		}
+		entry.commit = peeled
+	}
+	return entry, nil
 }
 
 // detach copies the retained fields out of the full git-for-each-ref output.
@@ -755,7 +829,7 @@ func (m packageTagMatcher) read(entry tagInventoryEntry) Tag {
 // the tag's bytes (each node has at most the fixed byte alphabet); work after
 // that is the real candidate overlap between custom formats. Empty-prefix
 // formats deliberately remain candidates for every tag.
-func parseTagsForPackages(out string, formats map[string]TagFormat) map[string]Tags {
+func parseTagsForPackages(out string, formats map[string]TagFormat) (map[string]Tags, error) {
 	result := make(map[string]Tags, len(formats))
 	prefixes := &tagPrefixNode[packageTagMatcher]{}
 	templates := make(map[TagFormat]*tagTemplate)
@@ -786,8 +860,11 @@ func parseTagsForPackages(out string, formats map[string]TagFormat) map[string]T
 	}
 
 	for line := range strings.Lines(out) {
-		entry, ok := parseTagInventoryLine(line)
-		if !ok || entry.name == LockTagName || strings.HasPrefix(entry.name, LockAttemptTagPrefix) {
+		entry, err := parseTagInventoryLine(line)
+		if err != nil {
+			return nil, err
+		}
+		if entry.name == "" || entry.name == LockTagName || strings.HasPrefix(entry.name, LockAttemptTagPrefix) {
 			continue
 		}
 		detached := false
@@ -808,18 +885,21 @@ func parseTagsForPackages(out string, formats map[string]TagFormat) map[string]T
 			node = node.child(entry.name[depth])
 		}
 	}
-	return result
+	return result, nil
 }
 
-func parseTags(out, pkg string, format TagFormat) Tags {
+func parseTags(out, pkg string, format TagFormat) (Tags, error) {
 	matcher, ok := newPackageTagMatcher(pkg, format)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	var tags Tags
 	for line := range strings.Lines(out) {
-		entry, ok := parseTagInventoryLine(line)
-		if !ok {
+		entry, err := parseTagInventoryLine(line)
+		if err != nil {
+			return nil, err
+		}
+		if entry.name == "" {
 			continue
 		}
 		if entry.name == LockTagName || strings.HasPrefix(entry.name, LockAttemptTagPrefix) {
@@ -839,7 +919,7 @@ func parseTags(out, pkg string, format TagFormat) Tags {
 		}
 		tags = append(tags, matcher.read(entry.detach()))
 	}
-	return tags
+	return tags, nil
 }
 
 // IsAncestor reports whether commit a is an ancestor-or-self of commit b.
@@ -847,7 +927,7 @@ func parseTags(out, pkg string, format TagFormat) Tags {
 // Ancestry rather than commit or tag dates is what keeps cancellation (§10.4)
 // and the staleness screen (§13.7b) deterministic under merges, rebases and
 // equal timestamps.
-func (c *CLI) IsAncestor(ctx context.Context, a, b string) (bool, error) {
+func (c *LocalGitx) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 	if a == "" || b == "" {
 		return false, nil
 	}
@@ -873,25 +953,40 @@ func (c *CLI) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 }
 
 // commitDAG returns the parent pointers of every commit reachable from HEAD,
-// loaded once per CLI and reused for every ancestry question.
-func (c *CLI) commitDAG(ctx context.Context) (map[string][]string, error) {
-	c.dagOnce.Do(func() {
-		out, err := c.run(ctx, "rev-list", "--parents", "HEAD")
-		if err != nil {
+// loaded once per LocalGitx and reused for every ancestry question.
+func (c *LocalGitx) commitDAG(ctx context.Context) (map[string][]string, error) {
+	c.dagMu.Lock()
+	defer c.dagMu.Unlock()
+	if c.dag != nil || c.dagErr != nil {
+		return c.dag, c.dagErr
+	}
+	out, err := c.run(ctx, "rev-list", "--parents", "HEAD")
+	if err != nil {
+		// A cancelled or expired context says nothing about the repository,
+		// so that answer is not remembered: a later caller with a live
+		// context asks git again instead of inheriting the interruption.
+		if ctx.Err() == nil {
 			c.dagErr = err
-			return
 		}
-		dag := make(map[string][]string)
-		for line := range strings.Lines(out) {
-			fields := strings.Fields(line)
-			if len(fields) == 0 {
-				continue
-			}
-			dag[fields[0]] = fields[1:]
+		return nil, err
+	}
+	dag := make(map[string][]string)
+	for line := range strings.Lines(out) {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
 		}
-		c.dag = dag
-	})
-	return c.dag, c.dagErr
+		// The parents are sub-slices of one rev-list buffer. Cloning the
+		// commit ids keeps the whole listing from staying live for as long as
+		// this repository handle does.
+		parents := make([]string, 0, len(fields)-1)
+		for _, parent := range fields[1:] {
+			parents = append(parents, strings.Clone(parent))
+		}
+		dag[strings.Clone(fields[0])] = parents
+	}
+	c.dag = dag
+	return c.dag, nil
 }
 
 // dagIsAncestor walks b's ancestry looking for a. The DAG is the repository's
@@ -916,13 +1011,10 @@ func dagIsAncestor(parents map[string][]string, a, b string) bool {
 
 // mergeBaseIsAncestor is the per-question fallback for commits the loaded DAG
 // does not cover.
-func (c *CLI) mergeBaseIsAncestor(ctx context.Context, a, b string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", c.Dir,
-		"merge-base", "--is-ancestor", a, b)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	cmd.WaitDelay = 10 * time.Second // same backstop as run()
-	err := cmd.Run()
+// It goes through run like every other invocation, so the question appears in
+// the trace and its failure carries the same redaction as the rest.
+func (c *LocalGitx) mergeBaseIsAncestor(ctx context.Context, a, b string) (bool, error) {
+	_, err := c.run(ctx, "merge-base", "--is-ancestor", a, b)
 	if err == nil {
 		return true, nil
 	}
@@ -931,17 +1023,61 @@ func (c *CLI) mergeBaseIsAncestor(ctx context.Context, a, b string) (bool, error
 	if errors.As(err, &ee) && ee.ExitCode() == 1 {
 		return false, nil
 	}
-	return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w: %s",
-		a, b, err, strings.TrimSpace(stderr.String()))
+	return false, err
+}
+
+var _ CommitProbex = (*LocalGitx)(nil)
+
+// IsCommitPresent reports whether rev resolves to a commit object here.
+//
+// `rev-parse --quiet --verify` is the one spelling that separates the two
+// failures this has to tell apart: an unknown revision exits 1 silently,
+// while a repository git cannot read at all exits 128 and says why. Peeling
+// with `^{commit}` makes the question about a commit rather than any object,
+// which is what a gitlink pin names.
+//
+// Callers use this before an ancestry question whose left side may be absent
+// — a control snapshot's source pin, above all. `merge-base --is-ancestor`
+// treats an unknown commit as a fatal error, so without the probe a source
+// clone that simply never fetched the pinned revision aborts planning with a
+// git exit status instead of reporting the fleet condition that caused it.
+func (c *LocalGitx) IsCommitPresent(ctx context.Context, rev string) (bool, error) {
+	if rev == "" {
+		return false, nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", c.Dir,
+		"rev-parse", "--quiet", "--verify", rev+"^{commit}")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.WaitDelay = 10 * time.Second // same backstop as run()
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	// Exit status 1 is the answer "no such commit here"; anything else is a
+	// real failure.
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git rev-parse --verify %s: %w: %s",
+		rev, err, strings.TrimSpace(stderr.String()))
 }
 
 // IsShallow reports whether the repository is a shallow clone.
-func (c *CLI) IsShallow(ctx context.Context) (bool, error) {
+func (c *LocalGitx) IsShallow(ctx context.Context) (bool, error) {
 	out, err := c.run(ctx, "rev-parse", "--is-shallow-repository")
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(out) == "true", nil
+	switch strings.TrimSpace(out) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("gitx: malformed shallow-repository reply")
+	}
 }
 
 // Record and field separators for the commit log. Both are ASCII control
@@ -969,7 +1105,7 @@ const (
 	logCommitFields = 5
 )
 
-func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
+func (c *LocalGitx) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 	rangeArg := "HEAD"
 	if sinceTag != "" {
 		rangeArg = sinceTag + "..HEAD"
@@ -991,6 +1127,10 @@ func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseCommits(out)
+}
+
+func parseCommits(out string) ([]Commit, error) {
 	if strings.TrimSpace(out) == "" {
 		return nil, nil
 	}
@@ -1002,11 +1142,22 @@ func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 		}
 		fields := strings.SplitN(record, logFieldSep, logCommitFields+1)
 		if len(fields) < logCommitFields {
-			continue
+			return nil, fmt.Errorf("gitx: malformed commit log record: expected at least %d fields, got %d",
+				logCommitFields, len(fields))
+		}
+		sha := strings.TrimSpace(fields[0])
+		if !fullObjectID(sha) {
+			return nil, fmt.Errorf("gitx: malformed commit log object id")
+		}
+		parents := strings.Fields(fields[1])
+		for _, parent := range parents {
+			if !fullObjectID(parent) {
+				return nil, fmt.Errorf("gitx: malformed commit log parent")
+			}
 		}
 		commit := Commit{
-			SHA:     strings.TrimSpace(fields[0]),
-			Parents: strings.Fields(fields[1]),
+			SHA:     sha,
+			Parents: parents,
 			// Trimmed because git pads neither, but a name is free text and a
 			// configured identity can carry trailing spaces the record would
 			// otherwise render.
@@ -1029,7 +1180,7 @@ func (c *CLI) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
 
 // CreateTag creates an annotated tag at target (any commit-ish), or at HEAD
 // when target is empty.
-func (c *CLI) CreateTag(ctx context.Context, name, message, target string) error {
+func (c *LocalGitx) CreateTag(ctx context.Context, name, message, target string) error {
 	return c.createTag(ctx, name, message, target, false)
 }
 
@@ -1041,11 +1192,11 @@ func (c *CLI) CreateTag(ctx context.Context, name, message, target string) error
 // dying on a tag some earlier attempt left behind. It is deliberately a
 // separate method rather than a flag on CreateTag: overwriting a release
 // record is not something a caller should be able to do by passing false.
-func (c *CLI) CreateTagForce(ctx context.Context, name, message, target string) error {
+func (c *LocalGitx) CreateTagForce(ctx context.Context, name, message, target string) error {
 	return c.createTag(ctx, name, message, target, true)
 }
 
-func (c *CLI) createTag(ctx context.Context, name, message, target string, force bool) error {
+func (c *LocalGitx) createTag(ctx context.Context, name, message, target string, force bool) error {
 	args := []string{"tag"}
 	if force {
 		args = append(args, "-f")
@@ -1060,7 +1211,7 @@ func (c *CLI) createTag(ctx context.Context, name, message, target string, force
 
 // DeleteTag removes a tag from this repository. It fails when the tag is not
 // there, which callers that are cleaning up are free to ignore.
-func (c *CLI) DeleteTag(ctx context.Context, name string) error {
+func (c *LocalGitx) DeleteTag(ctx context.Context, name string) error {
 	_, err := c.run(ctx, "tag", "-d", name)
 	return err
 }
@@ -1073,7 +1224,7 @@ func (c *CLI) DeleteTag(ctx context.Context, name string) error {
 // here is contending for a name someone else may already hold. A rejection is
 // the answer the caller asked for, not an obstacle to push through: forcing it
 // would overwrite the holder's ref and tell both of them they won.
-func (c *CLI) PushTag(ctx context.Context, remote, name string) error {
+func (c *LocalGitx) PushTag(ctx context.Context, remote, name string) error {
 	_, err := c.run(ctx, "push", remote, "refs/tags/"+name)
 	return err
 }
@@ -1082,13 +1233,13 @@ func (c *CLI) PushTag(ctx context.Context, remote, name string) error {
 // destination is never forced: an existing lock must make acquisition fail.
 // Naming the source object, rather than a mutable local ref, also makes this
 // safe when two dispat processes share one checkout.
-func (c *CLI) PushObjectToTag(ctx context.Context, remote, oid, name string) error {
+func (c *LocalGitx) PushObjectToTag(ctx context.Context, remote, oid, name string) error {
 	_, err := c.run(ctx, "push", remote, oid+":refs/tags/"+name)
 	return err
 }
 
 // TagObject resolves the tag object itself (without peeling it to its commit).
-func (c *CLI) TagObject(ctx context.Context, name string) (string, error) {
+func (c *LocalGitx) TagObject(ctx context.Context, name string) (string, error) {
 	out, err := c.run(ctx, "rev-parse", "refs/tags/"+name)
 	return strings.TrimSpace(out), err
 }
@@ -1097,7 +1248,7 @@ func (c *CLI) TagObject(ctx context.Context, name string) (string, error) {
 // does not have succeeds: git warns and reports the deletion, because the
 // fully qualified refspec leaves nothing to guess about. Cleanup is therefore
 // idempotent on this side, unlike DeleteTag.
-func (c *CLI) DeleteRemoteTag(ctx context.Context, remote, name string) error {
+func (c *LocalGitx) DeleteRemoteTag(ctx context.Context, remote, name string) error {
 	_, err := c.run(ctx, "push", remote, "--delete", "refs/tags/"+name)
 	return err
 }
@@ -1105,7 +1256,7 @@ func (c *CLI) DeleteRemoteTag(ctx context.Context, remote, name string) error {
 // DeleteRemoteTagLease deletes name only while it still names expectedOID.
 // If ownership changed, git rejects the operation and preserves the new
 // owner's lock.
-func (c *CLI) DeleteRemoteTagLease(ctx context.Context, remote, name, expectedOID string) error {
+func (c *LocalGitx) DeleteRemoteTagLease(ctx context.Context, remote, name, expectedOID string) error {
 	ref := "refs/tags/" + name
 	_, err := c.run(ctx, "push", "--force-with-lease="+ref+":"+expectedOID,
 		remote, ":"+ref)
@@ -1113,7 +1264,7 @@ func (c *CLI) DeleteRemoteTagLease(ctx context.Context, remote, name, expectedOI
 }
 
 // TagExists reports whether the named tag exists in this repository.
-func (c *CLI) TagExists(ctx context.Context, name string) (bool, error) {
+func (c *LocalGitx) TagExists(ctx context.Context, name string) (bool, error) {
 	_, err := c.run(ctx, "rev-parse", "-q", "--verify", "refs/tags/"+name)
 	if err != nil {
 		var exit *exec.ExitError
@@ -1128,7 +1279,7 @@ func (c *CLI) TagExists(ctx context.Context, name string) (bool, error) {
 // RemoteTagMessage reads an annotated tag's message from the remote without
 // touching this clone's refs: the fetch lands the object in FETCH_HEAD only.
 // A lightweight tag has no message and comes back empty.
-func (c *CLI) RemoteTagMessage(ctx context.Context, remote, name string) (string, error) {
+func (c *LocalGitx) RemoteTagMessage(ctx context.Context, remote, name string) (string, error) {
 	if _, err := c.run(ctx, "fetch", "--no-tags", remote, "refs/tags/"+name); err != nil {
 		return "", err
 	}
@@ -1150,7 +1301,7 @@ func (c *CLI) RemoteTagMessage(ctx context.Context, remote, name string) (string
 
 // pathspec renders dir relative to the repo root, avoiding symlinked-tempdir
 // mismatches in git pathspecs.
-func (c *CLI) pathspec(dir string) string {
+func (c *LocalGitx) pathspec(dir string) string {
 	if rel, err := filepath.Rel(c.Dir, dir); err == nil {
 		return rel
 	}
@@ -1161,12 +1312,12 @@ func (c *CLI) pathspec(dir string) string {
 // from HEAD and untracked files and folders are removed. Note this also wipes
 // any pre-existing uncommitted changes in that folder — CI runs from a clean
 // checkout, which is the intended environment.
-func (c *CLI) RevertDir(ctx context.Context, dir string) error {
-	spec := c.pathspec(dir)
-	if _, err := c.run(ctx, "checkout", "--", spec); err != nil {
+func (c *LocalGitx) RevertDir(ctx context.Context, dir string) error {
+	specs := c.withoutLinks([]string{c.pathspec(dir)})
+	if _, err := c.run(ctx, append([]string{"checkout", "--"}, specs...)...); err != nil {
 		return err
 	}
-	_, err := c.run(ctx, "clean", "-fd", "--", spec)
+	_, err := c.run(ctx, append([]string{"clean", "-fd", "--"}, specs...)...)
 	return err
 }
 
@@ -1174,17 +1325,14 @@ func (c *CLI) RevertDir(ctx context.Context, dir string) error {
 // single commit. It reports whether a commit was actually created: when the
 // staged set turns out empty (e.g. changelogs disabled and no manifest
 // changes) no commit is made and (false, nil) is returned.
-func (c *CLI) CommitDirs(ctx context.Context, dirs []string, message string) (bool, error) {
-	args := []string{"add", "--"}
-	for _, d := range dirs {
-		args = append(args, c.pathspec(d))
-	}
-	if _, err := c.run(ctx, args...); err != nil {
-		return false, err
-	}
+func (c *LocalGitx) CommitDirs(ctx context.Context, dirs []string, message string) (bool, error) {
 	paths := make([]string, 0, len(dirs))
 	for _, d := range dirs {
 		paths = append(paths, c.pathspec(d))
+	}
+	paths = c.withoutLinks(paths)
+	if _, err := c.run(ctx, append([]string{"add", "--"}, paths...)...); err != nil {
+		return false, err
 	}
 	// Check only this operation's paths. Unrelated staged changes belong to
 	// the caller and must neither cause nor enter this commit.
@@ -1202,11 +1350,12 @@ func (c *CLI) CommitDirs(ctx context.Context, dirs []string, message string) (bo
 // DirtyPaths returns tracked, staged, and untracked paths beneath dirs. It is
 // used before release work so automatic rollback and commit cannot overwrite
 // changes that predate the run.
-func (c *CLI) DirtyPaths(ctx context.Context, dirs []string) ([]string, error) {
-	args := []string{"status", "--porcelain=v1", "-z", "--untracked-files=all", "--"}
+func (c *LocalGitx) DirtyPaths(ctx context.Context, dirs []string) ([]string, error) {
+	specs := make([]string, 0, len(dirs))
 	for _, d := range dirs {
-		args = append(args, c.pathspec(d))
+		specs = append(specs, c.pathspec(d))
 	}
+	args := append([]string{"status", "--porcelain=v1", "-z", "--untracked-files=all", "--"}, c.withoutLinks(specs)...)
 	out, err := c.run(ctx, args...)
 	if err != nil {
 		return nil, err
@@ -1230,30 +1379,34 @@ func (c *CLI) DirtyPaths(ctx context.Context, dirs []string) ([]string, error) {
 }
 
 // HeadSHA returns the full SHA of the current HEAD commit.
-func (c *CLI) HeadSHA(ctx context.Context) (string, error) {
+func (c *LocalGitx) HeadSHA(ctx context.Context) (string, error) {
 	return c.ResolveCommit(ctx, "HEAD")
 }
 
 // ResolveCommit resolves any commit-ish (a short SHA, a ref, HEAD) to its
 // full commit SHA, peeling tags on the way.
-func (c *CLI) ResolveCommit(ctx context.Context, rev string) (string, error) {
+func (c *LocalGitx) ResolveCommit(ctx context.Context, rev string) (string, error) {
 	out, err := c.run(ctx, "rev-parse", rev+"^{commit}")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	oid := strings.TrimSpace(out)
+	if !fullObjectID(oid) {
+		return "", fmt.Errorf("gitx: malformed commit object id")
+	}
+	return oid, nil
 }
 
 // VerifyRemote checks that the remote exists, is reachable and authenticated.
 // Meant to run before any release work so misconfigured credentials fail fast.
-func (c *CLI) VerifyRemote(ctx context.Context, remote string) error {
+func (c *LocalGitx) VerifyRemote(ctx context.Context, remote string) error {
 	_, err := c.run(ctx, "ls-remote", "--heads", remote)
 	return err
 }
 
 // CurrentBranch returns the name of the checked-out branch, or "" when HEAD is
 // detached.
-func (c *CLI) CurrentBranch(ctx context.Context) (string, error) {
+func (c *LocalGitx) CurrentBranch(ctx context.Context) (string, error) {
 	out, err := c.run(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", err
@@ -1276,7 +1429,7 @@ func (c *CLI) CurrentBranch(ctx context.Context) (string, error) {
 // failed ResolveCommit answers true rather than propagating: the object is
 // missing because it is new, and the caller's remedy (pull) is the same either
 // way.
-func (c *CLI) BehindRemote(ctx context.Context, remote, branch string) (bool, error) {
+func (c *LocalGitx) BehindRemote(ctx context.Context, remote, branch string) (bool, error) {
 	ref := "refs/heads/" + branch
 	out, err := c.run(ctx, "ls-remote", remote, ref)
 	if err != nil {
@@ -1309,7 +1462,7 @@ func (c *CLI) BehindRemote(ctx context.Context, remote, branch string) (bool, er
 }
 
 // RemoteTags returns the names of the tags that exist on the remote.
-func (c *CLI) RemoteTags(ctx context.Context, remote string) (map[string]bool, error) {
+func (c *LocalGitx) RemoteTags(ctx context.Context, remote string) (map[string]bool, error) {
 	out, err := c.run(ctx, "ls-remote", "--tags", remote)
 	if err != nil {
 		return nil, err
@@ -1363,8 +1516,10 @@ func classifyPush(err error) error {
 		if strings.Contains(text, phrase) {
 			// git's own text leads, because that is what a reader of a failed
 			// release needs first; the sentinel stays in the chain for
-			// errors.Is, which is the only thing that reads it.
-			return fmt.Errorf("%v: %w", err, ErrRejected)
+			// errors.Is, which is the only thing that reads it. Both are
+			// wrapped, so a cancelled push still answers context.Canceled
+			// and an exit status is still reachable through errors.As.
+			return fmt.Errorf("%w: %w", err, ErrRejected)
 		}
 	}
 	return err
@@ -1407,7 +1562,7 @@ func (c *MergeConflict) Error() string {
 // The fetch is deliberately --no-tags: the tags this run just created are its
 // own records, and pulling the remote's would be a second, unrelated change to
 // the refs under a run that is already recovering from one surprise.
-func (c *CLI) MergeRemote(ctx context.Context, remote, branch, message string) error {
+func (c *LocalGitx) MergeRemote(ctx context.Context, remote, branch, message string) error {
 	if _, err := c.run(ctx, "fetch", "--no-tags", remote, branch); err != nil {
 		return err
 	}
@@ -1416,13 +1571,21 @@ func (c *CLI) MergeRemote(ctx context.Context, remote, branch, message string) e
 	// recovery documents is only a shape when there is a merge commit to have
 	// one.
 	if _, err := c.run(ctx, "merge", "--no-ff", "--no-edit", "-m", message, "FETCH_HEAD"); err != nil {
-		if paths, uErr := c.UnmergedPaths(ctx); uErr == nil && len(paths) > 0 {
+		// The merge that just failed may have failed because the run was
+		// cancelled. Reading the index and undoing the merge are the cleanup
+		// that cancellation is the reason for, so they run on a detached
+		// context with a deadline of their own: handing them the dead one
+		// would leave the merge in progress in the working tree, which is
+		// exactly what this function promises not to do.
+		cleanupCtx, cancel := detachedCleanup(ctx, mergeCleanupTimeout)
+		defer cancel()
+		if paths, uErr := c.UnmergedPaths(cleanupCtx); uErr == nil && len(paths) > 0 {
 			return &MergeConflict{Paths: paths}
 		}
 		// The abort's own failure is not what the caller needs to hear about:
 		// the merge is the thing that did not work, and saying so twice would
 		// bury it.
-		if abortErr := c.AbortMerge(ctx); abortErr != nil {
+		if abortErr := c.AbortMerge(cleanupCtx); abortErr != nil {
 			c.Log.Warn().Err(abortErr).Msg("could not abort the merge")
 		}
 		return err
@@ -1430,8 +1593,20 @@ func (c *CLI) MergeRemote(ctx context.Context, remote, branch, message string) e
 	return nil
 }
 
+// mergeCleanupTimeout bounds the detached index read and merge abort that
+// follow a failed merge. Two local git calls; a bound rather than none so an
+// unresponsive repository cannot hold an interrupted run open.
+const mergeCleanupTimeout = 30 * time.Second
+
+// detachedCleanup is a context for work that must still run after the
+// caller's was cancelled: the caller's values are kept, its cancellation is
+// not, and a deadline bounds the detachment.
+func detachedCleanup(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), d)
+}
+
 // UnmergedPaths are the paths a stopped merge left unresolved in the index.
-func (c *CLI) UnmergedPaths(ctx context.Context) ([]string, error) {
+func (c *LocalGitx) UnmergedPaths(ctx context.Context) ([]string, error) {
 	out, err := c.run(ctx, "diff", "--name-only", "--diff-filter=U")
 	if err != nil {
 		return nil, err
@@ -1446,7 +1621,7 @@ func (c *CLI) UnmergedPaths(ctx context.Context) ([]string, error) {
 }
 
 // AbortMerge undoes a merge in progress, leaving the working tree as it was.
-func (c *CLI) AbortMerge(ctx context.Context) error {
+func (c *LocalGitx) AbortMerge(ctx context.Context) error {
 	_, err := c.run(ctx, "merge", "--abort")
 	return err
 }
@@ -1463,7 +1638,7 @@ func (c *CLI) AbortMerge(ctx context.Context) error {
 // A path this side deleted cannot be checked out, and is removed instead;
 // every other shape of conflict, content or add/add, resolves to the file this
 // side has.
-func (c *CLI) ResolveOurs(ctx context.Context, paths []string) error {
+func (c *LocalGitx) ResolveOurs(ctx context.Context, paths []string) error {
 	for _, path := range paths {
 		if _, err := c.run(ctx, "checkout", "--ours", "--", path); err != nil {
 			if _, rmErr := c.run(ctx, "rm", "-q", "-f", "--", path); rmErr != nil {
@@ -1480,14 +1655,14 @@ func (c *CLI) ResolveOurs(ctx context.Context, paths []string) error {
 
 // StageFile adds one path to the index, which is how a caller puts something
 // of its own into a merge commit before finishing it.
-func (c *CLI) StageFile(ctx context.Context, path string) error {
+func (c *LocalGitx) StageFile(ctx context.Context, path string) error {
 	_, err := c.run(ctx, "add", "--", path)
 	return err
 }
 
 // CommitMerge finishes a merge in progress with the message it was started
 // with, whatever the caller resolved and staged in the meantime.
-func (c *CLI) CommitMerge(ctx context.Context) error {
+func (c *LocalGitx) CommitMerge(ctx context.Context) error {
 	_, err := c.run(ctx, "commit", "--no-edit")
 	return err
 }
@@ -1500,7 +1675,7 @@ func (c *CLI) CommitMerge(ctx context.Context) error {
 // exists to preserve. A name already taken is a failure rather than a fallback
 // name, because the naming scheme makes a collision practically impossible and
 // a surprise is worth stopping on.
-func (c *CLI) PushBranchAt(ctx context.Context, remote, rev, name string) error {
+func (c *LocalGitx) PushBranchAt(ctx context.Context, remote, rev, name string) error {
 	if err := ValidRefName(name); err != nil {
 		return fmt.Errorf("%q: %w", name, err)
 	}
@@ -1509,7 +1684,9 @@ func (c *CLI) PushBranchAt(ctx context.Context, remote, rev, name string) error 
 		return err
 	}
 	if strings.TrimSpace(existing) != "" {
-		return fmt.Errorf("%s already has a branch called %s", remote, name)
+		// The remote may be a resolved push URL rather than a name, and a
+		// release's error text reaches hook scripts through DISPAT_ERROR.
+		return fmt.Errorf("%s already has a branch called %s", RedactURL(remote), name)
 	}
 	_, err = c.run(ctx, "push", remote, rev+":refs/heads/"+name)
 	return err
@@ -1546,7 +1723,7 @@ type PushReport struct {
 // namespace, are ever forced. A refusal of that kind comes back wrapping
 // ErrRejected, so the caller can join what landed with MergeRemote and push
 // again rather than reporting a release that never landed.
-func (c *CLI) Push(ctx context.Context, remote string, tags []string, force bool) (PushReport, error) {
+func (c *LocalGitx) Push(ctx context.Context, remote string, tags []string, force bool) (PushReport, error) {
 	var report PushReport
 	if _, err := c.run(ctx, "push", remote, "HEAD"); err != nil {
 		return report, classifyPush(err)

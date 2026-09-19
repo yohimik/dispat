@@ -75,7 +75,7 @@ type PreparedEdit struct {
 	out  []byte      // the rendered replacement
 	mode os.FileMode // the file's own permissions, kept across the rewrite
 	noop bool        // the edit set changes nothing; Commit writes nothing
-	log  Logger      // the logger the preparation was asked for, for Commit
+	log  Loggerx     // the logger the preparation was asked for, for Commit
 }
 
 // PrepareEdits renders every edit against the file's current bytes without
@@ -180,7 +180,7 @@ func (l *Loader) ResolveEdit(ctx context.Context, path string, keyPath []string)
 // resolveEdit is ResolveEdit with the number of references already followed,
 // which is what bounds it: the loader refuses a cycle long before an edit is
 // collected, so this only has to stop rather than explain.
-func (l *Loader) resolveEdit(log Logger, path string, keyPath []string, followed int) (string, []string, error) {
+func (l *Loader) resolveEdit(log Loggerx, path string, keyPath []string, followed int) (string, []string, error) {
 	if followed > l.opts.MaxRefDepth {
 		return "", nil, fmt.Errorf("$ref nesting is more than %d files deep at %s", l.opts.MaxRefDepth, path)
 	}
@@ -298,7 +298,7 @@ func renderDocument(format string, data []byte, value any) ([]byte, error) {
 		var buf bytes.Buffer
 		enc := yaml.NewEncoder(&buf)
 		enc.SetIndent(2)
-		if err := enc.Encode(value); err != nil {
+		if err := encodeYAML(func() error { return enc.Encode(value) }); err != nil {
 			return nil, err
 		}
 		if err := enc.Close(); err != nil {
@@ -308,6 +308,25 @@ func renderDocument(format string, data []byte, value any) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unknown config format")
 	}
+}
+
+// encodeYAML turns yaml.v3's unsupported-kind panic into the same
+// ordinary error its other encoding failures use. Keep the recovery boundary
+// around Encode alone, and re-panic anything else: a caller panic from a custom
+// marshaler must not be mistaken for an unsupported Go value.
+func encodeYAML(encode func() error) (err error) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			return
+		}
+		message, ok := recovered.(string)
+		if !ok || !strings.HasPrefix(message, "cannot marshal type: ") {
+			panic(recovered)
+		}
+		err = errors.New(message)
+	}()
+	return encode()
 }
 
 // nullRendering reports that a value marshalled to JSON's "null", which is
@@ -483,7 +502,7 @@ func replaceValueYAML(data []byte, keyPath []string, value any) ([]byte, error) 
 		return nil, errors.New("top level is not a mapping")
 	}
 	var rendered yaml.Node
-	if err := rendered.Encode(value); err != nil {
+	if err := encodeYAML(func() error { return rendered.Encode(value) }); err != nil {
 		return nil, err
 	}
 	node := doc.Content[0]

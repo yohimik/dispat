@@ -90,8 +90,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # `dispat-<os>-<arch>`, which is a contract nothing here touches — so a
 # release carries them beside the six rather than instead of any of them.
 #
-# dispat bootstraps the latest Aqua; Aqua installs the custom TinyGo version
-# and GitHub asset checksums recorded in .aqua/. The complete toolchain stays
+# dispat bootstraps the Aqua version tools/bootstrap.yaml pins; Aqua installs
+# the custom TinyGo version and GitHub asset checksums recorded in .aqua/,
+# whose digests it verifies. The complete toolchain stays
 # in Aqua's package cache, with /usr/local/tinygo linked to its root.
 # Manifest changes invalidate this stage without duplicating download policy.
 #
@@ -110,6 +111,7 @@ COPY --from=build /out/dispat-linux-${TARGETARCH} /usr/local/bin/dispat
 ENV DISPAT_UPDATE_CHECK=false
 COPY .aqua /opt/dispat-tools/.aqua
 COPY scripts/install-tools.sh /opt/dispat-tools/scripts/install-tools.sh
+COPY tools/bootstrap.yaml /opt/dispat-tools/tools/bootstrap.yaml
 # GITHUB_TOKEN as a build secret rather than a build arg, so it never reaches
 # the image's history: installation uses the GitHub API, and a runner
 # sharing its IP with the rest of a cloud region meets the unauthenticated

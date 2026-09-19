@@ -141,7 +141,7 @@ type Options struct {
 	// context carries, and Nop when it carries none — so a program with one
 	// logger sets this once and a program with several passes them on the
 	// context instead.
-	Logger Logger
+	Logger Loggerx
 }
 
 // Default returns the options fully populated, the convenient starting point

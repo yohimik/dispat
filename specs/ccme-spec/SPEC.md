@@ -139,8 +139,10 @@ to be interpreted as described in RFC 2119.
 | **Resolvable**           | A released version an installer will select for a given consumer. A prerelease is resolvable only on its own line.      |
 | **Correction**           | A unit carrying an `Edits` or `Deletes` footer: a targeted rewrite of pending release records (§7.4).                   |
 | **Graduation**           | Ending a package's prerelease line by releasing it on `stable` (§11.5). Never happens implicitly.                       |
-| **Repository identity**  | In the polyrepository profile, `control` for the control repository or the exact `.gitmodules` name of a source repository (§27.2). |
+| **Repository identity**  | In the polyrepository profile, `control` for the control repository, the exact `.gitmodules` name of a source repository, or a peer's own `repository` value (§§27.2, 27.11). |
 | **Repository revision**  | A pair `(repository identity, full commit object ID)`. A bare commit ID is never a fleet-wide identity (§27.2).          |
+| **Saga**                 | Which polyrepository protocol releases a fleet: `orchestration`, with a control repository, or `choreography`, with peers (§27.11). |
+| **Fleet link**           | A submodule joining two peers of a choreographed fleet, named by the linked peer's identity and declared by its roster (§27.11). |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
 
@@ -2916,8 +2918,11 @@ Defaults are chosen so that an unconfigured repository behaves conservatively an
 | `registries`                | `{}`                                                         | Registry name → URL/credentials handle, referenced by `publishTargets` (§13.10a).         |
 | `publishTargets`            | `{}`                                                         | Package glob → registry name or `none`. Highest-precedence target source.                 |
 | `polyrepo`                  | `false`                                                      | Opt into the polyrepository Git profile (§27).                                            |
+| `saga`                      | `"orchestration"`                                            | Which polyrepository protocol releases the fleet: `orchestration` or `choreography`. The latter also activates the profile (§27.11). |
+| `repository`                | `""`                                                         | This repository's own identity in a choreographed fleet. REQUIRED under that saga and refused outside it (§27.11). |
+| `repositories`              | `[]`                                                         | The roster of a choreographed fleet: `{name, url, path, branch}` per peer. Refused outside that saga (§27.11). |
 | `configs`                   | `[]`                                                         | Explicit configuration files imported into the combined workspace; a non-empty list activates the profile (§27.3). |
-| `repositoryOverrides`       | `{}`                                                         | Source repository identity → central release-commit policy override (§27.3).              |
+| `repositoryOverrides`       | `{}`                                                         | Source repository identity → participation and central release-commit policy override (§27.3). |
 | `repositoryBaselines`       | `[]`                                                         | Explicit cross-repository consumer boundary tuples used only when ordinary checkpoint evidence is absent or ambiguous (§27.6). |
 
 ### 14.1 Safety limits
@@ -3254,12 +3259,17 @@ The VCS adapter diagnostics `E320`–`E329`, `W320` and `W321` are defined in th
 | `E330` | A source repository is missing, uninitialized, shallow, unpinned, duplicated, or outside the declared workspace, or a relevant planned head, release-tag ref, or pin changes before publication. |
 | `E331` | A package or space path crosses repository ownership, a source-local path escapes its source repository, or a package is inside an unlisted nested Git worktree. |
 | `E332` | Imported declarations conflict, or a repository override names no exact `.gitmodules` source identity. |
-| `E333` | A cross-repository consumer boundary is missing, ambiguous, conflicting, or unreachable. |
+| `E333` | A cross-repository consumer boundary is missing, ambiguous, conflicting, or unreachable, or an applicable control directive's causal snapshot pins a source revision the active source checkout does not contain. |
 | `E334` | Semantics require precedence between incomparable source revisions and no applicable control directive resolves it. |
 | `E335` | A source release record, source push, or control gitlink checkpoint failed after publication. |
-| `E336` | The fleet lock cannot coordinate every participating repository and standalone package. |
+| `E336` | A release lock cannot be acquired or returned, so exclusive release ownership is not cleanly coordinated. |
 | `E337` | A configured release branch is absent, or a detached repository needs a branch push without `commit.branch`. |
+| `E338` | A choreographed fleet's links do not form a tree: a second route reaches a repository the walk already entered. |
+| `E339` | A repository identity cannot be trusted to name one participant: it is missing, reserved, malformed, repeated in a roster, self-naming, or contradicted by the link it was reached through. |
 | `W330` | An `external: true` dependency provider is absent, so its edge is inactive for this snapshot. |
+| `W331` | The release lock is switched off by an explicit unsafe setting, for every repository the warning names. |
+| `W332` | A fleet link is declared by only one of its two repositories, so a release starting at the other end composes a smaller fleet. |
+| `W333` | A participant's roster does not name every member of the composed fleet, so a release starting there plans without them. |
 
 Errors (`E`) MUST be reported. Their blast radius depends on the code:
 
@@ -3273,7 +3283,8 @@ Errors (`E`) MUST be reported. Their blast radius depends on the code:
   the run. `E335`–`E337` found on an active package stop that publication or recording path and its dependent work;
   independent packages MAY continue. The run MUST report what completed and exit non-zero. These are recoverable by a
   later run, unlike repository-scoped errors.
-* **Polyrepository-scoped** (`E330`–`E334`): while the optional profile is active, the combined run cannot produce a
+* **Polyrepository-scoped** (`E330`–`E334`, `E338`, `E339`): while the optional profile is active, the combined run
+  cannot produce a
   trustworthy plan. An initial error MUST abort before package work. When `E330` is instead discovered by the required
   final revalidation after package work has begun, it MUST fail that package before its publish command and block its
   dependent work; independent packages MAY continue. The same checkout evaluated with the profile omitted retains the
@@ -5523,16 +5534,22 @@ No part of this protocol is implemented by the current dispat release merely bec
 
 ## 27. Polyrepository Git profile
 
-This optional profile lets one **control repository** plan and execute one package graph whose packages are owned by
-several linked Git repositories. It changes where history and release records are read; it does not change the message
+This optional profile plans and executes one package graph whose packages are owned by several linked Git
+repositories. It changes where history and release records are read; it does not change the message
 grammar, bump lattice, train and fresh windows, holds, cancellation, corrections, channel rules, dependency graph, or
 partial-publication guarantees defined above. Git is REQUIRED for every participating repository. Activating this
 profile does not activate or claim conformance with the external adapter or rollback protocols of §§25–26.
 
+The profile defines two **sagas**, and a fleet releases under exactly one of them. Sections 27.1–27.10 specify the
+**orchestrated** saga, in which one **control repository** composes the fleet, owns its intent, and records a gitlink
+checkpoint after each source release. Section 27.11 specifies the **choreographed** saga, in which no repository is
+the control repository. A configuration that names no saga is orchestrated.
+
 ### 27.1 Activation and compatibility
 
-The profile is active when `polyrepo: true`, a global `--polyrepo` option, or at least one explicitly imported
-configuration is present. With none of those inputs, nested repositories retain the single-repository behavior of the
+The profile is active when `polyrepo: true`, `saga: choreography`, a global `--polyrepo` or `--saga choreography`
+option, or at least one explicitly imported configuration is present. With none of those inputs, nested repositories
+retain the single-repository behavior of the
 previous specification: the control history is the only history, gitlink moves are ordinary changed paths, and this
 section has no effect. Implementations MUST test that opt-out behavior as part of profile conformance.
 
@@ -5615,6 +5632,8 @@ repositoryOverrides:
       enabled: true
       push: true
       branch: main
+  legacy-source:
+    enabled: false
 repositoryBaselines:
   - consumer: web
     releaseTag: web@2.4.0
@@ -5649,15 +5668,26 @@ repositories. A shared-versioning space or `versionGroups` entry declared by the
 ordinary monorepository identity and MAY span repository owners. Dependencies and control-declared shared groups
 therefore operate on the combined package graph without repository qualification.
 
-`repositoryOverrides` is keyed by an exact source repository identity from `.gitmodules`. Each value may contain a
-`commit` object and no relocation or package-definition fields. When the object is absent, the source inherits the
+`repositoryOverrides` is keyed by an exact source repository identity from `.gitmodules`. A key naming no declared
+source is `E332` whatever the value states. Each value may contain an `enabled` flag, a `commit` object, and no
+relocation or package-definition fields.
+
+`enabled` states whether the source takes part in the run. Absence means `true`. An explicit `false` removes that
+repository before any repository operation: the engine MUST NOT require its checkout, read its history, verify its
+pin, load a configuration imported from under its path, discover its packages, run its scripts, write its records, or
+acquire its lock. A control space path whose canonical location is inside an excluded repository contributes no
+package, and a space left with no contributing path is dropped with its own package entries. The exclusion does not
+release the repository's filesystem boundary: a control-owned package inside it remains `E331`, and a required
+dependency on one of its packages retains the existing configuration error, which MUST name the excluded repository.
+A `repositoryBaselines` entry naming an excluded repository is `E333`. When the object is absent, the source inherits the
 control repository's whole commit policy. When it is present, it **replaces** that policy as one complete
 `CommitConfig` and omitted fields take their normal defaults; fields are not overlaid individually. This distinction is
 required for plain boolean fields such as `push`. `commit.branch` supplies an explicit branch when a commit-enabled
 checkout is detached. Unknown keys are `E332`. The override does not move a package, import a configuration, change
 history ownership, or create a source.
-An override applies only to a source configured centrally. An explicitly imported source owns its own commit policy;
-an override for that same repository is `E332` rather than a second precedence layer.
+The `commit` override applies only to a source configured centrally. An explicitly imported source owns its own commit
+policy; a `commit` override for that same repository is `E332` rather than a second precedence layer. `enabled` is
+participation rather than policy and applies to a centrally configured and an explicitly imported source alike.
 
 ### 27.4 Dependency providers and scope
 
@@ -5702,9 +5732,9 @@ is reused. A propagation walk may be shared only for equal source set, depth, an
 
 ### 27.6 Cross-repository consumer boundaries
 
-The profile adds no ledger, tag payload, metadata ref, or timestamp convention. It reconstructs a consumer's position
-in a source repository from normal source release tags and ordinary control gitlink history, or requires an explicit
-baseline tuple.
+The profile adds no ledger, tag payload, metadata ref, or timestamp convention. Under the orchestrated saga it
+reconstructs a consumer's position in a source repository from normal source release tags and ordinary control gitlink
+history, or requires an explicit baseline tuple; §27.11 states what a fleet with no control repository reads instead.
 
 Automatic reconstruction is valid only when one ordinary **control release checkpoint** supplies all of this evidence:
 
@@ -5742,6 +5772,15 @@ recording remains sufficient for that history. If an applicable explicit control
 position relative to the tag is required, that control position MUST be proven by the ordinary checkpoint association
 above or by an explicit tuple whose `repository` is `control`; otherwise the engine fails with `E333`.
 
+The causal snapshot of §27.4 also bounds the direction a control directive may be projected. A control unit states
+intent about the source revisions its own commit pinned. If that unit is still applicable to a package, and the active
+checkout of the package's owning repository does not contain the revision that unit's own gitlinks pin for that
+repository, the engine MUST fail with `E333` rather than apply the intent. The active checkout and the control
+revision differing is not by itself an error: the engine MUST evaluate this only for a `(control commit, package)` pair
+the ordinary admission rules still apply, meaning the commit is in that package's pending window, is not already
+contained in its baseline, and is neither cancelled nor held for it. A pin the source repository does not hold at all
+MUST be reported as this condition and MUST NOT be reported as a repository read failure.
+
 ### 27.7 Publication, checkpoints, and recovery
 
 The combined publish sequence is the dependency-first sequence of §19.2 across all repositories. Publication remains
@@ -5770,9 +5809,11 @@ require one. The configured branch is pushed without force under the ordinary co
 own `commit` object.
 
 The release lock MUST coordinate the control repository, every active source repository, and standalone packages as
-one fleet. An implementation unable to acquire or verify that shared exclusion fails with `E336`; independent per-repo
-locks acquired without a deadlock-free fleet protocol are insufficient. Status and other read-only planning retain
-their ordinary lock-free behavior.
+one fleet. An implementation unable to acquire, verify, or return that shared exclusion fails with `E336`; independent
+per-repo locks acquired without a deadlock-free fleet protocol are insufficient. A cleanup failure does not change an
+already-published package's outcome, but the run MUST exit nonzero. If a completion event is emitted, it MUST report
+`failed` or `interrupted`, never `succeeded`. Fleet cleanup MUST continue through the remaining owned locks. Status and other read-only planning retain their ordinary lock-free
+behavior.
 
 Every operation that can hold more than one fleet or worktree lock MUST use one stable total order over the lock
 resource identities and release them in reverse order. Per-worktree mutation locks cover only the complete native Git
@@ -5893,3 +5934,221 @@ in the one-time history-walk bound above.
 27. A successful nested native record advances a source while another package script from the same run is already
     active. **Admit only the exact exported full commit ID.** Transient run coordination may make that pin visible to a
     later nested command in the active script; it is removed at run completion and supplies no baseline on a later run.
+
+### 27.11 Choreographed saga
+
+This section specifies the second saga of the profile. No repository is the control repository. Each participant
+states its own identity, carries its own configuration and release records, and is joined to its neighbours by
+ordinary two-sided submodule links, and a release MAY start in any of them. Everything §§27.1–27.10 require of the
+profile continues to apply except where this section states otherwise: the message grammar, the bump lattice, the
+windows, the one combined dependency graph and the partial-publication guarantees are unchanged.
+
+**Activation.** The choreographed saga is active when the configuration the run reads states `saga: choreography`, or
+a global `--saga choreography` option states it for that invocation. The value is matched without regard to case and
+MUST be `orchestration` or `choreography`; any other value is a configuration error. An absent `saga` key means
+`orchestration`, so a configuration written before this section composes exactly as it did, and implementations MUST
+test that compatibility as part of conformance. Stating `saga: choreography` activates the profile on its own: the
+engine MUST behave as though `polyrepo: true` were also stated and MUST NOT require both keys. An explicit
+`--polyrepo=false` clears it again and is the standalone escape hatch: the stating repository releases alone, its
+fleet links are not walked, and no other repository is planned, locked, settled or recorded. The engine MUST report
+that the fleet was skipped, because a release commit written by such a run carries no cross-repository evidence.
+
+**Peer identity.** `repository` is a repository's own identity in its fleet. It is REQUIRED under this saga and is
+written as `[A-Za-z0-9._-]+`. `control` and its case variants remain reserved for the orchestrated saga and MUST NOT
+be used. A missing, malformed or reserved identity is `E339`. The identity is also the submodule name every link to
+that repository is created under, which is what makes one identity readable from either end of a link. A linked
+checkout whose own `repository` value is not the name it was linked as is `E339`, and so is a linked checkout that
+does not itself state `saga: choreography`: a fleet link MUST NOT cross sagas.
+
+**The roster.** `repositories` is the membership list of the fleet a repository belongs to: every other peer, by
+identity, with the `url` a link to it is cloned from, the `path` that link occupies inside this repository, and the
+`branch` the link follows. An omitted `path` means `.links/<name>`. A roster entry naming the declaring repository,
+and two entries whose identities are equal under case folding, are `E339`; so is a `path` that is absolute or that
+leaves the declaring repository's root. The roster states membership only. It does not state which pairs are linked,
+and a peer two hops away is named here and reached through somebody else.
+
+**Fleet links and the tree rule.** A submodule is a fleet link exactly when the roster of the repository declaring it
+names that submodule's name; every other submodule is an ordinary vendored checkout and takes no part in the fleet. A
+submodule whose name differs from a roster entry only by case is `E339` rather than a link. The engine composes the
+fleet by walking those links breadth first from the entry repository, in folded-identity order, and MUST enter each
+identity exactly once. The link graph over the participating identities MUST be a tree: reaching an identity a second
+time through any link other than the one it was entered by is `E338`, because a second route is a second answer to
+which repositories lie between two peers, and the link evidence below would then depend on which route a reader
+followed. The two ends of one pair are one edge and not a cycle, so the engine MUST NOT descend into the back-link
+leading to the repository it arrived from. A link path holding no repository of its own, a peer without complete
+history, a `.gitmodules` that cannot be read, and a link path leaving the declaring repository are each `E330`. The
+diagnostic for an unmaterialized link MUST name the command that initializes exactly that link, because a run started
+inside another repository's linked checkout is the ordinary way to meet it.
+
+**The fixed fleet snapshot.** The snapshot of §27.2 is the head each composed peer holds when the walk reads it,
+together with the relevant release-tag refs. A recorded gitlink MUST NOT be required to equal that head: under this
+saga a pin is **advisory**. Two peers that link each other cannot both record the other's current revision, so exact
+pin equality is unachievable in principle and MUST NOT be reported as `E330`. Everything else §27.2 requires is
+unchanged: the engine retains each observed head as planning's initial boundary, revalidates every participating
+repository after the fleet `beforeAll` hooks and each package's relevant closure before its publish command, and
+treats a relevant head or release-tag change as `E330`. Commit identity remains `(repository, full object ID)`.
+
+**Composition.** Each peer's own configuration file establishes that repository's ordinary repository-local root,
+space and package layering, exactly as an explicitly imported configuration does under §27.3. Every participant of a
+choreographed fleet, the entry included, is such a root. The combined workspace, the single package-name namespace,
+the repository-local spaces and version groups, and the ownership rules of §27.3 apply unchanged, with one
+adjustment: a peer's checkout lies inside the repository that links it, so scope containment is compared within one
+repository rather than across the fleet. Two repositories declaring the same package name remain `E332`.
+
+The keys only a control repository can own are refused rather than ignored. `configs` and `--configs`,
+`repositoryOverrides.<name>.commit`, and a `repositoryBaselines` entry whose `repository` is `control` are each `E332`
+under this saga. `repository` or `repositories` stated without `saga: choreography` is `E332` as well, because a key
+nothing reads is how a fleet comes to believe it is linked when nothing walks the link.
+
+`repositoryOverrides.<peer>.enabled` keeps its meaning from §27.3 and is read from the entry repository's
+configuration alone: a peer owns its policy, but whether it takes part in this run is the invocation's question. A key
+naming no member of the entry's roster is `E332`, and so is excluding the repository the run started in.
+
+**Scope.** Every unit is repository-local, the entry's included: a unit can directly resolve only packages owned by
+the repository whose history carries it. This saga has no repository whose units address the whole fleet. Propagation
+across the combined graph is unaffected and remains the cross-repository path. The consequence for §27.4 is that the
+control directive which resolves incomparable revisions does not exist here: where the existing rule requires a single
+winner and the competing revisions are incomparable, the engine MUST report `E334` and MUST NOT pick by date,
+traversal order, repository name or SHA. A commit that only moved a fleet link MUST NOT be read as a change to any
+package, for the reason §27.4 already gives about gitlink moves.
+
+**Cross-repository boundaries.** Section 27.6 is replaced for this saga; its remedy is not. A consumer's position in
+another repository is proven from the links the release itself recorded, and automatic reconstruction is valid only
+when all of this holds:
+
+1. the consumer's release tag sits on an ordinary release commit in its own repository whose message names that exact
+   tag;
+2. following the one route of fleet links between the consumer's repository and the named repository, hop by hop
+   from that release commit's own tree, each hop's tree records a fleet link to the next hop; and
+3. the revision the last hop records is present in the named repository and is an ancestor of, or equal to, that
+   repository's planned head.
+
+A matching object ID proves nothing on its own, exactly as it proves nothing under §27.6: the tag may have been
+attached later to a commit whose links were recorded for another release. If the tag is not on a release commit that
+names it, if a hop records no link to the next, or if the resulting revision is absent or unreachable, automatic
+reconstruction fails with `E333` naming the hop it stopped at. Absence MUST be reported as this condition and MUST NOT
+be reported as a repository read failure.
+
+`repositoryBaselines` is the explicit form and is unchanged from §27.6, except that `control` is not an admissible
+`repository` value. An entry MAY be declared in any participating repository's configuration, and the engine MUST
+merge the entries of every composed peer before it resolves boundaries: the repository that knows a boundary is the
+one owning the consumer, and there is no central file to write it in. An explicit tuple wins over link evidence.
+Tag-only recording remains conforming and often sufficient, and remains the case that leaves a later boundary to an
+explicit tuple.
+
+**Settling fleet links before publication.** Because there is no control checkpoint, that evidence has to exist in the
+consumer's own release commit. Before a package whose plan read history from another repository publishes, the engine
+MUST record the route: every repository on the route from the consumer to each such repository records the revision of
+its next hop, deepest hop first, and the consumer records its own first hop, so the tree of the commit the release tag
+will sit on already carries the first link of the chain.
+
+The recording is ordinary commits in ordinary repositories and MUST NOT publish anything. It is all or nothing per
+package: if any repository on the route has release commits disabled while the consumer's repository has them
+enabled, the engine MUST refuse that package before publication with `E333` rather than publish a release whose
+evidence stops halfway. A consumer whose own release commits are disabled records no evidence at all; that is the
+tag-only case above, it is not an error, and the engine MUST report it rather than force a commit. No settlement is
+created where the recorded pins already equal the revisions to record, and the engine MUST NOT create an empty commit
+to mark a settlement.
+
+A settlement commits and pushes in a repository, so that repository's ordinary commit and push hooks bracket it and
+run outside the advisory mutation lock, exactly as §27.7 requires of every other native transaction. A repository
+whose settlement must be pushed while it is at detached `HEAD` requires `commit.branch` and otherwise fails with
+`E337` before publication.
+
+**A pin never outruns its target.** Before a repository that pushes records a revision of a peer, the engine MUST
+verify that the peer's own remote already holds that revision on the branch the fleet states for it: the peer's own
+`commit.branch` when it has one, and otherwise the `branch` a roster entry states for it. This is §27.7's rule that a
+pushed pointer may not name a commit nobody else can fetch. Every linked checkout is detached, so a peer with neither
+branch cannot be verified and the settlement MUST fail rather than proceed.
+
+**Interruption.** A settlement that fails partway leaves ordinary commits and nothing published. A later run MUST
+converge: it reads what each repository already records, does nothing where those records match, and pushes a head the
+remote does not hold yet. Nothing is deleted or rewritten to make a settlement look atomic.
+
+**Locks.** The fleet lock of §27.7 covers every participating peer. The order is the participants' identities sorted
+by name, with no reserved position for any of them, and the locks are released in reverse. The settlement of one
+package takes the publish lanes of every repository on its route in that same name order and gives back all but the
+consumer's own before publication begins, which is what keeps two consumers with overlapping routes from waiting on
+each other. An unsafe lock bypass stated in a configuration disables the lock of the repository stating it and no
+other, because one peer cannot decide another peer's safety; an environment kill switch is the invocation's and
+applies to every repository it releases. `W331` names the repositories releasing without a lock.
+
+**`--since`.** `--since <revision>` names a revision of the entry repository. The engine projects it into one range
+per repository by following the same routes the boundary evidence uses, and evaluates each repository once. A
+repository that revision records no link for projects to its whole reachable history, exactly as an absent gitlink
+does under §27.8. `--since all` still selects every package.
+
+**Configuration computation.** A configuration computation MAY propose the fleet links a roster implies: the minimum
+set of links connecting every identity the rosters name, the half of a link only one of its two repositories declares,
+the checkouts a declared link lacks, and the roster entries a participant has not heard of. The proposed set MUST be a
+spanning tree over the fleet, so it never creates the second route `E338` refuses, and it MUST be the same set
+whatever order the fleet was assembled in. A proposed missing half joins no pair the links do not already join, so it
+adds no route. Applying it creates a checkout for one half of each link and declares the other half inside that
+checkout without fetching it, pinned at a revision the declaring repository's remote can serve; a declaring repository
+that states no remote has that half withheld and reported rather than pinned at a revision no peer can fetch. A
+missing half is proposed only where the computation composed the peer whose declaration is absent, because that
+checkout is where the declaration is written. The computation MUST NOT commit, MUST NOT remove an existing
+link, and MUST NOT recurse into a link's own links: a link is history's only record of what a release incorporated,
+and the back-link of a pair is deliberately left unmaterialized. A roster entry no participant states a `url` for is
+reported rather than written, and a link URL carrying user information MUST be refused, because `.gitmodules` is
+committed and pushed.
+
+**Recoverable findings.** Two conditions are reported and do not stop a run. `W332` is a fleet link only one of its
+two repositories declares: the fleet still composes from the declaring end, and a release started at the other end
+would compose a smaller fleet. `W333` is a participant whose roster does not name every member of the composed fleet,
+because a repository that has not heard of a peer cannot plan a boundary across it. Both are what a configuration
+computation repairs.
+
+### 27.12 Choreographed conformance vectors
+
+1. A configuration names no `saga` and states no identity keys. **Compose under the orchestrated saga exactly as
+   before.** Nothing in §27.11 has any effect.
+2. Peers `api` and `sdk` state `saga: choreography`, their own identities, each other in their rosters, and link each
+   other. A run started in `api` and a run started in `sdk` **compose the same two repositories and plan the same
+   packages.** Neither is a control repository.
+3. A configuration states `repository` or `repositories` without `saga: choreography`. **`E332`.** Ignoring the keys
+   is non-conforming.
+4. A linked checkout calls itself `sdk-next` although it is linked as `sdk`, states another saga, names itself in its
+   own roster, or uses the reserved identity `control`. **`E339`** in each case.
+5. Three peers are linked in a ring, so two of them are joined by two routes. **`E338` before any package work.**
+   Choosing either route is non-conforming.
+6. A fresh clone's fleet links were never initialized. **`E330` naming the command that initializes that link.** The
+   same checkout composes the whole fleet once they are.
+7. A repository holds a submodule its roster does not name. **Take no part in the fleet.** Only the roster makes a
+   submodule a link.
+8. A choreographed configuration states `configs`, a `repositoryOverrides.<peer>.commit` object, or a
+   `repositoryBaselines` entry naming `control`. **`E332`** in each case.
+9. A peer's checkout holds a revision its linker's tree does not record. **Compose at the revision the checkout
+   holds.** A pin is advisory here, and the difference is not `E330`.
+10. `web@2.4.0` sits on a release commit naming it whose tree pins `api` at `A0`, and `api`'s tree at `A0` pins `sdk`
+    at `S0`. **The `web` boundary in `sdk` is `S0`.** Work in `sdk` up to `S0` is already incorporated.
+11. That same tag was attached by hand to a commit that is not a release commit. **`E333` naming `repositoryBaselines`
+    and the hop it stopped at.** Reading the pin anyway is non-conforming.
+12. A tuple `(web, web@2.4.0, sdk, S0)` is declared in `sdk`'s own configuration and the run starts in `api`. **Use
+    `S0`.** Every composed peer's tuples are merged before boundaries resolve.
+13. A consumer in `api` reads history from `sdk`, two hops away through `core`. **Record `sdk`'s revision in `core`
+    and `core`'s revision in `api` before `api` publishes**, deepest hop first.
+14. One repository on that route has `commit.enabled: false` while the consumer's repository has it enabled.
+    **Refuse the package before publication with `E333`.** Publishing evidence that stops halfway is non-conforming.
+15. Release commits are disabled in every repository. **Accept the tag-only release, record no evidence, and create no
+    commit.** A later boundary then requires an explicit tuple.
+16. A settlement must be pushed from a detached checkout with no `commit.branch`. **`E337` before publication.**
+17. The revision a settlement would pin is not yet on its own repository's remote. **Refuse the settlement.** A
+    pushed pin naming an unfetchable commit is non-conforming.
+18. A settlement's push is rejected. **Leave the ordinary commits, publish nothing, and converge on the next run.**
+    Each package is still released exactly once.
+19. A commit moves only a fleet link. **Do not count it as a change to any package.**
+20. `--since R` names an entry revision. **Evaluate one range per repository**, projected through the fleet routes. A
+    repository `R` records no link for contributes its whole reachable history.
+21. One peer states `unsafeDisableLock` and the others do not. **Release only that repository without its lock** and
+    name it in `W331`. Disabling another peer's lock is non-conforming.
+22. Incomparable revisions in two repositories require one winner for a package in a third. **`E334`.** No unit of any
+    peer can resolve it, because every unit is repository-local.
+23. A roster names four repositories and one link exists. **Propose exactly two more links**, never a second route
+    between two repositories, and the same two whatever order the fleet was assembled in.
+24. A proposed link's URL carries user information. **Refuse it.** A committed `.gitmodules` would publish it.
+25. A link is declared by one end only, and one peer's roster omits a fleet member. **`W332` and `W333`; the run
+    continues.** A configuration computation proposes the missing half and the missing roster entry, and adds no
+    route with either.
+26. A choreographed configuration is run with `--polyrepo=false`. **Release that repository alone** and report that
+    the fleet was skipped.

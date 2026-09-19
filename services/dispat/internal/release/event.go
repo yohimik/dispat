@@ -8,7 +8,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
-// The release-progress events an Observer receives. The names are the public
+// The release-progress events an Observerx receives. The names are the public
 // webhook vocabulary — an event travels to external receivers under exactly
 // the name a config file subscribes to — aliased here so the executor states
 // no string of its own.
@@ -67,11 +67,11 @@ type EventPackage struct {
 	Status          string `json:"status,omitempty"`
 }
 
-// Observer receives release-progress events. Implementations must be
+// Observerx receives release-progress events. Implementations must be
 // goroutine-safe and must return immediately — the executor calls it from
 // concurrent task goroutines and never waits on anything the observer does
-// with the event. A nil Observer on the Executor disables observation.
-type Observer interface {
+// with the event. A nil Observerx on the Executor disables observation.
+type Observerx interface {
 	Event(ev Event)
 }
 

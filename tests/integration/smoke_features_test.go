@@ -133,7 +133,7 @@ func TestSmokeKeyFeatures(t *testing.T) {
 	assertGraph(t, g, "core", "0.0.0 -> 0.1.0", "direct")
 	assertGraph(t, g, "web", "0.0.0 -> 0.1.0", "direct")
 	for _, tag := range []string{"core@0.1.0", "web@0.1.0"} {
-		require.True(t, r.HasTag(tag), "tags: %v", r.TagList())
+		require.True(t, r.IsTagged(tag), "tags: %v", r.TagList())
 	}
 	assert.Equal(t, 4, buildRuns(r), "the release ran the build stage once per package")
 	assert.Contains(t, readFile(t, r, "packages", "core", "package.json"), `"version": "0.1.0"`)

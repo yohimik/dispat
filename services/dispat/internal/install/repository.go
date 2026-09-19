@@ -64,6 +64,12 @@ const githubHost = "github.com"
 // rather than guessed at, because a GitHub owner may carry a dot of its own:
 // a reference that named a scheme has a host in that position and a shorthand
 // never does, so "some.org/repo" stays the owner it reads as.
+//
+// A colon is read the same way. The scp form a git remote is written in,
+// git@host:owner/repo, is the one spelling in which a colon separates the host
+// from the path; everywhere else it introduces a port and belongs to the host.
+// A reference that named a scheme is never in the scp form, so the port an
+// enterprise clone URL carries stays with its host.
 func ParseRepository(raw string) (Repository, error) {
 	ref := strings.TrimSpace(raw)
 	if ref == "" {
@@ -74,8 +80,11 @@ func ParseRepository(raw string) (Repository, error) {
 	if _, rest, ok := strings.Cut(ref, "@"); ok {
 		ref = rest
 		// git@host:owner/repo, whose host is separated by a colon rather than
-		// a slash. Only the first colon, so a host carrying a port survives.
-		if host, path, ok := strings.Cut(ref, ":"); ok && !strings.Contains(host, "/") {
+		// a slash. Only the scp form spells a repository that way, and only a
+		// reference without a scheme can be in it, so the split is asked only
+		// there: after a scheme the colon belongs to a port, and turning that
+		// into a separator made the port the owner.
+		if host, path, ok := strings.Cut(ref, ":"); ok && !scheme && !strings.Contains(host, "/") {
 			ref, scheme = host+"/"+path, true
 		}
 	}

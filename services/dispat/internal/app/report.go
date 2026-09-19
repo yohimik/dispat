@@ -54,11 +54,11 @@ func (a *App) printDiagnostics(pl *plan.Plan) {
 			hidden++
 			continue
 		}
-		ev := a.log.Warn()
+		level := zerolog.WarnLevel
 		if d.Level == plan.LevelError {
-			ev = a.log.Error()
+			level = zerolog.ErrorLevel
 		}
-		ev = ev.Str("code", d.Code)
+		ev := a.log.WithLevel(level).Str("code", d.Code)
 		if d.Repository != "" {
 			ev = ev.Str("repository", d.Repository)
 		}
@@ -103,7 +103,7 @@ func (a *App) printGraph(pl *plan.Plan) {
 		if provs := pl.Providers[name]; len(provs) > 0 {
 			ev = ev.Strs("dependsOn", provs)
 		}
-		if !rel.Changed() {
+		if !rel.IsChanged() {
 			ev.Str("version", rel.Previous().String()).
 				Str("channel", rel.Channel).
 				Msg("unchanged")
@@ -111,7 +111,7 @@ func (a *App) printGraph(pl *plan.Plan) {
 		}
 		// Before the version fields attach: a none package has no version to
 		// show and no hold to explain, only the scripts it exists to run.
-		if !rel.Releasable() {
+		if !rel.IsReleasable() {
 			scriptOnly++
 			ev.Int("ownCommits", len(rel.NotesUnits())).
 				Msg("∅ script-only (versioning: none)")
@@ -242,7 +242,7 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 	left := pl.Deselected()
 	scriptOnly := 0
 	for _, name := range pl.Order {
-		if rel := pl.Releases[name]; rel != nil && !rel.Releasable() && rel.Changed() && !rel.Deselected {
+		if rel := pl.Releases[name]; rel != nil && !rel.IsReleasable() && rel.IsChanged() && !rel.Deselected {
 			scriptOnly++
 		}
 	}

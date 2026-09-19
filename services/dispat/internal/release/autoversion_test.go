@@ -598,7 +598,7 @@ func syncLockOnlySpace(concurrency int) *model.Space {
 func TestSyncLockRunsWithNeitherStrategy(t *testing.T) {
 	root := t.TempDir()
 	space := syncLockOnlySpace(0)
-	assert.False(t, space.AutoVersion.Reconciles())
+	assert.False(t, space.AutoVersion.IsReconciling())
 	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
 	p := avPlan(root, space, "a")
 
@@ -666,7 +666,7 @@ func autoVersionPackagesCtx(ctx context.Context, p *plan.Plan, pkgs []string, po
 		}
 	}
 	for _, pkg := range pkgs {
-		if v.Changed(pkg) {
+		if v.IsChanged(pkg) {
 			changed[pkg] = true
 		}
 	}

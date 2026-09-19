@@ -78,7 +78,7 @@ func matchAuthor(a plan.Author, patterns []string) bool {
 	for _, p := range patterns {
 		p = strings.ToLower(p)
 		for _, s := range subjects {
-			if s != "" && globx.Match(p, s) {
+			if s != "" && globx.IsMatch(p, s) {
 				return true
 			}
 		}
