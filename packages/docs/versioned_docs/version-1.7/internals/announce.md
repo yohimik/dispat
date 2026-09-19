@@ -34,9 +34,9 @@ two-line lede, and the three install routes pinned to the version being announce
 changelog in the sections the changelog itself uses, plus `PICKS UP` for the providers the release rewrote, which on a
 monorepo is half of what a run did.
 
-![The announcement card's cover page](https://raw.githubusercontent.com/yohimik/dispat/main/announce/preview-1.png)
+![The announcement card's cover page](https://raw.githubusercontent.com/yohimik/dispat/438e97ed8bea9be761b3473f40bd218863c1e372/announce/preview-1.png)
 
-![The card's first changelog page](https://raw.githubusercontent.com/yohimik/dispat/main/announce/preview-2.png)
+![The card's first changelog page](https://raw.githubusercontent.com/yohimik/dispat/438e97ed8bea9be761b3473f40bd218863c1e372/announce/preview-2.png)
 
 There are two layouts, and a release wears one of them: a faint lattice on near-black, and a radial pine wash inside a
 ruled frame. Both draw the site's own palette, both paginate identically, and crier picks between them from the run's

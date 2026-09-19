@@ -236,8 +236,9 @@
     <div class="badge">v{{ .version }}</div>
 
     <div class="lede">
-      Release packages across languages. Versions, changelogs and publishing,
-      in dependency order.
+      {{ if eq .channel "rc" }}Orchestration or choreography. One release graph across linked repositories.
+      {{ else }}Release packages across languages. Versions, changelogs and publishing,
+      in dependency order.{{ end }}
     </div>
 
     <div class="install">

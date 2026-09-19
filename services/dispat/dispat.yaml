@@ -115,18 +115,16 @@ scripts:
   #
   # The outputs are written first, before anything that can be slow or can
   # fail: the post-release job's condition must not depend on whether a
-  # social network answered. announce/announce.sh renders the release's card
+  # social network answered. services/dispat/announce/announce.sh renders the release's card
   # with one crier invocation for Instagram, LinkedIn and Discord, including
   # the Instagram music story. An incomplete announcement returns failure;
-  # inspect the reported destinations before replaying. It lives at the repository
-  # root because its fonts and audio have no business in any package's build
-  # context, which is why it is reached through the toplevel rather than by a
-  # relative path from here.
+  # inspect the reported destinations before replaying. The announcement belongs
+  # to this package; Docker build contexts exclude its shared fonts and audio.
   announce: |
     echo "cli-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "cli-version=$DISPAT_NEW_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "released dispat $DISPAT_NEW_VERSION"
-    sh "$(git rev-parse --show-toplevel)/announce/announce.sh"
+    sh "$(git rev-parse --show-toplevel)/services/dispat/announce/announce.sh"
 # onFail is the net for the paths the build script never finishes:
 # unlink is idempotent, so closing an already-closed bracket is a
 # no-op. It matters because beforePublish runs `dispat commit`, which

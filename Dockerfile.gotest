@@ -596,7 +596,7 @@ RUN apk add --no-cache shellcheck python3 jq
 WORKDIR /src
 COPY install.sh ./
 COPY script[s] ./scripts
-COPY announc[e] ./announce
+COPY services/dispat/announce ./services/dispat/announce
 COPY specs/ccme-spec/*.sh ./specs/ccme-spec/
 COPY specs/agent-guide/*.sh ./specs/agent-guide/
 COPY tests/experiments/run.sh tests/experiments/
@@ -613,7 +613,7 @@ set -eu
 # left alone, because one log line per probe is the shape its logs are read in.
 sh -n install.sh
 set -- install.sh
-for f in scripts/*.sh announce/*.sh specs/*/*.sh; do
+for f in scripts/*.sh services/dispat/announce/*.sh specs/*/*.sh; do
   [ -f "$f" ] || continue
   case "$f" in scripts/tinygo-spike-darwin.sh) continue ;; esac
   set -- "$@" "$f"
@@ -636,8 +636,8 @@ sh scripts/cache-test.sh /src
 # a syntax check is not enough: it is run against a sample release and its
 # output parsed. Guarded on the file, which is written by the announcement's
 # own work and absent until then.
-if [ -f announce/notes.sh ]; then
-  echo "announce/notes.sh: parsing a sample release"
+if [ -f services/dispat/announce/notes.sh ]; then
+  echo "services/dispat/announce/notes.sh: parsing a sample release"
   DISPAT_PACKAGE=dispat DISPAT_NEW_VERSION=1.7.2 DISPAT_VERSION=1.7.1 \
   DISPAT_FIXES="the tiny binaries build on the fork
 the observer never fetches into the clone" \
@@ -645,8 +645,8 @@ the observer never fetches into the clone" \
   DISPAT_CHANGELOG="### Fixes
 
 - fix(dispat): the tiny binaries build on the fork" \
-    sh announce/notes.sh | python3 -m json.tool > /dev/null
-  echo "announce/notes.sh: the sample parses"
+    sh services/dispat/announce/notes.sh | python3 -m json.tool > /dev/null
+  echo "services/dispat/announce/notes.sh: the sample parses"
   python3 scripts/announce-test.py
 fi
 EOF

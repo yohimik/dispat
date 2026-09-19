@@ -76,6 +76,30 @@ identity and roster, keeps its own configuration and records, and is linked to i
 started in any of them composes the whole fleet. What a release incorporated is recorded in the links themselves rather
 than in a checkpoint. [A choreographed fleet](./choreographed-repositories.md) explains it.
 
+## Why use Git submodules to link repositories?
+
+dispat needs a link to another repository's configuration and a reproducible revision of its source. Git already
+provides both: each `.gitmodules` entry describes a flat repository link with a path and URL, while the parent
+commit pins the source revision through a gitlink. The linked checkout contains that repository's dispat configuration.
+
+This avoids inventing another checkout manifest and the tooling to keep it in sync. Git handles the links and pinned
+revisions; dispat's configuration declares which repositories participate and how their packages release. See
+[A control repository](./control-repository.md) and [A choreographed fleet](./choreographed-repositories.md).
+
+## Why doesn't choreography trigger CI jobs in each repository?
+
+Choreography describes how repositories own their configuration and release records. Any peer can start a release,
+and one dispat invocation follows the links to plan and execute the combined dependency graph.
+
+Remote job dispatch depends on the CI/CD provider: support, permissions, status reporting, and cancellation differ.
+It also makes a branching release harder to stop. If one job starts two others, and those start more jobs, cancelling
+the first job must also find and stop its descendants while accounting for anything they already published.
+
+Keeping execution in one invocation gives dispat one place to coordinate scheduling, cancellation, locks, and recovery.
+Packages already published retain their release records; a later run can plan the unfinished work. The
+[choreography CI setup](./choreographed-repositories.md#ci-checkout) needs a checkout and a command to run, without
+requiring remote workflow APIs.
+
 ## How do I stop something from releasing?
 
 Use `Release-As: none` to hold a package without discarding anything, and `Release-As: auto` to resume it at everything
@@ -97,6 +121,16 @@ formats dispat reads, from `package.json`, `go.mod`, `pom.xml`, `Cargo.toml`, `*
 files to the project files Unity, Godot, Unreal, Defold, and O3DE keep a version in. The
 [replace strategy](./configuration/autoversion.md) covers a version living somewhere no parser owns, such as a Gradle
 coordinate or a Helm chart, and the [examples](./examples/README.md) show one setup per ecosystem.
+
+## Why aren't scanner and writer separate command-line programs?
+
+They are available as [`dispat scanner`](./cli/scanner.md) and [`dispat writer`](./cli/writer.md). Keeping them in one
+binary gives developers and CI one installation, one version to pin, and one consistent command name.
+
+Separate executables would add shell setup and version coordination: one machine might have `writer`, another only
+`dispat`, and scripts would need to account for both. Subcommands keep that work out of release scripts. The
+[Go packages](./go/README.md) remain independently importable when you want to use the scanner or writer in your own
+program.
 
 ## Can I start with one package and add more later?
 

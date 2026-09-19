@@ -3,7 +3,7 @@
 # refused a post for reasons of its own: the tags exist, the release cannot run
 # again, and one post still has to be said.
 #
-# The replay scripts under announce/ are written when a post has to be said
+# The replay scripts under services/dispat/announce/{rc,stable}/ are written when a post has to be said
 # again, and each one is a record of what went out and why. This workflow is
 # what makes saying it again a dispatch rather than a laptop holding the
 # repository's secrets.
@@ -12,8 +12,14 @@ name: announce
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: announcement folder
+        type: choice
+        options: [rc, stable]
+        default: stable
+        required: true
       script:
-        description: replay script under announce/ to run
+        description: replay script in the selected announcement folder
         required: true
 
 permissions:
@@ -28,6 +34,7 @@ jobs:
       CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
       CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
       SCRIPT: ${{ inputs.script }}
+      CHANNEL: ${{ inputs.channel }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -46,7 +53,11 @@ jobs:
       # rather than anything else in the checkout.
       - name: Replay
         run: |
+          case "$CHANNEL" in
+            rc|stable) ;;
+            *) echo "channel must be rc or stable" >&2; exit 2 ;;
+          esac
           case "$SCRIPT" in
             *[!A-Za-z0-9._-]*|'') echo "script names are a single file name" >&2; exit 2 ;;
           esac
-          ANNOUNCE_CRIER_BIN="$PWD/replay-bin/crier" sh "announce/$SCRIPT"
+          ANNOUNCE_CRIER_BIN="$PWD/replay-bin/crier" sh "services/dispat/announce/$CHANNEL/$SCRIPT"

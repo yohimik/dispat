@@ -1,7 +1,7 @@
 # The card dispat posts about its own releases.
 #
 # announce.sh drives this from dispat's announce stage; it is not a project
-# anybody runs by hand, though `crier render --config announce/crier.yaml`
+# anybody runs by hand, though `crier render --config services/dispat/announce/crier.yaml`
 # with some DISPAT_* variables set is how the previews beside this file were
 # made.
 #
@@ -35,7 +35,7 @@ render:
   jpeg-quality: 92
   # Only the fonts beside this file: a release must not render differently
   # because a runner has different fonts installed than a laptop. Poppins and
-  # Space Mono live under announce/fonts with their OFL licences.
+  # Space Mono live under services/dispat/announce/fonts with their OFL licences.
   hermetic-fonts: true
   base-url: .
   # The card paginates: page one is the cover, and a long changelog carries on
@@ -57,8 +57,10 @@ publish:
   # The same changelog appears in Instagram, LinkedIn and Discord text.
   # Keep the release link first so it survives the platform's caption limit.
   caption: |-
-    dispat v{{ .version }} is out.
+    {{ if eq .channel "rc" }}dispat v{{ .version }} is ready for testing.{{ else }}dispat v{{ .version }} is out.{{ end }}
     Release notes: https://github.com/yohimik/dispat/releases
+    {{ range .announcement }}
+    {{ . }}{{ end }}
     {{ if .sections }}
     What changed:{{ range .sections }}
     {{ .label }}:{{ range .items }}
@@ -94,8 +96,10 @@ publish:
     enabled: false
     max-attachments: 10
     caption: |-
-      @everyone dispat v{{ .version }} is out.
+      @everyone {{ if eq .channel "rc" }}dispat v{{ .version }} is ready for testing.{{ else }}dispat v{{ .version }} is out.{{ end }}
       Release notes: https://github.com/yohimik/dispat/releases
+      {{ range .announcement }}
+      {{ . }}{{ end }}
       {{ if .sections }}
       What changed:{{ range .sections }}
       {{ .label }}:{{ range .items }}

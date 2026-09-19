@@ -3,8 +3,7 @@
 # destination, including Instagram's additional cover story with music.
 set -eu
 
-root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-here=$root/announce
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 log() { printf 'announce: %s\n' "$*" >&2; }
 
 if [ "${DISPAT_STAGE:-}" != announce ] && [ -z "${ANNOUNCE_FORCE:-}" ]; then

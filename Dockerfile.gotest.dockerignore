@@ -59,15 +59,21 @@ packages/docs/demo/illustration/out
 coverage/covdata
 
 # The shell sweep's inputs. Shell files only: scripts/ also holds a python
-# renderer and announce/ holds fonts and video clips, three megabytes of them,
-# which would join every build context this file widens.
+# renderer and services/dispat/announce holds shared fonts and audio. Include
+# only the publisher scripts, configuration and channel copy needed by tests.
 !scripts
 scripts/*
 !scripts/*.sh
 !scripts/announce-test.py
-!announce
-announce/*
-!announce/*.sh
+services/dispat/announce/*
+!services/dispat/announce/*.sh
+!services/dispat/announce/crier.yaml
+!services/dispat/announce/rc
+services/dispat/announce/rc/*
+!services/dispat/announce/rc/announcement.md
+!services/dispat/announce/stable
+services/dispat/announce/stable/*
+!services/dispat/announce/stable/announcement.md
 
 # Bootstrap integration fixture and pinned tool policy.
 !.aqua

@@ -7,7 +7,7 @@
 # release, a network, or a binary:
 #
 #   DISPAT_NEW_VERSION=1.2.3 DISPAT_FEATURES="a
-#   b" sh announce/notes.sh
+#   b" sh services/dispat/announce/notes.sh
 #
 # The variables are documented in reference/environment.md: entries are one per
 # line, in history order, and a group with no entries is set to empty text
@@ -15,6 +15,18 @@
 set -eu
 
 version=${DISPAT_NEW_VERSION:-dev}
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# Match the prerelease part, ignoring optional semver build metadata.
+case "${version%%+*}" in
+*-rc|*-rc.*) channel=rc ;;
+*-*) printf 'announce: no announcement copy for prerelease version %s\n' "$version" >&2; exit 1 ;;
+*) channel=stable ;;
+esac
+announcement=$here/$channel/announcement.md
+if [ ! -s "$announcement" ]; then
+	printf 'announce: missing %s announcement copy\n' "$channel" >&2
+	exit 1
+fi
 
 # How many entries a section shows before it says how many are left.
 #
@@ -94,11 +106,19 @@ printf '{'
 [ -z "${ANNOUNCE_NO_COVER:-}" ] || printf '"nocover":true,'
 [ -z "${ANNOUNCE_COVER_ONLY:-}" ] || printf '"coveronly":true,'
 printf '"version":"%s",' "$esc_version"
+printf '"channel":"%s",' "$channel"
+printf '"announcement":['
+separator=""
+while IFS= read -r line || [ -n "$line" ]; do
+	printf '%s"%s"' "$separator" "$(printf '%s' "$line" | escape)"
+	separator=,
+done <"$announcement"
+printf '],'
 printf '"sections":[%s],' "$sections"
 printf '"install":['
 printf '{"label":"curl","command":"curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v%s/install.sh | DISPAT_VERSION=%s sh"},' \
 	"$esc_version" "$esc_version"
-printf '{"label":"self-update","command":"dispat self-update"},'
-printf '{"label":"action","command":"uses: yohimik/dispat@v1"}'
+printf '{"label":"self-update","command":"dispat self-update --release %s"},' "$esc_version"
+printf '{"label":"action","command":"{uses: yohimik/dispat@v1, with: {version: %s}}"}' "$esc_version"
 printf ']}'
 printf '\n'
