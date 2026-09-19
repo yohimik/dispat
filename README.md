@@ -122,8 +122,16 @@ dispat draws on tools and ideas that make complex work easier to inspect, compos
 - **Linux and Git** guided the CLI design: focused commands, explicit inputs, useful exit codes, and tools that work
   together. The shell tools used on [Linux](https://www.kernel.org/) inspired
   [`dispat if`](https://dispat.dev/cli/if/) and [`dispat for`](https://dispat.dev/cli/for/), which expose familiar
-  conditional and looping control flow as commands. [Git](https://git-scm.com/) also supplies the history and release
-  records that let you inspect how a release was planned and what it completed.
+  conditional and looping control flow as commands. Linux's permission classes (others, group, owner) also inspired
+  the configuration scopes: global defaults for all packages, space settings for a group of packages, and a package's
+  own settings. [Git](https://git-scm.com/) also supplies the history and release records that let you inspect how a
+  release was planned and what it completed.
+- **Docker Compose, Swarm, and Kubernetes** inspired the move from local configuration to coordinated systems.
+  [Compose](https://docs.docker.com/compose/) describes services in YAML, and compatible service definitions can become
+  a [Swarm stack](https://docs.docker.com/engine/swarm/stack-deploy/) running across machines.
+  [Kubernetes](https://kubernetes.io/docs/concepts/overview/working-with-objects/) uses declarative manifests to describe
+  cluster workloads. dispat brings that idea to releases: start with packages in one repository, then link repositories
+  into a coordinated release workflow while keeping each repository's package configuration.
 - **Database recovery and sagas** inspired the approach to reliable releases: record completed work, coordinate
   concurrent runs, and recover after partial failure. Garcia-Molina and Salem's
   [*Sagas* (1987)](https://www.cs.princeton.edu/research/techreps/598) describes long transactions made of smaller,
