@@ -12,6 +12,8 @@ diagnostic codes. Read them there and link to them rather than restating them.
 Use ordinary Go composition: small cohesive types, explicit dependencies, and interfaces at the boundary that needs them. Apply a pattern when it solves a concrete problem. Do not add factories, wrappers, or inheritance-like layers merely to give a pattern a name.
 
 - Name structs with nouns that describe their responsibility.
+- Use explicit, descriptive names. The wider a name's scope, the more context its name must carry: package-level and exported names should be more descriptive than names used within a small local block.
+- Reserve `i`, `j`, and `k` for numeric loop counters or indexes, such as `0, 1, 2, 3, ...`. Name iterated values and map keys by their meaning, such as `packageName` or `repository`.
 - Name action functions and methods with verbs, such as `LoadConfig` or `AcquireLocks`.
 - Start constructor names with `New` for exported functions or `new` for unexported functions, such as `NewUser` or `newUser`.
 - Name methods that convert a value to a specific type after the target type, such as `User.Int()` for an integer conversion.
