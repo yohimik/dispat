@@ -371,6 +371,29 @@ func TestVersioningNoneProviderIsNeverReplaced(t *testing.T) {
 		"nothing was caught up, so nothing may say so")
 }
 
+// TestVersioningNonePreviewShowsNoEntry: a none package is never
+// changelogged, so a preview of pending notes has nothing to show for it.
+// Rendering its entry anyway offered a header built from a version it does
+// not have, `## smoke@0.0.0 (stable)`, which reads as a release that is
+// about to happen.
+func TestVersioningNonePreviewShowsNoEntry(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(noneConfig(echoBuild))
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("tools", "smoke")
+	r.Commit("feat(core,smoke): bootstrap both spaces")
+
+	res := r.Command("preview")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "## core@0.1.0", "the releasable package is previewed")
+	assert.NotContains(t, res.Stdout, "smoke@",
+		"a package that is never released has no entry to preview")
+
+	res = r.Command("preview", "--package", "smoke")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.NotContains(t, res.Stdout, "smoke@", "asking for it by name answers the same way")
+}
+
 // TestVersioningNoneHeldProviderPrereleaseIsReadFromOneAnswer: a held
 // provider's withheld version is not the version the run writes, so it must
 // not decide whether W203 is reported either. A stable consumer picking up a

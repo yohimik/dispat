@@ -104,6 +104,14 @@ func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
 	if !rel.IsChanged() && !rel.IsReleasing() {
 		return ""
 	}
+	// Before the header is built, for the reason printGraph checks the same
+	// thing before its version fields: a none package is never changelogged
+	// and has no version, so an entry for it would be headed by the 0.0.0
+	// placeholder it carries in the plan and would read as a release that is
+	// about to happen.
+	if !rel.IsReleasable() {
+		return ""
+	}
 	// The changelog entry's header carries the tag and a date; a preview has
 	// no date yet, so it shows the channel movement instead: the transition
 	// (§13.10) is the context a reader needs to judge the sections below.
