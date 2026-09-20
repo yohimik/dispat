@@ -27,6 +27,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -82,17 +83,49 @@ func (s linkSuggestion) render() string {
 // connect its roster, the halves of the links only one end declares, the
 // checkouts its declared links lack, and the roster entries that would let
 // every peer compose the same fleet.
-func (a *App) suggestLinks() []linkSuggestion {
-	if !a.workspace.IsChoreographed() {
-		return nil
+func (a *App) suggestLinks(topology string) ([]linkSuggestion, error) {
+	topology, err := normalizeComputeTopology(topology)
+	if err != nil {
+		return nil, err
+	}
+	if !a.workspace.IsLinked() {
+		if topology == "star" {
+			return nil, errors.New("star topology requires a linked fleet with a named entry repository")
+		}
+		return nil, nil
+	}
+	for _, finding := range a.workspace.LinkFindings() {
+		switch finding.Code {
+		case config.DiagnosticLinkGraph:
+			return nil, fmt.Errorf("existing fleet link topology is cyclic: %s; compute never removes links, so the existing links require operator resolution", finding.Message)
+		case config.DiagnosticOwnershipInvalid, config.DiagnosticComposition, config.DiagnosticBoundary:
+			return nil, fmt.Errorf("cannot compute repository topology from invalid configuration: %s: %s", finding.Code, finding.Message)
+		case config.DiagnosticIdentity:
+			return nil, fmt.Errorf("existing fleet repository identity is inconsistent: %s; compute never rewrites repository identities, so the existing configuration requires operator resolution", finding.Message)
+		}
 	}
 	fleet := a.fleetRoster()
 	var out []linkSuggestion
-	out = append(out, a.missingLinks(fleet)...)
+	links, err := a.missingLinks(fleet, topology)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, links...)
 	out = append(out, a.missingBackLinks()...)
 	out = append(out, a.missingCheckouts()...)
 	out = append(out, a.missingRosterEntries(fleet)...)
-	return out
+	return out, nil
+}
+
+func normalizeComputeTopology(topology string) (string, error) {
+	switch topology {
+	case "", "minimal":
+		return "minimal", nil
+	case "star":
+		return topology, nil
+	default:
+		return "", fmt.Errorf("invalid compute topology %q: expected minimal or star", topology)
+	}
 }
 
 // rosterEntry is one fleet member as the rosters describe it, folded together
@@ -100,7 +133,6 @@ func (a *App) suggestLinks() []linkSuggestion {
 type rosterEntry struct {
 	name   string
 	url    string
-	path   string
 	branch string
 	// composed is true when this run actually walked into the repository.
 	composed bool
@@ -110,6 +142,10 @@ type rosterEntry struct {
 // repositories and their rosters name it, in folded-identity order.
 func (a *App) fleetRoster() []rosterEntry {
 	byFold := map[string]*rosterEntry{}
+	disabled := make(map[string]bool)
+	for _, repository := range a.workspace.DisabledRepositories() {
+		disabled[strings.ToLower(repository.Name)] = true
+	}
 	remember := func(name string) *rosterEntry {
 		key := strings.ToLower(name)
 		if entry, ok := byFold[key]; ok {
@@ -123,12 +159,12 @@ func (a *App) fleetRoster() []rosterEntry {
 		repository := &a.workspace.Repositories[i]
 		remember(repository.Name).composed = true
 		for _, declared := range repository.Config.Repositories {
+			if disabled[strings.ToLower(declared.Name)] {
+				continue
+			}
 			entry := remember(declared.Name)
 			if entry.url == "" {
 				entry.url = declared.URL
-			}
-			if entry.path == "" {
-				entry.path = declared.Path
 			}
 			if entry.branch == "" {
 				entry.branch = declared.Branch
@@ -145,9 +181,12 @@ func (a *App) fleetRoster() []rosterEntry {
 
 // missingLinks is the spanning tree the fleet still needs: Kruskal over the
 // fleet's pairs in folded order, seeded with the links that exist.
-func (a *App) missingLinks(fleet []rosterEntry) []linkSuggestion {
+func (a *App) missingLinks(fleet []rosterEntry, topology string) ([]linkSuggestion, error) {
 	if len(fleet) < 2 {
-		return nil
+		return nil, nil
+	}
+	if topology == "star" {
+		return a.suggestStarLinks(fleet)
 	}
 	groups := newFleetGroups(fleet)
 	for i := range a.workspace.Repositories {
@@ -156,15 +195,11 @@ func (a *App) missingLinks(fleet []rosterEntry) []linkSuggestion {
 			groups.join(repository.Name, peer)
 		}
 	}
-	byFold := make(map[string]rosterEntry, len(fleet))
-	for _, entry := range fleet {
-		byFold[strings.ToLower(entry.name)] = entry
-	}
 	var out []linkSuggestion
 	for i := 0; i < len(fleet); i++ {
 		for j := i + 1; j < len(fleet); j++ {
 			from, to := fleet[i], fleet[j]
-			if !groups.join(from.name, to.name) {
+			if groups.find(from.name) == groups.find(to.name) {
 				continue
 			}
 			// The link is created in whichever end this run can reach; the
@@ -176,14 +211,61 @@ func (a *App) missingLinks(fleet []rosterEntry) []linkSuggestion {
 			if !owner.composed {
 				continue
 			}
+			groups.join(from.name, to.name)
 			out = append(out, linkSuggestion{
 				kind: linkChangeLink, repository: owner.name, peer: peer.name,
-				path: linkPathFor(peer), url: peer.url, branch: peer.branch,
+				path: resolveRepositoryLinkPath(a.workspace.RepositoryByName(owner.name), peer.name), url: peer.url, branch: peer.branch,
 				detail: fmt.Sprintf("connects %s to the fleet", peer.name),
 			})
 		}
 	}
-	return out
+	return out, nil
+}
+
+// suggestStarLinks proposes one direct link from the entry repository to
+// every other member. Existing links between two non-entry peers cannot be
+// reconciled without deleting history, so star refuses them before compute
+// selects or writes any suggestion.
+func (a *App) suggestStarLinks(fleet []rosterEntry) ([]linkSuggestion, error) {
+	entry := a.workspace.EntryRepository()
+	if entry == nil {
+		return nil, errors.New("star topology needs an entry repository")
+	}
+	for i := range a.workspace.Repositories {
+		repository := &a.workspace.Repositories[i]
+		for _, peer := range repository.LinkPeers() {
+			if !strings.EqualFold(repository.Name, entry.Name) && !strings.EqualFold(peer, entry.Name) {
+				return nil, fmt.Errorf("star topology is incompatible with existing link %s <-> %s; existing links are retained, so use minimal topology", repository.Name, peer)
+			}
+		}
+	}
+	var out []linkSuggestion
+	for _, peer := range fleet {
+		composedPeer := a.workspace.RepositoryByName(peer.name)
+		if strings.EqualFold(peer.name, entry.Name) || isRepositoryLinkedToPeer(entry, peer.name) || isRepositoryLinkedToPeer(composedPeer, entry.Name) {
+			continue
+		}
+		// A roster-only peer is unavailable to inspect, but the entry is always
+		// the writable owner of a star edge.
+		out = append(out, linkSuggestion{
+			kind: linkChangeLink, repository: entry.Name, peer: peer.name,
+			path: resolveRepositoryLinkPath(entry, peer.name), url: peer.url, branch: peer.branch,
+			detail: fmt.Sprintf("connects %s directly to %s", peer.name, entry.Name),
+		})
+	}
+	return out, nil
+}
+
+func isRepositoryLinkedToPeer(repository *config.Repository, peer string) bool {
+	if repository == nil {
+		return false
+	}
+	for name := range repository.Links {
+		if strings.EqualFold(name, peer) {
+			return true
+		}
+	}
+	return false
 }
 
 // missingBackLinks proposes the half of every link only one of its two
@@ -232,7 +314,7 @@ func (a *App) missingCheckouts() []linkSuggestion {
 		}
 		path := owner.Links[finding.Peer]
 		if path == "" {
-			path = linkPathFor(rosterEntry{name: finding.Peer})
+			path = resolveRepositoryLinkPath(owner, finding.Peer)
 		}
 		out = append(out, linkSuggestion{
 			kind: linkChangeInit, repository: owner.Name, peer: finding.Peer, path: path,
@@ -270,7 +352,7 @@ func (a *App) missingRosterEntries(fleet []rosterEntry) []linkSuggestion {
 			}
 			out = append(out, linkSuggestion{
 				kind: linkChangeRepository, repository: repository.Name, peer: member.name,
-				url: member.url, path: member.path, branch: member.branch,
+				url: member.url, branch: member.branch,
 				detail: "the fleet holds this repository and this roster does not name it",
 			})
 		}
@@ -278,13 +360,18 @@ func (a *App) missingRosterEntries(fleet []rosterEntry) []linkSuggestion {
 	return out
 }
 
-// linkPathFor is where a link to one peer lives: what the roster asked for,
-// or the fleet's default.
-func linkPathFor(entry rosterEntry) string {
-	if entry.path != "" {
-		return filepath.ToSlash(filepath.Clean(entry.path))
+// resolveRepositoryLinkPath resolves a roster path only in the repository that will
+// own the proposed link. Roster paths are relative to their declaring
+// repository, so a path learned from another peer cannot be reused here.
+func resolveRepositoryLinkPath(owner *config.Repository, peer string) string {
+	if owner != nil && owner.Config != nil {
+		for _, declared := range owner.Config.Repositories {
+			if strings.EqualFold(declared.Name, peer) && declared.Path != "" {
+				return filepath.ToSlash(filepath.Clean(declared.Path))
+			}
+		}
 	}
-	return config.DefaultLinkPath(entry.name)
+	return config.DefaultLinkPath(peer)
 }
 
 // fleetGroups is the union-find behind the spanning tree.
@@ -333,7 +420,7 @@ func (g *fleetGroups) join(a, b string) bool {
 // readable, which can name members this run had never heard of. It is bounded
 // by the fleet's size, so a fleet that keeps describing new members stops
 // rather than spinning.
-func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []linkSuggestion, out io.Writer) error {
+func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []linkSuggestion, topology string, out io.Writer) error {
 	if len(apply) == 0 {
 		return nil
 	}
@@ -362,7 +449,14 @@ func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []link
 				applied++
 			}
 		}
-		pending = a.linksAfterRepair(ctx, cfgPath)
+		var err error
+		pending, err = a.linksAfterRepair(ctx, cfgPath, topology)
+		if err != nil {
+			wrapped := fmt.Errorf("re-reading the fleet after %d staged link operation(s): %w; review the staged changes before retrying", applied, err)
+			a.log.Error().Err(wrapped).Str("topology", topology).
+				Msg("the fleet could not be verified after applying link changes")
+			return wrapped
+		}
 	}
 	if applied > 0 {
 		fmt.Fprintf(out, "created %d fleet link operation(s); review and commit them in each repository\n", applied)
@@ -378,20 +472,27 @@ func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []link
 // composed again — leniently, as compute always does — and the suggestions
 // are derived from what is there now. A fleet that cannot be recomposed
 // stops the loop rather than repeating what it already tried.
-func (a *App) linksAfterRepair(ctx context.Context, cfgPath string) []linkSuggestion {
+func (a *App) linksAfterRepair(ctx context.Context, cfgPath, topology string) ([]linkSuggestion, error) {
 	fresh, err := config.ComposeWorkspaceForRepair(ctx, a.cfg, cfgPath, a.root, nil, nil, nil)
-	if err != nil || fresh == nil {
-		a.log.Debug().Err(err).Msg("the repaired fleet cannot be read again; run compute once more to finish it")
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("the repaired fleet cannot be read again: %w", err)
+	}
+	if fresh == nil {
+		a.log.Debug().Msg("the repaired fleet produced no workspace; run compute once more to finish it")
+		return nil, nil
 	}
 	a.workspace = fresh
 	var pending []linkSuggestion
-	for _, change := range a.suggestLinks() {
+	changes, err := a.suggestLinks(topology)
+	if err != nil {
+		return nil, fmt.Errorf("the repaired fleet is incompatible with %s topology: %w", topology, err)
+	}
+	for _, change := range changes {
 		if change.kind == linkChangeLink || change.kind == linkChangeInit {
 			pending = append(pending, change)
 		}
 	}
-	return pending
+	return pending, nil
 }
 
 // applyLinkChange performs one fleet change and reports whether it did

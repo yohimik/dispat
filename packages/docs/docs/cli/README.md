@@ -61,21 +61,15 @@ there.
 
 ### `--polyrepo`
 
-Read the independent Git histories of the source repositories explicitly linked by the control repository. The default
-is false. This mode also turns on when the control config has `polyrepo: true` or imports `configs`. It requires each
+Read the independent Git histories of linked repositories. Identity-linked fleets enable this automatically when the
+entry configuration states a non-empty `repository` identity; its optional `repositories` roster names other peers. A control repository can enable it with
+`polyrepo: true` or imported `configs`. It requires each
 declared source to be initialized at its pinned gitlink commit with complete history. See
 [A control repository](../control-repository.md#source-history-mode).
 
-Passing `--polyrepo=false` to a repository configured with `saga: choreography` is the standalone escape hatch: the
+Passing `--polyrepo=false` to an identity-linked repository is the standalone escape hatch: the
 fleet links are not walked and that repository releases alone. See
 [Releasing one peer alone](../choreographed-repositories.md#releasing-one-peer-alone).
-
-### `--saga`
-
-The default comes from config. Override which polyrepository protocol releases the fleet. Pass `orchestration` for a
-control repository that composes the linked sources, or `choreography` for a repository that is one peer of a linked
-fleet, where the run composes the fleet by following the links. Choosing `choreography` also turns on polyrepository
-mode. An unknown value stops the run. See [A choreographed fleet](../choreographed-repositories.md).
 
 ### `--env-file`
 

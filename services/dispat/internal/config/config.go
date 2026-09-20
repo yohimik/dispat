@@ -82,16 +82,6 @@ const (
 	CommitErrorsError = public.CommitErrorsError
 )
 
-// Values of the polyrepository saga key; see the public package for semantics.
-const (
-	SagaOrchestration = public.SagaOrchestration
-	SagaChoreography  = public.SagaChoreography
-)
-
-// sagaNames lists every accepted saga value in the order an error spells them:
-// the default an absent key keeps, then the choreographed protocol.
-var sagaNames = []string{SagaOrchestration, SagaChoreography}
-
 // Versioning values of a space; see the public package for semantics.
 const (
 	VersioningIndependent           = public.VersioningIndependent
@@ -960,7 +950,7 @@ func validate(c *File, allowEmpty bool) error {
 	if err := validateWebhooks(c); err != nil {
 		return err
 	}
-	if err := validateSaga(c); err != nil {
+	if err := validateLinkedConfiguration(c); err != nil {
 		return err
 	}
 	if c.CommitErrors == "" {
@@ -1314,78 +1304,56 @@ func validateWebhookList(where string, hooks []WebhookConfig) error {
 	return nil
 }
 
-// validateSaga normalizes the polyrepository saga and checks the keys that
-// only the choreographed one gives meaning to: this repository's identity and
-// the roster of its peers.
-//
-// An absent saga is orchestration, and orchestration is exactly today's
-// configuration language, so a file that names no saga leaves here untouched.
-// The identity keys are refused outside choreography rather than ignored: a
-// key that quietly does nothing is how a fleet ends up believing it is linked
-// when nothing reads the link.
-func validateSaga(c *File) error {
-	switch {
-	case c.Saga == "":
-	case strings.EqualFold(c.Saga, SagaOrchestration):
-		c.Saga = SagaOrchestration
-	case strings.EqualFold(c.Saga, SagaChoreography):
-		c.Saga = SagaChoreography
-	default:
-		return fmt.Errorf("saga %q is invalid (want %s)", c.Saga, quotedNames(sagaNames))
-	}
-	if !c.IsChoreographed() {
-		key := ""
-		switch {
-		case c.Repository != "":
-			key = "repository"
-		case len(c.Repositories) > 0:
-			key = "repositories"
-		default:
-			return nil
+// validateLinkedConfiguration checks the identity-owned configuration of a linked fleet.
+// A repository identity selects linked composition. A roster without an
+// identity is refused so it cannot be silently interpreted as central policy.
+func validateLinkedConfiguration(c *File) error {
+	if !c.IsLinked() {
+		if len(c.Repositories) > 0 {
+			return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
+				"repositories requires `repository`: this repository's own identity, which its peers link it under"))
 		}
-		return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
-			"%s states a choreographed fleet and needs `saga: %s`; the orchestrated saga identifies a repository by its .gitmodules name",
-			key, SagaChoreography))
+		return nil
 	}
 	if strings.TrimSpace(c.Repository) == "" {
 		return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
-			"saga %s requires `repository`: this repository's own identity, which its peers link it under", SagaChoreography))
+			"linked configuration requires `repository`: this repository's own identity, which its peers link it under"))
 	}
-	// A choreographed fleet is a polyrepository fleet: its packages belong to
+	// A linked fleet is a polyrepository fleet: its packages belong to
 	// the repository holding them and release under that repository's own
-	// records. Stating the saga states that, so the flag follows the saga and
+	// records. Stating the identity states that, so the flag follows it and
 	// nobody has to write both. An explicit `--polyrepo=false` still clears it,
 	// which is how one peer is released on its own.
 	c.Polyrepo = true
 	if err := validateRepositoryIdentity("repository", c.Repository); err != nil {
 		return err
 	}
-	// The central keys of the orchestrated saga have no owner here. Refusing
+	// The central keys have no owner in a linked fleet. Refusing
 	// them is a safety boundary rather than tidiness: a fleet with no control
 	// repository cannot honour policy written for one, and silently dropping
 	// it would release under a policy nobody stated.
 	if len(c.Configs) > 0 {
 		return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
-			"saga %s composes through fleet links and cannot import `configs`; every peer carries its own configuration", SagaChoreography))
+			"linked configuration composes through fleet links and cannot import `configs`; every peer carries its own configuration"))
 	}
 	for _, name := range sortedKeys(c.RepositoryOverrides) {
 		if c.RepositoryOverrides[name].Commit != nil {
 			return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
-				"repositoryOverrides[%q]: commit policy belongs to repository %q's own configuration under saga %s",
-				name, name, SagaChoreography))
+				"repositoryOverrides[%q]: commit policy belongs to repository %q's own linked configuration",
+				name, name))
 		}
 	}
 	for i := range c.RepositoryBaselines {
 		if strings.EqualFold(c.RepositoryBaselines[i].Repository, ControlRepository) {
 			return WithDiagnostic(DiagnosticComposition, fmt.Errorf(
-				"repositoryBaselines[%d]: repository %q is the orchestrated control identity, which saga %s has no participant for",
-				i, c.RepositoryBaselines[i].Repository, SagaChoreography))
+				"repositoryBaselines[%d]: repository %q is the central control identity, which a linked fleet has no participant for",
+				i, c.RepositoryBaselines[i].Repository))
 		}
 	}
 	return validateRepositoryRoster(c)
 }
 
-// validateRepositoryRoster checks the peers a choreographed repository names:
+// validateRepositoryRoster checks the peers a linked repository names:
 // one entry per peer, none of them this repository, and a link path that stays
 // inside the repository declaring it.
 func validateRepositoryRoster(c *File) error {
@@ -1415,7 +1383,7 @@ func validateRepositoryRoster(c *File) error {
 
 // validateRepositoryIdentity checks one fleet identity. The character set is
 // what a `.gitmodules` name, a filesystem path and a log field can all carry
-// unambiguously, and the orchestrated control identity stays reserved because
+// unambiguously, and the central control identity stays reserved because
 // the workspace environment hands it to nested commands as a fixed word.
 func validateRepositoryIdentity(where, name string) error {
 	if !repositoryIdentity.MatchString(name) {
@@ -1424,7 +1392,7 @@ func validateRepositoryIdentity(where, name string) error {
 	}
 	if strings.EqualFold(name, ControlRepository) {
 		return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
-			"%s: %q is reserved for the orchestrated control repository", where, name))
+			"%s: %q is reserved for the central control repository", where, name))
 	}
 	return nil
 }

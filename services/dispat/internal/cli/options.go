@@ -19,7 +19,6 @@ type options struct {
 	root, cfgName         *string
 	configs               *[]string
 	polyrepo              *bool
-	saga                  *string
 	envFiles              *[]string
 	logLevel, logFormat   *string
 	quietParser           *bool
@@ -39,6 +38,7 @@ type options struct {
 	pvChangelog, pvGithub *bool
 
 	// compute
+	computeTopology                  *string
 	computeWrite, computeInteractive *bool
 
 	// self-update
@@ -125,8 +125,6 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"import a repository-local config, relative to the control repository root (repeatable; imports imply --polyrepo)")
 	o.polyrepo = fs.Bool("polyrepo", false,
 		"treat configured package paths as initialized git-submodule repositories with independent histories and release records")
-	o.saga = fs.String("saga", "",
-		"override the configured saga: orchestration, where this control repository composes the linked sources, or choreography, where this repository is one peer of a linked fleet and the run composes it by following the links")
 	o.envFiles = fs.StringArray("env-file", nil,
 		"read environment variables from this file instead of ./.env (repeatable, later files win); variables the environment already sets are kept")
 	fs.IntSlice("concurrency", nil, "override the configured concurrency: one value for both stages, or build,publish (e.g. 4,2); dispat run uses the build value")
@@ -152,6 +150,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"preview the changelog entry body (the default when neither --changelog nor --github is given)")
 	o.pvGithub = fs.Bool("github", false,
 		"preview the GitHub release body, under the github entry format; beside --changelog, both are printed")
+	o.computeTopology = fs.String("topology", "minimal", "repository link topology for compute: minimal preserves links and adds the fewest needed; star links every repository to the entry")
 	o.computeWrite = fs.Bool("write", false,
 		"apply every suggestion to the config file")
 	o.computeInteractive = fs.BoolP("interactive", "i", false,

@@ -10,13 +10,13 @@ const (
 	DiagnosticOwnershipInvalid  = "E331"
 	DiagnosticComposition       = "E332"
 	DiagnosticBoundary          = "E333"
-	// DiagnosticLinkGraph reports a choreographed fleet whose links do not
+	// DiagnosticLinkGraph reports a linked fleet whose links do not
 	// form a tree: a second path to a repository the walk already reached.
 	DiagnosticLinkGraph = "E338"
 	// DiagnosticIdentity reports a repository identity that cannot be trusted
 	// to name one participant: a missing, reserved or malformed `repository`,
 	// a roster naming the same peer twice, or a linked checkout whose own
-	// identity or saga contradicts the link it was reached through.
+	// identity contradicts the link it was reached through.
 	DiagnosticIdentity = "E339"
 	// DiagnosticLinkOneSided reports a fleet link only one of its two ends
 	// declares. The fleet still composes; the missing half is what `dispat

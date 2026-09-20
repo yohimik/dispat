@@ -65,7 +65,7 @@ func TestChoreographyComposesOneFleetFromAnyEntry(t *testing.T) {
 			assert.ElementsMatch(t, []string{"api-pkg", "sdk-pkg"}, plannedPackages(res))
 			for _, event := range res.Events {
 				if event.Str("message") == "polyrepo workspace composed" {
-					assert.Equal(t, models.SagaChoreography, event.Str("saga"))
+					assert.Empty(t, event.Str("saga"))
 					assert.Equal(t, entry, event.Str("entry"))
 				}
 			}
@@ -103,13 +103,12 @@ func TestChoreographyRefusesAnIdentityItCannotTrust(t *testing.T) {
 	}{
 		{"a peer that calls itself something else", "E339",
 			func(cfg *models.File) { cfg.Repository = "shop" }},
-		{"a peer that releases under the orchestrated saga", "E339", func(cfg *models.File) {
-			cfg.Saga = models.SagaOrchestration
+		{"a peer with no repository identity", "E339", func(cfg *models.File) {
 			cfg.Repository = ""
 			cfg.Repositories = nil
 		}},
-		{"a peer whose own configuration contradicts itself", "E332",
-			func(cfg *models.File) { cfg.Saga = "" }},
+		{"a roster without its own identity", "E339",
+			func(cfg *models.File) { cfg.Repository = "" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fleet := newChoreographyFleet(t, "api", "sdk")
@@ -122,6 +121,10 @@ func TestChoreographyRefusesAnIdentityItCannotTrust(t *testing.T) {
 			res := fleet.peer("api").Status("--package", "*")
 			assert.Equal(t, 1, res.Code)
 			requireDiagnostic(t, res, tc.code)
+			checked := fleet.peer("api").Command("compute", "--check")
+			assert.Equal(t, 1, checked.Code, "%s\n%s", checked.Stdout, checked.Stderr)
+			requireDiagnostic(t, checked, tc.code)
+			assert.NotContains(t, checked.Stdout, "are in sync")
 		})
 	}
 }
@@ -204,7 +207,7 @@ func TestChoreographyRefusesTheKeysOnlyAControlRepositoryOwns(t *testing.T) {
 			cfg.RepositoryBaselines = []models.RepositoryBaselineConfig{{
 				Consumer: "api-pkg", ReleaseTag: "api-pkg@1.0.0", Repository: "control", Revision: "HEAD"}}
 		}, "E332"},
-		{"an identity with no saga", func(cfg *models.File) { cfg.Saga = "" }, "E332"},
+		{"a roster with no identity", func(cfg *models.File) { cfg.Repository = "" }, "E339"},
 		{"a reserved identity", func(cfg *models.File) { cfg.Repository = "control" }, "E339"},
 		{"a roster naming this repository", func(cfg *models.File) {
 			cfg.Repositories = append(cfg.Repositories, models.RepositoryLinkConfig{Name: "API"})
@@ -228,7 +231,6 @@ func TestChoreographyAbsentKeysKeepSingleRepositoryBehaviour(t *testing.T) {
 	fleet := newChoreographyFleet(t, "api", "sdk")
 	fleet.link("api", "sdk")
 	fleet.writeConfig("api", func(cfg *models.File) {
-		cfg.Saga = ""
 		cfg.Repository = ""
 		cfg.Repositories = nil
 	})
@@ -305,27 +307,16 @@ func TestChoreographyExcludesADisabledPeer(t *testing.T) {
 	requireDiagnostic(t, refused, "E332")
 }
 
-// TestChoreographySelectsTheSagaFromTheCommandLine: `--saga` is a
-// configuration override, so a file that states nothing releases as a fleet
-// when the invocation says so.
-func TestChoreographySelectsTheSagaFromTheCommandLine(t *testing.T) {
+// TestLinkedFleetRejectsTheRemovedSagaFlag: fleet membership comes from
+// the configuration and links, with no protocol override on the command line.
+func TestLinkedFleetRejectsTheRemovedSagaFlag(t *testing.T) {
 	fleet := newChoreographyFleet(t, "api", "sdk")
 	fleet.link("api", "sdk")
-	// The file keeps the fleet's identity keys and states the orchestrated
-	// saga, which is a contradiction the load refuses...
-	fleet.writeConfig("api", func(cfg *models.File) { cfg.Saga = models.SagaOrchestration })
-	refused := fleet.peer("api").Status("--package", "*")
-	assert.Equal(t, 1, refused.Code)
-	requireDiagnostic(t, refused, "E332")
-
-	// ...and the flag settles it before the file is validated, which is what
-	// makes it an override rather than a patch applied afterwards.
-	res := fleet.peer("api").StatusOK("--package", "*", "--saga", models.SagaChoreography)
+	res := fleet.peer("api").StatusOK("--package", "*")
 	assert.ElementsMatch(t, []string{"api", "sdk"}, composedRepositories(res))
-
-	bad := fleet.peer("api").Status("--package", "*", "--saga", "ballet")
-	assert.Equal(t, 1, bad.Code)
-	assert.Contains(t, strings.ToLower(bad.Stdout+bad.Stderr), "saga")
+	refused := fleet.peer("api").Status("--saga", "choreography")
+	assert.NotEqual(t, 0, refused.Code)
+	assert.Contains(t, strings.ToLower(refused.Stdout+refused.Stderr), "unknown flag")
 }
 
 // TestChoreographyRefusesAFleetInventoryItCannotRead: the link inventory is

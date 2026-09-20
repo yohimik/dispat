@@ -28,10 +28,9 @@ runtime and recovery contract is in [A control repository](./control-repository.
 Go shapes are in [models](./go/models.md). The CLI exposes the same composition through `--polyrepo` and repeatable
 `--configs` global flags.
 
-A fleet with no control repository adds three more: `saga`, `repository`, and the `repositories` roster of
-`{name, url, path, branch}` entries. Their contract is in
-[A choreographed fleet](./choreographed-repositories.md), and the `--saga` global flag selects the protocol for one
-invocation.
+A fleet with no control repository uses `repository` as its activating identity and an optional `repositories` roster
+of `{name, url, path, branch}` entries for other peers. Their contract is
+in [A choreographed fleet](./choreographed-repositories.md); `--polyrepo=false` is the local escape for one invocation.
 
 ## The Go packages
 

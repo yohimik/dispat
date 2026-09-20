@@ -69,18 +69,18 @@ func ComposeWorkspaceForRepair(ctx context.Context, cfg *File, configPath, contr
 
 func composeWorkspace(ctx context.Context, cfg *File, configPath, controlRoot string, cliConfigs []string,
 	runPins map[string][]string, resolve SourcePinResolver, lenient bool) (*Workspace, error) {
-	// The choreographed saga composes by following links rather than by
+	// A linked fleet composes by following links rather than by
 	// reading one repository's inventory, so it is a different walk to the
-	// same result. Stating that saga sets the polyrepo flag, and
+	// same result. Stating a repository identity sets the polyrepo flag, and
 	// `--polyrepo=false` clears it again to release one peer on its own,
 	// which is why the delegation asks for both.
-	if cfg != nil && cfg.IsChoreographed() && cfg.Polyrepo {
+	if cfg != nil && cfg.IsLinked() && cfg.Polyrepo {
 		if len(cliConfigs) > 0 {
 			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf(
-				"choreography: --configs imports a repository-local configuration into a control run; every peer of a choreographed fleet carries its own"))
+				"linked fleet: --configs imports a repository-local configuration into a control run; every peer carries its own"))
 		}
-		return ComposeChoreography(ctx, cfg, configPath, controlRoot,
-			ChoreographyOptions{InheritedPins: resolve != nil, Lenient: lenient})
+		return ComposeLinked(ctx, cfg, configPath, controlRoot,
+			LinkedOptions{InheritedPins: resolve != nil, Lenient: lenient})
 	}
 	if cfg == nil || (!cfg.Polyrepo && len(cfg.Configs) == 0 && len(cliConfigs) == 0) {
 		return nil, nil
@@ -223,7 +223,6 @@ func composeWorkspace(ctx context.Context, cfg *File, configPath, controlRoot st
 		return nil, err
 	}
 	workspace := newWorkspace(root, repos, modules)
-	workspace.Saga = SagaOrchestration
 	workspace.disabled = participants.disabled
 	workspace.excludedPackages = participants.packages
 	workspace.excludedSpaces = participants.spaces
@@ -246,11 +245,11 @@ type Repository struct {
 	// reproduce it before any hook or publication may run.
 	CompositionHead string
 	// Entry marks the repository the command was invoked in: the control
-	// repository of an orchestrated fleet, and the peer a choreographed run
+	// repository of a central fleet, and the peer a linked run
 	// started from, which is any of them.
 	Entry bool
 	// Linker is the identity of the repository whose fleet link reached this
-	// one, in a choreographed fleet. The entry has none.
+	// one, in a linked fleet. The entry has none.
 	Linker string
 	// Links maps each fleet peer this repository links to the gitlink path
 	// holding it, relative to this repository's root. Orchestration links
@@ -262,13 +261,9 @@ type Repository struct {
 // run. It is immutable after composition.
 type Workspace struct {
 	// ControlRoot is the root of the repository the run is anchored in: the
-	// control repository of an orchestrated fleet, and the entry repository of
-	// a choreographed one, which owns no other repository's configuration.
-	ControlRoot string
-	// Saga is the protocol that composed this workspace. The zero value is
-	// the orchestrated one, which is what a workspace built by hand — in a
-	// test, or by a caller that only needs the ownership map — behaves as.
-	Saga         string
+	// control repository of a central fleet, and the entry repository of
+	// a linked one, which owns no other repository's configuration.
+	ControlRoot  string
 	Repositories []Repository
 	// Findings are the recoverable link problems composition observed.
 	// LinkFindings is the nil-safe way to read them.
@@ -804,7 +799,7 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 		declared = append(declared, deps...)
 		excluded = append(excluded, ex...)
 	}
-	if err := validatePackageOwnershipMode(pkgs, workspace.IsChoreographed()); err != nil {
+	if err := validatePackageOwnershipMode(pkgs, workspace.IsLinked()); err != nil {
 		return nil, nil, nil, err
 	}
 	return pkgs, declared, excluded, nil
@@ -970,10 +965,10 @@ func validatePackageOwnership(pkgs []*model.Package) error {
 // comparison scoped to one repository at a time.
 //
 // Package names stay one graph either way: two repositories may not both
-// declare `api`, whichever saga composed them. What differs is containment. An
-// orchestrated fleet is one tree of folders with every source inside the
+// declare `api`, whichever topology composed them. What differs is containment. A
+// central fleet is one tree of folders with every source inside the
 // control repository, so a scope containing another package's scope is always
-// an ownership mistake. A choreographed peer sits inside the checkout of the
+// an ownership mistake. A linked peer sits inside the checkout of the
 // repository that links it, so a repository whose own package covers its root
 // contains every peer linked beneath it, and comparing those scopes across
 // repositories would report an overlap that ownership does not have: the

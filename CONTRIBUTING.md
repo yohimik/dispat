@@ -68,7 +68,7 @@ interchangeable.
 
 The repository-wide keys exist only at the root: `spaces`, `versionGroups`, `initials`, `commit`, `shell`, `run`,
 `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`, `updateCheck`, `unsafeDisableLock`, `polyrepo`,
-`saga`, `repository`, `repositories`, `configs`, `repositoryOverrides` and `repositoryBaselines`. The full reference is
+`repository`, `repositories`, `configs`, `repositoryOverrides` and `repositoryBaselines`. The full reference is
 the [configuration documentation](packages/docs/docs/configuration/README.md).
 
 ### Repository participation
@@ -82,14 +82,15 @@ boundaries, so nothing else may reach into them.
 
 ### Choreographed fleets
 
-`saga: choreography` releases a fleet with no control repository: every participant states its own `repository`
-identity, carries its own configuration and records, and is joined to its neighbours by two-sided submodule links. The
+An identity-linked fleet has no control repository: every participant states its own `repository` identity, optionally
+lists other peers in `repositories`, carries its own configuration and records, and is joined to its neighbours by two-sided submodule links. The
 keys a control repository owns are refused rather than ignored there, because a fleet with no such repository cannot
 honour a policy written for one, and a key nothing reads is how a fleet comes to believe it is linked. Participation is
 still the invocation's question and is read from the entry repository alone, while commit policy, lock policy and
 release records belong to each peer. The links must form a tree, so exactly one route joins any two repositories and
-cross-repository evidence has one reading; `dispat compute` proposes the minimum set that connects the roster, never
-commits and never removes a link. The full contract is
+cross-repository evidence has one reading. `dispat compute --topology minimal` preserves existing links and proposes
+the fewest additions that connect the roster; `--topology star` proposes a direct link from the entry repository to
+every peer and errors when existing links cannot fit that shape. Neither mode commits nor removes a link. The full contract is
 [A choreographed fleet](packages/docs/docs/choreographed-repositories.md).
 
 ### Linked configuration

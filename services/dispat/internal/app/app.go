@@ -249,7 +249,7 @@ func (a *App) planOptions(ctx context.Context) (plan.Options, error) {
 		IgnoredTagsByRepository:      a.ignoreTagsByRepository,
 	}
 	if a.workspace != nil {
-		opts.LinkEvidence = a.workspace.IsChoreographed()
+		opts.LinkEvidence = a.workspace.IsLinked()
 		opts.Repositories = make(map[string]plan.RepositoryHistory, len(a.workspace.Repositories))
 		for _, repository := range a.workspace.Repositories {
 			repositoryGit := &gitx.LocalGitx{Dir: repository.Root, Name: a.git.Name, Email: a.git.Email, Log: a.log}

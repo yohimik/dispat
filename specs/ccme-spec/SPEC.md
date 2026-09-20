@@ -141,8 +141,7 @@ to be interpreted as described in RFC 2119.
 | **Graduation**           | Ending a package's prerelease line by releasing it on `stable` (§11.5). Never happens implicitly.                       |
 | **Repository identity**  | In the polyrepository profile, `control` for the control repository, the exact `.gitmodules` name of a source repository, or a peer's own `repository` value (§§27.2, 27.11). |
 | **Repository revision**  | A pair `(repository identity, full commit object ID)`. A bare commit ID is never a fleet-wide identity (§27.2).          |
-| **Saga**                 | Which polyrepository protocol releases a fleet: `orchestration`, with a control repository, or `choreography`, with peers (§27.11). |
-| **Fleet link**           | A submodule joining two peers of a choreographed fleet, named by the linked peer's identity and declared by its roster (§27.11). |
+| **Fleet link**           | A submodule joining two peers of a linked peer tree, named by the linked peer's identity and declared by its roster (§27.11). |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
 
@@ -2918,9 +2917,8 @@ Defaults are chosen so that an unconfigured repository behaves conservatively an
 | `registries`                | `{}`                                                         | Registry name → URL/credentials handle, referenced by `publishTargets` (§13.10a).         |
 | `publishTargets`            | `{}`                                                         | Package glob → registry name or `none`. Highest-precedence target source.                 |
 | `polyrepo`                  | `false`                                                      | Opt into the polyrepository Git profile (§27).                                            |
-| `saga`                      | `"orchestration"`                                            | Which polyrepository protocol releases the fleet: `orchestration` or `choreography`. The latter also activates the profile (§27.11). |
-| `repository`                | `""`                                                         | This repository's own identity in a choreographed fleet. REQUIRED under that saga and refused outside it (§27.11). |
-| `repositories`              | `[]`                                                         | The roster of a choreographed fleet: `{name, url, path, branch}` per peer. Refused outside that saga (§27.11). |
+| `repository`                | `""`                                                         | This repository's own identity in a linked peer fleet. A non-empty value activates peer composition (§27.11). |
+| `repositories`              | `[]`                                                         | The other peers in a linked fleet: `{name, url, path, branch}` per peer. MAY be empty for a one-member fleet; non-empty without `repository` is `E339` (§27.11). |
 | `configs`                   | `[]`                                                         | Explicit configuration files imported into the combined workspace; a non-empty list activates the profile (§27.3). |
 | `repositoryOverrides`       | `{}`                                                         | Source repository identity → participation and central release-commit policy override (§27.3). |
 | `repositoryBaselines`       | `[]`                                                         | Explicit cross-repository consumer boundary tuples used only when ordinary checkpoint evidence is absent or ambiguous (§27.6). |
@@ -3264,7 +3262,7 @@ The VCS adapter diagnostics `E320`–`E329`, `W320` and `W321` are defined in th
 | `E335` | A source release record, source push, or control gitlink checkpoint failed after publication. |
 | `E336` | A release lock cannot be acquired or returned, so exclusive release ownership is not cleanly coordinated. |
 | `E337` | A configured release branch is absent, or a detached repository needs a branch push without `commit.branch`. |
-| `E338` | A choreographed fleet's links do not form a tree: a second route reaches a repository the walk already entered. |
+| `E338` | A linked peer fleet's links do not form a tree: a second route reaches a repository the walk already entered. |
 | `E339` | A repository identity cannot be trusted to name one participant: it is missing, reserved, malformed, repeated in a roster, self-naming, or contradicted by the link it was reached through. |
 | `W330` | An `external: true` dependency provider is absent, so its edge is inactive for this snapshot. |
 | `W331` | The release lock is switched off by an explicit unsafe setting, for every repository the warning names. |
@@ -5540,15 +5538,16 @@ grammar, bump lattice, train and fresh windows, holds, cancellation, corrections
 partial-publication guarantees defined above. Git is REQUIRED for every participating repository. Activating this
 profile does not activate or claim conformance with the external adapter or rollback protocols of §§25–26.
 
-The profile defines two **sagas**, and a fleet releases under exactly one of them. Sections 27.1–27.10 specify the
-**orchestrated** saga, in which one **control repository** composes the fleet, owns its intent, and records a gitlink
-checkpoint after each source release. Section 27.11 specifies the **choreographed** saga, in which no repository is
-the control repository. A configuration that names no saga is orchestrated.
+The profile supports two configuration ownership layouts. Sections 27.1–27.10 specify central ownership, in which one
+**control repository** composes the fleet, owns its intent, and records a gitlink checkpoint after each source release.
+Section 27.11 specifies peer ownership, in which no repository is the control repository. The independent link-graph
+choice in §27.11 is minimal or star; star topology does not imply central configuration ownership. Existing centrally
+owned configurations retain their established behavior.
 
 ### 27.1 Activation and compatibility
 
-The profile is active when `polyrepo: true`, `saga: choreography`, a global `--polyrepo` or `--saga choreography`
-option, or at least one explicitly imported configuration is present. With none of those inputs, nested repositories
+The profile is active when `polyrepo: true`, a global `--polyrepo`, at least one explicitly imported configuration,
+or the entry configuration states a non-empty `repository` identity. With none of those inputs, nested repositories
 retain the single-repository behavior of the
 previous specification: the control history is the only history, gitlink moves are ordinary changed paths, and this
 section has no effect. Implementations MUST test that opt-out behavior as part of profile conformance.
@@ -5732,7 +5731,7 @@ is reused. A propagation walk may be shared only for equal source set, depth, an
 
 ### 27.6 Cross-repository consumer boundaries
 
-The profile adds no ledger, tag payload, metadata ref, or timestamp convention. Under the orchestrated saga it
+The profile adds no ledger, tag payload, metadata ref, or timestamp convention. Under central hub topology it
 reconstructs a consumer's position in a source repository from normal source release tags and ordinary control gitlink
 history, or requires an explicit baseline tuple; §27.11 states what a fleet with no control repository reads instead.
 
@@ -5935,36 +5934,34 @@ in the one-time history-walk bound above.
     active. **Admit only the exact exported full commit ID.** Transient run coordination may make that pin visible to a
     later nested command in the active script; it is removed at run completion and supplies no baseline on a later run.
 
-### 27.11 Choreographed saga
+### 27.11 Linked peer topology
 
-This section specifies the second saga of the profile. No repository is the control repository. Each participant
+This section specifies the linked peer topology of the profile. No repository is the control repository. Each participant
 states its own identity, carries its own configuration and release records, and is joined to its neighbours by
 ordinary two-sided submodule links, and a release MAY start in any of them. Everything §§27.1–27.10 require of the
 profile continues to apply except where this section states otherwise: the message grammar, the bump lattice, the
 windows, the one combined dependency graph and the partial-publication guarantees are unchanged.
 
-**Activation.** The choreographed saga is active when the configuration the run reads states `saga: choreography`, or
-a global `--saga choreography` option states it for that invocation. The value is matched without regard to case and
-MUST be `orchestration` or `choreography`; any other value is a configuration error. An absent `saga` key means
-`orchestration`, so a configuration written before this section composes exactly as it did, and implementations MUST
-test that compatibility as part of conformance. Stating `saga: choreography` activates the profile on its own: the
-engine MUST behave as though `polyrepo: true` were also stated and MUST NOT require both keys. An explicit
-`--polyrepo=false` clears it again and is the standalone escape hatch: the stating repository releases alone, its
+**Activation.** Peer-owned composition is active when the entry configuration states a non-empty `repository`
+identity. That key activates the polyrepository profile automatically; `polyrepo: true` is not required. A
+configuration written before this section and containing no identity composes exactly as it did, and
+implementations MUST test that compatibility as part of conformance. An explicit `--polyrepo=false` clears peer
+composition for the invocation and is the standalone escape hatch: the stating repository releases alone, its
 fleet links are not walked, and no other repository is planned, locked, settled or recorded. The engine MUST report
 that the fleet was skipped, because a release commit written by such a run carries no cross-repository evidence.
 
-**Peer identity.** `repository` is a repository's own identity in its fleet. It is REQUIRED under this saga and is
-written as `[A-Za-z0-9._-]+`. `control` and its case variants remain reserved for the orchestrated saga and MUST NOT
+**Peer identity.** `repository` is a repository's own identity in its fleet. It is REQUIRED in this topology and is
+written as `[A-Za-z0-9._-]+`. `control` and its case variants remain reserved for a central control repository and MUST NOT
 be used. A missing, malformed or reserved identity is `E339`. The identity is also the submodule name every link to
 that repository is created under, which is what makes one identity readable from either end of a link. A linked
-checkout whose own `repository` value is not the name it was linked as is `E339`, and so is a linked checkout that
-does not itself state `saga: choreography`: a fleet link MUST NOT cross sagas.
+checkout whose own `repository` value is not the name it was linked as is `E339`.
 
-**The roster.** `repositories` is the membership list of the fleet a repository belongs to: every other peer, by
+**The roster.** `repositories` is the optional membership list of the fleet a repository belongs to: every other peer, by
 identity, with the `url` a link to it is cloned from, the `path` that link occupies inside this repository, and the
 `branch` the link follows. An omitted `path` means `.links/<name>`. A roster entry naming the declaring repository,
 and two entries whose identities are equal under case folding, are `E339`; so is a `path` that is absolute or that
-leaves the declaring repository's root. The roster states membership only. It does not state which pairs are linked,
+leaves the declaring repository's root. It MAY be omitted or empty for a fleet containing only the declaring
+repository. A non-empty roster without a non-empty `repository` identity is `E339`. The roster states membership only. It does not state which pairs are linked,
 and a peer two hops away is named here and reached through somebody else.
 
 **Fleet links and the tree rule.** A submodule is a fleet link exactly when the roster of the repository declaring it
@@ -5990,15 +5987,14 @@ treats a relevant head or release-tag change as `E330`. Commit identity remains 
 
 **Composition.** Each peer's own configuration file establishes that repository's ordinary repository-local root,
 space and package layering, exactly as an explicitly imported configuration does under §27.3. Every participant of a
-choreographed fleet, the entry included, is such a root. The combined workspace, the single package-name namespace,
+linked peer fleet, the entry included, is such a root. The combined workspace, the single package-name namespace,
 the repository-local spaces and version groups, and the ownership rules of §27.3 apply unchanged, with one
 adjustment: a peer's checkout lies inside the repository that links it, so scope containment is compared within one
 repository rather than across the fleet. Two repositories declaring the same package name remain `E332`.
 
 The keys only a control repository can own are refused rather than ignored. `configs` and `--configs`,
 `repositoryOverrides.<name>.commit`, and a `repositoryBaselines` entry whose `repository` is `control` are each `E332`
-under this saga. `repository` or `repositories` stated without `saga: choreography` is `E332` as well, because a key
-nothing reads is how a fleet comes to believe it is linked when nothing walks the link.
+in this topology.
 
 `repositoryOverrides.<peer>.enabled` keeps its meaning from §27.3 and is read from the entry repository's
 configuration alone: a peer owns its policy, but whether it takes part in this run is the invocation's question. A key
@@ -6078,20 +6074,27 @@ per repository by following the same routes the boundary evidence uses, and eval
 repository that revision records no link for projects to its whole reachable history, exactly as an absent gitlink
 does under §27.8. `--since all` still selects every package.
 
-**Configuration computation.** A configuration computation MAY propose the fleet links a roster implies: the minimum
-set of links connecting every identity the rosters name, the half of a link only one of its two repositories declares,
-the checkouts a declared link lacks, and the roster entries a participant has not heard of. The proposed set MUST be a
-spanning tree over the fleet, so it never creates the second route `E338` refuses, and it MUST be the same set
-whatever order the fleet was assembled in. A proposed missing half joins no pair the links do not already join, so it
+**Configuration computation.** `compute --topology minimal` is the default. It MUST preserve existing links and MAY
+propose the fewest additional links that connect every identity the rosters name, the half of a link only one of its
+two repositories declares, the checkouts a declared link lacks, and roster entries a participant has not heard of.
+`compute --topology star` MUST propose a direct link from every peer to the entry repository. It is valid only for an
+identity-linked fleet and MUST fail when existing links are incompatible with that shape. Both modes retain the same
+repository-local policy and record ownership. Their proposed set MUST be a tree over the fleet, so it never creates
+the second route `E338` refuses. A proposed missing half joins no pair the links do not already join, so it
 adds no route. Applying it creates a checkout for one half of each link and declares the other half inside that
 checkout without fetching it, pinned at a revision the declaring repository's remote can serve; a declaring repository
 that states no remote has that half withheld and reported rather than pinned at a revision no peer can fetch. A
 missing half is proposed only where the computation composed the peer whose declaration is absent, because that
 checkout is where the declaration is written. The computation MUST NOT commit, MUST NOT remove an existing
-link, and MUST NOT recurse into a link's own links: a link is history's only record of what a release incorporated,
+link in either mode, and MUST NOT recurse into a link's own links: a link is history's only record of what a release incorporated,
 and the back-link of a pair is deliberately left unmaterialized. A roster entry no participant states a `url` for is
 reported rather than written, and a link URL carrying user information MUST be refused, because `.gitmodules` is
 committed and pushed.
+
+The engine MUST reject a topology conflict visible in the composed snapshot before writing. Application MAY discover
+additional links only after it checks out a previously unavailable peer. If such a link conflicts with the selected
+topology, the computation MUST fail and leave already staged edits for operator review; it MUST NOT roll those edits
+back or delete any link.
 
 **Recoverable findings.** Two conditions are reported and do not stop a run. `W332` is a fleet link only one of its
 two repositories declares: the fleet still composes from the declaring end, and a release started at the other end
@@ -6099,16 +6102,16 @@ would compose a smaller fleet. `W333` is a participant whose roster does not nam
 because a repository that has not heard of a peer cannot plan a boundary across it. Both are what a configuration
 computation repairs.
 
-### 27.12 Choreographed conformance vectors
+### 27.12 Linked peer conformance vectors
 
-1. A configuration names no `saga` and states no identity keys. **Compose under the orchestrated saga exactly as
-   before.** Nothing in §27.11 has any effect.
-2. Peers `api` and `sdk` state `saga: choreography`, their own identities, each other in their rosters, and link each
+1. A configuration states no identity or roster. **Preserve its existing central or single-repository behavior.**
+   Nothing in §27.11 has any effect.
+2. Peers `api` and `sdk` state their own identities, name each other in their rosters, and link each
    other. A run started in `api` and a run started in `sdk` **compose the same two repositories and plan the same
    packages.** Neither is a control repository.
-3. A configuration states `repository` or `repositories` without `saga: choreography`. **`E332`.** Ignoring the keys
-   is non-conforming.
-4. A linked checkout calls itself `sdk-next` although it is linked as `sdk`, states another saga, names itself in its
+3. A configuration states a non-empty `repository` and no roster. **Compose a one-member linked fleet.** A configuration
+   instead states a non-empty roster without a repository identity. **`E339`.** Ignoring the roster is non-conforming.
+4. A linked checkout calls itself `sdk-next` although it is linked as `sdk`, names itself in its
    own roster, or uses the reserved identity `control`. **`E339`** in each case.
 5. Three peers are linked in a ring, so two of them are joined by two routes. **`E338` before any package work.**
    Choosing either route is non-conforming.
@@ -6116,7 +6119,7 @@ computation repairs.
    same checkout composes the whole fleet once they are.
 7. A repository holds a submodule its roster does not name. **Take no part in the fleet.** Only the roster makes a
    submodule a link.
-8. A choreographed configuration states `configs`, a `repositoryOverrides.<peer>.commit` object, or a
+8. An identity-linked configuration states `configs`, a `repositoryOverrides.<peer>.commit` object, or a
    `repositoryBaselines` entry naming `control`. **`E332`** in each case.
 9. A peer's checkout holds a revision its linker's tree does not record. **Compose at the revision the checkout
    holds.** A pin is advisory here, and the difference is not `E330`.
@@ -6144,11 +6147,14 @@ computation repairs.
     name it in `W331`. Disabling another peer's lock is non-conforming.
 22. Incomparable revisions in two repositories require one winner for a package in a third. **`E334`.** No unit of any
     peer can resolve it, because every unit is repository-local.
-23. A roster names four repositories and one link exists. **Propose exactly two more links**, never a second route
-    between two repositories, and the same two whatever order the fleet was assembled in.
+23. A roster names four repositories and one compatible link exists. With `--topology minimal`, **preserve that link
+    and propose exactly two more**. With `--topology star`, **propose direct links from every peer to the entry**, or
+    error if the existing link cannot fit that star. Neither mode removes or converts a link.
 24. A proposed link's URL carries user information. **Refuse it.** A committed `.gitmodules` would publish it.
 25. A link is declared by one end only, and one peer's roster omits a fleet member. **`W332` and `W333`; the run
     continues.** A configuration computation proposes the missing half and the missing roster entry, and adds no
     route with either.
-26. A choreographed configuration is run with `--polyrepo=false`. **Release that repository alone** and report that
+26. An identity-linked configuration is run with `--polyrepo=false`. **Release that repository alone** and report that
     the fleet was skipped.
+27. `compute --topology star` is run without a non-empty `repository` identity. **Configuration error.** Topology
+    selection does not turn a central or single-repository configuration into a linked peer fleet.

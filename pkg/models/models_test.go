@@ -378,14 +378,11 @@ func TestMarshalledModelUsesTheConfigKeys(t *testing.T) {
 	}
 }
 
-// TestChoreographyModelRoundTrip: the choreographed keys survive the trip a
-// config file makes, and the saga predicate reads the value the file wrote
-// whatever case it wrote it in — an absent key is orchestration, which is what
-// keeps every existing configuration on its current path.
-func TestChoreographyModelRoundTrip(t *testing.T) {
+// TestLinkedModelRoundTrip: linked repository ownership survives a config
+// file round trip and the identity selects linked topology.
+func TestLinkedModelRoundTrip(t *testing.T) {
 	f := File{
 		Polyrepo:   true,
-		Saga:       SagaChoreography,
 		Repository: "api",
 		Repositories: []RepositoryLinkConfig{
 			{Name: "sdk", URL: "https://example.test/sdk.git", Path: ".links/sdk", Branch: "main"},
@@ -403,25 +400,19 @@ func TestChoreographyModelRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(got, f) {
 		t.Fatalf("round trip:\n got %#v\nwant %#v", got, f)
 	}
-	if !got.IsChoreographed() {
-		t.Errorf("saga %q must read as choreographed", got.Saga)
+	if !got.IsLinked() {
+		t.Errorf("repository %q must read as linked", got.Repository)
 	}
-	for _, spelling := range []string{"Choreography", "CHOREOGRAPHY"} {
-		mixed := File{Saga: spelling}
-		if !mixed.IsChoreographed() {
-			t.Errorf("saga %q must read as choreographed", spelling)
-		}
-	}
-	for _, other := range []*File{nil, {}, {Saga: SagaOrchestration}, {Polyrepo: true}} {
-		if other.IsChoreographed() {
-			t.Errorf("saga %#v must not read as choreographed", other)
+	for _, other := range []*File{nil, {}, {Polyrepo: true}, {Repositories: []RepositoryLinkConfig{{Name: "sdk"}}}} {
+		if other.IsLinked() {
+			t.Errorf("configuration %#v must not read as linked", other)
 		}
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"saga", "repository", "repositories"} {
+	for _, key := range []string{"repository", "repositories"} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("key %q must marshal back into a loadable file: %s", key, data)
 		}
@@ -430,8 +421,8 @@ func TestChoreographyModelRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(empty), "saga") || strings.Contains(string(empty), "repositor") {
-		t.Errorf("an orchestrated config must not marshal the choreographed keys: %s", empty)
+	if strings.Contains(string(empty), "repositor") {
+		t.Errorf("a central config must not marshal linked keys: %s", empty)
 	}
 }
 

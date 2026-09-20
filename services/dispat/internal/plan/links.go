@@ -20,7 +20,7 @@ package plan
 // consumer's gitlink to that tag, and the link chain must start at a release
 // commit that names the tag, so a pointer that happens to match says nothing.
 // Where the proof is missing the plan stops with E333 and the operator writes
-// the `repositoryBaselines` tuple, which is the same remedy in either saga.
+// the `repositoryBaselines` tuple, which supplies explicit evidence for either record layout.
 
 import (
 	"context"
@@ -70,15 +70,15 @@ type boundaryQuery struct {
 	tag        gitx.Tag
 	repository string
 	// snapshots and ambiguous are the control checkpoint index. They are the
-	// orchestrated saga's evidence and are read by nothing else.
+	// central checkpoint evidence and are read by nothing else.
 	snapshots map[string]controlSnapshot
 	ambiguous map[string]bool
 }
 
-// boundaryEvidence is how one saga answers that question. There are two, and
+// boundaryEvidence is how a record layout answers that question. There are two, and
 // which one a computation uses is decided once, when it is set up.
 type boundaryEvidence interface {
-	// index prepares whatever this saga reads evidence from, once per plan.
+	// index prepares the evidence for this record layout, once per plan.
 	index() error
 	// resolve answers a qualified revision, or an empty one together with the
 	// text the caller reports as E333.
@@ -88,7 +88,7 @@ type boundaryEvidence interface {
 }
 
 // checkpointEvidence reads the control repository's release checkpoints. It is
-// the orchestrated saga's evidence and behaves exactly as it always has.
+// the central checkpoint evidence and behaves exactly as it always has.
 type checkpointEvidence struct{ cp *computation }
 
 func (e checkpointEvidence) index() error {
@@ -444,7 +444,7 @@ func linkPathsOf(history RepositoryHistory) []string {
 }
 
 // precedenceRemedy names what resolves two incomparable revisions, which is
-// not the same thing in both sagas.
+// different for checkpoint records and linked records.
 //
 // An orchestrated fleet has a repository above the others, and a directive
 // written there is evaluated against its own gitlinks, so it can order what

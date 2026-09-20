@@ -26,7 +26,10 @@ func computeFleet(t *testing.T, repositories ...config.Repository) *App {
 		root = repositories[0].Root
 	}
 	a := New(root, &config.File{}, zerolog.Nop())
-	a.workspace = &config.Workspace{ControlRoot: root, Saga: config.SagaChoreography, Repositories: repositories}
+	if len(repositories) > 0 {
+		repositories[0].Entry = true
+	}
+	a.workspace = &config.Workspace{ControlRoot: root, Repositories: repositories}
 	if len(repositories) > 0 {
 		a.cfg = repositories[0].Config
 	}
@@ -34,7 +37,7 @@ func computeFleet(t *testing.T, repositories ...config.Repository) *App {
 }
 
 func fleetPeer(name string, peers []string, links map[string]string) config.Repository {
-	cfg := &config.File{Saga: config.SagaChoreography, Repository: name}
+	cfg := &config.File{Repository: name}
 	for _, peer := range peers {
 		cfg.Repositories = append(cfg.Repositories, config.RepositoryLinkConfig{
 			Name: peer, URL: "https://example.test/" + peer + ".git"})
@@ -53,13 +56,20 @@ func kinds(changes []linkSuggestion, kind string) []linkSuggestion {
 	return out
 }
 
+func requireLinkSuggestions(t *testing.T, a *App, topology string) []linkSuggestion {
+	t.Helper()
+	changes, err := a.suggestLinks(topology)
+	require.NoError(t, err)
+	return changes
+}
+
 // TestSuggestLinksConnectsTheRosterWithASpanningTree: a fleet that names
 // three peers and links none of them needs exactly two links, never three,
 // because a third would be a second path between two repositories and
 // composition refuses those.
 func TestSuggestLinksConnectsTheRosterWithASpanningTree(t *testing.T) {
 	a := computeFleet(t, fleetPeer("api", []string{"sdk", "web"}, nil))
-	links := kinds(a.suggestLinks(), linkChangeLink)
+	links := kinds(requireLinkSuggestions(t, a, ""), linkChangeLink)
 	require.Len(t, links, 2, "three repositories need two links")
 	assert.Equal(t, "api", links[0].repository)
 	assert.Equal(t, "sdk", links[0].peer)
@@ -72,7 +82,7 @@ func TestSuggestLinksConnectsTheRosterWithASpanningTree(t *testing.T) {
 	a = computeFleet(t,
 		fleetPeer("api", []string{"sdk", "web"}, map[string]string{"sdk": ".links/sdk"}),
 		fleetPeer("sdk", []string{"api", "web"}, map[string]string{"api": ".links/api"}))
-	links = kinds(a.suggestLinks(), linkChangeLink)
+	links = kinds(requireLinkSuggestions(t, a, ""), linkChangeLink)
 	require.Len(t, links, 1)
 	assert.Equal(t, "web", links[0].peer)
 
@@ -80,7 +90,7 @@ func TestSuggestLinksConnectsTheRosterWithASpanningTree(t *testing.T) {
 	a = computeFleet(t,
 		fleetPeer("api", []string{"sdk"}, map[string]string{"sdk": ".links/sdk"}),
 		fleetPeer("sdk", []string{"api"}, map[string]string{"api": ".links/api"}))
-	assert.Empty(t, kinds(a.suggestLinks(), linkChangeLink))
+	assert.Empty(t, kinds(requireLinkSuggestions(t, a, ""), linkChangeLink))
 }
 
 // TestSuggestLinksNeverProposesASecondPath: a link between two repositories
@@ -91,8 +101,149 @@ func TestSuggestLinksNeverProposesASecondPath(t *testing.T) {
 		fleetPeer("api", []string{"sdk", "web"}, map[string]string{"sdk": ".links/sdk"}),
 		fleetPeer("sdk", []string{"api", "web"}, map[string]string{"api": ".links/api", "web": ".links/web"}),
 		fleetPeer("web", []string{"api", "sdk"}, map[string]string{"sdk": ".links/sdk"}))
-	assert.Empty(t, kinds(a.suggestLinks(), linkChangeLink),
+	assert.Empty(t, kinds(requireLinkSuggestions(t, a, ""), linkChangeLink),
 		"every repository already reaches every other one")
+}
+
+func TestSuggestLinksRefusesAnExistingCycle(t *testing.T) {
+	a := computeFleet(t,
+		fleetPeer("api", []string{"sdk", "web"}, map[string]string{"sdk": ".links/sdk", "web": ".links/web"}),
+		fleetPeer("sdk", []string{"api", "web"}, map[string]string{"api": ".links/api", "web": ".links/web"}),
+		fleetPeer("web", []string{"api", "sdk"}, map[string]string{"api": ".links/api", "sdk": ".links/sdk"}))
+	a.workspace.Findings = []config.LinkFinding{{
+		Code: config.DiagnosticLinkGraph, Repository: "web", Peer: "sdk",
+		Message: `E338: linked fleet: repository "sdk" is reached twice; fleet links must form one tree`,
+	}}
+
+	for _, topology := range []string{"minimal", "star"} {
+		t.Run(topology, func(t *testing.T) {
+			changes, err := a.suggestLinks(topology)
+			assert.Nil(t, changes)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "existing fleet link topology is cyclic")
+			assert.Contains(t, err.Error(), config.DiagnosticLinkGraph)
+			assert.Contains(t, err.Error(), "compute never removes links")
+		})
+	}
+}
+
+func TestSuggestLinksRefusesAnInconsistentRepositoryIdentity(t *testing.T) {
+	a := computeFleet(t, fleetPeer("api", []string{"sdk"}, map[string]string{"sdk": ".links/sdk"}))
+	a.workspace.Findings = []config.LinkFinding{{
+		Code: config.DiagnosticIdentity, Repository: "api", Peer: "sdk",
+		Message: `E339: linked fleet: repository "sdk" calls itself "SDK-old"`,
+	}}
+
+	changes, err := a.suggestLinks("minimal")
+	assert.Nil(t, changes)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "existing fleet repository identity is inconsistent")
+	assert.Contains(t, err.Error(), config.DiagnosticIdentity)
+	assert.Contains(t, err.Error(), "compute never rewrites repository identities")
+}
+
+func TestSuggestLinksStarUsesTheEntryAsHub(t *testing.T) {
+	a := computeFleet(t, fleetPeer("zeta", []string{"alpha", "middle"}, nil))
+	links := kinds(requireLinkSuggestions(t, a, "star"), linkChangeLink)
+	require.Len(t, links, 2)
+	assert.Equal(t, "zeta", links[0].repository)
+	assert.Equal(t, "alpha", links[0].peer)
+	assert.Equal(t, "zeta", links[1].repository)
+	assert.Equal(t, "middle", links[1].peer)
+
+	// The empty option is the existing minimal contract, and rerunning after
+	// those edges exist is idempotent.
+	minimal := kinds(requireLinkSuggestions(t, a, ""), linkChangeLink)
+	require.Len(t, minimal, 2)
+	a.workspace.Repositories[0].Links = map[string]string{
+		"alpha": ".links/alpha", "middle": ".links/middle",
+	}
+	assert.Empty(t, kinds(requireLinkSuggestions(t, a, "star"), linkChangeLink))
+}
+
+func TestSuggestLinksStarRefusesAnExistingNonHubLink(t *testing.T) {
+	a := computeFleet(t,
+		fleetPeer("zeta", []string{"alpha", "middle"}, nil),
+		fleetPeer("alpha", []string{"zeta", "middle"}, map[string]string{"middle": ".links/middle"}),
+		fleetPeer("middle", []string{"zeta", "alpha"}, map[string]string{"alpha": ".links/alpha"}))
+
+	changes, err := a.suggestLinks("star")
+	assert.Nil(t, changes)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "incompatible with existing link alpha <-> middle")
+	assert.Contains(t, err.Error(), "existing links are retained")
+}
+
+func TestSuggestLinksRejectsUnknownTopology(t *testing.T) {
+	a := computeFleet(t, fleetPeer("api", []string{"sdk"}, nil))
+	changes, err := a.suggestLinks("mesh")
+	assert.Nil(t, changes)
+	require.EqualError(t, err, `invalid compute topology "mesh": expected minimal or star`)
+}
+
+func TestSuggestLinksStarRequiresALinkedFleet(t *testing.T) {
+	a := computeFleet(t, fleetPeer("api", []string{"sdk"}, nil))
+	a.workspace.Repositories = append(a.workspace.Repositories,
+		config.Repository{Name: config.ControlRepository, Control: true})
+	changes, err := a.suggestLinks("star")
+	assert.Nil(t, changes)
+	require.EqualError(t, err, "star topology requires a linked fleet with a named entry repository")
+}
+
+func TestSuggestLinksExcludesDisabledRosterPeers(t *testing.T) {
+	root := t.TempDir()
+	disabled := false
+	cfg := &config.File{
+		Repository: "api", Polyrepo: true,
+		Packages: map[string]config.PackageConfig{"api": {Path: "pkg"}},
+		Repositories: []config.RepositoryLinkConfig{{
+			Name: "offline", URL: "https://unavailable.invalid/offline.git",
+		}},
+		RepositoryOverrides: map[string]config.RepositoryOverrideConfig{
+			"offline": {Enabled: &disabled},
+		},
+		Commit: &config.CommitConfig{}, Run: &config.RunConfig{},
+	}
+	settleRepo(t, root, cfg)
+	cfgPath := filepath.Join(root, "dispat.json")
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cfgPath, data, 0o644))
+	settleGit(t, root, "add", "dispat.json")
+	settleGit(t, root, "commit", "-qm", "chore: configure fleet")
+
+	workspace, err := config.ComposeWorkspaceForRepair(t.Context(), cfg, cfgPath, root, nil, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, workspace)
+	require.Equal(t, []string{"offline"}, workspace.DisabledRepositoryNames())
+	a := New(root, cfg, zerolog.Nop())
+	a.workspace = workspace
+
+	for _, topology := range []string{"minimal", "star"} {
+		t.Run(topology, func(t *testing.T) {
+			changes := requireLinkSuggestions(t, a, topology)
+			for _, change := range changes {
+				assert.NotEqual(t, "offline", change.peer)
+				assert.NotEqual(t, "offline", change.repository)
+			}
+			assert.Empty(t, kinds(changes, linkChangeLink))
+			assert.Empty(t, kinds(changes, linkChangeInit))
+			assert.Empty(t, kinds(changes, linkChangeRepository))
+		})
+	}
+}
+
+// Unavailable roster members must not be unioned before compute knows an
+// edge can be created. Otherwise an unreachable early pair can make a later
+// reachable edge look redundant and leave the fleet disconnected.
+func TestSuggestLinksMinimalDoesNotUnionUnavailablePeers(t *testing.T) {
+	a := computeFleet(t, fleetPeer("zeta", []string{"alpha", "middle"}, nil))
+	links := kinds(requireLinkSuggestions(t, a, "minimal"), linkChangeLink)
+	require.Len(t, links, 2)
+	assert.ElementsMatch(t, []string{"alpha", "middle"}, []string{links[0].peer, links[1].peer})
+	for _, link := range links {
+		assert.Equal(t, "zeta", link.repository)
+	}
 }
 
 // TestSuggestLinksProposesTheCheckoutAndTheRosterEntry: the other two things
@@ -106,7 +257,7 @@ func TestSuggestLinksProposesTheCheckoutAndTheRosterEntry(t *testing.T) {
 		Code: config.DiagnosticRepositoryInvalid, Repository: "api", Peer: "sdk",
 		Message: "E330: choreography: repository \"sdk\" is not initialized"}}
 
-	changes := a.suggestLinks()
+	changes := requireLinkSuggestions(t, a, "")
 	inits := kinds(changes, linkChangeInit)
 	require.Len(t, inits, 1)
 	assert.Equal(t, "api", inits[0].repository)
@@ -119,8 +270,8 @@ func TestSuggestLinksProposesTheCheckoutAndTheRosterEntry(t *testing.T) {
 	assert.Contains(t, roster[0].render(), "+ repository sdk web")
 
 	// An orchestrated workspace proposes none of this.
-	a.workspace.Saga = config.SagaOrchestration
-	assert.Nil(t, a.suggestLinks())
+	a.workspace.Repositories = append(a.workspace.Repositories, config.Repository{Name: config.ControlRepository, Control: true})
+	assert.Nil(t, requireLinkSuggestions(t, a, ""))
 }
 
 // TestSuggestLinksWithholdsARosterEntryWithNoURL: an entry nothing can be
@@ -134,7 +285,7 @@ func TestSuggestLinksWithholdsARosterEntryWithNoURL(t *testing.T) {
 
 	var logged bytes.Buffer
 	a.log = zerolog.New(&logged)
-	roster := kinds(a.suggestLinks(), linkChangeRepository)
+	roster := kinds(requireLinkSuggestions(t, a, ""), linkChangeRepository)
 	assert.Empty(t, roster, "web is known by name alone")
 	assert.Contains(t, logged.String(), config.DiagnosticRosterDisagreement)
 	assert.Contains(t, logged.String(), "no roster states a url")
@@ -142,7 +293,7 @@ func TestSuggestLinksWithholdsARosterEntryWithNoURL(t *testing.T) {
 
 	// With a url anywhere in the fleet the entry is proposed again.
 	api.Config.Repositories[1].URL = "https://example.test/web.git"
-	roster = kinds(a.suggestLinks(), linkChangeRepository)
+	roster = kinds(requireLinkSuggestions(t, a, ""), linkChangeRepository)
 	require.Len(t, roster, 1)
 	assert.Equal(t, "sdk", roster[0].repository)
 	assert.Equal(t, "https://example.test/web.git", roster[0].url)
@@ -155,10 +306,10 @@ func TestCollectLinkEditsWritesTheRosterIntoItsOwnerConfig(t *testing.T) {
 	apiPath := filepath.Join(root, "dispat.json")
 	sdkPath := filepath.Join(root, "sdk.json")
 	for path, cfg := range map[string]config.File{
-		apiPath: {Saga: config.SagaChoreography, Repository: "api",
+		apiPath: {Repository: "api",
 			Repositories: []config.RepositoryLinkConfig{{Name: "sdk"}},
 			Packages:     map[string]config.PackageConfig{"app": {Path: "pkg"}}},
-		sdkPath: {Saga: config.SagaChoreography, Repository: "sdk",
+		sdkPath: {Repository: "sdk",
 			Repositories: []config.RepositoryLinkConfig{{Name: "api"}},
 			Packages:     map[string]config.PackageConfig{"lib": {Path: "pkg"}}},
 	} {
@@ -213,14 +364,14 @@ func TestApplyLinkChangesCreatesBothHalvesOfALink(t *testing.T) {
 	settleGit(t, api, "push", "-q", "origin", "HEAD:refs/heads/main")
 
 	a := New(api, apiCfg, zerolog.Nop())
-	a.workspace = &config.Workspace{ControlRoot: api, Saga: config.SagaChoreography,
+	a.workspace = &config.Workspace{ControlRoot: api,
 		Repositories: []config.Repository{
 			{Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true},
 		}}
 	var out bytes.Buffer
 	require.NoError(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
 		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
-	}}, &out))
+	}}, "minimal", &out))
 
 	assert.FileExists(t, filepath.Join(api, ".links", "sdk", "pkg", "input"), "the forward half is a checkout")
 	assert.Contains(t, settleGit(t, api, "config", "--file", ".gitmodules", "submodule.sdk.url"), "sdk")
@@ -244,6 +395,65 @@ func TestApplyLinkChangesCreatesBothHalvesOfALink(t *testing.T) {
 		"the peer checkout carries only the revision it was cloned at")
 }
 
+func TestApplyLinkChangesReportsStarConflictRevealedByCheckout(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+	base := t.TempDir()
+	api, sdk := filepath.Join(base, "api"), filepath.Join(base, "sdk")
+	apiCfg := &config.File{Repository: "api", Polyrepo: true, Commit: &config.CommitConfig{}, Run: &config.RunConfig{},
+		Packages:     map[string]config.PackageConfig{"api": {Path: "pkg"}},
+		Repositories: []config.RepositoryLinkConfig{{Name: "sdk", URL: sdk, Branch: "main"}}}
+	sdkCfg := &config.File{Repository: "sdk", Polyrepo: true, Commit: &config.CommitConfig{}, Run: &config.RunConfig{},
+		Packages: map[string]config.PackageConfig{"sdk": {Path: "pkg"}},
+		Repositories: []config.RepositoryLinkConfig{
+			{Name: "api", URL: api, Branch: "main"},
+			{Name: "web", URL: filepath.Join(base, "web"), Branch: "main"},
+		}}
+	settleRepo(t, api, apiCfg)
+	settleRepo(t, sdk, sdkCfg)
+	for root, cfg := range map[string]*config.File{api: apiCfg, sdk: sdkCfg} {
+		data, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), data, 0o644))
+		settleGit(t, root, "add", "dispat.json")
+		settleGit(t, root, "commit", "-qm", "chore: configure fleet")
+	}
+
+	// The sdk already links web, but api cannot know that until sdk is cloned.
+	// A gitlink is enough evidence even when the linked checkout is absent.
+	require.NoError(t, os.WriteFile(filepath.Join(sdk, ".gitmodules"), []byte(
+		"[submodule \"web\"]\n\tpath = .links/web\n\turl = "+filepath.Join(base, "web")+"\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(sdk, ".links", "web"), 0o755))
+	settleGit(t, sdk, "add", ".gitmodules")
+	settleGit(t, sdk, "update-index", "--add", "--cacheinfo", "160000", settleGit(t, sdk, "rev-parse", "HEAD"), ".links/web")
+	settleGit(t, sdk, "commit", "-qm", "chore: link web")
+
+	origin := filepath.Join(base, "api.git")
+	settleGit(t, base, "init", "-q", "--bare", origin)
+	settleGit(t, api, "remote", "add", "origin", origin)
+	settleGit(t, api, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+	var logged bytes.Buffer
+	a := New(api, apiCfg, zerolog.New(&logged))
+	a.workspace = &config.Workspace{ControlRoot: api, Repositories: []config.Repository{{
+		Name: "api", Root: api, ConfigPath: filepath.Join(api, "dispat.json"), Config: apiCfg,
+		Commit: apiCfg.Commit, Imported: true, Entry: true,
+	}}}
+	var out bytes.Buffer
+	err := a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
+		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
+	}}, "star", &out)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "incompatible with star topology")
+	assert.Contains(t, err.Error(), "existing link sdk <-> web")
+	assert.Contains(t, err.Error(), "after 1 staged link operation(s)")
+	assert.Contains(t, err.Error(), "review the staged changes before retrying")
+	assert.Contains(t, logged.String(), "the fleet could not be verified after applying link changes")
+	assert.Contains(t, logged.String(), "review the staged changes before retrying")
+	assert.NotEmpty(t, settleGit(t, api, "status", "--porcelain=v1"), "the reported partial link stays staged for review")
+}
+
 // TestApplyLinkChangesLeavesALinkItCannotCreate: a roster entry with no url
 // cannot be cloned, and a repository with no remote cannot be linked back to.
 // Both are reported and neither is a failure.
@@ -253,19 +463,19 @@ func TestApplyLinkChangesLeavesALinkItCannotCreate(t *testing.T) {
 	apiCfg := &config.File{Commit: &config.CommitConfig{}, Run: &config.RunConfig{}}
 	settleRepo(t, api, apiCfg)
 	a := New(api, apiCfg, zerolog.Nop())
-	a.workspace = &config.Workspace{ControlRoot: api, Saga: config.SagaChoreography,
+	a.workspace = &config.Workspace{ControlRoot: api,
 		Repositories: []config.Repository{
 			{Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true},
 		}}
 	var out bytes.Buffer
 	require.NoError(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
-		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk"}}, &out))
+		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk"}}, "minimal", &out))
 	assert.NoDirExists(t, filepath.Join(api, ".links", "sdk"))
 	assert.Empty(t, out.String())
 
 	// A repository this run did not compose is not one it can write into.
 	require.NoError(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
-		kind: linkChangeLink, repository: "absent", peer: "sdk", path: ".links/sdk", url: "https://example.test/sdk.git"}}, &out))
+		kind: linkChangeLink, repository: "absent", peer: "sdk", path: ".links/sdk", url: "https://example.test/sdk.git"}}, "minimal", &out))
 	assert.Empty(t, out.String())
 }
 
@@ -286,11 +496,39 @@ func TestLinkSuggestionRendering(t *testing.T) {
 	assert.Equal(t, set.links[0].render(), set.all()[0].render())
 }
 
-// TestLinkPathFollowsTheRoster: the roster decides where a link lives, and
-// the default is the dot folder discovery never descends into.
-func TestLinkPathFollowsTheRoster(t *testing.T) {
-	assert.Equal(t, ".links/sdk", linkPathFor(rosterEntry{name: "sdk"}))
-	assert.Equal(t, "vendor/sdk", linkPathFor(rosterEntry{name: "sdk", path: "./vendor//sdk"}))
+func TestSuggestLinksKeepsRosterPathsLocalToTheirOwner(t *testing.T) {
+	zeta := fleetPeer("zeta", []string{"alpha", "middle"}, nil)
+	zeta.Config.Repositories[0].Path = "./entry//alpha"
+	alpha := fleetPeer("alpha", []string{"zeta", "middle"}, nil)
+	alpha.Config.Repositories[1].Path = "alpha-only/middle"
+	a := computeFleet(t, zeta, alpha)
+
+	star := kinds(requireLinkSuggestions(t, a, "star"), linkChangeLink)
+	require.Len(t, star, 2)
+	byPeer := map[string]linkSuggestion{star[0].peer: star[0], star[1].peer: star[1]}
+	assert.Equal(t, "entry/alpha", byPeer["alpha"].path)
+	assert.Equal(t, ".links/middle", byPeer["middle"].path,
+		"the entry must not borrow alpha's repository-relative path")
+
+	// With zeta and alpha already joined, minimal chooses alpha as the owner
+	// of the missing edge and therefore uses alpha's own declaration.
+	a.workspace.Repositories[0].Links = map[string]string{"alpha": "entry/alpha"}
+	a.workspace.Repositories[1].Links = map[string]string{"zeta": ".links/zeta"}
+	minimal := kinds(requireLinkSuggestions(t, a, "minimal"), linkChangeLink)
+	require.Len(t, minimal, 1)
+	assert.Equal(t, "alpha", minimal[0].repository)
+	assert.Equal(t, "middle", minimal[0].peer)
+	assert.Equal(t, "alpha-only/middle", minimal[0].path)
+
+	// A newly copied membership entry carries shared fetch metadata but no
+	// path from the peer that supplied it.
+	zeta = fleetPeer("zeta", []string{"alpha"}, nil)
+	a = computeFleet(t, zeta, alpha)
+	roster := kinds(requireLinkSuggestions(t, a, "minimal"), linkChangeRepository)
+	require.Len(t, roster, 1)
+	assert.Equal(t, "zeta", roster[0].repository)
+	assert.Equal(t, "middle", roster[0].peer)
+	assert.Empty(t, roster[0].path)
 }
 
 // TestSuggestLinksProposesTheHalfOfAOneSidedLink: a link one repository
@@ -302,7 +540,7 @@ func TestSuggestLinksProposesTheHalfOfAOneSidedLink(t *testing.T) {
 		fleetPeer("api", []string{"sdk"}, map[string]string{"sdk": "vendor/sdk"}),
 		fleetPeer("sdk", []string{"api"}, nil))
 
-	links := kinds(a.suggestLinks(), linkChangeLink)
+	links := kinds(requireLinkSuggestions(t, a, ""), linkChangeLink)
 	require.Len(t, links, 1, "the pair is joined; only the declaration is missing")
 	assert.Equal(t, "sdk", links[0].repository, "the change belongs to the repository that lacks it")
 	assert.Equal(t, "api", links[0].peer)
@@ -315,12 +553,12 @@ func TestSuggestLinksProposesTheHalfOfAOneSidedLink(t *testing.T) {
 	a = computeFleet(t,
 		fleetPeer("api", []string{"sdk"}, map[string]string{"sdk": "vendor/sdk"}),
 		fleetPeer("sdk", []string{"api"}, map[string]string{"api": ".links/api"}))
-	assert.Empty(t, kinds(a.suggestLinks(), linkChangeLink))
+	assert.Empty(t, kinds(requireLinkSuggestions(t, a, ""), linkChangeLink))
 
 	// A peer this run never walked into has no checkout to write the
 	// declaration in, so the half is not proposed for it.
 	a = computeFleet(t, fleetPeer("api", []string{"sdk"}, map[string]string{"sdk": ".links/sdk"}))
-	assert.Empty(t, kinds(a.suggestLinks(), linkChangeLink))
+	assert.Empty(t, kinds(requireLinkSuggestions(t, a, ""), linkChangeLink))
 }
 
 // TestSuggestLinksFoldsTheIdentityOfABackLink: the two ends of a link may
@@ -330,5 +568,5 @@ func TestSuggestLinksFoldsTheIdentityOfABackLink(t *testing.T) {
 	a := computeFleet(t,
 		fleetPeer("api", []string{"sdk"}, map[string]string{"sdk": ".links/sdk"}),
 		fleetPeer("sdk", []string{"api"}, map[string]string{"API": ".links/api"}))
-	assert.Empty(t, kinds(a.suggestLinks(), linkChangeLink))
+	assert.Empty(t, kinds(requireLinkSuggestions(t, a, ""), linkChangeLink))
 }

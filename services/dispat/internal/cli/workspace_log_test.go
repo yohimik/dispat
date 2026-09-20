@@ -43,13 +43,11 @@ func firstLine(lines []map[string]any, message string) map[string]any {
 	return nil
 }
 
-// TestWorkspaceLogNamesTheSagaAndTheWalk: the composed line is where a reader
-// finds out which fleet ran, and for a choreographed one that means the saga
-// and the repository the run started in.
-func TestWorkspaceLogNamesTheSagaAndTheWalk(t *testing.T) {
+// TestWorkspaceLogNamesTheEntryAndTheWalk: the composed line is where a reader
+// finds out which fleet ran and which repository the run started in.
+func TestWorkspaceLogNamesTheEntryAndTheWalk(t *testing.T) {
 	workspace := &config.Workspace{
 		ControlRoot: "/w/api",
-		Saga:        config.SagaChoreography,
 		Repositories: []config.Repository{
 			{Name: "api", Root: "/w/api", Entry: true, Imported: true,
 				Links: map[string]string{"sdk": ".links/sdk"}},
@@ -62,7 +60,7 @@ func TestWorkspaceLogNamesTheSagaAndTheWalk(t *testing.T) {
 
 	composed := firstLine(lines, "polyrepo workspace composed")
 	require.NotNil(t, composed)
-	assert.Equal(t, config.SagaChoreography, composed["saga"])
+	assert.NotContains(t, composed, "saga")
 	assert.Equal(t, "api", composed["entry"])
 	assert.Equal(t, []any{"api", "sdk"}, composed["repositories"])
 
@@ -115,47 +113,33 @@ func TestWorkspaceLogLeavesAnOrchestratedCompositionAlone(t *testing.T) {
 	assert.Empty(t, logLines(t, nil), "no workspace is no composition line")
 }
 
-// TestNestedWorkspaceRestoresTheSaga: a package script running dispat inside a
-// choreographed release must compose the fleet the release is holding, even
-// when the saga was chosen on the command line rather than in the file.
-func TestNestedWorkspaceRestoresTheSaga(t *testing.T) {
-	t.Setenv(nestedWorkspaceRootEnv, t.TempDir())
+// TestNestedWorkspaceRestoresTheEntry: nested commands read the same entry
+// configuration, whose identity and links determine the fleet.
+func TestNestedWorkspaceRestoresTheEntry(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(nestedWorkspaceRootEnv, root)
 	t.Setenv(nestedWorkspaceConfigEnv, "dispat.json")
 	t.Setenv(nestedWorkspaceImportsEnv, `[]`)
-	t.Setenv(nestedWorkspaceSagaEnv, config.SagaChoreography)
-
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	o := declareFlags(fs)
-	require.NoError(t, applyNestedWorkspace(fs, o))
-	assert.True(t, o.nestedWorkspace)
-	assert.Equal(t, config.SagaChoreography, *o.saga)
-	assert.True(t, fs.Changed("saga"), "the restored saga reaches the config as an override")
+	options := declareFlags(fs)
+	require.NoError(t, applyNestedWorkspace(fs, options))
+	assert.True(t, options.nestedWorkspace)
+	assert.Equal(t, root, *options.root)
+	assert.True(t, *options.polyrepo)
+	assert.Nil(t, fs.Lookup("saga"))
 
-	// An explicit --saga is the operator pointing somewhere else, and it keeps
-	// the invocation out of the enclosing workspace entirely.
 	explicit := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	eo := declareFlags(explicit)
-	require.NoError(t, explicit.Set("saga", config.SagaOrchestration))
-	require.NoError(t, applyNestedWorkspace(explicit, eo))
-	assert.False(t, eo.nestedWorkspace)
-
-	// An orchestrated release exports no saga, and nothing is restored.
-	t.Setenv(nestedWorkspaceSagaEnv, "")
-	plain := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	po := declareFlags(plain)
-	require.NoError(t, applyNestedWorkspace(plain, po))
-	assert.True(t, po.nestedWorkspace)
-	assert.Empty(t, *po.saga)
-	assert.False(t, plain.Changed("saga"))
+	explicitOptions := declareFlags(explicit)
+	require.NoError(t, explicit.Set("polyrepo", "false"))
+	require.NoError(t, applyNestedWorkspace(explicit, explicitOptions))
+	assert.False(t, explicitOptions.nestedWorkspace)
 }
 
-// TestSagaFlagOverridesTheConfiguredSaga: --saga is a configuration override
-// like every other bound flag, so it is applied while the file is loaded
-// rather than patched in afterwards.
-func TestSagaFlagOverridesTheConfiguredSaga(t *testing.T) {
+func TestComputeTopologyIsNotAGlobalFlag(t *testing.T) {
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	declareFlags(fs)
-	require.NotNil(t, fs.Lookup("saga"))
-	assert.True(t, globalFlagTakesValue("--saga"))
-	assert.True(t, globalFlagInline("--saga=choreography"))
+	options := declareFlags(fs)
+	require.NotNil(t, fs.Lookup("topology"))
+	assert.Equal(t, "minimal", *options.computeTopology)
+	assert.False(t, globalFlagTakesValue("--topology"))
+	assert.False(t, globalFlagTakesValue("--saga"))
 }

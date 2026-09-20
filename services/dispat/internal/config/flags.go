@@ -18,7 +18,6 @@ var boundFlags = map[string]string{
 	"concurrency": "concurrency",
 	"logLevel":    "log-level",
 	"logFormat":   "log-format",
-	"saga":        "saga",
 }
 
 // flagOverrides renders the flags the caller passed as the override layer the

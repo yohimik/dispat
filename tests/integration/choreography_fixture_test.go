@@ -89,7 +89,6 @@ func (f *choreographyFleet) peer(name string) *choreographyPeer {
 // scenario shares.
 func (f *choreographyFleet) config(name string) models.File {
 	cfg := harness.BaseFile(2)
-	cfg.Saga = models.SagaChoreography
 	cfg.Repository = name
 	for _, other := range f.names {
 		if other == name {

@@ -20,11 +20,6 @@ const (
 	workspaceRootEnv    = "DISPAT_INTERNAL_WORKSPACE_ROOT"
 	workspaceConfigEnv  = "DISPAT_INTERNAL_WORKSPACE_CONFIG"
 	workspaceImportsEnv = "DISPAT_INTERNAL_WORKSPACE_CONFIGS"
-	// workspaceSagaEnv hands the saga down with the rest of the context. A
-	// choreographed fleet can be selected by `--saga` rather than by the file,
-	// and a nested command reading the file alone would compose a different
-	// fleet from the release running around it.
-	workspaceSagaEnv = "DISPAT_INTERNAL_WORKSPACE_SAGA"
 )
 
 // packageRunner dispatches every package or space script through the shell of
@@ -100,12 +95,12 @@ func workspaceContextEnv(workspace *config.Workspace) []string {
 		if !repo.Control {
 			repositories = append(repositories, repo.Name)
 		}
-		if !repo.Imported || repo.ConfigPath == "" || workspace.IsChoreographed() {
+		if !repo.Imported || repo.ConfigPath == "" || workspace.IsLinked() {
 			// A choreographed fleet imports nothing: every peer carries its
 			// own configuration and is found by walking the links from the
 			// entry, which is what the nested command does with the root and
-			// the saga it inherits. Listing the peers as imports would hand
-			// it the one shape that saga refuses.
+			// configuration it inherits. Peer files are reached through links,
+			// not central imports.
 			continue
 		}
 		path, err := filepath.Rel(workspace.ControlRoot, repo.ConfigPath)
@@ -122,9 +117,6 @@ func workspaceContextEnv(workspace *config.Workspace) []string {
 		workspaceConfigEnv + "=" + filepath.ToSlash(configPath),
 		workspaceImportsEnv + "=" + string(encoded),
 		workspaceenv.Repositories + "=" + string(encodedRepositories),
-	}
-	if workspace.IsChoreographed() {
-		env = append(env, workspaceSagaEnv+"="+config.SagaChoreography)
 	}
 	return env
 }

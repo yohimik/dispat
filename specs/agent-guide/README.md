@@ -91,8 +91,10 @@ Read-only inspection does not authorize configuration repair. Change configurati
 
 ## Inspect a polyrepository workspace
 
-A control repository can combine the independent Git histories of linked source repositories. This mode is explicit:
-`polyrepo: true`, `--polyrepo`, a non-empty `configs` list, or repeatable `--configs` flags activate it. If none is
+A control repository can combine the independent Git histories of linked source repositories. It activates this mode
+with `polyrepo: true`, `--polyrepo`, a non-empty `configs` list, or repeatable `--configs` flags. A repository with its
+own non-empty `repository` identity activates the same multi-history profile automatically; its optional
+`repositories` roster names other peers. If none is
 present, keep treating submodule pointer changes as ordinary control-repository changes.
 
 Before trusting a plan, inspect `.gitmodules`, the exact source names, current gitlinks, source checkouts, imported
@@ -181,14 +183,14 @@ For `--since <control-revision>`, verify that the command projects that revision
 repository; it must not scan the control history once per consumer or count pointer moves again. Package scripts and
 nested hooks share the combined workspace while retaining the triggering source context.
 
-### Choreographed fleets
+### Identity-linked fleets
 
-Identify the saga before anything else. `saga: choreography`, or a global `--saga choreography`, means there is no
-control repository: every participant states its own `repository` identity, carries its own configuration and release
-records, and is joined to its neighbours by two-sided submodule links. An absent `saga` key is the orchestrated saga
-above and nothing in this subsection applies. Reading the fleet starts from the repository you are standing in, not
+Identify the configuration owner before anything else. A non-empty `repository` identity means
+there is no control repository: every participant carries its own configuration and release records and is joined to
+its neighbours named by the optional `repositories` roster through two-sided submodule links. An omitted or empty
+roster is valid for a one-member fleet; a non-empty roster without identity is `E339`. Reading the fleet starts from the repository you are standing in, not
 from a central inventory, so record which peer a plan was composed from; the `polyrepo workspace composed` line names
-the saga and the entry.
+the entry and participants.
 
 Never run `git submodule update --recursive` in a linked fleet. Every peer carries a back-link to the repository that
 linked it, deliberately left as an empty folder, and recursion fills it with a second copy of the repository you are
@@ -196,7 +198,7 @@ in. Update one declared path at a time. A link path holding no repository is `E3
 exactly that link; a run started inside another peer's linked checkout meets the same diagnostic, which is expected
 rather than a broken fleet.
 
-`dispat compute --write` in a choreographed fleet touches Git and the network: it creates a checkout for one half of
+`dispat compute --write` in an identity-linked fleet touches Git and the network: it creates a checkout for one half of
 each link, declares the other half inside it, and stages `.gitmodules` and the gitlinks in both repositories. It also
 writes the missing half of a link only one end declares, which needs no fetch because that checkout already exists.
 That is a configuration change and needs the same authorization as any other; read-only inspection does not authorize
@@ -213,13 +215,21 @@ a fleet link is not a change to any package; do not report one as pending work.
 
 `E338` means the links do not form a tree and a pair is joined twice. Ask which link to remove rather than removing
 one: a link records what a release incorporated. `E339` means an identity cannot be trusted, usually because a peer's
-own `repository` value, the rosters naming it and the submodule name linking it do not agree, or because a linked
-repository does not state the choreographed saga itself. `W332` (a one-sided link) and `W333` (a roster missing a fleet
+own `repository` value, the rosters naming it and the submodule name linking it do not agree. `W332` (a one-sided link)
+and `W333` (a roster missing a fleet
 member) do not stop a run and are what `dispat compute` repairs; report them rather than working around them.
 
-`--polyrepo=false` on a choreographed configuration releases that repository alone and composes no fleet. A consumer
+`--polyrepo=false` on an identity-linked configuration releases that repository alone and composes no fleet. A consumer
 released that way writes its release commit without settling any link, so the next fleet-wide plan reports `E333` for
 that tag and needs an explicit `repositoryBaselines` tuple. Do not use the flag to get a release past a fleet problem.
+
+For link repair, `dispat compute --topology minimal` is the default: it preserves existing links and proposes the
+fewest additions needed to connect the roster. `--topology star` proposes a direct link from the entry repository to
+every peer and errors if existing links cannot fit that shape. Neither mode removes or converts links. `--write` and
+`--interactive` apply the selected suggestions under the same authorization rule described above.
+Known incompatible links are rejected before writes. A peer fetched by `--write` can expose a previously unseen link;
+if that link conflicts with the requested topology, the command fails and leaves staged edits for review. Do not
+describe or treat that state as an automatic rollback, and do not remove a link without explicit authorization.
 
 ## Share configuration across Windows and Linux
 

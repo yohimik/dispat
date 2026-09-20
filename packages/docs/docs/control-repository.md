@@ -12,10 +12,9 @@ Both modes preserve each source repository's ownership, review rules, and remote
 cross-repository pending windows and source-owned tags. Pointer-history mode keeps one simpler release history in the
 control repository.
 
-**Or without a control repository.** dispat calls the arrangement on this page the orchestration saga, and it is the
-default. Set `saga: choreography` instead to run the same combined graph with no control repository at all: every
-repository is a peer that keeps its own configuration and records, two-sided submodule links join the peers, and a
-release can start in any of them. See [A choreographed fleet](./choreographed-repositories.md).
+**Or without a control repository.** A non-empty repository identity activates a linked peer fleet automatically:
+every repository keeps its own configuration and records, two-sided submodule links join the peers, and a release can
+start in any of them. See [A choreographed fleet](./choreographed-repositories.md).
 
 ## Source-history mode
 

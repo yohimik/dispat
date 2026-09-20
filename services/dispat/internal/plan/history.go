@@ -594,8 +594,8 @@ func (cp *computation) repositoryBoundary(pkg *model.Package, tag gitx.Tag, repo
 			Msg("plan: explicit repository baseline resolved")
 		return revision, nil
 	}
-	// What is left is the saga's own question — which revision of that
-	// repository this release already carried — and each saga proves it from
+	// What is left is the record layout's question: which revision of that
+	// repository this release already carried. Each layout proves it from
 	// what it records. The remedy is the same tuple either way, so the
 	// diagnostic is raised here rather than in each of them.
 	revision, remedy := cp.evidenceFor().resolve(boundaryQuery{

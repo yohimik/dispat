@@ -448,6 +448,7 @@ func TestCommandArityIsAUsageError(t *testing.T) {
 	for _, args := range [][]string{
 		{"run"},                               // run requires the script name
 		{"run", "a", "b"},                     // ...and nothing else: packages are flags
+		{"compute", "--topology", "mesh"},     // topology is validated before loading a configuration
 		{"preview", "a"},                      // preview takes no arguments either
 		{"status", "extra"},                   // status takes no arguments
 		{"bogus", "extra"},                    // more than one non-command word

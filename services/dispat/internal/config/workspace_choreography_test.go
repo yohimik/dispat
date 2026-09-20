@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,7 +20,6 @@ import (
 // the fleet, and a package of its own so discovery has something to own.
 func choreoConfig(identity string, peers ...string) File {
 	cfg := File{
-		Saga:       SagaChoreography,
 		Repository: identity,
 		Packages:   map[string]PackageConfig{identity + "-pkg": {Path: "pkgs/" + identity}},
 	}
@@ -68,12 +66,12 @@ func choreoLinkAt(t *testing.T, from, target, name, path string) {
 	workspaceGit(t, from, "commit", "-m", "chore: link "+name)
 }
 
-func choreoCompose(t *testing.T, root string, opts ChoreographyOptions) (*Workspace, *File, error) {
+func choreoCompose(t *testing.T, root string, opts LinkedOptions) (*Workspace, *File, error) {
 	t.Helper()
 	path := filepath.Join(root, "dispat.json")
 	cfg, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeChoreography(t.Context(), cfg, path, root, opts)
+	workspace, err := ComposeLinked(t.Context(), cfg, path, root, opts)
 	return workspace, cfg, err
 }
 
@@ -119,10 +117,10 @@ func TestChoreographyComposesOneFleetFromEitherEntry(t *testing.T) {
 		{"sdk", sdk, "api"},
 	} {
 		t.Run(tc.entry, func(t *testing.T) {
-			workspace, cfg, err := choreoCompose(t, tc.root, ChoreographyOptions{})
+			workspace, cfg, err := choreoCompose(t, tc.root, LinkedOptions{})
 			require.NoError(t, err)
 			require.NotNil(t, workspace)
-			assert.True(t, workspace.IsChoreographed())
+			assert.True(t, workspace.IsLinked())
 			assert.ElementsMatch(t, []string{"api", "sdk"}, choreoNames(workspace))
 
 			entry := workspace.EntryRepository()
@@ -169,12 +167,12 @@ func TestChoreographyRefusesASecondPathToARepository(t *testing.T) {
 	choreoLink(t, api, sdk, "sdk")
 	choreoLink(t, api, web, "web")
 
-	_, _, err := choreoCompose(t, api, ChoreographyOptions{})
+	_, _, err := choreoCompose(t, api, LinkedOptions{})
 	require.Error(t, err)
 	requireWorkspaceDiagnostic(t, err, DiagnosticLinkGraph)
 	assert.ErrorContains(t, err, "must form one tree")
 
-	workspace, _, err := choreoCompose(t, api, ChoreographyOptions{Lenient: true})
+	workspace, _, err := choreoCompose(t, api, LinkedOptions{Lenient: true})
 	require.NoError(t, err, "compute repairs fleets and must be able to read a broken one")
 	require.NotEmpty(t, workspace.LinkFindings())
 	assert.Equal(t, DiagnosticLinkGraph, workspace.LinkFindings()[0].Code)
@@ -196,17 +194,17 @@ func TestChoreographyRefusesIdentityProblems(t *testing.T) {
 			message: "calls itself",
 		},
 		{
-			name:    "a peer that does not release under the saga",
+			name:    "a peer with no repository identity",
 			peer:    File{Packages: map[string]PackageConfig{"sdk-pkg": {Path: "pkgs/sdk"}}},
 			linkAs:  "sdk",
-			message: "may not cross sagas",
+			message: "must declare its own repository identity",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := choreoRepo(t, "api", choreoConfig("api", "sdk"))
 			peer := choreoRepo(t, "sdk", tc.peer)
 			choreoLink(t, api, peer, tc.linkAs)
-			_, _, err := choreoCompose(t, api, ChoreographyOptions{})
+			_, _, err := choreoCompose(t, api, LinkedOptions{})
 			require.Error(t, err)
 			requireWorkspaceDiagnostic(t, err, DiagnosticIdentity)
 			assert.ErrorContains(t, err, tc.message)
@@ -217,7 +215,7 @@ func TestChoreographyRefusesIdentityProblems(t *testing.T) {
 		api := choreoRepo(t, "api", choreoConfig("api", "sdk"))
 		sdk := choreoRepo(t, "sdk", choreoConfig("sdk", "api"))
 		choreoLinkAt(t, api, sdk, "SDK", DefaultLinkPath("SDK"))
-		_, _, err := choreoCompose(t, api, ChoreographyOptions{})
+		_, _, err := choreoCompose(t, api, LinkedOptions{})
 		require.Error(t, err)
 		requireWorkspaceDiagnostic(t, err, DiagnosticIdentity)
 		assert.ErrorContains(t, err, "carries the peer's identity exactly")
@@ -232,7 +230,7 @@ func TestChoreographyRefusesAnUninitializedPeer(t *testing.T) {
 	nested := filepath.Join(api, DefaultLinkPath("sdk"))
 	require.DirExists(t, filepath.Join(nested, DefaultLinkPath("api")), "the back-link exists as an empty folder")
 
-	_, _, err := choreoCompose(t, nested, ChoreographyOptions{})
+	_, _, err := choreoCompose(t, nested, LinkedOptions{})
 	require.Error(t, err)
 	requireWorkspaceDiagnostic(t, err, DiagnosticRepositoryInvalid)
 	assert.ErrorContains(t, err, "is not initialized")
@@ -240,11 +238,11 @@ func TestChoreographyRefusesAnUninitializedPeer(t *testing.T) {
 
 	// The repository that owns the link still composes the whole fleet, and
 	// the advisory drift the update left behind is not a composition problem.
-	workspace, _, err := choreoCompose(t, api, ChoreographyOptions{})
+	workspace, _, err := choreoCompose(t, api, LinkedOptions{})
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"api", "sdk"}, choreoNames(workspace))
 
-	workspace, _, err = choreoCompose(t, nested, ChoreographyOptions{Lenient: true})
+	workspace, _, err = choreoCompose(t, nested, LinkedOptions{Lenient: true})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"sdk"}, choreoNames(workspace))
 	require.Len(t, workspace.LinkFindings(), 1)
@@ -262,7 +260,7 @@ func TestChoreographyIgnoresSubmodulesTheRosterDoesNotName(t *testing.T) {
 	choreoFollowRemote(t, api, DefaultLinkPath("sdk"))
 	choreoLinkAt(t, api, vendor, "vendor", "third-party/vendor")
 
-	workspace, _, err := choreoCompose(t, api, ChoreographyOptions{})
+	workspace, _, err := choreoCompose(t, api, LinkedOptions{})
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"api", "sdk"}, choreoNames(workspace))
 	assert.Nil(t, workspace.RepositoryByName("vendor"))
@@ -279,7 +277,7 @@ func TestChoreographyReportsLinkAndRosterFindings(t *testing.T) {
 	choreoLink(t, api, sdk, "sdk")
 	choreoLink(t, api, web, "web")
 
-	workspace, _, err := choreoCompose(t, api, ChoreographyOptions{})
+	workspace, _, err := choreoCompose(t, api, LinkedOptions{})
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"api", "sdk", "web"}, choreoNames(workspace))
 	byCode := map[string][]LinkFinding{}
@@ -305,7 +303,7 @@ func TestChoreographyExcludesADisabledPeer(t *testing.T) {
 	api := choreoRepo(t, "api", cfg)
 	choreoLink(t, api, choreoRepo(t, "sdk", choreoConfig("sdk", "api")), "sdk")
 
-	workspace, _, err := choreoCompose(t, api, ChoreographyOptions{})
+	workspace, _, err := choreoCompose(t, api, LinkedOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"api"}, choreoNames(workspace))
 	assert.Equal(t, []string{"sdk"}, workspace.DisabledRepositoryNames())
@@ -314,14 +312,14 @@ func TestChoreographyExcludesADisabledPeer(t *testing.T) {
 	unknown := choreoConfig("api", "sdk")
 	unknown.RepositoryOverrides = map[string]RepositoryOverrideConfig{"absent": {Enabled: models.Bool(false)}}
 	choreoWriteConfig(t, api, unknown)
-	_, _, err = choreoCompose(t, api, ChoreographyOptions{})
+	_, _, err = choreoCompose(t, api, LinkedOptions{})
 	requireWorkspaceDiagnostic(t, err, DiagnosticComposition)
 	assert.ErrorContains(t, err, "no roster entry declares")
 
 	self := choreoConfig("api", "sdk")
 	self.RepositoryOverrides = map[string]RepositoryOverrideConfig{"api": {Enabled: models.Bool(false)}}
 	choreoWriteConfig(t, api, self)
-	_, _, err = choreoCompose(t, api, ChoreographyOptions{})
+	_, _, err = choreoCompose(t, api, LinkedOptions{})
 	requireWorkspaceDiagnostic(t, err, DiagnosticComposition)
 	assert.ErrorContains(t, err, "the run started in")
 }
@@ -343,7 +341,7 @@ func TestChoreographyMergesBaselinesFromEveryPeer(t *testing.T) {
 	choreoLink(t, sdk, api, "api")
 	choreoFollowRemote(t, api, DefaultLinkPath("sdk"))
 
-	_, cfg, err := choreoCompose(t, api, ChoreographyOptions{})
+	_, cfg, err := choreoCompose(t, api, LinkedOptions{})
 	require.NoError(t, err)
 	require.Len(t, cfg.RepositoryBaselines, 1)
 	assert.Equal(t, "sdk", cfg.RepositoryBaselines[0].Repository)
@@ -354,14 +352,14 @@ func TestChoreographyMergesBaselinesFromEveryPeer(t *testing.T) {
 	both := choreoConfig("api", "sdk")
 	both.RepositoryBaselines = sdkCfg.RepositoryBaselines
 	choreoWriteConfig(t, api, both)
-	_, cfg, err = choreoCompose(t, api, ChoreographyOptions{})
+	_, cfg, err = choreoCompose(t, api, LinkedOptions{})
 	require.NoError(t, err)
 	assert.Len(t, cfg.RepositoryBaselines, 1, "the same boundary from two peers is one baseline")
 }
 
-// TestValidateSagaRefusesContradictoryConfigurations: every way of writing a
+// TestValidateLinkedRefusesContradictoryConfigurations: every way of writing a
 // fleet that could not be released as written, refused where it is written.
-func TestValidateSagaRefusesContradictoryConfigurations(t *testing.T) {
+func TestValidateLinkedRefusesContradictoryConfigurations(t *testing.T) {
 	base := func() *File {
 		cfg := choreoConfig("api", "sdk")
 		return &cfg
@@ -372,8 +370,7 @@ func TestValidateSagaRefusesContradictoryConfigurations(t *testing.T) {
 		code    string
 		message string
 	}{
-		{"an unknown saga", func(c *File) { c.Saga = "ballet" }, "", "saga \"ballet\" is invalid"},
-		{"choreography with no identity", func(c *File) { c.Repository = "" }, DiagnosticIdentity, "requires `repository`"},
+		{"a roster with no identity", func(c *File) { c.Repository = "" }, DiagnosticIdentity, "requires `repository`"},
 		{"an identity Git cannot name", func(c *File) { c.Repository = "api/two" }, DiagnosticIdentity, "is not a repository identity"},
 		{"the reserved control identity", func(c *File) { c.Repository = "Control" }, DiagnosticIdentity, "is reserved"},
 		{"a roster naming this repository", func(c *File) {
@@ -392,12 +389,11 @@ func TestValidateSagaRefusesContradictoryConfigurations(t *testing.T) {
 			DiagnosticComposition, "cannot import `configs`"},
 		{"central commit policy", func(c *File) {
 			c.RepositoryOverrides = map[string]RepositoryOverrideConfig{"sdk": {Commit: &CommitConfig{Enabled: models.Bool(true)}}}
-		}, DiagnosticComposition, "belongs to repository \"sdk\"'s own configuration"},
+		}, DiagnosticComposition, "belongs to repository \"sdk\"'s own linked configuration"},
 		{"a baseline naming the control repository", func(c *File) {
 			c.RepositoryBaselines = []RepositoryBaselineConfig{{
 				Consumer: "api-pkg", ReleaseTag: "api-pkg@1.0.0", Repository: "control", Revision: "HEAD"}}
-		}, DiagnosticComposition, "orchestrated control identity"},
-		{"an identity without the saga", func(c *File) { c.Saga = "" }, DiagnosticComposition, "needs `saga: choreography`"},
+		}, DiagnosticComposition, "central control identity"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := base()
@@ -411,23 +407,32 @@ func TestValidateSagaRefusesContradictoryConfigurations(t *testing.T) {
 
 	t.Run("an accepted fleet", func(t *testing.T) {
 		cfg := base()
-		cfg.Saga = "Choreography"
 		require.NoError(t, validate(cfg, false))
-		assert.Equal(t, SagaChoreography, cfg.Saga, "the saga is normalized to its canonical spelling")
-		assert.True(t, cfg.Polyrepo, "a choreographed fleet is a polyrepository fleet")
+		assert.True(t, cfg.IsLinked())
+		assert.True(t, cfg.Polyrepo, "a linked fleet is a polyrepository fleet")
 	})
 
-	t.Run("an orchestrated file is untouched", func(t *testing.T) {
+	t.Run("a central file is untouched", func(t *testing.T) {
 		cfg := &File{Packages: map[string]PackageConfig{"api": {Path: "pkgs/api"}}}
 		require.NoError(t, validate(cfg, false))
-		assert.Empty(t, cfg.Saga)
 		assert.False(t, cfg.Polyrepo)
-		assert.False(t, cfg.IsChoreographed())
+		assert.False(t, cfg.IsLinked())
 	})
 }
 
+func TestSagaKeyIsRejected(t *testing.T) {
+	root := writeRawRepo(t, map[string]any{
+		"saga":       "choreography",
+		"repository": "api",
+		"packages":   map[string]any{"api-pkg": map[string]any{"path": "pkgs/api"}},
+	}, "pkgs/api")
+	_, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `unknown key "saga"`)
+}
+
 // TestComposeWorkspaceDelegatesOnlyToAChoreographedFleet: the delegation is
-// the one change the orchestrated path sees, so it is asserted from outside.
+// the one change the central path sees, so it is asserted from outside.
 func TestComposeWorkspaceDelegatesOnlyToAChoreographedFleet(t *testing.T) {
 	api, _ := choreoPair(t)
 	path := filepath.Join(api, "dispat.json")
@@ -437,7 +442,7 @@ func TestComposeWorkspaceDelegatesOnlyToAChoreographedFleet(t *testing.T) {
 	workspace, err := ComposeWorkspace(cfg, path, api, nil)
 	require.NoError(t, err)
 	require.NotNil(t, workspace)
-	assert.True(t, workspace.IsChoreographed())
+	assert.True(t, workspace.IsLinked())
 	canonical, err := filepath.EvalSymlinks(api)
 	require.NoError(t, err)
 	assert.Equal(t, canonical, workspace.ControlRoot, "the entry root is the workspace anchor")
@@ -454,17 +459,17 @@ func TestComposeWorkspaceDelegatesOnlyToAChoreographedFleet(t *testing.T) {
 	requireWorkspaceDiagnostic(t, err, DiagnosticComposition)
 	assert.ErrorContains(t, err, "--configs")
 
-	orchestrated := &File{Packages: map[string]PackageConfig{"api": {Path: "pkgs/api"}}}
-	workspace, err = ComposeWorkspace(orchestrated, path, api, nil)
+	central := &File{Packages: map[string]PackageConfig{"api": {Path: "pkgs/api"}}}
+	workspace, err = ComposeWorkspace(central, path, api, nil)
 	require.NoError(t, err)
-	assert.Nil(t, workspace, "a file naming no saga and no imports composes nothing")
-	assert.False(t, workspace.IsChoreographed())
+	assert.Nil(t, workspace, "a file naming no identity and no imports composes nothing")
+	assert.False(t, workspace.IsLinked())
 	assert.Nil(t, workspace.EntryRepository())
 	assert.Nil(t, workspace.LinkFindings())
 	assert.Nil(t, workspace.LinkRoute("api", "sdk"))
 }
 
-// TestPackageOwnershipScopesOverlapsPerRepository: a choreographed peer lives
+// TestPackageOwnershipScopesOverlapsPerRepository: a linked peer lives
 // inside the checkout of the repository that links it, so the containment that
 // is an ownership mistake in one tree of folders is ordinary here.
 func TestPackageOwnershipScopesOverlapsPerRepository(t *testing.T) {
@@ -480,9 +485,9 @@ func TestPackageOwnershipScopesOverlapsPerRepository(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, DiagnosticOwnershipInvalid, DiagnosticCode(err))
 	assert.NoError(t, validatePackageOwnershipMode(pkgs, true))
-	assert.Error(t, validatePackageOwnership(pkgs), "the orchestrated call keeps its signature and its answer")
+	assert.Error(t, validatePackageOwnership(pkgs), "the central call keeps its signature and its answer")
 
-	// Names stay one graph whichever saga composed the fleet.
+	// Names stay one graph whichever topology composed the fleet.
 	duplicate := []*model.Package{
 		{Name: "api-pkg", Dir: outer, Repository: "api"},
 		{Name: "API-PKG", Dir: inner, Repository: "sdk"},
@@ -547,18 +552,18 @@ func TestPeerConfigPathDoesNotAscend(t *testing.T) {
 // and a recorder read are asked of a workspace built by hand as well as of a
 // composed one, so each one answers safely when there is nothing to say.
 func TestWorkspaceAnswersAboutLinksWithoutAComposition(t *testing.T) {
-	orchestrated := &Workspace{Repositories: []Repository{
+	central := &Workspace{Repositories: []Repository{
 		{Name: ControlRepository, Root: "/w", Control: true},
 		{Name: "sdk", Root: "/w/sources/sdk"},
 	}}
-	entry := orchestrated.EntryRepository()
+	entry := central.EntryRepository()
 	require.NotNil(t, entry)
 	assert.Equal(t, ControlRepository, entry.Name,
 		"a workspace built without the entry flag still answers with the control repository")
-	assert.False(t, orchestrated.IsChoreographed())
-	assert.Empty(t, orchestrated.RepositoryByName("sdk").LinkPeers(), "an orchestrated source links nothing")
+	assert.False(t, central.IsLinked())
+	assert.Empty(t, central.RepositoryByName("sdk").LinkPeers(), "a central source links nothing")
 
-	apart := &Workspace{Saga: SagaChoreography, Repositories: []Repository{
+	apart := &Workspace{Repositories: []Repository{
 		{Name: "api", Root: "/w/api", Entry: true},
 		{Name: "sdk", Root: "/w/sdk"},
 	}}
@@ -567,36 +572,6 @@ func TestWorkspaceAnswersAboutLinksWithoutAComposition(t *testing.T) {
 
 	var absent *Repository
 	assert.Nil(t, absent.LinkPeers())
-}
-
-// TestSagaFlagIsAConfigurationOverride: `--saga` is a config override like
-// every other bound flag, applied while the file is read, so validation and
-// composition both see the saga the invocation chose rather than a value
-// patched in behind them.
-func TestSagaFlagIsAConfigurationOverride(t *testing.T) {
-	orchestrated := File{Repository: "", Packages: map[string]PackageConfig{"api-pkg": {Path: "pkgs/api"}}}
-	root := choreoRepo(t, "api", orchestrated)
-	path := filepath.Join(root, "dispat.json")
-
-	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	fs.String("saga", "", "")
-	require.NoError(t, fs.Parse([]string{"--saga", SagaChoreography}))
-	_, err := Load(path, fs)
-	require.Error(t, err, "the flag selects the saga, and this file states no identity for it")
-	assert.Equal(t, DiagnosticIdentity, DiagnosticCode(err))
-
-	choreoWriteConfig(t, root, choreoConfig("api"))
-	cfg, err := Load(path, fs)
-	require.NoError(t, err)
-	assert.True(t, cfg.IsChoreographed())
-	assert.True(t, cfg.Polyrepo)
-
-	untouched := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	untouched.String("saga", "", "")
-	require.NoError(t, untouched.Parse(nil))
-	cfg, err = Load(path, untouched)
-	require.NoError(t, err)
-	assert.True(t, cfg.IsChoreographed(), "a flag nobody passed overrides nothing")
 }
 
 // TestDefaultLinkPathStaysOutOfPackageDiscovery: the default is a dot folder

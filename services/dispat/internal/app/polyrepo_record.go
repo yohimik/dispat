@@ -57,7 +57,7 @@ type workspaceRecorder struct {
 	pins     *workspacePins
 	// linkPlan is each releasing package's foreign history inputs, which are
 	// the repositories its release has to record fleet links for. Empty for
-	// every saga but the choreographed one.
+	// a workspace with centrally owned configuration.
 	linkPlan map[string][]string
 	// routes memoises each release's settlement route tree. Packages publish
 	// concurrently, so the map is guarded; it is emptied when a new plan
@@ -185,7 +185,7 @@ func (w *workspaceRecorder) lockBypass(r *repositoryRecord) (bypassed, byConfig 
 	if r.repo.Config != nil && r.repo.Config.UnsafeDisableLock {
 		return true, true
 	}
-	if !w.app.workspace.IsChoreographed() && w.app.cfg.UnsafeDisableLock {
+	if !w.app.workspace.IsLinked() && w.app.cfg.UnsafeDisableLock {
 		return true, true
 	}
 	return lockDisabledByEnv(), false
@@ -334,7 +334,7 @@ func (w *workspaceRecorder) verifyPublishBranch(ctx context.Context, rel *plan.R
 	if sourceCommit && source.repo.Commit.IsPushEnabled() && source.branch == "" {
 		return config.WithDiagnostic("E337", fmt.Errorf("E337: repository %s is detached; set commit.branch before publishing a release that needs a source commit", source.repo.Name))
 	}
-	if source.repo.Control || w.app.workspace.IsChoreographed() {
+	if source.repo.Control || w.app.workspace.IsLinked() {
 		// A choreographed fleet writes no checkpoint after the record. What
 		// its release needs from other repositories is settled before
 		// publication, and reports its own E337 there.

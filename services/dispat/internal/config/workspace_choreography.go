@@ -6,8 +6,8 @@ package config
 // Choreographed composition: the fleet a run sees when no repository is the
 // control repository.
 //
-// The orchestrated saga reads one inventory — the control checkout's
-// `.gitmodules` — and every participant is one entry of it. A choreographed
+// Central composition reads one inventory — the control checkout's
+// `.gitmodules` — and every participant is one entry of it. A linked
 // fleet has no such place to read: each peer knows its own identity, the
 // roster of the fleet it belongs to, and the handful of submodule links that
 // reach its neighbours. So the fleet is walked rather than listed, breadth
@@ -39,15 +39,15 @@ import (
 // discovery from ever descending into another repository's checkout.
 func DefaultLinkPath(name string) string { return ".links/" + name }
 
-// ChoreographyOptions steers one choreographed composition.
-type ChoreographyOptions struct {
+// LinkedOptions steers one linked composition.
+type LinkedOptions struct {
 	// Lenient turns a fleet that is not yet linked correctly into findings
 	// instead of a refusal. It belongs to `dispat compute`, whose whole job is
 	// to repair those links; every other command needs the fleet it plans
 	// against to be the fleet that exists.
 	Lenient bool
 	// InheritedPins records that this invocation accepted a validated live
-	// workspace context, exactly as the orchestrated composition does.
+	// workspace context, exactly as central composition does.
 	InheritedPins bool
 }
 
@@ -61,10 +61,10 @@ type LinkFinding struct {
 	Message    string
 }
 
-// ComposeChoreography composes the fleet reachable from one entry repository
+// ComposeLinked composes the fleet reachable from one entry repository
 // through its fleet links. cfg is the entry's own configuration, configPath
 // the file it was read from, and entryRoot the repository that file belongs to.
-func ComposeChoreography(ctx context.Context, cfg *File, configPath, entryRoot string, opts ChoreographyOptions) (*Workspace, error) {
+func ComposeLinked(ctx context.Context, cfg *File, configPath, entryRoot string, opts LinkedOptions) (*Workspace, error) {
 	if cfg == nil {
 		return nil, nil
 	}
@@ -74,7 +74,7 @@ func ComposeChoreography(ctx context.Context, cfg *File, configPath, entryRoot s
 	root, err := canonicalRepositoryRoot(entryRoot)
 	if err != nil {
 		return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
-			fmt.Errorf("choreography: resolve entry root %s: %w", entryRoot, err))
+			fmt.Errorf("linked fleet: resolve entry root %s: %w", entryRoot, err))
 	}
 	if err := requireCompleteRepository(root, cfg.Repository); err != nil {
 		return nil, err
@@ -97,21 +97,35 @@ func ComposeChoreography(ctx context.Context, cfg *File, configPath, entryRoot s
 		return nil, err
 	}
 	workspace := newWorkspace(root, repos, nil)
-	workspace.Saga = SagaChoreography
 	workspace.inheritedPins = opts.InheritedPins
 	workspace.disabled = walk.disabled
 	workspace.Findings = walk.findings
 	return workspace, nil
 }
 
-// IsChoreographed reports whether this workspace was composed by following
-// fleet links rather than by reading a control repository's inventory.
-func (w *Workspace) IsChoreographed() bool { return w != nil && w.Saga == SagaChoreography }
+// IsLinked reports whether this workspace was composed from repository-owned
+// configurations. Linked workspaces have a named entry and no control owner.
+func (w *Workspace) IsLinked() bool {
+	if w == nil {
+		return false
+	}
+	for i := range w.Repositories {
+		if w.Repositories[i].Control || strings.EqualFold(w.Repositories[i].Name, ControlRepository) {
+			return false
+		}
+	}
+	for i := range w.Repositories {
+		if w.Repositories[i].Entry && w.Repositories[i].Name != "" {
+			return true
+		}
+	}
+	return false
+}
 
 // EntryRepository returns the repository the run is anchored in: the control
-// repository of an orchestrated fleet, or the peer a choreographed run started
+// repository of a central fleet, or the peer a linked run started
 // from. Every caller that used to reach for the control identity asks this
-// instead, which is what keeps the rest of the CLI free of saga flags.
+// instead, which keeps callers independent of composition details.
 func (w *Workspace) EntryRepository() *Repository {
 	if w == nil {
 		return nil
@@ -262,7 +276,7 @@ func (w *linkWalk) compose(entry *linkNode) error {
 		head, err := gitOutputContext(w.ctx, node.root, "rev-parse", "HEAD")
 		if err != nil {
 			return WithDiagnostic(DiagnosticRepositoryInvalid,
-				fmt.Errorf("E330: choreography: repository %q has no HEAD: %w", node.identity, err))
+				fmt.Errorf("E330: linked fleet: repository %q has no HEAD: %w", node.identity, err))
 		}
 		node.head = head
 		links, err := w.linksOf(node)
@@ -294,16 +308,16 @@ func (w *linkWalk) enter(node *linkNode, peer, path string) (*linkNode, error) {
 			return nil, nil
 		}
 		return nil, w.refuse(DiagnosticLinkGraph, node.identity, peer, fmt.Errorf(
-			"E338: choreography: repository %q is reached through %q and again through %q; fleet links must form one tree",
+			"E338: linked fleet: repository %q is reached through %q and again through %q; fleet links must form one tree",
 			visited.identity, visited.linker, node.identity))
 	}
 	root, err := containedPath(node.root, path)
 	if err != nil {
 		return nil, w.refuse(DiagnosticRepositoryInvalid, node.identity, peer, fmt.Errorf(
-			"E330: choreography: repository %q link path %q: %w", node.identity, path, err))
+			"E330: linked fleet: repository %q link path %q: %w", node.identity, path, err))
 	}
 	uninitialized := fmt.Errorf(
-		"E330: choreography: repository %q is not initialized at %s; run `git submodule update --init -- %s` in %s",
+		"E330: linked fleet: repository %q is not initialized at %s; run `git submodule update --init -- %s` in %s",
 		peer, root, path, node.root)
 	resolved, err := canonicalRepositoryRoot(root)
 	if err != nil {
@@ -328,21 +342,21 @@ func (w *linkWalk) enter(node *linkNode, peer, path string) (*linkNode, error) {
 	configPath, err := peerConfigPath(root)
 	if err != nil {
 		return nil, w.refuse(DiagnosticRepositoryInvalid, node.identity, peer, fmt.Errorf(
-			"E330: choreography: repository %q: %w", peer, err))
+			"E330: linked fleet: repository %q: %w", peer, err))
 	}
 	config, err := Load(configPath, nil)
 	if err != nil {
 		return nil, w.refuse(DiagnosticRepositoryInvalid, node.identity, peer, fmt.Errorf(
-			"choreography: repository %q config %s: %w", peer, configPath, err))
+			"linked fleet: repository %q config %s: %w", peer, configPath, err))
 	}
-	if !config.IsChoreographed() {
+	if !config.IsLinked() {
 		return nil, w.refuse(DiagnosticIdentity, node.identity, peer, fmt.Errorf(
-			"E339: choreography: repository %q at %s does not release under saga %s; a fleet link may not cross sagas",
-			peer, configPath, SagaChoreography))
+			"E339: linked fleet: repository %q at %s has no repository identity; each linked peer must declare its own repository identity",
+			peer, configPath))
 	}
 	if config.Repository != peer {
 		return nil, w.refuse(DiagnosticIdentity, node.identity, peer, fmt.Errorf(
-			"E339: choreography: %s calls itself %q but repository %q links it as %q; an identity is spelled the same on both sides of a link",
+			"E339: linked fleet: %s calls itself %q but repository %q links it as %q; an identity is spelled the same on both sides of a link",
 			configPath, config.Repository, node.identity, peer))
 	}
 	next := &linkNode{
@@ -363,6 +377,11 @@ func (w *linkWalk) admit(node *linkNode) {
 func (w *linkWalk) refuse(code, repository, peer string, err error) error {
 	if !w.lenient {
 		return WithDiagnostic(code, err)
+	}
+	// Preserve the same diagnostic that strict composition would return.
+	// Otherwise an invalid peer identity looks like a missing checkout.
+	if reportedCode := DiagnosticCode(err); reportedCode != "" {
+		code = reportedCode
 	}
 	w.findings = append(w.findings, LinkFinding{
 		Code: code, Repository: repository, Peer: peer, Message: err.Error()})
@@ -390,7 +409,7 @@ func (w *linkWalk) linksOf(node *linkNode) (map[string]string, error) {
 			for name := range inventory {
 				if strings.EqualFold(name, entry.Name) {
 					if err := w.refuse(DiagnosticIdentity, node.identity, entry.Name, fmt.Errorf(
-						"E339: choreography: repository %q links submodule %q for roster entry %q; a fleet link carries the peer's identity exactly",
+						"E339: linked fleet: repository %q links submodule %q for roster entry %q; a fleet link carries the peer's identity exactly",
 						node.identity, name, entry.Name)); err != nil {
 						return nil, err
 					}
@@ -413,7 +432,7 @@ func (w *linkWalk) isDisabled(name string) bool {
 }
 
 // disable resolves participation from the entry configuration alone. A peer
-// owns its own policy in a choreographed fleet, but whether it takes part in
+// owns its own policy in a linked fleet, but whether it takes part in
 // this run is the invocation's question, and the invocation is the entry.
 func (w *linkWalk) disable(cfg *File) error {
 	roster := make(map[string]bool, len(cfg.Repositories)+1)
@@ -424,14 +443,14 @@ func (w *linkWalk) disable(cfg *File) error {
 	for _, name := range sortedKeys(cfg.RepositoryOverrides) {
 		if !roster[strings.ToLower(name)] {
 			return WithDiagnostic(DiagnosticComposition,
-				fmt.Errorf("choreography: repositoryOverrides names %q, which no roster entry declares", name))
+				fmt.Errorf("linked fleet: repositoryOverrides names %q, which no roster entry declares", name))
 		}
 		if cfg.RepositoryOverrides[name].IsEnabled() {
 			continue
 		}
 		if strings.EqualFold(name, cfg.Repository) {
 			return WithDiagnostic(DiagnosticComposition,
-				fmt.Errorf("choreography: repositoryOverrides[%q] excludes the repository the run started in", name))
+				fmt.Errorf("linked fleet: repositoryOverrides[%q] excludes the repository the run started in", name))
 		}
 		w.disabled = append(w.disabled, DisabledRepository{Name: name})
 	}
@@ -556,7 +575,7 @@ func mergePeerBaselines(cfg *File, repos []Repository) {
 //
 // loadSubmodules answers a stricter question and cannot serve here: it refuses
 // a repository with no `.gitmodules` at all and requires every entry to be an
-// initialized checkout. A choreographed peer may legitimately be neither —
+// initialized checkout. A linked peer may legitimately be neither —
 // a repository that has not been linked yet has no `.gitmodules`, and the
 // back-link of every two-sided pair is deliberately left unpopulated so the
 // walk never descends into a second copy of its own linker.
@@ -567,7 +586,7 @@ func readLinkInventory(ctx context.Context, root string) (map[string]string, err
 			return map[string]string{}, nil
 		}
 		return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
-			fmt.Errorf("choreography: read %s: %w", file, err))
+			fmt.Errorf("linked fleet: read %s: %w", file, err))
 	}
 	out, err := gitOutputContext(ctx, root, "config", "--file", file, "--null", "--get-regexp", `^submodule\..*\.path$`)
 	if err != nil {
@@ -579,7 +598,7 @@ func readLinkInventory(ctx context.Context, root string) (map[string]string, err
 			return map[string]string{}, nil
 		}
 		return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
-			fmt.Errorf("choreography: read %s: %w", file, err))
+			fmt.Errorf("linked fleet: read %s: %w", file, err))
 	}
 	inventory := map[string]string{}
 	for _, record := range strings.Split(out, "\x00") {
@@ -589,7 +608,7 @@ func readLinkInventory(ctx context.Context, root string) (map[string]string, err
 		key, path, ok := strings.Cut(record, "\n")
 		if !ok {
 			return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
-				fmt.Errorf("choreography: malformed git config output for %s", file))
+				fmt.Errorf("linked fleet: malformed git config output for %s", file))
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(key, "submodule."), ".path")
 		if name == "" || path == "" {
@@ -602,7 +621,7 @@ func readLinkInventory(ctx context.Context, root string) (map[string]string, err
 
 // peerConfigPath finds a linked repository's own configuration file without
 // ascending out of it. The ordinary resolution climbs parents, and every peer
-// of a choreographed fleet sits inside the checkout of the repository that
+// of a linked fleet sits inside the checkout of the repository that
 // links it: an ascent would find the linker's file and compose a repository
 // against a configuration it does not own.
 func peerConfigPath(root string) (string, error) {

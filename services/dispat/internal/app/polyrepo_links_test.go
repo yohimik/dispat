@@ -82,7 +82,7 @@ func newSettleFleet(t testing.TB, consumerCommits, providerCommits bool) *settle
 	head := settleGit(t, sdk, "rev-parse", "HEAD")
 
 	a := New(api, apiCfg, zerolog.Nop())
-	a.workspace = &config.Workspace{ControlRoot: api, Saga: config.SagaChoreography,
+	a.workspace = &config.Workspace{ControlRoot: api,
 		Repositories: []config.Repository{
 			{Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true,
 				Links: map[string]string{"sdk": ".links/sdk"}},
@@ -251,22 +251,22 @@ func TestLockBypassIsPerRepositoryInAChoreographedFleet(t *testing.T) {
 	bypassed, _ = f.recorder.lockBypass(sdk)
 	assert.False(t, bypassed, "the entry's setting does not unlock its peers")
 
-	f.recorder.app.workspace.Saga = config.SagaOrchestration
+	f.recorder.app.workspace.Repositories[0].Control = true
 	bypassed, byConfig = f.recorder.lockBypass(sdk)
 	assert.True(t, bypassed, "an orchestrated fleet releases under one policy")
 	assert.True(t, byConfig)
 
 	t.Setenv("DISPAT_UNSAFE_DISABLE_LOCK", "true")
-	f.recorder.app.workspace.Saga = config.SagaChoreography
+	f.recorder.app.workspace.Repositories[0].Control = false
 	bypassed, byConfig = f.recorder.lockBypass(sdk)
 	assert.True(t, bypassed, "the environment switch is the invocation's, and covers the run")
 	assert.False(t, byConfig)
 }
 
-// TestWorkspaceContextEnvHandsDownTheEntryAndTheSaga: a nested dispat command
+// TestWorkspaceContextEnvHandsDownTheEntryConfiguration: a nested dispat command
 // has to compose the same fleet, which means starting where the run started
-// and under the saga it chose.
-func TestWorkspaceContextEnvHandsDownTheEntryAndTheSaga(t *testing.T) {
+// and reading the same entry configuration.
+func TestWorkspaceContextEnvHandsDownTheEntryConfiguration(t *testing.T) {
 	f := newSettleFleet(t, true, true)
 	f.recorder.app.workspace.Repositories[0].ConfigPath = filepath.Join(f.api, "dispat.json")
 	f.recorder.app.workspace.Repositories[1].ConfigPath = filepath.Join(f.sdk, "dispat.json")
@@ -274,13 +274,12 @@ func TestWorkspaceContextEnvHandsDownTheEntryAndTheSaga(t *testing.T) {
 	env := workspaceContextEnv(f.recorder.app.workspace)
 	assert.Contains(t, env, workspaceRootEnv+"="+f.api)
 	assert.Contains(t, env, workspaceConfigEnv+"=dispat.json")
-	assert.Contains(t, env, workspaceSagaEnv+"="+config.SagaChoreography)
 	assert.Contains(t, env, workspaceImportsEnv+"=null",
 		"a choreographed fleet imports nothing: the nested command walks the links itself")
 
-	f.recorder.app.workspace.Saga = config.SagaOrchestration
+	f.recorder.app.workspace.Repositories[0].Control = true
 	for _, pair := range workspaceContextEnv(f.recorder.app.workspace) {
-		assert.NotContains(t, pair, workspaceSagaEnv, "an orchestrated run hands down no saga")
+		assert.NotContains(t, pair, "DISPAT_INTERNAL_WORKSPACE_SAGA", "the workspace is recovered from its configuration")
 	}
 }
 
@@ -305,7 +304,7 @@ func TestSetLinkPlanReadsTheReleasesForeignInputs(t *testing.T) {
 	assert.Empty(t, f.recorder.linkPlan)
 
 	// An orchestrated fleet records checkpoints instead, and plans no links.
-	f.recorder.app.workspace.Saga = config.SagaOrchestration
+	f.recorder.app.workspace.Repositories[0].Control = true
 	f.recorder.linkPlan = nil
 	pl.RepositoryInputs["app"] = []uint64{0b11}
 	f.recorder.setLinkPlan(pl)

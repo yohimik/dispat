@@ -95,7 +95,7 @@ keys written beside it belongs to two files at once, so `--write` refuses it rat
 wholly in a referenced file is written in that file at the key it holds there. The `$ref` survives the write, and the
 backup sits beside the file that changed.
 
-**Fleet links.** In a [choreographed fleet](../choreographed-repositories.md), the command also reads the fleet and
+**Fleet links.** In an [identity-linked fleet](../choreographed-repositories.md), the command also reads the fleet and
 proposes what joins it. The suggestions are independent of the package selection, because a fleet is either linked or
 it is not:
 
@@ -107,8 +107,11 @@ $ dispat compute
 2 suggestion(s); apply all with --write, choose with --interactive
 ```
 
-- `+ link <repository> <peer>` creates a missing link. dispat proposes the minimum set that connects everything the
-  rosters name, chosen so that no two repositories are ever joined twice. The same line also proposes the half of a
+- `+ link <repository> <peer>` creates a missing link. With `--topology minimal`, the default, dispat preserves every
+  existing link and proposes the fewest additions that connect everything the rosters name, chosen so that no two
+  repositories are ever joined twice. With `--topology star`, it proposes a direct link from the entry repository to
+  every peer. Star mode errors when existing links are incompatible with that shape; it does not convert or remove them.
+  The same line also proposes the half of a
   link only one of its two repositories declares, which is what `W332` reports: the pair is already joined, so nothing
   is fetched and only the missing declaration is written.
 - `+ init <repository> <path>` materialises a link the fleet declares and this checkout does not have.
@@ -124,6 +127,17 @@ is committed and pushed.
 
 The `--check` flag overrides both apply modes. It writes nothing and exits `1` when any suggestion exists across any
 source, fleet links included. Use this as the CI gate for a config lagging the manifests.
+
+`--topology` chooses the shape used for fleet-link suggestions. `minimal` is the default and adds the fewest links
+needed while preserving the links already present. New links use the path declared by their owning repository,
+or `.links/<peer>` when that owner states none. `star` links every peer directly to the entry repository and
+errors when existing links cannot fit that shape. Both choices preserve existing links.
+An existing cycle (`E338`) or invalid repository identity (`E339`) stops compute, including under `--check`;
+neither is reported as in sync.
+An incompatible link already visible in the composed fleet is rejected before writing. With `--write`, a newly
+checked-out peer can reveal another link that was not visible earlier; if that link conflicts with the selected
+topology, compute fails and leaves the changes it already staged for review. It does not roll them back or delete a
+link.
 
 ## Flags
 
@@ -160,3 +174,11 @@ Confirm each suggestion (`y`/`N` on stdin) before applying it for `compute` only
 Report only, change nothing, and exit `1` when there is something to do for `compute` and `self-update`. For `compute`,
 this triggers on any suggestion at all: edges, baselines and fleet links alike. This is the CI gate for a config
 lagging the manifests, and it overrides both apply modes.
+
+### `--topology`
+
+Choose the fleet-link shape proposed by `compute`: `minimal` (the default) or `star`. Minimal preserves existing links
+and adds the fewest needed to connect the roster. Star proposes a direct link from every peer to the entry repository
+and errors if the existing links are incompatible. `--write` and `--interactive` apply these suggestions in the same
+way as other compute suggestions; no topology mode removes a link. `star` requires a linked fleet with a repository identity.
+`minimal` also works with ordinary configurations, where compute still derives dependencies and baselines.

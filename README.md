@@ -87,12 +87,13 @@ when a release crosses toolchains or destinations, and completing it requires mo
   destination. See [single-package releases](https://dispat.dev/examples/single-package/).
 - **Monorepos and polyrepos use the same release model.** A monorepo declares packages and their dependencies in one
   checkout. A [control repository](https://dispat.dev/control-repository/) can assemble separate repositories through
-  Git submodules and coordinate them with one graph, in either of two modes. In source-history mode
-  (`polyrepo: true`), dispat reads each linked repository's own commits and tags, those repositories own their release
+  Git submodules and coordinate them with one graph. In its source-history mode (`polyrepo: true`), dispat reads each
+  linked repository's own commits and tags, those repositories own their release
   records, and a submodule pointer move establishes the source range instead of counting as a package change. In
   pointer-history mode, the default, the control repository's pointer-update commits carry the release intent, and its
   own history holds the versions, changelogs, tags and records. Pick the mode that matches where your release intent
-  is already written.
+  is already written. A fleet without a control repository activates automatically when the entry states its own
+  repository identity; its optional roster lists other peers. `--polyrepo=false` is the local escape for one invocation.
 - **Your manifests and commands remain the inputs.** Build and publish stages run the shell commands you configure, so
   the language of a package is your choice rather than dispat's. Configure the toolchain's checks, credentials, and
   artifact validation in those stages. Reading manifests is the separate half: dispat parses a

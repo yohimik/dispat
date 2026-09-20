@@ -183,27 +183,26 @@ func TestChoreographyComputeChangesNothingWithoutAnApplyFlag(t *testing.T) {
 	assert.Equal(t, "", api.Git("status", "--porcelain=v1"), "nothing was written at all")
 }
 
-// TestChoreographyComputeReadsAFleetThatDoesNotCompose: compute exists to
-// repair a fleet, so a second route between two repositories is a finding it
-// reports rather than a refusal that stops it reading anything.
-func TestChoreographyComputeReadsAFleetThatDoesNotCompose(t *testing.T) {
+// TestComputeTopologyRejectsCyclesWithoutChangingLinks: neither topology can
+// repair a cycle by adding links, so all checks and writes fail without edits.
+func TestComputeTopologyRejectsCyclesWithoutChangingLinks(t *testing.T) {
 	fleet := newChoreographyFleet(t, "api", "sdk", "web")
 	fleet.link("api", "sdk")
 	fleet.link("api", "web")
 	fleet.link("sdk", "web")
 	fleet.follow("api", "sdk")
-	api := fleet.peer("api")
-
-	refused := api.Status("--package", "*")
-	assert.Equal(t, 1, refused.Code, "a release cannot read a fleet with two routes")
-	requireDiagnostic(t, refused, "E338")
-
-	res := api.CommandEnv(fileProtocolEnv(), "compute")
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout+res.Stderr, "E338", "the ring is reported where it can be repaired")
-	assert.NotContains(t, res.Stdout, "connects ",
-		"a fleet already joined needs no more links; the half of a link only one end "+
-			"declares is a declaration rather than a route, and is proposed as one")
+	entry := fleet.peer("api")
+	before := entry.Git("status", "--porcelain")
+	for _, topology := range []string{"minimal", "star"} {
+		for _, mode := range []string{"--check", "--write"} {
+			result := entry.Command("compute", "--topology", topology, mode)
+			require.Equal(t, 1, result.Code, "%s\n%s", result.Stdout, result.Stderr)
+			requireDiagnostic(t, result, "E338")
+			assert.NotContains(t, result.Stdout, "are in sync")
+			assert.NotContains(t, result.Stdout, "+ link ")
+			assert.Equal(t, before, entry.Git("status", "--porcelain"))
+		}
+	}
 }
 
 // TestChoreographyComputeSummarisesWhatItActuallyDid: a run that created
@@ -411,7 +410,7 @@ func TestChoreographyComputeRefusesALinkFolderOverAFile(t *testing.T) {
 // TestChoreographyComputeStopsWhenTheRepairedFleetCannotBeRead: creating a
 // link makes another peer's configuration readable for the first time, and a
 // fleet that peer then describes in terms this run cannot resolve is a fleet
-// no further work can be derived from. The run keeps what it made and stops.
+// no further work can be derived from. The run fails and keeps its staged changes.
 func TestChoreographyComputeStopsWhenTheRepairedFleetCannotBeRead(t *testing.T) {
 	fleet := unlinkedFleet(t, "api", "sdk")
 	api := fleet.peer("api")
@@ -425,8 +424,11 @@ func TestChoreographyComputeStopsWhenTheRepairedFleetCannotBeRead(t *testing.T) 
 	fleet.push("sdk")
 
 	res := api.CommandEnv(fileProtocolEnv(), "compute", "--write")
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Contains(t, res.Stdout, "linked sdk from api")
+	assert.Contains(t, res.Stdout+res.Stderr, "review the staged changes before retrying")
+	assert.Contains(t, res.Stdout+res.Stderr, "ghost")
+	assert.Contains(t, api.Git("diff", "--cached", "--name-only"), ".gitmodules")
 	assert.DirExists(t, api.Path(".links", "sdk", "packages"))
 
 	api.Commit("chore: link the fleet")
@@ -530,4 +532,85 @@ func TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote(t *testing.T) {
 	assert.Contains(t, res.Stdout+res.Stderr, "no remote to be fetched from")
 	assert.NoDirExists(t, api.Path(".links", "sdk", ".links", "api"))
 	requireDiagnostic(t, api.StatusOK("--package", "*"), "W332")
+}
+
+// TestComputeStarUsesTheEntryAndRemainsStable proves topology affects links,
+// without a separate release selector or an alphabetical hub assumption.
+func TestComputeStarUsesTheEntryAndRemainsStable(t *testing.T) {
+	fleet := unlinkedFleet(t, "api", "sdk", "web")
+	entry := fleet.peer("web")
+	preview := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "star")
+	require.Equal(t, 0, preview.Code, "%s\n%s", preview.Stdout, preview.Stderr)
+	assert.Contains(t, preview.Stdout, "+ link web api")
+	assert.Contains(t, preview.Stdout, "+ link web sdk")
+	assert.NoFileExists(t, entry.Path(".gitmodules"))
+
+	result := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "star", "--write")
+	require.Equal(t, 0, result.Code, "%s\n%s", result.Stdout, result.Stderr)
+	for _, peer := range []string{"api", "sdk"} {
+		assert.Equal(t, ".links/"+peer, entry.Git("config", "--file", ".gitmodules", "submodule."+peer+".path"))
+		commitLinked(entry, ".links/"+peer, "chore: record the return link")
+	}
+	entry.Commit("chore: record the star topology")
+	assert.ElementsMatch(t, []string{"api", "sdk", "web"}, composedRepositories(entry.StatusOK("--package", "*")))
+	settled := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "star", "--check")
+	assert.Equal(t, 0, settled.Code, "%s\n%s", settled.Stdout, settled.Stderr)
+}
+
+// TestComputeStarRefusesRewiringBeforeWriting preserves release evidence
+// when the requested hub conflicts with an already connected graph.
+func TestComputeStarRefusesRewiringBeforeWriting(t *testing.T) {
+	fleet := newChoreographyFleet(t, "api", "sdk", "web")
+	fleet.link("sdk", "web")
+	fleet.link("api", "sdk")
+	entry := fleet.enter("api")
+	entry.Git("-c", "protocol.file.allow=always", "-C", ".links/sdk", "submodule", "update", "--init", "--", ".links/web")
+	before := entry.Git("status", "--porcelain")
+	modules := readAbs(t, entry.Path(".gitmodules"))
+	result := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "star", "--write")
+	assert.NotEqual(t, 0, result.Code)
+	assert.Contains(t, strings.ToLower(result.Stdout+result.Stderr), "star")
+	assert.Equal(t, before, entry.Git("status", "--porcelain"))
+	assert.Equal(t, modules, readAbs(t, entry.Path(".gitmodules")))
+	minimal := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "minimal", "--check")
+	assert.Equal(t, 0, minimal.Code, "%s\n%s", minimal.Stdout, minimal.Stderr)
+}
+
+func TestComputeRejectsUnknownTopologyBeforeWriting(t *testing.T) {
+	fleet := unlinkedFleet(t, "api", "sdk")
+	entry := fleet.peer("api")
+	before := readAbs(t, entry.Path("dispat.json"))
+	result := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "mesh", "--write")
+	assert.NotEqual(t, 0, result.Code)
+	assert.Contains(t, strings.ToLower(result.Stdout+result.Stderr), "topology")
+	assert.Equal(t, before, readAbs(t, entry.Path("dispat.json")))
+	assert.NoFileExists(t, entry.Path(".gitmodules"))
+}
+
+// TestComputeTopologyExcludesDisabledRepositories keeps a disabled repository
+// out of link creation even when another participating peer's roster names it.
+func TestComputeTopologyExcludesDisabledRepositories(t *testing.T) {
+	for _, topology := range []string{"minimal", "star"} {
+		t.Run(topology, func(t *testing.T) {
+			fleet := unlinkedFleet(t, "api", "sdk", "web")
+			entry := fleet.peer("api")
+			fleet.writeConfig("api", func(cfg *models.File) {
+				cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
+					"web": {Enabled: models.Bool(false)},
+				}
+				for i := range cfg.Repositories {
+					if cfg.Repositories[i].Name == "web" {
+						cfg.Repositories[i].URL = entry.Path("absent-remote")
+					}
+				}
+			})
+			result := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", topology, "--write")
+			require.Equal(t, 0, result.Code, "%s\n%s", result.Stdout, result.Stderr)
+			assert.Contains(t, result.Stdout, "+ link api sdk")
+			assert.NotContains(t, result.Stdout, "+ link api web")
+			assert.NotContains(t, result.Stdout, "+ link sdk web")
+			assert.NoDirExists(t, entry.Path(".links/web"))
+			assert.NoDirExists(t, entry.Path(".links/sdk/.links/web"))
+		})
+	}
 }

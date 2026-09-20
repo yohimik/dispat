@@ -1588,7 +1588,7 @@ cannot make the rest of the goal pass.
 | Test | Invariant |
 | --- | --- |
 | `TestChoreographyComposesOneFleetFromAnyEntry` | A run started in either peer composes the same repositories and plans the same packages, naming the saga and the entry, and a two-sided pair reports nothing. |
-| `TestChoreographyRefusesASecondLinkPath` | Three repositories linked in a ring give two routes between two of them, which `E338` refuses rather than choosing one. |
+| `TestChoreographyRefusesASecondLinkPath` | A cyclic link graph fails release planning with E338 because two paths give ambiguous release evidence. |
 | `TestChoreographyRefusesAnIdentityItCannotTrust` | A linked checkout that calls itself something else, or releases under another saga, is `E339`; a peer whose own configuration states the identity keys without the saga is `E332`. |
 | `TestChoreographyRefusesALinkNobodyMaterialized` | A clone whose links were never initialized is `E330` naming the command that repairs it, and the same checkout composes the whole fleet once they are. |
 | `TestChoreographyIgnoresASubmoduleTheRosterDoesNotName` | A vendored submodule takes no part in the fleet: only the roster makes one a peer. |
@@ -1597,7 +1597,7 @@ cannot make the rest of the goal pass.
 | `TestChoreographyAbsentKeysKeepSingleRepositoryBehaviour` | A configuration naming no saga composes nothing and plans its own packages alone, submodules and all. |
 | `TestChoreographyReleasesOnePeerWithPolyrepoFalse` | `--polyrepo=false` is the standalone escape hatch, said out loud in the log. |
 | `tests/integration/choreography_compose_test.go::TestChoreographyExcludesADisabledPeer` | `repositoryOverrides.<peer>.enabled: false` removes a peer from the whole run, and an override naming no roster entry is refused. |
-| `TestChoreographySelectsTheSagaFromTheCommandLine` | `--saga` is applied while the file is validated, so it settles a file whose keys the saga contradicts, and an unknown value is refused. |
+| `TestLinkedFleetRejectsTheRemovedSagaFlag` | Repository identity and links compose the fleet without a saga selector; the removed `--saga` flag is rejected. |
 | `TestChoreographyPlansAFirstReleaseWithoutEvidence` | A fleet that has never released has no boundary to prove and needs no tuple to say so. |
 | `TestChoreographyReadsTheBoundaryFromTheReleasedLink` | The pin a release recorded is where the consumer's window in the provider starts: work it incorporated is not counted again and work after it is. |
 | `TestChoreographyRelaysTheBoundaryAlongTheRoute` | Two repositories that do not link each other are comparable one hop at a time along the one route between them. |
@@ -1616,6 +1616,10 @@ cannot make the rest of the goal pass.
 | `TestChoreographyConcurrentConsumersSettleInLaneOrder` | Two consumers whose settlements overlap take the same lanes in the same order, proven to overlap by a bounded file handshake and to finish by both publishing. |
 | `TestChoreographyRunsTheSettlingRepositoryHooks` | A settlement is a commit dispat makes, so that repository's commit hooks bracket it. |
 | `TestChoreographyPushesEveryRepositoryItRecorded` | With pushing on, each repository's branch and tags reach its own remote and a second run pushes nothing new. |
+| `TestComputeTopologyExcludesDisabledRepositories` | Both topology choices omit a disabled peer before cloning, even when its remote is absent and another peer still lists it. |
+| `TestComputeStarUsesTheEntryAndRemainsStable` | Star topology uses a nonalphabetical entry as the hub; preview writes nothing, applying creates a composable fleet, and the next check is clean. |
+| `TestComputeStarRefusesRewiringBeforeWriting` | Conflicting existing links cause a star request to fail without writes, while minimal topology retains that graph. |
+| `TestComputeRejectsUnknownTopologyBeforeWriting` | Unsupported topology values fail before changing configuration or creating Git links. |
 | `TestChoreographyComputeLinksAnUnlinkedFleet` | `compute --check` reports an unlinked fleet as pending work and `--write` creates the forward checkout and the other half, without committing either. |
 | `TestChoreographyComputeConnectsWithoutASecondPath` | Three repositories are connected by exactly two links, and the fleet composes without `E338`. |
 | `TestChoreographyComputeInitializesADeclaredLink` | A declared link whose checkout is missing is its own change, and initializing it composes the fleet. |
@@ -1632,7 +1636,7 @@ cannot make the rest of the goal pass.
 | `TestChoreographyRefusesALinkPathThatIsNotARepository` | A link path holding an ordinary folder is the same `E330` as a link nobody materialized, because Git answers from the repository around it. |
 | `TestChoreographySinceARevisionThatPinsNothing` | A revision from before a link existed projects that repository to its whole history, as an absent gitlink always has. |
 | `TestChoreographyReadsEveryReleaseSubjectOfARepositoryAtOnce` | Two released packages in one repository have their release subjects read in one pass, and both boundaries resolve from them. |
-| `TestChoreographyComputeReadsAFleetThatDoesNotCompose` | A ring stops a release with `E338` and is a finding to `dispat compute`, which still reads the fleet and proposes no further link. |
+| `TestComputeTopologyRejectsCyclesWithoutChangingLinks` | Both topology choices reject cyclic graphs with E338 under check and write, preserving existing links and never reporting the graph as in sync. |
 | `TestChoreographyRefusesToPushASettlementFromADetachedCheckout` | A repository that will push what it records needs `commit.branch`, and `E337` stops the release before publication. |
 | `TestChoreographyRefusesAPinItsTargetHasNotPushed` | A revision the provider's own remote does not hold stops the consumer before it publishes, so a recorded link never outruns its target. |
 | `TestChoreographyConvergesAfterARejectedSettlementPush` | A settlement whose push is rejected fails the run leaving only ordinary commits, and the next run finishes the job, releasing each package exactly once. |
@@ -1675,7 +1679,7 @@ cannot make the rest of the goal pass.
 | `TestChoreographyComputePinsTheBackLinkAtWhatTheRemoteHolds` | The other half of a link carries the remote the configuration names; a remote that does not hold the branch yet falls back to this repository's own head with a warning, and no remote at all leaves the half to the operator and shows up as `W332`. |
 | `TestChoreographyComputeRefusesARosterURLCarryingASecret` | A roster URL carrying user information is refused before anything is written, and the secret never reaches the run's output. |
 | `TestChoreographyComputeRefusesALinkFolderOverAFile` | A peer already holding a file where the back link's folder belongs is reported by path rather than written around. |
-| `TestChoreographyComputeStopsWhenTheRepairedFleetCannotBeRead` | A peer whose configuration becomes readable only once the link exists, and which then describes a fleet this run cannot resolve, stops the repair loop with what it made kept. |
+| `TestChoreographyComputeStopsWhenTheRepairedFleetCannotBeRead` | A peer whose configuration becomes readable only once the link exists, and which then describes a fleet this run cannot resolve, fails the command with a diagnostic and retained staged edits for review. |
 | `TestChoreographyComputeDoesNotRepeatAnInitItAlreadyMade` | The repair loop applies each change once however often the recomposed fleet proposes it again. |
 | `TestChoreographyRefusesToRecordALinkOverATrackedFile` | A settlement records fleet links and nothing else: a path the repository tracks as an ordinary file refuses it rather than having that file deleted from the tree. |
 | `TestChoreographyComputeRefusesABackLinkURLCarryingASecret` | The remote written into the peer's `.gitmodules` is held to the same rule a roster URL is, and the secret never reaches the run's output. |

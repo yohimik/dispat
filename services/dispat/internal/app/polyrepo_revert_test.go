@@ -41,9 +41,6 @@ func nestedRevertFixture(t *testing.T, control bool) (*workspaceRecorder, string
 		{Name: "sdk", Root: inner, GitlinkPath: ".links/sdk", Config: innerCfg, Commit: innerCfg.Commit,
 			Imported: !control, Linker: "api"},
 	}}
-	if !control {
-		a.workspace.Saga = config.SagaChoreography
-	}
 	return a.newWorkspaceRecorder(), outer, inner
 }
 
@@ -52,12 +49,12 @@ func nestedRevertFixture(t *testing.T, control bool) (*workspaceRecorder, string
 // restores nothing — and, for a fleet with no control repository, a nil
 // dereference when no root matched at all.
 func TestRevertDirRestoresThroughTheDeepestOwner(t *testing.T) {
-	for _, saga := range []struct {
+	for _, arrangement := range []struct {
 		name    string
 		control bool
 	}{{"choreographed peers", false}, {"an orchestrated source", true}} {
-		t.Run(saga.name, func(t *testing.T) {
-			w, outer, inner := nestedRevertFixture(t, saga.control)
+		t.Run(arrangement.name, func(t *testing.T) {
+			w, outer, inner := nestedRevertFixture(t, arrangement.control)
 			file := filepath.Join(inner, "pkg", "input")
 			require.NoError(t, os.WriteFile(file, []byte("half-written release"), 0o644))
 

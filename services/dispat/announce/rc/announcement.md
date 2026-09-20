@@ -1,9 +1,8 @@
 One release graph can now span many repositories.
 
-Two saga modes let you choose how those repositories work together:
+Linked fleets are enabled by repository identity; an optional roster names the other peers. Every peer keeps its own configuration and release records, and no separate control repository is needed.
 
-- Orchestration uses a control repository to combine configuration and the source histories pinned by its checkout.
-- Choreography lets repositories coordinate as peers, each keeping its own configuration and release records. No separate control repository is needed.
+Preview the links with `dispat compute --topology minimal` to preserve existing links and add the fewest needed, or `dispat compute --topology star` to link every peer directly to the entry repository. Neither shape changes repository-local ownership or deletes links. Existing centrally configured fleets keep their established behavior.
 
 In either model, dispat calculates versions and runs packages in dependency order across repository boundaries. Before it plans a release, it acquires the remote release locks for every participating repository; if any lock cannot be claimed, the run fails closed without producing a plan.
 

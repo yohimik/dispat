@@ -37,7 +37,7 @@ import (
 // evidence for: the repositories its plan read history from, other than its
 // own. It is filled once, from the plan, beside the snapshot closure.
 func (w *workspaceRecorder) setLinkPlan(pl *plan.Plan) {
-	if pl == nil || !w.app.workspace.IsChoreographed() {
+	if pl == nil || !w.app.workspace.IsLinked() {
 		return
 	}
 	w.routesMu.Lock()

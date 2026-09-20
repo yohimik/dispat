@@ -46,22 +46,14 @@ type File struct {
 	// RepositoryBaselines supplies explicit cross-repository history
 	// associations when a gitlink transition is absent or ambiguous.
 	RepositoryBaselines []RepositoryBaselineConfig `json:"repositoryBaselines,omitempty"`
-	// Saga selects which polyrepository protocol a fleet releases under:
-	// SagaOrchestration, the default, where one control repository owns the
-	// fleet's intent and records a gitlink checkpoint after each source
-	// release; or SagaChoreography, where every repository is a peer carrying
-	// its own identity and configuration, and the fleet is composed by
-	// following the submodule links between the peers. An absent key keeps a
-	// configuration on the orchestrated path it has always taken.
-	Saga string `json:"saga,omitempty"`
-	// Repository is this repository's own identity in a choreographed fleet.
+	// Repository is this repository's own identity in a linked fleet.
 	// Every peer states it, every peer's roster names the others by it, and it
 	// must equal the submodule name its neighbours link this repository under,
 	// which is what makes one identity readable from either side of a link.
 	// It is written as [A-Za-z0-9._-]+ and may not be the reserved
-	// orchestration identity "control".
+	// central ownership identity "control".
 	Repository string `json:"repository,omitempty"`
-	// Repositories is the roster of the choreographed fleet this repository
+	// Repositories is the roster of the linked fleet this repository
 	// belongs to: every other peer, by identity, with where the link to it
 	// lives and where it is fetched from. The roster states membership rather
 	// than the links themselves; `dispat compute` derives the minimum set of
@@ -692,20 +684,7 @@ type RepositoryOverrideConfig struct {
 // IsEnabled reports whether the repository participates (default true).
 func (c RepositoryOverrideConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
 
-// Saga values of the `saga` key: which polyrepository protocol releases the
-// fleet. Orchestration is the default an absent key keeps.
-const (
-	// SagaOrchestration is the control-repository protocol: one repository
-	// owns the fleet's configuration and records a gitlink checkpoint after
-	// each source release.
-	SagaOrchestration = "orchestration"
-	// SagaChoreography is the peer protocol: no control repository, every
-	// participant carries its own identity, configuration and release
-	// records, and a release may start in any of them.
-	SagaChoreography = "choreography"
-)
-
-// RepositoryLinkConfig is one peer of a choreographed fleet, as the roster
+// RepositoryLinkConfig is one peer of a linked fleet, as the roster
 // names it.
 type RepositoryLinkConfig struct {
 	// Name is the peer's exact identity: its own `repository` value, and the
@@ -721,12 +700,11 @@ type RepositoryLinkConfig struct {
 	Branch string `json:"branch,omitempty"`
 }
 
-// IsChoreographed reports whether this configuration releases under the
-// choreographed saga. Nil-safe, and the value is matched the way every other
-// config value is, without regard to case.
-func (c *File) IsChoreographed() bool {
-	return c != nil && strings.EqualFold(c.Saga, SagaChoreography)
-}
+// IsLinked reports whether this configuration belongs to a linked fleet.
+// A repository identity is the declaration: linked repositories own their
+// own configuration and records, while central configurations have no
+// identity of their own.
+func (c *File) IsLinked() bool { return c != nil && c.Repository != "" }
 
 // RepositoryBaselineConfig is one explicit cross-repository history
 // boundary. Repository is a .gitmodules name, or the reserved name "control".

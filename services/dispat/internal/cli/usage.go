@@ -83,7 +83,7 @@ var helperFlags = []string{"on-failure", "in"}
 
 // globalFlags apply to every command, so they are rendered separately rather
 // than repeated in each entry.
-var globalFlags = []string{"root", "config", "configs", "polyrepo", "saga", "env-file", "concurrency", "log-level", "log-format",
+var globalFlags = []string{"root", "config", "configs", "polyrepo", "env-file", "concurrency", "log-level", "log-format",
 	"quiet-parser", "version", "help"}
 
 // updateCheckFlags are read on every command without being any command's own:
@@ -344,8 +344,13 @@ yet.
 only and exits 1 when suggestions exist, which is the CI gate. An edge
 marked keep: true is never suggested for removal, an initials entry already
 in the config is never rewritten, and --package/--space/--group scope the
-suggestions to those packages.`,
-		flags: append([]string{"write", "interactive", "check"}, selectionFlags...),
+suggestions to those packages.
+
+For a linked fleet, --topology minimal preserves existing links and adds the
+fewest needed to connect the roster. --topology star links every peer to the
+entry repository and refuses existing links that conflict with that shape.
+Links are proposed without changes unless --write or --interactive is used.`,
+		flags: append([]string{"write", "interactive", "check", "topology"}, selectionFlags...),
 	},
 	{
 		name:     cmdIf,

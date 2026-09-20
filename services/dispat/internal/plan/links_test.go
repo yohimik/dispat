@@ -322,7 +322,7 @@ func TestProjectSinceFollowsTheFleetRoutes(t *testing.T) {
 	assert.ErrorContains(t, err, "no entry repository")
 }
 
-// TestReleaseSubjectTagsReadsOneFormat: both sagas recognise a release commit
+// TestReleaseSubjectTagsReadsOneFormat: both record layouts recognise a release commit
 // the same way, so the reading is one function and is checked once.
 func TestReleaseSubjectTagsReadsOneFormat(t *testing.T) {
 	assert.Equal(t, []string{"app@1.0.0"}, releaseSubjectTags("chore(release): app@1.0.0"))

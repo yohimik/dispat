@@ -240,6 +240,10 @@ var foreignFlagHints = map[foreignFlag]string{
 // fills in write and reps for the commands whose flags carry a request.
 func (r *runner) validateFlags() (int, bool) {
 	cmd := r.inv.cmd
+	if cmd == cmdCompute && *r.o.computeTopology != "minimal" && *r.o.computeTopology != "star" {
+		r.boot.Error().Str("topology", *r.o.computeTopology).Msg("unknown --topology value (want minimal or star)")
+		return 2, true
+	}
 	if sweepCommand(cmd) && !app.IsValidOnError(*r.o.onError) {
 		r.boot.Error().Str("on-error", *r.o.onError).Msgf("unknown --on-error value (want %q or %q)",
 			app.OnErrorSkip, app.OnErrorContinue)
@@ -953,7 +957,7 @@ func (r *runner) runConfigured() int {
 		}
 		cfg.Polyrepo = true
 	}
-	standalone := cfg.IsChoreographed() && !cfg.Polyrepo
+	standalone := cfg.IsLinked() && !cfg.Polyrepo
 	var pins map[string][]string
 	var pinResolver config.SourcePinResolver
 	if r.o.nestedWorkspace {
@@ -1033,7 +1037,7 @@ func (r *runner) runConfigured() int {
 	if standalone {
 		// The escape hatch, said out loud: the fleet this repository belongs to
 		// is not composed, so nothing outside it is planned, locked or recorded.
-		log.Info().Str("saga", config.SagaChoreography).Str("repository", cfg.Repository).
+		log.Info().Str("repository", cfg.Repository).
 			Msg("fleet links skipped by --polyrepo=false; releasing this repository alone")
 	}
 	logWorkspaceComposition(log, r.workspace)
@@ -1254,6 +1258,7 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 	case cmdCompute:
 		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
 			Write:       *o.computeWrite,
+			Topology:    *o.computeTopology,
 			Interactive: *o.computeInteractive,
 			Check:       *o.check,
 			Filter:      sel,

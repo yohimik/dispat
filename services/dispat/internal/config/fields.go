@@ -45,7 +45,6 @@ func fileFields(dst *File) fields {
 		"configs":               strs(&dst.Configs),
 		"repositoryoverrides":   objMap(&dst.RepositoryOverrides, repositoryOverrideFields),
 		"repositorybaselines":   objList(&dst.RepositoryBaselines, repositoryBaselineFields),
-		"saga":                  str(&dst.Saga),
 		"repository":            str(&dst.Repository),
 		"repositories":          objList(&dst.Repositories, repositoryLinkFields),
 		"scripts":               scriptMap(&dst.Scripts),
@@ -340,7 +339,7 @@ func repositoryBaselineFields(dst *RepositoryBaselineConfig) fields {
 	}
 }
 
-// repositoryLinkFields is one entry of the choreographed `repositories`
+// repositoryLinkFields is one entry of the linked `repositories`
 // roster: a peer of this fleet, and where a link to it lives and comes from.
 func repositoryLinkFields(dst *RepositoryLinkConfig) fields {
 	return fields{

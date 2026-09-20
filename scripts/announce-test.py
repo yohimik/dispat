@@ -53,8 +53,8 @@ sys.exit(int(os.environ.get('ANNOUNCE_TEST_EXIT', '0')))
         data = calls[0]['data']
         assert data['channel'] == 'rc'
         assert data['announcement'] == (announcement_root / 'rc/announcement.md').read_text().splitlines()
-        assert 'orchestration' in '\n'.join(data['announcement'])
-        assert 'choreography' in '\n'.join(data['announcement'])
+        assert '--topology minimal' in '\n'.join(data['announcement'])
+        assert '--topology star' in '\n'.join(data['announcement'])
         assert all(version in route['command'] for route in data['install'])
     code, calls = run(DISPAT_NEW_VERSION='1.11.0+build.rc.1')
     assert code == 0 and calls[0]['data']['channel'] == 'stable'

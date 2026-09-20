@@ -72,7 +72,7 @@ func TestChoreographyNestedCommandComposesTheSameFleet(t *testing.T) {
 	var composed []string
 	for _, event := range nested {
 		if event.Str("message") == "polyrepo workspace composed" {
-			assert.Equal(t, models.SagaChoreography, event.Str("saga"))
+			assert.Empty(t, event.Str("saga"))
 			assert.Equal(t, "api", event.Str("entry"))
 			for _, name := range event["repositories"].([]any) {
 				composed = append(composed, name.(string))

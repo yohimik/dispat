@@ -37,7 +37,7 @@ func newWorkspacePins(a *App) *workspacePins {
 		pins.inherited = a.workspace.IsInheritedPinsEnabled()
 		pins.root = a.workspace.ControlRoot
 		// The entry repository's file is the invocation a nested command
-		// reproduces, whichever saga composed the fleet.
+		// reproduces, whichever repository owns the configuration.
 		if entry := a.workspace.EntryRepository(); entry != nil {
 			pins.config = entry.ConfigPath
 		}

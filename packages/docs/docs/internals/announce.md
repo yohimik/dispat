@@ -12,7 +12,7 @@ beside the CLI they announce. The two channel folders hold the text to review be
 
 | File | Purpose |
 |---|---|
-| `rc/announcement.md` | Release-candidate copy. The current draft introduces orchestration and choreography across linked repositories. |
+| `rc/announcement.md` | Release-candidate copy. The current draft introduces identity-linked fleets and their minimal or star link shapes. |
 | `stable/announcement.md` | Stable-release copy. |
 | `announce.sh` | Stage guard, platform selection, and the single publishing command. |
 | `notes.sh` | JSON data: version, selected channel copy, changelog sections, and version-pinned install commands. |
@@ -24,7 +24,7 @@ A version such as `1.11.0-rc.1` selects RC copy. A stable version selects stable
 that selection. Other prerelease channels are refused until an announcement policy exists for them. Missing copy
 fails before rendering or posting. Shared fonts and audio stay outside the CLI and Go test image build contexts.
 
-The selected text appears before the generated changelog in each caption. RC cards describe the new saga modes, and
+The selected text appears before the generated changelog in each caption. RC cards describe identity-linked fleets and their topology choices, and
 RC captions label the version as ready for testing. The install commands select the announced version, including prereleases.
 Platform caption limits still apply to long release notes.
 
@@ -72,7 +72,7 @@ Generate the RC caption data from the repository root:
 
 ```sh
 DISPAT_NEW_VERSION=1.11.0-rc.1 \
-DISPAT_FEATURES="Orchestration and choreography across linked repositories" \
+DISPAT_FEATURES="Minimal or star topology for identity-linked repositories" \
   sh services/dispat/announce/notes.sh | python3 -m json.tool
 ```
 

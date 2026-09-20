@@ -18,6 +18,11 @@ import (
 
 // ComputeOptions selects what `dispat compute` does with its suggestions.
 type ComputeOptions struct {
+	// Topology selects the fleet-link shape proposed by compute. Empty and
+	// "minimal" preserve existing links and add the fewest links needed to
+	// connect the fleet. "star" links every peer directly to the entry
+	// repository.
+	Topology string
 	// Write applies every suggestion to the config file.
 	Write bool
 	// Interactive asks y/N per suggestion on In and applies the accepted
@@ -100,6 +105,19 @@ func (c *changeSet) add(ch change) {
 // existing initials entry is never rewritten, and nothing is written at all
 // outside Write/Interactive.
 func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) (int, error) {
+	topology, err := normalizeComputeTopology(opts.Topology)
+	if err != nil {
+		a.log.Error().Err(err).Msg("cannot compute the fleet topology")
+		return 0, err
+	}
+	if topology == "star" && !a.workspace.IsLinked() {
+		err := errors.New("star topology requires a linked fleet with a named entry repository")
+		a.log.Error().Err(err).Str("topology", topology).Msg("cannot compute the fleet topology")
+		return 0, err
+	}
+	if a.workspace.IsLinked() {
+		a.log.Debug().Str("topology", topology).Msg("computing repository link topology")
+	}
 	// Packages only, deliberately without Discover's dependency validation: a
 	// stale edge naming a deleted package must reach diffEdges as a removal
 	// suggestion, not abort the one command able to fix it.
@@ -163,7 +181,11 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	// The fleet's own shape is not a package's business, so it is proposed
 	// whatever the selection narrows to: a fleet is either linked or it is
 	// not.
-	sugs.links = a.suggestLinks()
+	sugs.links, err = a.suggestLinks(topology)
+	if err != nil {
+		a.log.Error().Err(err).Str("topology", topology).Msg("cannot compute the fleet topology")
+		return 0, err
+	}
 
 	out := opts.Out
 	if out == nil {
@@ -178,7 +200,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 		if baselines {
 			subject = "dependencies and baselines"
 		}
-		if a.workspace.IsChoreographed() {
+		if a.workspace.IsLinked() {
 			subject += " and fleet links"
 		}
 		fmt.Fprintf(out, "%s are in sync%s: %d detected edge(s), %d declared\n",
@@ -193,7 +215,7 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	if apply.len() == 0 {
 		return sugs.len(), nil
 	}
-	if err := a.applySuggestions(ctx, cfgPath, apply, declared, out); err != nil {
+	if err := a.applySuggestions(ctx, cfgPath, apply, declared, topology, out); err != nil {
 		return sugs.len(), err
 	}
 	return sugs.len() - apply.len(), nil
@@ -313,7 +335,7 @@ func (f *fileEdits) add(path string, e config.Edit) error {
 // TOML file cannot be edited format-preservingly, so it gets a rendered block
 // to paste and an error.
 func (a *App) applySuggestions(ctx context.Context, cfgPath string, apply changeSet,
-	declared []config.DeclaredDependency, out io.Writer) error {
+	declared []config.DeclaredDependency, topology string, out io.Writer) error {
 	var edits fileEdits
 	for _, collect := range []func() error{
 		func() error { return a.collectDepEdits(&edits, cfgPath, apply.deps, declared) },
@@ -392,7 +414,7 @@ func (a *App) applySuggestions(ctx context.Context, cfgPath string, apply change
 	}
 	// The fleet links come last: a link is created against the configuration
 	// that describes it, so the file has to hold the roster first.
-	return a.applyLinkChanges(ctx, cfgPath, apply.links, out)
+	return a.applyLinkChanges(ctx, cfgPath, apply.links, topology, out)
 }
 
 // configuredChanges counts the accepted changes that land in a configuration

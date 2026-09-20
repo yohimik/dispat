@@ -71,7 +71,8 @@ propagate versions across the combined graph while the code stays where it is.
 
 ## Joining repositories as peers
 
-You do not have to add a repository to get the graph. With `saga: choreography`, every repository is a peer that keeps
+You do not have to add a control repository to get the graph. With a `repository` identity, every repository is a peer
+that optionally names the others in its `repositories` roster and keeps
 its own configuration and release records, two-sided submodule links join the peers, and a run started in any of them
 composes the whole fleet. The trade is symmetry against central control: no commit can address the fleet as a whole,
 because every unit is read against the repository that carries it.

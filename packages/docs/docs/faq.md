@@ -71,8 +71,8 @@ tags, and records. With `polyrepo: true` it reads each linked repository's own c
 instead, and each of those repositories owns its records while the control repository checkpoints the pointers
 afterwards. [A control repository for many repositories](./control-repository.md) explains both.
 
-You can also do without the extra repository. With `saga: choreography`, every repository is a peer that states its own
-identity and roster, keeps its own configuration and records, and is linked to its neighbours both ways, so a run
+You can also do without the extra repository. A non-empty `repository` identity makes the repository a peer; its
+optional `repositories` roster names neighbours. Each peer keeps its own configuration and records, so a run
 started in any of them composes the whole fleet. What a release incorporated is recorded in the links themselves rather
 than in a checkpoint. [A choreographed fleet](./choreographed-repositories.md) explains it.
 

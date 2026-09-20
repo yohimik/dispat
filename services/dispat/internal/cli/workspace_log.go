@@ -16,7 +16,7 @@ import (
 // Participation is the part worth the default level: a repository the control
 // file excluded is absent from every later line, so a reader who never sees
 // this line has no way to tell an excluded repository from one that simply had
-// nothing to release. A choreographed fleet adds the saga and the entry to that
+// nothing to release. A linked fleet adds the entry to that
 // line for the same reason: which repository the run started in decides which
 // fleet it found.
 func logWorkspaceComposition(log zerolog.Logger, workspace *config.Workspace) {
@@ -32,14 +32,13 @@ func logWorkspaceComposition(log zerolog.Logger, workspace *config.Workspace) {
 	// choreographed fleet has no control repository at all, so calling its
 	// entry root `control` would name a thing that does not exist.
 	event := log.Info()
-	if workspace.IsChoreographed() {
+	if workspace.IsLinked() {
 		event = event.Str("root", workspace.ControlRoot)
 	} else {
 		event = event.Str("control", workspace.ControlRoot)
 	}
 	event = event.Strs("repositories", participating)
-	if workspace.IsChoreographed() {
-		event = event.Str("saga", config.SagaChoreography)
+	if workspace.IsLinked() {
 		if entry := workspace.EntryRepository(); entry != nil {
 			event = event.Str("entry", entry.Name)
 		}
@@ -63,7 +62,7 @@ func logWorkspaceComposition(log zerolog.Logger, workspace *config.Workspace) {
 		event := log.Trace().Str("repository", repository.Name).Str("root", repository.Root).
 			Str("gitlink", repository.GitlinkPath).Bool("control", repository.Control).
 			Bool("imported", repository.Imported).Str("revision", repository.CompositionHead)
-		if workspace.IsChoreographed() {
+		if workspace.IsLinked() {
 			event = event.Bool("entry", repository.Entry).Str("linker", repository.Linker)
 		}
 		event.Msg("repository composed")
@@ -87,7 +86,7 @@ func logLinkFindings(log zerolog.Logger, workspace *config.Workspace) {
 // composed fleet read back as the walk that found it, which is the only way to
 // see why a repository is in the run or why the walk stopped where it did.
 func logRepositoryLinks(log zerolog.Logger, workspace *config.Workspace, repository *config.Repository) {
-	if !workspace.IsChoreographed() {
+	if !workspace.IsLinked() {
 		return
 	}
 	if repository.Linker != "" {

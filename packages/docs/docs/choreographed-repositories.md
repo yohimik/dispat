@@ -1,12 +1,13 @@
-# A choreographed fleet of repositories
+# Linked repositories
 
-A [control repository](./control-repository.md) is one way to give dispat a graph across several Git repositories. A
-choreographed fleet is the other. There is no control repository. Every repository is a peer that states its own
-identity, keeps its own configuration and writes its own release records, the peers are joined to each other by
-ordinary two-sided git submodule links, and a release can start in any of them.
+Each repository in a linked fleet declares its identity, owns its configuration and records its releases locally.
+Two-sided Git submodule links connect the repositories, and a release can start from any of them. The links can form
+a star around one repository or a minimal tree. Both shapes use the same release engine.
 
-dispat calls the two arrangements **sagas**. `saga: orchestration` is the control-repository protocol and the default.
-`saga: choreography` is this page. A configuration that names no saga behaves exactly as it always has.
+dispat distinguishes the arrangements by configuration ownership. This page describes peer-owned configuration,
+activated by repository identity rather than by a protocol selector. Its link graph may use the minimal tree or star
+shape described below; choosing star does not introduce central policy ownership. Existing control-repository
+configurations keep their established behavior.
 
 ## When to choose it
 
@@ -27,13 +28,14 @@ choreographed fleet when each repository owns its own release policy and any of 
 whole graph. The cost is that no commit can address the fleet as a whole: every unit is read against the repository
 that carries it.
 
-## The three keys
+## The identity and roster
 
-Each peer declares the saga, its own identity, and the roster of the fleet it belongs to. Here is a three-repository
+Each peer declares its own identity, which activates polyrepository composition automatically. Its optional roster
+names the other peers; it may be omitted or empty for a one-member fleet. A non-empty roster without the declaring
+repository's identity is `E339`. Here is a three-repository
 fleet of `sdk`, `api` and `web`, where `api` consumes `sdk` and `web` consumes `api`.
 
 ```yaml title="sdk/dispat.yaml"
-saga: choreography
 repository: sdk
 
 repositories:
@@ -55,7 +57,6 @@ commit:
 ```
 
 ```yaml title="api/dispat.yaml"
-saga: choreography
 repository: api
 
 repositories:
@@ -82,10 +83,8 @@ commit:
 `web/dispat.yaml` is the same shape, with `repository: web`, a roster naming `sdk` and `api`, and `web: [api]` in its
 `dependencies`.
 
-- **`saga: choreography`** selects the protocol. It also turns on polyrepository mode, so you do not write
-  `polyrepo: true` beside it. You can select it for one invocation with the global `--saga choreography` flag.
 - **`repository`** is this repository's identity in the fleet. It is written from letters, digits, dots, underscores
-  and hyphens, and `control` is reserved for the orchestration saga. The same spelling is the submodule name every
+  and hyphens, and `control` is reserved for a central control repository. The same spelling is the submodule name every
   link to this repository uses, which is what lets one identity be read from either end of a link.
 - **`repositories`** is the roster: every other peer by identity, with the `url` a link to it is cloned from, the
   `path` a link to it occupies inside this repository (default `.links/<name>`) and the `branch` the link follows.
@@ -93,10 +92,9 @@ commit:
 The roster states membership, not the links. A fleet of three repositories needs only two links, so a peer names every
 member of the fleet and is linked to some of them. dispat walks the links to reach the rest.
 
-Three keys belong to a control repository and are refused here, because a fleet with no control repository cannot
+Three settings belong to a control repository and are refused here, because a fleet with no control repository cannot
 honour a policy written for one: `configs` and `--configs`, a `repositoryOverrides.<peer>.commit` object, and a
-`repositoryBaselines` entry naming `control`. Writing `repository` or `repositories` without `saga: choreography` is
-refused too, so a fleet never believes it is linked while nothing reads the link.
+`repositoryBaselines` entry naming `control`.
 
 ## Linking the fleet with `dispat compute`
 
@@ -113,8 +111,9 @@ $ dispat compute
 
 There are three kinds of fleet change beside the dependency edges and baselines the command already proposes:
 
-- `+ link <repository> <peer>` creates a link that is missing. dispat proposes the minimum set of links that connects
-  everything the rosters name, chosen so no two repositories are ever joined twice. Three repositories get two links,
+- `+ link <repository> <peer>` creates a link that is missing. `--topology minimal`, the default, preserves existing
+  links and proposes the fewest additions that connect everything the rosters name, chosen so no two repositories are
+  ever joined twice. Three repositories get two links,
   never three, because a third would be a second route between two of them and a run refuses that with `E338`. The
   same line also proposes the half of a link only one of its two repositories declares, which is the state `W332`
   reports: the pair is already joined, so the proposal adds no route, fetches nothing, and writes the missing
@@ -122,6 +121,12 @@ There are three kinds of fleet change beside the dependency edges and baselines 
 - `+ init <repository> <path>` materialises a link the fleet declares and this checkout does not have.
 - `+ repository <repository> <peer>` adds a roster entry a peer has not heard of. The entry is written into that
   peer's own configuration file, because a roster is that repository's own statement.
+
+Use `--topology star` when every peer should link directly to the repository where the command starts. Star mode
+preserves existing links and errors if they cannot fit that shape; it never converts a tree by deleting links.
+Known incompatible links are rejected before a write begins. A peer checked out during `--write` can expose a link
+that was not previously visible; if it conflicts, the command fails and leaves its staged edits for review. It does
+not roll back those edits or delete the conflicting link.
 
 Apply them with `--write`, or `--interactive` to answer per suggestion. `--check` writes nothing and exits `1` while
 anything is pending, which is the CI gate for a fleet whose links lag its rosters.
@@ -168,15 +173,15 @@ been entered once. The log says what it found:
 
 ```console
 $ dispat status
-09:31:07 INF polyrepo workspace composed root=/w/api entry=api repositories=["api","sdk","web"] saga=choreography
+09:31:07 INF polyrepo workspace composed root=/w/api entry=api repositories=["api","sdk","web"]
 ```
 
 Two rules keep the walk unambiguous. Only a submodule the roster names is a fleet link, so an ordinary vendored
 submodule takes no part. And the links must form a tree: reaching a repository a second time through another link is
 `E338`, because a second route would be a second answer to which repositories lie between two peers.
 
-A linked checkout that calls itself something other than the name it was linked as, or that does not itself state
-`saga: choreography`, is `E339`. A link whose folder holds no repository is `E330`, and the message names the command
+A linked checkout that calls itself something other than the name it was linked as is `E339`. A link whose folder
+holds no repository is `E330`, and the message names the command
 that initialises exactly that link. That is also what you get when you start a run inside another repository's linked
 checkout: the back-link there is an empty folder by design.
 
@@ -280,7 +285,7 @@ repositoryBaselines:
 This says `api-pkg@2.4.0` incorporated `sdk` through that revision. Write the entry in whichever peer knows it: dispat
 merges the `repositoryBaselines` of every composed repository before it resolves a boundary, because there is no
 central file to collect them in. An explicit tuple wins over the link evidence. `control` is not a valid `repository`
-value here, because this saga has no participant by that name.
+value here, because this fleet has no participant by that name.
 
 ## Repository participation
 
@@ -299,12 +304,12 @@ run started in.
 
 ## Releasing one peer alone
 
-`--polyrepo=false` is the escape hatch. It clears the polyrepository mode that `saga: choreography` turned on and
+`--polyrepo=false` is the local escape hatch. It overrides the polyrepository mode activated by identity and
 releases the repository you are standing in, by itself:
 
 ```console
 $ dispat --polyrepo=false release
-09:31:07 INF fleet links skipped by --polyrepo=false; releasing this repository alone repository=api saga=choreography
+09:31:07 INF fleet links skipped by --polyrepo=false; releasing this repository alone repository=api
 ```
 
 No fleet is composed, so nothing outside this repository is planned, locked, settled or recorded.
@@ -390,12 +395,12 @@ each one. `W332` and `W333` are what `dispat compute` repairs.
   differently. Per-package settings still come from the peer that owns the package.
 - **A roster the fleet outgrew is a warning, not a repair.** `W333` tells you a peer cannot plan a boundary across a
   repository it has not heard of. Run `dispat compute` in that peer rather than assuming the next release will notice.
-- **A peer that is itself a control repository does not merge.** A fleet link may not cross sagas, and a linked
-  checkout that does not state `saga: choreography` is `E339`.
+- **A centrally configured repository does not merge as a peer.** Linked peers own their own policy and records;
+  centrally imported sources preserve the control repository's established ownership behavior.
 
 ## See also
 
-- [A control repository](./control-repository.md) for the other saga, and for the pointer-history pattern that needs
+- [A control repository](./control-repository.md) for central hub topology, and for the pointer-history pattern that needs
   no conventional commits in the linked repositories at all.
 - [One repository or many](./monorepo.md) for the underlying decision.
 - [The compute command](./cli/compute.md) for the dependency edges and baselines the same command proposes.
