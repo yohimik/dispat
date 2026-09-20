@@ -1,6 +1,5 @@
 # The public Go model and CLI share major and minor versions.
 versionGroup: cli
-dependencies: [ccme]
 
 github:
   footer:

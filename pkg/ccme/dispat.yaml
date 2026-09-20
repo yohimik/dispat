@@ -1,9 +1,9 @@
-# The CCME parser and specification share major and minor versions.
-# Each package retains its own patch version and tag.
-versionGroup: ccme
-
-github:
-  footer:
-    - line: ["---", ""]
-    - line:
-        - "[pkg.go.dev](https://pkg.go.dev/github.com/yohimik/dispat/pkg/ccme) · [Documentation](https://dispat.dev/)"
+# The CCME parser stands outside the release flow. Its module path is the
+# unsuffixed github.com/yohimik/dispat/pkg/ccme, whose published line ends at
+# v1.0.0, while its last tag, pkg/ccme/v2.0.0, belongs to the /v2 path that was
+# withdrawn. Go lets an unsuffixed path carry only v0 and v1, so no version
+# dispat could compute here is one a consumer's go.mod may require: models and
+# the CLI keep requiring v1.0.0, and nothing is versioned, tagged or published
+# from this folder. Its scripts still run. A `Release-As: none` footer is a
+# hold that waits to be lifted; this is not waiting for anything.
+versioning: none

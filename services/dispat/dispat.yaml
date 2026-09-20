@@ -3,7 +3,7 @@
 # dispat.example.* files beside this one are documentation samples, not
 # configuration; dispat resolves the exact names dispat.{json,yaml,yml,toml}.
 versionGroup: cli
-dependencies: [ccme, config, manifest, models, scanner, writer]
+dependencies: [config, manifest, models, scanner, writer]
 aliasTags:
   - format: v{version}
   - format: v{major}
