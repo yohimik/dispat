@@ -5293,7 +5293,8 @@ restatement, use `Edits: <A>` again, which supersedes `B` directly (`W210`, vect
 
 These vectors exercise §13.9a and are REQUIRED only of an engine that offers shared-version groups. Every one of them
 uses one group `G` of three packages, `a`, `b` and `d`, at shared depth `d = 2` unless stated otherwise, and each
-states the group's rule as `(counter, channels)`.
+states the group's rule as `(counter, channels)`. The numbers are the case numbers of §15.8; a case with no vector of
+its own is one the table states completely.
 
 **Vector 139**: `(fixed, fixed)`, the default. Stable baselines `a@1.10.3`, `b@1.10.0`, `d@1.10.0`; commit `C1` is
 `feat(a,b,d)%rc: start the train` and every member is tagged `1.11.0-rc.0` at it. Commit `C2` is `fix(a,b,d): a shared
@@ -5321,10 +5322,12 @@ run died. Re-run at the same `HEAD`.
 → **`b` and `d` release `1.11.0`.** Their own windows carry no bump at all, since the feature was `d`'s and `a`'s
 release already contains it, so §11.5 computes `1.10.0` for them and the floor raises it to the line. **No `E185`.**
 
-**Vector 143**: the same, but `b` was tagged `1.12.3-rc.0` by hand while the group's line is `1.12.0`.
+**Vector 143**: any rule. `a` and `d` are on `1.11.5` on `stable`; `b` was tagged `1.11.3-rc.0` by hand, a patch above
+the group's line `1.11.0`; `C1` is `release(b)%rc` and `C2` is `release(b)%rc>stable`.
 
-→ **`E185` against `b`.** The floor raises the graduation to `1.12.0` and no further, so a baseline nothing in the
-group explains still fails.
+→ **`E185` against `b`.** The floor raises the graduation to `1.11.0` and no further, so a baseline nothing in the
+group explains still fails. Where the hand-edited tag is itself the group's baseline, the same guard fires against the
+group's own computation instead, and being repository-scoped it aborts the run before any member is assigned.
 
 **Vector 144**: `(fixed, fixed)`. `a` and `d` are on `1.11.0-rc.0`; `b` is a sparse member resting on `1.10.0`; the
 pending commit is `fix(d): more train work`.

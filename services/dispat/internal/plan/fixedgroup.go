@@ -426,8 +426,8 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 		rel.FixedRide = !own
 		// A member's own pin is the one case that takes the group's whole
 		// version whatever the channel axis says. Such a pin names a version
-		// inside the prefix the group is leaving — that is why fixedGroupPin
-		// left it to the member in the first place — so running the member's
+		// inside the prefix the group is leaving, which is why fixedGroupPin
+		// left it to the member in the first place, so running the member's
 		// own computation here would apply it and break the shared prefix
 		// outright. Dropping it is what the shared-channel path has always
 		// done, and one behaviour for both is the honest answer while the
