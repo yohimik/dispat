@@ -22,12 +22,23 @@ import (
 // under that prefix are each package's own, so a fix in one member of a
 // `fixedMajor` group moves nothing else.
 //
-// One rule carries the difference: the group engages when the shared prefix
-// moves, and versions its members individually when it does not. Assignment
-// itself is the same either way, because ccme.Version.Bumped already zeroes
-// everything below the component it bumps: a group major bump computes 2.0.0
-// and a group minor bump 1.3.0, which is exactly the version every member
-// takes.
+// A group declares two further axes beside the depth: whether the members
+// holding that prefix in common also hold one prerelease counter and one
+// channel. Both default to shared, which is the behaviour a group declared as
+// a depth alone has always had.
+//
+// One rule carries every difference: the group engages when a part of the
+// version IT SHARES moves, and versions its members individually when none
+// does. Under the defaults that is the shared prefix plus the whole train the
+// group is on; under an independent counter the train's own progress is each
+// member's; under independent channels so is the line each of them sits on.
+// groupRule below is where that rule lives, and everything else asks it.
+//
+// Assignment with one channel is the same either way, because
+// ccme.Version.Bumped already zeroes everything below the component it bumps:
+// a group major bump computes 2.0.0 and a group minor bump 1.3.0, which is
+// exactly the version every member takes. With a channel of its own a member
+// computes its own version instead, floored at the group's core.
 
 // groupContrib is one direct contribution as the fixed-group aggregate needs
 // it: the bump and the commit that carried it. directBumps records them beside
@@ -329,15 +340,17 @@ func (r groupRule) reason(g *Release) string {
 // and one Release-As applies to the group's shared version.
 //
 // Assignment is where sparseness shows, and it is each member's own: a plain
-// mode releases every non-held member at the group version, marking members
-// with no cause of their own as FixedRide (W234); a sparse mode assigns the
-// group version only to members with a cause of their own and leaves the rest
-// at their previous versions.
+// mode releases every non-held member, marking members with no cause of their
+// own as FixedRide (W234); a sparse mode assigns only to members with a cause
+// of their own and leaves the rest at their previous versions. What an
+// assigned member takes is the group's whole version while the channel is
+// shared, and its own computation floored at the group's core when it is not,
+// so that each member continues its own counter on its own line.
 //
-// When the shared prefix does not move — a patch under `fixedMajorMinor`, a
-// minor under `fixedMajor`, or nothing pending at all — every member is
-// versioned on its own, and alignFixedGroup afterwards is what keeps the
-// prefix invariant true.
+// When nothing the group shares moves, every member is versioned on its own
+// and alignFixedGroup afterwards is what keeps the prefix invariant true. A
+// patch under `fixedMajorMinor`, a minor under `fixedMajor`, a further
+// prerelease under an independent counter and a quiet run all land there.
 func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	if len(members) == 0 {
 		return
