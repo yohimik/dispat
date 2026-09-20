@@ -364,7 +364,7 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 		}
 	}
 
-	var channelCands []string // distinct member channels departing from the group baseline
+	var channelCands []string // distinct channels the moving members propose
 	seenChan := make(map[string]bool)
 	for _, name := range members {
 		rel := cp.rel[name]
@@ -383,7 +383,15 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 		if fresh {
 			g.NewWork = true
 		}
-		if rel.Channel != "" && rel.Channel != g.BaselineChannel && !seenChan[rel.Channel] {
+		// Only a member that is itself moving between channels proposes one.
+		// A channel is derived from a baseline (§11.1) and a proposal is a
+		// directive, so a member resting where its own tags put it asks for
+		// nothing: a sparse member left on stable while the rest ride an rc,
+		// or a rider left on rc after the rest graduated, states no intent at
+		// all. Reading a resting channel as a proposal graduates a whole group
+		// because one member never joined its train, and drags a graduated
+		// group back onto one because one rider never left it.
+		if rel.IsChannelChanged() && rel.Channel != g.BaselineChannel && !seenChan[rel.Channel] {
 			seenChan[rel.Channel] = true
 			channelCands = append(channelCands, rel.Channel)
 		}
