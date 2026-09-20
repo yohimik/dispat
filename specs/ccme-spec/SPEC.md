@@ -2716,9 +2716,12 @@ the prefix on the line's channel is enough, and under `channels: independent` ho
 channel.
 
 A member whose baseline is below the shared prefix is a **laggard**. A laggard that is releasing adopts the line when
-the counter is shared, and is raised by the floor alone when it is not. A laggard with nothing pending is released at
-the line as a ride, unless its own mode leaves it behind, exactly as a `W193` catch-up discharges an earlier run's
-unfinished propagation.
+the counter is shared, and is raised by the floor when it is not. Where the floor was withheld, a member on `stable`
+while the line is a prerelease, it is brought to the prefix all the same, on the line's channel and at its own counter:
+the floor cannot change a channel, and no axis excuses staying below the prefix. A laggard with nothing pending is
+released at the line as a ride, unless its own mode leaves it behind, exactly as a `W193` catch-up discharges an
+earlier run's unfinished propagation. With a counter of its own it joins at the start of its own line rather than at
+the group's published prerelease.
 
 **Guarantees.** Under `counter: independent`, `G1` to `G6` of §13.7c hold per member exactly as they hold for a package
 that versions alone: a retry at a fixed `HEAD` plans each unpublished member at the version the failed run planned for
@@ -3387,6 +3390,7 @@ Every row assumes an engine that offers groups (§13.9a). `d` is the group's sha
 | 151 | `counter: fixed` declared beside `channels: independent`                   | A configuration error. One counter counts one train, and a train runs on one channel (§13.9a).                                                                               |
 | 152 | A sharing axis declared for packages that share no version prefix          | A configuration error: there is nothing for the axis to be an axis of.                                                                                                       |
 | 153 | A quiet group whose members all hold the shared prefix                     | Nothing releases, under every axis. Under `counter: independent` a member behind the group's counter is aligned and is not caught up.                                        |
+| 154 | A member on `stable` releases work of its own while the line is a prerelease | It joins the shared prefix on the line's channel at its own counter. The floor is withheld from it (it must not publish that core as `stable`) and staying below the prefix is excused by no axis (§13.9a). |
 
 ---
 
@@ -5366,6 +5370,12 @@ pending commit is `feat(d): a feature on the stable line`.
 
 → **Empty plan.** Every member holds the line's shared prefix, so none of them is a laggard, whatever its counter says.
 Under `(fixed, fixed)` the same state releases `a` and `b` at `1.11.0-rc.1` instead.
+
+**Vector 154**: `(independent, independent)`. `a` and `d` ran a train two prereleases deep to `1.11.0-rc.1`; `b` never
+joined it and is on `1.10.0` on `stable`; the pending commit is `fix(b): b's own first change`.
+
+→ **`b` releases `1.11.0-rc.0`**, on the `rc` line and not as a ride: its own change is what puts it in the plan, the
+shared prefix is what decides its core, and its own counter is what starts the line. `a` and `d` release nothing.
 
 ---
 

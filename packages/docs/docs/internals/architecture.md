@@ -235,7 +235,9 @@ alignment pass then keeps the invariant. A member releasing below the group's pr
 member's first change lands it on the shared part. A non-sparse member with nothing pending whose baseline lags is
 released at the prefix with `W234`. Under an independent counter, a member holding the prefix is aligned whatever its
 counter says, so a member one prerelease behind is neither caught up nor raised; the floor does the raising instead,
-and it raises only the part the group shares.
+and it raises only the part the group shares. The one member the floor declines to lift, one on stable while the line
+is a prerelease, is brought to the prefix by the alignment pass on the line's channel at its own counter, because the
+floor cannot change a channel and staying below the prefix is excused by no axis.
 
 Assignment is where sparseness shows. The mode is each member's own, so a joined group can mix them. A plain mode
 releases every non-held member at the group version. It marks members with no cause of their own as rides using `W234`.

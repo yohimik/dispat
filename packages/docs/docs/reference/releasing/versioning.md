@@ -322,6 +322,11 @@ INF unchanged package=a version=1.11.0-rc.1
 The second run releases the versions the failed run planned, which is what a retry is supposed to do. A member sitting
 one prerelease behind the others is not a laggard under this setting and is never caught up.
 
+Falling behind the *shared part* is a different matter, and no setting excuses it. A member that never joined the train
+still joins the shared minor on its own next release, at the start of its own line (`1.11.0-rc.0`, not the group's
+`1.11.0-rc.1`) and on the line's channel, because a member must not be the first to publish a stable version of a
+version the group has only reached as a prerelease.
+
 ### What a graduation does
 
 With channels shared, ending the train is the group's business:

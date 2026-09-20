@@ -509,6 +509,34 @@ func TestAMemberBelowThePrefixStillCatchesUp(t *testing.T) {
 	}
 }
 
+func TestAReleasingLaggardJoinsThePrefixOnItsOwnCounter(t *testing.T) {
+	// b has never joined the train and releases a fix of its own on the
+	// stable line, which would leave it below the shared minor. It joins the
+	// prefix instead, and on the line's channel: publishing a stable 1.11.0
+	// would be the first stable release of a core the group holds only as a
+	// prerelease. Its counter is still its own, so it starts the line.
+	rule := sharedGroup{
+		mode:     model.VersioningFixedMajorMinor,
+		counter:  model.SharingIndependent,
+		channels: model.SharingIndependent,
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(a,d)%rc: start the train"},
+		commit{sha: "c2", message: "fix(a,d): a second prerelease"},
+		commit{sha: "c3", message: "fix(b): b's own first change"},
+	).tag("a", "1.10.3", "").tag("b", "1.10.0", "").tag("d", "1.10.0", "").
+		tag("a", "1.11.0-rc.0", "c1").tag("d", "1.11.0-rc.0", "c1").
+		tag("a", "1.11.0-rc.1", "c2").tag("d", "1.11.0-rc.1", "c2")
+
+	p := rule.compute(t, git, nil)
+
+	assertNext(t, p, "b", "1.11.0-rc.0", true)
+	assert.Equal(t, "rc", p.Releases["b"].Channel, "it joins on the line's channel")
+	assert.False(t, p.Releases["b"].FixedRide, "b releases a change of its own")
+	assert.False(t, p.Releases["a"].IsReleasing(), "the members on the train have nothing to add")
+	assert.False(t, p.Releases["d"].IsReleasing())
+}
+
 func TestASparseMemberNeverRidesWhateverTheAxes(t *testing.T) {
 	for _, rule := range sharingRules(model.VersioningFixedMajorMinor) {
 		t.Run(rule.String(), func(t *testing.T) {

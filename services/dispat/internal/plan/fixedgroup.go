@@ -183,18 +183,6 @@ func newGroupRule(g *Release, first *Release, depth int) groupRule {
 	return r
 }
 
-// floor is the lowest core a member may compute for itself: the core of the
-// group's line. A member's own window need not contain the work that put the
-// group there, so its computation is raised to this before the version guards
-// read it (see Release.versionFloor). A group that has never published has no
-// line and no floor, which the zero version expresses exactly.
-func (r groupRule) floor() ccme.Version {
-	if !r.hasLine {
-		return ccme.Version{}
-	}
-	return r.line.Core()
-}
-
 // engages reports whether the group versions its members as one on this run,
 // which is what decides between the two paths of applyFixedGroup.
 //
@@ -730,11 +718,14 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 // own smaller baseline, may land below the version the group already holds,
 // and the full sharing demands the raise.
 //
-// Under an independent counter the raise is the version floor's job instead.
-// The floor lifts what the group shares and leaves the rest to the member,
-// while this raise would hand the member the group's whole version, counter
-// included, which is the one number an independent counter says is not the
-// group's to give.
+// Under an independent counter the raise is mostly the version floor's job
+// instead. The floor lifts what the group shares and leaves the rest to the
+// member, while this raise would hand the member the group's whole version,
+// counter included, which is the one number an independent counter says is
+// not the group's to give. What the floor cannot do is change a channel, so
+// the one member it declines to lift, one on stable while the group's line is
+// a prerelease, is brought to the prefix here instead: at its own counter, on
+// the line's channel, the same way a laggard with nothing pending joins.
 func (cp *computation) alignFixedGroup(groupName string, g *Release, members []string, rule groupRule) {
 	if !rule.hasLine {
 		return // the group has never published: nothing to align to
@@ -746,9 +737,17 @@ func (cp *computation) alignFixedGroup(groupName string, g *Release, members []s
 			continue
 		}
 		if rel.IsReleasing() {
-			if rule.counter.IsShared() && versionLess(rel.Next, target) &&
-				(rule.depth < model.SharedVersioningDepth || g.absorbed) {
-				rel.Next, rel.Channel = target, channelOf(target, true)
+			switch {
+			case rule.counter.IsShared():
+				if versionLess(rel.Next, target) &&
+					(rule.depth < model.SharedVersioningDepth || g.absorbed) {
+					rel.Next, rel.Channel = target, channelOf(target, true)
+				}
+			case versionLess(rel.Next, target) && !samePrefix(rel.Next, target, rule.depth):
+				// Below the shared prefix, which no axis excuses. The prefix
+				// condition is what keeps a member merely behind the group's
+				// counter out of this: that is where it is entitled to be.
+				rel.Next, rel.Channel = rule.catchUp(rel)
 			}
 			continue
 		}

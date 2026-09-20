@@ -170,6 +170,37 @@ func TestVersionGroupIndependentChannelsGraduateOnlyNamedMembers(t *testing.T) {
 	assert.True(t, r.IsTagged("app1@1.3.0-beta.0"), "tags: %v", r.TagList())
 }
 
+// TestVersionGroupIndependentCounterCatchesUpAtItsOwnCounter: falling behind
+// the shared prefix is not something any axis excuses, but where the counter
+// is each member's own the laggard joins the prefix at the start of its own
+// line rather than adopting the group's published prerelease.
+func TestVersionGroupIndependentCounterCatchesUpAtItsOwnCounter(t *testing.T) {
+	r := seedAxesRepo(t, models.VersionGroupConfig{
+		Versioning: models.VersioningFixedMajorMinorSparse,
+		Counter:    models.SharingIndependent,
+		Channels:   models.SharingIndependent,
+	})
+	r.Commit("feat(lib1, app1, docs1): bootstrap the platform")
+	r.ReleaseOK()
+
+	// lib1 and app1 board a train and run it two prereleases deep. docs1 is
+	// sparse with nothing of its own, so it stays behind on the stable line.
+	r.CommitEmpty("feat(lib1, app1)%beta: board the train")
+	r.ReleaseOK()
+	r.CommitEmpty("fix(lib1, app1): a second prerelease")
+	r.ReleaseOK()
+	require.True(t, r.IsTagged("lib1@1.2.0-beta.1"), "tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("docs1@"), "the sparse member stayed behind; tags: %v", r.TagList())
+
+	// docs1's own first change joins the shared prefix. Its counter is its
+	// own, so it starts the line rather than landing on beta.1.
+	r.CommitEmpty("fix(docs1): the sparse member finally changes")
+	r.ReleaseOK()
+	assert.True(t, r.IsTagged("docs1@1.2.0-beta.0"),
+		"the laggard joins the prefix at the start of its own line; tags: %v", r.TagList())
+	assert.Equal(t, 3, r.TagCount("lib1@"), "nobody else moves; tags: %v", r.TagList())
+}
+
 // TestVersionGroupRefusesASharedCounterWithIndependentChannels: one counter
 // counts one train and a train runs on one channel, so the combination has no
 // meaning. The refusal reaches the operator through the binary.

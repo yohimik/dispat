@@ -141,27 +141,19 @@ func withPrerelease(core ccme.Version, channel string, counter uint64) ccme.Vers
 	}
 }
 
-// nextPrerelease implements §11.4.
+// prereleaseOnCore implements §11.4 over a target core its caller has already
+// decided: the counter continues only when the baseline is a prerelease of
+// that same core on that same channel, and starts at zero otherwise.
 //
-// The target is recomputed from the *stable* baseline on every run, which is
-// why a breaking change arriving mid-train moves the whole train and resets
-// the counter rather than continuing under a version that no longer describes
-// the content. Continuing an existing counter requires all three of: a
-// prerelease baseline, the same channel, and the same core.
-func nextPrerelease(stable, baseline ccme.Version, hasBaseline bool, channel string, e ccme.Bump) (ccme.Version, bool) {
-	return prereleaseOnCore(stable.Bumped(e).Core(), baseline, hasBaseline, channel)
-}
-
-// prereleaseOnCore is the second half of §11.4, with the core the train is
-// heading to already decided: the counter continues only when the baseline is
-// a prerelease of that same core on that same channel, and starts at zero
-// otherwise.
-//
-// It is split out because a member of a versioning group does not always
-// derive its target from its own window. The group's line can hold a core the
-// member's own commits never justify, since a ride carries none of the work
-// that set it, so the target arrives from the group and only the counter is
-// the member's own.
+// The caller decides the core because the target is not always the package's
+// own. Ordinarily it is `applyBump(stableBaseline, effective)`, recomputed
+// from the stable baseline on every run, which is why a breaking change
+// arriving mid-train moves the whole train and resets the counter rather than
+// continuing under a version that no longer describes the content. A member
+// of a versioning group takes the core of its group's line where that is
+// higher: the group's line can hold a core the member's own commits never
+// justify, since a ride carries none of the work that set it, so the target
+// arrives from the group and only the counter is the member's own.
 func prereleaseOnCore(target, baseline ccme.Version, hasBaseline bool, channel string) (ccme.Version, bool) {
 	if !hasBaseline || !baseline.IsPrerelease() {
 		return withPrerelease(target, channel, 0), true
