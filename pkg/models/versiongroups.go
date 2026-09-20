@@ -113,7 +113,7 @@ func (c *VersionGroupConfig) UnmarshalJSON(data []byte) error {
 // `versioning` value onto the three axes it carries. where names the entry for
 // error messages, since every group in the file writes the same key.
 //
-// It is the single implementation behind both entry points — UnmarshalJSON
+// It is the single implementation behind both entry points: UnmarshalJSON
 // here, and the CLI's config reader, whose decode table hands it the value
 // under the same key. Two readers of one syntax would be two syntaxes
 // eventually.

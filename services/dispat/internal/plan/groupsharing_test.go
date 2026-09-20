@@ -17,10 +17,10 @@ import (
 // the member target floor, and the three sharing axes.
 //
 // Every fixture here builds a group of three members over a linear history,
-// because the shapes these tests are about — a rider that never left the
-// train, a sparse member that never joined it, a leg that failed after a
-// neighbour published — all need one member to be in a different position
-// from the others.
+// because the shapes these tests are about all need one member to be in a
+// different position from the others: a rider that never left the train, a
+// sparse member that never joined it, a leg that failed after a neighbour
+// published.
 
 // sharedGroup is a group's versioning rule as a fixture states it: the semver
 // mode every member versions under, and the two sharing axes. The zero axes

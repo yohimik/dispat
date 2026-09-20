@@ -264,15 +264,96 @@ Two details worth remembering. A space that versions as a group is a group name 
 from several spaces, or a standalone package that belongs to no space at all, and standing in a folder never selects a
 group for you.
 
+## Counters and channels
+
+The mode answers how much of the version is shared. Two further settings answer what else is shared with it: the
+prerelease counter, and the channel the members sit on. Both live on a
+[`versionGroups` declaration](../../configuration/spaces.md#the-sharing-axes), and both default to shared, which is
+what a group written as a bare mode has always done.
+
+```yaml
+versionGroups:
+  clients:
+    versioning:
+      semver: fixedMajorMinor
+      counter: independent
+      channels: independent
+  manifests:
+    versioning: fixed        # the shorthand still means both axes shared
+```
+
+The rule is one sentence: **the group moves as one when a part of the version it shares moves.** Which parts those are
+is what the two settings decide.
+
+| What happens                             | counter and channels shared | counter independent | both independent |
+|------------------------------------------|-----------------------------|---------------------|------------------|
+| The shared part moves, next train included | the group                   | the group           | the group        |
+| The group graduates or switches channel  | the group                   | the group           | only the named packages |
+| More work inside a train the group is on | the group                   | only the packages that changed | only the packages that changed |
+| A patch below the shared part            | one package                 | one package         | one package      |
+
+A shared counter needs a shared channel, so `counter: fixed` beside `channels: independent` is refused at load.
+
+### What a retry does
+
+This is the difference you notice first. Take a group of three on `1.11.0-rc.0` where a run published `a` at
+`1.11.0-rc.1` and the other two legs failed. Nothing has changed since; you run the release again.
+
+With the counter shared, the whole train advances:
+
+```console
+$ dispat
+WRN released at 1.11.0-rc.2 with no changes of its own, to keep versioning group "clients" on one major and minor
+    version  code=W234 package=a
+INF ● changed package=a reason="fixed group versioning" version="1.11.0-rc.1 -> 1.11.0-rc.2"
+INF ● changed package=b reason=direct version="1.11.0-rc.0 -> 1.11.0-rc.2"
+INF ● changed package=d reason=direct version="1.11.0-rc.0 -> 1.11.0-rc.2"
+```
+
+With `counter: independent`, each member continues from its own tag, and the one that already published owes nothing:
+
+```console
+$ dispat
+INF ● changed package=b reason=direct version="1.11.0-rc.0 -> 1.11.0-rc.1"
+INF ● changed package=d reason=direct version="1.11.0-rc.0 -> 1.11.0-rc.1"
+INF unchanged package=a version=1.11.0-rc.1
+```
+
+The second run releases the versions the failed run planned, which is what a retry is supposed to do. A member sitting
+one prerelease behind the others is not a laggard under this setting and is never caught up.
+
+### What a graduation does
+
+With channels shared, ending the train is the group's business:
+`release(d)%rc>stable` lands every member on `1.11.0`. With `channels: independent` it lands only `d`:
+
+```console
+$ dispat
+INF ● changed package=d reason="channel rc -> stable" version="1.11.0-rc.0 -> 1.11.0"
+INF unchanged package=a version=1.11.0-rc.0
+INF unchanged package=b version=1.11.0-rc.0
+```
+
+`a` and `b` stay on the rc line, and later runs leave them there. When the next feature moves the shared minor, all
+three move together, each on the line it is on: `d` to `1.12.0` and the other two to `1.12.0-rc.0`.
+
+Two rules keep that honest, and neither is configurable:
+
+- A member on stable that rides a **prerelease** group version follows it onto that prerelease line. A ride is never
+  the first stable publication of a version the group has only reached as a prerelease.
+- A member on a prerelease is never graduated by a ride. It takes the new version on its own line, at counter `0`.
+  Ending a train is deliberate, and a movement nobody wrote for that package cannot be it.
+
 ## Prereleases and pinned versions
 
 Both follow the same rule as everything else: they move the group when they reach the shared part, and stay local when
 they do not.
 
 A prerelease train started by a breaking change in a `fixedMajor` group is the group's train. Every member goes to
-`2.0.0-beta.0` together, later work takes all of them to `beta.1`, and a graduation on any one member ends the train
-for all of them. A prerelease train started by a *patch* in the same group belongs to the package that started it, and
-nobody else joins.
+`2.0.0-beta.0` together. With the counter and the channel shared, which is the default, later work takes all of them to
+`beta.1` and a graduation on any one member ends the train for all of them; under
+[independent counters and channels](#counters-and-channels) neither of those is true. A prerelease train started by a
+*patch* in the same group belongs to the package that started it, and nobody else joins.
 
 An exact [`Release-As`](../commits.md) works the same way. `Release-As: 2.0.0` in a `fixedMajor` group at major 1 names
 a different major, so it pins the whole group's version. `Release-As: 1.7.0` in the same group names the major it is
@@ -284,7 +365,7 @@ already on, so it pins that one package and leaves the rest untouched.
 |--------|----------------------------------------------------------------------------------------------------------------|
 | `W234` | A package was released with nothing of its own, to keep the group together. Also raised when a package that fell behind is caught up to the shared part. |
 | `W235` | Two exact `Release-As` pins both named the group's shared part. The newest wins.                                |
-| `W236` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. |
+| `W236` | Members resolved to different prerelease channels while the group was moving as one, so a single winner is picked. Only where the channel is shared: with `channels: independent` no channel is forced on anybody. |
 | `W237` | Members asked to share different parts of the version. The group uses the deepest, which satisfies all of them.  |
 | `W233` | Members are on different major versions, so the newest one is about to take the rest of the group to its major. It names the member that decided, including a sparse one, which may not be a member that releases. |
 
@@ -331,8 +412,8 @@ What this means in practice:
   package cannot depend on a `none` package; the provider would never have a version for
   [auto-versioning](../../configuration/autoversion.md) to write, so the edge is refused when the configuration loads.
   A manifest can still name a `none` package, as a Go module requiring a sibling that is no longer released does.
-  Auto-versioning and `dispat autowriter --set-local` leave such a declaration exactly as it is written, and
-  `--link-local` still links the folder.
+  Auto-versioning, `dispat autowriter --set-local` and [`dispat autoreplacer`](../../cli/autoreplacer.md) leave such a
+  declaration exactly as it is written, and `--link-local` still links the folder.
 * **Directives aimed at them are inert.** A `Release-As` footer whose scope resolves to a `none` package moves nothing
   and is reported as `W238`. Naming one in `dispat release --package` is answered with a log line instead of a silent
   no-op.

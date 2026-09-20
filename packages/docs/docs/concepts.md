@@ -118,6 +118,10 @@ space runs a single prerelease train, and an exact `Release-As` on one member pi
 same is true of a breaking change, while a fix or a feature moves only its own package, along with its own train and
 its own pins.
 
+Whether the members also share the prerelease counter and the channel is two further choices, declared on a
+[`versionGroups` entry](./configuration/spaces.md#the-sharing-axes) and shared by default. The paragraphs below and the
+page they link to describe that default.
+
 A member released with nothing of its own gets one "no changes" changelog entry naming what is shared, labelled `W234`
 in the plan. Under a plain mode, a member left behind by a failed ride is re-aligned on the next run. Commit and file
 scopes keep exactly one job in every shared mode: deciding which changelog entries and GitHub release notes each

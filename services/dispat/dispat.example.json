@@ -133,6 +133,13 @@
   "versionGroups": {
     "platform": {
       "versioning": "fixed"
+    },
+    "clients": {
+      "versioning": {
+        "semver": "fixedMajorMinor",
+        "counter": "independent",
+        "channels": "independent"
+      }
     }
   },
   "run": {

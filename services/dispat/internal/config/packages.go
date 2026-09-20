@@ -69,9 +69,9 @@ func configCandidates(dir string) ([]string, error) {
 
 // validateVersionGroups normalizes the declared groups in place and rejects
 // the declaration mistakes: a versioning mode that does not share (a group
-// exists to share versions), a name a space already holds — group and space
+// exists to share versions), a name a space already holds (group and space
 // names share one namespace, because a versionGroup reference may name
-// either — and a sharing rule that cannot be honoured.
+// either), and a sharing rule that cannot be honoured.
 func validateVersionGroups(c *File) error {
 	for name, g := range c.VersionGroups {
 		if name == "" {

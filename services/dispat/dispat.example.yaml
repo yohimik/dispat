@@ -216,13 +216,26 @@ packages:
 
 # Shared-versioning groups that cut across spaces, joined by name through a
 # space's or package's versionGroup key. The declaration owns the group's
-# mode (any of the shared modes above; independent would defeat the point),
+# rule (any of the shared modes above; independent would defeat the point),
 # so a member never sets versioning alongside versionGroup. A space with a
 # shared versioning is implicitly a group named after itself, and
 # versionGroup may reference such a space too.
+#
+# versioning also takes an object, which states the other two axes of the
+# rule: whether the members holding a prefix in common also hold one
+# prerelease counter and one channel. Both default to fixed, which is what
+# the scalar form above says. With counter: independent each member continues
+# its own counter, so a retry after a partial publication releases only the
+# legs that failed; with channels: independent only the packages a directive
+# names enter or leave a train. A shared counter needs a shared channel.
 versionGroups:
   platform:
     versioning: fixed
+  clients:
+    versioning:
+      semver: fixedMajorMinor
+      counter: independent
+      channels: independent
 
 # The top-level `run` object holds the run-level hooks, executed in the
 # monorepo root. beforeAll is the one gating run hook: it runs once before

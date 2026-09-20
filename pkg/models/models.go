@@ -787,8 +787,8 @@ const (
 // VersionGroupConfig declares one entry of the top-level `versionGroups`
 // map: a shared-versioning group whose membership is stated by the members
 // themselves, through their versionGroup key. The declaration owns the
-// group's versioning rule — all three axes of it — so every member moves
-// under one rule and a member cannot contradict it.
+// group's versioning rule, all three axes of it, so every member moves under
+// one rule and a member cannot contradict it.
 type VersionGroupConfig struct {
 	// Versioning is the semver axis: how much of the version the group holds
 	// in common. Any of the shared modes above; "independent" is invalid,

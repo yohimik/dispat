@@ -221,6 +221,49 @@ there, because a group exists to share versions. The declaration's mode is autho
 makes `versionGroup` and `versioning` mutually exclusive on the same space or package. A member cannot contradict its
 group. A declared group nobody joins is inert configuration, like a disabled block.
 
+### The sharing axes
+
+`versioning` also accepts an object. A mode says how much of the version the members hold in common; the object says
+what else they hold in common with it.
+
+```json
+{
+  "versionGroups": {
+    "platform": {
+      "versioning": {
+        "semver": "fixedMajorMinor",
+        "counter": "independent",
+        "channels": "independent"
+      }
+    }
+  }
+}
+```
+
+| Key        | Values                                  | Default | Meaning                                                                                      |
+|------------|-----------------------------------------|---------|----------------------------------------------------------------------------------------------|
+| `semver`   | any shared mode                         | required | How much of the version the group holds in common. The same value the scalar form carries.   |
+| `counter`  | `fixed`, `independent`                  | `fixed` | Whether the members also hold one prerelease counter in common.                               |
+| `channels` | `fixed`, `independent`                  | `fixed` | Whether the members also sit on one channel in common.                                        |
+
+Both axes default to `fixed`, so `"versioning": "fixedMajorMinor"` and
+`"versioning": {"semver": "fixedMajorMinor"}` mean exactly the same thing. Nobody's plan changes until they opt in.
+[Shared versions](../reference/releasing/versioning.md#counters-and-channels) works through what each setting does to a
+release, a retry and a graduation.
+
+Three combinations are valid and one is refused:
+
+| `counter`     | `channels`    | Result                                                                               |
+|---------------|---------------|----------------------------------------------------------------------------------------|
+| `fixed`       | `fixed`       | The whole group runs one prerelease train on one channel. The default.                 |
+| `independent` | `fixed`       | Each member counts its own prereleases; the train's channel is still the group's.      |
+| `independent` | `independent` | Each member counts its own prereleases and sits on its own channel.                    |
+| `fixed`       | `independent` | Refused at load: one shared counter cannot span two channels.                           |
+
+The axes belong to a `versionGroups` entry. A space, a package or the root file states a mode and nothing else, so an
+object written at one of those levels is refused with a message pointing at the group. A space that versions as a group
+of its own therefore carries the defaults; declare the group by name to state the axes.
+
 A group shares the version, not its spelling. Each member keeps its own [`tagFormat`](./versions.md#tagformat) and
 [alias tags](./alias-tags.md). One group release might tag `lib1-v1.2.0` in one space and `app1@1.2.0` in another.
 

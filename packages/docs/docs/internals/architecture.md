@@ -196,6 +196,12 @@ group holds equal: 3 for `fixed`, 2 for `fixedMajorMinor`, 1 for `fixedMajor`, a
 depth is the deepest any member declares. Sharing more implies sharing the prefix, and dispat reports a disagreement as
 `W237`.
 
+A declared group carries two further axes beside the depth: whether its members also hold one prerelease counter and
+one channel in common. Both default to shared. The three of them are one value object built once per group, and every
+question below is asked of it rather than re-derived: whether the group engages, whether a member is aligned, and what
+floor a member computes under. A shared counter beside independent channels is refused at load, because one counter
+counts one train and a train runs on one channel.
+
 dispat versions each group as one virtual package after the per-package pipeline produces bumps, channels, and pins.
 The group aggregates what the version computation reads. It reads the baselines of *every* member, including held ones,
 so the shared version can never fall below a position a member already published. It also reads the bumps, new work,
@@ -203,25 +209,41 @@ and channel movements of the members that would release. dispat runs that throug
 including pins, trains, and guards. This produces one shared next version, one prerelease train, and one pin per group.
 The newest member pin wins. Its scope breadth is one by construction because the group holds one shared prefix.
 
-**The engagement rule** makes a partial depth work. It is a single predicate evaluated after that computation. The
-group takes its members over in two cases only. It engages when the computed version leaves the group's prefix behind,
-or when the group already sits on a prerelease train whose prefix left the stable line. In that second case, the
-train's later prereleases and its graduation belong to the whole group, even though neither moves the prefix again. At
-the full depth, the predicate is constantly true, so `fixed` and `fixedSparse` run the path they always did. dispat
-admits a pin to the group computation under the same rule. A pin naming the prefix the group already carries is left to
-its own package's `applyPin`. This ensures a member's local `Release-As` is never measured against the group's
+**The engagement rule** makes a partial depth work: the group engages when a part of the version *it shares* moves. A
+movement of the shared prefix is that under every setting, the move onto the next train included. Beyond it the axes
+decide. A shared counter makes the whole train the group's, so its later prereleases and its graduation engage it too,
+and at the full depth every movement does, because the group shares the whole version. An independent counter leaves
+the train's own progress to each member and keeps only the channel; independent channels keep nothing else at all.
+dispat admits a pin to the group computation under the same rule. A pin naming the prefix the group already carries is
+left to its own package's `applyPin`. This ensures a member's local `Release-As` is never measured against the group's
 aggregate.
 
-When the group does not engage, every member goes through the ordinary per-member `versionOne`. An alignment pass then
-keeps the invariant. A member releasing below the group's prefix adopts it. This is how a sparse member's first change
-lands it on the shared part. A non-sparse member with nothing pending whose baseline lags is released at the prefix
-with `W234`.
+**The channel a group moves on** comes only from the members that are themselves moving between channels. A channel is
+derived from a baseline, so a member resting where its own tags put it proposes nothing: a sparse member left on stable
+while the rest ride an rc does not graduate the group, and a rider left on rc after the rest graduated does not drag
+them back. With independent channels the aggregate takes no proposals at all and decides only the core.
+
+**The member target floor** is what lets a member compute a version its own window does not explain. A group member's
+§11.4 target and §11.5 graduation version are raised to the core of the group's line before the E185 and E195 guards
+read them. A ride carries none of the work that set the group's core and a failed leg carries only part of it, so
+without the floor a retry computes a version below one the group already holds. The floor never reaches past the line,
+so both guards keep their meaning. One exception: a member releasing on stable whose own baseline is stable takes no
+floor while the line is a prerelease, because the group has published no stable version of that core.
+
+When the group does not engage, every member goes through the ordinary per-member `versionOne` with that floor. An
+alignment pass then keeps the invariant. A member releasing below the group's prefix adopts it, which is how a sparse
+member's first change lands it on the shared part. A non-sparse member with nothing pending whose baseline lags is
+released at the prefix with `W234`. Under an independent counter, a member holding the prefix is aligned whatever its
+counter says, so a member one prerelease behind is neither caught up nor raised; the floor does the raising instead,
+and it raises only the part the group shares.
 
 Assignment is where sparseness shows. The mode is each member's own, so a joined group can mix them. A plain mode
 releases every non-held member at the group version. It marks members with no cause of their own as rides using `W234`.
 This is non-suppressible and writes a "no changes" changelog entry naming the shared part. A sparse mode assigns the
-group version only to members with a cause of their own. Scope resolution remains untouched either way, so each member
-keeps its *own* units for changelog and release notes.
+group version only to members with a cause of their own. With independent channels the assignment is each member's own
+computation instead, floored at the group's new core and left on its own channel, with two safety rules: a ride by a
+member on stable follows a prerelease group version onto that line, and a ride never graduates a member. Scope
+resolution remains untouched either way, so each member keeps its *own* units for changelog and release notes.
 
 dispat preserves two convergence properties. A quiet group whose members agree on the prefix releases nothing. A
 non-sparse member left behind by a failed ride or a mid-life adoption is re-released on the next run. It releases at

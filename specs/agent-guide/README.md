@@ -288,6 +288,8 @@ Use the same selection for preview and release. Explicit `--package` (`-p`), `--
 
 Selection narrows which planned packages execute; the complete dependency graph still participates in version calculation. Review warnings about withheld consumers and split version groups. Use `--strict` when those conditions must fail the gate. Do not suppress them by editing configuration or selecting only the convenient half of a group.
 
+A version group's sharing rule decides how far a directive reaches. Where its `channels` axis is `independent`, only the packages a directive names enter or leave a prerelease train; the others stay on the line they are on, and no later run catches them up. Name every package you intend to move, and confirm the resulting channels and versions with `dispat status` before releasing. Where its `counter` axis is `independent`, each member continues its own prerelease counter, so members of one group legitimately sit at different counters and a retry releases only the legs that failed.
+
 `preview` cannot predict values produced only by build or publish scripts. A successful status is evidence about the plan, not proof that scripts, credentials, registries, or artifacts will succeed.
 
 ## Keep tool-heavy pipelines reproducible

@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// A `versionGroups` entry has two shapes — a bare mode, or an object naming
-// the three sharing axes — and they mean the same thing to everything
+// A `versionGroups` entry has two shapes, a bare mode or an object naming the
+// three sharing axes, and they mean the same thing to everything
 // downstream. What is tested here is that both land on the same three values,
 // that the shape written back is the shortest one carrying the rule, and that
 // an unknown key is refused rather than dropped, which is what the config
