@@ -89,7 +89,9 @@ func TestVersionGroupWritesTheShortestForm(t *testing.T) {
 func TestVersionGroupRejectsWhatIsNotARule(t *testing.T) {
 	for _, c := range []struct{ src, want string }{
 		{`{"versioning": {"semver": "fixed", "conter": "independent"}}`, `unknown key "conter"`},
-		{`{"versioning": {"semver": "fixed", "Semver": "fixedMajor"}}`, "are the same key"},
+		// Sorted key order makes the pair name the same two spellings in the
+		// same order on every run, whatever the map handed over first.
+		{`{"versioning": {"semver": "fixed", "Semver": "fixedMajor"}}`, `"Semver" and "semver" are the same key`},
 		{`{"versioning": {"counter": 3}}`, "counter wants a value"},
 		{`{"versioning": 3}`, "wants a versioning mode"},
 		{`{"counter": "independent"}`, "unknown field"},

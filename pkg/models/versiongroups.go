@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -133,10 +134,21 @@ func NormalizeVersionGroupVersioning(raw any, where string) (VersionGroupConfig,
 // versionGroupObject reads the object form. Keys are matched folded, like
 // every key of the config language, and two spellings of one axis are refused
 // rather than resolved by whichever the runtime handed over first.
+//
+// The keys are visited in sorted order for the reason the generic decoder
+// sorts its own: an object with more than one thing wrong with it has to
+// report the same one first on every run, and a pair of spellings has to be
+// named in the same order every time.
 func versionGroupObject(fields map[string]any, where string) (VersionGroupConfig, error) {
 	var out VersionGroupConfig
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	seen := make(map[string]string, len(fields))
-	for key, val := range fields {
+	for _, key := range keys {
+		val := fields[key]
 		axis := strings.ToLower(key)
 		target, ok := map[string]*string{
 			"semver":   &out.Versioning,
