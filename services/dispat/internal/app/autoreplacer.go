@@ -202,18 +202,33 @@ func (w *replacerWork) providers(ctx context.Context, rel *plan.Release) []relea
 			if pr == nil {
 				continue
 			}
+			if !pr.IsReleasable() {
+				// A versioning "none" package is never released, so it has no
+				// version to render: the 0.0.0 it carries in the plan is a
+				// placeholder, not a baseline. Expanding a rule over it would
+				// rewrite a real requirement down to that placeholder, exactly
+				// as auto-versioning and `autowriter --set-local` refuse to.
+				w.app.log.Debug().Str("package", rel.Pkg.Name).Str("provider", provider).
+					Msg("provider dropped from the fan-out: it is never released and has no version")
+				continue
+			}
 			if w.onlyUpdated && !pr.IsReleasing() {
 				w.app.log.Debug().Str("package", rel.Pkg.Name).Str("provider", provider).
 					Msg("provider dropped from the fan-out: this run does not update it")
 				continue
 			}
 			seen[provider] = true
+			// Both facts are read off the one version the rules render, the
+			// way providerFacts reads them: the withheld version of a held
+			// provider is not what this run writes, so it must not decide
+			// whether the consumer is naming a prerelease either.
+			version, releasing := plannedRelease(pr)
 			out = append(out, release.ProviderFacts{
 				Name:       provider,
-				Version:    plannedVersion(pr),
+				Version:    version.String(),
 				Previous:   pr.Previous().String(),
-				Releasing:  pr.IsReleasing(),
-				Prerelease: pr.IsPrerelease(),
+				Releasing:  releasing,
+				Prerelease: version.IsPrerelease(),
 			})
 		}
 	}

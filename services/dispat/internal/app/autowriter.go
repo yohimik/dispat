@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/pkg/manifest"
 	"github.com/yohimik/dispat/pkg/scanner"
 	"github.com/yohimik/dispat/pkg/writer"
@@ -341,13 +342,25 @@ func (w *writerWork) expand(names map[string]string, dep, text string) (string, 
 // planned one when it is releasing, its current one otherwise. It is the same
 // answer auto-versioning writes into a consumer's range.
 func plannedVersion(rel *plan.Release) string {
+	version, _ := plannedRelease(rel)
+	return version.String()
+}
+
+// plannedRelease is the same answer with the version left whole, and whether
+// this run is the one that publishes it. Everything a caller says about a
+// package's end-of-run version comes from here, so a caller cannot render one
+// version and classify another: a held package's withheld Next is reported to
+// explain the hold (W154) and is not what the run writes. It is the app-side
+// twin of release.taskCtx.providerVersion, which answers the same question
+// with a run's per-package results in hand.
+func plannedRelease(rel *plan.Release) (ccme.Version, bool) {
 	if rel.IsReleasing() {
-		return rel.Next.String()
+		return rel.Next, true
 	}
 	if rel.HasBaseline {
-		return rel.Baseline.String()
+		return rel.Baseline, false
 	}
-	return rel.Current.String()
+	return rel.Current, false
 }
 
 // updating reports whether the named package is one this run releases. An empty

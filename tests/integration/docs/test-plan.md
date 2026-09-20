@@ -1264,6 +1264,8 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestVersioningNoneReleaseAsInert`          | Adding `Release-As` footers targeting `none` packages produces warning W238 and performs no version bump.                                                                                       |
 | `TestVersioningNoneReleaseOnlySettingsInert` | Release settings like `tagFormat` and publish stages are ignored on `none` spaces without raising config errors. Build scripts continue to execute under `dispat run`.                                                 |
 | `TestVersioningNoneProviderIsNeverReconciled` | A manifest naming a `none` package keeps the requirement it wrote: `dispat autoversion`, `autowriter --set-local`, and the release's version stage leave a `go.mod` pinned at `v1.0.0` unchanged instead of writing the `0.0.0` placeholder, and no W197 catch-up is reported. |
+| `TestVersioningNoneProviderIsNeverReplaced`  | The replacing strategy keeps the same rule: `dispat autoreplacer`'s `{providerVersion}` fan-out leaves out a `none` package a manifest names, so a pinned coordinate is not rewritten down to the `0.0.0` placeholder and no W197 catch-up is reported. |
+| `TestVersioningNoneHeldProviderPrereleaseIsReadFromOneAnswer` | A held provider's withheld prerelease is not the version the run writes, so it does not classify the consumer either: a stable release picking up the provider's published stable version reports no W203. |
 
 ### Goal 35: spaces spanning several folders (`spacepaths_test.go`)
 

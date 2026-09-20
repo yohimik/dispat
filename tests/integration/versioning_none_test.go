@@ -336,3 +336,67 @@ func TestVersioningNoneProviderIsNeverReconciled(t *testing.T) {
 	assert.Equal(t, pinned, read(), "the version stage must leave a none provider's requirement alone")
 	quiet(res)
 }
+
+// TestVersioningNoneProviderIsNeverReplaced: the replacing strategy's own
+// half of the same rule. A `{providerVersion}` pattern fans out over the
+// workspace packages a manifest names, and a none package among them has no
+// version to render: the 0.0.0 it carries in the plan is a placeholder. The
+// fan-out therefore leaves it out, exactly as the parsing strategy and
+// `autowriter --set-local` do, and reports no catch-up for a provider that is
+// never released.
+func TestVersioningNoneProviderIsNeverReplaced(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
+		"libs":  {Path: models.PathList{"packages"}, Flow: buildPublish()},
+		"tools": {Path: models.PathList{"tools"}, Versioning: models.VersioningNone, Flow: buildPublish()},
+	}))
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("tools", "parser")
+	r.WriteFile("tools/parser/package.json", `{"name": "parser", "version": "1.0.0"}`)
+	r.WriteFile("packages/core/package.json",
+		`{"name": "core", "version": "0.0.0", "dependencies": {"parser": "1.0.0"}}`)
+	const coordinates = "uses parser 1.0.0\n"
+	r.WriteFile("packages/core/NOTES.md", coordinates)
+	r.Commit("feat(core,parser): bootstrap with manifests")
+
+	res := r.Command("autoreplacer", "--since", "all", "--package", "core", "--files", "NOTES.md",
+		"--replace", "{provider} 1.0.0=>{provider} {providerVersion}")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+	got, err := os.ReadFile(r.Path("packages", "core", "NOTES.md"))
+	require.NoError(t, err)
+	assert.Equal(t, coordinates, string(got),
+		"a never-released provider has no version, so the placeholder must not be written")
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W197", "core"),
+		"nothing was caught up, so nothing may say so")
+}
+
+// TestVersioningNoneHeldProviderPrereleaseIsReadFromOneAnswer: a held
+// provider's withheld version is not the version the run writes, so it must
+// not decide whether W203 is reported either. A stable consumer picking up a
+// provider that stays on its published stable version is an ordinary release
+// and says nothing about prereleases.
+func TestVersioningNoneHeldProviderPrereleaseIsReadFromOneAnswer(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "core", "version": "0.0.0"}`)
+	r.WriteFile("packages/web/package.json",
+		`{"name": "web", "version": "0.0.0", "dependencies": {"core": "0.0.0"}}`)
+	r.Commit("feat(core,web): bootstrap")
+	r.ReleaseOK()
+
+	// core's next release would be a prerelease, and it is held, so the run
+	// publishes nothing for it and web keeps picking up the stable 0.1.0.
+	r.WriteFile("packages/web/NOTES.md", "uses core 0.1.0\n")
+	r.Commit("fix(core)%beta: withheld work\n\n---\n\nrelease(core): not this run\n\nRelease-As: none\n")
+	res := r.Command("autoreplacer", "--since", "all", "--package", "web", "--files", "NOTES.md",
+		"--replace", "{provider} {providerPrevious}=>{provider} {providerVersion}")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W203", "web"),
+		"the provider is staying on its published stable version, so nothing names a prerelease")
+}
