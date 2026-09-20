@@ -633,12 +633,12 @@ shellcheck -s bash tests/experiments/run.sh tests/experiments/lib/common.sh
 sh tests/experiments/lib/cache-test.sh
 sh scripts/cache-test.sh /src
 
-# The announcement: the notes generator is run against a sample release and its
-# output parsed, the two crier configurations are read for what they must share
-# and what they must not, and the hand-written release candidate is checked
-# against its card and the platforms' caption limits. Guarded on the file,
-# which is written by the announcement's own work and absent until then.
-if [ -f services/dispat/announce/notes.py ]; then
+# The announcement: the two crier configurations are read for what they must
+# share and what they must not, the hand-written release candidate is checked
+# against its card, and both captions against the platforms' limits. Guarded
+# on the file, which is written by the announcement's own work and absent
+# until then.
+if [ -f services/dispat/announce/publish.yaml ]; then
   python3 scripts/announce-test.py
 fi
 EOF

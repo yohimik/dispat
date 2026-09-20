@@ -1,9 +1,6 @@
 {{- /*
   Every random value this card draws, drawn here: at the top, unconditionally,
-  before any branch. A cover document and a nocover one are two executions of
-  this file, and the story pass has to come out the same colour as the feed
-  post. Drawing inside {{ if not .nocover }} would mean the two executions read
-  a different number of values off the run's stream and disagreed from there on.
+  so every pass over this file reads the same values off the run's stream.
 
   Every accent is one of the site's own sage shades and every tint is light
   enough to read on the deep pine panel, so there is no combination that
@@ -66,13 +63,12 @@
     }
   }
 
-  /* The same conditional suppression, for the same reason: it is about page
-     one being the cover, not about page one. A nocover document's first page
-     is the first changelog page and has to say which release it is. */
-  {{ if not .nocover }}@page :first {
+  /* The cover carries its own badge, so it needs neither the small one nor
+     the page counter, exactly as on rc/template.html. */
+  @page :first {
     @top-left { content: none }
     @bottom-right { content: none }
-  }{{ end }}
+  }
 
   /* Where this card parts company with the other one.
 
@@ -131,13 +127,6 @@
     letter-spacing: 3px;
   }
 
-  /* The version, for a document that has no cover to carry it. The small badge
-     in the page margin reads string(ver) and nothing else sets it, so a
-     nocover document sets it from something that draws nothing at all. */
-  .version-only {
-    string-set: ver content();
-    height: 0; font-size: 0; line-height: 0; margin: 0; padding: 0;
-  }
 
   /* The version badge, ruled rather than filled: the other card stamps it,
      this one frames it. Same string-set, because the small badge in the page
@@ -173,31 +162,26 @@
        one break this layout must not take. */
     break-after: avoid;
   }
-  .section ul { margin: 0; padding: 0; list-style: none }
-  /* The wrapping rules, shared letter for letter with rc/template.html: up to
-     three lines an entry, then the multi-line clamp, and an unbroken run
-     breaks anywhere rather than escaping the card. */
-  .section li {
-    font-size: 25px; line-height: 1.4; color: {{ $tint }};
-    margin-bottom: 8px;
-    overflow: hidden; overflow-wrap: break-word;
-    max-lines: 3; continue: discard; block-ellipsis: auto;
-    break-inside: avoid;
+  /* A group arrives as dispat wrote it: one entry per line in one variable,
+     because the card's data is the release's own environment. pre-line gives
+     each entry a line of its own and wraps a long one, and an unbroken run
+     breaks anywhere rather than escaping the card. A group flows across pages
+     between its lines. */
+  .section .items {
+    font-size: 25px; line-height: 1.5; color: {{ $tint }};
+    white-space: pre-line;
+    overflow-wrap: break-word;
+    border-left: 3px solid {{ $accent }}; padding-left: 16px;
   }
-  /* ASCII, like the other card's dash: the embedded fonts are the only fonts
-     a release is allowed, and a glyph they do not carry draws as a blank. */
-  .section li:before { content: "> "; color: {{ $accent }} }
-  .more { color: #7f9c8d; font-size: 21px; margin-top: 4px }
 
   /* Breaking changes are the one section worth a warm colour, here too. */
   .breaking h2 { background: #e8a06a; color: #2a1608 }
-  .breaking li { color: #f3d5bb }
-  .breaking li:before { color: #e8a06a }
+  .breaking .items { color: #f3d5bb; border-left-color: #e8a06a }
 
   /* What the release picked up from its own providers: the run's bookkeeping,
      worth stating and not worth shouting. */
   .picks h2 { background: #557f68; color: #e6f0ea }
-  .picks li { color: #b6cdc0 }
+  .picks .items { color: #b6cdc0; border-left-color: #557f68 }
   .picks li:before { color: #557f68 }
 
   /* Pinned to the bottom of the cover. */
@@ -226,14 +210,14 @@
 </style>
 </head>
 <body>
-  {{ if not .nocover }}<div class="cover">
+  <div class="cover">
     <svg class="mark" viewBox="0 0 9 9" width="76" height="76" xmlns="http://www.w3.org/2000/svg">
       <path fill="{{ $accent }}" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
       <path fill="{{ $tint }}" d="M3 3h6v6H3Z"/>
     </svg><span class="wordmark">dispat</span>
 
     <div class="prompt">$ dispat release</div>
-    <div class="badge">v{{ .version }}</div>
+    <div class="badge">v{{ .new_version }}</div>
 
     <div class="lede">
       Release packages across languages. Versions, changelogs and publishing,
@@ -242,16 +226,15 @@
 
     <div class="install">
       <h2>INSTALL</h2>
-      {{ range .install }}<div class="cmd"><span>{{ if eq .label "action" }}-{{ else }}${{ end }}</span> {{ .command }}</div>{{ end }}
+      <div class="cmd"><span>$</span> curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v{{ .new_version }}/install.sh | DISPAT_VERSION={{ .new_version }} sh</div>
+      <div class="cmd"><span>$</span> dispat self-update --release {{ .new_version }}</div>
+      <div class="cmd"><span>-</span> {uses: yohimik/dispat@v1, with: {version: {{ .new_version }}}}</div>
     </div>
-  </div>{{ end }}{{ if .nocover }}<div class="version-only">v{{ .version }}</div>{{ end }}
-
-  {{ if not .coveronly }}{{ range .sections }}
-  <div class="section{{ if eq .label "BREAKING" }} breaking{{ end }}{{ if eq .label "PICKS UP" }} picks{{ end }}">
-    <h2>{{ .label }}</h2>
-    <ul>{{ range .items }}<li>{{ . }}</li>{{ end }}</ul>
-    {{ if gt .more 0 }}<div class="more">+{{ .more }} more</div>{{ end }}
   </div>
-  {{ end }}{{ end }}
+
+  {{ if .breaking_changes }}<div class="section breaking"><h2>BREAKING</h2><div class="items">{{ .breaking_changes }}</div></div>{{ end }}
+  {{ if .features }}<div class="section"><h2>FEATURES</h2><div class="items">{{ .features }}</div></div>{{ end }}
+  {{ if .fixes }}<div class="section"><h2>FIXES</h2><div class="items">{{ .fixes }}</div></div>{{ end }}
+  {{ if .dependencies }}<div class="section picks"><h2>PICKS UP</h2><div class="items">{{ .dependencies }}</div></div>{{ end }}
 </body>
 </html>

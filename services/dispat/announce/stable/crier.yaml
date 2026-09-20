@@ -1,13 +1,12 @@
 # The card dispat posts about a stable release.
 #
-# The announce script in services/dispat/dispat.yaml picks this file when
-# DISPAT_CHANNEL is stable and pipes notes.py into it; rc/crier.yaml is its
-# counterpart for a release candidate. `DISPAT_NEW_VERSION=1.11.0 python3
-# services/dispat/announce/notes.py | crier render --config
+# The announce script in services/dispat/dispat.yaml is one crier command whose
+# configuration is named by the channel, so a stable release lands here and a
+# release candidate in rc/crier.yaml. `DISPAT_NEW_VERSION=1.11.0
+# DISPAT_FIXES="a fix" crier render --config
 # services/dispat/announce/stable/crier.yaml` renders it without posting.
 #
 # One image post per platform: a cover followed by changelog pages.
-# Cover-only mode keeps the changelog in the caption.
 render:
   # The release's face: the candidate's card seen as print. A radial pine wash
   # with the light in one corner, a thin frame ruled around the page, and the
@@ -17,11 +16,13 @@ render:
   # differs in how it looks. The accents vary with the run's seed, and one run
   # renders once, so every destination receives the same design.
   template: template.html
-  # A stable release announces what dispat generated for it: notes.py turns the
-  # release-notes variables into this document and the announce script pipes it
-  # in. It has arrays in it, which an env: prefix cannot carry: this is the
-  # case stdin exists for.
-  data: "-"
+  # A stable release announces what dispat generated for it, and dispat hands
+  # that to every stage as environment variables: DISPAT_NEW_VERSION and the
+  # release-notes groups, one entry per line. This prefix turns them into
+  # {{ .new_version }}, {{ .breaking_changes }}, {{ .features }}, {{ .fixes }}
+  # and {{ .dependencies }} for the card and the caption alike, so nothing has
+  # to build a document first.
+  data: "env:DISPAT_"
   width: 1080
   height: 1080
   background: "#101713"
@@ -38,8 +39,7 @@ render:
   # The card paginates: page one is the cover, and a long changelog carries on
   # across the pages after it. Ten is the default and it is stated here because
   # it is load-bearing for this card: a release past it fails the render rather
-  # than posting a truncated version of itself, and notes.py's own cap of
-  # twenty entries a section is what keeps a real release well under it.
+  # than posting a truncated version of itself.
   pages-max: 10
   video:
     # Only the cover-story render enables video. Photo posts remain stills.
@@ -57,22 +57,33 @@ publish:
   $ref: ../publish.yaml
   # The notes dispat generated for this release, under a fixed introduction.
   # Keep the release link first so it survives the platform's caption limit.
+  #
+  # crier posts a caption whole, and Discord refuses a message over 2000
+  # characters and Instagram a caption over 2200. The pictures always carry the
+  # groups in full, so the text carries a group only while it is short: under
+  # 330 characters each, the four of them and everything fixed here stay inside
+  # Instagram's limit. Discord leaves the groups to the pictures attached to
+  # the same message. scripts/announce-test.py checks the worst case.
   caption: |-
-    {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .version }} is out.
-    Release notes: https://github.com/yohimik/dispat/releases
+    {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is out.
+    Release notes: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
 
     Turn conventional commits into a release plan, then build and publish the changed packages in dependency order.
 
     dispat coordinates releases across Go, npm, Cargo, Python, Docker, mobile, game, and other supported project formats while your own commands build and publish the artifacts. Git-backed release records let interrupted runs preserve completed publications and continue the remaining work.
 
     Preview the plan safely with `dispat status`, then follow the guide at https://dispat.dev/
-    {{ if .sections }}
-    What changed:{{ range .sections }}
-    {{ .label }}:{{ range .items }}
-    - {{ . }}{{ end }}{{ if gt .more 0 }}
-    - and {{ .more }} more{{ end }}{{ end }}
-    {{ end }}
-    Release packages across languages in dependency order.
+    {{ if eq .Platform "discord" }}
+    What changed is on the pictures.{{ else }}{{ if .breaking_changes }}
+    BREAKING:
+    {{ if lt (len .breaking_changes) 330 }}{{ .breaking_changes }}{{ else }}see the pictures{{ end }}{{ end }}{{ if .features }}
+    FEATURES:
+    {{ if lt (len .features) 330 }}{{ .features }}{{ else }}see the pictures{{ end }}{{ end }}{{ if .fixes }}
+    FIXES:
+    {{ if lt (len .fixes) 330 }}{{ .fixes }}{{ else }}see the pictures{{ end }}{{ end }}{{ if .dependencies }}
+    PICKS UP:
+    {{ if lt (len .dependencies) 330 }}{{ .dependencies }}{{ else }}see the pictures{{ end }}{{ end }}{{ end }}
+
     Get started: https://dispat.dev
 
     #golang #opensource #devtools #releaseengineering

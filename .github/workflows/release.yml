@@ -140,7 +140,7 @@ jobs:
     # ANNOUNCE is the one switch: set when the repository holds any of the
     # announcement's secrets and the dispatch did not ask to skip it. It gates
     # the steps here and, in the release job, the announce script in
-    # services/dispat/dispat.yaml. Without it this job still succeeds, so the
+    # services/dispat/dispat.yaml, which is one crier command behind it. Without it this job still succeeds, so the
     # release keeps its normal dependencies.
     env:
       ANNOUNCE: ${{ !inputs.skip_announcements && (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
@@ -468,10 +468,10 @@ jobs:
         # post-version test gates (flow.beforeBuild in the pkg and services
         # spaces), the release commit, tags, the push, and the GitHub release
         # with the cross-compiled binaries its containerised build stage
-        # exported. The dispat package's announce stage writes this step's
-        # cli-released / cli-version outputs and then posts the announcement,
-        # and only fires when that package published; see
-        # services/dispat/dispat.yaml.
+        # exported. The dispat package's postPublish hook writes this step's
+        # cli-released / cli-version outputs, its announce stage then posts
+        # the announcement, and both fire only when that package published;
+        # see services/dispat/dispat.yaml.
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -517,7 +517,7 @@ jobs:
     #
     # !cancelled(), because a bare condition implies success(): the CLI's leg
     # records itself mid-run, so a run that later failed on another package
-    # still published a CLI worth checking — the announce stage set
+    # still published a CLI worth checking — the postPublish hook set
     # cli-released before the failure, and skipping the check here would
     # leave exactly the releases that most need verifying unverified.
     if: ${{ !cancelled() && needs.release.outputs.cli-released == 'true' }}

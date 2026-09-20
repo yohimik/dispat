@@ -60,14 +60,13 @@ coverage/covdata
 
 # The shell sweep's inputs. Shell files only: scripts/ also holds a python
 # renderer and services/dispat/announce holds shared fonts and each channel's
-# audio. Include only the notes generator, the shared cross-posting, and each
-# channel's configuration and card, which the announcement check reads.
+# audio. Include only the shared cross-posting and each channel's
+# configuration, words and card, which the announcement check reads.
 !scripts
 scripts/*
 !scripts/*.sh
 !scripts/announce-test.py
 services/dispat/announce/*
-!services/dispat/announce/notes.py
 !services/dispat/announce/publish.yaml
 !services/dispat/announce/rc
 services/dispat/announce/rc/*
