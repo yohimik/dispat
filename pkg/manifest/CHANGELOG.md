@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/manifest/v1.2.1 (2026-09-20)
+
+### Fixes
+
+- provide consistent predicates with compatible API aliases ([2f591b0](https://github.com/yohimik/dispat/commit/2f591b0139339d13f20c4718056d14be6e0dea98)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## pkg/manifest/v1.2.0 (2026-09-05)
 
 No changes: a version bump to keep the versioning group on one version.
