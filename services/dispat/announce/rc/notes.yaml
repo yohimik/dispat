@@ -8,8 +8,8 @@
 # over 2000 characters and Instagram a caption over 2200, and crier posts a
 # caption whole, so Discord gets the links and the lede and leaves the long
 # paragraphs to the pictures attached to the same message, which carry them in
-# full. scripts/announce-test.py checks the limits and that the card says the
-# same words.
+# full. `crier publish --dry-run --json` prints each platform's caption, which
+# is how to check a rewrite against those limits.
 --- |-
   {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is ready for testing.
   This release candidate: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}

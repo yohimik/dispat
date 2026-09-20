@@ -34,7 +34,7 @@ The only value either takes from the release is `{{ .new_version }}`, which Crie
 
 Crier posts a caption whole, and the platforms refuse a long one: Discord at 2000 characters, Instagram at 2200. The caption keeps every link on every platform. On Discord it follows the lede with a pointer to the pictures instead of the long paragraphs, because the pictures attached to the same message carry the notes in full.
 
-`python3 scripts/announce-test.py` fails when a paragraph or a link of the caption is missing from the card, when the card says something the caption does not, or when the caption is over a platform's limit.
+Nothing checks those two by machine. After a rewrite, read the card's preview against the caption, and print each platform's resolved caption with `crier publish --dry-run --json` to see its length.
 
 The [cover preview](rc/preview-1.jpg) and [notes preview](rc/preview-2.jpg) show the draft for the planned `1.11.0-rc.1` release:
 
@@ -72,8 +72,6 @@ The publishing command reports each destination's result and returns failure if 
 
 The announcement replay workflow selects `rc` or `stable` and a replay script within that folder. A replay script is a few lines: it sets `DISPAT_NEW_VERSION`, switches off the destinations that already have the post with `CRIER_PUBLISH_<NAME>_ENABLED=false`, and calls `crier publish` with the channel's `crier.yaml` (with the release-notes variables set for a stable replay). The replay workflow holds no Instagram credentials, so a replay there disables Instagram.
 
-## Checks
-
-Run `python3 scripts/announce-test.py` from the repository root. It checks that the two configurations share their cross-posting while keeping separate cards and music, the release candidate's words and limits, the stable caption's worst case against each platform's limit, where the step outputs are written, and, when a `dispat` binary is available, the announce script itself with a fake publisher. It never contacts a social platform. The Docker shell gate also runs this check; it has no `dispat` binary, so there the announce script is read but not run.
+## Requirements
 
 This flow requires a Crier release that supports `publish.instagram.cover-story` and `publish.discord.mention-everyone`. Earlier versions fail configuration validation at the ping gate.

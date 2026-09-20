@@ -63,7 +63,7 @@ publish:
   # groups in full, so the text carries a group only while it is short: under
   # 330 characters each, the four of them and everything fixed here stay inside
   # Instagram's limit. Discord leaves the groups to the pictures attached to
-  # the same message. scripts/announce-test.py checks the worst case.
+  # the same message.
   caption: |-
     {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is out.
     Release notes: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}

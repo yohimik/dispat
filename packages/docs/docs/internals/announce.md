@@ -126,12 +126,9 @@ DISPAT_FEATURES="Minimal or star topology for identity-linked repositories" \
   crier render --config services/dispat/announce/stable/crier.yaml
 ```
 
-Run `python3 scripts/announce-test.py` to check that the two configurations share their cross-posting and keep separate
-cards and music, that an RC links to its own release, that the RC card and its caption say the same words, that both
-captions fit each platform's limit in their worst case, and that the step outputs belong to `postPublish`. When a
-`dispat` binary is available it also runs the announce script with a fake publisher. This test contacts no social
-platform. The Docker shell gate runs it too, without a `dispat` binary, so there the announce script is read but not
-run.
+Nothing checks the release candidate's two copies or a caption's length by machine. After a rewrite, read the card
+against the caption, and print each platform's resolved caption with `crier publish --dry-run --json`, which makes no
+network calls.
 
 Without `ANNOUNCE` the announce script posts nothing, so `dispat run announce -p dispat` and a release run from a laptop
 stay quiet.

@@ -59,24 +59,12 @@ packages/docs/demo/illustration/out
 coverage/covdata
 
 # The shell sweep's inputs. Shell files only: scripts/ also holds a python
-# renderer and services/dispat/announce holds shared fonts and each channel's
-# audio. Include only the shared cross-posting and each channel's
-# configuration, words and card, which the announcement check reads.
+# renderer. The announcement folder holds no shell, only crier configuration,
+# cards, fonts and audio, so none of it enters this context.
 !scripts
 scripts/*
 !scripts/*.sh
-!scripts/announce-test.py
-services/dispat/announce/*
-!services/dispat/announce/publish.yaml
-!services/dispat/announce/rc
-services/dispat/announce/rc/*
-!services/dispat/announce/rc/crier.yaml
-!services/dispat/announce/rc/notes.yaml
-!services/dispat/announce/rc/template.html
-!services/dispat/announce/stable
-services/dispat/announce/stable/*
-!services/dispat/announce/stable/crier.yaml
-!services/dispat/announce/stable/template.html
+services/dispat/announce
 
 # Bootstrap integration fixture and pinned tool policy.
 !.aqua

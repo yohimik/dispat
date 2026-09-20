@@ -200,8 +200,8 @@ dispat draws on tools and ideas that make complex work easier to inspect, compos
   `go install github.com/yohimik/dispat/services/dispat@latest` working. It also attached six cross-compiled binaries
   to the CLI's GitHub release, published the four container images, and released the versioned documentation site.
   Every package received its own tag, changelog entry, and GitHub release. The release also announces itself: its
-  `announce` stage renders a card from the changelog it just wrote and posts it to Instagram and LinkedIn with
-  [crier](https://github.com/yohimik/crier), from the same Actions run, which
+  `announce` stage renders a card from the release notes it just wrote and posts it to Instagram, LinkedIn, and
+  Discord with [crier](https://github.com/yohimik/crier), from the same Actions run, which
   [the announcement page](https://dispat.dev/internals/announce/) describes.
 - **[crier](https://github.com/yohimik/crier)**: a single-package repository, one Go module and one binary, which
   renders HTML templates to images and video and posts them to fourteen social platforms. It shows that dispat needs no

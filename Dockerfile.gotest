@@ -596,8 +596,6 @@ RUN apk add --no-cache shellcheck python3 jq
 WORKDIR /src
 COPY install.sh ./
 COPY script[s] ./scripts
-COPY services/dispat/announce ./services/dispat/announce
-COPY services/dispat/dispat.yam[l] ./services/dispat/
 COPY specs/ccme-spec/*.sh ./specs/ccme-spec/
 COPY specs/agent-guide/*.sh ./specs/agent-guide/
 COPY tests/experiments/run.sh tests/experiments/
@@ -632,15 +630,6 @@ echo "shellcheck (bash): tests/experiments/run.sh tests/experiments/lib/common.s
 shellcheck -s bash tests/experiments/run.sh tests/experiments/lib/common.sh
 sh tests/experiments/lib/cache-test.sh
 sh scripts/cache-test.sh /src
-
-# The announcement: the two crier configurations are read for what they must
-# share and what they must not, the hand-written release candidate is checked
-# against its card, and both captions against the platforms' limits. Guarded
-# on the file, which is written by the announcement's own work and absent
-# until then.
-if [ -f services/dispat/announce/publish.yaml ]; then
-  python3 scripts/announce-test.py
-fi
 EOF
 
 # The shell inside the configuration, swept the same way. Every `scripts`

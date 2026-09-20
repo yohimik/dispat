@@ -8,8 +8,8 @@
 #
 # One image post per platform: a cover, then the notes. Everything a candidate
 # says is written by hand, and not in this file: the caption is notes.yaml and
-# the same words are on the card, template.html. Edit those two before a
-# candidate ships; scripts/announce-test.py fails when they differ.
+# the same words are on the card, template.html. Edit those two together
+# before a candidate ships.
 render:
   # The candidate's face: a faint lattice on near-black, a dependency graph's
   # ruling seen through the panel, with the section labels set as spaced
