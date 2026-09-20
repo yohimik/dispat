@@ -5558,11 +5558,30 @@ grammar, bump lattice, train and fresh windows, holds, cancellation, corrections
 partial-publication guarantees defined above. Git is REQUIRED for every participating repository. Activating this
 profile does not activate or claim conformance with the external adapter or rollback protocols of §§25–26.
 
-The profile supports two configuration ownership layouts. Sections 27.1–27.10 specify central ownership, in which one
-**control repository** composes the fleet, owns its intent, and records a gitlink checkpoint after each source release.
-Section 27.11 specifies peer ownership, in which no repository is the control repository. The independent link-graph
-choice in §27.11 is minimal or star; star topology does not imply central configuration ownership. Existing centrally
-owned configurations retain their established behavior.
+An engine operates in one of three modes, distinguished by which Git histories it reads and how it finds
+them:
+
+1. **Single history.** The profile is inactive (§27.1). One repository's history is the only history.
+2. **Specified histories.** The entry configuration states which histories take part: linked repositories whose
+   packages it declares or whose configurations it imports. Sections 27.1–27.10 specify this mode. They call the
+   repository that holds the entry configuration the **control repository**, and the linked repositories its sources.
+3. **Discovered histories.** Every repository states its own identity, and the engine discovers the participating
+   histories and their configurations by walking fleet links whose shape is a topology, minimal or star. Section 27.11
+   specifies this mode. No repository is the control repository, and a star topology does not make its centre one.
+
+Existing configurations of the second mode retain their established behavior.
+
+The control repository of the second mode is where the fleet's configuration, its fleet-wide intent and its optional
+checkpoint evidence live. It is not the place releases come from, and nothing in this profile confines publication to
+it. Every package is built and published from its own path and is recorded by a tag in its owning repository (§27.7), a
+source-owned package is never published through a control-owned wrapper (§27.3), and a control checkpoint is optional
+evidence written after a source record, never a precondition of one. A source repository also remains an ordinary
+repository. A release it makes on its own in the first mode is conforming, and a later fleet plan reads its reachable
+source tag exactly as it reads any tag-only release: direct source history needs no control boundary, and a
+cross-repository boundary across that tag is proven by a checkpoint that satisfies §27.6 or stated by an explicit
+tuple. The second mode fixes the inputs of a fleet run, which are the entry configuration, the fixed snapshot of §27.2
+and the specified histories. It does not fix the directory or the repository the engine is invoked from, and an
+implementation MAY accept a fleet run started anywhere it resolves that same input.
 
 ### 27.1 Activation and compatibility
 
@@ -5662,11 +5681,11 @@ repositoryBaselines:
 
 `configs` is a control-file array of file paths. Each path is relative to that control file; each `--configs` path is
 relative to the control root. Canonical duplicate paths are loaded once. An imported root MUST NOT declare another
-fleet `configs` list; every participating source is named by the control run. Imports are explicit configuration
-composition: the named file establishes that source's ordinary repository-local root, space, and package layering,
-including its explicit references and normal in-folder configuration. Central path traversal alone establishes no such
-root and MUST NOT infer source configuration. `--config` continues to select the one control file and does not become
-repeatable.
+fleet `configs` list; every imported source is named by the entry configuration or by the invocation. Imports are
+explicit configuration composition: the named file establishes that source's ordinary repository-local root, space,
+and package layering, including its explicit references and normal in-folder configuration. Central path traversal
+alone establishes no such root and MUST NOT infer source configuration. `--config` continues to select the one control
+file and does not become repeatable.
 
 An imported package or space path is relative to the source repository that owns the imported file. A path declared
 in the control configuration retains its existing control-relative spelling, and its canonical location determines the
@@ -5754,7 +5773,7 @@ is reused. A propagation walk may be shared only for equal source set, depth, an
 
 ### 27.6 Cross-repository consumer boundaries
 
-The profile adds no ledger, tag payload, metadata ref, or timestamp convention. Under central hub topology it
+The profile adds no ledger, tag payload, metadata ref, or timestamp convention. With specified histories it
 reconstructs a consumer's position in a source repository from normal source release tags and ordinary control gitlink
 history, or requires an explicit baseline tuple; §27.11 states what a fleet with no control repository reads instead.
 
@@ -5972,6 +5991,10 @@ in the one-time history-walk bound above.
 27. A successful nested native record advances a source while another package script from the same run is already
     active. **Admit only the exact exported full commit ID.** Transient run coordination may make that pin visible to a
     later nested command in the active script; it is removed at run completion and supplies no baseline on a later run.
+28. Source `core-source` releases its package `core` on its own in single-history mode, and the control gitlink is later
+    moved to that release. **Accept the source tag as `core`'s baseline; no fleet run has to have produced it.**
+    Refusing or discounting the tag because the control repository did not start the release is non-conforming. A
+    cross-repository boundary across such a tag has no checkpoint and takes an explicit tuple, as in vector 14.
 
 ### 27.11 Linked peer topology
 
@@ -6017,8 +6040,8 @@ diagnostic for an unmaterialized link MUST name the command that initializes exa
 inside another repository's linked checkout is the ordinary way to meet it.
 
 **The fixed fleet snapshot.** The snapshot of §27.2 is the head each composed peer holds when the walk reads it,
-together with the relevant release-tag refs. A recorded gitlink MUST NOT be required to equal that head: under this
-saga a pin is **advisory**. Two peers that link each other cannot both record the other's current revision, so exact
+together with the relevant release-tag refs. A recorded gitlink MUST NOT be required to equal that head: in this
+mode a pin is **advisory**. Two peers that link each other cannot both record the other's current revision, so exact
 pin equality is unachievable in principle and MUST NOT be reported as `E330`. Everything else §27.2 requires is
 unchanged: the engine retains each observed head as planning's initial boundary, revalidates every participating
 repository after the fleet `beforeAll` hooks and each package's relevant closure before its publish command, and
@@ -6040,14 +6063,14 @@ configuration alone: a peer owns its policy, but whether it takes part in this r
 naming no member of the entry's roster is `E332`, and so is excluding the repository the run started in.
 
 **Scope.** Every unit is repository-local, the entry's included: a unit can directly resolve only packages owned by
-the repository whose history carries it. This saga has no repository whose units address the whole fleet. Propagation
+the repository whose history carries it. This mode has no repository whose units address the whole fleet. Propagation
 across the combined graph is unaffected and remains the cross-repository path. The consequence for §27.4 is that the
 control directive which resolves incomparable revisions does not exist here: where the existing rule requires a single
 winner and the competing revisions are incomparable, the engine MUST report `E334` and MUST NOT pick by date,
 traversal order, repository name or SHA. A commit that only moved a fleet link MUST NOT be read as a change to any
 package, for the reason §27.4 already gives about gitlink moves.
 
-**Cross-repository boundaries.** Section 27.6 is replaced for this saga; its remedy is not. A consumer's position in
+**Cross-repository boundaries.** Section 27.6 is replaced for this mode; its remedy is not. A consumer's position in
 another repository is proven from the links the release itself recorded, and automatic reconstruction is valid only
 when all of this holds:
 
