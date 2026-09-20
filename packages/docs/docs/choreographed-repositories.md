@@ -245,6 +245,10 @@ Because a settlement commits and pushes in a repository, that repository's `befo
 `postCommit`, `beforePush` and `afterPush` hooks bracket it, outside the advisory lock and only when a commit or a push
 actually happens.
 
+A settlement moves a repository's head before the package publishes, and dispat admits exactly the revision it wrote
+as that repository's expected head. It checks the head the run expects before it writes, so a head that anything else
+moved is still `E330`.
+
 ## Freshness, and a pin that never outruns its target
 
 Before it records a revision of a peer, a repository that pushes asks that peer's own remote whether it already holds

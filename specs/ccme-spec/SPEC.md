@@ -2703,7 +2703,8 @@ unqualified end-to-end upper bound.
 Notation: `P` packages, `E` workspace dependency edges, `H` commits and `A` parent edges in the history reachable from
 the fixed `HEAD`, `C` commits in the union of all pending windows, `U` units in those commits, `N` total bytes of their
 messages and changed paths, `T` reachable tags, and `M` tag-record/package-format matches examined while partitioning
-the inventory (at worst `P · T`). `k` is the number of **distinct** commits carrying a stable baseline. `R` is the
+the inventory (at worst `P · T`). `k` is the number of **distinct** commits carrying a boundary: a stable baseline, or
+a package's newest baseline of any channel where that is another commit. `R` is the
 actual work of resolving scopes and changed paths against the workspace, including candidates examined when the result
 is empty. `I` is the number of resulting unit-to-package incidences (and can be `P · U`). `Z` is the number of
 unit/source/target contribution or provenance incidences retained or emitted. `F` is the number of publish failures,
@@ -2714,9 +2715,13 @@ its resolved scope-set size.
 For the polyrepository profile, `H` and `A` below mean the sums over the fixed reachable snapshots of all repositories,
 not the size of a fictitious merged history. Let `Q` be the number of repositories, `Hq` and `Aq` one repository's
 reachable commits and parent edges, `G` the number of control-repository gitlink transitions examined, and `Kq` the
-number of distinct `(stable boundary, fresh boundary)` pairs used in repository `q`. Let `V` be the number of package
-memberships in shared-version groups (`V <= P`). The implementation MUST preserve repository identity in every index
-and cache key.
+number of distinct boundary revisions used in repository `q`, stable and newest-baseline boundaries counted together
+and the no-boundary class counted once. `Kq` counts revisions and not `(stable, fresh)` pairs, which can number the
+product of the two. Let `V` be the number of package memberships in shared-version groups (`V <= P`). Under the linked
+peer topology of §27.11 there is no control index and `G` is zero; let `X` be the number of `(consumer release tag,
+repository)` boundaries resolved, `Y` the number of hops in the longest route between two peers (at most `Q - 1`, and at
+most 2 in a star), and `B` the number of distinct `(repository, revision)` trees whose fleet links are read (`B <= X ·
+Y`). The implementation MUST preserve repository identity in every index and cache key.
 
 | Phase                      | Literal transcription | Achievable            | Note                                        |
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
@@ -2736,7 +2741,9 @@ and cache key.
 | Blocking closure (§19.3)   | `O(F · (P + E))`      | `O(P + E)` per run    | One multi-source reverse traversal          |
 | Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
 | Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum(Kq · (Hq + Aq)) + Iw)` | Boundaries share only within one repository |
-| Publication input closure (§27.2) | `O(P · (P + E + V))` | `O(Q · (P + E + V))` | One augmented graph traversal per repository |
+| Publication input closure (§27.2) | `O(P · (P + E + V))` | `O((P + E + V) · ceil(Q / wordSize))` | Condense the augmented graph, then one bitset union per edge |
+| Link evidence (§27.11)     | `O(X · (Q + Y))`, `X · Y` tree reads | `O(Q + X · Y)`, `B` tree reads | Root the link tree once; read each `(repository, revision)` tree once |
+| Link settlement (§27.11)   | one commit per route hop | one commit per recording repository | Merge a package's routes into one tree: at most `Q - 1` commits, 2 in a star |
 
 The bold rows are the ones that matter. Each contains quantities that can be large in a workspace with thousands of
 packages and a long history. Window classes safely share history reachability work. Propagation traversal is reusable
@@ -2751,7 +2758,13 @@ Ancestry and walk caches MUST be bounded by configured memory or by an eviction 
 can itself grow quadratically in `Hq`. No cache may synthesize ancestry between repositories.
 
 The publication input closure is over the graph augmented with shared-version-group membership, as §27.2 defines.
-Computing one repository's reachable package set at a time avoids a graph walk per release. A dense representation
+Dependency edges alone are acyclic, but a group joins its members in both directions, so dependency and group edges can
+form a cycle and a single topological pass over packages does not reach the fixed point. Represent each group as one
+node adjacent to its members, condense the strongly connected components of that graph in `O(P + E + V)`, and visit
+the components in reverse topological order: a component's repository set is its members' owners united with the sets
+of the components it reads, one bitset union per condensed edge. Every member of a component has the same closure, so
+the result is exact. Computing one repository's reachable package set at a time, `O(Q · (P + E + V))`, also avoids a
+graph walk per release and is a valid intermediate that gives up the word-parallel factor. A dense representation
 costs `O(P · ceil(Q / wordSize))` words before equal sets are interned; interning reduces repeated storage but does not
 change that worst case. Expanding every distinct bitset into repository-name slices raises retained storage to `O(P ·
 Q)` name references in the worst case; implementations SHOULD keep the compact form across internal boundaries or at
@@ -2760,9 +2773,14 @@ once and visit its members as one adjacency list instead.
 
 **Windows: group by distinct baseline commit.** For a fixed `HEAD`, `W(P)` is determined by
 `stableCommit(P)`. Different package tags that resolve to the same commit therefore share a window. A release MAY
-record packages at different commits; `k` counts distinct baseline commits, not release runs, and can be as large as
-`P`. Computing reachability once per distinct `s`, plus once for packages with no baseline, and testing membership by
-lookup replaces `P` traversals with at most `k + 1`.
+record packages at different commits; `k` counts distinct boundary commits, not release runs, and can be as large as
+`2P`. Computing reachability once per distinct boundary commit, plus once for packages with no baseline, and testing
+membership by lookup replaces `P` traversals with at most `k + 1`. The fresh window needs no class of its own. By
+§13.3, `Wfresh(P) = W(P) - reach(baselineCommit(P))`, so with `after(b) = reach(HEAD) - reach(b)` a commit is in
+`Wfresh(P)` exactly when it is in both `after(stableCommit(P))` and `after(baselineCommit(P))`. Every window is
+therefore a function of one boundary commit, a fresh membership test is the conjunction of two lookups, and no
+reachability set is keyed by a `(stable, fresh)` pair. The identity holds whether or not the newest baseline descends
+from the stable one.
 The traversals range over the reachable history, so their safe bound is in `H + A`, not `C`: proving that a commit is
 outside a pending window may require walking commits that never enter the union. `Iw` is the number of stored or emitted
 package/window memberships and is `P · C` in the worst case.
@@ -2777,13 +2795,16 @@ Window storage may likewise be shared only inside one plan and fixed history sna
 boundary identity is equal (with a separate no-baseline class). The shared membership set MUST be immutable. `Wfresh(P)`
 also depends on `P`'s newest baseline of any channel: two packages can share `W(P)` because their stable baseline commit
 is equal while having different prerelease `baselineCommit(P)`, so fresh/contained membership MUST remain per package
-or be keyed by that second boundary too.
+or be keyed by that second boundary too. Keying the second operand by its own boundary commit, as above, satisfies this
+without a class per pair.
 
-In the polyrepository profile, the repository identity is also part of the window key. Two equal SHA byte strings in
-different repositories are unrelated. Within one repository, packages may share an immutable train window only when
-their stable boundary is equal, and may share a fresh window only when both stable and newest-baseline boundaries are
-equal. This is the `Kq` grouping above. A control snapshot's gitlink index can locate those boundaries, but it cannot
-replace the source repository's ancestry walk.
+In the polyrepository profile, the identity of the repository whose history a window ranges over is also part of the
+window key. Two equal SHA byte strings in different repositories are unrelated. A window over repository `q` is a
+function of `q`, its planned head, and one boundary revision in `q`, and of nothing else: packages may share an
+immutable window over `q` exactly when their boundary in `q` is the same qualified revision, whichever repositories
+own them. A materialised fresh window may be shared only when both its stable and newest-baseline boundaries are equal.
+This is the `Kq` grouping above. A control snapshot's gitlink index or a linked peer's recorded links can locate those
+boundaries, but neither can replace the source repository's ancestry walk.
 
 Commit-graph generation numbers can reject some ancestry candidates and bound a graph walk. They do not establish
 ancestry by a constant-time comparison: commits on different branches can have ordered generation numbers without
@@ -2791,7 +2812,7 @@ an ancestor relationship. A positive answer still requires a reachability query 
 See Git's [commit-graph design](https://git-scm.com/docs/commit-graph).
 
 Storing `W(P)` as an explicit set per package costs `O(P · C)` **memory**. A dense representation over every reachable
-history index uses `k + 1` bitsets of `H` bits: one for each distinct stable baseline plus the no-baseline window class.
+history index uses `k + 1` bitsets of `H` bits: one for each distinct boundary commit plus the no-baseline window class.
 Alternatively, after the pending union is known, a representation indexed only by its `C` commits uses
 `O((k + 1) · C)` bits, but computing that union and each membership still requires reachability over `H + A`. A sparse
 representation costs in `Iw`, the actual membership incidences. Each makes §13.4a admission a membership lookup; none
@@ -5722,9 +5743,12 @@ local direct source set, and then propagates through the one combined graph. Adm
 `commitOf(u) in Wfresh(D)`, but for a consumer `D` in another repository that membership means that `D`'s last release
 had not yet incorporated the qualified source revision. Section 27.6 defines how that consumer position is proven.
 
-Stable train aggregation and fresh admission remain separate. Packages can share an immutable train window only when
-they have the same owning repository and stable boundary; they can share a fresh window only when their owning
-repository, stable boundary, and newest baseline boundary are all equal. Holds, cancellation, correction, channel
+Stable train aggregation and fresh admission remain separate. A window ranges over one repository's history, which for
+a cross-repository consumer is not the repository that owns the package. Packages can share an immutable train window
+over a repository only when their stable boundary in that repository is the same qualified revision; they can share a
+fresh window over it only when their stable boundary and newest baseline boundary there are both equal. The owners of
+the sharing packages need not be equal, because a window is a function of the history it ranges over, that
+repository's planned head and the boundary, and of nothing else (§13.11). Holds, cancellation, correction, channel
 transition matching, per-target admission, provenance, and warnings remain per unit and package even when a graph walk
 is reused. A propagation walk may be shared only for equal source set, depth, and edge kinds (§13.11).
 
@@ -5852,6 +5876,22 @@ With the notation of §13.11, input traversal is realistically `O(G + sum(Hq + A
 work, and window reachability is `O(sum(Kq * (Hq + Aq)) + Iw)` for an indexed implementation. Parsing, scope
 incidences, propagation, provenance, sorting, and output retain their separate `N`, `R`, `I`, `Z`, and `Oout` costs.
 This profile makes no globally linear end-to-end claim and permits no synthetic ancestry shortcut.
+
+Under the linked peer topology of §27.11 there is no control index, so `G` is zero and the evidence cost is in the
+links. The link graph is a tree, so rooting it once in `O(Q)` fixes every route, and an engine SHOULD NOT search the
+graph once per boundary. It SHOULD read the fleet links one `(repository, revision)` tree records at most once per plan
+and answer every later hop through that revision from the retained pins: the consumers of one hub ask about the same few
+revisions. With the notation of §13.11, boundary resolution is then `O(Q + X · Y)` lookups over `B` tree reads,
+against `X · Y` tree reads and `X` graph searches for a literal transcription. Those reads locate boundaries and do not
+replace the ancestry walk of the repository the boundary lies in.
+
+Settlement cost is a property of the link tree and not of the package graph. The routes from one consumer to the
+repositories its plan read form a subtree, and an engine SHOULD settle that subtree once, with one commit in each
+repository that has a next hop in it, not once per route. A package therefore settles with at most `Q - 1` commits,
+and with at most `Y` when it reads one repository. Both topologies of §27.11 use `Q - 1` links, the fewest that join
+`Q` peers and the only count at which every route is unique. They differ in `Y`: a star bounds every route at two hops
+and every settlement at two commits, while another tree can reach `Q - 1` of each. A pin that already records the
+revision to settle costs no commit, so consecutive packages of one repository that read unchanged peers settle once.
 
 Publication revalidation has a separate output-sensitive cost. If repository `q` participates in `Jq` fleet or
 package checks and its relevant tag snapshot contains `Tq` refs, a full-ref implementation performs
@@ -6045,6 +6085,14 @@ tag-only case above, it is not an error, and the engine MUST report it rather th
 created where the recorded pins already equal the revisions to record, and the engine MUST NOT create an empty commit
 to mark a settlement.
 
+A settlement moves the head of every repository it commits in, the consumer's own included, and it does so before the
+revalidation point of §27.2, which admits only a native record step of the owning package. The exact full commit ID a
+successful settlement produced is therefore an admitted transition of the repository it was written in, and it
+advances the run's expected head there exactly as an admitted record does. Before it writes, a settlement MUST verify
+that the repository still holds the head the run expects. A head that no settlement or admitted record produced remains
+`E330`. Without this admission the pre-publish revalidation of every settled consumer would refuse the head its own
+settlement wrote.
+
 A settlement commits and pushes in a repository, so that repository's ordinary commit and push hooks bracket it and
 run outside the advisory mutation lock, exactly as §27.7 requires of every other native transaction. A repository
 whose settlement must be pushed while it is at detached `HEAD` requires `commit.branch` and otherwise fails with
@@ -6157,3 +6205,9 @@ computation repairs.
     the fleet was skipped.
 27. `compute --topology star` is run without a non-empty `repository` identity. **Configuration error.** Topology
     selection does not turn a central or single-repository configuration into a linked peer fleet.
+28. The settlement of vector 13 commits in `core` and in `api` before `api`'s package publishes. **Admit exactly those
+    settlement revisions as the expected heads of `core` and `api`, so the pre-publish revalidation succeeds.** A head
+    either repository gained from anything else, including between the run's observation and the settlement, is `E330`.
+29. Consumers owned by `web` and by `api` have the same boundary `S0` in `sdk`. **One immutable window over `sdk` may
+    serve both.** A window is keyed by the repository it ranges over and the boundary revision, not by the owner of
+    the package that reads it; two boundaries that differ remain two windows.
