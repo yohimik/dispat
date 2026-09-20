@@ -1263,6 +1263,7 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestVersioningNonePackageSelection`        | Selecting a `none` package explicitly behaves according to the command: `release --package` reports the package does not release and exits 0, while `run --package` executes configured scripts.                             |
 | `TestVersioningNoneReleaseAsInert`          | Adding `Release-As` footers targeting `none` packages produces warning W238 and performs no version bump.                                                                                       |
 | `TestVersioningNoneReleaseOnlySettingsInert` | Release settings like `tagFormat` and publish stages are ignored on `none` spaces without raising config errors. Build scripts continue to execute under `dispat run`.                                                 |
+| `TestVersioningNoneProviderIsNeverReconciled` | A manifest naming a `none` package keeps the requirement it wrote: `dispat autoversion`, `autowriter --set-local`, and the release's version stage leave a `go.mod` pinned at `v1.0.0` unchanged instead of writing the `0.0.0` placeholder, and no W197 catch-up is reported. |
 
 ### Goal 35: spaces spanning several folders (`spacepaths_test.go`)
 
