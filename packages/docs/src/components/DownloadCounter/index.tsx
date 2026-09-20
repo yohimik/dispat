@@ -42,7 +42,7 @@ export default function DownloadCounter(): React.ReactElement {
       </div>
       <p className={styles.label}>GitHub release asset downloads + Docker Hub pulls</p>
       <p className={styles.freshness}>
-        {snapshot ? <>Collected {new Date(snapshot.collectedAt).toLocaleString()}{(failed || stale) && ' · refresh delayed'}</> : loading ? 'Loading count…' : 'Count unavailable'}
+        {snapshot ? <>Collected {new Date(snapshot.collectedAt).toLocaleString()}{(failed || stale)}</> : loading ? 'Loading count…' : 'Count unavailable'}
       </p>
     </div>
   );
