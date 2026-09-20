@@ -92,7 +92,18 @@ func TestIgnoreScopeLevelsConcatenate(t *testing.T) {
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "utils")
 	r.Commit("feat(core,utils): bootstrap")
-	r.ReleaseOK()
+	first := r.ReleaseOK("--log-level", "debug")
+	for _, packageName := range []string{"core", "utils"} {
+		var resolved harness.Event
+		for _, event := range first.Events {
+			if event.Str("message") == "package resolved" && event.Str("package") == packageName {
+				resolved = event
+				break
+			}
+		}
+		require.NotNil(t, resolved, "debug output must explain the resolved package")
+		assert.NotZero(t, resolved["ignoreLevels"], "debug output exposes inherited ignore policy")
+	}
 
 	// The space's patterns reach every one of its packages, and the
 	// repository's reach both spaces.

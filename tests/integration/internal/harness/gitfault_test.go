@@ -83,4 +83,13 @@ func TestGitFaultSelectsMatchesAndPassesTheRestThrough(t *testing.T) {
 		assert.NotContains(t, stderr, GitFaultMarker)
 		assert.Equal(t, 1, fault.Matches())
 	})
+
+	t.Run("a successful command loses its response", func(t *testing.T) {
+		fault := NewGitFault(t, GitFault{Pattern: "*--version*", After: true, Code: 128})
+		code, stdout, stderr := runThroughFault(t, fault, "--version")
+		assert.Equal(t, 128, code)
+		assert.Contains(t, stdout, "git version", "the real command ran before the injected failure")
+		assert.Contains(t, stderr, GitFaultMarker)
+		assert.Equal(t, 1, fault.Matches())
+	})
 }

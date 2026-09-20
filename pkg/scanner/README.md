@@ -22,6 +22,7 @@ roots, err = scanner.ScanRoot(ctx, "packages/web")
 Both methods share an error contract. If a manifest fails to parse, dispat skips it, joins its error into the returned
 error, and returns all successfully parsed manifests. This lets you report problems without discarding partial results.
 Reads are capped at 16 MiB per file (`ErrManifestTooLarge`), and output order is always deterministic.
+Scanning skips nonregular files, including named pipes and devices. Symlinks to regular manifests remain readable.
 
 ## Supported manifests
 

@@ -396,10 +396,18 @@ var ErrManifestTooLarge = errors.New("scanner: manifest exceeds 16 MiB")
 // the way the walk skips real directories.
 var errNotAFile = errors.New("scanner: not a regular file")
 
-// readManifest reads one manifest behind the size cap. The size is checked
-// against the open handle and again against what was read, so a file growing
-// between the two cannot slip past the cap.
+// readManifest reads one regular manifest behind the size cap. Stat before
+// opening keeps named pipes and devices from blocking the scanner; checking
+// the open handle too verifies the type actually read. Stat follows
+// symlinks deliberately: scanner reads symlinks to regular manifests.
 func readManifest(path string) ([]byte, error) {
+	before, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() {
+		return nil, errNotAFile
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -409,7 +417,7 @@ func readManifest(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if info.IsDir() {
+	if !info.Mode().IsRegular() {
 		return nil, errNotAFile
 	}
 	if info.Size() > maxManifestBytes {

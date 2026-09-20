@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
+package integration
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks proves
+// minimal topology treats a healthy link as part of the spanning tree. It
+// adds the single edge needed to reach that component and keeps the component's
+// existing edge as the only route between its members.
+func TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks(t *testing.T) {
+	fleet := newChoreographyFleet(t, "api", "sdk", "web", "shop")
+	fleet.link("api", "sdk")
+	fleet.link("sdk", "web")
+	fleet.follow("api", "sdk")
+	entry := fleet.enter("api")
+	fleet.materialize(entry, ".links/sdk", "web")
+	sdkPin := entry.Git("rev-parse", "HEAD:.links/sdk")
+	webPin := entry.Git("-C", ".links/sdk", "rev-parse", "HEAD:.links/web")
+
+	preview := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "minimal", "--check")
+	assert.Equal(t, 1, preview.Code, "%s\n%s", preview.Stdout, preview.Stderr)
+	assert.Contains(t, preview.Stdout, "+ link api shop")
+	assert.NotContains(t, preview.Stdout, "+ link api sdk")
+	assert.NotContains(t, preview.Stdout, "+ link api web")
+	assert.NotContains(t, preview.Stdout, "+ link sdk web")
+
+	result := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "minimal", "--write")
+	require.Equal(t, 0, result.Code, "%s\n%s", result.Stdout, result.Stderr)
+	assert.Contains(t, result.Stdout, "linked shop from api")
+	assert.NotContains(t, result.Stdout, "linked sdk from api")
+	assert.NotContains(t, result.Stdout, "linked web from api")
+	assert.Equal(t, ".links/shop",
+		entry.Git("config", "--file", ".gitmodules", "submodule.shop.path"))
+	assert.NotContains(t, readAbs(t, entry.Path(".gitmodules")), "submodule \"web\"",
+		"minimal topology must not add a second route from api to web")
+	assert.Equal(t, sdkPin, entry.Git("rev-parse", "HEAD:.links/sdk"),
+		"compute must keep the existing edge from the entry")
+	assert.Equal(t, webPin, entry.Git("-C", ".links/sdk", "rev-parse", "HEAD:.links/web"),
+		"compute must keep the existing edge inside the connected component")
+	assert.Equal(t, ".links/web",
+		entry.Git("-C", ".links/sdk", "config", "--file", ".gitmodules", "submodule.web.path"))
+}
+
+// TestComputeStarAddsOnlyMissingHubEdges proves star topology preserves a
+// direct entry edge that already exists and creates only the missing spoke.
+func TestComputeStarAddsOnlyMissingHubEdges(t *testing.T) {
+	fleet := newChoreographyFleet(t, "api", "sdk", "web")
+	fleet.link("api", "sdk")
+	entry := fleet.peer("api")
+	sdkPin := entry.Git("rev-parse", "HEAD:.links/sdk")
+
+	preview := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "star", "--check")
+	assert.Equal(t, 1, preview.Code, "%s\n%s", preview.Stdout, preview.Stderr)
+	assert.Contains(t, preview.Stdout, "+ link api web")
+	assert.NotContains(t, preview.Stdout, "+ link api sdk")
+
+	result := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "star", "--write")
+	require.Equal(t, 0, result.Code, "%s\n%s", result.Stdout, result.Stderr)
+	assert.Contains(t, result.Stdout, "linked web from api")
+	assert.NotContains(t, result.Stdout, "linked sdk from api")
+	assert.Equal(t, sdkPin, entry.Git("rev-parse", "HEAD:.links/sdk"),
+		"the existing spoke remains pinned at the revision the entry recorded")
+	assert.Equal(t, ".links/sdk",
+		entry.Git("config", "--file", ".gitmodules", "submodule.sdk.path"))
+	assert.Equal(t, ".links/web",
+		entry.Git("config", "--file", ".gitmodules", "submodule.web.path"))
+}

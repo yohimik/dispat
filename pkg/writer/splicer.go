@@ -51,14 +51,16 @@ type splicer struct {
 	rebuilt bool
 }
 
-// openSplicer reads the file at path, refusing one larger than the cap. The
-// size is checked against the open handle and again against what was read, so
-// a file growing between the two cannot slip past.
+// openSplicer reads a regular file at path, refusing one larger than the cap.
+// Lstat before opening prevents symlinks and special files from being followed
+// or blocking; the open handle is checked again before reading.
 func openSplicer(path string) (*splicer, error) {
 	if info, err := os.Lstat(path); err != nil {
 		return nil, err
 	} else if info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("%s: refusing to rewrite a symbolic link", path)
+	} else if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: refusing to rewrite a non-regular file", path)
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -68,6 +70,9 @@ func openSplicer(path string) (*splicer, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: refusing to rewrite a non-regular file", path)
 	}
 	if info.Size() > maxManifestBytes {
 		return nil, tooLarge(path, info.Size())

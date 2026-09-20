@@ -24,6 +24,7 @@ res, err = w.Rewrite("packages/web/package.json", "1.3.0", nil)
 All writes are atomic: dispat writes to a temporary file in the same folder, runs an fsync, and renames the file over
 the original. If nothing changed, dispat skips the write entirely. Manifest reads are capped at 16 MiB
 (`ErrManifestTooLarge`), and unsupported file paths return `ErrUnsupportedManifest`.
+Writers refuse symbolic links and nonregular files, including named pipes and devices, before opening them.
 
 Inspect the returned result to track three distinct outcomes. `Applied` lists the edits that modified the file on disk.
 `Skipped` contains declared dependencies whose versions cannot be updated, while `Missing` lists entries that the

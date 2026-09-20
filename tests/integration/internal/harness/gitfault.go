@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,6 +68,10 @@ type GitFault struct {
 	// scenario hands the code under test a reply it cannot parse, or a
 	// revision that is not the one on disk — so Code says nothing about it.
 	Output string
+	// After runs the real command before reporting failure. It models a lost
+	// response after a successful remote write; the caller must read durable
+	// state to distinguish it from a rejected write.
+	After bool
 
 	t       testing.TB
 	dir     string
@@ -109,6 +114,19 @@ func (f *GitFault) Env() []string {
 	if f.Onward {
 		onward = "1"
 	}
+	after := "0"
+	if f.After {
+		after = "1"
+	}
+	output := f.Output
+	outputFile := ""
+	if strings.ContainsRune(output, '\x00') {
+		outputFile = filepath.Join(f.dir, "fault-output")
+		if err := os.WriteFile(outputFile, []byte(output), 0o600); err != nil {
+			f.t.Fatalf("writing Git fault output: %v", err)
+		}
+		output = ""
+	}
 	return []string{
 		"PATH=" + f.dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"DISPAT_IT_GIT_REAL=" + f.realGit,
@@ -116,7 +134,9 @@ func (f *GitFault) Env() []string {
 		"DISPAT_IT_GIT_FAULT_CODE=" + strconv.Itoa(code),
 		"DISPAT_IT_GIT_FAULT_NTH=" + strconv.Itoa(f.Nth),
 		"DISPAT_IT_GIT_FAULT_ONWARD=" + onward,
-		"DISPAT_IT_GIT_FAULT_OUTPUT=" + f.Output,
+		"DISPAT_IT_GIT_FAULT_AFTER=" + after,
+		"DISPAT_IT_GIT_FAULT_OUTPUT=" + output,
+		"DISPAT_IT_GIT_FAULT_OUTPUT_FILE=" + outputFile,
 		"DISPAT_IT_GIT_FAULT_DIR=" + f.matches,
 	}
 }
@@ -162,6 +182,13 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 		selected=1
 	fi
 	if [ "$selected" -eq 1 ]; then
+		if [ "$DISPAT_IT_GIT_FAULT_AFTER" -eq 1 ]; then
+			"$DISPAT_IT_GIT_REAL" "$@" || exit "$?"
+		fi
+		if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE" ]; then
+			cat "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE"
+			exit 0
+		fi
 		if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT" ]; then
 			printf '%s' "$DISPAT_IT_GIT_FAULT_OUTPUT"
 			exit 0

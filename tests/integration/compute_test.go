@@ -240,6 +240,33 @@ func TestComputeSeedsInitialsFromManifests(t *testing.T) {
 	assert.Equal(t, 0, r.Command("compute", "--check").Code)
 }
 
+func TestComputeWithholdsBaselinesWhenReleaseTagsCannotBeRead(t *testing.T) {
+	repository := harness.New(t)
+	repository.WriteConfigModel(libsConfig(echoBuild, 1))
+	repository.SeedPackage("packages", "core")
+	repository.SeedPackage("packages", "web")
+	repository.WriteFile("packages/core/package.json", `{"name":"@acme/core","version":"1.4.2"}`)
+	repository.WriteFile("packages/web/package.json", `{"name":"@acme/web","version":"2.1.0","dependencies":{"@acme/core":"workspace:*"}}`)
+	repository.Commit("feat(core,web): bootstrap")
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*tag --list*", Code: 128})
+
+	result := repository.CommandEnv(fault.Env(), "compute", "--write")
+	require.Zero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+	assert.Contains(t, result.Stdout+result.Stderr, "cannot read the release tags; no baseline suggested")
+	assert.Equal(t, 2, fault.Matches(), "both packages must consult their release history")
+	config, err := os.ReadFile(repository.Path("dispat.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(config), `"web": [`)
+	assert.NotContains(t, string(config), `"initials"`, "a failed history read must not invent a release baseline")
+
+	retry := repository.Command("compute", "--write")
+	require.Zero(t, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+	assert.Contains(t, retry.Stdout, "+ initial core 1.4.2")
+	assert.Contains(t, retry.Stdout, "+ initial web 2.1.0")
+	assert.NotContains(t, retry.Stdout, "+ add", "the independently derived dependency was already saved")
+	repository.StatusOK()
+}
+
 // TestComputeKeepsExistingInitials: an entry already in the config is the
 // operator's own statement. compute never rewrites one, whatever the manifest
 // says and however the entry is spelled, which is what makes writing the

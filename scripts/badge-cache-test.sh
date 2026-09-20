@@ -62,7 +62,7 @@ if build >"$threshold_log" 2>&1; then
   echo 'badge accepted coverage below 95%' >&2
   exit 1
 fi
-grep -E 'combined coverage [0-9]+/[0-9]+ is below 95%' "$threshold_log" >/dev/null || {
+grep -E 'combined coverage [0-9]+/[0-9]+ \([0-9]+\.[0-9]+%\) is below 95\.0%' "$threshold_log" >/dev/null || {
   echo 'below-threshold profiles failed for an unrelated reason' >&2
   cat "$threshold_log" >&2
   exit 1

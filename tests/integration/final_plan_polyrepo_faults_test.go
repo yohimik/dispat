@@ -11,6 +11,7 @@ package integration
 // real CLI and prove a second run converges once Git answers again.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -308,20 +309,41 @@ func TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex(t *test
 // truncated framed log. That reply is not an empty source history; status
 // fails before presenting or recording a plan with the pending commit erased.
 func TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow(t *testing.T) {
-	f := finalPolyrepo(t)
-	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*log --format=*--diff-merges=first-parent HEAD*",
-		Output:  "truncated-unframed-commit",
-	})
-
-	res := f.control.CommandEnv(fault.Env(), "status")
-	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	combined := res.Stdout + res.Stderr
-	assert.Contains(t, combined, "malformed commit log record")
-	assert.Contains(t, combined, "lib-source history for core")
-	assert.NotContains(t, combined, "release plan ready")
-	assert.Equal(t, 1, fault.Matches(), "the corrupt source history reply was consumed once")
-	assert.Empty(t, polyrepoTags(f.control, "sources/lib"), "a truncated window records no release")
+	for _, scenario := range []struct {
+		name   string
+		object string
+		parent string
+		want   string
+	}{
+		{name: "truncated framing", want: "malformed commit log record"},
+		{name: "invalid commit identity", object: "not-an-object", want: "malformed commit log object id"},
+		{name: "invalid parent identity", parent: "not-a-parent", want: "malformed commit log parent"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			fleet := finalPolyrepo(t)
+			output := "truncated-unframed-commit"
+			if scenario.object != "" || scenario.parent != "" {
+				object := scenario.object
+				if object == "" {
+					object = fleet.control.Git("-C", "sources/lib", "rev-parse", "HEAD")
+				}
+				output = strings.Join([]string{object, scenario.parent, "Author", "author@example.test", "fix(core): pending"}, "\x1f")
+			}
+			fault := harness.NewGitFault(t, harness.GitFault{
+				Pattern: "*log --format=*--diff-merges=first-parent HEAD*", Output: output,
+			})
+			result := fleet.control.CommandEnv(fault.Env(), "status")
+			require.NotZero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+			combined := result.Stdout + result.Stderr
+			assert.Contains(t, combined, scenario.want)
+			assert.Contains(t, combined, "lib-source history for core")
+			assert.NotContains(t, combined, "release plan ready")
+			assert.Equal(t, 1, fault.Matches(), "the corrupt source history reply was consumed once")
+			assert.Empty(t, polyrepoTags(fleet.control, "sources/lib"), "an invalid window records no release")
+			healed := fleet.control.StatusOK()
+			assert.Equal(t, "0.0.0 -> 0.1.0", harness.GraphLine(healed.Events, "core").Str("version"))
+		})
+	}
 }
 
 // TestFinalPolyrepoMalformedTagInventoryCannotEraseThePublishedBaseline: the
@@ -329,29 +351,41 @@ func TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow(t *test
 // its history window. A truncated record cannot turn an existing 0.1.0 release
 // into a fresh package and reinterpret its pending fix as another first release.
 func TestFinalPolyrepoMalformedTagInventoryCannotEraseThePublishedBaseline(t *testing.T) {
-	f := finalPolyrepo(t)
-	f.control.Git("-C", "sources/lib", "tag", "-a", "core@0.1.0", "-m", "known release")
-	f.control.WriteFile("sources/lib/packages/core/fix.txt", "pending fix\n")
-	commitPolyrepoSource(t, f.control, "sources/lib", "fix(core): pending correction")
-	checkpointPolyrepoSource(t, f.control, "sources/lib")
-	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*tag --list --merged HEAD*",
-		Output:  "core@0.1.0-without-object-fields",
-	})
-
-	res := f.control.CommandEnv(fault.Env(), "status")
-	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	combined := res.Stdout + res.Stderr
-	assert.Contains(t, combined, "malformed tag inventory record")
-	assert.Contains(t, combined, "repository lib-source loading tags")
-	assert.NotContains(t, combined, "release plan ready")
-	assert.Equal(t, 1, fault.Matches(), "the corrupt ref inventory reply was consumed once")
-	assert.Equal(t, []string{"core@0.1.0"}, polyrepoTags(f.control, "sources/lib"),
-		"planning failure preserves the only published release")
-
-	healed := f.control.StatusOK()
-	assert.Equal(t, "0.1.0 -> 0.1.1", harness.GraphLine(healed.Events, "core").Str("version"),
-		"the real ref inventory restores the fix release window")
+	for _, scenario := range []struct {
+		name   string
+		record string
+		want   string
+	}{
+		{name: "missing fields", record: "core@0.1.0-without-object-fields", want: "malformed tag inventory record"},
+		{name: "missing peeled field", record: "core@0.1.0\t%s", want: "malformed tag inventory record"},
+		{name: "extra fields", record: "core@0.1.0\t%s\t\textra", want: "malformed tag inventory record"},
+		{name: "missing tag identity", record: "\t%s\t", want: "malformed tag inventory identity"},
+		{name: "invalid object identity", record: "core@0.1.0\tinvalid\t", want: "malformed tag inventory identity"},
+		{name: "invalid peeled identity", record: "core@0.1.0\t%s\tinvalid", want: "malformed peeled tag object id"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			fleet := finalPolyrepo(t)
+			fleet.control.Git("-C", "sources/lib", "tag", "-a", "core@0.1.0", "-m", "known release")
+			knownTag := fleet.control.Git("-C", "sources/lib", "rev-parse", "refs/tags/core@0.1.0")
+			fleet.control.WriteFile("sources/lib/packages/core/fix.txt", "pending fix\n")
+			commitPolyrepoSource(t, fleet.control, "sources/lib", "fix(core): pending correction")
+			checkpointPolyrepoSource(t, fleet.control, "sources/lib")
+			fault := harness.NewGitFault(t, harness.GitFault{
+				Pattern: "*tag --list --merged HEAD*", Output: strings.ReplaceAll(scenario.record, "%s", knownTag),
+			})
+			result := fleet.control.CommandEnv(fault.Env(), "status")
+			require.NotZero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+			combined := result.Stdout + result.Stderr
+			assert.Contains(t, combined, scenario.want)
+			assert.Contains(t, combined, "repository lib-source loading tags")
+			assert.NotContains(t, combined, "release plan ready")
+			assert.Equal(t, 1, fault.Matches(), "the corrupt ref inventory reply was consumed once")
+			assert.Equal(t, []string{"core@0.1.0"}, polyrepoTags(fleet.control, "sources/lib"))
+			assert.Equal(t, knownTag, fleet.control.Git("-C", "sources/lib", "rev-parse", "refs/tags/core@0.1.0"), "the existing tag is unchanged")
+			healed := fleet.control.StatusOK()
+			assert.Equal(t, "0.1.0 -> 0.1.1", harness.GraphLine(healed.Events, "core").Str("version"), "the real inventory restores the fix release window")
+		})
+	}
 }
 
 // TestFinalPolyrepoImportedConfigFaultRefusesUnattributedOwnership: an import

@@ -420,6 +420,7 @@ func TestManifestsScannerVerifyGates(t *testing.T) {
 	r := harness.New(t)
 	r.WriteFile("packages/web/package.json", webPackageJSON)
 	r.WriteFile("go.mod", "module example.com/m\n\ngo 1.25.0\n\nrequire example.com/dep v1.0.0\n")
+	r.WriteFile("Dockerfile", "FROM alpine:3.22\n")
 
 	clean := r.Command("scanner", "--log-format", "json", "--verify-unlinked")
 	assert.Equal(t, 0, clean.Code, "stderr:\n%s", clean.Stderr)
@@ -569,4 +570,11 @@ func TestManifestsWriterSetBuild(t *testing.T) {
 
 	failed := r.Command("writer", "--set-build", "banana", "AndroidManifest.xml")
 	assert.Equal(t, 1, failed.Code, "a word where an integer is required is refused")
+
+	printed := r.Command("writer", "--set-build", "43", "Info.plist")
+	require.Zero(t, printed.Code, "%s\n%s", printed.Stdout, printed.Stderr)
+	assert.Contains(t, printed.Stdout, "build number written")
+	assert.NotContains(t, printed.Stdout, "version written")
+	assert.Contains(t, readRepoFile(t, r, "Info.plist"), "<string>43</string>")
+	assert.Contains(t, readRepoFile(t, r, "Info.plist"), "<string>1.2.0</string>")
 }

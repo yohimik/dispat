@@ -67,6 +67,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// checkGit runs first so a repository without git still fails in its own
 	// words rather than on a raw `git tag`.
 	if err := a.checkGit(); err != nil {
+		a.log.Error().Err(err).Msg("cannot start release")
 		return nil, err
 	}
 	fleet, unlock, err := a.acquireReleaseLocks(ctx)
