@@ -15,12 +15,20 @@
 <html>
 <head>
 <style>
-  /* The release card dispat posts about itself: the documentation site's own
-     palette, on the near-black the site uses in dark mode.
+  /* The release card dispat posts about a release candidate of itself: the
+     documentation site's own palette, on the near-black the site uses in dark
+     mode. stable/template.html is the same card seen as print, for the stable
+     release that follows.
+
+     It carries the candidate's committed text, the same two files its captions
+     are built from: announcement.md is the notes and links.md is the links.
+     The first line of the notes is the cover's lede, the links sit on the cover
+     above the install commands, and the rest of the notes open the pages that
+     follow. A description therefore repeats its picture, links included.
 
      It paginates. Page one is the cover: the mark, the wordmark, the version
-     badge a thumbnail has to carry, and the install commands pinned to the
-     bottom edge. The changelog flows on from there across as many pages as it
+     badge a thumbnail has to carry, and the links and install commands pinned
+     to the bottom edge. The notes and then the changelog flow on from there across as many pages as it
      needs, under a repeated header and footer drawn in the page margins. A
      release with nothing much in it is one page and looks exactly as it
      always did. */
@@ -167,6 +175,23 @@
     max-width: 860px;
   }
 
+  /* The candidate's notes, as written: one paragraph per line of
+     announcement.md, in the order the caption prints them. They flow into the
+     changelog rather than ending their page, because every page spent here is
+     one fewer under render.pages-max. A paragraph moves to the next page whole
+     rather than splitting across two pictures. */
+  .notes h2 {
+    font-size: 22px; font-weight: 700; margin: 0 0 12px 0;
+    letter-spacing: 4px; color: {{ $accent }};
+    break-after: avoid;
+  }
+  .notes p {
+    font-size: 23px; line-height: 1.45; color: {{ $tint }};
+    margin: 0 0 14px 0;
+    overflow-wrap: break-word;
+    break-inside: avoid;
+  }
+
   .section { margin-top: 26px }
   .section h2 {
     font-size: 22px; font-weight: 700; margin: 0 0 10px 0;
@@ -225,6 +250,13 @@
   }
   .install .cmd + .cmd { margin-top: 2px }
   .install .cmd span { color: #4e7d64 }
+  /* The links to this candidate, printed where a reader can copy them: a
+     picture cannot be clicked. They share the install block's type and sit
+     above it, so the cover ends with where this release is and how to get it.
+     An address breaks anywhere rather than escaping the card. */
+  .install .link { overflow-wrap: anywhere }
+  .install .link span { color: {{ $accent }} }
+  .install .cmd + h2 { margin-top: 22px }
 </style>
 </head>
 <body>
@@ -237,17 +269,20 @@
     <div class="prompt">$ dispat release</div>
     <div class="badge">v{{ .version }}</div>
 
-    <div class="lede">
-      {{ if eq .channel "rc" }}Minimal or star links. One peer-owned release graph across repositories.
-      {{ else }}Release packages across languages. Versions, changelogs and publishing,
-      in dependency order.{{ end }}
-    </div>
+    <div class="lede">{{ index .announcement 0 }}</div>
 
     <div class="install">
+      <h2>LINKS</h2>
+      {{ range .links }}<div class="cmd link"><span>{{ .label }}</span> {{ .url }}</div>{{ end }}
       <h2>INSTALL</h2>
       {{ range .install }}<div class="cmd"><span>{{ if eq .label "action" }}-{{ else }}${{ end }}</span> {{ .command }}</div>{{ end }}
     </div>
   </div>{{ end }}{{ if .nocover }}<div class="version-only">v{{ .version }}</div>{{ end }}
+
+  {{ if not .coveronly }}<div class="notes">
+    <h2>NOTES</h2>
+    {{ range $i, $line := .announcement }}{{ if and $line (or $.nocover (gt $i 0)) }}<p>{{ $line }}</p>{{ end }}{{ end }}
+  </div>{{ end }}
 
   {{ if not .coveronly }}{{ range .sections }}
   <div class="section{{ if eq .label "BREAKING" }} breaking{{ end }}{{ if eq .label "PICKS UP" }} picks{{ end }}">

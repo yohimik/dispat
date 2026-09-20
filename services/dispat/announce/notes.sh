@@ -12,6 +12,10 @@
 # The variables are documented in reference/environment.md: entries are one per
 # line, in history order, and a group with no entries is set to empty text
 # rather than unset.
+#
+# `sh notes.sh --channel` prints only the channel the version selects, rc or
+# stable. announce.sh asks it that way to choose the channel's crier.yaml, so
+# the rule that reads a version lives in this file alone.
 set -eu
 
 version=${DISPAT_NEW_VERSION:-dev}
@@ -22,9 +26,22 @@ case "${version%%+*}" in
 *-*) printf 'announce: no announcement copy for prerelease version %s\n' "$version" >&2; exit 1 ;;
 *) channel=stable ;;
 esac
+if [ "${1:-}" = --channel ]; then
+	printf '%s\n' "$channel"
+	exit 0
+fi
+# A channel's fixed text is two files committed beside its crier.yaml, and
+# nothing else: announcement.md is the notes, links.md is one `Label: URL` per
+# line. The card and every caption are built from the same two files, so what a
+# picture says and what its description says cannot drift apart.
 announcement=$here/$channel/announcement.md
 if [ ! -s "$announcement" ]; then
 	printf 'announce: missing %s announcement copy\n' "$channel" >&2
+	exit 1
+fi
+links=$here/$channel/links.md
+if [ ! -s "$links" ]; then
+	printf 'announce: missing %s announcement links\n' "$channel" >&2
 	exit 1
 fi
 
@@ -46,6 +63,40 @@ max=${ANNOUNCE_MAX_ITEMS:-20}
 escape() {
 	sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r//g'
 }
+
+# expand writes the announced version into committed copy. The copy spells it
+# ${DISPAT_NEW_VERSION}, the way the github.footer lines in dispat.yaml do, so a
+# link can name this exact release without anybody editing a number into it.
+sed_version=$(printf '%s' "$version" | sed -e 's/[\\&|]/\\&/g')
+expand() {
+	sed -e "s|\${DISPAT_NEW_VERSION}|$sed_version|g"
+}
+
+# link_objects prints the {"label":…,"url":…} objects of a links file, comma
+# separated. A line that is not `Label: https://…` fails the run here, before
+# any output, rather than reaching a card as a link nobody can follow.
+link_objects() {
+	separator=""
+	while IFS= read -r line || [ -n "$line" ]; do
+		case "$line" in *[![:space:]]*) ;; *) continue ;; esac
+		line=$(printf '%s' "$line" | expand)
+		label=${line%%: *}
+		url=${line#*: }
+		case "$url" in
+		*[[:space:]]*) url="" ;;
+		https://*) ;;
+		*) url="" ;;
+		esac
+		if [ -z "$url" ] || [ "$label" = "$line" ]; then
+			printf 'announce: not a "Label: https://..." link: %s\n' "$line" >&2
+			return 1
+		fi
+		printf '%s{"label":"%s","url":"%s"}' "$separator" \
+			"$(printf '%s' "$label" | escape)" "$(printf '%s' "$url" | escape)"
+		separator=,
+	done <"$1"
+}
+link_list=$(link_objects "$links")
 
 # section prints one {"label":…,"items":[…],"more":N} object, or nothing at all
 # when the group is empty. An empty section is omitted rather than rendered
@@ -110,10 +161,11 @@ printf '"channel":"%s",' "$channel"
 printf '"announcement":['
 separator=""
 while IFS= read -r line || [ -n "$line" ]; do
-	printf '%s"%s"' "$separator" "$(printf '%s' "$line" | escape)"
+	printf '%s"%s"' "$separator" "$(printf '%s' "$line" | expand | escape)"
 	separator=,
 done <"$announcement"
 printf '],'
+printf '"links":[%s],' "$link_list"
 printf '"sections":[%s],' "$sections"
 printf '"install":['
 printf '{"label":"curl","command":"curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v%s/install.sh | DISPAT_VERSION=%s sh"},' \

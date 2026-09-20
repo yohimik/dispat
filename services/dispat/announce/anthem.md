@@ -2,11 +2,17 @@
 
 # The anthems
 
-The release picks one clip from a pool. Each is sixteen seconds of a
-public-domain recording, faded in and out, loudness-normalised to the
-same level (loudnorm I=-14, TP=-1.5), 48kHz stereo MP3.
+The release picks one clip from its channel's pool. Each is sixteen
+seconds of a public-domain recording, faded in and out,
+loudness-normalised to the same level (loudnorm I=-14, TP=-1.5), 48kHz
+stereo MP3.
 
-## anthem.mp3: Tchaikovsky, 1812 Overture
+The two channels do not share music. A stable release gets the arrival:
+the two clips under `stable/`, named by `stable/crier.yaml`. A release
+candidate gets the chase that leads up to it: the two clips under `rc/`,
+named by `rc/crier.yaml`.
+
+## stable/anthem.mp3: Tchaikovsky, 1812 Overture
 
 The bells-and-brass finale.
 
@@ -17,7 +23,7 @@ The bells-and-brass finale.
 - Composition 1880; the recording carries a Public Domain Mark on
   Wikimedia Commons.
 
-## anthem-stars-and-stripes.mp3: Sousa, The Stars and Stripes Forever
+## stable/anthem-stars-and-stripes.mp3: Sousa, The Stars and Stripes Forever
 
 The final grandioso strain, piccolos on top.
 
@@ -28,7 +34,7 @@ The final grandioso strain, piccolos on top.
 - Composition 1896; the file is marked Public domain on Wikimedia
   Commons.
 
-## anthem-william-tell.mp3: Rossini, William Tell Overture
+## rc/anthem-william-tell.mp3: Rossini, William Tell Overture
 
 The galop.
 
@@ -40,7 +46,7 @@ The galop.
   quiet; loudnorm brings it to the pool's level.
 - Composition 1829.
 
-## anthem-mountain-king.mp3: Grieg, In the Hall of the Mountain King
+## rc/anthem-mountain-king.mp3: Grieg, In the Hall of the Mountain King
 
 The closing accelerando, fortissimo.
 
@@ -51,14 +57,14 @@ The closing accelerando, fortissimo.
 - Trim: 132s to 148s of the 2m34s performance.
 - Composition 1875.
 
-The release's video story carries one of them as its soundtrack, chosen
-by the seeded pool machinery so a re-run of the same release picks the
-same clip. No platform's public API can name a licensed track, which is
+The release's video story carries one of its channel's two as its
+soundtrack, chosen by the seeded pool machinery so a re-run of the same
+release picks the same clip. No platform's public API can name a licensed track, which is
 how a hundred-year-old cannon barrage came to announce software; see
 crier's own [music notes](https://github.com/yohimik/crier/blob/main/docs/publishing/music.md).
 
 The four files and this page are copied from
 [crier's announce folder](https://github.com/yohimik/crier/tree/main/announce),
 which is where they were cut. dispat's announcement runs the same flow
-against the same pool, so the clips are the same bytes rather than a
-second cut of the same recordings.
+and divides that pool between its two channels, so the clips are the same
+bytes rather than a second cut of the same recordings.

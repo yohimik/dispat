@@ -180,11 +180,18 @@ jobs:
           [ -z "$CRIER_PUBLISH_INSTAGRAM_TOKEN$CRIER_PUBLISH_INSTAGRAM_USER_ID" ] || instagram=true
           [ -z "$CRIER_PUBLISH_LINKEDIN_TOKEN$CRIER_PUBLISH_LINKEDIN_AUTHOR_URN" ] || linkedin=true
           [ -z "$CRIER_PUBLISH_DISCORD_WEBHOOK_URL" ] || discord=true
-          ./ping-bin/crier ping --config services/dispat/announce/crier.yaml \
-            --publish-instagram-enabled="$instagram" \
-            --publish-linkedin-enabled="$linkedin" \
-            --publish-discord-enabled="$discord" \
-            </dev/null
+          # Both channel configurations, because this gate runs before the
+          # release has a version: the destinations are the same file, but each
+          # channel owns a card and a music pool that only its own ping reads.
+          for channel in rc stable; do
+            echo "::group::$channel"
+            ./ping-bin/crier ping --config "services/dispat/announce/$channel/crier.yaml" \
+              --publish-instagram-enabled="$instagram" \
+              --publish-linkedin-enabled="$linkedin" \
+              --publish-discord-enabled="$discord" \
+              </dev/null
+            echo "::endgroup::"
+          done
 
       # The release uses the exact executable that passed this gate.
       - name: Keep the verified crier

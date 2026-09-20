@@ -1,0 +1,56 @@
+# The card dispat posts about a release candidate.
+#
+# announce.sh drives this from dispat's announce stage for a version such as
+# 1.11.0-rc.1; stable/crier.yaml is its counterpart for a stable version. It is
+# not a project anybody runs by hand, though
+# `crier render --config services/dispat/announce/rc/crier.yaml` with some
+# DISPAT_* variables set is how the previews beside this file were made.
+#
+# One image post per platform: a cover followed by changelog pages.
+# Cover-only mode keeps the changelog in the caption.
+render:
+  # The candidate's face: a faint lattice on near-black, a dependency graph's
+  # ruling seen through the panel, with the section labels set as spaced
+  # capitals. It reads as the drawing of a release rather than the print of
+  # one, which is what a candidate is. The stable card shares every
+  # load-bearing rule with it (the page geometry, the margin boxes that carry
+  # the version badge and the page counter, the wrapping of a changelog entry)
+  # and differs in how it looks. The accents still vary with the run's seed,
+  # which announce.sh derives from the version, so every destination receives
+  # the same design.
+  template: template.html
+  # The data comes from announce.sh on standard input, built out of the
+  # release-notes variables. It has arrays in it, which an env: prefix cannot
+  # carry: this is the case stdin exists for.
+  data: "-"
+  width: 1080
+  height: 1080
+  background: "#101713"
+  format: jpeg
+  # Instagram will not fetch a PNG, and the card is flat colour, so quality
+  # costs little.
+  jpeg-quality: 92
+  # Only the fonts the two channels share: a release must not render differently
+  # because a runner has different fonts installed than a laptop. Poppins and
+  # Space Mono live under services/dispat/announce/fonts with their OFL
+  # licences, one folder up, which is why the base URL points there.
+  hermetic-fonts: true
+  base-url: ..
+  # The card paginates: page one is the cover, and a long changelog carries on
+  # across the pages after it. Ten is the default and it is stated here because
+  # it is load-bearing for this card: a release past it fails the render rather
+  # than posting a truncated version of itself, and notes.sh's own cap of
+  # twenty entries a section is what keeps a real release well under it.
+  pages-max: 10
+  video:
+    # Only the cover-story render enables video. Photo posts remain stills.
+    enabled: false
+    # The candidate's music is the chase: a galop and an accelerando, both
+    # still on their way somewhere. The arrival belongs to the stable release.
+    audio-pool:
+      - anthem-william-tell.mp3
+      - anthem-mountain-king.mp3
+
+# The same cross-posting as the stable channel, from the one file both share.
+publish:
+  $ref: ../publish.yaml

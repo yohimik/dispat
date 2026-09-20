@@ -1,0 +1,67 @@
+# Where dispat's release announcements post, for both channels.
+#
+# rc/crier.yaml and stable/crier.yaml each pull this file in as their whole
+# `publish` section, so a release candidate and a stable release reach the same
+# destinations with the same limits and the same caption. What a channel owns is
+# its card and its music, which live in its own folder and its own `render`
+# section. A destination added here is added to both.
+#
+# The same text appears in Instagram, LinkedIn and Discord: the channel's links,
+# its notes, then the changelog. The links and notes are the channel folder's
+# links.md and announcement.md, the same two files the card is drawn from, so a
+# description repeats its picture. Keep the links first so they survive the
+# platform's caption limit.
+caption: |-
+  {{ if eq .channel "rc" }}dispat v{{ .version }} is ready for testing.{{ else }}dispat v{{ .version }} is out.{{ end }}{{ range .links }}
+  {{ .label }}: {{ .url }}{{ end }}
+  {{ range .announcement }}
+  {{ . }}{{ end }}
+  {{ if .sections }}
+  What changed:{{ range .sections }}
+  {{ .label }}:{{ range .items }}
+  - {{ . }}{{ end }}{{ if gt .more 0 }}
+  - and {{ .more }} more{{ end }}{{ end }}
+  {{ end }}
+  Release packages across languages in dependency order.
+  Get started: https://dispat.dev
+
+  #golang #opensource #devtools #releaseengineering
+
+instagram:
+  enabled: true
+  api-base-url: https://graph.instagram.com/v25.0
+  poll-timeout: 5m
+  story: false
+  cover-story: true
+  # Ten rendered photos fit in one carousel. The script caps rendering to
+  # the same number, so crier cannot split an announcement into more posts.
+  max-attachments: 10
+
+linkedin:
+  # Enabled with the other destinations in a single publishing command.
+  # The shared render cap keeps every destination within one photo post.
+  enabled: false
+  max-attachments: 10
+
+discord:
+  mention-everyone: true
+  # Enabled with the other destinations. Incoming webhooks take
+  # ten ordered files in one multipart message, and crier never retries that
+  # request after an ambiguous failure.
+  enabled: false
+  max-attachments: 10
+  caption: |-
+    @everyone {{ if eq .channel "rc" }}dispat v{{ .version }} is ready for testing.{{ else }}dispat v{{ .version }} is out.{{ end }}{{ range .links }}
+    {{ .label }}: {{ .url }}{{ end }}
+    {{ range .announcement }}
+    {{ . }}{{ end }}
+    {{ if .sections }}
+    What changed:{{ range .sections }}
+    {{ .label }}:{{ range .items }}
+    - {{ . }}{{ end }}{{ if gt .more 0 }}
+    - and {{ .more }} more{{ end }}{{ end }}
+    {{ end }}
+    Release packages across languages in dependency order.
+    Get started: https://dispat.dev
+
+    #golang #opensource #devtools #releaseengineering

@@ -10,4 +10,4 @@ Publication remains a recoverable saga. If a provider publishes successfully and
 
 Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
 
-Preview your exact release plan safely with `dispat status`, which runs no release stages and acquires no release lock. Read the guide: https://dispat.dev/
+Preview your exact release plan safely with `dispat status`, which runs no release stages and acquires no release lock.

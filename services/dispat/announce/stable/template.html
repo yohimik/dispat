@@ -15,14 +15,14 @@
 <html>
 <head>
 <style>
-  /* The release card dispat posts about itself: the second face of it.
+  /* The release card dispat posts about a stable release of itself.
 
-     template.html is a panel of near-black under a faint lattice, with the
-     section labels set as spaced capitals. This one is the same card seen as
-     print: a deep pine wash with the light in one corner, a thin frame ruled
-     around the page, and the labels set as filled tags.
+     rc/template.html, the candidate's card, is a panel of near-black under a
+     faint lattice, with the section labels set as spaced capitals. This one is
+     the same card seen as print: a deep pine wash with the light in one corner,
+     a thin frame ruled around the page, and the labels set as filled tags.
 
-     Everything that carries meaning is shared with template.html letter for
+     Everything that carries meaning is shared with rc/template.html letter for
      letter: the page box and its margins, the running header and footer, the
      string that feeds the small badge, the cover height that pins the install
      block and pushes the changelog onto page two, and the wrapping rules that
@@ -34,12 +34,12 @@
   @font-face { font-family: "Space Mono"; font-weight: 400; src: url("fonts/space-mono/SpaceMono-Regular.ttf") }
   @font-face { font-family: "Space Mono"; font-weight: 700; src: url("fonts/space-mono/SpaceMono-Bold.ttf") }
 
-  /* Identical to template.html, deliberately: the running header and footer
+  /* Identical to rc/template.html, deliberately: the running header and footer
      are the card's furniture, and moving them between two layouts of the same
      release would read as two different projects. */
   @page {
     /* The page's own background rather than the root's, exactly as in
-       template.html and for the same reason: the margin boxes draw here. The
+       rc/template.html and for the same reason: the margin boxes draw here. The
        wash below is inset against it, which is what makes the ruled frame read
        as a card laid on the page. */
     background: #101713;
@@ -98,7 +98,7 @@
   }
   body {
     margin: 0;
-    /* The same padding as template.html, and for the same reason: the panel
+    /* The same padding as rc/template.html, and for the same reason: the panel
        extends past the text on every page, and the cover height subtracts it. */
     padding: 40px 44px;
     font-family: "Poppins", sans-serif;
@@ -174,7 +174,7 @@
     break-after: avoid;
   }
   .section ul { margin: 0; padding: 0; list-style: none }
-  /* The wrapping rules, shared letter for letter with template.html: up to
+  /* The wrapping rules, shared letter for letter with rc/template.html: up to
      three lines an entry, then the multi-line clamp, and an unbroken run
      breaks anywhere rather than escaping the card. */
   .section li {
@@ -236,9 +236,8 @@
     <div class="badge">v{{ .version }}</div>
 
     <div class="lede">
-      {{ if eq .channel "rc" }}Minimal or star links. One peer-owned release graph across repositories.
-      {{ else }}Release packages across languages. Versions, changelogs and publishing,
-      in dependency order.{{ end }}
+      Release packages across languages. Versions, changelogs and publishing,
+      in dependency order.
     </div>
 
     <div class="install">

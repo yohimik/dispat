@@ -70,12 +70,21 @@ elif [ "$CRIER_STAGE_MODE" = server ]; then
 fi
 export CRIER_STAGE_MODE
 
+# Each channel has a crier.yaml of its own: its card and its music. Both pull
+# the same publish.yaml, so the destinations never differ by channel. notes.sh
+# owns the rule that reads a version and refuses a channel with no policy.
+channel=$(sh "$here/notes.sh" --channel)
+config=$here/$channel/crier.yaml
+if [ ! -f "$config" ]; then
+	log "missing $channel crier configuration"; exit 1
+fi
+
 seed=$(printf '%s' "$version" | cksum | cut -d' ' -f1)
 data=$(mktemp)
 trap 'rm -f "$data"' EXIT
 sh "$here/notes.sh" >"$data"
-log "announcing v$version with one crier call (instagram=$instagram linkedin=$linkedin discord=$discord)"
-if "$crier" publish --config "$here/crier.yaml" --render-data - \
+log "announcing $channel v$version with one crier call (instagram=$instagram linkedin=$linkedin discord=$discord)"
+if "$crier" publish --config "$config" --render-data - \
 	--render-seed "$seed" --render-video-enabled=false --render-pages-max 10 \
 	--publish-instagram-enabled="$instagram" \
 	--publish-linkedin-enabled="$linkedin" \
