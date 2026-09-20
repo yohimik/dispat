@@ -25,6 +25,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
+	"github.com/yohimik/dispat/services/dispat/internal/httpx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -279,7 +280,7 @@ func (r *Releaser) once(ctx context.Context, call apiCall, attempt int) ([]byte,
 		}
 	}
 	start := time.Now()
-	resp, err := client.Do(req)
+	resp, err := httpx.Do(client, req)
 	if err != nil {
 		r.logCall(call, 0, attempt, start)
 		// net/http wraps a transport failure with the full request URL. The

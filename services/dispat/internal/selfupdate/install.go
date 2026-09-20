@@ -16,6 +16,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/yohimik/dispat/services/dispat/internal/httpx"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
@@ -257,7 +258,7 @@ func (i *Installer) fetch(ctx context.Context, a Asset, f *os.File, url string, 
 	// the fact that it was sent.
 	i.Log.Debug().Str("asset", a.Name).Bool("authenticated", authed).
 		Msg(i.what() + ": downloading the release asset")
-	resp, err := i.client().Do(req)
+	resp, err := httpx.Do(i.client(), req)
 	if err != nil {
 		return fmt.Errorf("%s: downloading %s: %w", i.what(), a.Name, err)
 	}

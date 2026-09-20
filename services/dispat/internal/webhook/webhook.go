@@ -29,6 +29,7 @@ import (
 	"github.com/rs/zerolog"
 	public "github.com/yohimik/dispat/pkg/models"
 
+	"github.com/yohimik/dispat/services/dispat/internal/httpx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
@@ -289,7 +290,7 @@ func (d *Dispatcher) attempt(ep Endpoint, del delivery) (status int, err error) 
 	if len(ep.Secret) > 0 {
 		req.Header.Set("X-Dispat-Signature", sign(ep.Secret, del.body))
 	}
-	resp, err := d.client.Do(req)
+	resp, err := httpx.Do(d.client, req)
 	if err != nil {
 		// Webhook paths and query strings frequently carry credentials.
 		// net/http wraps transport failures with the full request URL.

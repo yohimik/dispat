@@ -15,6 +15,7 @@ import (
 
 	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
+	"github.com/yohimik/dispat/services/dispat/internal/httpx"
 )
 
 const (
@@ -191,7 +192,7 @@ func (s *Source) get(ctx context.Context, url string, tolerate int, what string)
 	if s.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.Token)
 	}
-	resp, err := s.client().Do(req)
+	resp, err := httpx.Do(s.client(), req)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("%s: %s: %w", s.what(), what, err)
 	}

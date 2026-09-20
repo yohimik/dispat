@@ -571,12 +571,40 @@ func (p *Proc) Signal(sig os.Signal) {
 	require.NoError(p.repo.T, p.cmd.Process.Signal(sig))
 }
 
+// waitLimit is how long Wait lets a started process run on. Every scenario that
+// starts one either signals it or lets a short script finish, and the longest
+// script the suite writes sleeps thirty seconds, so a process still alive after
+// this is one that will never exit. Left unbounded, one such process held the
+// whole suite until `go test -timeout` fired an hour later, and the gate
+// reported a timeout rather than the test that caused it.
+const waitLimit = 3 * time.Minute
+
 // Wait blocks until the process exits and returns the run's outcome. The
 // output buffers are only read here, after the process is gone, so the
 // harness needs no synchronisation around them.
+//
+// A process that outlives waitLimit is killed and fails the test, with what it
+// had printed when the kill let its output be collected.
 func (p *Proc) Wait() RunResult {
 	p.repo.T.Helper()
-	err := p.cmd.Wait()
+	exited := make(chan error, 1)
+	go func() { exited <- p.cmd.Wait() }()
+	var err error
+	select {
+	case err = <-exited:
+	case <-time.After(waitLimit):
+		_ = p.cmd.Process.Kill()
+		select {
+		case <-exited:
+			p.repo.T.Fatalf("dispat was still running %s after the test began waiting for it, and was killed\nstdout:\n%s\nstderr:\n%s",
+				waitLimit, p.stdout.String(), p.stderr.String())
+		case <-time.After(10 * time.Second):
+			// A descendant still holds the output pipes, so the buffers are
+			// still being written and must not be read.
+			p.repo.T.Fatalf("dispat was still running %s after the test began waiting for it, and was killed; "+
+				"a descendant kept its output open", waitLimit)
+		}
+	}
 	code := 0
 	if err != nil {
 		var exitErr *exec.ExitError
