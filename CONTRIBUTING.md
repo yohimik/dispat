@@ -7,6 +7,8 @@ working procedure: how to pick up a task, what to verify, and what to record. Th
 [CCME specification](specs/ccme-spec/SPEC.md) owns the commit-message grammar, the release units, the corrections, and the
 diagnostic codes. Read them there and link to them rather than restating them.
 
+Keep review findings, audit summaries and task plans in the conversation. Never create or commit standalone review reports in this repository. Put lasting requirements and user-facing explanations in the existing guides, specifications or documentation.
+
 ## Code style
 
 Use ordinary Go composition: small cohesive types, explicit dependencies, and interfaces at the boundary that needs them. Apply a pattern when it solves a concrete problem. Do not add factories, wrappers, or inheritance-like layers merely to give a pattern a name.
