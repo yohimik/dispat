@@ -9,11 +9,11 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/subosito/gotenv v1.6.0
 	github.com/yohimik/dispat/pkg/ccme v1.0.0
-	github.com/yohimik/dispat/pkg/config v1.0.0
-	github.com/yohimik/dispat/pkg/manifest v1.2.0
+	github.com/yohimik/dispat/pkg/config v1.0.1
+	github.com/yohimik/dispat/pkg/manifest v1.2.1
 	github.com/yohimik/dispat/pkg/models v1.11.0-rc.0
-	github.com/yohimik/dispat/pkg/scanner v1.2.0
-	github.com/yohimik/dispat/pkg/writer v1.2.0
+	github.com/yohimik/dispat/pkg/scanner v1.2.1
+	github.com/yohimik/dispat/pkg/writer v1.2.1
 	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
