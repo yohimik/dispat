@@ -139,19 +139,35 @@ func (cp *computation) groupDepth(g *Release, groupName string, members []string
 type groupRule struct {
 	// depth is how many leading version components the group holds equal.
 	depth int
+	// counter and channels are the other two axes: whether the members that
+	// share a prefix also share one prerelease counter and one channel.
+	counter  model.Sharing
+	channels model.Sharing
 	// line is the version a member adopts to join the shared prefix: the
 	// group's baseline with everything below the shared depth zeroed, or the
 	// baseline itself while it is a prerelease the group has not passed.
 	// Meaningful only when hasLine is set.
 	line    ccme.Version
 	hasLine bool
+	// onTrain reports that the group sits on a shared prerelease train: its
+	// baseline is a prerelease whose shared prefix has already left the
+	// group's stable line, so the train's later prereleases and its
+	// graduation are movements of the shared part rather than of any one
+	// member's own tail.
+	onTrain bool
 }
 
-// newGroupRule reads the rule off the group's aggregate and its depth.
-func newGroupRule(g *Release, depth int) groupRule {
+// newGroupRule reads the rule off the group's aggregate, its depth, and the
+// axes its members carry. Every member of a group resolves the same
+// declaration, so the first is as good as the last.
+func newGroupRule(g *Release, first *Release, depth int) groupRule {
 	r := groupRule{depth: depth, hasLine: g.HasBaseline}
+	if space := first.Pkg.Space; space != nil {
+		r.counter, r.channels = space.CounterSharing, space.ChannelSharing
+	}
 	if g.HasBaseline {
 		r.line = groupTarget(g.Baseline, depth)
+		r.onTrain = g.Baseline.IsPrerelease() && !samePrefix(g.Baseline, g.Current, depth)
 	}
 	return r
 }
@@ -168,23 +184,135 @@ func (r groupRule) floor() ccme.Version {
 	return r.line.Core()
 }
 
-// groupMoves reports whether the group's shared prefix moves on this run,
+// engages reports whether the group versions its members as one on this run,
 // which is what decides between the two paths of applyFixedGroup.
 //
-// Sharing the whole version means every movement is the group's, so the full
-// depth always moves. A partial mode moves when the computed version leaves
-// the group's prefix behind, and stays moving while the group sits on a
-// prerelease train whose prefix has already left the stable line: that train's
-// later prereleases and its graduation belong to the whole group even though
-// neither of them moves the prefix again.
-func groupMoves(g *Release, d int) bool {
-	if d >= model.SharedVersioningDepth {
+// One sentence covers every axis: the group engages when a part of the
+// version it shares moves. The shared prefix moving is that for every group,
+// including the move onto the next train. Beyond it the axes differ. A shared
+// counter makes the whole train the group's, so its later prereleases and its
+// graduation are the group's too, and at the full depth every movement is,
+// because the group shares the whole version. An independent counter leaves
+// the train's own progress to each member and keeps only the channel, while
+// independent channels keep nothing else at all.
+func (r groupRule) engages(g *Release) bool {
+	if !samePrefix(g.Next, g.Baseline, r.depth) {
 		return true
 	}
-	if !samePrefix(g.Next, g.Baseline, d) {
+	if r.counter.IsIndependent() {
+		// A graduation or a switch still moves the group as one while the
+		// channel is shared, because the channel is a part of the version
+		// every member holds in common.
+		return r.channels.IsShared() && r.onTrain && g.IsChannelChanged()
+	}
+	if r.depth >= model.SharedVersioningDepth {
 		return true
 	}
-	return g.HasBaseline && !samePrefix(g.Baseline, g.Current, d)
+	return r.onTrain
+}
+
+// isAligned reports that a member already holds what the group shares and so
+// needs neither a catch-up nor a raise, whatever else its version says.
+//
+// It answers only under an independent counter, because that is the axis that
+// makes a member's own counter its own business: a member one prerelease
+// behind the line is where it is entitled to be, and reading the whole
+// version against the line would catch it up through the back door. With
+// independent channels the channel drops out of the question too, so a member
+// left on rc after the others graduated is not a laggard either. Under a
+// shared counter nothing is aligned this way and the whole version decides,
+// exactly as it always has.
+func (r groupRule) isAligned(rel *Release) bool {
+	if !r.counter.IsIndependent() || !r.hasLine || !rel.HasBaseline {
+		return false
+	}
+	if !samePrefix(rel.Baseline, r.line, r.depth) {
+		return false
+	}
+	return r.channels.IsIndependent() ||
+		channelOf(rel.Baseline, true) == channelOf(r.line, true)
+}
+
+// catchUp is the version a member behind the group's shared prefix is
+// released at, and the channel it lands on.
+//
+// With one counter across the group that is the line itself: the exact
+// version the group published, which is what joining a shared train means.
+// With a counter of its own the member joins the prefix at the start of its
+// own line instead, because the group's counter is not a number it shares.
+// With a channel of its own it joins on the channel its own baseline puts it
+// on, with the one exception the group's channel still reaches: the line
+// being a prerelease, which no member may publish a stable version of.
+func (r groupRule) catchUp(rel *Release) (ccme.Version, string) {
+	lineChannel := channelOf(r.line, true)
+	if r.counter.IsShared() {
+		return r.line, lineChannel
+	}
+	channel := lineChannel
+	if r.channels.IsIndependent() && rel.BaselineChannel != ccme.ChannelStable {
+		channel = rel.BaselineChannel
+	}
+	if channel == ccme.ChannelStable {
+		return r.line.Core(), ccme.ChannelStable
+	}
+	next, ok := prereleaseOnCore(r.line.Core(), rel.Baseline, rel.HasBaseline, channel)
+	if !ok {
+		// E182 territory: the member's own tag carries no counter to continue.
+		// The line is a version that does, and joining it is what the member
+		// was going to do anyway.
+		return r.line, lineChannel
+	}
+	return next, channel
+}
+
+// rideChannel is the channel a member takes when the group moves and the
+// channels are each member's own: its own, except that a ride onto a
+// prerelease group version follows it onto that prerelease line.
+//
+// A ride is the group's movement rather than the member's, so it must never
+// be the first publication of a stable version of a prefix the group has only
+// reached as a prerelease. The converse does not hold: a member on a
+// prerelease is never graduated by a ride, because ending a train is a
+// deliberate act (§11.5) and a movement nobody wrote for that member cannot
+// be it.
+func (r groupRule) rideChannel(g, rel *Release) string {
+	if rel.FixedRide && g.Next.IsPrerelease() && rel.Channel == ccme.ChannelStable {
+		return channelOf(g.Next, true)
+	}
+	return rel.Channel
+}
+
+// floorFor is the floor one member computes under on the per-member path: the
+// core of the group's line, withheld from a member that is on stable and has
+// only ever been there while the line is a prerelease. The group has
+// published no stable version of that core and a member must not be the first
+// to; that member keeps its own line, and alignment decides whether it joins
+// the train at all.
+func (r groupRule) floorFor(rel *Release) ccme.Version {
+	if !r.hasLine {
+		return ccme.Version{}
+	}
+	if r.line.IsPrerelease() &&
+		rel.Channel == ccme.ChannelStable && rel.BaselineChannel == ccme.ChannelStable {
+		return ccme.Version{}
+	}
+	return r.line.Core()
+}
+
+// reason names why the group engaged, or why it did not, for the trace line.
+func (r groupRule) reason(g *Release) string {
+	switch {
+	case !samePrefix(g.Next, g.Baseline, r.depth):
+		return "the shared prefix moves"
+	case r.counter.IsShared() && r.depth >= model.SharedVersioningDepth:
+		return "the whole version is shared"
+	case r.counter.IsShared() && r.onTrain:
+		return "the shared counter runs the train"
+	case r.onTrain && g.IsChannelChanged():
+		return "the shared channel moves"
+	default:
+		return "nothing shared moves"
+	}
 }
 
 // applyFixedGroup versions one versioning group and assigns the result to its
@@ -216,7 +344,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	}
 	g, channelCands := cp.fixedGroupAggregate(groupName, members)
 	depth := cp.groupDepth(g, groupName, members)
-	rule := newGroupRule(g, depth)
+	rule := newGroupRule(g, cp.rel[members[0]], depth)
 	cp.reportMajorSpread(g, groupName, members)
 
 	groupPin, hasPin := cp.fixedGroupPin(g, groupName, members, depth)
@@ -230,10 +358,12 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 			return // no correct plan exists; the run aborts, leave members untouched
 		}
 	}
+	engaged := g.IsChanged() && rule.engages(g)
 	if cp.log.Trace().Enabled() {
 		cp.log.Trace().Str("group", groupName).Strs("members", members).
 			Int("depth", depth).Str("target", g.Next.String()).
-			Bool("moves", g.IsChanged() && groupMoves(g, depth)).
+			Str("counter", rule.counter.String()).Str("channels", rule.channels.String()).
+			Bool("moves", engaged).Str("because", rule.reason(g)).
 			Bool("absorbed", g.absorbed).
 			Msg("plan: fixed group unified")
 	}
@@ -242,23 +372,23 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	// states (heterogeneous member baselines) leave a member changed while the
 	// aggregate is not — one member graduating while the max baseline is
 	// already stable. Both cases take the per-member path.
-	if !g.IsChanged() || !groupMoves(g, depth) {
-		floor := rule.floor()
+	if !engaged {
 		for _, name := range members {
 			rel := cp.rel[name]
-			rel.versionFloor = floor
+			rel.versionFloor = rule.floorFor(rel)
 			cp.versionOne(name, rel)
 		}
-		cp.alignFixedGroup(groupName, g, members, depth)
+		cp.alignFixedGroup(groupName, g, members, rule)
 		return
 	}
 
-	// Only now is a divergent channel a conflict. The group is about to take
-	// every member onto one channel, so the members that asked for another one
-	// have been overridden, which is what W236 reports. Had the group stayed
-	// put, each member would have kept the channel it asked for and there
-	// would have been nothing to report.
-	if len(channelCands) > 1 {
+	// Only now is a divergent channel a conflict, and only where one channel
+	// is about to be forced on every member: the members that asked for
+	// another one have been overridden, which is what W236 reports. Had the
+	// group stayed put, or were its channels each member's own, every member
+	// would keep the channel it asked for and there would be nothing to
+	// report.
+	if len(channelCands) > 1 && rule.channels.IsShared() {
 		cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
 			fmt.Sprintf("members of versioning group %q resolve to different channels %v; the group moves as one, using %q",
 				groupName, channelCands, g.Channel))
@@ -279,17 +409,26 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 		if rel.Pkg.Space.Versioning.IsSparse() && !own {
 			continue // sparse: an unchanged member keeps its previous version
 		}
+		rel.FixedRide = !own
+		if rule.channels.IsIndependent() {
+			// Only the core is the group's here, so the floor carries it and
+			// the member's own computation does the rest: its own channel,
+			// continuing its own counter.
+			rel.versionFloor = g.Next.Core()
+			rel.Channel = rule.rideChannel(g, rel)
+			cp.versionOne(name, rel)
+		} else {
+			rel.Next = g.Next
+			rel.Bump = g.Bump
+			rel.NewWork = rel.NewWork || g.NewWork
+			rel.Channel = g.Channel
+			rel.Pinned = rel.Pinned || g.Pinned
+		}
 		if !own {
-			rel.FixedRide = true
 			cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
 				"released at %s with no changes of its own, to keep versioning group %q on %s",
-				g.Next.String(), groupName, SharedPartName(depth)))
+				rel.Next.String(), groupName, SharedPartName(depth)))
 		}
-		rel.Next = g.Next
-		rel.Bump = g.Bump
-		rel.NewWork = rel.NewWork || g.NewWork
-		rel.Channel = g.Channel
-		rel.Pinned = rel.Pinned || g.Pinned
 	}
 }
 
@@ -568,20 +707,26 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 // published: then a member releasing that work computes its version from its
 // own smaller baseline, may land below the version the group already holds,
 // and the full sharing demands the raise.
-func (cp *computation) alignFixedGroup(groupName string, g *Release, members []string, depth int) {
-	if !g.HasBaseline {
+//
+// Under an independent counter the raise is the version floor's job instead.
+// The floor lifts what the group shares and leaves the rest to the member,
+// while this raise would hand the member the group's whole version, counter
+// included, which is the one number an independent counter says is not the
+// group's to give.
+func (cp *computation) alignFixedGroup(groupName string, g *Release, members []string, rule groupRule) {
+	if !rule.hasLine {
 		return // the group has never published: nothing to align to
 	}
-	target := groupTarget(g.Baseline, depth)
-	channel := channelOf(target, true)
+	target := rule.line
 	for _, name := range members {
 		rel := cp.rel[name]
-		if rel.Held {
+		if rel.Held || rule.isAligned(rel) {
 			continue
 		}
 		if rel.IsReleasing() {
-			if (depth < model.SharedVersioningDepth || g.absorbed) && versionLess(rel.Next, target) {
-				rel.Next, rel.Channel = target, channel
+			if rule.counter.IsShared() && versionLess(rel.Next, target) &&
+				(rule.depth < model.SharedVersioningDepth || g.absorbed) {
+				rel.Next, rel.Channel = target, channelOf(target, true)
 			}
 			continue
 		}
@@ -591,11 +736,12 @@ func (cp *computation) alignFixedGroup(groupName string, g *Release, members []s
 		if rel.HasBaseline && !versionLess(rel.Baseline, target) {
 			continue // already at (or somehow past) the group's shared prefix
 		}
+		next, channel := rule.catchUp(rel)
 		rel.FixedRide = true
-		rel.Next = target
+		rel.Next = next
 		rel.Channel = channel
 		cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
 			"released at %s with no changes of its own, catching up to versioning group %q's published version",
-			target.String(), groupName))
+			next.String(), groupName))
 	}
 }

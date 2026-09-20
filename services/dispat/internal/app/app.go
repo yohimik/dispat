@@ -312,6 +312,14 @@ func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency, exclu
 			if g := p.VersionGroupName(); g != "" && g != s.Name {
 				ev = ev.Str("versionGroup", g)
 			}
+			// The other two axes, named only where they are not the default,
+			// so the ordinary group's line stays the line it always was.
+			if s.CounterSharing.IsIndependent() {
+				ev = ev.Str("counter", string(s.CounterSharing))
+			}
+			if s.ChannelSharing.IsIndependent() {
+				ev = ev.Str("channels", string(s.ChannelSharing))
+			}
 		}
 		if len(p.Ignore) > 0 {
 			ev = ev.Int("ignoreLevels", len(p.Ignore))

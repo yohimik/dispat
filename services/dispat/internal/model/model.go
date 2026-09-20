@@ -105,6 +105,41 @@ func (v Versioning) IsShared() bool { return v.SharedDepth() > 0 }
 // scripts and are never versioned, tagged or published.
 func (v Versioning) IsReleasable() bool { return v != VersioningNone }
 
+// Sharing is one axis of a versioning group's rule beside its mode: whether
+// the group's members also hold their prerelease counter, or the channel they
+// sit on, in common.
+//
+// The zero value reads as SharingFixed, which is what a group declared as a
+// bare mode has always done, so a configuration that names neither axis plans
+// exactly as it did before the axes existed.
+type Sharing string
+
+const (
+	// SharingFixed holds the axis in common across the group.
+	SharingFixed Sharing = public.SharingFixed
+	// SharingIndependent leaves the axis to each member.
+	SharingIndependent Sharing = public.SharingIndependent
+)
+
+// IsIndependent reports whether the axis belongs to each member rather than
+// to the group.
+func (s Sharing) IsIndependent() bool { return s == SharingIndependent }
+
+// IsShared is IsIndependent's complement, written out because the planner
+// reads the question both ways round and a negated call at the point of use
+// reads as a double negative.
+func (s Sharing) IsShared() bool { return !s.IsIndependent() }
+
+// String spells the axis as configuration writes it, with the zero value
+// rendered as the default it means rather than as nothing at all: a log line
+// saying an axis is empty tells a reader less than one saying it is fixed.
+func (s Sharing) String() string {
+	if s == "" {
+		return string(SharingFixed)
+	}
+	return string(s)
+}
+
 // Space groups packages that share build and publish behaviour. A package
 // whose configuration overrides its space's carries its own Space value — a
 // derived copy with the overrides applied — so every consumer of Space reads
@@ -161,6 +196,14 @@ type Space struct {
 	// value means the space's own group. Only read when Versioning is
 	// shared.
 	VersionGroup string
+	// CounterSharing and ChannelSharing are the group's other two sharing
+	// axes, carried here beside the mode for the same reason the mode is:
+	// every member needs the whole rule, and a package resolves its copy
+	// through the group it joined. Both are the group's, never the member's,
+	// so every member of one group carries the same pair. Only read when
+	// Versioning is shared.
+	CounterSharing Sharing
+	ChannelSharing Sharing
 	// Scripts is the effective script map of the package this Space was
 	// derived for: the file's scripts, overlaid with the space's, overlaid
 	// with the package's, keyed by the name the nearest layer that declared it

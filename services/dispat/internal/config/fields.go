@@ -69,7 +69,7 @@ func fileFields(dst *File) fields {
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
 		"isbuildwaitingpublish": flagPtr(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
-		"versioning":            str(&dst.Versioning),
+		"versioning":            versioningMode(&dst.Versioning),
 		"src":                   str(&dst.Src),
 		"ignore":                strs(&dst.Ignore),
 		"commiterrors":          str(&dst.CommitErrors),
@@ -91,7 +91,7 @@ func spaceConfigFields(dst *SpaceConfig) fields {
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
 		"webhooks":              objList(&dst.Webhooks, webhookFields),
-		"versioning":            str(&dst.Versioning),
+		"versioning":            versioningMode(&dst.Versioning),
 		"versiongroup":          str(&dst.VersionGroup),
 		"scripts":               scriptMap(&dst.Scripts),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
@@ -117,7 +117,7 @@ func spaceFileFields(dst *SpaceFile) fields {
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
 		"webhooks":              objList(&dst.Webhooks, webhookFields),
-		"versioning":            str(&dst.Versioning),
+		"versioning":            versioningMode(&dst.Versioning),
 		"versiongroup":          str(&dst.VersionGroup),
 		"scripts":               scriptMap(&dst.Scripts),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
@@ -153,7 +153,7 @@ func packageConfigFields(dst *PackageConfig) fields {
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
 		"webhooks":              objList(&dst.Webhooks, webhookFields),
-		"versioning":            str(&dst.Versioning),
+		"versioning":            versioningMode(&dst.Versioning),
 		"versiongroup":          str(&dst.VersionGroup),
 		"scripts":               scriptMap(&dst.Scripts),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
@@ -168,10 +168,12 @@ func packageConfigFields(dst *PackageConfig) fields {
 }
 
 // versionGroupFields is one entry of `versionGroups`: a declared group owns
-// its versioning mode and nothing else.
+// its versioning rule and nothing else. The rule has three axes and one key,
+// because two of them are the default for almost every group; the setter is
+// what reads both shapes the key is written in.
 func versionGroupFields(dst *VersionGroupConfig) fields {
 	return fields{
-		"versioning": str(&dst.Versioning),
+		"versioning": versionGroupVersioning(dst),
 	}
 }
 

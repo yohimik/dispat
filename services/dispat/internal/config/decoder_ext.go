@@ -16,6 +16,8 @@ package config
 // are written in. fields.go is one line per key and reads better for it.
 
 import (
+	"fmt"
+
 	lib "github.com/yohimik/dispat/pkg/config"
 
 	public "github.com/yohimik/dispat/pkg/models"
@@ -134,6 +136,38 @@ func pathList(dst *PathList) setter {
 		}
 		*dst = out
 		return nil
+	}
+}
+
+// versionGroupVersioning fills a declared group's `versioning` key, the one
+// key of the language that carries an object as readily as a scalar: the
+// semver axis alone, or all three sharing axes named separately. The
+// expansion lives in pkg/models, so this and the public type's own
+// UnmarshalJSON cannot come to disagree about what the key accepts.
+func versionGroupVersioning(dst *VersionGroupConfig) setter {
+	return func(val any, at string) error {
+		out, err := public.NormalizeVersionGroupVersioning(val, at)
+		if err != nil {
+			return err
+		}
+		*dst = out
+		return nil
+	}
+}
+
+// versioningMode fills a `versioning` key anywhere else: the root file, a
+// space, a space folder's file, a package. Those four levels state which mode
+// a package versions under and never a sharing rule, which belongs to the
+// group the members share, so an object written here is refused by name
+// rather than as a bare type mismatch the reader has to translate.
+func versioningMode(dst *string) setter {
+	return func(val any, at string) error {
+		if _, isObject := val.(map[string]any); isObject {
+			return fmt.Errorf(
+				"%s: the sharing axes (semver, counter, channels) are declared on a versionGroups entry; here versioning names one mode",
+				at)
+		}
+		return str(dst)(val, at)
 	}
 }
 

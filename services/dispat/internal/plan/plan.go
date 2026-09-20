@@ -2984,22 +2984,16 @@ func (cp *computation) computeVersion(rel *Release) {
 	if rel.Channel == ccme.ChannelStable {
 		// Graduation and the ordinary stable release are the same
 		// computation: applyBump over the stable baseline, no suffix (§11.5).
-		next := rel.Current.Bumped(rel.Bump)
-		if rel.BaselineChannel != ccme.ChannelStable {
-			// Ending a train publishes the core the train reached, and for a
-			// group member that core is the group's line rather than whatever
-			// this member's own window happens to justify.
-			next = cp.raisedToFloor(rel, next)
-			if versionLess(next, rel.Baseline.Core()) {
-				// Reachable from hand-edited tags, and from a train an exact
-				// Release-As raised above what the window computes (§11.5):
-				// the pin's effect lives in the baseline tag, not in the
-				// window, so the graduation must be pinned too.
-				cp.pkgErr(rel, CodeGraduateNoIncrease,
-					fmt.Sprintf("graduating to %s would go backwards from the %s baseline %s",
-						next.String(), rel.BaselineChannel, rel.Baseline.String()))
-				return
-			}
+		next := cp.raisedToFloor(rel, rel.Current.Bumped(rel.Bump))
+		if rel.BaselineChannel != ccme.ChannelStable && versionLess(next, rel.Baseline.Core()) {
+			// Reachable from hand-edited tags, and from a train an exact
+			// Release-As raised above what the window computes (§11.5): the
+			// pin's effect lives in the baseline tag, not in the window, so
+			// the graduation must be pinned too.
+			cp.pkgErr(rel, CodeGraduateNoIncrease,
+				fmt.Sprintf("graduating to %s would go backwards from the %s baseline %s",
+					next.String(), rel.BaselineChannel, rel.Baseline.String()))
+			return
 		}
 		rel.Next = next
 		cp.checkGreater(rel)

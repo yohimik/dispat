@@ -111,6 +111,19 @@ var versioningNames = []string{
 	VersioningNone,
 }
 
+// Sharing values of a versioning group's counter and channels axes; see the
+// public package for semantics.
+const (
+	SharingFixed       = public.SharingFixed
+	SharingIndependent = public.SharingIndependent
+)
+
+// sharingNames lists the accepted values of a sharing axis, the default
+// first, for the same reason versioningNames does: one list is matched
+// against and rendered from, so an axis cannot be accepted by one and omitted
+// by the other.
+var sharingNames = []string{SharingFixed, SharingIndependent}
+
 // sharedVersioningNames lists the modes a versionGroups declaration accepts:
 // versioningNames without the independent default, which shares nothing.
 func sharedVersioningNames() []string {
@@ -888,6 +901,25 @@ func normalizeVersioning(raw string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// normalizeSharing resolves one sharing axis case-insensitively, the way
+// normalizeVersioning resolves a mode. An absent value stays absent rather
+// than becoming the default it means: writing the default into the
+// declaration would turn "said nothing" into "said fixed", and a config
+// dispat rewrote would grow an object around a group written as a mode.
+func normalizeSharing(label, axis, raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	low := strings.ToLower(raw)
+	for _, name := range sharingNames {
+		if low == strings.ToLower(name) {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("%s: versioning.%s %q is invalid (want %s)",
+		label, axis, raw, quotedNames(sharingNames))
 }
 
 // fillOptional replaces nil optional sub-objects with their zero values. The
@@ -2145,7 +2177,7 @@ func checkManifestNames(pkgs []*model.Package) error {
 // package that is its own space. Both callers have it; neither the config
 // nor a member package can be asked for it afterwards.
 func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc SpaceConfig) (*model.Space, error) {
-	mode, group, err := resolveSpaceVersioning(c, spaceName, sc)
+	versioning, err := resolveSpaceVersioning(c, spaceName, sc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
@@ -2168,8 +2200,10 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		Env:                  EnvPairs(MergeEnv(c.Env, sc.Env)),
 		BuildWaitsPublish:    boolValue(sc.IsBuildWaitingPublish),
 		RevertOnFail:         boolValue(sc.RevertOnFail),
-		Versioning:           model.Versioning(mode),
-		VersionGroup:         group,
+		Versioning:           model.Versioning(versioning.mode),
+		VersionGroup:         versioning.group,
+		CounterSharing:       versioning.counter,
+		ChannelSharing:       versioning.channels,
 		Scripts:              scope.scripts,
 		BuildScript:          scope.commands(sc.Flow.Build),
 		PublishScript:        scope.commands(sc.Flow.Publish),

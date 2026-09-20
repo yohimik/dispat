@@ -68,10 +68,10 @@ func configCandidates(dir string) ([]string, error) {
 }
 
 // validateVersionGroups normalizes the declared groups in place and rejects
-// the two declaration mistakes: a versioning mode that does not share (a
-// group exists to share versions), and a name a space already holds — group
-// and space names share one namespace, because a versionGroup reference may
-// name either.
+// the declaration mistakes: a versioning mode that does not share (a group
+// exists to share versions), a name a space already holds — group and space
+// names share one namespace, because a versionGroup reference may name
+// either — and a sharing rule that cannot be honoured.
 func validateVersionGroups(c *File) error {
 	for name, g := range c.VersionGroups {
 		if name == "" {
@@ -84,33 +84,62 @@ func validateVersionGroups(c *File) error {
 			return fmt.Errorf("versionGroups[%q]: the space %q has the same name; group and space names share one namespace",
 				name, taken)
 		}
+		label := fmt.Sprintf("versionGroups[%q]", name)
+		// The object form is the only way to state an axis, so an axis beside
+		// an absent mode is an object that left out the one key carrying what
+		// the group shares at all.
+		if g.Versioning == "" && (g.Counter != "" || g.Channels != "") {
+			return fmt.Errorf("%s: versioning: semver is required beside counter and channels", label)
+		}
 		mode, ok := normalizeVersioning(g.Versioning)
 		if !ok || !model.Versioning(mode).IsShared() {
+			// A mode that shares nothing shares no counter and no channel
+			// either, so the axes need no separate refusal here: there is no
+			// group for them to be an axis of.
 			return fmt.Errorf("versionGroups[%q]: versioning %q is invalid (a group exists to share versions; want %s)",
 				name, g.Versioning, quotedNames(sharedVersioningNames()))
 		}
-		g.Versioning = mode
+		counter, err := normalizeSharing(label, "counter", g.Counter)
+		if err != nil {
+			return err
+		}
+		channels, err := normalizeSharing(label, "channels", g.Channels)
+		if err != nil {
+			return err
+		}
+		// One counter counts one train, and a train runs on one channel, so a
+		// group cannot hold the counter in common while its members sit
+		// wherever their own directives put them.
+		if counter != SharingIndependent && channels == SharingIndependent {
+			return fmt.Errorf(
+				"%s: versioning: channels %q needs counter %q; one shared counter cannot span two channels",
+				label, SharingIndependent, SharingIndependent)
+		}
+		g.Versioning, g.Counter, g.Channels = mode, counter, channels
 		c.VersionGroups[name] = g
 	}
 	return nil
 }
 
 // resolveVersionGroup resolves a versionGroup reference onto the group key
-// and versioning mode it stands for: a declared versionGroups entry, or a
-// space whose own versioning is shared (its implicit group). The lookup is
-// case-insensitive, like every other name in the configuration.
+// and the whole versioning rule it stands for: a declared versionGroups
+// entry, or a space whose own versioning is shared (its implicit group). The
+// lookup is case-insensitive, like every other name in the configuration.
 //
 // The key it answers with is the map's own, not the reference's: two packages
 // reaching one group through `Libs` and `libs` have to land in the same
 // bucket, and the space whose implicit group this may be is keyed by the
 // spelling its own entry carries.
-func resolveVersionGroup(c *File, ref string) (key, mode string, err error) {
+//
+// An implicit group has no declaration to carry sharing axes, so its rule is
+// the mode alone and the axes are their defaults.
+func resolveVersionGroup(c *File, ref string) (key string, rule VersionGroupConfig, err error) {
 	if name, g, ok := public.FoldLookup(c.VersionGroups, ref); ok {
-		return name, g.Versioning, nil
+		return name, g, nil
 	}
 	if name, s, ok := public.FoldLookup(c.Spaces, ref); ok {
 		if s.VersionGroup != "" {
-			return "", "", fmt.Errorf("versionGroup %q: space %q is itself a member of group %q; name that group directly",
+			return "", rule, fmt.Errorf("versionGroup %q: space %q is itself a member of group %q; name that group directly",
 				ref, name, s.VersionGroup)
 		}
 		// A space that states no mode of its own versions by the root's, so
@@ -123,23 +152,42 @@ func resolveVersionGroup(c *File, ref string) (key, mode string, err error) {
 			if mode == "" {
 				mode = VersioningIndependent
 			}
-			return "", "", fmt.Errorf("versionGroup %q: space %q does not version as a group (its versioning is %q)",
+			return "", rule, fmt.Errorf("versionGroup %q: space %q does not version as a group (its versioning is %q)",
 				ref, name, mode)
 		}
-		return name, mode, nil
+		return name, VersionGroupConfig{Versioning: mode}, nil
 	}
-	return "", "", fmt.Errorf("versionGroup %q matches no versionGroups entry and no space", ref)
+	return "", rule, fmt.Errorf("versionGroup %q matches no versionGroups entry and no space", ref)
 }
 
-// resolveSpaceVersioning returns the effective versioning mode and group key
-// of a validated space-shaped config: the referenced group's when one is
-// named, the config's own mode under the space's implicit group otherwise.
-func resolveSpaceVersioning(c *File, spaceName string, sc SpaceConfig) (mode, group string, err error) {
-	if sc.VersionGroup != "" {
-		group, mode, err = resolveVersionGroup(c, sc.VersionGroup)
-		return mode, group, err
+// spaceVersioning is a space's resolved versioning: the semver mode, the key
+// of the group it versions under, and the group's two sharing axes. A space
+// versioning under its own implicit group shares only what its mode says, so
+// its axes are the defaults.
+type spaceVersioning struct {
+	mode     string
+	group    string
+	counter  model.Sharing
+	channels model.Sharing
+}
+
+// resolveSpaceVersioning returns the effective versioning of a validated
+// space-shaped config: the referenced group's rule when one is named, the
+// config's own mode under the space's implicit group otherwise.
+func resolveSpaceVersioning(c *File, spaceName string, sc SpaceConfig) (spaceVersioning, error) {
+	if sc.VersionGroup == "" {
+		return spaceVersioning{mode: sc.Versioning, group: spaceName}, nil
 	}
-	return sc.Versioning, spaceName, nil
+	group, rule, err := resolveVersionGroup(c, sc.VersionGroup)
+	if err != nil {
+		return spaceVersioning{}, err
+	}
+	return spaceVersioning{
+		mode:     rule.Versioning,
+		group:    group,
+		counter:  model.Sharing(rule.Counter),
+		channels: model.Sharing(rule.Channels),
+	}, nil
 }
 
 // validatePackageEntries checks the top-level packages map on its own: keys
