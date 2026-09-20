@@ -18,6 +18,13 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/ccme-spec-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
 
+# The document itself, before any fixture. Every case below verifies a
+# hand-written stand-in for SPEC.md, so a heading the verifier requires can be
+# renamed in the real document and nothing here notices: the release then fails
+# at its beforeVersion hook, after other packages have already published. The
+# verifier and the document it verifies must agree in this checkout.
+sh "$here/verify.sh"
+
 fixture() {
   dir=$1
   version=$2
@@ -35,7 +42,7 @@ Example version 1.0.0 is not a normative declaration.
 ## 26. Explicit rollback
 [Rollback](./ROLLBACK.md)
 ## 27. Polyrepository Git profile
-### 27.11 Choreographed saga
+### 27.11 Linked peer topology
 repository-qualified revision identity
 [Design history](./DESIGN-HISTORY.md)
 EOF
