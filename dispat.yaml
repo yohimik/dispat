@@ -174,8 +174,18 @@ versionGroups:
     versioning: fixedMajorMinor
   manifests:
     versioning: fixed
+  # The cli group shares a generation, not a release. Its members ship on
+  # their own schedules through one prerelease train, and a run that
+  # published some of them and lost the rest is the ordinary case, so a
+  # retry has to owe the legs that failed and nothing to the ones already
+  # out. Each member therefore counts its own prereleases and sits on the
+  # channel its own tags and directives put it on; only a movement of the
+  # shared major and minor takes all of them.
   cli:
-    versioning: fixedMajorMinor
+    versioning:
+      semver: fixedMajorMinor
+      counter: independent
+      channels: independent
 
 # A space's existence and its path live here; everything else it says about
 # itself lives in <space>/dispat.yaml.
