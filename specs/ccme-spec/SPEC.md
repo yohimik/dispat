@@ -139,6 +139,8 @@ to be interpreted as described in RFC 2119.
 | **Resolvable**           | A released version an installer will select for a given consumer. A prerelease is resolvable only on its own line.      |
 | **Correction**           | A unit carrying an `Edits` or `Deletes` footer: a targeted rewrite of pending release records (§7.4).                   |
 | **Graduation**           | Ending a package's prerelease line by releasing it on `stable` (§11.5). Never happens implicitly.                       |
+| **Shared-version group** | A named set of packages holding a leading part of their versions in common, and optionally one prerelease counter and one channel (§13.9a). |
+| **Ride**                 | A release of a group member with no cause of its own, made because the group's shared part moved (§13.9a).              |
 | **Repository identity**  | In the polyrepository profile, `control` for the control repository, the exact `.gitmodules` name of a source repository, or a peer's own `repository` value (§§27.2, 27.11). |
 | **Repository revision**  | A pair `(repository identity, full commit object ID)`. A bare commit ID is never a fleet-wide identity (§27.2).          |
 | **Fleet link**           | A submodule joining two peers of a linked peer tree, named by the linked peer's identity and declared by its roster (§27.11). |
@@ -1852,6 +1854,9 @@ Because `target` is recomputed from the stable baseline on every run, a breaking
 moves the whole train, and the counter resets rather than continuing under a version that no longer describes the
 content.
 
+For a member of a shared-version group, `target` is additionally raised to the core of the group's line where it falls
+below it, because the member's own window need not carry the work that put the group there (§13.9a).
+
 **The channel-entry patch.** A package can be released for a channel change alone; that is what the channel axis does
 to a dependent with no bump of its own (§9.3). Entering a train from a clean stable baseline then computes a version
 that is *lower* than the baseline: from `1.2.0` with `E = none`, `target` is `1.2.0` and `next` is `1.2.0-beta.0`, which
@@ -1891,7 +1896,9 @@ Propagate-Channel-Scope: @acme/*, -@acme/legacy-adapter
 
 Rules, common to both:
 
-* The published version is `applyBump(S, E)`, the same `target` as §11.4, with no prerelease suffix.
+* The published version is `applyBump(S, E)`, the same `target` as §11.4, with no prerelease suffix. For a member of a
+  shared-version group it is raised to the core of the group's line where it falls below it (§13.9a), which is what
+  lets a half-finished graduation be retried.
 * Graduation never lowers a version: if `target` is not greater than the baseline core, `E185` is raised (this can only
   happen if tags were hand-edited).
 * Graduating a package already on `stable` is a no-op with `W185`, unless the window contains bumps, in which case it is
@@ -2056,7 +2063,7 @@ targets are resolved per §13.10a.
 
 An implementation using the optional polyrepository profile MUST first construct the fixed repository snapshot and
 workspace ownership map of §27. The resulting package graph is one graph for every later phase. Repository boundaries
-do not break dependency propagation, version groups, publish ordering, failure blocking, or package selection.
+do not break dependency propagation, version groups (§13.9a), publish ordering, failure blocking, or package selection.
 
 **The dependency graph MUST be acyclic** over the edge kinds of `propagation.kinds` and `publish.orderKinds` (§14). A
 cycle is `E200`, repository-scoped: the run aborts before any plan is computed, and the diagnostic MUST name every
@@ -2611,6 +2618,119 @@ to whoever reviews it. Its version comes from §11.4, including the channel-entr
 
 `next` MUST be strictly greater than `baseline(P)` by SemVer precedence; otherwise `E195`.
 
+A package belonging to a shared-version group is additionally subject to §13.9a, whose member target floor raises
+`target` and the graduation version before this comparison is made.
+
+### 13.9a Shared-version groups
+
+This subsection is **normative for an engine that offers shared-version groups** and **OPTIONAL otherwise**. An engine
+that versions every package from its own history alone conforms to §§4-24 without implementing any of it. An engine
+that offers groups MUST implement all of it, because the rules below are the only thing that keeps a group's members
+convergent (§13.7c) while they share a number none of their own windows explains.
+
+**Membership.** A shared-version group is a named set of packages. How membership is stated is configuration's
+business (§14); what matters here is that it is a property of the workspace at `HEAD`, that every member belongs to at
+most one group, and that a group's rule is one rule for all of its members.
+
+**The three sharing axes.** A group's rule has three axes.
+
+| Axis       | Values                                                        | What it decides                                                         |
+|------------|---------------------------------------------------------------|--------------------------------------------------------------------------|
+| `semver`   | a shared **depth** `d` of 1, 2 or 3                           | How many leading core components (`MAJOR`, `MAJOR.MINOR`, the whole core) the members hold equal. |
+| `counter`  | `fixed` (default) or `independent`                            | Whether the members also hold one prerelease counter (§11.3) in common. |
+| `channels` | `fixed` (default) or `independent`                            | Whether the members also sit on one channel (§11.1) in common.          |
+
+`counter: fixed` with `channels: independent` MUST be refused as a configuration error: one counter counts one train,
+and a train runs on one channel. The remaining three combinations are valid, and both axes defaulting to `fixed` is
+what makes a group stated as a depth alone behave exactly as it did before the axes existed.
+
+An axis MUST NOT be stated for a set of packages that shares no version prefix; there is nothing for it to be an axis
+of.
+
+**The group baseline and the line.** `groupBaseline(G)` is the highest-precedence `baseline(P)` over every member `P`
+of `G`, held members included: no shared version may fall below a position a member has already published.
+`groupStable(G)` is the highest `stableBaseline(P)` over the same set. The group's **line** is `groupBaseline(G)` with
+every core component below `d` set to zero, except that a `groupBaseline(G)` ranking below that prefix is itself the
+line: a group mid-train is on the train, not past it.
+
+A group **sits on a shared train** when `groupBaseline(G)` is a prerelease whose first `d` core components differ from
+those of `groupStable(G)`. Its later prereleases and its graduation then move a part of the version the group shares,
+which is the only reason a train belongs to a group rather than to the member that started it.
+
+**Engagement.** A group **engages** when a part of the version it shares moves, and when it does it versions its
+members as one: the whole group goes through §13.9 as a single virtual package whose baselines, bumps, new work and
+channel proposals are those of its members. When it does not engage, every member is versioned by §13.9 on its own.
+
+| Event                                                       | `counter` fixed, `channels` fixed | `counter` independent, `channels` fixed | both independent      |
+|--------------------------------------------------------------|-------------------------------------|-------------------------------------------|-------------------------|
+| The shared prefix moves, including onto the next train        | the group                          | the group                                | the group               |
+| The group's channel changes on a shared train                 | the group                          | the group                                | members only            |
+| Fresh work inside a shared train                              | the group                          | members only                             | members only            |
+| A component below the shared prefix moves on the stable line  | members only                       | members only                             | members only            |
+
+At `d = 3` the shared prefix is the whole core, so every stable movement is a movement of the shared part and the first
+row covers it. A prerelease counter is not a core component, which is why `rc.N` to `rc.N+1` is the third row and not
+the first.
+
+**The member target floor.** Let `floor(G)` be the core of the group's line. Wherever a member `P` of `G` computes a
+version of its own, the `target` of §11.4 and the graduation version of §11.5 MUST be raised to `floor(G)` when they
+fall below it, **before** the `E185` and `E195` guards read the result.
+
+The floor is what makes a group convergent. A member's own pending window need not contain the work that put the group
+where it is: a ride carries none of it, and a leg that failed after its neighbours published carries only part of it,
+so the member's own computation can land below a version the group already holds. Raising it before the guards leaves
+both guards their meaning, because the floor never reaches past the line: a baseline that nothing in the group explains
+still fails, and so does a channel switch that would go backwards.
+
+One exception is required. A member releasing on `stable` whose own baseline is also on `stable` takes no floor while
+the group's line is a prerelease: the group has published no stable version of that core, and a member MUST NOT be the
+first to.
+
+**Channel proposals.** Only a member whose own resolved channel differs from its own baseline's channel proposes a
+channel to the group (§11.1: a channel is derived from a baseline, and a proposal is a directive). A member resting
+where its own tags put it proposes nothing. Reading a resting channel as a proposal graduates a whole group because one
+member never joined its train, and returns a graduated group to a train because one member never left it.
+
+With `channels: independent` the group takes no channel proposals at all: it decides only whether the shared prefix
+moves and to which core.
+
+**Assignment.** When the group engages, each member that is not held is assigned as follows. A member whose own mode
+leaves an unchanged package behind (a sparse mode) is assigned nothing unless it has a cause of its own. A member with
+no cause of its own is released anyway and its release is a **ride**.
+
+* With `channels: fixed`, every assigned member takes the group's computed version and the group's channel.
+* With `channels: independent`, every assigned member is versioned by its own §13.9 computation with `floor(G)` raised
+  to the core of the group's computed version, on its own channel, so that each continues its own counter. Two rules
+  constrain the channel: a ride by a member on `stable` follows a **prerelease** group version onto that prerelease
+  channel, because a ride must never be the first stable publication of a core the group has only reached as a
+  prerelease; and a member on a prerelease is never graduated by a ride, because ending a train is deliberate (§11.5)
+  and a movement nobody wrote for that member cannot be it.
+
+A ride MUST be reported. The code is implementation-defined, and the report MUST NOT be suppressible: nothing in the
+commit log explains why the package is in the plan, so the report is the only place a reviewer can find out.
+
+**Alignment and laggards.** After a run in which the group did not engage, a member whose baseline holds the group's
+shared prefix is **aligned** and is neither raised nor released. Under `counter: fixed` a member's whole version is
+compared against the line, so a member behind the group's counter is not aligned; under `counter: independent` holding
+the prefix on the line's channel is enough, and under `channels: independent` holding the prefix is enough on any
+channel.
+
+A member whose baseline is below the shared prefix is a **laggard**. A laggard that is releasing adopts the line when
+the counter is shared, and is raised by the floor alone when it is not. A laggard with nothing pending is released at
+the line as a ride, unless its own mode leaves it behind, exactly as a `W193` catch-up discharges an earlier run's
+unfinished propagation.
+
+**Guarantees.** Under `counter: independent`, `G1` to `G6` of §13.7c hold per member exactly as they hold for a package
+that versions alone: a retry at a fixed `HEAD` plans each unpublished member at the version the failed run planned for
+it, and plans nothing for the members that published.
+
+Under `counter: fixed` this is weaker, and the weakening is stated rather than hidden. A retry after a partial
+publication on a shared train advances the group's counter, so the members that failed are planned at a later
+prerelease than the one the failed run planned, and the members that already published ride with them. `G3` there
+covers the group's core, not its counter. The core is stable across the retry because §11.4 recomputes it from the
+stable baseline, and it is the core that a consumer's range and a reader's expectations are about. An implementation
+MUST NOT present the counter as stable under this axis.
+
 ### 13.10 Emit
 
 Packages with `effective(P) == none` and no channel change and no `Release-As` are **not** released. **Held** packages
@@ -2929,6 +3049,7 @@ Defaults are chosen so that an unconfigured repository behaves conservatively an
 | `rootPathMap`               | `{}`                                                         | Glob → package list for files owned by no package (§6.2).                                 |
 | `ignoredPaths`              | `[]`                                                         | Globs removed before file-derived resolution.                                             |
 | `channels.allowed`          | `null`                                                       | If set, restricts every channel value (both sides of a transition) to a list (§11.2).   |
+| `versionGroups`             | `{}`                                                         | Group name → sharing rule: the shared depth, and whether the prerelease counter and the channel are shared (§13.9a). Membership is stated by the packages. |
 | `publish.orderKinds`        | `["dependencies","peerDependencies","optionalDependencies"]` | Edges defining the publish order (§19.2).                                                 |
 | `publish.blockingKinds`     | `["dependencies","peerDependencies"]`                        | Edges over which a failed publish blocks dependents (§19.3).                              |
 | `publish.onFailure`         | `"skip-dependents"`                                          | `"skip-dependents"` or `"abort"`; what a failed publish does to the rest.                |
@@ -3244,6 +3365,28 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 136 | A bump is rejected by §9.3a but the same unit carries an admissible propagated channel | The channel still applies; reversing this implication is forbidden (G8). |
 | 137 | `Propagate-Channel: inherit`; the source baseline graduates between retries | The inherited channel and planned version may change; G3 applies only while the relevant baseline channels remain fixed. |
 | 138 | Two bucketed units share target `cli`, but `cli` is a source of one unit only | Admit `cli` only for the other unit after a per-unit self-source check; “reached by some edge” alone over-admits. |
+
+### 15.8 Shared-version groups
+
+Every row assumes an engine that offers groups (§13.9a). `d` is the group's shared depth.
+
+| #   | Case                                                                      | Resolution                                                                                                                                                                  |
+|-----|---------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 139 | Retry at a fixed `HEAD` on a shared train, `counter: independent`         | Each unpublished member releases at the version the failed run planned for it; the members that published release nothing. `G3` per member.                                  |
+| 140 | The same under `counter: fixed`                                           | The group's counter advances: every member releases at the next prerelease, the published ones as rides. `G3` covers the core, not the counter (§13.9a).                      |
+| 141 | A member's own window justifies a core below the group's line             | Its `target` is raised to the line's core (§11.4, §13.9a), so a rider continues the train rather than raising `E195`.                                                        |
+| 142 | A graduation whose second leg failed, retried                             | The members that never carried the feature setting the train's core graduate at that core, not at what their own windows compute: the floor applies before `E185` (§11.5).    |
+| 143 | A member's baseline is above the group's line and nothing explains it      | Still `E185` or `E195`. The floor never reaches past the line, so a hand-edited tag fails exactly as before.                                                                  |
+| 144 | A member resting on `stable` while the group rides a prerelease train      | It proposes nothing. The train continues; the group does not graduate because one member never joined it.                                                                    |
+| 145 | A member left on a prerelease after the rest graduated                     | It proposes nothing. The graduated group stays graduated, and the member is released at the group's published version as a ride.                                              |
+| 146 | Fresh work inside a shared train, `counter: independent`                   | Only the members with a cause of their own release, each continuing its own counter.                                                                                         |
+| 147 | Work moving the shared prefix onto the next train                          | The group engages under every axis: every member takes the new core, and each counter restarts at `0`.                                                                       |
+| 148 | A graduation naming one member, `channels: independent`                    | Only that member graduates. The others stay on the line they are on, and no channel conflict is reported.                                                                    |
+| 149 | A member on `stable` riding a **prerelease** group version                 | It follows the group onto that prerelease channel: a ride is never the first stable publication of a core the group holds only as a prerelease (§13.9a).                      |
+| 150 | A member on a prerelease riding a **stable** group version                 | It takes the new core on its own channel at counter `0`. A ride never graduates a member.                                                                                    |
+| 151 | `counter: fixed` declared beside `channels: independent`                   | A configuration error. One counter counts one train, and a train runs on one channel (§13.9a).                                                                               |
+| 152 | A sharing axis declared for packages that share no version prefix          | A configuration error: there is nothing for the axis to be an axis of.                                                                                                       |
+| 153 | A quiet group whose members all hold the shared prefix                     | Nothing releases, under every axis. Under `counter: independent` a member behind the group's counter is aligned and is not caught up.                                        |
 
 ---
 
@@ -4345,7 +4488,8 @@ tags:     core@1.4.2, cli@2.0.0, ui@0.9.1, api@1.2.0, @acme/theme@1.0.0
            does not exempt it from release or tagging, §13.10a)
 ```
 
-Sections B.4 and B.5 override these tags locally where stated.
+Sections B.4 and B.5 override these tags locally where stated, and B.12 states a workspace of its own, because a
+shared-version group is a relationship this one does not have.
 
 ### B.1 Parsing
 
@@ -5144,6 +5288,81 @@ only a package outside it is `E213` (§7.4.2).
 → `B` is void: `A`'s record returns, and `C`'s `docs` record stands as the restatement of `B`'s. `core` releases
 `2.0.0`, because `A`'s `major` is back in the window and `docs` maps to `none`. To correct the
 restatement, use `Edits: <A>` again, which supersedes `B` directly (`W210`, vector 114).
+
+### B.12 Shared-version groups
+
+These vectors exercise §13.9a and are REQUIRED only of an engine that offers shared-version groups. Every one of them
+uses one group `G` of three packages, `a`, `b` and `d`, at shared depth `d = 2` unless stated otherwise, and each
+states the group's rule as `(counter, channels)`.
+
+**Vector 139**: `(fixed, fixed)`, the default. Stable baselines `a@1.10.3`, `b@1.10.0`, `d@1.10.0`; commit `C1` is
+`feat(a,b,d)%rc: start the train` and every member is tagged `1.11.0-rc.0` at it. Commit `C2` is `fix(a,b,d): a shared
+fix`, and only `a` published `1.11.0-rc.1` at it before the run died. Re-run at the same `HEAD`.
+
+→ The group sits on a shared train and its counter is shared, so the train is the group's: **`a`, `b` and `d` all
+release `1.11.0-rc.2`**, `a`'s as a ride. The counter advanced, which is what §13.9a says `G3` does not cover under
+this axis.
+
+**Vector 140**: the same history and tags under `(independent, fixed)` and under `(independent, independent)`.
+
+→ **`b` and `d` release `1.11.0-rc.1`; `a` releases nothing.** Each member continues its own counter from its own
+baseline, and `a` has already published exactly this work. Adding `fix(d): repair` on top changes nothing about `a`.
+
+**Vector 141**: `(independent, *)`, the floor. Same baselines and tags as vector 140. `b`'s own pending window carries
+only the shared `fix`, so `applyBump(1.10.0, patch)` is `1.10.1`.
+
+→ `target` is raised to `1.11.0`, the core of the group's line, and `b` releases **`1.11.0-rc.1`**. Without the floor
+the computed `1.10.1-rc.0` would raise `E195` against `b`'s own baseline `1.11.0-rc.0`.
+
+**Vector 142**: any rule, the graduation retry. Stable baselines all `1.10.0`; `C1` is `feat(d)%rc: start` and every
+member rides to `1.11.0-rc.0`; `C2` is `release(a,b,d)%rc>stable: graduate`, and only `a` published `1.11.0` before the
+run died. Re-run at the same `HEAD`.
+
+→ **`b` and `d` release `1.11.0`.** Their own windows carry no bump at all, since the feature was `d`'s and `a`'s
+release already contains it, so §11.5 computes `1.10.0` for them and the floor raises it to the line. **No `E185`.**
+
+**Vector 143**: the same, but `b` was tagged `1.12.3-rc.0` by hand while the group's line is `1.12.0`.
+
+→ **`E185` against `b`.** The floor raises the graduation to `1.12.0` and no further, so a baseline nothing in the
+group explains still fails.
+
+**Vector 144**: `(fixed, fixed)`. `a` and `d` are on `1.11.0-rc.0`; `b` is a sparse member resting on `1.10.0`; the
+pending commit is `fix(d): more train work`.
+
+→ **`d` and `a` release `1.11.0-rc.1`**, `a`'s as a ride; **`b` releases nothing**. `b`'s `stable` is where its own
+tags put it, not a request to end the train, so the group does not graduate.
+
+**Vector 145**: `(fixed, fixed)` at `d = 3`. `a` and `d` are on `1.11.0`; `b`'s leg failed and left it on
+`1.11.0-rc.0`; nothing is pending.
+
+→ **`b` releases `1.11.0` as a ride; `a` and `d` release nothing.** The group stays graduated, and no channel-entry
+patch (`W204`) arises, because nothing proposed a channel at all.
+
+**Vector 147**: any rule. The state of vector 139, plus `C3` = `feat(d)!: a breaking change`.
+
+→ **Every member releases `2.0.0-rc.0`**, `a`'s and `b`'s as rides. The shared prefix moved, so the group engages under
+every axis, and the new core restarts every counter at `0`.
+
+**Vector 148**: `(independent, independent)`. The state of vector 139, plus `C3` = `release(d)%rc>stable: graduate d`.
+
+→ **`d` releases `1.11.0`; `b` releases `1.11.0-rc.1` for its own failed leg; `a` releases nothing.** No channel
+conflict is reported, because no channel is forced on anybody.
+
+**Vector 149**: `(independent, independent)`. `a` and `d` are on `1.11.0-rc.0`; `b` has never left `1.10.0` on
+`stable`; the pending commit is `feat(d)!: a breaking change`.
+
+→ **`b` releases `2.0.0-rc.0` on the `rc` line**, not `2.0.0`. A ride is never the first stable publication of a core
+the group holds only as a prerelease.
+
+**Vector 150**: `(independent, independent)`. `a` and `d` are on `1.11.0` on `stable`; `b` sits on `1.11.0-rc.5`; the
+pending commit is `feat(d): a feature on the stable line`.
+
+→ **`a` and `d` release `1.12.0`; `b` releases `1.12.0-rc.0`.** A ride never graduates a member.
+
+**Vector 153**: `(independent, *)`. `a` and `b` are on `1.11.0-rc.0`, `d` on `1.11.0-rc.1`, and nothing is pending.
+
+→ **Empty plan.** Every member holds the line's shared prefix, so none of them is a laggard, whatever its counter says.
+Under `(fixed, fixed)` the same state releases `a` and `b` at `1.11.0-rc.1` instead.
 
 ---
 
