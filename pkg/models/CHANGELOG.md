@@ -1,5 +1,22 @@
 # Changelog
 
+## pkg/models/v1.11.0-rc.2 (2026-09-20)
+
+### Fixes
+
+- derive linked releases from repository topology ([35664e1](https://github.com/yohimik/dispat/commit/35664e1685e703c347233421f9faefdba8b1622a)) (by yohimik)
+  Remove saga selectors and infer linked ownership from repository identity.
+  Let compute choose minimal or star links while preserving existing edges.
+  Reject cycles, invalid identities and incompatible topology, exclude disabled
+  peers, and resolve link paths relative to the owning repository.
+
+  Include integration regressions for topology, repair failures and exclusions.
+
+### Authors
+
+- yohimik
+
+
 ## pkg/models/v1.11.0-rc.0 (2026-09-15)
 
 ### Features
