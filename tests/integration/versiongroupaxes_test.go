@@ -201,6 +201,65 @@ func TestVersionGroupIndependentCounterCatchesUpAtItsOwnCounter(t *testing.T) {
 	assert.Equal(t, 3, r.TagCount("lib1@"), "nobody else moves; tags: %v", r.TagList())
 }
 
+// TestVersionGroupAxesAreTraceableAndReachAStableMember: two things the plan
+// only shows on request. The trace line names the rule the group decided
+// under and why it decided that way, and a member that never joined the
+// train follows a movement of the shared prefix onto the train's line rather
+// than publishing the new core as stable.
+func TestVersionGroupAxesAreTraceableAndReachAStableMember(t *testing.T) {
+	r := seedAxesRepo(t, models.VersionGroupConfig{
+		Versioning: models.VersioningFixedMajorMinor,
+		Counter:    models.SharingIndependent,
+		Channels:   models.SharingIndependent,
+	})
+	r.Commit("feat(lib1, app1, docs1): bootstrap the platform")
+	r.ReleaseOK()
+
+	// lib1 and app1 board a train; docs1 stays on stable with nothing of its
+	// own, which under a plain mode means it rides.
+	r.CommitEmpty("feat(lib1, app1)%beta: board the train")
+	r.ReleaseOK()
+	assert.True(t, r.IsTagged("docs1@1.2.0-beta.0"),
+		"the plain member follows the group onto its line; tags: %v", r.TagList())
+
+	// The trace says which rule the group ran under and why.
+	res := r.StatusOK("--log-level", "trace")
+	unified := harness.Event{}
+	for _, e := range res.Events {
+		if e.Str("message") == "plan: fixed group unified" {
+			unified = e
+		}
+	}
+	require.NotEmpty(t, unified, "the group decision is traceable; stdout:\n%s", res.Stdout)
+	assert.Equal(t, "platform", unified.Str("group"))
+	assert.Equal(t, "independent", unified.Str("counter"))
+	assert.Equal(t, "independent", unified.Str("channels"))
+	assert.Equal(t, "nothing shared moves", unified.Str("because"),
+		"the trace says why, not only whether")
+}
+
+// TestVersionGroupRefusesTheAxisObjectOutsideAGroup: the four levels that
+// state a versioning mode never state a sharing rule, and the refusal names
+// where the rule belongs instead of reporting a bare type mismatch.
+func TestVersionGroupRefusesTheAxisObjectOutsideAGroup(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigRaw(map[string]any{
+		"scripts": map[string]any{"build": echoBuild, "publish": "echo publishing"},
+		"spaces": map[string]any{
+			"libs": map[string]any{
+				"path":       "packages",
+				"versioning": map[string]any{"semver": "fixedMajorMinor", "counter": "independent"},
+			},
+		},
+	})
+	r.SeedPackage("packages", "lib1")
+	r.Commit("feat(lib1): anything at all")
+
+	res := r.Status()
+	require.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, loadError(res), "declared on a versionGroups entry")
+}
+
 // TestVersionGroupRefusesASharedCounterWithIndependentChannels: one counter
 // counts one train and a train runs on one channel, so the combination has no
 // meaning. The refusal reaches the operator through the binary.
