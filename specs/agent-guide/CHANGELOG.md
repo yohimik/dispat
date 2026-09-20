@@ -1,5 +1,18 @@
 # Changelog
 
+## specs/agent-guide/v1.11.0-rc.1 (2026-09-20)
+
+### Fixes
+
+- document safe topology computation and graph repair ([35664e1](https://github.com/yohimik/dispat/commit/35664e1685e703c347233421f9faefdba8b1622a)) (by yohimik)
+
+- clarify release intent and safe fleet recovery ([2f591b0](https://github.com/yohimik/dispat/commit/2f591b0139339d13f20c4718056d14be6e0dea98)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## specs/agent-guide/v1.11.0-rc.0 (2026-09-15)
 
 ### Fixes
