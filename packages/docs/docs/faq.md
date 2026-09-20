@@ -3,6 +3,14 @@
 Read the most common questions, their short answers, and links to the full details. You can ask anything not covered
 here on [Discord](https://discord.gg/83PwVSCCmk).
 
+## What is a space, and why that name?
+
+A **space** groups packages that share configuration, such as build and publish commands. It is short for
+*workspace*, a familiar term in monorepo tooling for organizing related packages.
+
+The name takes inspiration from Go's `go work` command, which also shortens "workspace." dispat's author preferred
+the other half: `space`. See [Spaces](./configuration/spaces.md) for configuration details.
+
 ## What does dispat need before the first release?
 
 Give dispat a git repository with full history, one configuration file naming the package folders and the build and
