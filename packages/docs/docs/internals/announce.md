@@ -8,70 +8,74 @@ announcement scripts.
 ## RC and stable announcements
 
 The files live in [`services/dispat/announce/`](https://github.com/yohimik/dispat/tree/main/services/dispat/announce),
-beside the CLI they announce. Each channel has a folder with a crier configuration, a card, music, and the text to
-review before a release:
+beside the CLI they announce. There is no announcement script. The `announce` entry of
+[`services/dispat/dispat.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.yaml) is a short
+[`dispat if`](../cli/if.md) chain that selects a crier configuration by channel:
+
+```sh
+dispat if 'DISPAT_STAGE!=announce' --then 'echo "announce: not the announce stage, nothing is posted"' \
+  --elif '!ANNOUNCE' --then 'echo "announce: announcements are off for this run"' \
+  --elif 'DISPAT_CHANNEL=rc' --then 'crier publish --config announce/rc/crier.yaml' \
+  --elif 'DISPAT_CHANNEL=stable' --then 'python3 announce/notes.py | crier publish --config announce/stable/crier.yaml' \
+  --else 'echo "announce: no announcement for the $DISPAT_CHANNEL channel"'
+```
+
+A release candidate announces only what a person wrote, with every link to that candidate, and no generated notes. A
+stable release announces the notes dispat generated for it. Any other prerelease channel has no announcement.
 
 | File | Purpose |
 |---|---|
-| `rc/crier.yaml`, `stable/crier.yaml` | One crier configuration per channel: its card, its music, and the shared cross-posting. |
-| `rc/template.html` | The release-candidate card: a faint lattice on near-black. |
-| `stable/template.html` | The stable card: the same layout as print, a pine wash inside a ruled frame. |
+| `rc/crier.yaml` | The release-candidate configuration. Its caption is a `$ref` of `rc/notes.yaml`. Its data is `env:DISPAT_`, so it takes only the version from the release. |
+| `rc/notes.yaml` | The human-written release-candidate caption: the headline, every link to the candidate, and the notes. |
+| `rc/template.html` | The release-candidate card: a faint lattice on near-black, carrying the same notes and links as the caption. |
+| `stable/crier.yaml` | The stable configuration. Its caption prints the generated notes under a fixed introduction. Its data is the document `notes.py` writes to standard input. |
+| `stable/template.html` | The stable card: the same layout as print, a pine wash inside a ruled frame, with changelog pages. |
 | `rc/anthem-*.mp3` | Release-candidate music: the William Tell galop and In the Hall of the Mountain King. |
 | `stable/anthem*.mp3` | Stable music: the 1812 Overture finale and The Stars and Stripes Forever. |
-| `rc/announcement.md` | Release-candidate notes. The current draft introduces identity-linked fleets and their minimal or star link shapes. |
-| `rc/links.md` | Links to this release candidate: its GitHub release and its guide. |
-| `stable/announcement.md`, `stable/links.md` | Stable-release notes and links. |
-| `publish.yaml` | The cross-posting both configurations pull in: destinations, limits, and captions. |
-| `announce.sh` | Stage guard, platform selection, channel configuration, and the single publishing command. |
-| `notes.sh` | JSON data: version, the channel's notes and links, changelog sections, and version-pinned install commands. |
+| `publish.yaml` | The cross-posting both configurations pull in: the three destinations and their limits. |
+| `notes.py` | JSON data for a stable release: version, changelog sections, and version-pinned install commands. |
 | `fonts/`, `anthem.md` | Shared fonts, licences, and audio provenance. |
 
-A version such as `1.11.0-rc.1` selects the RC configuration and copy. A stable version selects the stable ones. Build
-metadata does not change that selection. Other prerelease channels are refused until an announcement policy exists for
-them. Missing notes or links fail before rendering or posting. Fonts and audio stay outside the CLI and Go test image
-build contexts.
-
 Both configurations set their `publish` section to a `$ref` of `publish.yaml`, so the two channels cannot post to
-different destinations. The channels differ only in `render`: the template and the audio pool. The two cards share
-their page geometry, running header and footer, and wrapping rules, so a release paginates the same way on either.
+different destinations. Each writes only its `caption` beside the reference. The channels differ in `render`: the
+template, the data source, and the audio pool. The two cards share their page geometry, running header and footer, so a
+release paginates the same way on either. Fonts and audio stay outside the CLI and Go test image build contexts.
 
-## Notes and links
+## Writing a release candidate
 
-A channel's fixed text is two committed files and nothing else stores it. `announcement.md` holds the notes.
-`links.md` holds one `Label: https://...` link per line, and a line of any other shape fails the run before anything
-renders. Either file can write the version as `${DISPAT_NEW_VERSION}`, the spelling the `github.footer` lines of
-`dispat.yaml` use, and `notes.sh` fills in the announced version. The RC links therefore name this exact candidate:
-its GitHub release under `releases/tag/services/dispat/v<version>` and its guide under `https://dispat.dev/next/`.
+The words of a release candidate are written by hand in two places, and the two must match: `rc/notes.yaml`, which
+`rc/crier.yaml` pulls in as its caption with a `$ref`, and the text of `rc/template.html`. Announcing a new candidate
+therefore never edits the configuration. The first line of the notes is the cover's lede. The links are printed on the
+cover above the install commands, where a reader can copy an address a picture cannot make clickable. The remaining
+paragraphs fill the notes page.
 
-The RC notes and links are duplicated in the description and in the picture, because both are built from the same two
-files. Every caption prints the links first, so they survive a platform's caption limit, then the notes, then the
-generated changelog. The RC card prints the first line of the notes as the cover's lede and the links on the cover
-above the install commands, where a reader can copy an address a picture cannot make clickable. The remaining notes
-open the page after the cover and the changelog follows them. The stable card keeps its fixed lede.
+The only value either takes from the release is `{{ .new_version }}`, which crier builds from `DISPAT_NEW_VERSION`. The
+links therefore name this exact candidate: its GitHub release under `releases/tag/services/dispat/v<version>` and its
+documentation under `https://dispat.dev/next/`.
 
-RC captions label the version as ready for testing. The install commands select the announced version, including
-prereleases. Platform caption limits still apply to long release notes.
+crier posts a caption whole, and the platforms refuse a long one: Discord at 2000 characters and Instagram at 2200. The
+caption keeps every link on every platform. On Discord it follows the lede with a pointer to the pictures instead of the
+long paragraphs, because the pictures attached to the same message carry the notes in full. RC captions label the
+version as ready for testing.
 
 ## What posts where
 
-The renderer is [crier](https://github.com/yohimik/crier). One `crier publish` invocation renders the release and handles
-every enabled destination:
+The renderer is [crier](https://github.com/yohimik/crier). One `crier publish` invocation renders the release and
+handles every destination:
 
 | Destination | Output |
 |---|---|
-| Instagram feed | One photo post containing the cover, the RC notes page, and the changelog pages. |
+| Instagram feed | One photo post: the cover, then the RC notes page or the stable changelog pages. |
 | Instagram story | The cover held for sixteen seconds with music from the channel's audio pool. |
 | LinkedIn | One photo post with the release caption. |
 | Discord | One photo post with the release caption and an explicit `@everyone` mention. |
 
-Rendering is capped at ten pages. Set `ANNOUNCE_COVER_ONLY=1` to use only the cover image while retaining the notes and
-the changelog in captions. The sample pages show each channel's card:
+Rendering is capped at ten pages. Set `ANNOUNCE_COVER_ONLY=1` to use only the stable cover image while retaining the
+changelog in captions. The sample pages show each channel's card:
 
 ![Sample release-candidate cover](https://raw.githubusercontent.com/yohimik/dispat/main/services/dispat/announce/rc/preview-1.jpg)
 
 ![Sample release-candidate notes page](https://raw.githubusercontent.com/yohimik/dispat/main/services/dispat/announce/rc/preview-2.jpg)
-
-![Sample release-candidate changelog page](https://raw.githubusercontent.com/yohimik/dispat/main/services/dispat/announce/rc/preview-3.jpg)
 
 ![Sample stable cover](https://raw.githubusercontent.com/yohimik/dispat/main/services/dispat/announce/stable/preview-1.jpg)
 
@@ -79,7 +83,7 @@ the changelog in captions. The sample pages show each channel's card:
 
 ## Configure destinations
 
-Credentials are optional, but each enabled destination must have a complete configuration:
+All three destinations are enabled in `publish.yaml`, and each needs its credentials:
 
 | Repository secret | Purpose |
 |---|---|
@@ -88,40 +92,46 @@ Credentials are optional, but each enabled destination must have a complete conf
 | `CRIER_PUBLISH_DISCORD_WEBHOOK_URL` | Incoming Discord webhook. Keep it out of files and logs. |
 | `NGROK_AUTHTOKEN` | Public media staging for Instagram when `CRIER_STAGE_MODE=server`. |
 
-Without any configured destination, the announcement is skipped. An incomplete credential pair fails. LinkedIn-only
-and Discord-only runs need no public staging tunnel. Instagram can use an alternative configured staging mode such as
-`url` or `s3` instead of the default server tunnel.
+The release workflow sets `ANNOUNCE` when the repository holds any of these secrets and the dispatch did not select
+`skip_announcements`. Without `ANNOUNCE` the announce script posts nothing, which also keeps a release run from a laptop
+quiet. Skipping announcements leaves the test suite, package publication, release records, and installation checks in
+place. To run without one destination, set `CRIER_PUBLISH_<NAME>_ENABLED=false` in the environment.
 
-The release workflow checks configured destinations with `crier ping` before publishing packages and uses the same
-verified executable for the announcement. The check runs against both channel configurations, because each channel
-names music of its own and the gate runs before the release has a version. Select `skip_announcements` when
-dispatching Release to omit social posts; the test suite, package publication, release records, and installation checks
-still run.
+With `ANNOUNCE` set, the workflow checks the destinations with `crier ping` before publishing packages and puts the same
+verified executable first on `PATH` for the announcement. The check runs against both channel configurations, because
+each channel names music of its own and the gate runs before the release has a version. A missing or revoked credential
+stops the release at that gate. Instagram fetches its media from a public URL, so the release job defaults
+`CRIER_STAGE_MODE` to `server` behind an ngrok tunnel, and the repository variable can select `url` or `s3` instead.
+crier starts the tunnel only when a destination needs a URL.
 
 ## Preview and test without posting
 
-Generate the RC caption data from the repository root:
+Render the RC card, or generate the stable data, from the repository root:
 
 ```sh
-DISPAT_NEW_VERSION=1.11.0-rc.1 \
+DISPAT_NEW_VERSION=1.11.0-rc.1 crier render --config services/dispat/announce/rc/crier.yaml
+
+DISPAT_NEW_VERSION=1.11.0 \
 DISPAT_FEATURES="Minimal or star topology for identity-linked repositories" \
-  sh services/dispat/announce/notes.sh | python3 -m json.tool
+  python3 services/dispat/announce/notes.py | python3 -m json.tool
 ```
 
-Run `python3 scripts/announce-test.py` to check channel selection, install commands, credential handling, and failure
-behavior with a fake publisher. It also checks that the two configurations share their cross-posting and keep separate
-cards and music, that an RC links to its own release, and that the RC card draws the notes and links its captions
-print. This test contacts no social platform. The Docker shell gate runs it too.
+Run `python3 scripts/announce-test.py` to check the generated stable notes, that the two configurations share their
+cross-posting and keep separate cards and music, that an RC links to its own release, that the RC card and its caption
+say the same words, and that the RC caption fits each platform's limit. When a `dispat` binary is available it also runs
+the announce script with a fake publisher. This test contacts no social platform. The Docker shell gate runs it too,
+without a `dispat` binary, so there the announce script is read but not run.
 
-`dispat run announce -p dispat` sets the stage to `run:announce`, so the publishing script stops at its stage guard.
-Actual posting requires the release's `announce` stage or an explicit `ANNOUNCE_FORCE=1` override.
+`dispat run announce -p dispat` sets the stage to `run:announce`, so the announce script stops at its first condition.
+Actual posting requires the release's `announce` stage and `ANNOUNCE`.
 
 ## Recover an incomplete announcement
 
-An incomplete announcement returns failure. There is no automatic retry after an ambiguous publishing result:
-inspect the destination first so a replay does not duplicate a successful post.
+An incomplete announcement returns failure. There is no automatic retry after an ambiguous publishing result: inspect
+the destination first so a replay does not duplicate a successful post.
 
 The [replay workflow](https://github.com/yohimik/dispat/blob/main/.github/workflows/announce.yml) accepts a channel
 (`rc` or `stable`) and a script filename inside that channel folder. Write the replay script for the published version
-and destination that needs recovery. `ANNOUNCE_ONLY=linkedin` or `ANNOUNCE_ONLY=discord` limits the shared publisher to
-that destination. `ANNOUNCE_CRIER_BIN` selects the verified binary installed by the workflow.
+and the destination that needs recovery. It sets `DISPAT_NEW_VERSION`, disables the destinations that already have the
+post with `CRIER_PUBLISH_<NAME>_ENABLED=false`, and calls `crier publish` with the channel's `crier.yaml`. A stable
+replay pipes `notes.py` with the release-notes variables. The workflow puts the released crier first on `PATH`.

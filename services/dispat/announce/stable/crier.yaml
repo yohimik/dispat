@@ -1,10 +1,10 @@
 # The card dispat posts about a stable release.
 #
-# announce.sh drives this from dispat's announce stage for a version such as
-# 1.11.0; rc/crier.yaml is its counterpart for a release candidate. It is not a
-# project anybody runs by hand, though
-# `crier render --config services/dispat/announce/stable/crier.yaml` with some
-# DISPAT_* variables set renders it without posting.
+# The announce script in services/dispat/dispat.yaml picks this file when
+# DISPAT_CHANNEL is stable and pipes notes.py into it; rc/crier.yaml is its
+# counterpart for a release candidate. `DISPAT_NEW_VERSION=1.11.0 python3
+# services/dispat/announce/notes.py | crier render --config
+# services/dispat/announce/stable/crier.yaml` renders it without posting.
 #
 # One image post per platform: a cover followed by changelog pages.
 # Cover-only mode keeps the changelog in the caption.
@@ -14,13 +14,13 @@ render:
   # section labels set as filled tags. It shares every load-bearing rule with
   # the candidate's card (the page geometry, the margin boxes that carry the
   # version badge and the page counter, the wrapping of a changelog entry) and
-  # differs in how it looks. The accents still vary with the run's seed, which
-  # announce.sh derives from the version, so every destination receives the
-  # same design.
+  # differs in how it looks. The accents vary with the run's seed, and one run
+  # renders once, so every destination receives the same design.
   template: template.html
-  # The data comes from announce.sh on standard input, built out of the
-  # release-notes variables. It has arrays in it, which an env: prefix cannot
-  # carry: this is the case stdin exists for.
+  # A stable release announces what dispat generated for it: notes.py turns the
+  # release-notes variables into this document and the announce script pipes it
+  # in. It has arrays in it, which an env: prefix cannot carry: this is the
+  # case stdin exists for.
   data: "-"
   width: 1080
   height: 1080
@@ -38,7 +38,7 @@ render:
   # The card paginates: page one is the cover, and a long changelog carries on
   # across the pages after it. Ten is the default and it is stated here because
   # it is load-bearing for this card: a release past it fails the render rather
-  # than posting a truncated version of itself, and notes.sh's own cap of
+  # than posting a truncated version of itself, and notes.py's own cap of
   # twenty entries a section is what keeps a real release well under it.
   pages-max: 10
   video:
@@ -51,5 +51,28 @@ render:
       - anthem-stars-and-stripes.mp3
 
 # The same cross-posting as the rc channel, from the one file both share.
+# The caption is the stable release's own and is written beside the reference,
+# which replaces that one key and leaves the destinations alone.
 publish:
   $ref: ../publish.yaml
+  # The notes dispat generated for this release, under a fixed introduction.
+  # Keep the release link first so it survives the platform's caption limit.
+  caption: |-
+    {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .version }} is out.
+    Release notes: https://github.com/yohimik/dispat/releases
+
+    Turn conventional commits into a release plan, then build and publish the changed packages in dependency order.
+
+    dispat coordinates releases across Go, npm, Cargo, Python, Docker, mobile, game, and other supported project formats while your own commands build and publish the artifacts. Git-backed release records let interrupted runs preserve completed publications and continue the remaining work.
+
+    Preview the plan safely with `dispat status`, then follow the guide at https://dispat.dev/
+    {{ if .sections }}
+    What changed:{{ range .sections }}
+    {{ .label }}:{{ range .items }}
+    - {{ . }}{{ end }}{{ if gt .more 0 }}
+    - and {{ .more }} more{{ end }}{{ end }}
+    {{ end }}
+    Release packages across languages in dependency order.
+    Get started: https://dispat.dev
+
+    #golang #opensource #devtools #releaseengineering

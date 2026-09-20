@@ -1,9 +1,6 @@
 {{- /*
   Every random value this card draws, drawn here: at the top, unconditionally,
-  before any branch. A cover document and a nocover one are two executions of
-  this file, and the story pass has to come out the same colour as the feed
-  post. Drawing inside {{ if not .nocover }} would mean the two executions read
-  a different number of values off the run's stream and disagreed from there on.
+  so every pass over this file reads the same values off the run's stream.
 
   Every accent is one of the site's own sage shades and every tint is light
   enough to read on the near-black panel, so there is no combination that
@@ -20,18 +17,21 @@
      mode. stable/template.html is the same card seen as print, for the stable
      release that follows.
 
-     It carries the candidate's committed text, the same two files its captions
-     are built from: announcement.md is the notes and links.md is the links.
-     The first line of the notes is the cover's lede, the links sit on the cover
-     above the install commands, and the rest of the notes open the pages that
-     follow. A description therefore repeats its picture, links included.
+     A candidate's announcement is written by a person and is the same words in
+     two places: the caption in notes.yaml beside this file, and this card. The
+     first line of the notes is the cover's lede, the links to this candidate
+     sit on the cover above the install commands, and the rest of the notes fill
+     the pages that follow. There is no generated changelog here; that belongs
+     to the stable card. The only thing the card takes from the release is
+     {{ .new_version }}, which crier builds from DISPAT_NEW_VERSION.
+
+     Edit the words here and in notes.yaml together. scripts/announce-test.py
+     fails when a paragraph or a link of the caption is missing from this file.
 
      It paginates. Page one is the cover: the mark, the wordmark, the version
      badge a thumbnail has to carry, and the links and install commands pinned
-     to the bottom edge. The notes and then the changelog flow on from there across as many pages as it
-     needs, under a repeated header and footer drawn in the page margins. A
-     release with nothing much in it is one page and looks exactly as it
-     always did. */
+     to the bottom edge. The notes flow on from there across as many pages as
+     they need, under a repeated header and footer drawn in the page margins. */
   @font-face { font-family: "Poppins"; font-weight: 400; src: url("fonts/poppins/Poppins-Regular.ttf") }
   @font-face { font-family: "Poppins"; font-weight: 700; src: url("fonts/poppins/Poppins-Bold.ttf") }
   @font-face { font-family: "Space Mono"; font-weight: 400; src: url("fonts/space-mono/SpaceMono-Regular.ttf") }
@@ -75,17 +75,11 @@
   /* The cover carries its own badge, so it does not need the small one. It
      also skips the page counter: a release that fits on one page would
      otherwise announce itself as "1 / 1", which says nothing and looks like a
-     mistake. The domain stays.
-
-     Only when there is a cover. This suppression is about page one being the
-     cover, not about page one: a nocover document's first page is the first
-     changelog page, and stripping its badge and its counter would leave the
-     stories unlabelled. The first updates story should say which release it
-     is. */
-  {{ if not .nocover }}@page :first {
+     mistake. The domain stays. */
+  @page :first {
     @top-left { content: none }
     @bottom-right { content: none }
-  }{{ end }}
+  }
 
   /* No height here. A fixed body height clips whatever will not fit instead of
      flowing it onto the next page, which is the one thing this layout must
@@ -122,7 +116,7 @@
 
   /* The cover is exactly one page of content: 1080 less the page margins
      (56 + 78) and the body padding (40 + 40). Giving it a height is what pins
-     the install block to the bottom edge and what pushes the changelog onto
+     the install block to the bottom edge and what pushes the notes onto
      page two. */
   .cover {
     position: relative;
@@ -148,16 +142,6 @@
     letter-spacing: 2px;
   }
 
-  /* The version, for a document that has no cover to carry it.
-
-     The small badge in the page margin reads string(ver), and the only thing
-     that sets it is the big badge on the cover. Strip the cover and every page
-     would lose the badge. So a nocover document sets the string from something
-     that draws nothing: no height, no type, no space taken. */
-  .version-only {
-    string-set: ver content();
-    height: 0; font-size: 0; line-height: 0; margin: 0; padding: 0;
-  }
 
   /* The version badge: the one thing a thumbnail has to carry, and the source
      of the small one in the page margin. */
@@ -175,59 +159,21 @@
     max-width: 860px;
   }
 
-  /* The candidate's notes, as written: one paragraph per line of
-     announcement.md, in the order the caption prints them. They flow into the
-     changelog rather than ending their page, because every page spent here is
-     one fewer under render.pages-max. A paragraph moves to the next page whole
-     rather than splitting across two pictures. */
+  /* The candidate's notes, as written: one paragraph each, in the order the
+     caption prints them. A paragraph moves to the next page whole rather than
+     splitting across two pictures. */
   .notes h2 {
     font-size: 22px; font-weight: 700; margin: 0 0 12px 0;
     letter-spacing: 4px; color: {{ $accent }};
     break-after: avoid;
   }
   .notes p {
-    font-size: 23px; line-height: 1.45; color: {{ $tint }};
-    margin: 0 0 14px 0;
+    font-size: 21px; line-height: 1.42; color: {{ $tint }};
+    margin: 0 0 12px 0;
     overflow-wrap: break-word;
     break-inside: avoid;
   }
 
-  .section { margin-top: 26px }
-  .section h2 {
-    font-size: 22px; font-weight: 700; margin: 0 0 10px 0;
-    letter-spacing: 4px; color: {{ $accent }};
-    /* A heading alone at the foot of a page, with its list overleaf, is the
-       one break this layout must not take. */
-    break-after: avoid;
-  }
-  .section ul { margin: 0; padding: 0; list-style: none }
-  .section li {
-    font-size: 25px; line-height: 1.4; color: {{ $tint }};
-    margin-bottom: 8px;
-    /* A release subject is as long as somebody wrote it, and the card is
-       paginated, so long ones wrap: up to three lines each, then the
-       multi-line clamp. An unbroken run with no spaces in it breaks anywhere
-       rather than escaping the card. A long entry costing three lines is what
-       pushes its neighbours onto the next page, which is the point of having
-       pages. */
-    overflow: hidden; overflow-wrap: break-word;
-    max-lines: 3; continue: discard; block-ellipsis: auto;
-    break-inside: avoid;
-  }
-  .section li:before { content: "- "; color: #4e7d64 }
-  .more { color: #4e7d64; font-size: 21px; margin-top: 4px }
-
-  /* Breaking changes are the one section worth a warm colour on a card this
-     green: the eye finds them before it reads a word. */
-  .breaking h2 { color: #e8a06a }
-  .breaking li { color: #f0cdad }
-  .breaking li:before { color: #a8724a }
-
-  /* What the release picked up from its own providers, quieter than the
-     changes somebody wrote: it is the run's bookkeeping, worth stating and
-     not worth shouting. */
-  .picks h2 { color: #6c9a83 }
-  .picks li { color: #a9c4b6 }
 
   /* Pinned to the bottom of the cover. */
   .install {
@@ -260,36 +206,38 @@
 </style>
 </head>
 <body>
-  {{ if not .nocover }}<div class="cover">
+  <div class="cover">
     <svg class="mark" viewBox="0 0 9 9" width="76" height="76" xmlns="http://www.w3.org/2000/svg">
       <path fill="{{ $accent }}" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
       <path fill="{{ $tint }}" d="M3 3h6v6H3Z"/>
     </svg><span class="wordmark">dispat</span>
 
     <div class="prompt">$ dispat release</div>
-    <div class="badge">v{{ .version }}</div>
+    <div class="badge">v{{ .new_version }}</div>
 
-    <div class="lede">{{ index .announcement 0 }}</div>
+    <div class="lede">Orchestration and choreography. No separate control repository.</div>
 
     <div class="install">
       <h2>LINKS</h2>
-      {{ range .links }}<div class="cmd link"><span>{{ .label }}</span> {{ .url }}</div>{{ end }}
+      <div class="cmd link"><span>This release candidate</span> https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}</div>
+      <div class="cmd link"><span>Linked repositories guide</span> https://dispat.dev/next/choreographed-repositories/</div>
+      <div class="cmd link"><span>dispat compute reference</span> https://dispat.dev/next/cli/compute/</div>
+      <div class="cmd link"><span>Report a problem</span> https://github.com/yohimik/dispat/issues</div>
       <h2>INSTALL</h2>
-      {{ range .install }}<div class="cmd"><span>{{ if eq .label "action" }}-{{ else }}${{ end }}</span> {{ .command }}</div>{{ end }}
+      <div class="cmd"><span>$</span> curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v{{ .new_version }}/install.sh | DISPAT_VERSION={{ .new_version }} sh</div>
+      <div class="cmd"><span>$</span> dispat self-update --release {{ .new_version }}</div>
     </div>
-  </div>{{ end }}{{ if .nocover }}<div class="version-only">v{{ .version }}</div>{{ end }}
-
-  {{ if not .coveronly }}<div class="notes">
-    <h2>NOTES</h2>
-    {{ range $i, $line := .announcement }}{{ if and $line (or $.nocover (gt $i 0)) }}<p>{{ $line }}</p>{{ end }}{{ end }}
-  </div>{{ end }}
-
-  {{ if not .coveronly }}{{ range .sections }}
-  <div class="section{{ if eq .label "BREAKING" }} breaking{{ end }}{{ if eq .label "PICKS UP" }} picks{{ end }}">
-    <h2>{{ .label }}</h2>
-    <ul>{{ range .items }}<li>{{ . }}</li>{{ end }}</ul>
-    {{ if gt .more 0 }}<div class="more">+{{ .more }} more</div>{{ end }}
   </div>
-  {{ end }}{{ end }}
+
+  <div class="notes">
+    <h2>NOTES</h2>
+    <p>This RC lets you release across repositories using the repositories you already have. Choose one as your usual starting point for orchestration, or start from any peer for choreography. Each repository keeps its own configuration and release records. Declare its repository identity and name the other peers in its roster to connect the fleet.</p>
+    <p>Choose how the repositories connect. `dispat compute --topology star` proposes direct links from the current repository to every peer. `dispat compute --topology minimal` keeps existing links and adds the fewest needed to connect the fleet. You can also arrange your own connected tree of links. Cycles are refused, so each repository has one unambiguous route through the fleet.</p>
+    <p>These commands preview changes; add `--write` to apply them. Neither topology deletes existing links or turns a peer into a separate control repository.</p>
+    <p>dispat acquires every participating repository's remote release lock before computing the release plan. If any lock fails, the release stops before planning. Once locked, it calculates versions and runs packages in dependency order across repository boundaries.</p>
+    <p>Releases recover through saga records. If a provider publishes and its consumer fails, the provider's completed release stays recorded. The next run uses that record to catch the consumer up without publishing the provider again. Independent packages can continue when their dependencies permit it.</p>
+    <p>Autistic stability for ADHD projects. Mathematical planning. Saga recovery.</p>
+    <p>Preview the release plan with `dispat status`. It runs no release stages and acquires no release lock.</p>
+  </div>
 </body>
 </html>

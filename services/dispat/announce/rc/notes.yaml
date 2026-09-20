@@ -1,0 +1,37 @@
+# What this release candidate says, written by a person: the headline, every
+# link to this candidate, then the notes. rc/crier.yaml pulls this file in as
+# its caption, so a new candidate is announced by editing this file and the
+# same words on template.html, and never the configuration.
+#
+# The only value it takes from the release is {{ .new_version }}. The links come
+# first so they survive a platform's caption limit. Discord refuses a message
+# over 2000 characters and Instagram a caption over 2200, and crier posts a
+# caption whole, so Discord gets the links and the lede and leaves the long
+# paragraphs to the pictures attached to the same message, which carry them in
+# full. scripts/announce-test.py checks the limits and that the card says the
+# same words.
+--- |-
+  {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is ready for testing.
+  This release candidate: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
+  Linked repositories guide: https://dispat.dev/next/choreographed-repositories/
+  dispat compute reference: https://dispat.dev/next/cli/compute/
+  Report a problem: https://github.com/yohimik/dispat/issues
+
+  Orchestration and choreography. No separate control repository.
+  {{ if eq .Platform "discord" }}
+  The full notes are on the pictures.{{ else }}
+  This RC lets you release across repositories using the repositories you already have. Choose one as your usual starting point for orchestration, or start from any peer for choreography. Each repository keeps its own configuration and release records. Declare its repository identity and name the other peers in its roster to connect the fleet.
+
+  Choose how the repositories connect. `dispat compute --topology star` proposes direct links from the current repository to every peer. `dispat compute --topology minimal` keeps existing links and adds the fewest needed to connect the fleet. You can also arrange your own connected tree of links. Cycles are refused, so each repository has one unambiguous route through the fleet.
+
+  These commands preview changes; add `--write` to apply them. Neither topology deletes existing links or turns a peer into a separate control repository.
+
+  dispat acquires every participating repository's remote release lock before computing the release plan. If any lock fails, the release stops before planning. Once locked, it calculates versions and runs packages in dependency order across repository boundaries.
+
+  Releases recover through saga records. If a provider publishes and its consumer fails, the provider's completed release stays recorded. The next run uses that record to catch the consumer up without publishing the provider again. Independent packages can continue when their dependencies permit it.
+
+  Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
+
+  Preview the release plan with `dispat status`. It runs no release stages and acquires no release lock.{{ end }}
+
+  #golang #opensource #devtools #releaseengineering

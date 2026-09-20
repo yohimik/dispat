@@ -1,13 +1,15 @@
 # The card dispat posts about a release candidate.
 #
-# announce.sh drives this from dispat's announce stage for a version such as
-# 1.11.0-rc.1; stable/crier.yaml is its counterpart for a stable version. It is
-# not a project anybody runs by hand, though
-# `crier render --config services/dispat/announce/rc/crier.yaml` with some
-# DISPAT_* variables set is how the previews beside this file were made.
+# The announce script in services/dispat/dispat.yaml picks this file when
+# DISPAT_CHANNEL is rc; stable/crier.yaml is its counterpart for a stable
+# version. `DISPAT_NEW_VERSION=1.11.0-rc.1 crier render --config
+# services/dispat/announce/rc/crier.yaml` is how the previews beside this file
+# were made.
 #
-# One image post per platform: a cover followed by changelog pages.
-# Cover-only mode keeps the changelog in the caption.
+# One image post per platform: a cover, then the notes. Everything a candidate
+# says is written by hand, and not in this file: the caption is notes.yaml and
+# the same words are on the card, template.html. Edit those two before a
+# candidate ships; scripts/announce-test.py fails when they differ.
 render:
   # The candidate's face: a faint lattice on near-black, a dependency graph's
   # ruling seen through the panel, with the section labels set as spaced
@@ -15,14 +17,15 @@ render:
   # one, which is what a candidate is. The stable card shares every
   # load-bearing rule with it (the page geometry, the margin boxes that carry
   # the version badge and the page counter, the wrapping of a changelog entry)
-  # and differs in how it looks. The accents still vary with the run's seed,
-  # which announce.sh derives from the version, so every destination receives
-  # the same design.
+  # and differs in how it looks. The accents vary with the run's seed, and one
+  # run renders once, so every destination receives the same design.
   template: template.html
-  # The data comes from announce.sh on standard input, built out of the
-  # release-notes variables. It has arrays in it, which an env: prefix cannot
-  # carry: this is the case stdin exists for.
-  data: "-"
+  # A candidate's announcement is written by a person, in notes.yaml and on the
+  # card, so the only thing it takes from the release is the version. dispat
+  # hands every stage DISPAT_NEW_VERSION, which this prefix turns into
+  # {{ .new_version }} for the card and the caption alike. There is no
+  # generated changelog here: that belongs to the stable release.
+  data: "env:DISPAT_"
   width: 1080
   height: 1080
   background: "#101713"
@@ -36,11 +39,9 @@ render:
   # licences, one folder up, which is why the base URL points there.
   hermetic-fonts: true
   base-url: ..
-  # The card paginates: page one is the cover, and a long changelog carries on
-  # across the pages after it. Ten is the default and it is stated here because
-  # it is load-bearing for this card: a release past it fails the render rather
-  # than posting a truncated version of itself, and notes.sh's own cap of
-  # twenty entries a section is what keeps a real release well under it.
+  # The card paginates: page one is the cover and the notes follow it. Notes
+  # past ten pages fail the render rather than posting a truncated version of
+  # themselves, and ten pictures is also what one post holds.
   pages-max: 10
   video:
     # Only the cover-story render enables video. Photo posts remain stills.
@@ -52,5 +53,12 @@ render:
       - anthem-mountain-king.mp3
 
 # The same cross-posting as the stable channel, from the one file both share.
+# The caption is the candidate's own and is written beside the reference, which
+# replaces that one key and leaves the destinations alone.
 publish:
   $ref: ../publish.yaml
+  # Human-written, with every link to this candidate, and no generated notes.
+  # The words live in notes.yaml so that announcing a new candidate never means
+  # editing this file.
+  caption:
+    $ref: notes.yaml

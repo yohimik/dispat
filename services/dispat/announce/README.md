@@ -1,37 +1,69 @@
 # Release announcements
 
-This folder belongs to the Dispat CLI package. Each channel has a folder of its own, `rc/` and `stable/`, holding its Crier configuration (`crier.yaml`), its card (`template.html`), its music, and its fixed text: the notes (`announcement.md`) and the links (`links.md`). Edit the appropriate notes and links before its release. They are committed files and nothing else stores them. The scripts, the fonts, and `publish.yaml` are shared.
+This folder belongs to the Dispat CLI package. Each channel has a folder of its own, `rc/` and `stable/`, holding its Crier configuration (`crier.yaml`), its card (`template.html`), and its music. The release candidate's words are in `rc/notes.yaml`. `publish.yaml`, `notes.py`, and the fonts are shared.
 
-Both configurations take their whole `publish` section from `publish.yaml`, so a release candidate and a stable release post to the same destinations with the same captions and limits. They differ in the card and the music: the candidate uses the lattice card with the William Tell galop or In the Hall of the Mountain King, and the stable release uses the print card with the 1812 Overture or The Stars and Stripes Forever. [anthem.md](anthem.md) records where the clips came from.
+There is no announcement script. The `announce` entry of [../dispat.yaml](../dispat.yaml) is a few lines of `dispat if`: it posts nothing outside the announce stage or without `ANNOUNCE`, and otherwise the channel picks the configuration.
 
-`notes.sh` selects RC copy for a version such as `1.11.0-rc.1` and stable copy for a version such as `1.11.0`, and `announce.sh` selects the same channel's `crier.yaml`. Other prerelease channels fail before publishing until they have an explicit announcement policy. Install commands name the exact announced version.
+| Channel | Command | What it says |
+|---|---|---|
+| `rc` | `crier publish --config announce/rc/crier.yaml` | Only what a person wrote: the caption in `rc/notes.yaml` and the same words on `rc/template.html`, with every link to this candidate. No generated notes. |
+| `stable` | `python3 announce/notes.py \| crier publish --config announce/stable/crier.yaml` | The notes dispat generated for the release, under the fixed introduction in `stable/crier.yaml`. |
 
-`links.md` holds one `Label: https://...` link per line. Notes and links may write the version as `${DISPAT_NEW_VERSION}`, the spelling `github.footer` uses in `dispat.yaml`, and `notes.sh` fills in the announced version. The RC links therefore point at this exact candidate: its GitHub release under `releases/tag/services/dispat/v<version>` and its guide under `https://dispat.dev/next/`. A line that is not a label and an `https` address fails before rendering or posting.
+Any other prerelease channel has no announcement, and the script says so.
 
-The RC notes and links are duplicated in the description and in the picture. Every caption prints the links first, then the notes, then the generated changelog. The RC card draws the same two files: the first line of the notes is the cover's lede, the links are printed on the cover above the install commands, and the remaining notes open the page after the cover, ahead of the changelog. The stable card keeps its fixed lede, and its notes and links appear in the captions.
+## Same cross-posting, separate cards and music
 
-Preview the RC data without rendering or posting:
+Both configurations take their `publish` section from `publish.yaml`, so a release candidate and a stable release post to the same destinations with the same limits: Instagram, LinkedIn, and Discord, all enabled. Each channel writes only its caption beside that reference. They differ in the card and the music: the candidate uses the lattice card with the William Tell galop or In the Hall of the Mountain King, and the stable release uses the print card with the 1812 Overture or The Stars and Stripes Forever. [anthem.md](anthem.md) records where the clips came from.
+
+## Writing a release candidate
+
+Edit two places before a candidate ships, and keep them the same. Neither is the configuration: `rc/crier.yaml` pulls the caption in with a `$ref` and never changes between candidates.
+
+1. [rc/notes.yaml](rc/notes.yaml), the caption: the headline, the links, the notes.
+2. The words on [rc/template.html](rc/template.html): the first line of the notes is the cover's lede, the links are printed on the cover above the install commands, and the remaining paragraphs fill the notes page.
+
+The only value either takes from the release is `{{ .new_version }}`, which Crier builds from `DISPAT_NEW_VERSION` (`render.data: env:DISPAT_`). The links therefore point at this exact candidate: its GitHub release under `releases/tag/services/dispat/v<version>` and its documentation under `https://dispat.dev/next/`.
+
+Crier posts a caption whole, and the platforms refuse a long one: Discord at 2000 characters, Instagram at 2200. The caption keeps every link on every platform. On Discord it follows the lede with a pointer to the pictures instead of the long paragraphs, because the pictures attached to the same message carry the notes in full.
+
+`python3 scripts/announce-test.py` fails when a paragraph or a link of the caption is missing from the card, when the card says something the caption does not, or when the caption is over a platform's limit.
+
+The [cover preview](rc/preview-1.jpg) and [notes preview](rc/preview-2.jpg) show the draft for the planned `1.11.0-rc.1` release:
 
 ```sh
-DISPAT_NEW_VERSION=1.11.0-rc.1 sh services/dispat/announce/notes.sh | python3 -m json.tool
+DISPAT_NEW_VERSION=1.11.0-rc.1 crier render --config services/dispat/announce/rc/crier.yaml
 ```
 
-The RC draft is in [rc/announcement.md](rc/announcement.md) and [rc/links.md](rc/links.md). Its [cover preview](rc/preview-1.jpg), [notes preview](rc/preview-2.jpg) and [changelog preview](rc/preview-3.jpg) use a sample changelog for the planned `1.11.0-rc.1` release. The stable card has the same pair: a [cover preview](stable/preview-1.jpg) and a [changelog preview](stable/preview-2.jpg) with sample notes for `1.11.0`. They are local renders, not publication records.
+## Stable releases
 
-The announcement replay workflow selects `rc` or `stable` and a replay script within that folder. Shared publishing remains in `announce.sh`, which reads the channel from the version the replay script sets.
+`notes.py` reads the release-notes variables and prints the document the stable card and caption read: the version, the changelog sections, and install commands that name the announced version. Preview it without rendering or posting:
 
-The release uses one `crier publish` command to render the cover and changelog pages and send one photo post to each configured destination: Instagram, LinkedIn, and Discord. Every post includes the changelog in its caption, with a release-notes link near the beginning. Discord explicitly enables `@everyone` notifications. Platform text limits still apply to long captions.
+```sh
+DISPAT_NEW_VERSION=1.11.0 DISPAT_FIXES="a fix" python3 services/dispat/announce/notes.py | python3 -m json.tool
+```
 
-The same command also publishes an Instagram story: the first page, shown for sixteen seconds with music from the channel's audio pool. It fits the cover into a vertical frame. Instagram's feed keeps its photo carousel and changelog caption; the story carries the music.
+The stable card has a [cover preview](stable/preview-1.jpg) and a [changelog preview](stable/preview-2.jpg) with sample notes for `1.11.0`. Rendering is capped at ten pages, so each destination receives one photo post. If an account cannot accept multiple photos, set `ANNOUNCE_COVER_ONLY=1` to show only the stable cover while keeping the changelog in the captions. The previews are local renders, not publication records.
 
-Rendering is capped at ten pages, so each destination receives one photo post. If an account cannot accept multiple photos, set `ANNOUNCE_COVER_ONLY=1` to show only the cover on all destinations while keeping the notes and the changelog in their captions. The RC cover still carries its links.
+## What is posted
 
-The release workflow runs `crier ping` against both channel configurations before publishing any packages. Failed credentials or required story inputs block the release. The publishing command reports each destination's result and returns failure if an announcement is incomplete. It does not retry an ambiguous publishing failure automatically. Inspect the destination before replaying to avoid duplicate posts. `ANNOUNCE_ONLY=linkedin` or `ANNOUNCE_ONLY=discord` limits a replay to that destination and needs no public staging tunnel.
+One `crier publish` command renders the pages and sends one photo post to each destination. Discord explicitly enables `@everyone` notifications, and the captions write the mention for Discord only. The same command also publishes an Instagram story: the cover, shown for sixteen seconds with music from the channel's audio pool, fitted into a vertical frame.
 
-Select `skip_announcements` when dispatching the Release workflow to publish packages without posting to social platforms. This leaves the full test suite, package publication, release records, and installation checks enabled. Announcements remain enabled by default; the opt-out applies only to that workflow run.
+## The release workflow
 
-Set the repository secret `CRIER_PUBLISH_DISCORD_WEBHOOK_URL` to an incoming Discord webhook URL. No separate Discord bot token is required. Keep that URL out of configuration files and logs.
+The workflow sets `ANNOUNCE` when the repository holds any of the announcement's secrets and the dispatch did not select `skip_announcements`. Without it nothing is posted, which is also what keeps a release run from a laptop quiet. Skipping leaves the full test suite, package publication, release records, and installation checks enabled.
+
+With `ANNOUNCE` set, the workflow runs `crier ping` against both channel configurations before publishing any packages. Every destination in `publish.yaml` is checked, so a missing or revoked credential, or a missing story input, blocks the release. The release job then puts that verified `crier` first on `PATH`. Instagram fetches its media from a public URL, so the job sets `CRIER_STAGE_MODE` (default `server`, through an ngrok tunnel; the repository variable can select `s3` or `url` instead). Crier starts the tunnel only when a destination needs a URL.
+
+Set the repository secret `CRIER_PUBLISH_DISCORD_WEBHOOK_URL` to an incoming Discord webhook URL. No separate Discord bot token is required. Keep that URL out of configuration files and logs. To run without one destination, set `CRIER_PUBLISH_<NAME>_ENABLED=false` in the environment.
+
+## Recovering an incomplete announcement
+
+The publishing command reports each destination's result and returns failure if an announcement is incomplete. It does not retry an ambiguous publishing failure. Inspect the destination before replaying to avoid duplicate posts.
+
+The announcement replay workflow selects `rc` or `stable` and a replay script within that folder. A replay script is a few lines: it sets `DISPAT_NEW_VERSION`, switches off the destinations that already have the post with `CRIER_PUBLISH_<NAME>_ENABLED=false`, and calls `crier publish` with the channel's `crier.yaml` (piping `notes.py` and the release-notes variables for a stable replay). The replay workflow holds no Instagram credentials, so a replay there disables Instagram.
+
+## Checks
+
+Run `python3 scripts/announce-test.py` from the repository root. It checks the generated stable notes, that the two configurations share their cross-posting while keeping separate cards and music, the release candidate's words and limits, and, when a `dispat` binary is available, the announce script itself with a fake publisher. It never contacts a social platform. The Docker shell gate also runs this check; it has no `dispat` binary, so there the announce script is read but not run.
 
 This flow requires a Crier release that supports `publish.instagram.cover-story` and `publish.discord.mention-everyone`. Earlier versions fail configuration validation at the ping gate.
-
-Run `python3 scripts/announce-test.py` from the repository root to check single-call orchestration with a fake publisher, the configuration each channel selects, and that the two configurations share their cross-posting while keeping separate cards and music. It never contacts a social platform. The Docker shell gate also runs this check.

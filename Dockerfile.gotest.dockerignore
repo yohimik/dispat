@@ -60,26 +60,23 @@ coverage/covdata
 
 # The shell sweep's inputs. Shell files only: scripts/ also holds a python
 # renderer and services/dispat/announce holds shared fonts and each channel's
-# audio. Include only the publisher scripts, the shared cross-posting, and each
-# channel's configuration, card and copy needed by tests.
+# audio. Include only the notes generator, the shared cross-posting, and each
+# channel's configuration and card, which the announcement check reads.
 !scripts
 scripts/*
 !scripts/*.sh
 !scripts/announce-test.py
 services/dispat/announce/*
-!services/dispat/announce/*.sh
+!services/dispat/announce/notes.py
 !services/dispat/announce/publish.yaml
 !services/dispat/announce/rc
 services/dispat/announce/rc/*
-!services/dispat/announce/rc/announcement.md
 !services/dispat/announce/rc/crier.yaml
-!services/dispat/announce/rc/links.md
+!services/dispat/announce/rc/notes.yaml
 !services/dispat/announce/rc/template.html
 !services/dispat/announce/stable
 services/dispat/announce/stable/*
-!services/dispat/announce/stable/announcement.md
 !services/dispat/announce/stable/crier.yaml
-!services/dispat/announce/stable/links.md
 !services/dispat/announce/stable/template.html
 
 # Bootstrap integration fixture and pinned tool policy.
