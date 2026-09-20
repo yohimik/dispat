@@ -59,6 +59,13 @@ integration suite itself.
     mid-train and to a sparse member, the mixed-depth resolution (W237) along a train, the polyglot script-only member,
     the versioning-`none` refusal through the binary, `--group` selection under a partial mode, and divergent
     per-member `tagFormat` as defined behavior: one shared version, each member spelling its tag its own way.
+56. **A version group's sharing axes** (`versiongroupaxes_test.go`): a group holds a version prefix in common, and
+    whether its members also hold one prerelease counter and one channel is two further choices. The whole release
+    cycle of an opted-in group (onto a train together, a leg that dies, a retry that owes only that leg, a fix that
+    moves one package, the next train that moves all of them, convergence), a graduation that takes only the members
+    it names, the refusal of a shared counter beside independent channels, and the two shapes the defaults themselves
+    got wrong: a member resting off the train deciding the group's channel, and a half-finished graduation that could
+    not be retried.
 38. **The longitudinal fence** (`longitudinal_test.go`): one repository modelled on dispat's own shape (a declared
     group across two spaces, a wired publish leg, a caret provider, alias tags, a remote, and the GitHub recorder)
     released through a whole rc-train lifecycle with every record and every status line asserted at every step. The
@@ -394,6 +401,7 @@ tests/integration/
   packages_test.go          goal 14
   spacedeps_test.go         goal 15
   versiongroups_test.go     goal 36
+  versiongroupaxes_test.go  goal 56
   stepwiring_test.go        goal 37
 
   the commands
@@ -1311,6 +1319,16 @@ script-only members, and per-member tag spellings.
 | `TestVersionGroupPartialReleaseTwoLaggards` | One holder, two failed legs: both laggards catch up at the published version in a single retry.                                                                                                                     |
 | `TestVersionGroupPartialReleaseNewerWorkMovesOn` | The mask reaches exactly as far as the published tag: work landing after the partial release moves the prefix, the laggard releases everything at the next minor without ever landing on the version it skipped past, and the erstwhile holder rides up (W234). |
 | `TestVersionGroupTrainPartialReleaseAdvancesTheTrain` | On a prerelease train the stable-line masking stays out (§11.4 owns the window): the retry advances the train, the laggard boards at the next prerelease and the holder rides beside it.                       |
+
+### Goal 56: a version group's sharing axes (`versiongroupaxes_test.go`)
+
+| Test                                        | Claim proven                                                                                                                                                                                                        |
+|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestVersionGroupIndependentCounterRetriesOnlyTheFailedLeg` | The whole release cycle of a group with a counter and a channel of its own: the shared prefix takes every member onto a train, a failed leg is retried at the version the failed run planned for it while the members that published are untouched and gain no "no changes" entry, work inside the train releases only the package that wrote it, the next train takes all of them with the counters reset and W234 on the riders, and a further run converges. |
+| `TestVersionGroupIndependentChannelsGraduateOnlyNamedMembers` | With a channel of its own, a graduation ends only the trains it names, with no W236; a later movement of the shared prefix still takes every member, the graduated one on stable and the others on the line they never left, because a ride does not graduate a member. |
+| `TestVersionGroupRefusesASharedCounterWithIndependentChannels` | One shared counter counts one train and a train runs on one channel, so the combination is refused through the binary with the loader's own message. |
+| `TestVersionGroupRestingMemberDoesNotDecideTheGroupsChannel` | Under the defaults, a sparse member resting on stable while the rest ride an rc does not graduate the group: the train continues. |
+| `TestVersionGroupGraduationRetryFinishesTheTrain` | Under the defaults, a graduation whose second leg failed is retried and finishes the train, rather than reporting E185 for a member whose own window never carried the work that set the train's core. |
 
 ### Goal 37: step commands wired into a running release (`stepwiring_test.go`)
 
