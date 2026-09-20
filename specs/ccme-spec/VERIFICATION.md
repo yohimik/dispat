@@ -47,7 +47,7 @@ The paper explicitly analyzes the historical 1.0.0 specification at `713f1a0b`. 
 The first coordinated run published CLI 1.8.0, the four images at 1.8.0, CCME and its specification at 2.0.0,
 and manifest, scanner and writer at 1.2.0. The docs package stopped at its experiment gate. Models 2.0.0 was an
 incorrect release: commit `3e8b5849` had introduced unnecessary `/v2` imports and separated models from the CLI
-version group. At the owner's request, all artifacts and tags from that coordinated run were withdrawn and main was restored
+version group. Recovery withdrew all artifacts and tags from that coordinated run and restored main
 to the pre-publication history before applying the repair.
 
 Moving the specification did not change any parser production type or function. The recovery restores the original
@@ -107,8 +107,8 @@ package explicitly enables rollback, previously published packages are not repub
 
 The rollback removed all eleven publications from the failed run, including the erroneous models 2.0.0 release.
 Docker rollback run 33947918048 verified the four image repositories: stable aliases again resolve to 1.7.2 and the
-1.8/1.8.0 tags are absent. Discord deletion was verified through its API; the owner confirmed LinkedIn and Instagram
-cleanup. The corrected main revision requires fresh CI and the complete release gates before publication.
+1.8/1.8.0 tags are absent. Discord deletion was verified through its API; LinkedIn and Instagram
+cleanup was reported complete. The corrected main revision requires fresh CI and the complete release gates before publication.
 
 An isolated copy of the checked-in specification passed the real release hook from 1.0.0 to 2.0.0. The hook
 updated `VERSION` and all three normative Markdown declarations, and the resulting specification passed validation.
@@ -127,8 +127,8 @@ uses the production package configuration in a disposable Git repository, runs t
 checks both working files and the committed tag for version 2.0.0. It fails with the previous configuration and
 passes with the correction. Shellcheck and the existing script regression suite passed too.
 
-The run was cancelled before CLI, images, docs or announcements published. At the owner's request, all six release
-pages and tags from this attempt were removed, including the five correctly built Go modules, so the complete
+The run was cancelled before CLI, images, docs or announcements published. Recovery removed all six release
+pages and tags from this attempt, including the five correctly built Go modules, so the complete
 release can run together. Remote checks confirmed that all intended release tags and all four images' 1.8 and
 1.8.0 tags are absent. Main was rebuilt from the pre-release revision with the verified lifecycle correction.
 Further configuration changes require reading the relevant project documentation before editing and validating
@@ -136,7 +136,7 @@ the configured behavior through the CLI before release.
 
 ## Native specification replacement
 
-At the owner's direction, the final configuration uses `autoVersion` with `manifests: none` and four explicit
+Specification version updates use `autoVersion` with `manifests: none` and four explicit
 literal replacement rules. The configuration and replacer documentation were read before editing. The custom
 stamping script was removed. Verification runs before native replacement and during the build; the build also
 rejects a version that differs from the planned release, including a consistently stale file that only raised W222.

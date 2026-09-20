@@ -446,10 +446,9 @@ diagnostic.
 
 **Why `%%` is not a reach.** `%` concerns the unit's own packages; `%%` changes the *audience* to the dependents.
 `^`/`^^` keep one audience and change the *distance*. A channel has no distance dimension of its own to intensify, because how
-far it goes is what `++N` says, so a doubled `%` could not have meant what a doubled `^` means. Given that, the two
-candidate readings were a doubled sigil (`%%`) or a compound one (`^%`), and `%%` was preferred because it keeps `%`
-reading as "channel" throughout, whereas `^%` would make `^` a namespace prefix in one form and a bump sigil taking bump
-words in every other.
+far it goes is what `++N` says, so a doubled `%` could not have meant what a doubled `^` means. The doubled sigil `%%` keeps `%`
+reading as "channel" throughout. A compound `^%` would make `^` a namespace prefix in one form and a bump sigil taking
+bump words in every other.
 
 #### Channel transitions
 
@@ -1036,7 +1035,7 @@ propagation".
 
 The two are **not** the same diagnostic. `^none` and `+0` ask for nothing and get nothing: that is `W152`, redundancy,
 because writing nothing says the same thing. `^minor+0` asks for something (a `minor`) and a depth of `0` throws it
-away: that is `W201`, an inert value, because the author plainly wanted a bump to travel and it reaches nobody. See
+away: that is `W201`, an inert value, because a nonzero propagation bump has no effect at depth `0`. See
 §8.3b for the rule that separates them, which is the same on both axes.
 
 ### 8.3a `Propagate-Channel-Depth`
@@ -5122,8 +5121,8 @@ only a package outside it is `E213` (§7.4.2).
 `Edits: <B>`.
 
 → `B` is void: `A`'s record returns, and `C`'s `docs` record stands as the restatement of `B`'s. `core` releases
-`2.0.0`, because `A`'s `major` is back in the window and `docs` maps to `none`. An author who wanted to fix the
-restatement should have written `Edits: <A>` again, which supersedes `B` directly (`W210`, vector 114).
+`2.0.0`, because `A`'s `major` is back in the window and `docs` maps to `none`. To correct the
+restatement, use `Edits: <A>` again, which supersedes `B` directly (`W210`, vector 114).
 
 ---
 

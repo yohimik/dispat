@@ -20,18 +20,24 @@
   Orchestration and choreography. No separate control repository.
   {{ if eq .Platform "discord" }}
   The full notes are on the pictures.{{ else }}
-  This RC lets you release across repositories using the repositories you already have. Choose one as your usual starting point for orchestration, or start from any peer for choreography. Each repository keeps its own configuration and release records. Declare its repository identity and name the other peers in its roster to connect the fleet.
+  Monorepo: release packages that live in one repository.
 
-  Choose how the repositories connect. `dispat compute --topology star` proposes direct links from the current repository to every peer. `dispat compute --topology minimal` keeps existing links and adds the fewest needed to connect the fleet. You can also arrange your own connected tree of links. Cycles are refused, so each repository has one unambiguous route through the fleet.
+  Orchestration: start from one chosen repository to coordinate releases across linked repositories.
 
-  These commands preview changes; add `--write` to apply them. Neither topology deletes existing links or turns a peer into a separate control repository.
+  Choreography: start a release from any linked repository.
 
-  dispat acquires every participating repository's remote release lock before computing the release plan. If any lock fails, the release stops before planning. Once locked, it calculates versions and runs packages in dependency order across repository boundaries.
+  Both approaches to linked repositories work without a separate control repository. Each repository keeps its own configuration and release history.
 
-  Releases recover through saga records. If a provider publishes and its consumer fails, the provider's completed release stays recorded. The next run uses that record to catch the consumer up without publishing the provider again. Independent packages can continue when their dependencies permit it.
+  Connect repositories with a star, a minimal tree, or your own tree of links. `dispat compute --topology star` proposes direct links from the current repository to every other one. `dispat compute --topology minimal` keeps existing links and adds only what is needed. Custom links must connect the repositories without loops.
+
+  Both commands preview changes. Add `--write` to apply them. Existing links are kept.
+
+  Before planning, dispat locks every participating repository. If any lock fails, the release stops. It then calculates versions and releases dependencies before the packages that need them.
+
+  If a library releases but an app using it fails, the successful release stays recorded. The next run plans the unfinished work without releasing the library again. This is saga recovery: keep what succeeded and finish what remains.
 
   Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
 
-  Preview the release plan with `dispat status`. It runs no release stages and acquires no release lock.{{ end }}
+  Check the plan with `dispat status`. It publishes nothing and takes no release locks.{{ end }}
 
-  #golang #opensource #devtools #releaseengineering
+  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #softwaredevelopment

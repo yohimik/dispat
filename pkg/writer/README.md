@@ -108,7 +108,7 @@ The Docker rewriters skip three reference patterns outright, returning them as `
 
 | Reference                       | Why it is left alone                                                                     |
 |---------------------------------|------------------------------------------------------------------------------------------|
-| `FROM redis`                    | there is no tag to replace, and inventing one overrides the default the author chose      |
+| `FROM redis`                    | there is no explicit tag to replace; adding one would override the default image tag      |
 | `FROM redis@sha256:...`         | the digest is what gets pulled, so a new tag beside it would name a version nothing uses  |
 | `FROM ${REGISTRY}/base:${TAG}`  | the value is resolved outside the file, and a literal would sever the indirection         |
 

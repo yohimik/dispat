@@ -255,9 +255,8 @@ release's notes, and a section claiming only such types never appears.
 
 A line is grouped by the first of these that holds:
 
-1. **A breaking change always renders under the breaking section**, whatever claims its type. Letting `add(x)!:` sit
-   under "Added" would put the one thing a reader scans an entry for behind the word its author chose for ordinary
-   work.
+1. **A breaking change always renders under the breaking section**, regardless of its commit type. For example,
+   `add(x)!:` belongs under "Breaking changes", so its compatibility impact remains visible.
 2. A section of your own claiming the commit's type takes it.
 3. Everything else falls to the bump-keyed built-in it always had.
 

@@ -8,8 +8,8 @@ here on [Discord](https://discord.gg/83PwVSCCmk).
 A **space** groups packages that share configuration, such as build and publish commands. It is short for
 *workspace*, a familiar term in monorepo tooling for organizing related packages.
 
-The name takes inspiration from Go's `go work` command, which also shortens "workspace." dispat's author preferred
-the other half: `space`. See [Spaces](./configuration/spaces.md) for configuration details.
+Like Go's `go work` command, dispat shortens "workspace" in its configuration vocabulary. It uses the other half,
+`space`, to keep names concise. See [Spaces](./configuration/spaces.md) for configuration details.
 
 ## What does dispat need before the first release?
 

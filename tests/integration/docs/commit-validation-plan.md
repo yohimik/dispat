@@ -1,6 +1,6 @@
 # Validated commit authoring: implementation and review plan
 
-Status: implementation and fresh independent verification complete; CI-gated release pending. The author subsequently requested shipping the feature and explicitly confirmed that docs and Docker images must release with it. Release follows successful verification; research reruns use the resulting published binary.
+Status: implementation and fresh independent verification complete; CI-gated release pending. The release scope includes the feature, documentation, and Docker images. Release follows successful verification; research reruns use the resulting published binary.
 
 ## Scope and compatibility
 

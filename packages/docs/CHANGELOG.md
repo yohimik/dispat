@@ -35,8 +35,8 @@
 
 - explain single-root npm release configuration ([3f7174d](https://github.com/yohimik/dispat/commit/3f7174dc71fcb32bd5146ccc4d79bf729c0c3fd9)) (by yohimik, Codex (gpt-6-astra))
   Add the existing-runtime recipe and synchronize current and 1.10 docs.
-  Explain version-stage scheduling, versioning from 0.0.0, user-chosen first
-  releases, root-file scopes and recovery for parent manifest changes.
+  Explain version-stage scheduling, versioning from 0.0.0, explicit initial
+  release versions, root-file scopes and recovery for parent manifest changes.
 
 ### Dependencies
 

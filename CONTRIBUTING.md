@@ -215,4 +215,6 @@ The levels answer different questions, and choosing the wrong one makes a run un
 
 Explain the user outcome before implementation details. Use short direct sentences, runnable examples, and descriptive links. Keep README copy slightly formal and the CCME specification formal. Avoid decorative em dashes, unsupported superlatives, and promises of automatic recovery from ambiguous uploads. Any language is supported through configured commands; list built-in manifest support separately.
 
-Update current documentation and examples with behavior changes. Historical version snapshots describe their released binaries and must not be rewritten to advertise unreleased features. Put unresolved findings, incomplete validation, and optional cleanup in the review ledger with their impact. A passing suite is evidence for the cases it exercises, not a guarantee that every future release will succeed.
+State repository conventions, design rules, and style requirements directly. Do not attribute them to a user's request, an author's preference, or a conversation. Preserve technical authorship credits and distinguish verified historical outcomes from reported ones.
+
+Update current documentation and examples with behavior changes. Historical version snapshots describe their released binaries and must not be rewritten to advertise unreleased features. Report unresolved findings, incomplete validation, and optional cleanup in the conversation with their impact. A passing suite is evidence for the cases it exercises, not a guarantee that every future release will succeed.

@@ -65,10 +65,10 @@ Playwright recordings and screenshots are retained locally under `output/playwri
 
 ## Explicitly deferred or limited
 
-- Historical commit diagnostics: 34 unit/message errors all predate the v1.7.2 release. Current `commitErrors: warn` policy leaves these units inert and `status` returns a valid plan with exit 0. History was preserved as requested; changing that policy to `error` would require an explicit treatment of those old commits.
-- Persistent recovery journal: deferred as agreed. Git tags remain the completion record, with documented publisher idempotency requirements for ambiguous outcomes.
+- Historical commit diagnostics: 34 unit/message errors all predate the v1.7.2 release. Current `commitErrors: warn` policy leaves these units inert and `status` returns a valid plan with exit 0. The historical commits remain unchanged; changing that policy to `error` would require an explicit treatment of those old commits.
+- Persistent recovery journal: not implemented. Git tags remain the completion record, with documented publisher idempotency requirements for ambiguous outcomes.
 - Aqua registry authoring and installation: outside project-manifest support. Dynamic expressions, `go_version_file`, and checksums are not evaluated or rewritten.
-- Duplicate release-window flag: unnecessary; existing `--since` and `--consumers` cover the requested workflow.
+- Duplicate release-window flag: unnecessary; existing `--since` and `--consumers` cover the release-window selection workflow.
 - Unrelated dependency upgrades and speculative architecture/performance rewrites: not performed. Remotion packages were aligned only as required for the live player.
 - Real external publishing and every third-party registry combination: not executed. Local failure experiments use isolated repositories and test servers.
 - Browser evidence uses Chromium desktop/mobile emulation. Other browser engines and physical devices were not certified by this review.
