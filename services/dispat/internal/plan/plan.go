@@ -714,6 +714,20 @@ type Release struct {
 	// shared depth — the one case where a releasing member can otherwise
 	// land below a version its group has already published.
 	absorbed bool
+	// versionFloor is the lowest core the package's own version computation
+	// may land on: the core of its versioning group's line, written by the
+	// group before the member is versioned. It is the zero version for every
+	// package that versions on its own, and the zero version is below every
+	// other, so nothing outside a group ever notices it.
+	//
+	// A member's window need not contain the work that set its group's core.
+	// A ride carries none of it, and a leg that failed after its neighbours
+	// published carries only part of it, so the member's own §11.4 target and
+	// §11.5 graduation version can land below a position the group already
+	// holds. The floor is applied before the E185 and E195 guards read the
+	// result, which leaves both guards their meaning: a version below a
+	// position the group never reached is still an error.
+	versionFloor ccme.Version
 
 	// Deselected is set by Narrow when the invocation's selection leaves the
 	// package out of this run. It is Held's twin: the package keeps its
@@ -2971,22 +2985,29 @@ func (cp *computation) computeVersion(rel *Release) {
 		// Graduation and the ordinary stable release are the same
 		// computation: applyBump over the stable baseline, no suffix (§11.5).
 		next := rel.Current.Bumped(rel.Bump)
-		if rel.BaselineChannel != ccme.ChannelStable && versionLess(next, rel.Baseline.Core()) {
-			// Reachable from hand-edited tags, and from a train an exact
-			// Release-As raised above what the window computes (§11.5): the
-			// pin's effect lives in the baseline tag, not in the window, so
-			// the graduation must be pinned too.
-			cp.pkgErr(rel, CodeGraduateNoIncrease,
-				fmt.Sprintf("graduating to %s would go backwards from the %s baseline %s",
-					next.String(), rel.BaselineChannel, rel.Baseline.String()))
-			return
+		if rel.BaselineChannel != ccme.ChannelStable {
+			// Ending a train publishes the core the train reached, and for a
+			// group member that core is the group's line rather than whatever
+			// this member's own window happens to justify.
+			next = cp.raisedToFloor(rel, next)
+			if versionLess(next, rel.Baseline.Core()) {
+				// Reachable from hand-edited tags, and from a train an exact
+				// Release-As raised above what the window computes (§11.5):
+				// the pin's effect lives in the baseline tag, not in the
+				// window, so the graduation must be pinned too.
+				cp.pkgErr(rel, CodeGraduateNoIncrease,
+					fmt.Sprintf("graduating to %s would go backwards from the %s baseline %s",
+						next.String(), rel.BaselineChannel, rel.Baseline.String()))
+				return
+			}
 		}
 		rel.Next = next
 		cp.checkGreater(rel)
 		return
 	}
 
-	next, ok := nextPrerelease(rel.Current, rel.Baseline, rel.HasBaseline, rel.Channel, rel.Bump)
+	target := cp.raisedToFloor(rel, rel.Current.Bumped(rel.Bump).Core())
+	next, ok := prereleaseOnCore(target, rel.Baseline, rel.HasBaseline, rel.Channel)
 	if !ok {
 		cp.pkgErr(rel, CodeBadPrereleaseTag,
 			fmt.Sprintf("baseline %s has no numeric prerelease counter, so the train cannot be continued (§11.3)",
@@ -3001,7 +3022,8 @@ func (cp *computation) computeVersion(rel *Release) {
 	// channel-only release, so it can never mask the genuine regression E195
 	// exists to catch.
 	if rel.Bump == ccme.BumpNone && rel.HasBaseline && !versionLess(rel.Baseline, next) {
-		bumped, okPatch := nextPrerelease(rel.Current, rel.Baseline, rel.HasBaseline, rel.Channel, ccme.BumpPatch)
+		patched := cp.raisedToFloor(rel, rel.Current.Bumped(ccme.BumpPatch).Core())
+		bumped, okPatch := prereleaseOnCore(patched, rel.Baseline, rel.HasBaseline, rel.Channel)
 		if okPatch {
 			cp.pkgWarn(rel, CodeChannelEntryPatch, "",
 				fmt.Sprintf("channel-entry patch applied: %s would not have exceeded the baseline %s, so %s is released instead",
@@ -3012,6 +3034,25 @@ func (cp *computation) computeVersion(rel *Release) {
 
 	rel.Next = next
 	cp.checkGreater(rel)
+}
+
+// raisedToFloor lifts a computed core to the package's version floor, and
+// says so at trace level, because a version the package's own window does not
+// explain is exactly the kind of number a reader comes looking for.
+//
+// The zero floor every package outside a versioning group carries is below
+// every version, so this is an identity for all of them.
+func (cp *computation) raisedToFloor(rel *Release, computed ccme.Version) ccme.Version {
+	if !versionLess(computed, rel.versionFloor) {
+		return computed
+	}
+	if cp.log.Trace().Enabled() {
+		cp.log.Trace().Str("package", rel.Pkg.Name).
+			Str("computed", computed.String()).
+			Str("floor", rel.versionFloor.String()).
+			Msg("plan: member target raised to its versioning group's line")
+	}
+	return rel.versionFloor
 }
 
 // checkGreater enforces the §13.9 requirement that a computed version be

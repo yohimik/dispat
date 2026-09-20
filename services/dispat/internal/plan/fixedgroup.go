@@ -131,6 +131,43 @@ func (cp *computation) groupDepth(g *Release, groupName string, members []string
 	return depth
 }
 
+// groupRule is one versioning group's sharing contract, built once per group
+// from its members and asked rather than re-derived wherever the group has a
+// decision to make. The members agree on it by construction: configuration
+// states the rule on the group, and every member carries the copy it resolved
+// through.
+type groupRule struct {
+	// depth is how many leading version components the group holds equal.
+	depth int
+	// line is the version a member adopts to join the shared prefix: the
+	// group's baseline with everything below the shared depth zeroed, or the
+	// baseline itself while it is a prerelease the group has not passed.
+	// Meaningful only when hasLine is set.
+	line    ccme.Version
+	hasLine bool
+}
+
+// newGroupRule reads the rule off the group's aggregate and its depth.
+func newGroupRule(g *Release, depth int) groupRule {
+	r := groupRule{depth: depth, hasLine: g.HasBaseline}
+	if g.HasBaseline {
+		r.line = groupTarget(g.Baseline, depth)
+	}
+	return r
+}
+
+// floor is the lowest core a member may compute for itself: the core of the
+// group's line. A member's own window need not contain the work that put the
+// group there, so its computation is raised to this before the version guards
+// read it (see Release.versionFloor). A group that has never published has no
+// line and no floor, which the zero version expresses exactly.
+func (r groupRule) floor() ccme.Version {
+	if !r.hasLine {
+		return ccme.Version{}
+	}
+	return r.line.Core()
+}
+
 // groupMoves reports whether the group's shared prefix moves on this run,
 // which is what decides between the two paths of applyFixedGroup.
 //
@@ -179,6 +216,7 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	}
 	g, channelCands := cp.fixedGroupAggregate(groupName, members)
 	depth := cp.groupDepth(g, groupName, members)
+	rule := newGroupRule(g, depth)
 	cp.reportMajorSpread(g, groupName, members)
 
 	groupPin, hasPin := cp.fixedGroupPin(g, groupName, members, depth)
@@ -205,8 +243,11 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	// aggregate is not — one member graduating while the max baseline is
 	// already stable. Both cases take the per-member path.
 	if !g.IsChanged() || !groupMoves(g, depth) {
+		floor := rule.floor()
 		for _, name := range members {
-			cp.versionOne(name, cp.rel[name])
+			rel := cp.rel[name]
+			rel.versionFloor = floor
+			cp.versionOne(name, rel)
 		}
 		cp.alignFixedGroup(groupName, g, members, depth)
 		return

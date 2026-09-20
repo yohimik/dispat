@@ -146,3 +146,109 @@ func TestNewcomerWithoutABaselineProposesNoChannel(t *testing.T) {
 	assertNext(t, p, "b", "1.11.0-rc.1", true)
 	assert.True(t, p.Releases["b"].FixedRide, "the newcomer joins the train it is riding")
 }
+
+// ---------------------------------------------------------------------------
+// X2: the member target floor
+// ---------------------------------------------------------------------------
+
+// graduationRetry is the shape a half-finished graduation leaves behind: the
+// group entered an rc train together, a graduation was written for all three,
+// and only a published before the run died. b and d carry the directive and
+// the train tag; neither carries the feature that set the train's core, which
+// belongs to d alone.
+func graduationRetry() *fakeGit {
+	return newFakeGit(
+		commit{sha: "c1", message: "feat(d)%rc: start the train\n\n---\n\nrelease(a,b)%rc: enter"},
+		commit{sha: "c2", message: "release(a,b,d)%rc>stable: graduate the train"},
+	).tag("a", "1.10.0", "").tag("b", "1.10.0", "").tag("d", "1.10.0", "").
+		tag("a", "1.11.0-rc.0", "c1").tag("b", "1.11.0-rc.0", "c1").tag("d", "1.11.0-rc.0", "c1").
+		tag("a", "1.11.0", "c2")
+}
+
+func TestGraduationRetryFinishesTheTrainRatherThanGoingBackwards(t *testing.T) {
+	// b's own window carries no bump at all: the feature that took the train
+	// to 1.11.0 is d's, and b only ever rode. Graduating from b's own stable
+	// baseline computes 1.10.0, which is behind the rc it has published. The
+	// floor is what makes the retry finish the train it is on.
+	for _, mode := range []model.Versioning{model.VersioningFixed, model.VersioningFixedMajorMinor} {
+		t.Run(string(mode), func(t *testing.T) {
+			p := sharedGroup{mode: mode}.compute(t, graduationRetry(), nil)
+
+			assertNext(t, p, "b", "1.11.0", true)
+			assertNext(t, p, "d", "1.11.0", true)
+			assert.False(t, p.Releases["a"].IsReleasing(), "a published in the failed run")
+			assert.False(t, hasCode(p, CodeGraduateNoIncrease))
+		})
+	}
+}
+
+func TestARejectedPinOnARiderFallsBackAboveItsBaseline(t *testing.T) {
+	// The pin names the version b already holds, so E153 rejects it and the
+	// ordinary computation runs in its place (§16). That fallback must see
+	// the same floor the direct path does, or a rejected footer would turn a
+	// finishable graduation into E185.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(d)%rc: start the train\n\n---\n\nrelease(a,b)%rc: enter"},
+		commit{sha: "c2", message: "release(a,d)%rc>stable: graduate the train\n\n---\n\n" +
+			"release(b)%rc>stable: graduate b at a stated version\n\nRelease-As: 1.11.0-rc.0\n"},
+	).tag("a", "1.10.0", "").tag("b", "1.10.0", "").tag("d", "1.10.0", "").
+		tag("a", "1.11.0-rc.0", "c1").tag("b", "1.11.0-rc.0", "c1").tag("d", "1.11.0-rc.0", "c1").
+		tag("a", "1.11.0", "c2")
+
+	p := sharedGroup{mode: model.VersioningFixedMajorMinor}.compute(t, git, nil)
+
+	require.True(t, hasCode(p, CodePinNotGreater), "the pin is rejected")
+	assertNext(t, p, "b", "1.11.0", true)
+	assert.False(t, p.Releases["b"].Pinned)
+	assert.False(t, hasCode(p, CodeGraduateNoIncrease), "the fallback sees the floor too")
+}
+
+func TestAHandEditedTagStillFailsAGraduation(t *testing.T) {
+	// b sits a patch above the group's shared minor, which nothing in the
+	// group's history explains. The floor raises b to the line and no
+	// further, so E185 still reports the tag that cannot be graduated from.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(b)%rc: put b on its own rc line"},
+		commit{sha: "c2", message: "release(b)%rc>stable: bring b back"},
+	).tag("a", "1.11.5", "").tag("b", "1.10.0", "").tag("d", "1.11.5", "").
+		tag("b", "1.11.3-rc.0", "c1")
+
+	p := sharedGroup{mode: model.VersioningFixedMajorMinor}.compute(t, git, nil)
+
+	d, ok := findDiagnostic(p, CodeGraduateNoIncrease, "b")
+	require.True(t, ok, "E185 still reports the tag nothing explains")
+	assert.Contains(t, d.Message, "1.11.3-rc.0")
+}
+
+func TestAChannelSwitchBelowTheLineStillFails(t *testing.T) {
+	// The floor raises the core, never the channel: switching b from rc onto
+	// a channel whose name sorts lower produces a version below b's own
+	// baseline, and E195 is exactly the guard for that.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(d)%rc: start the train\n\n---\n\nrelease(a,b)%rc: enter"},
+		commit{sha: "c2", message: "release(b)%rc>beta: move b to the beta line"},
+	).tag("a", "1.10.0", "").tag("b", "1.10.0", "").tag("d", "1.10.0", "").
+		tag("a", "1.11.0-rc.0", "c1").tag("b", "1.11.0-rc.5", "c1").tag("d", "1.11.0-rc.0", "c1").
+		tag("a", "1.11.0", "c2")
+
+	p := sharedGroup{mode: model.VersioningFixedMajorMinor}.compute(t, git, nil)
+
+	d, ok := findDiagnostic(p, CodeVersionNotGreater, "b")
+	require.True(t, ok, "E195 still reports a version behind the package's own baseline")
+	assert.Contains(t, d.Message, "1.11.0-beta.0")
+}
+
+func TestAStableLineLaggardStillCatchesUpAtTheSharedPrefix(t *testing.T) {
+	// The floor must not disturb the case alignment already answers: a member
+	// behind the group's stable line releases at the line, on the stable
+	// channel, exactly as before.
+	git := newFakeGit(
+		commit{sha: "c1", message: "fix(b): b's own patch"},
+	).tag("a", "1.10.0", "").tag("b", "1.9.6", "").tag("d", "1.10.0", "")
+
+	p := sharedGroup{mode: model.VersioningFixedMajorMinor}.compute(t, git, nil)
+
+	assertNext(t, p, "b", "1.10.0", true)
+	assert.False(t, p.Releases["a"].IsReleasing(), "a patch stays below the shared minor")
+	assert.False(t, p.Releases["d"].IsReleasing())
+}

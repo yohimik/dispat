@@ -149,8 +149,20 @@ func withPrerelease(core ccme.Version, channel string, counter uint64) ccme.Vers
 // the content. Continuing an existing counter requires all three of: a
 // prerelease baseline, the same channel, and the same core.
 func nextPrerelease(stable, baseline ccme.Version, hasBaseline bool, channel string, e ccme.Bump) (ccme.Version, bool) {
-	target := stable.Bumped(e).Core()
+	return prereleaseOnCore(stable.Bumped(e).Core(), baseline, hasBaseline, channel)
+}
 
+// prereleaseOnCore is the second half of §11.4, with the core the train is
+// heading to already decided: the counter continues only when the baseline is
+// a prerelease of that same core on that same channel, and starts at zero
+// otherwise.
+//
+// It is split out because a member of a versioning group does not always
+// derive its target from its own window. The group's line can hold a core the
+// member's own commits never justify — a ride carries none of the work that
+// set it — so the target arrives from the group and only the counter is the
+// member's own.
+func prereleaseOnCore(target, baseline ccme.Version, hasBaseline bool, channel string) (ccme.Version, bool) {
 	if !hasBaseline || !baseline.IsPrerelease() {
 		return withPrerelease(target, channel, 0), true
 	}
