@@ -198,6 +198,14 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 		if provider == "" || provider == tc.t.pkg {
 			continue // not a workspace dependency
 		}
+		if pr := tc.plan.Releases[provider]; pr == nil || !pr.IsReleasable() {
+			// A versioning "none" package is never released, so it has no
+			// version to write: the 0.0.0 it carries in the plan is a
+			// placeholder, not a baseline. The configured edge is refused at
+			// load for this reason; a manifest can still name the package, and
+			// the requirement it wrote is the only one there is.
+			continue
+		}
 		if !av.Kinds[model.DepKind(d.Kind)] {
 			continue
 		}

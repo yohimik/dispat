@@ -119,6 +119,15 @@ func (w *writerWork) providerOf(rel *plan.Release, m scanner.Manifest, d scanner
 // through would report an edit applied on every converged run and re-trigger
 // the syncLock scripts for a file nothing changed.
 func (w *writerWork) derivedEdit(rel *plan.Release, m scanner.Manifest, d scanner.DeclaredDep, provider string) (writer.Edit, bool) {
+	if pr := w.pl.Releases[provider]; pr == nil || !pr.IsReleasable() {
+		// A versioning "none" provider is never released and has no version to
+		// derive a range from, exactly as in auto-versioning. Linking its
+		// folder is a different request and stays available.
+		w.app.log.Debug().Str("package", rel.Pkg.Name).Str("manifest", m.Path).
+			Str("dependency", d.Name).Str("provider", provider).
+			Msg("derived edit dropped: the provider is never released and has no version")
+		return writer.Edit{}, false
+	}
 	next := release.RangeText(w.rangePolicy, plannedVersion(w.pl.Releases[provider]), m.Ecosystem)
 	if next == d.Range {
 		w.app.log.Debug().Str("package", rel.Pkg.Name).Str("manifest", m.Path).

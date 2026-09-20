@@ -51,8 +51,11 @@ resolving every declared provider against the plan, while lock-file scripts unde
 You see this pickup as `W197` in the log and in the release commit's manifest diff, but it does not appear in the
 consumer's [changelog entry](./records.md#changelog) because the provider's own release already documented the change.
 Hold a provider back with the `match` filter or an explicit [`dependencies` range](./dependencies.md) if a consumer
-must not pick it up yet. Run [`dispat autoversion`](../cli/autoversion.md) to trigger this pickup standalone and
-reconcile a lagging manifest without releasing.
+must not pick it up yet. A provider in a
+[`versioning: none`](../reference/releasing/versioning.md#packages-that-never-release-none) space or package is never
+picked up at all, because it has no released version: the declaration stays as it is written. Run
+[`dispat autoversion`](../cli/autoversion.md) to trigger this pickup standalone and reconcile a lagging manifest
+without releasing.
 
 ## The options
 

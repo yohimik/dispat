@@ -330,6 +330,9 @@ What this means in practice:
   publishing" warning stays quiet when the link targets only `none` packages, because they never publish. A releasable
   package cannot depend on a `none` package; the provider would never have a version for
   [auto-versioning](../../configuration/autoversion.md) to write, so the edge is refused when the configuration loads.
+  A manifest can still name a `none` package, as a Go module requiring a sibling that is no longer released does.
+  Auto-versioning and `dispat autowriter --set-local` leave such a declaration exactly as it is written, and
+  `--link-local` still links the folder.
 * **Directives aimed at them are inert.** A `Release-As` footer whose scope resolves to a `none` package moves nothing
   and is reported as `W238`. Naming one in `dispat release --package` is answered with a log line instead of a silent
   no-op.

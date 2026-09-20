@@ -282,3 +282,57 @@ func TestVersioningNoneReleaseOnlySettingsInert(t *testing.T) {
 	assert.FileExists(t, r.Path("tools", "smoke", "build.marker"),
 		"the same script runs on request; only the release stages are out of reach")
 }
+
+// TestVersioningNoneProviderIsNeverReconciled: a none package has no version,
+// so a releasable package whose manifest requires one keeps the requirement it
+// wrote. The configured edge is refused at load (see above), but a manifest can
+// still name the package, and auto-versioning once "caught it up" to the
+// 0.0.0 a none package carries in the plan: a go.mod pinned at a published
+// v1.0.0 came out of the version stage requiring v0.0.0. Both the release and
+// the standalone commands leave the declaration alone, and say nothing about a
+// catch-up that did not happen.
+func TestVersioningNoneProviderIsNeverReconciled(t *testing.T) {
+	r := harness.New(t)
+	cfg := spacesConfig(echoBuild, map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(),
+			AutoVersion: &models.AutoVersionConfig{}},
+		"tools": {Path: models.PathList{"tools"}, Versioning: models.VersioningNone, Flow: buildPublish()},
+	})
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("tools", "parser")
+	r.WriteFile("tools/parser/go.mod", "module github.com/acme/parser\n\ngo 1.26\n")
+	const pinned = "module github.com/acme/core\n\ngo 1.26\n\nrequire github.com/acme/parser v1.0.0\n"
+	r.WriteFile("packages/core/go.mod", pinned)
+	r.Commit("feat(core,parser): bootstrap with manifests")
+
+	read := func() string {
+		t.Helper()
+		got, err := os.ReadFile(r.Path("packages", "core", "go.mod"))
+		require.NoError(t, err)
+		return string(got)
+	}
+	quiet := func(res harness.RunResult) {
+		t.Helper()
+		assert.False(t, harness.IsCodePresentForPackage(res.Events, "W197", "core"),
+			"nothing was caught up, so nothing may say so")
+	}
+
+	// The standalone reconciliation, then the --set-local derivation: neither
+	// has a version to write for a package that is never released.
+	res := r.Command("autoversion", "--package", "core")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, pinned, read(), "autoversion must leave a none provider's requirement alone")
+	quiet(res)
+
+	res = r.Command("autowriter", "--package", "core", "--set-local")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, pinned, read(), "--set-local must leave a none provider's requirement alone")
+
+	// The release itself: core ships with the requirement it declared.
+	res = r.ReleaseOK()
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("parser@"))
+	assert.Equal(t, pinned, read(), "the version stage must leave a none provider's requirement alone")
+	quiet(res)
+}
