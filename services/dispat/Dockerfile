@@ -185,6 +185,14 @@ RUN set -eu; \
 # run unprivileged so permission regressions cannot disappear into skips.
 # Go reports a package-level skip for cmd/tsmark, which has no test files;
 # reject skipped test cases while requiring the integration package to pass.
+#
+# One test is left out by name rather than allowed to skip:
+# TestGoInstallBuildUsesTheGoToolchainForUpdates builds a dispat of its own
+# with `go install` and asserts what Go's build metadata makes self-update
+# say, so it never touches the binary this gate accepts, and the harness skips
+# it under a prebuilt TinyGo run. Naming it here keeps the rule below absolute:
+# a test that skips for any other reason fails the gate, and the gate says
+# which test it was.
 FROM tiny-build AS tiny-test
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends git jq \
@@ -205,9 +213,12 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
     DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
-      go test -C /src/tests/integration -json -count=1 -timeout 60m ./... > /gate/integration.json \
+      go test -C /src/tests/integration -json -count=1 -timeout 60m \
+        -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./... > /gate/integration.json \
       || { cat /gate/integration.json; exit 1; }; \
-    jq -s -e 'any(.[]; .Action == "pass" and .Package == "github.com/yohimik/dispat/tests/integration" and (has("Test") | not)) and all(.[]; .Action != "fail" and (.Action != "skip" or (has("Test") | not)))' /gate/integration.json; \
+    jq -s -e 'any(.[]; .Action == "pass" and .Package == "github.com/yohimik/dispat/tests/integration" and (has("Test") | not)) and all(.[]; .Action != "fail" and (.Action != "skip" or (has("Test") | not)))' /gate/integration.json > /dev/null \
+      || { jq -r 'select(has("Test") and (.Action == "skip" or .Action == "fail")) | "\(.Action): \(.Test)"' /gate/integration.json; \
+           echo "the TinyGo acceptance gate refuses failed and skipped tests" >&2; exit 1; }; \
     jq -s '{passed:([.[] | select(.Action == "pass" and has("Test"))] | length),failed:([.[] | select(.Action == "fail")] | length),skipped:([.[] | select(.Action == "skip" and has("Test"))] | length)}' /gate/integration.json; \
     touch /gate/passed
 
