@@ -1,5 +1,49 @@
 # Changelog
 
+## packages/docs/v1.11.0-rc.3 (2026-09-20)
+
+### Fixes
+
+- say that a versioning none provider is never picked up ([d282cfc](https://github.com/yohimik/dispat/commit/d282cfc4553dcbcf1d65c6d6a4d06e54406053f8)) (by yohimik, Claude Fable 5.1)
+
+- remove delayed label ([4811866](https://github.com/yohimik/dispat/commit/481186681cf2f055d902d21c33766253b43641f8)) (by yohimik)
+
+- describe the single announce command and the postPublish outputs ([8a956d7](https://github.com/yohimik/dispat/commit/8a956d7196bae8b4e4cef5a78c26ece156c93601)) (by yohimik, Claude Fable 5.1)
+
+- explain what a space is and where the name comes from ([c45f7eb](https://github.com/yohimik/dispat/commit/c45f7ebd1832bfc4e69f3ade551ae799b1ed5ab6)) (by yohimik, Claude Fable 5.1)
+
+- describe the script-free announcement flow ([9b4cf64](https://github.com/yohimik/dispat/commit/9b4cf6485e1effb1cd7d99b0cf29de4273b37b04)) (by yohimik, Claude Fable 5.1)
+  Document the dispat if chain, the hand-written release candidate, the
+  generated stable notes, caption limits, ANNOUNCE and replays.
+
+- document channel configurations, notes and links ([13cf8af](https://github.com/yohimik/dispat/commit/13cf8afb6becf678fc4ef7de06d84115c0ffe3ef)) (by yohimik, Claude Fable 5.1)
+  Describe the per-channel crier configurations, the shared cross-posting, and
+  how RC notes and links are duplicated in the description and the picture.
+
+- explain topology selection and linked release ownership ([35664e1](https://github.com/yohimik/dispat/commit/35664e1685e703c347233421f9faefdba8b1622a)) (by yohimik)
+  Update configuration and command references, examples and RC announcements.
+
+- explain polyrepo design choices and announcement channels ([de8b1f9](https://github.com/yohimik/dispat/commit/de8b1f98785fb5f9cdb030b5cf3ce271d8b6bcf4)) (by yohimik)
+  Explain submodule links, choreography execution and cancellation, and the
+  single CLI approach for scanner and writer. Document channel-specific
+  announcements and preserve historical preview links.
+
+- document parser imports and Go naming conventions ([2f591b0](https://github.com/yohimik/dispat/commit/2f591b0139339d13f20c4718056d14be6e0dea98)) (by yohimik)
+  Clarify Is and Are predicates, New and new constructors, and conversion
+  methods named after their target type.
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.3): 1.11.0-rc.0 -> 1.11.0-rc.3
+- [cli](https://github.com/yohimik/dispat/releases/tag/packages/cli/v1.11.0-rc.3): 1.11.0-rc.0 -> 1.11.0-rc.3
+- [dispat-alpine](https://github.com/yohimik/dispat/releases/tag/docker/dispat-alpine/v1.11.0-rc.3): 1.11.0-rc.0 -> 1.11.0-rc.3
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## packages/docs/v1.11.0-rc.0 (2026-09-15)
 
 ### Fixes
