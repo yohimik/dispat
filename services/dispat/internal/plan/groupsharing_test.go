@@ -564,6 +564,32 @@ func TestAPinInsideThePrefixStaysWithItsMember(t *testing.T) {
 	}
 }
 
+func TestAPinInsideThePrefixNeverBreaksAMovingGroup(t *testing.T) {
+	// The pin names a version inside the prefix the group is leaving, so the
+	// group never took it (fixedGroupPin left it to the member) and the
+	// member cannot apply it either: honouring it would leave one member on
+	// the old prefix while the rest moved. Every rule answers the same way,
+	// and the silence about the dropped pin is the same silence under all of
+	// them.
+	for _, rule := range sharingRules(model.VersioningFixedMajorMinor) {
+		t.Run(rule.String(), func(t *testing.T) {
+			git := newFakeGit(
+				commit{sha: "c1", message: "feat(a,b,d)%rc: start the train"},
+				commit{sha: "c2", message: "feat(d)!: a breaking change\n\n---\n\n" +
+					"release(b): hold b at the old line\n\nRelease-As: 1.11.0-rc.7\n"},
+			).tag("a", "1.10.3", "").tag("b", "1.10.0", "").tag("d", "1.10.0", "").
+				tag("a", "1.11.0-rc.0", "c1").tag("b", "1.11.0-rc.0", "c1").tag("d", "1.11.0-rc.0", "c1")
+
+			p := rule.compute(t, git, nil)
+
+			for _, name := range []string{"a", "b", "d"} {
+				assertNext(t, p, name, "2.0.0-rc.0", true)
+			}
+			assert.False(t, p.Releases["b"].Pinned, "the pin the group did not take is not applied")
+		})
+	}
+}
+
 func TestEveryAxisReleasesAboveEachMembersOwnBaseline(t *testing.T) {
 	// The invariant that outranks every rule above, extended over the axes
 	// and over a train baseline, which is where a member's own window and its

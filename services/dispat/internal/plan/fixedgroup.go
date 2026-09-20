@@ -416,14 +416,23 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 			continue
 		}
 		own := rel.IsChanged()
-		if _, ok := cp.pinned[name]; ok {
+		_, memberPinned := cp.pinned[name]
+		if memberPinned {
 			own = true // the member's pin has not been applied to it, only to the group
 		}
 		if rel.Pkg.Space.Versioning.IsSparse() && !own {
 			continue // sparse: an unchanged member keeps its previous version
 		}
 		rel.FixedRide = !own
-		if rule.channels.IsIndependent() {
+		// A member's own pin is the one case that takes the group's whole
+		// version whatever the channel axis says. Such a pin names a version
+		// inside the prefix the group is leaving — that is why fixedGroupPin
+		// left it to the member in the first place — so running the member's
+		// own computation here would apply it and break the shared prefix
+		// outright. Dropping it is what the shared-channel path has always
+		// done, and one behaviour for both is the honest answer while the
+		// silence about it is unfixed.
+		if rule.channels.IsIndependent() && !memberPinned {
 			// Only the core is the group's here, so the floor carries it and
 			// the member's own computation does the rest: its own channel,
 			// continuing its own counter.
