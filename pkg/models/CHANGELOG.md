@@ -1,5 +1,10 @@
 # Changelog
 
+## pkg/models/v1.11.0-rc.3 (2026-09-20)
+
+No changes: a version bump to keep the versioning group on one major and minor version.
+
+
 ## pkg/models/v1.11.0-rc.2 (2026-09-20)
 
 ### Fixes
