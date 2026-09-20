@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/config/v1.0.1 (2026-09-20)
+
+### Fixes
+
+- reject unsupported YAML values without corrupting configuration ([2f591b0](https://github.com/yohimik/dispat/commit/2f591b0139339d13f20c4718056d14be6e0dea98)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## pkg/config/v1.0.0 (2026-08-31)
 
 ### Breaking Changes
