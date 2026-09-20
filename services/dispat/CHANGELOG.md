@@ -1,5 +1,135 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.3 (2026-09-20)
+
+### Features
+
+- polyrepo saga orchestration and choreography ([97b1f03](https://github.com/yohimik/dispat/commit/97b1f032b14c140fc2b3bb5b4870c0bc383cbb37)) (by yohimik)
+
+### Fixes
+
+- let the TinyGo acceptance gate name the one test it leaves out ([026f8ad](https://github.com/yohimik/dispat/commit/026f8ad3748b61499e438deee6430e80f37bfc3c)) (by yohimik, Claude Fable 5.1)
+  The gate refuses any skipped test case, and
+  TestGoInstallBuildUsesTheGoToolchainForUpdates skips under a prebuilt TinyGo
+  run: it builds a dispat of its own with `go install` and never touches the
+  binary being accepted. Both arrived together, and the suite hanging on an
+  interrupt test hid the conflict until that was fixed; then the CLI build
+  failed with nothing but "false" after all 3126 tests had passed.
+
+  The gate now leaves that test out by name with -skip, so the rule stays
+  absolute for every other test, and when it does refuse a run it prints which
+  tests failed or skipped.
+
+- catch the CLI's go.mod up to the released pkg modules ([c97a432](https://github.com/yohimik/dispat/commit/c97a432311eacff09a576a1485b3e0277e566cf2)) (by yohimik, Claude Fable 5.1)
+  The partial release published scanner and writer 1.2.1, which require
+  pkg/manifest v1.2.1, while the CLI still required v1.2.0. Inside the link
+  bracket the build runs with -mod=readonly, so every CLI build on main stopped
+  at "updates to go.mod needed". The CLI now requires config 1.0.1 and manifest,
+  scanner and writer 1.2.1, the versions that run released, reconciled with
+  `dispat autoversion` and tidied. models stays at its published rc.0: its next
+  version is only planned, and the release writes it.
+
+- never reconcile a declaration that names a versioning none package ([d282cfc](https://github.com/yohimik/dispat/commit/d282cfc4553dcbcf1d65c6d6a4d06e54406053f8)) (by yohimik)
+  A versioning "none" package is never released, so it has no version to write.
+  The configured edge into one is refused at load, but a manifest can still name
+  the package, and auto-versioning "caught it up" to the 0.0.0 placeholder the
+  plan carries: a go.mod requiring a published v1.0.0 left the version stage
+  requiring v0.0.0, with a W197 for a catch-up that never happened.
+  `dispat autowriter --set-local` derived the same range. Both now leave the
+  declaration as written; --link-local still links the folder.
+
+- announce with one crier command named by the channel ([8a956d7](https://github.com/yohimik/dispat/commit/8a956d7196bae8b4e4cef5a78c26ece156c93601)) (by yohimik)
+  The announce script is `crier publish --config
+  "announce/$DISPAT_CHANNEL/crier.yaml"` behind the ANNOUNCE switch, and nothing
+  builds data first: both configurations read the stage's environment. A
+  release candidate still reads only the version. A stable release reads the
+  release-notes groups dispat generated, one entry per line, so notes.py is
+  gone; its card prints each group as written and its caption carries a group
+  only while it is short, which keeps the worst case inside every platform's
+  limit. The stable release link now names the released version.
+
+  The cli-released and cli-version step outputs move to the postPublish hook, so
+  they never wait on a social network.
+
+- end an HTTP request when its context does ([5f9c7a6](https://github.com/yohimik/dispat/commit/5f9c7a6c3e6612b6ff52fe613b8bce6164b1a1ad)) (by yohimik)
+  Every HTTP call now goes through httpx.Do, which returns when the request's
+  context ends or the client's Timeout elapses even if the transport notices
+  neither. The TinyGo build's HTTP client reads the response on the calling
+  goroutine and consults no context and no timeout, so a server that accepted a
+  request and never answered held a tiny binary for good, and an interrupt could
+  not free it.
+
+  That is what TestStandaloneGitHubInterruptDrainsTheInFlightRequest met: against
+  dispat-tiny-linux-* it sat for 51 minutes on both architectures until go test's
+  60 minute alarm, which took the Build and Native ARM64 export jobs from about
+  20 minutes to over an hour. Built with the same fork release, the test now
+  passes in 0.01s.
+
+- announce from the dispat config instead of a shell script ([9b4cf64](https://github.com/yohimik/dispat/commit/9b4cf6485e1effb1cd7d99b0cf29de4273b37b04)) (by yohimik)
+  Replace announce.sh with a short `dispat if` chain in the package's announce
+  script: nothing is posted outside the announce stage or without ANNOUNCE, and
+  the channel picks its crier configuration.
+
+  A release candidate now announces only what a person wrote, with every link
+  to that candidate and no generated notes. The words live in rc/notes.yaml,
+  which rc/crier.yaml pulls in as its caption with a $ref, and are repeated on
+  the card; the only value taken from the release is the version. Discord
+  receives the links and the lede and leaves the long paragraphs to the
+  attached pictures, which keeps the caption inside its 2000 character limit.
+
+  A stable release keeps the notes dispat generated. notes.py replaces notes.sh
+  and prints the same document in half the code.
+
+  publish.yaml holds only the three destinations, all enabled; each channel
+  writes its caption beside the reference. The release workflow gates the ping
+  and the announcement on one ANNOUNCE switch, pings both configurations
+  without flags, and puts the verified crier on PATH.
+
+- give RC and stable announcements their own crier configurations ([13cf8af](https://github.com/yohimik/dispat/commit/13cf8afb6becf678fc4ef7de06d84115c0ffe3ef)) (by yohimik)
+  Add rc/crier.yaml and stable/crier.yaml. Both take their whole publish
+  section from the shared publish.yaml, so the two channels cross-post to the
+  same destinations, and each owns its card and its music. announce.sh selects
+  the configuration from the channel notes.sh reads off the version, and the
+  release gate pings both.
+
+  Keep a channel's fixed text in two committed files, announcement.md and
+  links.md, with the version written as ${DISPAT_NEW_VERSION}. The RC links name
+  this exact candidate. Captions print the links, the notes and the changelog;
+  the RC card repeats the same notes and prints the links on its cover.
+
+- restore the full-suite release gate ([85fb4e8](https://github.com/yohimik/dispat/commit/85fb4e8dae0c649398ff24633893767cbd58dd9b)) (by yohimik)
+  Cover release recovery, locking, topology, configuration, manifest and installation edge cases. Reject nonregular manifest files before opening them, report unavailable Git during release startup, and correct the coverage gate assertion.
+
+  Validated all 17 package test jobs, 1,315 integration tests with and without race detection, coverage freshness checks, and repository checks. Integration coverage: 23,826/25,073 statements (95.03%); combined coverage: 97.3%.
+
+- derive linked releases from repository topology ([35664e1](https://github.com/yohimik/dispat/commit/35664e1685e703c347233421f9faefdba8b1622a)) (by yohimik)
+  Remove saga selectors and infer linked ownership from repository identity.
+  Let compute choose minimal or star links while preserving existing edges.
+  Reject cycles, invalid identities and incompatible topology, exclude disabled
+  peers, and resolve link paths relative to the owning repository.
+
+  Include integration regressions for topology, repair failures and exclusions.
+
+- separate RC and stable release announcements ([de8b1f9](https://github.com/yohimik/dispat/commit/de8b1f98785fb5f9cdb030b5cf3ce271d8b6bcf4)) (by yohimik)
+  Move the shared publisher and media into services/dispat/announce. Select
+  channel-specific copy, introduce the saga RC announcement, and pin install
+  commands to the announced version. Update release and replay workflows,
+  Docker contexts, and offline announcement checks for the new layout.
+
+### Dependencies
+
+- [config](https://github.com/yohimik/dispat/releases/tag/pkg/config/v1.0.1): 1.0.0 -> 1.0.1
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.1): 1.2.0 -> 1.2.1
+- [scanner](https://github.com/yohimik/dispat/releases/tag/pkg/scanner/v1.2.1): 1.2.0 -> 1.2.1
+- [writer](https://github.com/yohimik/dispat/releases/tag/pkg/writer/v1.2.1): 1.2.0 -> 1.2.1
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.11.0-rc.3): 1.11.0-rc.2 -> 1.11.0-rc.3
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## services/dispat/v1.11.0-rc.0 (2026-09-15)
 
 ### Features
