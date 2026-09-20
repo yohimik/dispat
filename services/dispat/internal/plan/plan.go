@@ -3160,7 +3160,20 @@ func (cp *computation) providerUpdates(rel *Release, name string) []ProviderUpda
 			return
 		}
 		seen[prov] = true
-		u := ProviderUpdate{Name: prov, From: pr.Previous(), To: pr.Next}
+		// Where the provider ends the run. A provider this run publishes ends
+		// it at its next version; one it does not ends it exactly where it
+		// started, whatever version it has computed and is withholding. A held
+		// package's Next is reported so an operator can see what lifting the
+		// hold would release (W154), and it is the one number no tag will ever
+		// carry, so a dependency line, a release body or a version script that
+		// picked it up would point at a version that does not exist. Native
+		// auto-versioning already writes the published one (providerVersion);
+		// one release must not have two answers.
+		to := pr.Next
+		if !pr.IsReleasing() {
+			to = pr.Previous()
+		}
+		u := ProviderUpdate{Name: prov, From: pr.Previous(), To: to}
 		if u.From.Compare(u.To) == 0 {
 			// The catch-up shape: the provider published in an earlier run,
 			// so its own before-and-after have already collapsed onto the
