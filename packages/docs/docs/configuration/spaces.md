@@ -196,6 +196,11 @@ consumer's own can substitute for an input that never existed. Under `none` it m
 `isBlocking: false`, which lets a consumer release its own work beside a provider that failed. Relax it only where a
 release of the consumer alone is meaningful.
 
+Where a release executes its builds on other machines, the relation travels with the run's resolved configuration and
+a node never states one of its own. A provider whose relation is `none` contributes no build outputs to a consumer's
+build task there, which is the same statement as the local one: the declaration is that the consumer's build reads
+nothing of it.
+
 A non-blocking relation has one sharp edge, and `build` has carried it since before the key had any other value. A
 consumer's version stage may write the provider's *planned* version into its manifests while that provider's publish
 is still pending. If the publish then fails and the consumer proceeds on its own bump, it publishes a manifest naming
