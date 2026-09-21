@@ -326,6 +326,12 @@ func TestExecutionMissingSecretRefusesDistributedRelease(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			mailbox := executionMailbox(t)
 			r, bare := executionReleasableRepo(t, executionSays(executionDistributedConfig(mailbox)))
+			if tc.code == 0 {
+				// A run that can be coordinated goes on to ask the node it
+				// would dispatch to what it is, so the node has to be there.
+				defer startWorker(t, r, executionWorkerConfig(mailbox), 0,
+					executionSecretEnv+"=hunter2").stop(t)
+			}
 
 			res := r.CommandEnv(append(harness.LockEnabled, tc.env...))
 
