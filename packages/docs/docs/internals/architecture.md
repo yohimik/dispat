@@ -342,10 +342,17 @@ precise rule.)
   beyond it nothing is read.
 - A consumer's `publish` **always** waits for its providers' publishes. Publishing against an unpublished provider
   version would be broken under any relation.
+- Publish order is taken over the **whole dependency graph** as well, and no relation ends a path through it. A
+  provider reached only through a package with nothing to release still publishes first, because the consumer resolves
+  it through that package at install time whatever either build read. `{build: none}` says a build reads nothing of the
+  provider, never that a publication may overtake it.
 - When a changed provider fails or is skipped, its consumers are skipped unless they have a fresh release reason of
   their own. A provider under a blocking relation skips them unconditionally: under `publish` their builds consume the
   publish that never happened, and under `none` their publications are the whole of what was meant to follow it, so a
   reason of their own cannot proceed them either way.
+- That cascade follows the same whole-graph reach as the publish order, so a provider that failed skips the consumers
+  that reach it through packages with nothing to release. Each skipped package's `blockedBy` names the provider that
+  actually failed rather than whatever stands between them.
 - The `syncLock` node sits between `version` and `build` in a scheduling class of its own.
 
 ### Drain: the one scheduling pump

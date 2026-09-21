@@ -174,6 +174,12 @@ publishes. Even a consumer that already built, which `false` allows while the pr
 allows from the start, gets skipped at its publish once the provider's publish failure is known. dispat never publishes
 against an unpublished provider version, and skips cascade down the dependency chain by the same rule.
 
+The chain is the dependency graph, not the plan. A provider a consumer reaches only through a package with nothing to
+release publishes before that consumer does, and skips it when the publish fails, exactly as a provider the consumer
+declares itself would. A package with no bump this run is the commonest shape an incremental release has, and it is no
+gap in the chain: the consumer still resolves what lies behind it at install time. The `blockedBy` field of a skipped
+package names the provider that actually failed rather than whatever stands between them.
+
 A consumer that proceeds on its own reason runs its pipeline normally, with two adjustments. First, failed and skipped
 providers are filtered out of the `DISPAT_UPDATED_*` variables. Second, if it had providers to pick up and none
 survive, the version script does not execute at all.
