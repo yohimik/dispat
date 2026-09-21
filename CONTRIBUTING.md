@@ -35,6 +35,7 @@ Use small cohesive types, explicit dependencies, and abstractions at the boundar
 - Start constructor names with `New` for exported functions or `new` for unexported functions, such as `NewUser` or `newUser`.
 - Name methods that convert a value to a specific type after the target type, such as `User.Int()` for an integer conversion.
 - Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
+- Keep positional parameter lists short: prefer at most two parameters, and require a separate, descriptively named parameter struct when there are more than three. An optional `context.Context` does not count toward this limit; keep it as the first parameter, outside the struct. Construct parameter structs with named fields so adding a field does not change argument order at call sites.
 - Return errors with the operation and safe context. Preserve wrapped errors with `%w` when callers need to inspect them. Never ignore cleanup errors that could leave a release lock or published state ambiguous.
 - Pass the caller's context through cancellable work. Use a bounded detached context only for documented finalization that must survive cancellation.
 - Format Go with `gofmt`.
@@ -54,6 +55,7 @@ declaration may instead carry `//namingcheck:exempt <reason>` in its own doc com
 ### JavaScript and TypeScript
 
 - Use `const` for every variable declaration, including destructuring and loop bindings. Do not use `let` or `var`.
+- Pass parameters in a single object with named properties, even when there is only one input. Destructure that object in the function signature where useful. Define parameter shapes with named interfaces in TypeScript, rather than type aliases or inline object types. JavaScript uses the same object parameter convention without TypeScript syntax. Adding or reordering properties must not change the meaning of existing arguments. Functions without inputs need no parameter object. Preserve positional signatures required by external callback or library contracts and existing published APIs.
 - When a value depends on branching, extract the decision into a function with early returns and bind its result with `const`. Do not replace reassignment with an object used only as a mutable box.
 - Use `for (const item of items)` or `for (const [index, item] of items.entries())` when iteration needs early `continue` or `break`. Use collection operations such as `map`, `filter`, or `reduce` when they express the transformation clearly.
 - A `const` binding does not make an object or array immutable. Keep any mutation explicit and within the owning component.
@@ -63,7 +65,13 @@ declaration may instead carry `//namingcheck:exempt <reason>` in its own doc com
 For example, calculate a retry delay in a focused function, return directly from each branch, and bind the result with `const`. Name this operation `calculateRetryDelay`, not `getRetryDelay`:
 
 ```ts
-function calculateRetryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+interface RetryDelayOptions {
+  attempt: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+}
+
+function calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs }: RetryDelayOptions): number {
   if (attempt <= 0) {
     return 0;
   }
@@ -71,7 +79,32 @@ function calculateRetryDelay(attempt: number, baseDelayMs: number, maxDelayMs: n
   return Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
 }
 
-const retryDelayMs = calculateRetryDelay(attempt, baseDelayMs, maxDelayMs);
+const retryDelayMs = calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs });
+```
+
+### TSX components
+
+- After imports, start each component file with an `interface ComponentProps` that declares its props.
+- Define components only as `const` arrow functions typed as `FC<ComponentProps>`. Import `FC` as a type from React.
+- When a component accepts children, declare `children?: ReactNode` explicitly in `ComponentProps` and import `ReactNode` as a type. Omit the property when children are not supported.
+- Keep one component per file. Move additional components into their own files, each with its own `ComponentProps` interface.
+
+```tsx
+import type { FC, ReactNode } from 'react';
+
+interface ComponentProps {
+  title: string;
+  children?: ReactNode;
+}
+
+export const ReleaseSummary: FC<ComponentProps> = ({ title, children }) => {
+  return (
+    <section>
+      <h2>{title}</h2>
+      {children}
+    </section>
+  );
+};
 ```
 
 ### Shell and documentation
