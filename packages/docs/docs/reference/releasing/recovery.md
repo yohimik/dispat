@@ -163,9 +163,14 @@ dispat stops before merging anything when the remote already carries a release t
 ```
 
 That is a checkout whose tags were stale enough for the plan to recompute a version somebody else has already released.
-The recovery would push the tag again, and [`commit.force`](../../configuration/records.md#force) is on by default, so
-it would move a published ref. Pull and run again instead: the plan then reads the tag that exists and releases the
-version after it. Moving aliases are not part of the check, because moving them is what every release does.
+Pull and run again instead: the plan then reads the tag that exists and releases the version after it. Moving aliases
+are not part of the check, because moving them is what every release does.
+
+A checkout that stale is normally refused much earlier. Before it plans anything, a release that pushes reads the
+release records of the remote it records to, under its lock, and stops with `E196` when the remote holds one this
+checkout does not (see [plan errors](../plan-errors.md)); the remedy is `git fetch --tags`. This check is the last
+line, for a record that arrived while the run was working. Whichever of them reports it, no release tag is ever
+replaced on the remote: the push creates the name or leaves what is there alone.
 
 ### When what landed conflicts
 

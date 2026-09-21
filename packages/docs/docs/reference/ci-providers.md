@@ -14,7 +14,11 @@ once it is there.
 computes wrong, so it refuses to guess and stops with `E196` instead. Most providers clone shallowly by default, so you
 must change this setting.
 
-**Tags must come with it.** A baseline is a tag. A clone without tags looks like a repository that has never released.
+**Tags must come with it.** A baseline is a tag. A clone without tags looks like a repository that has never released,
+so a release from one is refused with `E196` before it plans: the remote holds records this checkout cannot see, and
+planning from them would publish a released version a second time. The check runs under the release lock and reads the
+remote once per repository. Fetch the tags in the job (`git fetch --tags`, or your provider's own setting below);
+dispat never fetches them for you.
 
 **Something must be able to push.** Tags and the release commit go back to the remote. Change your checkout token if it
 is read-only.

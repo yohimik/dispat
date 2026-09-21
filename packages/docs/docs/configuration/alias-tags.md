@@ -139,5 +139,7 @@ the release tag itself, where a failure is a [critical](../internals/architectur
 ## Pushing
 
 dispat pushes aliases with the release tags, so it never leaves behind a ref nobody can fetch. A moving alias needs to
-replace the copy the remote already has. This is what [`commit.force`](./records.md#force) does, and it is why the flag
-defaults to on.
+replace the copy the remote already has, and declaring it `moving` is what allows that: it is the only kind of ref a
+release replaces on a remote. A release tag beside it is pushed create-only and is never replaced, whatever
+[`commit.force`](./records.md#force) says. An alias that is not moving is written the same way, so the copy an earlier
+release left is kept.

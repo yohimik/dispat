@@ -458,18 +458,22 @@ changelog:
 # Optional finalize phase (disabled by default): one release commit capturing
 # changelog/manifest changes of all published packages (tags then point at
 # it), optionally pushed together with the tags. Remote access is verified
-# before any release work starts.
+# before any release work starts, and so are the remote's release tags: a
+# checkout missing one the remote holds is refused (E196) rather than
+# publishing that version again.
 commit:
   enabled: false
   messageFormat: "chore(release): {tags}"  # {tags}, {packages}
   push: false
-  # Write a tag the repository already carries instead of failing on it
-  # (default true), which is what a moving alias tag needs. A release tag
-  # found at a different commit is still left alone, and the branch is never
-  # force pushed.
+  # Write a tag this repository already carries at the release's own commit
+  # instead of failing on it (default true), which is what a moving alias tag
+  # needs. A release tag found at a different commit is left alone, and the
+  # branch is never force pushed. It says nothing about the remote: a release
+  # tag is pushed create-only and never replaces the record the remote holds,
+  # and only an alias declared moving is replaced there.
   force: true
   remote: origin
-  verify: true   # ls-remote check before any work when push is enabled
+  verify: true   # ls-remote checks before any work when push is enabled
   # Extra repo-relative paths the release commit stages: the shared artifacts
   # a syncLock regenerates outside every package folder (paths that do not
   # exist at commit time are simply not staged).

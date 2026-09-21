@@ -18,17 +18,23 @@ unique annotated-tag object, remembers its object ID, and offers that immutable 
 The push is not forced. If the name is taken, git rejects the push and that rejection acts as the lock. Using the
 object ID matters when two processes share one checkout: neither process can retarget the object the other is pushing.
 
-A release happens in four steps:
+A release happens in five steps:
 
 1. Create the `dispat-release-lock` tag and push it. Stop and exit `1` if the push is rejected for any reason.
 2. Check that this checkout is not behind the remote, when `commit.push` and `commit.verify` are both on. A plan built
    from a stale checkout recomputes versions somebody else has already published, so the check runs before the plan
    exists and under the lock that keeps its answer from going stale.
-3. Do everything else: plan, build, publish, record, tag, push.
-4. Delete the remote tag only if it still points to this run's object, then remove the local attempt tag.
+3. Read the remote's release tags once, under the same conditions, and compare them with this checkout's. The lock
+   decides who releases; it does not decide what the releasing run knows, and a checkout that is level with the branch
+   can still be missing every record another run wrote. A tag the remote holds on a commit this run's head reaches and
+   this checkout does not have is `E196`; the same version named at two commits is `E191`. Both stop the run before
+   anything is planned, and the remedy is `git fetch --tags`, because a run that refreshed its records after reading
+   them would be planning from something nothing checked.
+4. Do everything else: plan, build, publish, record, tag, push.
+5. Delete the remote tag only if it still points to this run's object, then remove the local attempt tag.
 
-Step 4 happens no matter what steps 2 and 3 did. A failed package, a guard refusing the run, or an empty plan all
-trigger cleanup. Cleanup is detached from a cancelled release context and bounded to 30 seconds. If another owner has
+The last step happens no matter what the ones before it did. A failed package, a guard refusing the run, or an empty
+plan all trigger cleanup. Cleanup is detached from a cancelled release context and bounded to 30 seconds. If another owner has
 replaced the remote ref, the expected-object lease rejects the delete and preserves that owner's lock.
 
 If any repository's lock cannot be returned, dispat reports `E336` and exits nonzero. A publication that already

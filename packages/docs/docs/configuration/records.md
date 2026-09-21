@@ -673,7 +673,7 @@ by the version itself and is not configurable. A `1.3.0-beta.0` that gets a rele
 | `messageFormat` | `chore(release): {tags}` | Template. `{tags}` and `{packages}` become comma-separated lists.                                                                                                                                                                                                                                                                                                                                 |
 | `push`          | `false`                  | Push the release commit and tags. Only applies when `enabled` is true.                                                                                                                                                                                                                                     |
 | `branch`        | unset                    | In polyrepository mode, the target branch for release-commit pushes. Required for a detached checkout only when it will push a branch. |
-| `force`         | `true`                   | Write tags the repository or the remote already carries, instead of leaving them alone. The branch is never force pushed, and a release tag found at a different commit is still left as it is. See [Force](#force) below. `dispat commit --no-force` turns it off for one invocation.                                                                     |
+| `force`         | `true`                   | Write a tag this repository already carries at the release's own commit, instead of failing on it. The branch is never force pushed, a release tag found at a different commit is left as it is, and a release tag on the remote is never replaced at all. See [Force](#force) below. `dispat commit --no-force` turns it off for one invocation.                                                                     |
 | `remote`        | `origin`                 | Remote to push to.                                                                                                                                                                                                                                                                                                                                                                                |
 | `name`, `email` | unset                    | The git identity every commit and annotated tag dispat creates is authored under, so a CI run needs no `git config` step. Unset values fall back to git's own configuration.  |
 | `verify`        | `true`                   | Verify remote access (`git ls-remote`) before any release work when `push` is enabled. Set `false` to skip the check, e.g. for a remote that rejects ls-remote but accepts pushes.                                                                                                                                                                                                                |
@@ -702,34 +702,46 @@ Pushing pushes the branch first and the run's tags after it. A single-repository
 `actions/checkout` with a `ref`). In polyrepository mode, an explicit `branch` lets a source use a detached,
 pinned checkout while naming the branch that receives its release commit. When `push` is enabled, remote access is **verified before any release work starts**
 (`git ls-remote`, switched off by `verify: false`), so a misconfigured remote fails the run before anything is built.
-An enabled GitHub configuration is likewise verified up front, push or not (see [`github`](#github)). A failure during
+The same run also reads the remote's release tags once, under the release lock and before it plans, and refuses a
+checkout the remote has records for that it does not hold (`E196`) or names at another commit (`E191`); `verify: false`
+excuses that read with the others. An enabled GitHub configuration is likewise verified up front, push or not (see
+[`github`](#github)). A failure during
 the finalize phase itself (commit, tag, push, GitHub release) exits 1 with everything else in the phase still done, and
 already-published registry artifacts stay published. See
 [After the point of no return](../internals/architecture.md#after-the-point-of-no-return).
 
 ### Force
 
-`force` (default `true`) decides what happens when a tag is already there.
+`force` (default `true`) decides what happens when a tag is already there **in this repository**.
 
-With it on, a tag the repository already carries is rewritten (`git tag -f`). One the remote already carries is
-replaced (`git push --force` on that one ref, reported with a warning naming it). Without it, both are left as they are
-and reported as skipped. This older behaviour means a re-run after a partially pushed release converges instead of
-dying on "tag already exists".
+With it on, a tag this repository already carries at the release's own commit is rewritten (`git tag -f`). Without it,
+that tag is left as it is and reported as skipped. Either way a re-run after a partially finished release converges
+instead of dying on "tag already exists".
 
-The default is on for two reasons. A tag the remote already has is otherwise skipped on every future run, so a *moving*
-tag could never move. And a tag appearing between dispat's check and its push would otherwise reject the whole push at
-the very end of a release, after every artefact is already out.
+The default is on for two reasons. A tag that is already there is otherwise an error at the very end of a release,
+after every artefact is out. And a *moving* tag could never move.
+
+What happens on the remote is not a setting. Every release tag is pushed create-only, so the remote decides in the same
+operation that writes it:
+
+- **A tag the remote does not have is created**, which is the ordinary outcome.
+- **A tag the remote holds at this release's commit is the same record**, written twice because an earlier answer was
+  lost. It is reported as already there and the run carries on.
+- **A tag the remote holds at another commit is a published record.** It is left exactly where it is, reported as
+  `E221`, and the package stays `published`, because what failed is this run's recording and not its release. Correct
+  the tag that is wrong and run again; dispat will not choose for you.
+- **Only an alias declared [`moving`](./alias-tags.md) is replaced on the remote.** Moving is what it is for.
 
 Three things `force` deliberately does not do:
 
 - **The branch is never force pushed**, under either setting. A rejected branch push means someone else pushed while
   the run was working. The answer to that is to look, not to overwrite their commits.
-- **A release tag found at a different commit is left alone.** That is reported as `E221` and the tag is not written at
-  all, because it is a record some earlier run made. A tag moved here would then be force pushed over the copy on the
-  remote, turning one local mistake into everyone's. Force means "do not fail because the ref exists", not "overwrite
-  whatever is there".
+- **A release tag found at a different commit is left alone**, in this repository as on the remote. That is reported as
+  `E221` and the tag is not written at all, because it is a record some earlier run made. Force means "do not fail
+  because the ref exists", not "overwrite whatever is there".
 - **The [release lock](../reference/releasing/release-lock.md) is never forced.** Its whole purpose is to fail when the
   name is taken, since a run that took the lock by overwriting somebody else's would be releasing beside them.
 
-The one case force does change for release tags is a tag on a commit the current branch cannot reach. dispat's baseline
-query cannot see it, so nothing planned around it, and the write simply succeeds.
+The one case force does change for release tags is a tag in this repository on a commit the current branch cannot
+reach. dispat's baseline query cannot see it, so nothing planned around it, and the local write simply succeeds. The
+push of that tag still asks the remote first, and still leaves a record the remote holds elsewhere where it is.

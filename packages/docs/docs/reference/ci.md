@@ -87,6 +87,11 @@ Grant `contents: write` even for a job that pushes nothing. The run claims the r
 [release lock](../reference/releasing/release-lock.md) tag on the remote before it plans. This refuses a second job
 instead of racing it. You can safely trigger the job on every merge because the second run stops immediately.
 
+`fetch-depth: 0` brings the tags with the history, which is the other half of what the job needs. A checkout made
+without them is refused with `E196`: the remote holds release records the checkout cannot see, and planning from them
+would publish a released version again. The run reads the remote's records under its lock and says which tag is
+missing; the remedy is `git fetch --tags` in the job, because dispat refuses rather than refreshing what it plans from.
+
 ## Gating a pipeline on the plan
 
 A repository with nothing pending releases nothing and exits `0`. This keeps your pipeline green when a merge only
