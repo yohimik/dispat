@@ -149,7 +149,14 @@ func WebhookScriptEvent(word string) string { return "script." + word }
 // WebhookFormatFields lists every event field a Format template may name in
 // a {field} token: the scalar payload fields, spelled exactly as the JSON
 // payload spells them. The list-valued `packages` field is deliberately
-// absent — a template renders one line, and a list has no one rendering.
+// absent: a template renders one line, and a list has no one rendering.
+//
+// The last three name the machines a release ran on. `role` and `node` say
+// which process sent the event, and `worker` says which node the event is
+// about, so a receiver that hears from several machines at once can tell an
+// orchestrator's report of a worker apart from the worker's own. They are
+// empty on every release that states no execution object, exactly as an
+// absent `blockedBy` is, so a template naming them renders nothing there.
 func WebhookFormatFields() []string {
 	return []string{
 		"event", "timestamp",
@@ -157,6 +164,7 @@ func WebhookFormatFields() []string {
 		"status", "failedStage", "error", "code", "blockedBy",
 		"progress", "message",
 		"root", "published", "failed", "skipped", "cancelled",
+		"role", "node", "worker",
 	}
 }
 

@@ -152,3 +152,24 @@ func TestWebhookConfigRoundTripKeepsHeaderCase(t *testing.T) {
 		t.Errorf("round trip changed the config:\n got %+v\nwant %+v", out, in)
 	}
 }
+
+func TestWebhookFormatFieldsNameTheSendingNode(t *testing.T) {
+	// A release spread over several machines has to be readable from one
+	// endpoint, so a template may name who sent the event and which node it
+	// is about. The three travel with the rest of the vocabulary: listed,
+	// accepted as tokens, and expanded by the same tokenizer.
+	for _, field := range []string{"role", "node", "worker"} {
+		if !IsKnownWebhookFormatField(field) {
+			t.Errorf("field %q is not accepted as a format token", field)
+		}
+		rendered := ExpandWebhookFormat("{"+field+"}", func(name string) string {
+			if name != field {
+				t.Errorf("the tokenizer asked for %q while rendering %q", name, field)
+			}
+			return "build-a"
+		})
+		if rendered != "build-a" {
+			t.Errorf("{%s} rendered %q", field, rendered)
+		}
+	}
+}
