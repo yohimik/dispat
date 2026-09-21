@@ -62,12 +62,24 @@ type releaseStore struct {
 // package has built, nothing has published, and the deferred cleanup gives the
 // locks back on the way out.
 func (a *App) compareReleaseRecords(ctx context.Context, fleet *workspaceRecorder) error {
+	stores := comparingStores(a.releaseStores(fleet))
+	if len(stores) == 0 {
+		return nil
+	}
+	// Discovery comes after the stores are settled, so a run that records
+	// nowhere pays nothing for a comparison it does not make. A workspace that
+	// cannot be discovered has no records to compare and no plan either: the
+	// planner reports that failure in its own words a moment later, and
+	// reporting it here would rename it.
 	packages, err := a.packages()
 	if err != nil {
-		return err
+		a.log.Debug().Err(err).Msg("release records are not compared: the workspace could not be discovered")
+		return nil
 	}
 	aliases := plan.NewAliasFilter(packages)
-	for _, store := range a.releaseStores(fleet, packages) {
+	byRepository := packagesByRepository(packages)
+	for _, store := range stores {
+		store.packages = byRepository[store.repository]
 		if err := store.compare(ctx, aliases); err != nil {
 			return err
 		}
@@ -75,52 +87,70 @@ func (a *App) compareReleaseRecords(ctx context.Context, fleet *workspaceRecorde
 	return nil
 }
 
-// releaseStores lists what this run records to, with each store's packages
-// attached: the packages decide which tag names are records at all, and a
-// repository owning none has no records to compare.
-func (a *App) releaseStores(fleet *workspaceRecorder, packages []*model.Package) []releaseStore {
-	byRepository := make(map[string][]*model.Package, len(packages))
-	for _, pkg := range packages {
-		if pkg != nil {
-			byRepository[pkg.Repository] = append(byRepository[pkg.Repository], pkg)
-		}
-	}
+// releaseStores lists what this run records to: one store for a single
+// repository, and one per participating repository of a composed workspace,
+// because each of them records to a store of its own.
+func (a *App) releaseStores(fleet *workspaceRecorder) []releaseStore {
 	if fleet == nil {
 		return []releaseStore{{
-			git: a.git, remote: a.pushRemote(), commit: a.cfg.Commit,
-			packages: byRepository[""], log: a.log,
+			git: a.git, remote: a.pushRemote(), commit: a.cfg.Commit, log: a.log,
 		}}
 	}
 	stores := make([]releaseStore, 0, len(fleet.ordered))
 	for _, record := range fleet.ordered {
 		stores = append(stores, releaseStore{
 			repository: record.repo.Name, git: record.git, remote: record.remote(),
-			commit: record.repo.Commit, packages: byRepository[record.repo.Name],
-			log: record.git.Log,
+			commit: record.repo.Commit, log: record.git.Log,
 		})
 	}
 	return stores
 }
 
-// compare reads this store's release records once and holds every one of them
-// against the planning input.
+// comparingStores keeps the stores this run has something to compare with, and
+// says of each one it drops why.
 //
-// Three runs have nothing to compare and say so rather than reading a remote.
-// A run that pushes nothing records nowhere, so its own repository is its
-// store. A repository owning no package has no record namespace. And
-// commit.verify=false is the setting for a remote that rejects ls-remote and
-// accepts pushes, which is the same read this would make: the run keeps the
-// exemption the existing up-front checks give it.
+// A run that pushes nothing records nowhere, so its own repository is its store
+// and its planning input is already the whole of it. commit.verify=false is the
+// setting for a remote that rejects ls-remote and accepts pushes, and the
+// comparison is another ls-remote: the exemption the up-front checks give that
+// remote is the same exemption here.
+func comparingStores(stores []releaseStore) []releaseStore {
+	comparing := make([]releaseStore, 0, len(stores))
+	for _, store := range stores {
+		if !store.commit.IsPushEnabled() {
+			store.log.Debug().Msg("release records are not compared: this run pushes nothing, so its own repository is its store")
+			continue
+		}
+		if !store.commit.IsVerifyEnabled() {
+			// Said out loud rather than at debug, because this is the one
+			// exemption a person chose: an engine that forgoes the read must
+			// not let the run read as though the records had been compared.
+			store.log.Warn().Str("remote", gitx.RedactURL(store.remote)).
+				Msg("release records are not compared: commit.verify is off for this remote, " +
+					"so a checkout missing a record this remote holds can publish that version a second time")
+			continue
+		}
+		comparing = append(comparing, store)
+	}
+	return comparing
+}
+
+// packagesByRepository groups the workspace's packages by the repository whose
+// records they belong to, which is the empty name in a single repository.
+func packagesByRepository(packages []*model.Package) map[string][]*model.Package {
+	byRepository := make(map[string][]*model.Package, len(packages))
+	for _, pkg := range packages {
+		if pkg != nil {
+			byRepository[pkg.Repository] = append(byRepository[pkg.Repository], pkg)
+		}
+	}
+	return byRepository
+}
+
+// compare reads this store's release records once and holds every one of them
+// against the planning input. A repository owning no package has no record
+// namespace and reads nothing.
 func (s releaseStore) compare(ctx context.Context, aliases plan.AliasFilter) error {
-	if !s.commit.IsPushEnabled() {
-		s.log.Debug().Msg("release records are not compared: this run pushes nothing, so its own repository is its store")
-		return nil
-	}
-	if !s.commit.IsVerifyEnabled() {
-		s.log.Debug().Str("remote", gitx.RedactURL(s.remote)).
-			Msg("release records are not compared: commit.verify is off for this remote")
-		return nil
-	}
 	formats := releaseTagFormats(s.packages)
 	if len(formats) == 0 {
 		s.log.Debug().Msg("release records are not compared: this repository owns no package")
@@ -155,12 +185,23 @@ func (s releaseStore) compare(ctx context.Context, aliases plan.AliasFilter) err
 
 // checkRecord holds one stored release record against the planning input.
 //
+// A name carrying no version is not a record of a version, whatever shape it
+// has: `core@backup` matches the format and states nothing this run could
+// plan again, and the planner reads no baseline and no duplicate out of it
+// either. The comparison is about the versions a run would publish a second
+// time, so it skips those exactly as the planner does.
+//
 // The ancestry question is asked only for a record this checkout lacks, which
 // in the ordinary case is none: a record the checkout holds is answered by
 // comparing the two commits, and a record on a commit the checkout does not
 // hold cannot be reachable from its head, so it can affect no plan this run
 // computes.
 func (s releaseStore) checkRecord(ctx context.Context, record gitx.Tag, held gitx.TagSnapshot) error {
+	if !record.Parsed {
+		s.log.Debug().Str("tag", record.Name).
+			Msg("the store holds a tag with no version in it; it records no release")
+		return nil
+	}
 	if local, isHeld := held[record.Name]; isHeld {
 		if local.Commit() == record.Commit {
 			return nil

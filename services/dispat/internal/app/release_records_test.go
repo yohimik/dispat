@@ -4,6 +4,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -84,9 +85,15 @@ func (f *recordsFixture) commitEmpty(message string) string {
 	return f.git("rev-parse", "HEAD")
 }
 
+// compare runs the whole decision the release path makes: which stores have
+// anything to compare, and then the comparison itself.
 func (f *recordsFixture) compare() error {
 	f.t.Helper()
-	return f.store.compare(context.Background(), plan.NewAliasFilter(f.store.packages))
+	stores := comparingStores([]releaseStore{f.store})
+	if len(stores) == 0 {
+		return nil
+	}
+	return stores[0].compare(context.Background(), plan.NewAliasFilter(f.store.packages))
 }
 
 // recordsPackages is one package in one space, named and formatted the way a
@@ -189,6 +196,14 @@ func TestReleaseStoreComparison(t *testing.T) {
 
 		require.NoError(t, f.compare(), "only the workspace's own formats name records")
 	})
+
+	t.Run("a name with no version in it records no release", func(t *testing.T) {
+		f := newRecordsFixture(t, recordsPackages())
+		f.recordOnRemoteOnly("core@backup", "HEAD")
+
+		require.NoError(t, f.compare(),
+			"the planner reads no baseline and no duplicate out of it either")
+	})
 }
 
 // TestReleaseStoreComparisonIsSkipped covers the three runs that have nothing
@@ -204,14 +219,19 @@ func TestReleaseStoreComparisonIsSkipped(t *testing.T) {
 		require.NoError(t, f.compare())
 	})
 
-	t.Run("commit.verify off keeps its exemption", func(t *testing.T) {
+	t.Run("commit.verify off keeps its exemption and says so", func(t *testing.T) {
 		f := newRecordsFixture(t, recordsPackages())
 		f.recordOnRemoteOnly("core@0.1.0", "HEAD")
 		f.store.commit = &config.CommitConfig{
 			Enabled: models.Bool(true), Push: true, Verify: models.Bool(false)}
+		var said bytes.Buffer
+		f.store.log = zerolog.New(&said)
 
 		require.NoError(t, f.compare(),
 			"the same ls-remote the up-front checks are excused from")
+		assert.Contains(t, said.String(), "\"level\":\"warn\"",
+			"an engine that forgoes the read may not read as though it had compared")
+		assert.Contains(t, said.String(), "release records are not compared")
 	})
 
 	t.Run("a repository owning no package has no record namespace", func(t *testing.T) {
