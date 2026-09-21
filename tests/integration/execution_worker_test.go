@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -283,7 +284,15 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 	})
 
 	t.Run("two nodes may not share one state folder", func(t *testing.T) {
-		first := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 6)
+		// The first node is interrupted below, so its idle window only has to
+		// outlast the second start; the second is started once the first
+		// holds the folder, or under load it is the first that gets refused.
+		first := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 60)
+		lock := filepath.Join(first.stateDir, executionNode, "worker.lock")
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(lock)
+			return err == nil
+		}, 30*time.Second, 25*time.Millisecond, "the first node takes the state folder")
 
 		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
 			"worker", "--root", first.root, "--state-dir", first.stateDir, "--idle-timeout", "1")
@@ -309,6 +318,36 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		_, isStarted := executionLine(res, "worker started")
 		assert.True(t, isStarted, "a crashed node can be restarted without a person deleting a file")
+	})
+
+	t.Run("a lock its writer never filled is taken over after the grace", func(t *testing.T) {
+		// Creating the lock and writing the process id are two steps, so an
+		// empty lock is either an owner that is starting or one that died in
+		// between. It is waited for, then replaced, and the node starts.
+		root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
+		state := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "worker.lock"), nil, 0o644))
+
+		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
+			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "1")
+
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		_, isStarted := executionLine(res, "worker started")
+		assert.True(t, isStarted, "an empty lock does not keep a node from restarting")
+	})
+
+	t.Run("a lock holding no process id is taken over", func(t *testing.T) {
+		root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
+		state := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "worker.lock"),
+			[]byte("not-a-pid"), 0o644))
+
+		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
+			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "1")
+
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	})
 
 	t.Run("an answered-work record from another week is pruned", func(t *testing.T) {
