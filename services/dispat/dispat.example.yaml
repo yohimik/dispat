@@ -473,7 +473,10 @@ commit:
   # and only an alias declared moving is replaced there.
   force: true
   remote: origin
-  verify: true   # ls-remote checks before any work when push is enabled
+  # ls-remote checks before any work when push is enabled: remote access
+  # and the remote's release records. false skips both and warns that the
+  # records were not compared.
+  verify: true
   # Extra repo-relative paths the release commit stages: the shared artifacts
   # a syncLock regenerates outside every package folder (paths that do not
   # exist at commit time are simply not staged).

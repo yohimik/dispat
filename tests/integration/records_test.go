@@ -302,13 +302,16 @@ func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.
 	assert.Empty(t, r.TagList())
 }
 
-// TestRecordsPushSkipsExistingRemoteTags: a tag already present on the remote
-// (left by a partially pushed earlier run) is skipped with the rest of the
-// push going through — the branch, the release commit and every new tag —
-// and the pre-existing remote tag keeping its original target, because this
-// run turns force off. With force on (the default) the same tag is replaced;
-// see TestRecordsPushForceReplacesExistingRemoteTags.
-func TestRecordsPushSkipsExistingRemoteTags(t *testing.T) {
+// TestRecordsPushRefusesEveryPackageWhenOneIsAlreadyRecorded: a record the
+// remote holds and this checkout does not is a property of the repository, not
+// of the package that happens to carry it, so it stops the whole run before
+// anything is built. The package with nothing wrong with it is not released
+// either, and neither the remote nor this checkout is changed.
+//
+// It used to be the opposite: the run went ahead and the push decided, leaving
+// the remote tag alone (force off) or replacing it (force on), both of which
+// published a@0.1.0 a second time.
+func TestRecordsPushRefusesEveryPackageWhenOneIsAlreadyRecorded(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Commit = &models.CommitConfig{
@@ -320,29 +323,36 @@ func TestRecordsPushSkipsExistingRemoteTags(t *testing.T) {
 
 	r.AddBareRemote()
 	r.Commit("feat(a,b): first release of both")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	head := r.Git("rev-parse", "HEAD")
 
 	// Plant a's future tag on the remote only: create it at the source
-	// commit, push it, delete it locally, so the planner still plans a@0.1.0.
-	r.Git("tag", "-a", "a@0.1.0", "-m", "left by an earlier partial push")
+	// commit, push it, delete it locally, so the planner would plan a@0.1.0.
+	r.Git("tag", "-a", "a@0.1.0", "-m", "left by an earlier run")
 	r.Git("push", "-q", "origin", "a@0.1.0")
 	remoteTarget := r.Git("rev-list", "-n1", "a@0.1.0")
 	r.Git("tag", "-d", "a@0.1.0")
 
-	r.ReleaseOK()
-	head := r.Git("rev-parse", "HEAD")
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E196"), "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "a@0.1.0", "the record it is missing is named")
 
 	remoteRefs := r.Git("ls-remote", "origin")
-	assert.Contains(t, remoteRefs, "refs/tags/b@0.1.0", "the new tag arrives")
-	assert.Contains(t, remoteRefs, head, "the release commit arrives")
+	assert.NotContains(t, remoteRefs, "refs/tags/b@0.1.0", "the healthy package is not released either")
+	assert.Empty(t, r.TagList(), "and nothing was recorded in this checkout")
+	assert.Equal(t, head, r.Git("rev-parse", "HEAD"), "no release commit was made")
 	stillAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
-	assert.Equal(t, remoteTarget, stillAt, "the existing remote tag is skipped, not overwritten")
+	assert.Equal(t, remoteTarget, stillAt, "the existing remote record is where it was")
 }
 
-// TestRecordsPushForceReplacesExistingRemoteTags: the default. A tag the
-// remote already carries is overwritten rather than skipped forever, which is
-// what closes the window between the check and the push — and the only way a
-// moving tag could ever move. The replacement is reported, not silent.
-func TestRecordsPushForceReplacesExistingRemoteTags(t *testing.T) {
+// TestRecordsPushNeverReplacesARecordTheRemoteHolds: a record the remote holds
+// on a commit this checkout's head does not reach changes no plan, so the run
+// goes ahead and plans that version. The push is where it is decided, and it
+// creates the name or leaves what is there alone: the remote keeps its record,
+// the package stays published because its publish succeeded, and the run
+// reports E221 and exits non-zero rather than force-moving a published ref.
+func TestRecordsPushNeverReplacesARecordTheRemoteHolds(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
@@ -350,18 +360,28 @@ func TestRecordsPushForceReplacesExistingRemoteTags(t *testing.T) {
 	r.SeedPackage("packages", "a")
 	r.AddBareRemote()
 	r.Commit("feat(a): first release")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 
-	r.Git("tag", "-a", "a@0.1.0", "-m", "left by an earlier partial push")
+	// Somebody released this version from a line of their own. The commit is
+	// not on this checkout's head, so nothing about the plan changes.
+	r.Git("checkout", "-q", "-b", "theirs")
+	r.Git("commit", "-q", "--allow-empty", "-m", "feat(a): their own work")
+	r.Git("tag", "-a", "a@0.1.0", "-m", "released elsewhere")
 	r.Git("push", "-q", "origin", "a@0.1.0")
-	staleTarget := r.Git("rev-list", "-n1", "a@0.1.0")
+	theirs := r.Git("rev-list", "-n1", "a@0.1.0")
 	r.Git("tag", "-d", "a@0.1.0")
+	r.Git("checkout", "-q", harness.DefaultBranch)
+	r.Git("branch", "-q", "-D", "theirs")
 
-	res := r.ReleaseOK()
-	assert.Contains(t, res.Stdout, "overwritten", "the replacement is reported")
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E221"), "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, `"status":"published"`, "the publish itself succeeded")
 
 	nowAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
-	assert.NotEqual(t, staleTarget, nowAt, "the remote tag was moved onto this release")
-	assert.Equal(t, r.Git("rev-list", "-n1", "a@0.1.0"), nowAt, "and agrees with the local tag")
+	assert.Equal(t, theirs, nowAt, "the remote keeps the record it published")
+	assert.NotEqual(t, theirs, r.Git("rev-list", "-n1", "a@0.1.0"),
+		"while this checkout recorded its own release of the same version, which is what E221 names")
 }
 
 // TestRecordsExportedPackageCommitPinsTheTag: a release script exporting

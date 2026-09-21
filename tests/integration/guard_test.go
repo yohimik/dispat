@@ -447,35 +447,55 @@ func TestReleaseMergesWhatLandedTwice(t *testing.T) {
 }
 
 // TestReleaseRefusesToRepublishAnExistingTag: the recovery pushes this run's
-// tags again, and commit.force is on by default, so a checkout whose tags are
-// stale enough to have re-planned an already published version would
-// force-move that published tag onto its own commit. The push this recovers
-// from never reached a tag ref at all, so nothing used to stand between the
-// two; now the remote's tags are read first and the run stops.
+// tags again, so a checkout that planned a version somebody else has already
+// published would write its own tag over that published record. The push this
+// recovers from never reached a tag ref at all, so nothing used to stand
+// between the two; now the remote's tags are read first and the run stops.
+//
+// The record arrives while the run is working, which is the only way it can
+// still reach the recovery: a record the remote already held when the run
+// started is refused under the lock, before anything is planned (goal 59).
+// Here the same clone that lands the mid-release commit publishes the version
+// too, on the commit this run planned from.
 func TestReleaseRefusesToRepublishAnExistingTag(t *testing.T) {
 	r := harness.New(t)
 	bare := r.AddBareRemote()
-	cfg := libsConfig(midReleasePush(t, bare, "chore: landed mid-release", "NOTES.md", "landed\n"), 1)
-	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
-	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")
 	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	published := strings.TrimSpace(bareGit(t, bare, "rev-parse", harness.DefaultBranch))
 
-	// Somebody else already published this version. The tag is on the remote
-	// and this checkout has never seen it, which is exactly what makes the
-	// plan compute it again.
-	published := bareGit(t, bare, "rev-parse", harness.DefaultBranch)
-	bareGit(t, bare, "-c", "user.email=other@dispat.test", "-c", "user.name=other clone",
-		"tag", "-a", "core@0.1.0", "-m", "released elsewhere", strings.TrimSpace(published))
+	cfg := libsConfig(midReleasePush(t, bare, "chore: landed mid-release", "NOTES.md", "landed\n")+
+		" && "+midReleaseTag(t, bare, "core@0.1.0", published), 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.Commit("chore: configure the release")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Contains(t, res.Stdout, "already carries core@0.1.0")
 	assert.Contains(t, res.Stdout, "Pull and run again")
-	assert.Equal(t, strings.TrimSpace(published),
+	assert.Equal(t, published,
 		strings.TrimSpace(bareGit(t, bare, "rev-list", "-n", "1", "core@0.1.0")),
 		"the published tag is where its own release left it")
+}
+
+// midReleaseTag is a script fragment that publishes a release record from
+// another clone while this run is between its plan and its push.
+//
+// It is what makes the recovery's own check reachable: a record the remote
+// held before the run is refused under the lock, and only one that arrives
+// afterwards can still be waiting at the push.
+func midReleaseTag(t *testing.T, bare, tag, commit string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the mid-release tag is a POSIX shell script")
+	}
+	return "if [ ! -f ../../tagged.marker ]; then touch ../../tagged.marker && " +
+		"git -C " + harness.ShQuote(bare) + " -c user.email=other@dispat.test " +
+		"-c user.name='other clone' tag -a " + harness.ShQuote(tag) +
+		" -m 'released elsewhere' " + harness.ShQuote(commit) + "; fi"
 }
 
 // TestReleaseSettlesAConflictAndKeepsBothSides: what landed changed the same

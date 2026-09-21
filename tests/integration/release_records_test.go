@@ -208,6 +208,25 @@ func TestReleaseRecordsIgnoreRemoteTagsOffTheHistory(t *testing.T) {
 	assert.Equal(t, sideline, remoteRecord(t, bare, "core@9.9.9"), "and left the other record alone")
 }
 
+// TestReleaseRecordsIgnoreATagWithNoVersionInIt: a name carrying no version
+// records no release. `core@backup` has a release tag's shape and states
+// nothing this run could publish a second time, and the planner reads no
+// baseline and no duplicate out of it either.
+func TestReleaseRecordsIgnoreATagWithNoVersionInIt(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	r, bare := newRecordsOrigin(t, recordsConfig(registry))
+
+	r.Git("tag", "-a", "core@backup", "-m", "a name somebody parked here")
+	r.Git("push", "-q", "origin", "core@backup")
+	parked := r.Git("rev-list", "-n1", "core@backup")
+	r.Git("tag", "-d", "core@backup")
+
+	res := r.CommandEnv(harness.LockEnabled)
+	assert.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+	assert.Equal(t, parked, remoteRecord(t, bare, "core@backup"), "and the name is left alone")
+}
+
 // TestReleaseRecordsCreateOnlyPush: the window the comparison cannot close.
 // A record may appear on the store between this run's plan and its push, and
 // the push is where that is decided: the remote is asked to create the name
@@ -347,6 +366,9 @@ func TestReleaseRecordsRespectVerifyOffAndNoPush(t *testing.T) {
 		res := stale.Release()
 		assert.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.False(t, harness.IsCodePresent(res.Events, "E196"), "no records were read at all")
+		assert.Contains(t, res.Stdout, "release records are not compared",
+			"and the run says so rather than reading as though they had been")
+		assert.Contains(t, res.Stdout, `"level":"warn"`)
 		assert.Equal(t, []string{"core@0.1.0", "core@0.1.0"}, publishedVersions(t, registry),
 			"which is the behaviour the setting always had")
 		assert.Equal(t, recorded, remoteRecord(t, bare, "core@0.1.0"),

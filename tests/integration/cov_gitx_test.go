@@ -5,10 +5,11 @@ package integration
 
 // Coverage scenarios for the git layer, driven through the flows that reach
 // it: a remote URL carrying a credential, a staged rename under the dirty
-// guard, a remote that already carries the tag a release is about to push, and
-// a release whose commit has nothing to stage.
+// guard, a remote that already records the version a release is about to plan,
+// and a release whose commit has nothing to stage.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -74,12 +75,17 @@ func TestGitDirtyGuardReadsARenameAsOneEntry(t *testing.T) {
 	assert.FileExists(t, r.Path("packages", "core", "renamed.txt"), "and the work is untouched")
 }
 
-// TestGitPushSaysWhatItDidAboutATagTheRemoteAlreadyHad: a re-run after a
-// partly pushed release must converge rather than die on "already exists", so
-// a tag the remote carries is left alone and reported as skipped. With force
-// it is overwritten instead, and replacing a published ref is worth saying out
-// loud even when it is what was asked for.
-func TestGitPushSaysWhatItDidAboutATagTheRemoteAlreadyHad(t *testing.T) {
+// TestGitPushRefusesAPlanTheRemoteAlreadyRecorded: a checkout that plans a
+// version the remote has already recorded is refused before it runs anything,
+// and `commit.force` decides nothing about it.
+//
+// This is the shape the older behaviour was written for, where such a run was
+// allowed to reach its push and the tag was skipped or force-replaced there.
+// Both answers planned a published version a second time; the refusal is the
+// answer now, and the remote's annotated tag is read peeled, because the
+// listing carries the ref and its target and only one of the two names a
+// commit.
+func TestGitPushRefusesAPlanTheRemoteAlreadyRecorded(t *testing.T) {
 	setup := func(t *testing.T, force bool) (*harness.Repo, string, string) {
 		t.Helper()
 		r := harness.New(t)
@@ -94,8 +100,7 @@ func TestGitPushSaysWhatItDidAboutATagTheRemoteAlreadyHad(t *testing.T) {
 		r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 		bootstrap := r.Git("rev-parse", "HEAD")
 		// Somebody's earlier run left the tag there, annotated the way a
-		// release writes one: the listing carries the ref and its peeled
-		// target, and only one of the two names a tag.
+		// release writes one.
 		bareGit(t, bare, "-c", "user.email=other@dispat.test", "-c", "user.name=other clone",
 			"tag", "-a", "core@0.1.0", "-m", "an earlier release", harness.DefaultBranch)
 		return r, bare, bootstrap
@@ -107,25 +112,18 @@ func TestGitPushSaysWhatItDidAboutATagTheRemoteAlreadyHad(t *testing.T) {
 		return strings.TrimSpace(bareGit(t, bare, "rev-list", "-n", "1", "core@0.1.0"))
 	}
 
-	t.Run("without force the remote keeps what it had", func(t *testing.T) {
-		r, bare, bootstrap := setup(t, false)
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("commit.force=%v", force), func(t *testing.T) {
+			r, bare, bootstrap := setup(t, force)
 
-		res := r.ReleaseOK()
-		assert.Contains(t, res.Stdout, "tag already exists on the remote, skipped")
-		assert.Equal(t, bootstrap, remoteTagCommit(t, bare),
-			"the published ref is exactly where it was")
-		assert.True(t, r.IsTagged("core@0.1.0"), "and this clone still made its own; tags: %v", r.TagList())
-	})
-
-	t.Run("with force it is overwritten and said so", func(t *testing.T) {
-		r, bare, bootstrap := setup(t, true)
-
-		res := r.ReleaseOK()
-		assert.Contains(t, res.Stdout, "tag already existed on the remote and was overwritten")
-		assert.NotEqual(t, bootstrap, remoteTagCommit(t, bare),
-			"the ref now names this run's release commit")
-		assert.Equal(t, r.Git("rev-list", "-n", "1", "core@0.1.0"), remoteTagCommit(t, bare))
-	})
+			res := r.Release()
+			require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.True(t, harness.IsCodePresent(res.Events, "E196"), "stdout:\n%s", res.Stdout)
+			assert.Equal(t, bootstrap, remoteTagCommit(t, bare),
+				"the published ref is exactly where it was")
+			assert.Empty(t, r.TagList(), "and this clone wrote none of its own; tags: %v", r.TagList())
+		})
+	}
 }
 
 // TestGitReleaseCommitIsSkippedWhenNothingWasStaged: with the changelog off
