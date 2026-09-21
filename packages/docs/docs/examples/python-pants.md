@@ -36,8 +36,9 @@ folder. Use a fresh `dist/` directory per package and run; upload only the artif
 upload command above is a first-attempt example. Before a retry, reconcile accepted filenames and hashes with the
 index as described in [the Python guide](./python.md#check-the-release-file-set).
 
-The parent layout matters: dispat 1.10 requires package paths below the repository root. Do not claim that adding
-`path: "."` wraps an unchanged root-only project. See [single-package layout](./single-package.md).
+The parent layout matters. A root-only project is wrapped by a standalone entry whose `path` is `"."`, which makes the
+repository itself the package; releases from dispat 1.10 and earlier need a package folder below the root instead. See
+[single-package layout](./single-package.md).
 
 ## Pants adapter
 

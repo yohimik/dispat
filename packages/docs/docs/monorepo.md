@@ -88,9 +88,12 @@ Two details are different at that size:
 
 - Set `tagFormat: "v{version}"` to get `v1.4.0` rather than `app@1.4.0`. You do not need the prefix because there is no
   second package to disambiguate from.
-- Set `path` to a directory inside the repository, such as `src`, `lib`, or `app`. A single root `package.json` can
-  hold both your package and dispat as a development dependency: [the root-manifest example](./examples/single-package.md#one-root-manifest)
-  runs npm commands from the root while source changes belong to the configured folder.
+- Set `path` to `.` when the manifest, the sources and the changelog live at the top of the repository: the package is
+  then the repository itself, and its scripts run there. See
+  [The repository as the package](./configuration/packages.md#the-repository-as-the-package). Set it to a directory
+  such as `src`, `lib`, or `app` when the deliverable sits in one, in which case
+  [the root-manifest example](./examples/single-package.md#one-root-manifest) runs npm commands from the root while
+  source changes belong to the configured folder.
 
 A fleet of small repositories each running dispat is a completely ordinary setup. Every repository gets its own
 [release lock](./reference/releasing/release-lock.md). The lock is a tag on that repository's own remote, so they never

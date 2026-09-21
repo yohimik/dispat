@@ -168,7 +168,10 @@ spaces:
 #
 # An entry with a `path` (root-relative) declares a standalone package
 # outside every space: the entry key is the package name and the entry itself
-# is its whole configuration — same keys, same in-folder file layering.
+# is its whole configuration — same keys, same in-folder file layering. A
+# `path` of `.` is the repository itself, which is how a single-package
+# repository declares its one package; it owns every file no deeper package
+# owns, and its own layer is the entry, not this file.
 packages:
   core:
     revertOnFail: false               # tri-state: absent inherits

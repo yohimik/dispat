@@ -124,9 +124,40 @@ If your manifest already lives beside the code in a subfolder, commands can run 
 }
 ```
 
-The `path` field must name a folder inside the repository; `path: .` is not supported. In this layout, the folder
-contains its own manifest, and its scripts and changelog use that folder. The dispat configuration lives at the root,
-and tags belong to the repository.
+In this layout, the folder contains its own manifest, and its scripts and changelog use that folder. The dispat
+configuration lives at the root, and tags belong to the repository.
+
+## The repository itself as the package
+
+A `path` of `.` names the repository root, so the package is the repository and no folder-relative detour is needed.
+Use it when the manifest, the sources and the changelog all live at the top:
+
+```yaml title="dispat.yaml"
+scripts:
+  version: npm version "$DISPAT_NEW_VERSION" --no-git-tag-version --ignore-scripts --allow-same-version
+  build: npm run build
+  publish: npm publish --access public
+
+packages:
+  app:
+    path: .
+    tagFormat: v{version}
+    changelog:
+      enabled: true
+    flow:
+      version: version
+      build: build
+      publish: publish
+
+commit:
+  enabled: true
+```
+
+Scripts run in the repository root, `CHANGELOG.md` is written there, and `commit.include` is unnecessary because the
+manifest and the lockfile are already inside the package. The release commit covers the whole repository, so release
+from a clean checkout. Two settings are refused for a package rooted this way: `revertOnFail`, which would discard
+every local change in the tree, and a `buildOutputs` root holding another package's folder. See
+[The repository as the package](../configuration/packages.md#the-repository-as-the-package).
 
 Write commits scoped with the package name to drive releases. A commit with no scope also counts when it touches files
 inside the folder. Watch how dispat handles a new feature:

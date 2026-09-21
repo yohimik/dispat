@@ -58,7 +58,7 @@ these package-only keys:
 
 | Key            | Type            | Effect                                                                                                                                                                                                                                                                                                |
 |----------------|-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `path`         | string          | Declares a [standalone package](#standalone-packages-path) at this root-relative folder. This is always exactly one folder, unlike a space's `path`. You can only set this on an entry whose key matches no space folder, because a space package's location *is* its folder, and never in an [in-folder file](#in-folder-configuration-files). |
+| `path`         | string          | Declares a [standalone package](#standalone-packages-path) at this root-relative folder, `.` included: that names [the repository itself](#the-repository-as-the-package). This is always exactly one folder, unlike a space's `path`. You can only set this on an entry whose key matches no space folder, because a space package's location *is* its folder, and never in an [in-folder file](#in-folder-configuration-files). |
 | `changelog`    | object          | Overlays the top-level [`changelog`](./records.md#changelog) **field by field** for this package's release records. You can flip `enabled`, rename the file, or retitle a section. Unset fields keep the global values, but a [line list](./records.md#overriding-a-list) set here replaces the inherited one rather than adding to it.        |
 | `github`       | object          | Overlays the top-level [`github`](./records.md#github) the same way. A package can disable its GitHub releases or target another repository while keeping the global `tokenEnv`. Distinct effective targets each get their own up-front verification.                                                 |
 | `concurrency`  | int or `[b, p]` | The package's *weight*: how many slots of the stage [concurrency budgets](./README.md#top-level-options) its tasks occupy. See [package weights](#package-weights-concurrency) below.                                                                                                                 |
@@ -239,9 +239,9 @@ is never overtaken by lighter ones that became ready after it.
 Add a `path` to an entry to create a package **outside every space**. This could be a tools folder next to the
 workspaces, a deploy bundle at the repository top, or anything else that releases like a package but shares no parent
 folder with one. The path is relative to the monorepo root, must stay inside the repository without absolute paths or
-`..`, and must name an existing folder. `path: .` is not supported. An npm project can still keep one root
-`package.json`: use `path: src` or `path: lib`, run npm commands from the parent, and explicitly version and record the
-root manifest and lockfile. See [One root manifest](../examples/single-package.md#one-root-manifest).
+`..`, and must name an existing folder. The repository root is such a folder: `path: .` (or `path: ./`) declares the
+repository itself as the package, which is how a single-package repository keeps its manifest, its changelog and its
+sources at the top. See [The repository as the package](#the-repository-as-the-package) below.
 
 A standalone package is a full package in every respect. It plans, versions, builds, publishes, tags, and writes
 records exactly like a space package. dispat builds its effective configuration through the same layers as an override,
@@ -259,6 +259,52 @@ Having no space has three consequences:
 A standalone package's name is the entry key exactly as you wrote it, capitals included. That name is what its tags,
 its events and its `DISPAT_*` variables carry, so [renaming it](./versions.md#renaming-a-package) is a decision about
 its release history rather than a change of spelling.
+
+### The repository as the package
+
+A `path` of `.` names the repository root, so the package is the repository. It releases like any other package: it
+plans from the commits that touch it, versions the manifest at the top, writes `CHANGELOG.md` there, tags under the
+repository's [`tagFormat`](./versions.md#tagformat), and runs its scripts with the repository root as their working
+directory.
+
+```yaml title="dispat.yaml"
+scripts:
+  build: npm run build
+  publish: npm publish --access public
+
+packages:
+  app:
+    path: .
+    flow:
+      build: build
+      publish: publish
+```
+
+What it owns is the ordinary rule: a file belongs to the package whose folder is its longest matching path prefix, so
+the repository package owns every file no deeper package owns. A space under `packages/`, or another standalone
+package under `tools/cli`, keeps its own files, its own manifests and its own releases, and a commit touching only
+such a folder releases that package alone. [`src`](#src) and [`ignore`](./change-scope.md) narrow the repository
+package exactly as they narrow any package.
+
+Three consequences follow from the folder being the repository root:
+
+- **The root configuration file is not the package's own layer.** The file in that folder is the one that declares the
+  package, so dispat does not read it again as an [in-folder file](#in-folder-configuration-files). The
+  repository-wide keys it carries stay legal, and the entry remains the nearest statement about the package.
+- **`revertOnFail` is refused.** Rolling this package's folder back would discard every local change in the working
+  tree, including the release files the other packages of the same run have already written. dispat refuses the
+  configuration whether the `true` was written on the entry or inherited from the root file; write
+  `revertOnFail: false` on the entry to keep the setting for everything else.
+- **A declared `buildOutputs` root may not hold another package's folder.** A declared output is installed whole, so
+  `buildOutputs: [packages]` beside a space at `packages/` is refused, as it is for any package that contains
+  another.
+
+The [release commit](./records.md) covers what it stages, which here is the whole repository. With `commit.enabled`,
+dispat therefore refuses to release while the working tree carries local changes, exactly as it does for a package
+whose folder holds another package's folder. A continuous integration run starts from a clean checkout, which is the
+environment that rule is written for. Running a command at the top of the repository does not narrow it to the
+repository package either: a bare `dispat release` there still covers every package, and `--package` names this one
+when you want it alone.
 
 ## Package dependencies
 
