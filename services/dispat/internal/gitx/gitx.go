@@ -380,6 +380,86 @@ func (m AliasMatcher) IsMatch(tag string) bool {
 	return m.tpl.matchesAlias(m.pkg, tag)
 }
 
+// literalPrefix is text every name this matcher accepts begins with: the
+// literal and {name} segments a shape opens with, taken over every shape the
+// format renders, since a format that spells its prerelease drops that whole
+// section for a stable version and may open differently for it. The match is
+// anchored and byte-exact over those segments, so a name that does not carry
+// the prefix cannot match and need not be tried.
+func (m AliasMatcher) literalPrefix() string {
+	if m.tpl == nil {
+		return ""
+	}
+	shapes := []shape{shapeFull}
+	if m.tpl.spellsPrerelease() {
+		shapes = []shape{shapeFull, shapeNoCount, shapeStable}
+	}
+	prefix := ""
+	for i, sh := range shapes {
+		var lead strings.Builder
+	segments:
+		for _, seg := range m.tpl.reduce(sh) {
+			switch seg.kind {
+			case segLiteral:
+				lead.WriteString(seg.text)
+			case segName:
+				lead.WriteString(m.pkg)
+			default:
+				break segments
+			}
+		}
+		if i == 0 {
+			prefix = lead.String()
+			continue
+		}
+		n := 0
+		for other := lead.String(); n < len(prefix) && n < len(other) && prefix[n] == other[n]; {
+			n++
+		}
+		prefix = prefix[:n]
+	}
+	return prefix
+}
+
+// AliasIndex answers whether any of a workspace's alias formats could have
+// written a name, by trying only the formats whose literal prefix the name
+// carries. Every package writes aliases under its own name, so a listing of T
+// unparsed tags against P packages' aliases is T walks of a name's bytes
+// where trying every format for every tag is T times P matches.
+type AliasIndex struct {
+	root *tagPrefixNode[AliasMatcher]
+	size int
+}
+
+// NewAliasIndex indexes the matchers. The zero AliasIndex matches nothing.
+func NewAliasIndex(matchers []AliasMatcher) AliasIndex {
+	root := &tagPrefixNode[AliasMatcher]{}
+	for _, m := range matchers {
+		root.add(m.literalPrefix(), m)
+	}
+	return AliasIndex{root: root, size: len(matchers)}
+}
+
+// Len is the number of alias formats indexed.
+func (x AliasIndex) Len() int { return x.size }
+
+// IsMatch reports whether any indexed alias could have written the name.
+func (x AliasIndex) IsMatch(tag string) bool {
+	node := x.root
+	for depth := 0; node != nil; depth++ {
+		for _, m := range node.matchers {
+			if m.IsMatch(tag) {
+				return true
+			}
+		}
+		if depth == len(tag) {
+			break
+		}
+		node = node.child(tag[depth])
+	}
+	return false
+}
+
 // Commit is one commit of a pending window.
 type Commit struct {
 	// SHA identifies the commit. It is the key a pending window is a set of
@@ -514,6 +594,45 @@ type CommitProbex interface {
 	IsCommitPresent(ctx context.Context, rev string) (bool, error)
 }
 
+// UnionHistoryx is the optional Gitx capability behind the planner's single
+// history read and its marker pass (CCME §13.11).
+//
+// A plan needs one pending window per distinct baseline commit. Read one at a
+// time, the messages and changed paths of the commits those windows share are
+// read and parsed once per window. The windows are nested or overlapping views
+// of one history, so their union is one walk, and every window is recovered
+// from it by ancestry alone.
+//
+// An implementation promises three things, and the planner relies on each:
+//
+//   - the result is exactly the union of what Commits returns for every
+//     boundary, a boundary being a full commit id;
+//   - the commits of any one of those windows appear in the result in the
+//     order Commits lists them, so a window is a subsequence of the union and
+//     the precedence that order carries (§11.6) does not move;
+//   - every Commit carries its complete parent list, so ancestry among the
+//     returned commits is what their Parents say, and IsAncestor need not be
+//     asked about two of them.
+//
+// Every boundary has to be an ancestor-or-self of HEAD, and the implementation
+// checks it, answering ErrBoundaryNotBehindHead otherwise. The planner recovers
+// a window by ancestry inside the union, which is exact only then: a boundary
+// on a line HEAD never merged excludes commits of the union without being in
+// it, and nothing in the union says so. A tag is behind HEAD by construction
+// (Tags lists reachable tags only); a revision pinned by another repository
+// need not be.
+//
+// Implementations without the capability are simply not asked: the planner
+// reads one window per boundary and asks IsAncestor, exactly as before.
+type UnionHistoryx interface {
+	CommitsSinceAny(ctx context.Context, boundaries []string) ([]Commit, error)
+}
+
+// ErrBoundaryNotBehindHead is CommitsSinceAny declining a boundary HEAD does
+// not descend from. It is not a failure: the caller reads that history one
+// window at a time instead.
+var ErrBoundaryNotBehindHead = errors.New("gitx: a union history boundary is not an ancestor of HEAD")
+
 // LocalGitx implements Gitx through the local git executable.
 type LocalGitx struct {
 	Dir string // repository root
@@ -553,7 +672,7 @@ type LocalGitx struct {
 	// context: a first caller whose context is cancelled must not settle the
 	// answer for every later one.
 	dagMu  sync.Mutex
-	dag    map[string][]string
+	dag    *commitGraph
 	dagErr error
 }
 
@@ -939,22 +1058,21 @@ func (c *LocalGitx) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 	// question hundreds of times per run (baseline containment, cancels,
 	// train windows), and paying a git process per question was the single
 	// largest cost of `dispat status`.
-	parents, err := c.commitDAG(ctx)
+	graph, err := c.commitDAG(ctx)
 	if err != nil {
 		return false, err
 	}
-	pa, pb := parents[a], parents[b]
-	if pa != nil && pb != nil {
-		return dagIsAncestor(parents, a, b), nil
+	if yes, known := graph.isAncestor(a, b); known {
+		return yes, nil
 	}
 	// A commit outside HEAD's ancestry (or an abbreviated SHA): answer the
 	// one question authoritatively instead of guessing from a partial graph.
 	return c.mergeBaseIsAncestor(ctx, a, b)
 }
 
-// commitDAG returns the parent pointers of every commit reachable from HEAD,
-// loaded once per LocalGitx and reused for every ancestry question.
-func (c *LocalGitx) commitDAG(ctx context.Context) (map[string][]string, error) {
+// commitDAG returns the history reachable from HEAD in index form, loaded once
+// per LocalGitx and reused for every ancestry question.
+func (c *LocalGitx) commitDAG(ctx context.Context) (*commitGraph, error) {
 	c.dagMu.Lock()
 	defer c.dagMu.Unlock()
 	if c.dag != nil || c.dagErr != nil {
@@ -970,43 +1088,113 @@ func (c *LocalGitx) commitDAG(ctx context.Context) (map[string][]string, error) 
 		}
 		return nil, err
 	}
-	dag := make(map[string][]string)
-	for line := range strings.Lines(out) {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		// The parents are sub-slices of one rev-list buffer. Cloning the
-		// commit ids keeps the whole listing from staying live for as long as
-		// this repository handle does.
-		parents := make([]string, 0, len(fields)-1)
-		for _, parent := range fields[1:] {
-			parents = append(parents, strings.Clone(parent))
-		}
-		dag[strings.Clone(fields[0])] = parents
-	}
-	c.dag = dag
+	c.dag = newCommitGraph(out)
 	return c.dag, nil
 }
 
-// dagIsAncestor walks b's ancestry looking for a. The DAG is the repository's
-// own history, so a plain iterative DFS with a seen-set is enough.
-func dagIsAncestor(parents map[string][]string, a, b string) bool {
-	seen := make(map[string]bool)
-	stack := []string{b}
+// commitGraph is the history reachable from HEAD with every commit given a
+// dense index, so that a set of commits is a bitset and a parent is four
+// bytes rather than another copy of its id.
+//
+// Planning asks whether a is an ancestor of b thousands of times, and b is
+// almost always one of a few commits: a baseline, a cancel barrier, the commit
+// of a correction (CCME §13.11). A fresh walk per question costs the whole
+// ancestry of b every time the answer is no, which on a prerelease train is
+// every fresh commit. The first question about b walks its ancestry once and
+// keeps it; every later one is a bit test.
+type commitGraph struct {
+	index   map[string]int32
+	parents [][]int32
+
+	mu    sync.Mutex
+	reach map[int32][]uint64 // descendant -> its ancestors-or-self
+	order []int32            // insertion order, oldest first, for eviction
+}
+
+// reachBudget bounds the retained ancestor sets. One set is a bit per
+// reachable commit, 12 KiB for a history of 100,000, so the budget holds
+// thousands of boundaries; past it the oldest set is dropped and recomputed
+// if it is asked about again, which changes no answer.
+const reachBudget = 64 << 20
+
+// newCommitGraph reads `git rev-list --parents` output. rev-list does not
+// promise that a parent's own line precedes its mention, so indices are
+// assigned in one pass and parents resolved in a second.
+func newCommitGraph(revList string) *commitGraph {
+	g := &commitGraph{index: make(map[string]int32), reach: make(map[int32][]uint64)}
+	for line := range strings.Lines(revList) {
+		if id, _, _ := strings.Cut(strings.TrimSpace(line), " "); id != "" {
+			if _, dup := g.index[id]; !dup {
+				// The ids are sub-slices of one rev-list buffer. Cloning them
+				// keeps the whole listing from staying live for as long as
+				// this repository handle does.
+				g.index[strings.Clone(id)] = int32(len(g.index))
+			}
+		}
+	}
+	g.parents = make([][]int32, len(g.index))
+	for line := range strings.Lines(revList) {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		child := g.index[fields[0]]
+		if g.parents[child] != nil {
+			continue
+		}
+		parents := make([]int32, 0, len(fields)-1)
+		for _, parent := range fields[1:] {
+			// A shallow clone names parents it does not hold.
+			if i, ok := g.index[parent]; ok {
+				parents = append(parents, i)
+			}
+		}
+		g.parents[child] = parents
+	}
+	return g
+}
+
+// isAncestor reports whether a is an ancestor-or-self of b. known is false
+// when either commit lies outside the loaded history, and the caller asks git.
+func (g *commitGraph) isAncestor(a, b string) (yes, known bool) {
+	ia, okA := g.index[a]
+	ib, okB := g.index[b]
+	if !okA || !okB {
+		return false, false
+	}
+	set := g.ancestors(ib)
+	return set[ia>>6]&(1<<(uint(ia)&63)) != 0, true
+}
+
+// ancestors returns the ancestor-or-self set of b, walking it on first use.
+// The set under construction is its own seen-set.
+func (g *commitGraph) ancestors(b int32) []uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if set, ok := g.reach[b]; ok {
+		return set
+	}
+	set := make([]uint64, (len(g.parents)+63)/64)
+	stack := []int32{b}
 	for len(stack) > 0 {
 		cur := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		if cur == a {
-			return true
-		}
-		if seen[cur] {
+		if set[cur>>6]&(1<<(uint(cur)&63)) != 0 {
 			continue
 		}
-		seen[cur] = true
-		stack = append(stack, parents[cur]...)
+		set[cur>>6] |= 1 << (uint(cur) & 63)
+		stack = append(stack, g.parents[cur]...)
 	}
-	return false
+	size := len(set) * 8
+	for len(g.order) > 0 && (len(g.order)+1)*size > reachBudget {
+		delete(g.reach, g.order[0])
+		g.order = g.order[1:]
+	}
+	if size <= reachBudget {
+		g.reach[b] = set
+		g.order = append(g.order, b)
+	}
+	return set
 }
 
 // mergeBaseIsAncestor is the per-question fallback for commits the loaded DAG
@@ -1106,15 +1294,124 @@ const (
 )
 
 func (c *LocalGitx) Commits(ctx context.Context, sinceTag string) ([]Commit, error) {
-	rangeArg := "HEAD"
-	if sinceTag != "" {
-		rangeArg = sinceTag + "..HEAD"
+	if sinceTag == "" {
+		return c.log(ctx, "HEAD")
 	}
+	return c.log(ctx, sinceTag+"..HEAD")
+}
 
-	out, err := c.run(ctx,
+// unionBoundaryChunk bounds one merge-base command line. A full object id is
+// at most 64 bytes, and the shortest process limit dispat meets is Windows'
+// 32,767 characters. A variable so that a test can fold a small history.
+var unionBoundaryChunk = 256
+
+// CommitsSinceAny implements UnionHistoryx. The union of the windows b..HEAD
+// is everything reachable from HEAD and not reachable from every boundary at
+// once, and the commits reachable from all of them are the ancestors of their
+// octopus merge bases, so the union is one walk: HEAD --not <bases>.
+//
+// The order promise holds because git emits a limited walk by commit date
+// with ties broken by insertion, a window is closed under descendants, and a
+// commit is therefore only ever queued by a commit of its own window: what
+// else the walk is holding decides nothing about the order within a window.
+func (c *LocalGitx) CommitsSinceAny(ctx context.Context, boundaries []string) ([]Commit, error) {
+	seen := make(map[string]bool, len(boundaries))
+	distinct := make([]string, 0, len(boundaries))
+	for _, b := range boundaries {
+		if b == "" {
+			// No boundary at all: that window is the whole history, and so is
+			// the union.
+			return c.log(ctx, "HEAD")
+		}
+		if !fullObjectID(b) {
+			return nil, fmt.Errorf("gitx: union history boundary %q is not a full commit id", b)
+		}
+		if !seen[b] {
+			seen[b] = true
+			distinct = append(distinct, b)
+		}
+	}
+	if len(distinct) == 0 {
+		return c.log(ctx, "HEAD")
+	}
+	// Anything reachable from a boundary and not from HEAD means that boundary
+	// is not behind HEAD. One counting walk per chunk, bounded like the log
+	// itself: it ends where HEAD's history has covered the boundaries.
+	for rest := distinct; len(rest) > 0; {
+		n := min(len(rest), unionBoundaryChunk)
+		out, err := c.run(ctx, append(append([]string{"rev-list", "--count"}, rest[:n]...), "--not", "HEAD")...)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(out) != "0" {
+			return nil, ErrBoundaryNotBehindHead
+		}
+		rest = rest[n:]
+	}
+	// Folded a chunk at a time. With R the bases so far, the commits common to
+	// R's ancestry and the chunk's are, for each r in R, the ancestors of the
+	// octopus bases of r and the chunk; their union is the next R.
+	bases := distinct[:1]
+	for rest := distinct[1:]; len(rest) > 0 && len(bases) > 0; {
+		n := min(len(rest), unionBoundaryChunk)
+		chunk := rest[:n]
+		rest = rest[n:]
+		var next []string
+		known := make(map[string]bool)
+		for _, r := range bases {
+			found, err := c.octopusBases(ctx, append([]string{r}, chunk...))
+			if err != nil {
+				return nil, err
+			}
+			for _, base := range found {
+				if !known[base] {
+					known[base] = true
+					next = append(next, base)
+				}
+			}
+		}
+		bases = next
+	}
+	if len(bases) == 0 {
+		// The boundaries share no history, so nothing is behind all of them.
+		return c.log(ctx, "HEAD")
+	}
+	return c.log(ctx, append([]string{"HEAD", "--not"}, bases...)...)
+}
+
+// octopusBases lists the best common ancestors of all the commits, or nothing
+// when they have none.
+func (c *LocalGitx) octopusBases(ctx context.Context, commits []string) ([]string, error) {
+	out, err := c.run(ctx, append([]string{"merge-base", "--octopus", "--all"}, commits...)...)
+	if err != nil {
+		// Exit status 1 is the answer "none"; anything else is a real failure.
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var bases []string
+	for line := range strings.Lines(out) {
+		if id := strings.TrimSpace(line); id != "" {
+			if !fullObjectID(id) {
+				return nil, fmt.Errorf("gitx: malformed merge base object id")
+			}
+			bases = append(bases, strings.Clone(id))
+		}
+	}
+	return bases, nil
+}
+
+var _ UnionHistoryx = (*LocalGitx)(nil)
+
+// log reads the commits a revision range selects, with the payload planning
+// needs from each.
+func (c *LocalGitx) log(ctx context.Context, revisions ...string) ([]Commit, error) {
+	args := []string{
 		"log",
-		"--format="+logRecordSep+"%H"+logFieldSep+"%P"+logFieldSep+
-			"%an"+logFieldSep+"%ae"+logFieldSep+"%B"+logFieldSep,
+		"--format=" + logRecordSep + "%H" + logFieldSep + "%P" + logFieldSep +
+			"%an" + logFieldSep + "%ae" + logFieldSep + "%B" + logFieldSep,
 		"--name-only",
 		// §6.2: a merge commit's changed-file list is its diff against the
 		// *first parent*. Without this git shows no diff for merges at all, so
@@ -1122,8 +1419,8 @@ func (c *LocalGitx) Commits(ctx context.Context, sinceTag string) ([]Commit, err
 		// This does not change which commits are traversed — the window is
 		// still every commit reachable from HEAD (§13.3).
 		"--diff-merges=first-parent",
-		rangeArg,
-	)
+	}
+	out, err := c.run(ctx, append(args, revisions...)...)
 	if err != nil {
 		return nil, err
 	}

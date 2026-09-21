@@ -1533,3 +1533,38 @@ func TestMergeRemoteOverridesMergeFfOnly(t *testing.T) {
 	require.Len(t, fields, 3, "merge.ff=only did not stop the merge")
 	assert.Equal(t, before, fields[1], "and the release commit is still the first parent")
 }
+
+// TestCommitGraphAncestry pins the in-process ancestry answers on a history
+// shaped to catch the two ways a walk goes wrong: a diamond, where a commit is
+// reached twice, and a side branch, where a later line is not a descendant.
+//
+//	r - a - b --- m - h
+//	     \       /
+//	      c --- d        s (shallow: names a parent the clone does not hold)
+func TestCommitGraphAncestry(t *testing.T) {
+	// A parent is mentioned before its own line on purpose: rev-list orders by
+	// date, not by topology.
+	g := newCommitGraph("h m\nm b d\nd c\nb a\nc a\na r\nr\ns gone\n")
+
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"r", "h", true}, {"a", "h", true}, {"c", "h", true}, {"b", "m", true},
+		{"h", "h", true},
+		{"h", "r", false}, {"b", "d", false}, {"c", "b", false}, {"d", "b", false},
+		{"s", "h", false}, {"r", "s", false},
+	} {
+		got, known := g.isAncestor(tc.a, tc.b)
+		assert.True(t, known, "%s..%s lie inside the loaded history", tc.a, tc.b)
+		assert.Equalf(t, tc.want, got, "isAncestor(%s, %s)", tc.a, tc.b)
+	}
+
+	_, known := g.isAncestor("gone", "h")
+	assert.False(t, known, "a commit the clone does not hold is git's to answer")
+
+	// Asked again, the answers come from the retained sets and do not change.
+	assert.Len(t, g.reach, 6, "one ancestor set per distinct descendant asked about")
+	got, _ := g.isAncestor("c", "h")
+	assert.True(t, got)
+}
