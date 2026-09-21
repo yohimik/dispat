@@ -66,18 +66,32 @@ func (a *App) resolveOutputProviders(pl *plan.Plan) func(string) []execution.Inp
 	}
 }
 
-// collectProviderClosure marks every package that is a provider of name,
-// directly or through another provider. The plan's graph is acyclic before
-// anything is dispatched (a cycle is refused at planning), and the seen set
-// makes a diamond cost one visit rather than two.
+// collectProviderClosure marks every package whose build outputs the build of
+// name may read: its providers, directly or through another provider. The
+// plan's graph is acyclic before anything is dispatched (a cycle is refused at
+// planning), and the seen set makes a diamond cost one visit rather than two.
+//
+// A provider whose relation is `none` ends the path it is reached by (CCME
+// §19.2a): that relation declares that a consumer's build reads nothing the
+// provider builds, and what a package does not read it cannot pass on. Such a
+// provider is left unmarked rather than marked and skipped, because another
+// path with no `none` hop on it may still reach it.
 func collectProviderClosure(pl *plan.Plan, name string, seen map[string]bool) {
 	for _, provider := range pl.Providers[name] {
-		if seen[provider] {
+		if seen[provider] || !isBuildReadingProvider(pl, provider) {
 			continue
 		}
 		seen[provider] = true
 		collectProviderClosure(pl, provider, seen)
 	}
+}
+
+// isBuildReadingProvider reports whether a consumer's build reads what this
+// provider builds, which is every relation but `none`. A name the plan holds
+// no release for reads as the default relation, as it does in the task graph.
+func isBuildReadingProvider(pl *plan.Plan, provider string) bool {
+	rel := pl.Releases[provider]
+	return rel == nil || rel.Pkg.Space.ProviderRelation.IsBuildWaitingBuild()
 }
 
 // runAnchor is the folder every path a node reproduces is relative to: the
