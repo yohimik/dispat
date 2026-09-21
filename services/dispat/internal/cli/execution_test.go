@@ -19,8 +19,9 @@ import (
 // TestWorkerAuthorityRefusesOnlyTheReleaseWords: a worker's task runs real
 // build scripts, and those scripts run dispat. The list is therefore the
 // smallest one that holds: the release and every command that writes a native
-// release ref or announces one, with every helper a build legitimately uses
-// left alone.
+// release ref, with every helper a build legitimately uses left alone. A
+// webhook event is one of those helpers: a build that reports its progress
+// reports it from whichever machine runs it.
 func TestWorkerAuthorityRefusesOnlyTheReleaseWords(t *testing.T) {
 	for name, tc := range map[string]struct {
 		command   string
@@ -32,8 +33,8 @@ func TestWorkerAuthorityRefusesOnlyTheReleaseWords(t *testing.T) {
 		"a changelog entry":       {command: cmdChangelog, isRefused: true},
 		"a version write":         {command: cmdAutoversion, isRefused: true},
 		"a computed config":       {command: cmdCompute, isRefused: true},
-		"a webhook event":         {command: cmdTrigger, isRefused: true},
 		"the plan":                {command: cmdStatus},
+		"a webhook event":         {command: cmdTrigger},
 		"a declared script":       {command: cmdRun},
 		"one declared script":     {command: cmdExec},
 		"a condition":             {command: cmdIf},

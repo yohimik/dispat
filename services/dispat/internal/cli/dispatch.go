@@ -1371,18 +1371,23 @@ func (r *runner) refuseWorkerAuthority(log zerolog.Logger) (int, bool) {
 // isRefusedUnderWorkerAuthority reports the command words a task may not run.
 //
 // The refused list is the release itself, including the bare invocation that
-// is one, and every command that writes a native release ref or announces a
-// release: a tag, a release commit, a GitHub release, a changelog entry, a
-// version write, a computed configuration, a webhook event. Serving is
-// refused for a reason of its own: a task that started a node serving the
-// same mailbox would give one node two processes racing over what it has
-// already answered. Everything else stays allowed, because a build script
-// legitimately reads the plan, runs a declared script, branches on a
-// condition and edits manifests, and a worker that could not do those could
-// not run a build at all.
+// is one, and every command that writes a native release ref: a tag, a
+// release commit, a GitHub release, a changelog entry, a version write, a
+// computed configuration. Serving is refused for a reason of its own: a task
+// that started a node serving the same mailbox would give one node two
+// processes racing over what it has already answered. Everything else stays
+// allowed, because a build script legitimately reads the plan, runs a
+// declared script, branches on a condition and edits manifests, and a worker
+// that could not do those could not run a build at all.
+//
+// Raising a webhook event is allowed, and is the one word that left this
+// list. It writes no ref and starts no release: it reports what a script is
+// doing, from the stage that is doing it. Refusing it would have made moving
+// a build to a worker a change in what the repository's receivers hear, which
+// is exactly what a placement decision must not be.
 func isRefusedUnderWorkerAuthority(command string) bool {
 	switch command {
-	case cmdRelease, cmdCommit, cmdGithub, cmdChangelog, cmdAutoversion, cmdCompute, cmdTrigger, cmdWorker:
+	case cmdRelease, cmdCommit, cmdGithub, cmdChangelog, cmdAutoversion, cmdCompute, cmdWorker:
 		return true
 	}
 	return false

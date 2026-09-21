@@ -166,7 +166,6 @@ func TestExecutionWorkerAuthorityRefusesNativeRefWrites(t *testing.T) {
 		"a changelog entry":      {"changelog"},
 		"a native version write": {"autoversion"},
 		"a computed config":      {"compute"},
-		"a webhook event":        {"trigger", "progress", "50"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r, _ := executionReleasableRepo(t, executionSaysNothing)
@@ -187,6 +186,9 @@ func TestExecutionWorkerAuthorityRefusesNativeRefWrites(t *testing.T) {
 			"the plan":          {"status"},
 			"a declared script": {"exec", "build"},
 			"a condition":       {"if", "!ABSENT", "--then", "echo building"},
+			// A build script reports its own progress, and moving that build
+			// to a worker may not change what the receivers hear.
+			"a webhook event": {"trigger", "progress", "50"},
 		} {
 			t.Run(name, func(t *testing.T) {
 				res := r.CommandEnv(executionWorkerMarker, args...)

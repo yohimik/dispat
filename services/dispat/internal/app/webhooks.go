@@ -57,6 +57,17 @@ func (a *App) newDispatcher(endpoints []webhook.Endpoint) *webhook.Dispatcher {
 // webhook list; outside a run the fields are absent and the top-level list
 // alone hears it.
 //
+// On a worker it is the same command with the same environment: the task's
+// computed DISPAT_* pairs are what the script was started with, and the
+// checkout it runs in carries the repository's `webhooks` list, so the event
+// reaches the endpoints the release would have reached from home. What is
+// resolved on that machine rather than on the orchestrator is everything the
+// endpoints read from the environment: a header's $NAME and the variable
+// `secretEnv` names. A distributed deployment therefore puts a webhook's
+// secret on every node a build may be placed on, exactly as it puts a
+// registry credential on every node that publishes. The sender's own name is
+// stamped by the dispatcher, and under worker authority it names the worker.
+//
 // It always returns nil once the config is loaded: like every other webhook
 // outcome, an endpoint that cannot be reached is a W239 warning, never an
 // exit code — a script must not be able to fail its stage by reporting.
