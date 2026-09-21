@@ -194,9 +194,12 @@ fact reads the provider and says otherwise will build against whatever was there
 written any other way, because the consumer's build takes the provider's publish as input and no work of the
 consumer's own can substitute for an input that never existed. Under `none` it may be relaxed with
 `isBlocking: false`, which lets a consumer release its own work beside a provider that failed. Relax it only where a
-release of the consumer alone is meaningful: under `build` with `isBlocking: false`, a consumer's version stage may
-already have written the provider's planned version into its manifests while that provider's publish was still
-pending, and if the publish then fails, the consumer publishes a manifest naming a version nobody published.
+release of the consumer alone is meaningful.
+
+A non-blocking relation has one sharp edge, and `build` has carried it since before the key had any other value. A
+consumer's version stage may write the provider's *planned* version into its manifests while that provider's publish
+is still pending. If the publish then fails and the consumer proceeds on its own bump, it publishes a manifest naming
+a version nobody published. That is why blocking is the default everywhere except `build`.
 
 ## `versioning`
 
