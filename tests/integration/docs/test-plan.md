@@ -310,6 +310,19 @@ integration suite itself.
     is not a race dispat can win by being careful, so it refuses to enter it: the first to push the lock tag releases,
     the second is told to come back later, and the tag is gone by the time either exits.
 
+59. **Records under the lock** (`release_records_test.go`): the lock decides who releases; it does not decide what the
+    releasing run knows. A plan is built from the tags the checkout holds, so a clone made before another run recorded,
+    or made without tags at all, plans a version that is already published, publishes it a second time and writes its
+    own tag over the record of the first. Under the locks and before the plan, the run reads the release records of
+    every store it writes to and refuses a difference: `E196` for a record it lacks on a commit its planned head
+    reaches, `E191` for one version named at two commits, and nothing at all for a record off that history, which can
+    change no plan. Nothing is repaired and nothing is fetched. The window the comparison cannot close is closed at the
+    other end: a record is written create-only, so a name the store took meanwhile is left where it is and reported
+    (`E221`) while the package stays `published`, and the same commit is the retry of a write whose answer was lost.
+    Only an alias declared `moving` is still replaced. The exemptions are claims too: a run that pushes nothing records
+    in its own repository and compares nothing, and `commit.verify: false` keeps the exemption it has from every other
+    up-front `ls-remote`.
+
 ### Correcting the record
 
 31. **Corrections and reverted changelogs** (`corrections_test.go`): a release record is written in a commit message,
@@ -487,6 +500,7 @@ tests/integration/
   guard_test.go             goal 29
   release_lost_response_test.go goal 29
   lock_test.go              goal 30
+  release_records_test.go   goal 59
 
   correcting the record
   corrections_test.go       goal 31
@@ -1312,6 +1326,28 @@ the tag object on the remote instead.
 | `TestReleaseLockAppliesOnlyToRelease`      | Commands like `status`, `preview`, `run`, `changelog`, `autoversion`, `commit`, and `scanner` acquire no remote locks and function in repositories without remotes.                                                                                  |
 | `TestReleaseLockIsNotAReleaseTag`          | The lock tag targets HEAD during plan computation. Broad tag formats like `{version}` still read 0.1.0 as the baseline and increment to 0.2.0.                                                                                |
 | `TestReleaseLockTakenEvenWhenNothingToRelease` | The lock is unconditional. A `--require-release` run with nothing to publish takes the lock, gives it straight back and exits 3, building and tagging nothing. A lock already held refuses such a run on the lock rather than on the empty plan, which is what proves the lock precedes planning; `dispat status --require-release` remains the lock-free way to ask the same question. |
+
+### Goal 59: records under the lock (`release_records_test.go`)
+
+Every scenario is a checkout that disagrees with the remote it records to, which is what a second clone, a runner's
+`--no-tags` checkout and a run that started before another one finished all are. The evidence is the registry log the
+publish stage appends to, outside both repositories: a version published twice is the failure these refusals exist to
+prevent, whatever the tags end up looking like. The configuration writes nothing to commit, so two clones of one head
+plan the same version and the branch never tells them apart; `harness.LockEnabled` brings the lock back wherever the
+claim is about what the lock does and does not buy.
+
+| Test                                               | Claim proven                                                                                                                                                                                              |
+|----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestReleaseRecordsRefuseACloneWithoutTheRemoteTags` | A clone made before another run recorded is refused with `E196` under the lock, before any script runs, naming the record and the `git fetch --tags` remedy. The registry keeps one line, the remote record does not move, the lock is given back so the up-to-date clone still releases, and the fetched clone re-publishes nothing. |
+| `TestReleaseRecordsNeverMoveAPublishedTag`         | A `--no-tags` checkout at a newer head is refused with `E196` because the record it cannot see is on a commit its head reaches. Nothing publishes, the published record still names its own commit, and the refused run writes no tag at all.                                    |
+| `TestReleaseRecordsRefuseATagAtAnotherCommit`      | One version named at two commits, one in the checkout and one on the remote, is `E191` naming both. Neither side is moved and nothing publishes.                                                             |
+| `TestReleaseRecordsIgnoreRemoteTagsOffTheHistory`  | A record on a commit the planned head does not reach changes no plan, so the run goes ahead and leaves that record alone.                                                                                    |
+| `TestReleaseRecordsCreateOnlyPush`                 | A record pushed by another clone between this run's plan and its push decides at the push: another commit leaves the store's record exactly where it is, reports `E221`, keeps the package `published` and exits non-zero; the same commit is the retry of a lost write and succeeds. |
+| `TestReleaseRecordsAliasTagsStillMove`             | A moving alias is re-pointed on the remote at the newer release and says so, while the record of the earlier release stays where it was.                                                                     |
+| `TestReleaseRecordsRespectVerifyOffAndNoPush`      | `commit.verify: false` reads no records at all and behaves exactly as it did, and a run with push disabled records in its own repository and touches no remote.                                              |
+| `TestReleaseRecordsUnreadableStoreRefusesTheRun`   | One `ls-remote --tags` per repository, and a failing one refuses the run with `E196` before any script, the way a failed remote verification does.                                                           |
+| `TestReleaseRecordsUnwritableStoreKeepsThePublication` | A store that refuses the create-only push leaves a published package recorded in its own repository, reports the push failure and exits non-zero, with one push carrying every record of the run.        |
+| `TestReleaseRecordsInAComposedWorkspace`           | A fleet compares every participating repository: a source repository whose checkout lacks its remote's record refuses the whole run with `E196` naming that repository, before anything publishes anywhere.  |
 
 ### Goal 31: corrections and reverted changelogs (`corrections_test.go`)
 
@@ -2499,6 +2535,8 @@ than showing up as a puzzling behaviour change somewhere downstream.
 | **`compute --write` proposed the links it had just created.** Remaining work was derived from the workspace composed before anything was written, so a freshly linked fleet still looked unlinked and the second attempt at the same link failed. | `TestChoreographyComputeLinksAnUnlinkedFleet`, `TestChoreographyComputeAsksBeforeEachLink` | `choreography_compute_test.go`; `internal/app` |
 | **`compute --write` ignored imported repositories.** It rediscovered packages from the control config and root instead of the composed workspace, so an imports-only run exited successfully without scanning source manifests, deriving cross-source edges, or writing the consumer owner's config and backup. | `TestPolyrepoComputeWritesImportedOwnerConfig` | `polyrepo_test.go`; `internal/app` |
 | **`dispat compute` could not repair a one-sided fleet link.** The docs and the saga's own findings say `W332` is what the command repairs, but the link set was derived from a union-find seeded with the links that exist: once one end declared the link the pair counted as joined, so the missing half was never proposed and a run interrupted between the two halves could only be finished by hand. | `TestChoreographyComputeDeclaresTheHalfOfAOneSidedLink`, `TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote`, `TestChoreographyFaultStopsComputeDeclaringTheOtherHalf`; `services/dispat/internal/app/computelinks_test.go::TestSuggestLinksProposesTheHalfOfAOneSidedLink` | `choreography_compute_test.go`, `choreography_faults_test.go`; `internal/app` |
+| **A release planned from the local clone's tags although it held the lock.** The lock precedes planning and the plan reads release tags from the checkout, so a clone made before another run recorded re-planned the published version, published it again and pushed its own tag over the record; with `--no-tags` at a newer head it moved the published tag. Reproduced on the shipped binary. | `TestReleaseRecordsRefuseACloneWithoutTheRemoteTags`, `TestReleaseRecordsNeverMoveAPublishedTag`, `TestReleaseRecordsInAComposedWorkspace`; `services/dispat/internal/app/release_records_test.go::TestReleaseStoreComparison` | `release_records_test.go`; `internal/app` |
+| **A release tag was force-pushed with the rest of the run's refs.** `commit.force` defaults on and the push forced every tag it carried, so a record the remote already held at another commit was replaced rather than reported, and `CommitConfig.Force` promised the opposite. | `TestReleaseRecordsCreateOnlyPush`, `TestReleaseRecordsAliasTagsStillMove`; `services/dispat/internal/gitx/gitx_test.go::TestPushMovesOnlyTheRefsDeclaredMoving` | `release_records_test.go`; `internal/gitx` |
 | **A fleet change `compute --write` could not make failed the run silently.** Every other refusal in that command reports itself before returning and the dispatcher only turns an error into an exit status, so a link that could not be created, declared or pinned left the operator with exit 1, no diagnostic, and no sentence naming the repository, the peer or the cause. | `TestChoreographyFaultStopsComputeAndConvergesOnASecondRun`, `TestChoreographyFaultStopsComputeDeclaringTheOtherHalf`, `TestChoreographyFaultStopsComputeInitializingADeclaredLink` | `choreography_faults_test.go`; `internal/app` |
 
 ## Running

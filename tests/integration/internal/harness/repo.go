@@ -77,6 +77,27 @@ func Clone(t testing.TB, url string) *Repo {
 	return r
 }
 
+// CloneWithoutTags is Clone with the tags left behind: a complete history and
+// no release records at all.
+//
+// It is the checkout of a CI runner that asked for one without them, and it
+// is the shape a release has to refuse rather than plan from, because every
+// version the repository ever published looks unreleased in it.
+func CloneWithoutTags(t testing.TB, url string) *Repo {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dispatBin, tsmarkBin := Build(t)
+	root := filepath.Join(t.TempDir(), "clone")
+	out, err := exec.Command("git", "clone", "-q", "--no-tags", url, root).CombinedOutput()
+	require.NoError(t, err, "git clone --no-tags %s: %s", url, out)
+	r := &Repo{T: t, Root: root, dispatBin: dispatBin, tsmarkBin: tsmarkBin}
+	r.Git("config", "user.email", "integration@dispat.test")
+	r.Git("config", "user.name", "dispat integration")
+	return r
+}
+
 // CloneShallow is Clone with only the tip commit fetched, which is the
 // checkout a CI runner that asked for a fast one gets.
 //
