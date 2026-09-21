@@ -11,21 +11,33 @@ Keep review findings, audit summaries and task plans in the conversation. Never 
 
 ## Code style
 
-Use ordinary Go composition: small cohesive types, explicit dependencies, and interfaces at the boundary that needs them. Apply a pattern when it solves a concrete problem. Do not add factories, wrappers, or inheritance-like layers merely to give a pattern a name.
+### Common rules for all languages
 
-- Name structs with nouns that describe their responsibility.
-- Use explicit, descriptive names. The wider a name's scope, the more context its name must carry: package-level and exported names should be more descriptive than names used within a small local block.
+Use small cohesive types, explicit dependencies, and abstractions at the boundary that needs them. Apply a pattern when it solves a concrete problem. Do not add factories, wrappers, or inheritance-like layers merely to give a pattern a name.
+
+- Use explicit, descriptive names. The wider a name's scope, the more context its name must carry: package-level and exported names should be more descriptive than names used within a small local block. Avoid unexplained abbreviations and generic names such as `data` or `obj` when a domain name is available.
+- Name variables, parameters, fields, and data types primarily with nouns or noun phrases that describe what they hold or represent, such as `repository`, `packageName`, or `releasePlan`. Use plural nouns for collections, such as `packages`.
 - Reserve `i`, `j`, and `k` for numeric loop counters or indexes, such as `0, 1, 2, 3, ...`. Name iterated values and map keys by their meaning, such as `packageName` or `repository`.
-- Name action functions and methods with verbs, such as `LoadConfig` or `AcquireLocks`.
+- Name action functions and methods with verbs, such as `LoadConfig` in Go or `loadConfig` in JavaScript/TypeScript.
+- Name functions after the specific work they perform: `CalculateChecksum`/`calculateChecksum`, `FormatReleaseLabel`/`formatReleaseLabel`, or `ResolveConfig`/`resolveConfig`. Using `Get`/`get` for a calculation, transformation, or decision is an antipattern: `getReleaseLabel` hides that the function formats a label. Reserve `Get`/`get` for retrieving an existing value, such as `getPackageById` fetching a package record from a database.
+- Name boolean variables and predicates as questions: use `Is`/`is` for a singular subject and `Are`/`are` for a plural subject, following the language's casing rules. Examples include `IsEnabled`, `isEnabled`, `ArePackagesLocal`, and `arePackagesLocal`. A lookup returning a value and a presence boolean keeps its action name, such as `FindPackage`.
+- Preserve published APIs. Introduce a preferred name with a documented deprecated alias or forwarding function when a rename would break users. Required library and framework methods keep their contract names.
+- Keep functions focused on one operation. Split a long function along meaningful validation, planning, execution, or cleanup boundaries. Do not fragment a readable operation into trivial helpers just to lower its line count.
+- When a decision needs branching, move it into a focused, named function that returns the result directly from each branch. Do not initialize a temporary variable and assign it separately in each branch.
+- Prefer guard clauses and early `return` for invalid inputs, errors, and completed cases. Keep the main path flat, and omit `else` after a branch that returns.
+- Use `continue` to skip irrelevant loop items and `break` as soon as the loop's work is complete. Prefer these exits over nested conditionals or flags that only track whether to stop. Preserve required cleanup on every exit path.
+- Keep mutable state owned by one component. Bound concurrency, close response bodies and files, and stop timers and child processes on every exit path.
+
+### Go
+
+- Use ordinary Go composition and define interfaces at the boundary that consumes them.
+- Name structs with nouns that describe their responsibility. Use Go's exported and unexported casing conventions.
 - Start constructor names with `New` for exported functions or `new` for unexported functions, such as `NewUser` or `newUser`.
 - Name methods that convert a value to a specific type after the target type, such as `User.Int()` for an integer conversion.
-- Start boolean predicates with `Is` for a singular subject, such as `IsEnabled` or `IsAncestor`, and `Are` for a plural subject, such as `ArePackagesLocal`. A lookup returning a value and a presence boolean keeps its action name, such as `FindPackage`.
 - Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
-- Preserve published APIs. Introduce a preferred name with a documented deprecated alias or forwarding function when a rename would break users. Required standard-library methods keep their contract names.
-- Keep functions focused on one operation. Split a long function along meaningful validation, planning, execution, or cleanup boundaries. Do not fragment a readable operation into trivial helpers just to lower its line count.
 - Return errors with the operation and safe context. Preserve wrapped errors with `%w` when callers need to inspect them. Never ignore cleanup errors that could leave a release lock or published state ambiguous.
 - Pass the caller's context through cancellable work. Use a bounded detached context only for documented finalization that must survive cancellation.
-- Keep mutable state owned by one component. Bound concurrency, close response bodies and files, and stop timers and child processes on every exit path.
+- Format Go with `gofmt`.
 
 Three of those naming rules are checked. `go run ./tools/namingcheck .` reads `pkg`, `services/dispat`, `tools` and
 `tests/integration` and reports an exported predicate that does not start with `Is`, an exported interface that is
@@ -39,7 +51,32 @@ interface fixes, and the deprecated forwarders in `pkg/*/compatibility.go` and
 change and names the review that owns the tree it lives in; `namingcheck -pending` lists that backlog. A single
 declaration may instead carry `//namingcheck:exempt <reason>` in its own doc comment.
 
-Format Go with `gofmt`. Follow the local TypeScript, shell, and documentation conventions when editing other parts of the repository. Shell scripts use POSIX `sh` and `set -eu`; quote paths and pass data separately from executable command text. Prefer a Go command under `tools/` or a dispat config script over a new shell file.
+### JavaScript and TypeScript
+
+- Use `const` for every variable declaration, including destructuring and loop bindings. Do not use `let` or `var`.
+- When a value depends on branching, extract the decision into a function with early returns and bind its result with `const`. Do not replace reassignment with an object used only as a mutable box.
+- Use `for (const item of items)` or `for (const [index, item] of items.entries())` when iteration needs early `continue` or `break`. Use collection operations such as `map`, `filter`, or `reduce` when they express the transformation clearly.
+- A `const` binding does not make an object or array immutable. Keep any mutation explicit and within the owning component.
+- Use `camelCase` for variables, parameters, functions, and methods, and `PascalCase` for classes, interfaces, and type aliases. Apply the common noun, action, and predicate naming rules.
+- Follow the package's existing formatting, module, and TypeScript conventions.
+
+For example, calculate a retry delay in a focused function, return directly from each branch, and bind the result with `const`. Name this operation `calculateRetryDelay`, not `getRetryDelay`:
+
+```ts
+function calculateRetryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  if (attempt <= 0) {
+    return 0;
+  }
+
+  return Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
+}
+
+const retryDelayMs = calculateRetryDelay(attempt, baseDelayMs, maxDelayMs);
+```
+
+### Shell and documentation
+
+Follow the local shell and documentation conventions. Shell scripts use POSIX `sh` and `set -eu`; quote paths and pass data separately from executable command text. Prefer a Go command under `tools/` or a dispat config script over a new shell file.
 
 ## Configuration is an API
 
