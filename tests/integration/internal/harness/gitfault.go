@@ -67,10 +67,17 @@ type GitFault struct {
 	// running Git at all. A fault with an Output succeeds — it is how a
 	// scenario hands the code under test a reply it cannot parse, or a
 	// revision that is not the one on disk — so Code says nothing about it.
+	//
+	// With After it is the reply in place of the real one rather than in place
+	// of the command: the write applies and the caller is handed this answer
+	// about it, which is the only way to model the reply a remote gives for a
+	// write it has already accepted.
 	Output string
 	// After runs the real command before reporting failure. It models a lost
 	// response after a successful remote write; the caller must read durable
-	// state to distinguish it from a rejected write.
+	// state to distinguish it from a rejected write. With an Output the real
+	// command's own standard output is discarded, so the caller reads the
+	// crafted reply rather than both.
 	After bool
 
 	t       testing.TB
@@ -183,7 +190,11 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 	fi
 	if [ "$selected" -eq 1 ]; then
 		if [ "$DISPAT_IT_GIT_FAULT_AFTER" -eq 1 ]; then
-			"$DISPAT_IT_GIT_REAL" "$@" || exit "$?"
+			if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT" ] || [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE" ]; then
+				"$DISPAT_IT_GIT_REAL" "$@" >/dev/null || exit "$?"
+			else
+				"$DISPAT_IT_GIT_REAL" "$@" || exit "$?"
+			fi
 		fi
 		if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE" ]; then
 			cat "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE"

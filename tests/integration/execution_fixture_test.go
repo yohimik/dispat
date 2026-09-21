@@ -58,6 +58,10 @@ type executionRig struct {
 	repo    *harness.Repo
 	origin  string
 	mailbox string
+	// builds is the file every build script of the fixture appends a line to,
+	// outside every checkout, so that what ran where survives the folder a
+	// node built in being removed.
+	builds string
 }
 
 // newExecutionRig builds the repository every distributed scenario starts
@@ -83,14 +87,89 @@ func newExecutionRig(t *testing.T, adjust ...func(*models.File)) *executionRig {
 	}
 	repo.WriteConfigModel(cfg)
 	repo.Commit("feat(core): bootstrap")
-	return &executionRig{t: t, repo: repo, origin: repo.AddBareRemote(), mailbox: mailbox}
+	return newExecutionRigOver(t, repo, mailbox)
+}
+
+// newExecutionRigOver wraps an already-seeded repository as a rig: a remote to
+// take the release lock on, the mailbox, and the file the build scripts of the
+// fixture record themselves in.
+func newExecutionRigOver(t *testing.T, repo *harness.Repo, mailbox string) *executionRig {
+	t.Helper()
+	return &executionRig{t: t, repo: repo, origin: repo.AddBareRemote(), mailbox: mailbox,
+		builds: filepath.Join(t.TempDir(), "builds.log")}
 }
 
 // env is what every invocation of a distributed scenario needs: the release
-// lock back on, and the signing secret.
+// lock back on, the signing secret, and the file a build script records itself
+// in wherever it runs.
 func (r *executionRig) env(extra ...string) []string {
 	return append(append(append([]string{}, harness.LockEnabled...),
-		executionSecretEnv+"="+executionSecret), extra...)
+		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+r.builds), extra...)
+}
+
+// executionBuildLogEnv names the file the fixture's build scripts append to.
+// It is in the suite's own namespace, which is the only one the harness lets
+// through to a dispat process, and it is what lets a script that ran inside a
+// node's temporary checkout leave a record outside it.
+const executionBuildLogEnv = "DISPAT_IT_EXECUTION_LOG"
+
+// executionRecordingScript is the build script every delegated scenario uses:
+// one line naming the node it ran on, the package it built and the folder it
+// ran in. A build on the orchestrator names no node, which is exactly what the
+// scenarios that assert "this did not go to a worker" read.
+const executionRecordingScript = `printf '%s %s %s\n' ` +
+	`"${DISPAT_EXECUTION_NODE:-orchestrator}" "$DISPAT_PACKAGE" "$PWD" >> "$DISPAT_IT_EXECUTION_LOG"`
+
+// executionRun is one recorded execution of a fixture script.
+type executionRun struct {
+	Node    string
+	Package string
+	Dir     string
+}
+
+// runs are the script executions this rig recorded, in order.
+func (r *executionRig) runs() []executionRun {
+	r.t.Helper()
+	content, err := os.ReadFile(r.builds)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	require.NoError(r.t, err)
+	var recorded []executionRun
+	for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		recorded = append(recorded, executionRun{Node: fields[0], Package: fields[1], Dir: fields[2]})
+	}
+	return recorded
+}
+
+// executionProbePrefix marks a recorded line as one of the fixture's probes
+// rather than as one of its builds, so that a scenario reading "where did this
+// package build" is not answered by a probe that ran in the same script.
+const executionProbePrefix = "probe-"
+
+// nodesByPackage is which node built each package, for the scenarios whose
+// claim is where the work happened rather than in which order.
+func (r *executionRig) nodesByPackage() map[string]string {
+	placed := map[string]string{}
+	for _, run := range r.runs() {
+		if strings.HasPrefix(run.Node, executionProbePrefix) {
+			continue
+		}
+		placed[run.Package] = run.Node
+	}
+	return placed
+}
+
+// startWorker starts a node against this rig's mailbox, with the build log
+// the fixture's scripts write to already in its environment.
+func (r *executionRig) startWorker(cfg models.File, idleSeconds int, extraEnv ...string) *executionWorker {
+	r.t.Helper()
+	return startWorker(r.t, r.repo, cfg, idleSeconds,
+		append([]string{executionBuildLogEnv + "=" + r.builds}, extraEnv...)...)
 }
 
 // release runs the release of this rig, with whatever else the scenario
@@ -114,6 +193,10 @@ type executionWorker struct {
 	stateDir string
 	root     string
 }
+
+// executionSecondNode is the second node the placement scenarios add, so that
+// "which node ran this" is a question with more than one answer.
+const executionSecondNode = "build-b"
 
 // executionWorkerConfig is the node configuration a worker is started with:
 // what it is called, where its mailbox is, and what it may take on.

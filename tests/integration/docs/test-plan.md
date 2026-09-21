@@ -416,6 +416,7 @@ tests/integration/
   execution_fixture_test.go  goal 57 (the two processes, the mailbox and the messages crafted by hand)
   execution_worker_test.go  goal 57 (a serving node: what it answers, what it refuses, how it stops)
   execution_preflight_test.go  goal 57 (what a release asks its pool before it dispatches anything)
+  execution_build_test.go   goal 57 (build stages executed on other machines, from a prepared input state)
 
   configuration
   config_test.go            goal 10
@@ -656,7 +657,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_build_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -692,6 +693,20 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionPreflightIgnoresUnauthenticReplies` | A reply the run cannot authenticate is not an answer: a report signed with another secret, one bound to another run and a result carrying no report at all are each logged as rejected and left where they are, and the probe's own deadline fails the release with E225 rather than the forged reply dispatching anything. |
 | `TestExecutionMailboxGitFaults` | The orchestrator's own git failing at an object write, a tree write, a commit, a push, a poll or a fetch of a coordination branch fails preflight with E225 instead of dispatching something it could not describe, with no stage run and nothing tagged. |
 | `TestExecutionRetainedBranchIsAWarning` | A coordination branch a finished run could not delete is reported with W244 and the `transport-cleanup` class, and the release is still a release: the tag is written and the run exits 0, because a coordination branch carries no release record. |
+| `TestExecutionBuildsRunOnWorkersFromThePreparedSnapshot` | Every build frame of a delegating release runs on a worker node and none of them on the orchestrator, and each node builds from the working tree as the orchestrator had it: the version stage's own manifest edit is the version the consumer's remote build reads. The release still writes its four tags, and preparing those input states moves no head, writes no branch, stages nothing in the repository's index and leaves no coordination branch behind, with the signing secret in neither log. |
+| `TestExecutionTasksSharingARepositoryUseSeparateBranches` | Two builds of one repository overlap in time on two nodes, each on a coordination branch of its own and in a checkout of its own, and never in the orchestrator's own folder: one repository's work is never one node's queue. |
+| `TestExecutionTransportCommitsStayOutsideReleaseHistory` | A finished delegating run leaves no `dispat-worker-*` branch in its mailbox, every release tag points at the planned head rather than at a transport commit, and the release branch's history holds no `dispat transport` commit. |
+| `TestExecutionBudgetsHoldAcrossNodes` | The run-wide build budget is the run's, whatever the pool underneath it is: with a budget of two and two nodes of capacity two, exactly two of the four builds are ever in flight at once. |
+| `TestExecutionWorkerCapacityHoldsAcrossRuns` | A node's capacity bounds that node across runs rather than within one: two independent repositories released concurrently through one mailbox and one node of capacity one never have two of its tasks in flight, and both releases complete. |
+| `TestExecutionLockfilePreparationRunsOnTheOrchestratorOnly` | The shared manifest and lock-file preparation stays on the orchestrator: every `syncLock` script records the orchestrator as the node it ran on, and every dispatched build finds the complete lock file the preparation left. |
+| `TestExecutionOrchestratorRoleNodeServesDelegatedTask` | Serving is a posture rather than a role: a node configured as an orchestrator, with worker links of its own, executes the builds addressed to it and leaves its own mailbox empty, because a node serving a task delegates nothing. |
+| `TestExecutionWorkerTaskRefusesNestedRelease` | Every command of a task runs under worker authority: a build script that invokes `dispat release` or `dispat commit --tag` through the binary's own path is refused with E226 on the node, the package fails at its build stage, and nothing is tagged anywhere. |
+| `TestExecutionRemoteBuildFailureFailsThePackageLocally` | A node reporting a failure of the hook before the stage, of the stage's own script or of the hook after it fails that package here at its build stage and leaves it untagged, runs the `onFail` script on the orchestrator rather than on the node, and leaves the same node healthy enough to build and release every other package of the run. |
+| `TestExecutionStrayWritesAreReported` | A build that edits a tracked file of the checkout it was given is reported with W244 and the `transport-cleanup` class naming how many files it wrote, the release still exits 0, and the orchestrator's own checkout is unchanged. |
+| `TestExecutionSnapshotGitFaults` | The orchestrator's own git failing where an input state is prepared — the index cannot be located, the staging fails, the tree cannot be written — refuses the task that needed it with E227 rather than dispatching a state nobody could describe, and publishes nothing. |
+| `TestExecutionWorkerTaskGitFaults` | A node's git failing around a task's checkout is answered by what the call was for: a worktree that cannot be made fails the task and the release, while an inspection for stray writes and a removal that fail are warnings the release survives, and the node carries on serving either way. |
+| `TestExecutionLostResultPushIsRecognized` | A node whose push applied and whose answer was lost re-reads the branch, finds the object it meant to put there and carries on: the attempt produces exactly one of each message rather than failing work it had already finished. |
+| `TestExecutionTaskTimeoutLeaksTheSlot` | A node that has not reported within `timeouts.task` keeps its slot and leaves the pool: the attempt is abandoned with E227, the unhealthy node is named, nothing is published, the lock is given back, the run exits 1, and the node stops cleanly afterwards without having reported any prepared input state as a rejected message. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
 
