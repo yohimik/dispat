@@ -131,6 +131,13 @@ integration suite itself.
     once is only readable if every line says which machine wrote it, so every process taking part names itself with a
     role and a node on every line and in every webhook event, a line or event about another node names that node
     separately, and a repository that states no `execution` object writes and delivers exactly what it always did.
+    The sixth is where a stage is allowed to run: `runOnly` rides the same ladder and says, for a package's build and
+    for its publish, whether the frame may be delegated, must be delegated or must stay on the machine the release was
+    started on. That machine is one more node of the pool, chosen last, so the default never queues work behind a
+    worker while it is free; a frame it keeps produces the same verified output set a delegated one does and reaches
+    the nodes that consume it over the same relay; a stage that may only run on a worker, in a configuration with no
+    worker link, refuses the release before anything runs; and a space that logs in publishes on the orchestrator,
+    so pinning its publish to a worker is refused as the configuration is read.
 60. **The provider relation** (`stage_relation_test.go`): `isBuildWaitingPublish` answers two questions rather than
     one, so it accepts an object beside the boolean it has always been. The first question is what a consumer's
     version and build stage waits for on a changed provider: nothing under `none`, the provider's build under `build`,
@@ -459,6 +466,7 @@ tests/integration/
   execution_build_test.go   goal 57 (build stages executed on other machines, from a prepared input state)
   execution_identity_test.go  goal 57 (which machine wrote this line, and which machine sent this event)
   execution_outputs_test.go goal 57 (declared build outputs travelling from the node that made them to the node that needs them)
+  execution_placement_test.go  goal 57 (where a stage is allowed to run, and what the run does with the machine it was started on)
   stage_relation_test.go    goal 60 (what a consumer waits for, and what a failed provider does to it)
 
   configuration
@@ -702,7 +710,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`, `execution_placement_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -766,6 +774,17 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionOutputGitFaults` | The git invocations an output transfer is made of, each failed in turn: the staging of the declared roots, the tree write and the batched object read on the node, and the batched object read the orchestrator installs through. Each refuses the affected package with E227, publishes nothing, closes the branches the run created, and leaves the node serving. |
 | `TestExecutionOversizedManifestIsRefusedWhereItIsWritten` | A manifest larger than `execution.transfer.maxManifestBytes` is refused on the node that wrote it with the `manifest-oversize` reason, so the package fails with E227 and nothing is published, rather than the run waiting out a task deadline for a document nobody could read. |
 | `TestExecutionRelayFailureFailsTheConsumer` | A copy that could not be pushed onto the consumer's endpoint is a prerequisite that did not arrive, so the consumer is refused with E227, the package that needed it publishes nothing and both mailboxes are closed. |
+| `TestExecutionOrchestratorOnlyBuildFeedsWorkers` | A package whose `runOnly` pins it to the machine the release was started on is built there exactly once, with no node variable in its environment, while every other package is still delegated; the bytes it produced reach both consumers and the package below them unchanged, over a relay branch the run pushed onto the nodes' mailbox, and all four tags are written with no coordination branch left behind. |
+| `TestExecutionOrchestratorOnlyBuildConsumesWorkerOutputs` | A pinned consumer reads what workers produced: its providers build on nodes, their admitted outputs are installed in the orchestrator's checkout before its own frame starts, and the pinned build assembles both of them and releases. |
+| `TestExecutionWorkerOnlyBuildNeverRunsOnTheOrchestrator` | Three builds pinned to a worker run on the one node of capacity one, one at a time, and not one of them runs on the orchestrator although it declares a capacity of four. |
+| `TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull` | Under the default the orchestrator is the node of last resort: with the only worker busy it takes a frame rather than letting it queue, the worker still takes its share, and the run's own build budget bounds every node of the pool together. |
+| `TestExecutionBothPrefersAFreeWorker` | The other half of the default: with the worker free the orchestrator takes nothing, however much capacity it declares. |
+| `TestExecutionRunOnlyPerStagePair` | A `[build, publish]` pair states the two stages apart: the ladder resolves them as written, and the build side runs on the worker the pair names while the package still publishes from the orchestrator. |
+| `TestExecutionWorkerOnlyWithoutWorkersRefusesTheRelease` | A build, a publish or both pinned to a worker in a configuration that declares no `execution.workers` refuses the release with E225 naming the package, the stage and the missing key, before the first stage script runs and with nothing tagged, while `dispat status` still reports the plan because it executes nothing. |
+| `TestExecutionRunOnlyRefusals` | Every shape and every word the key does not have, through the binary: a misspelled value, a value of another key, a list of one, a list of three, a misspelled half of a pair, and a publish pinned to a worker beside a space that configures `flow.login`. Each exits 1 naming the key, carries E225 and tags nothing. |
+| `TestExecutionRunOnlyLadder` | `runOnly` resolves through the ordinary ladder and replaces as a pair: a package folder's own file wins over the space folder's file, which wins over the root file's space entry, which wins over the repository default a standalone package reaches too. Read out of the resolved debug lines of `dispat status`. |
+| `TestExecutionRunOnlyIsInertWithoutWorkers` | With no `execution` object, a configuration stating the default, both stages pinned to this machine or a pair naming it writes the same tag and the same sequence of log lines as the same repository without the key at all. |
+| `TestExecutionOrchestratorBuildFailureIsALocalFailure` | A pinned build that fails fails its package here at its build stage, runs its `onFail` script on this machine, names no worker on any line about it, and leaves the run delegating and releasing every other package. |
 | `TestExecutionTriggerFromAWorkerNamesTheWorker` | A build script placed on a node reports its own progress from there: the `script.progress` delivery carries `role=worker`, the node's name, the package and the stage the task gave it, its header value and its signature resolve from that node's environment rather than the orchestrator's, and the run's own brackets are still the orchestrator's and unsigned. |
 
 ### Goal 60: the provider relation (`stage_relation_test.go`)

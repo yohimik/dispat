@@ -93,8 +93,15 @@ const executionStageWindow = 8 * time.Second
 
 // executionOneWorker narrows the fixture to a single node, for the scenarios
 // whose claim is about what a run leaves behind rather than about placement.
+//
+// It pins the builds to that node, because the claims made on this fixture
+// are about the delegated path: under the default the orchestrator is one
+// more node of the pool and takes a frame whenever the single worker is full
+// or gone, which is a placement these scenarios are not about. The publish
+// stage keeps the default, which is the orchestrator anyway.
 func executionOneWorker(cfg *models.File) {
 	cfg.Execution.Workers = cfg.Execution.Workers[:1]
+	cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker, Publish: models.RunOnlyBoth}
 }
 
 // recordingBuild is the build script of the scenarios that only need to know
