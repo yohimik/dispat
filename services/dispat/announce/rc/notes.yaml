@@ -40,4 +40,4 @@
 
   Check the plan with `dispat status`. It publishes nothing and takes no release locks.{{ end }}
 
-  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #softwaredevelopment
+  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #softwaredevelopment #releasemanagement #buildtools #developerexperience #platformengineering #polyglot #orchestration #choreography #sagapattern
