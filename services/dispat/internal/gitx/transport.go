@@ -28,16 +28,21 @@ package gitx
 // of a transport call are the ones every other git call in dispat gets.
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // Transportx is the mailbox surface of a Git remote: create a branch nobody
@@ -688,6 +693,177 @@ func (p *Plumbing) ReadBlob(ctx context.Context, oid string, to io.Writer, maxBy
 	if _, err := p.git.runStream(ctx, gitStream{stdout: to}, "cat-file", "blob", oid); err != nil {
 		p.fail(fmt.Errorf("gitx: reading the transport blob %s: %w", oid, err))
 	}
+}
+
+// ObjectReader is one long-running `git cat-file --batch`, asked for objects
+// one at a time and streaming each answer straight into the caller's writer.
+//
+// It exists because the alternative is two forks per file. A build output set
+// is tens of thousands of files, and both the node that captures it and the
+// node that installs it have to read every blob once: doing that through
+// Plumbing.ReadBlob would start eighty thousand git processes where one is
+// enough. The process is also the boundary the bytes never cross as a whole,
+// since every answer is copied out with io.CopyN.
+//
+// One reader belongs to one operation and to one goroutine: the request and
+// the answer share a pipe, so two callers interleaving on it would each read
+// the other's object.
+type ObjectReader struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	stop   context.CancelFunc
+	// isBroken is set by a read that left the pipe mid-object, which is every
+	// refusal: the protocol is a stream, so a reader that stopped early can
+	// answer nothing more and is killed rather than asked again.
+	isBroken bool
+}
+
+// ErrObjectMissing is the object store answering that it does not have what it
+// was asked for. It is a sentinel because it is the one answer a caller acts
+// on: a digest, a file name or a branch reference whose bytes cannot be
+// retrieved is a transfer that did not happen (§28.5), and that fails the
+// prerequisite rather than the process.
+var ErrObjectMissing = errors.New("gitx: the object store does not hold the object")
+
+// OpenObjectReader starts one batch reader on a repository.
+//
+// The caller's context is wrapped rather than used directly so that Close can
+// kill a reader that was abandoned mid-object without cancelling anything else
+// the caller is doing.
+func OpenObjectReader(ctx context.Context, git *LocalGitx) (*ObjectReader, error) {
+	gitInvocations.Add(1)
+	running, stop := context.WithCancel(ctx)
+	cmd := exec.CommandContext(running, "git", "-C", git.Dir, "cat-file", "--batch")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	cmd.WaitDelay = 10 * time.Second
+	script.SetProcessGroup(cmd)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		stop()
+		return nil, fmt.Errorf("gitx: opening the object reader of %s: %w", git.Dir, err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stop()
+		return nil, fmt.Errorf("gitx: opening the object reader of %s: %w", git.Dir, err)
+	}
+	if err := cmd.Start(); err != nil {
+		stop()
+		return nil, fmt.Errorf("gitx: starting the object reader of %s: %w", git.Dir, err)
+	}
+	git.Log.Trace().Str("dir", git.Dir).Msg("object reader opened")
+	return &ObjectReader{cmd: cmd, stdin: stdin, stdout: bufio.NewReaderSize(stdout, 64<<10), stop: stop}, nil
+}
+
+// ReadBlob streams one blob into to and answers how many bytes it was,
+// refusing anything the caller is not willing to read before a byte of it is
+// copied.
+//
+// The size comes from the object's own header, which is the first thing the
+// batch answers, so the ceiling is applied to the real length rather than to
+// however much arrived.
+func (r *ObjectReader) ReadBlob(oid string, to io.Writer, maxBytes int64) (int64, error) {
+	if r.isBroken {
+		return 0, fmt.Errorf("gitx: the object reader stopped at an earlier object: %w", ErrTransportLimit)
+	}
+	size, err := r.request(oid)
+	if err != nil {
+		return 0, err
+	}
+	if size > maxBytes {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the object %s is %d bytes, at most %d: %w",
+			oid, size, maxBytes, ErrTransportLimit)
+	}
+	if _, err := io.CopyN(to, r.stdout, size); err != nil {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: reading the %d bytes of %s: %w", size, oid, err)
+	}
+	// Every answer ends with one newline the caller never sees; leaving it in
+	// the pipe would make the next header unreadable.
+	if _, err := r.stdout.ReadByte(); err != nil {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: reading the end of %s: %w", oid, err)
+	}
+	return size, nil
+}
+
+// request asks for one object and answers the length the header promised.
+func (r *ObjectReader) request(oid string) (int64, error) {
+	if _, err := io.WriteString(r.stdin, oid+"\n"); err != nil {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: asking the object reader for %s: %w", oid, err)
+	}
+	header, err := r.stdout.ReadString('\n')
+	if err != nil {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the object reader did not answer about %s: %w", oid, err)
+	}
+	fields := strings.Fields(header)
+	if len(fields) == 2 && fields[1] == "missing" {
+		return 0, fmt.Errorf("gitx: %s: %w", oid, ErrObjectMissing)
+	}
+	if len(fields) != 3 || fields[1] != "blob" {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the object reader answered %q about %s, which is not a blob header",
+			strings.TrimSpace(header), oid)
+	}
+	size, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the length of %s is not a number: %w", oid, err)
+	}
+	return size, nil
+}
+
+// Close ends the reader and reports what git made of the session.
+//
+// A reader that answered everything it was asked is closed by closing its
+// input, which is how the batch protocol ends; one abandoned mid-object is
+// killed instead, because the bytes still in the pipe are bytes nobody is
+// going to read and git would block writing them.
+func (r *ObjectReader) Close() error {
+	if r.isBroken {
+		r.stop()
+		_ = r.stdin.Close()
+		_ = r.cmd.Wait()
+		return nil
+	}
+	if err := r.stdin.Close(); err != nil {
+		r.stop()
+		_ = r.cmd.Wait()
+		return fmt.Errorf("gitx: ending the object reader: %w", err)
+	}
+	err := r.cmd.Wait()
+	r.stop()
+	if err != nil {
+		return fmt.Errorf("gitx: the object reader failed: %w", err)
+	}
+	return nil
+}
+
+// ResolveSubtree is the object id of one path inside a tree, which is how a
+// tree written from a repository's index is narrowed to the folder a package
+// owns.
+//
+// The path is read as git reads `<tree>:<path>`, and the caller passes a path
+// it composed rather than one a message carried: what comes back is an object
+// id, so a path naming something else would answer something else rather than
+// reach anywhere it should not.
+func (p *Plumbing) ResolveSubtree(ctx context.Context, tree, path string) string {
+	if p.err != nil {
+		return ""
+	}
+	if path == "" || path == "." {
+		return tree
+	}
+	out, err := p.git.run(ctx, "rev-parse", "--verify", "--end-of-options", tree+":"+path)
+	if err != nil {
+		p.fail(fmt.Errorf("gitx: resolving %s inside the tree %s: %w", path, tree, err))
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // ListTree walks a tree recursively and calls visit once per entry, as the

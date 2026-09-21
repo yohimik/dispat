@@ -388,3 +388,93 @@ func TestTransportNeverPrintsACredential(t *testing.T) {
 		assert.Contains(t, text, "REDACTED")
 	}
 }
+
+// TestObjectReaderStreamsManyBlobsThroughOneProcess: the reader an output
+// transfer reads every file through. One process answers every request in
+// order, an object the store does not hold is a sentinel rather than a
+// failure, and a ceiling refuses a blob before a byte of it is copied.
+func TestObjectReaderStreamsManyBlobsThroughOneProcess(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	plumbing := NewPlumbing(f.git)
+	bodies := map[string]string{"one": "first", "two": strings.Repeat("x", 4096), "three": ""}
+	oids := map[string]string{}
+	for name, body := range bodies {
+		oids[name] = plumbing.HashObject(ctx, strings.NewReader(body))
+	}
+	require.NoError(t, plumbing.Err())
+
+	before := GitInvocations()
+	reader, err := OpenObjectReader(ctx, f.git)
+	require.NoError(t, err)
+	for name, body := range bodies {
+		var out bytes.Buffer
+		size, err := reader.ReadBlob(oids[name], &out, 1<<20)
+		require.NoError(t, err, name)
+		assert.Equal(t, int64(len(body)), size, name)
+		assert.Equal(t, body, out.String(), name)
+	}
+	_, missingErr := reader.ReadBlob(strings.Repeat("0", 40), &bytes.Buffer{}, 1<<20)
+	assert.ErrorIs(t, missingErr, ErrObjectMissing,
+		"an object nobody fetched is named as one rather than reported as a broken process")
+	// The stream survives a missing object, because nothing of it was read.
+	var again bytes.Buffer
+	_, err = reader.ReadBlob(oids["one"], &again, 1<<20)
+	require.NoError(t, err)
+	assert.Equal(t, "first", again.String())
+	require.NoError(t, reader.Close())
+	assert.Equal(t, before+1, GitInvocations(), "one process answered every request")
+}
+
+// TestObjectReaderRefusesAnOversizedBlobAndStops: the ceiling is applied to
+// the length the header promised, so an oversized object is never copied
+// anywhere; the reader is then spent, because the bytes of it are still in the
+// pipe and nothing is going to read them.
+func TestObjectReaderRefusesAnOversizedBlobAndStops(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	plumbing := NewPlumbing(f.git)
+	oid := plumbing.HashObject(ctx, strings.NewReader(strings.Repeat("y", 1000)))
+	require.NoError(t, plumbing.Err())
+
+	reader, err := OpenObjectReader(ctx, f.git)
+	require.NoError(t, err)
+	var out bytes.Buffer
+	_, err = reader.ReadBlob(oid, &out, 10)
+
+	assert.ErrorIs(t, err, ErrTransportLimit)
+	assert.Empty(t, out.String(), "nothing was written before the refusal")
+	_, err = reader.ReadBlob(oid, &bytes.Buffer{}, 1<<20)
+	assert.ErrorIs(t, err, ErrTransportLimit, "a reader that stopped mid-stream answers nothing more")
+	assert.NoError(t, reader.Close())
+}
+
+// TestResolveSubtreeNarrowsARepositoryTreeToAFolder: a tree written from an
+// index is rooted at the repository, and a manifest names its files by the
+// package folder, so the one is narrowed to the other.
+func TestResolveSubtreeNarrowsARepositoryTreeToAFolder(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	dist := filepath.Join(f.root, "packages", "core", "dist")
+	require.NoError(t, os.MkdirAll(dist, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dist, "app.js"), []byte("payload"), 0o644))
+
+	plumbing := NewPlumbing(f.git)
+	index := filepath.Join(t.TempDir(), "index")
+	tree := plumbing.WriteTreeFromPaths(ctx, filepath.Join(f.root, "packages", "core"), index, []string{"dist"}, true)
+	narrowed := plumbing.ResolveSubtree(ctx, tree, "packages/core")
+	require.NoError(t, plumbing.Err())
+	assert.Equal(t, tree, plumbing.ResolveSubtree(ctx, tree, "."), "a package at the root is the tree itself")
+
+	listed := map[string]int64{}
+	plumbing.ListTree(ctx, narrowed, func(entry TreeEntry) error {
+		listed[entry.Name] = entry.Size
+		return nil
+	})
+	require.NoError(t, plumbing.Err())
+	assert.Equal(t, map[string]int64{"dist/app.js": int64(len("payload"))}, listed)
+
+	absent := NewPlumbing(f.git)
+	absent.ResolveSubtree(ctx, tree, "packages/absent")
+	assert.Error(t, absent.Err(), "a folder the tree does not hold is a failure rather than an empty answer")
+}

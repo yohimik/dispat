@@ -103,10 +103,12 @@ func TestProtocolDocumentsRoundTrip(t *testing.T) {
 		StaticEnv:    []string{"REGISTRY=$DISPAT_REGISTRY"},
 		Shell:        []string{"/bin/sh", "-c"},
 		Platforms:    []string{"linux/amd64"},
-		Inputs:       []AssignmentInput{{Task: "ui", Package: "ui", Commit: "beef"}},
-		Outputs:      []string{"dist"},
-		Permits:      AssignmentPermits{Publish: true},
-		Limits:       TransferLimits{MaxFiles: 10, MaxBytes: 20, MaxManifestBytes: 30},
+		Inputs: []AssignmentInput{{Task: "ui:build", Package: "ui",
+			Branch: "dispat-worker-build-a-20260921-relay-abc", Commit: "beef",
+			Digest: "d1", Path: "packages/ui"}},
+		Outputs: []string{"dist"},
+		Permits: AssignmentPermits{Publish: true},
+		Limits:  TransferLimits{MaxFiles: 10, MaxBytes: 20, MaxManifestBytes: 30},
 	}
 
 	document, err := json.Marshal(assignment)
@@ -119,10 +121,22 @@ func TestProtocolDocumentsRoundTrip(t *testing.T) {
 	result := Result{
 		Header: assignment.Header, Assignment: "cafe", Status: StatusFailed,
 		FailedPart: "build", Exit: 2,
-		Platform:   Platform{OS: "linux", Arch: "amd64", Dispat: "1.11.0"},
-		Exports:    []ExportedValue{{Name: "IMAGE", Value: "acme/core:1", Source: "core:build"}},
-		Manifest:   []ManifestEntry{{Path: "dist/a.js", Type: "blob", Mode: "100644", Size: 3, SHA256: "aa"}},
-		OutputTree: "feed", StrayWrites: 1,
+		Platform: Platform{OS: "linux", Arch: "amd64", Dispat: "1.11.0"},
+		Exports:  []ExportedValue{{Name: "IMAGE", Value: "acme/core:1", Source: "core:build"}},
+		Outputs: &OutputManifest{
+			Protocol: ProtocolVersion, Run: "run-1", PlanDigest: "digest", Task: "core:build",
+			Attempt: 2, Generation: "generation", Node: "build-a", Package: "core", Version: "1.2.0",
+			Repositories: []ManifestRepository{{Name: "api", Snapshot: "cafe"}},
+			Platform:     Platform{OS: "linux", Arch: "amd64", Dispat: "1.11.0"},
+			Roots:        []string{"dist"},
+			Inputs:       []ManifestInput{{Package: "ui", OutputTree: "f00d", Digest: "d1"}},
+			Entries: []ManifestEntry{
+				{Path: "dist/a.js", Type: EntryFile, Mode: EntryModeFile, Size: 3, SHA256: "aa"},
+				{Path: "dist/link", Type: EntrySymlink, Mode: EntryModeFile, Size: 4, SHA256: "bb", Target: "a.js"},
+			},
+			Files: 2, Bytes: 7, OutputTree: "feed", Digest: "manifest",
+		},
+		StrayWrites: 1,
 		Report: &NodeReport{Protocol: ProtocolVersion, Dispat: "1.11.0", OS: "linux",
 			Arch: "amd64", Capacity: 2, GitVersion: "git version 2.43.0"},
 	}

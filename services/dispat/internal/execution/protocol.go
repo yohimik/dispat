@@ -270,12 +270,28 @@ type AssignmentFrame struct {
 	After    []string `json:"after,omitempty"`
 }
 
-// AssignmentInput is one provider result a task consumes: which task produced
-// it, and the exact object its verified outputs are read from.
+// AssignmentInput is one provider's admitted output set as the consuming node
+// has to reach it: which task produced it, the branch of this node's own
+// endpoint the bytes are fetchable from, the exact object they are read at,
+// the manifest the orchestrator admitted, and where the provider's folder sits
+// in the checkout the consumer materializes.
+//
+// The branch is endpoint-local because the consumer talks to one mailbox and
+// to nothing else: when the producer answered somewhere else, the orchestrator
+// relays the object onto this endpoint and names the relay branch here, so a
+// node never has to be told about a machine it cannot reach (§28.5).
+//
+// The digest is what makes the reference a transfer rather than a promise. A
+// node verifies the manifest it finds at Commit against this value before a
+// single file is installed, so an output set somebody swapped on the mailbox
+// is refused by the consumer as well as by the orchestrator that admitted it.
 type AssignmentInput struct {
 	Task    string `json:"task"`
 	Package string `json:"package,omitempty"`
+	Branch  string `json:"branch"`
 	Commit  string `json:"commit"`
+	Digest  string `json:"manifestDigest"`
+	Path    string `json:"path,omitempty"`
 }
 
 // AssignmentPermits is what one assignment authorizes beyond running
@@ -373,11 +389,12 @@ type Result struct {
 	Platform Platform `json:"platform"`
 	// Exports are what the stage's scripts wrote to their DISPAT_OUTPUT files.
 	Exports []ExportedValue `json:"exports,omitempty"`
-	// Manifest is the verified description of the outputs this attempt
-	// captured, empty when it produced none.
-	Manifest []ManifestEntry `json:"manifest,omitempty"`
-	// OutputTree is the object the captured outputs are read from.
-	OutputTree string `json:"outputTree,omitempty"`
+	// Outputs is the verified description of what this attempt produced, nil
+	// when it declared none. It travels inside the result rather than beside
+	// it so that the signature over the result is the signature over the
+	// manifest: a blob added to the same tree under a name of its own would be
+	// trusted for being called what it is called.
+	Outputs *OutputManifest `json:"outputs,omitempty"`
 	// StrayWrites counts the tracked files the task wrote outside what it
 	// declared. They are never admitted; the count is what makes a build that
 	// writes where nobody expected it visible.
@@ -408,8 +425,32 @@ type Platform struct {
 	Dispat string `json:"dispat"`
 }
 
+// The two kinds of thing a build output may be. A declared root travels as
+// files and links and as nothing else: a device node, a socket or a submodule
+// is not a build product, and a node that installed one would be reproducing
+// something about the machine that built it rather than something it made.
+const (
+	EntryFile    = "file"
+	EntrySymlink = "symlink"
+)
+
+// The two file modes an output entry may carry, in git's own spelling minus
+// the object-type digits. Everything a build writes is either readable or
+// runnable; anything else is a permission bit that does not survive the
+// journey between two operating systems and must therefore not be promised.
+const (
+	EntryModeFile       = "0644"
+	EntryModeExecutable = "0755"
+)
+
 // ManifestEntry is one file of a task's captured outputs, bound to the digest
 // that makes it verifiable on the consuming node.
+//
+// The path is slash-separated and relative to the package folder, because that
+// is the one spelling two machines can agree on; the digest is over the
+// content for a file and over the link target for a symlink, so that every
+// entry of a manifest is something the consumer can check rather than
+// something it has to believe.
 type ManifestEntry struct {
 	Path   string `json:"path"`
 	Type   string `json:"type"`
@@ -417,6 +458,79 @@ type ManifestEntry struct {
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256,omitempty"`
 	Target string `json:"target,omitempty"`
+}
+
+// OutputManifest is what one successful build says it produced, bound to
+// everything that decides whether a consumer may use it (§28.5).
+//
+// Two halves travel together. The header binds the bytes to the run, the plan,
+// the task attempt and the ownership that authorized it, to the exact source
+// states the build consumed, to the package and version it was for, to the
+// platform it ran on and to the output sets that went into it; the entries
+// describe the bytes themselves. Neither half is useful alone: a description
+// of files nobody can place in a run is a description of files nobody may
+// install, which is exactly the substitution §28.5 forbids.
+//
+// The whole document travels inside the signed result, so nothing here is
+// trusted for being found somewhere. Digest is the manifest's own name, taken
+// over the document with that field empty, so that an assignment can name one
+// admitted manifest and a consumer can prove the one it fetched is that one.
+type OutputManifest struct {
+	// Protocol is ProtocolVersion, matched exactly, as on every message.
+	Protocol int `json:"protocol"`
+	// The work this output set belongs to, in the same vocabulary the
+	// protocol's headers use.
+	Run        string `json:"run"`
+	PlanDigest string `json:"planDigest"`
+	Task       string `json:"task"`
+	Attempt    int    `json:"attempt"`
+	Generation string `json:"generation"`
+	Node       string `json:"node"`
+	// Package and Version are what was being built, so that an output set can
+	// be reported and refused by the name a person reads in a plan.
+	Package string `json:"package"`
+	Version string `json:"version,omitempty"`
+	// Repositories are the prepared input states the build consumed, one per
+	// repository of its input closure, repository-qualified so that a
+	// composed workspace's states are told apart.
+	Repositories []ManifestRepository `json:"repositories,omitempty"`
+	// Platform is the machine the build ran on, which is what a consumer
+	// compares against the platforms its own package may build on.
+	Platform Platform `json:"platform"`
+	// Roots are the declared build output roots the entries lie under,
+	// exactly as the configuration ladder resolved them.
+	Roots []string `json:"roots,omitempty"`
+	// Inputs are the output sets installed for this build, so that what a set
+	// was made from is as inspectable as what it is.
+	Inputs []ManifestInput `json:"inputs,omitempty"`
+	// Entries are the files themselves, sorted by path.
+	Entries []ManifestEntry `json:"entries,omitempty"`
+	// Files and Bytes are the totals the transfer ceilings are applied to.
+	// They are stated rather than recomputed so that a reader can refuse a
+	// set before it walks it, and they are checked against the entries so
+	// that stating them is not a way of lying about them.
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
+	// OutputTree is the git tree the entries are read from.
+	OutputTree string `json:"outputTree"`
+	// Digest names this manifest: the SHA-256 of the document with this field
+	// empty.
+	Digest string `json:"manifestDigest"`
+}
+
+// ManifestRepository is one prepared input state a build consumed: the
+// repository's identity in the run and the exact commit that was materialized.
+type ManifestRepository struct {
+	Name     string `json:"name,omitempty"`
+	Snapshot string `json:"snapshot"`
+}
+
+// ManifestInput is one provider output set that was installed before a build
+// ran: whose it was, the tree it came from and the manifest that described it.
+type ManifestInput struct {
+	Package    string `json:"package"`
+	OutputTree string `json:"outputTree"`
+	Digest     string `json:"manifestDigest"`
 }
 
 // NodeReport is what a node answers a probe with: everything preflight has to
