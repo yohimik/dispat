@@ -422,9 +422,9 @@ func TestRunFailureSkipsConsumer(t *testing.T) {
 func TestRunChannelChangeIsItsOwnReason(t *testing.T) {
 	// A package moving between channels is being released for something a
 	// failed provider cannot invalidate, so it proceeds rather than skipping.
-	// Without isBuildWaitingPublish: a waiting provider's failure skips its
-	// consumers whatever their reasons (see BuildWaitsPublish in shouldSkip);
-	// the own-reason rule is the non-waiting providers'.
+	// Without isBuildWaitingPublish: a blocking provider's failure skips its
+	// consumers whatever their reasons (see ProviderRelation in shouldSkip);
+	// the own-reason rule is the non-blocking providers'.
 	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	b := p.Releases["b"]
 	b.OwnBump, b.Bump = ccme.BumpNone, ccme.BumpNone
