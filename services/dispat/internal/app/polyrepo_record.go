@@ -64,6 +64,11 @@ type workspaceRecorder struct {
 	// arrives and goes with the recorder at the end of the run.
 	routesMu sync.Mutex
 	routes   map[*plan.Release]*settlePlan
+	// held are the repository locks this run acquired, in acquisition order.
+	// They are recorded rather than recomputed because a lock is proof of one
+	// acquisition: the object it carries is what a later ownership check and
+	// the run's ownership generation are both taken from.
+	held []heldLock
 }
 
 func (a *App) newWorkspaceRecorder() *workspaceRecorder {
@@ -167,6 +172,12 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 		}
 		held = append(held, heldLock{repository: r, lock: lock, order: order})
 	}
+	// Kept for the distributed run that asks later whether it still owns every
+	// repository it took (CCME §28.6) and names that ownership in what it
+	// dispatches. Only a complete acquisition is recorded: a failure above
+	// gave every lock back before returning. Cleanup keeps reading the local
+	// slice, so nothing about unlocking depends on this.
+	w.held = held
 	w.app.log.Debug().Int("repositories", len(w.ordered)).Int("locks", len(held)).
 		Strs("order", w.repositoryNames()).Msg("fleet release locks acquired")
 	return unlock, nil

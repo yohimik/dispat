@@ -236,6 +236,11 @@ func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func
 			Str("remedy", release.LockRemedy).Msg("unable to create the release lock tag")
 		return nil, nil, err
 	}
+	// Kept for the distributed run that has to ask later whether it still owns
+	// what it took (CCME §28.6) and has to name that ownership in what it
+	// dispatches. Nothing else reads it, and holding it changes nothing about
+	// how the lock is given back.
+	a.releaseLock = lock
 	return nil, func() error {
 		return config.WithDiagnostic("E336", lock.Release(context.WithoutCancel(ctx)))
 	}, nil
