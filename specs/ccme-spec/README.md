@@ -39,3 +39,9 @@ The verifier checks version declarations, required normative sections and files,
 The package uses the documented [replacing strategy](../../packages/docs/docs/editing/replacer.md#replacing-during-a-release): `autoVersion.manifests: none` disables manifest scanning, and four explicit rules update `VERSION` and the declarations in `SPEC.md`. Examples and unrelated files are preserved. [dispat.yaml](./dispat.yaml) contains the configuration.
 
 Validation brackets replacement through `beforeVersion` and `build`. Multi-file writes are not one atomic transaction; a failed release retains local edits for inspection and must not publish an invalid specification. Version classification follows SPEC.md §17.3. The optional polyrepository profile is a minor addition because omitting it preserves the existing single-repository plan exactly.
+
+A previous release passed standalone version-stamping tests but created a specification tag whose files still
+contained the old version. Its custom `flow.version` script had not run because the package had neither provider
+updates nor native `autoVersion`. Keep the regression at the release boundary: run the actual package configuration
+in a disposable repository and inspect the version declarations in the committed tag, not only the working files.
+The build must reject a version different from `DISPAT_NEW_VERSION`, even when all declarations agree with each other.

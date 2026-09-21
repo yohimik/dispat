@@ -1496,6 +1496,17 @@ Compiler selection and version-stamped fixtures have separate checks:
 
 This goal owns authoring a source commit through Git with the existing CCME parser. Goal 19 continues to own per-package release commits; its release/tag/push cases are not duplicated here. Parser grammar itself remains owned by `pkg/ccme`.
 
+Git passes the raw message to `commit-msg` before final cleanup. Compare the validated bytes with the resulting
+commit object for each supported cleanup mode and actual editor use; validating the hook input alone is insufficient.
+Argument-routing regressions must distinguish option values from command names and reject release selectors both
+before and after `commit`, while preserving HEAD and staged contents on rejection. Invoke original hooks from their
+original paths exactly once so adjacent helper files remain accessible, and preserve the invocation directory for
+relative message paths and pathspecs while resolving configuration separately.
+
+Cross-compiling Windows builds does not establish native hook, editor, or cancellation behavior. Verify those on
+Windows before claiming parity. The Windows subprocess runner terminates the direct process and bounds pipe waits;
+Unix process-tree termination tests do not prove Windows descendant termination.
+
 | Test | Invariant |
 | --- | --- |
 | `TestCommitValidationNaturalMessageAndDefaultParser` | A staged source change commits through natural `-m` without a dispat configuration file. |

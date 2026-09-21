@@ -49,6 +49,12 @@ view`, compare registry versions or integrity, reconcile a response, or invoke
 reported on stdout, and an npm error remains a failing process status. The npm
 subprocess has a two-minute deadline and a 2 MiB output bound.
 
+The [11 September 2026 publication incident](./INCIDENT-2026-09-11.md) records why successful upload must be
+followed by release recording without a registry-readiness gate in between. Preserve the regression where npm
+accepts the tarball while later metadata is unavailable. The
+[recovery guide](../docs/docs/reference/releasing/recovery.md#recover-an-npm-publication-without-a-release-tag)
+owns the operational recovery procedure.
+
 ## Issues found after development
 
 - The independent Docker gate showed that selecting Node 24.18 alone did not select npm 12. The first npm-12 gate
