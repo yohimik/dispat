@@ -158,6 +158,16 @@ integration suite itself.
 15. **Dependency edges declared by a space** (`spacedeps_test.go`): a space states the edges of its own packages next
     to the space, and every declaration merges into one graph. The rule that makes the level worth having is that an
     edge must touch the space it sits in: one touching neither end is refused before anything runs.
+58. **The repository root as a space folder or a package folder** (`root_path_test.go`): both folders of the
+    configuration may be the repository itself. A space rooted there releases the repository's top-level folders as
+    its packages, with the dot-folder skip and `.dispatexclude` deciding what is a package exactly as they do under
+    any other folder, and nothing may be listed beside it. A standalone `packages` entry rooted there is the
+    single-package repository: the package is the repository, its changelog and its manifest sit at the top, its
+    scripts run in the root, and it owns every file no deeper package owns, so a space under `packages/` and a space
+    rooted beside it keep their own files and their own manifests. Two things follow from the folder being the root.
+    The file in it is the root configuration file rather than the package's own layer, so the repository-wide keys it
+    carries stay legal and the entry remains the nearest word about the package. And `revertOnFail` is refused there,
+    written or inherited, because rolling that folder back would discard every other package's release files.
 
 ### The commands
 
@@ -425,6 +435,7 @@ tests/integration/
   overrides_test.go         goal 13
   packages_test.go          goal 14
   spacedeps_test.go         goal 15
+  root_path_test.go         goal 58 (the repository root as a space folder and as a package folder)
   versiongroups_test.go     goal 36
   versiongroupaxes_test.go  goal 56
   stepwiring_test.go        goal 37
@@ -809,6 +820,17 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestSpaceDependenciesRefuseAnEdgeItDoesNotTouch` | An edge touching neither end of the space it is written in is refused before anything runs, naming the space, both endpoints and the root object as where it belongs. Nothing is tagged.                        |
 | `TestSpaceFileDependenciesThroughTheBinary`                       | The space folder's own config file declares edges too, and they add to the root file's space entry rather than replacing it: only the file's edge can explain the consumer's release.                           |
 | `TestSpaceDependenciesComputeEditsThemInPlace`    | `compute --write` corrects a kind and drops a dead edge inside the space's object, keyed by consumer, and appends the newly detected edge to the root object instead. A second run has nothing left to say.     |
+
+### Goal 58: the repository root as a space folder or a package folder (`root_path_test.go`)
+
+| Test                                                     | Claim proven                                                                                                                                                                                                                                                                                       |
+|----------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TestRootPathSpaceReleasesTopLevelFolders`               | A space whose path is the repository releases its top-level folders as packages, records into each package's own folder, and converges; a dot-folder and a folder its `.dispatexclude` names are not packages; `./` names the folder `.` names; and a second folder listed beside it is refused. |
+| `TestRootPathPackageReleasesTheRepositoryItself`         | A standalone entry with `path: .` releases the repository as a package: it plans, previews, tags under the repository's format, writes its changelog at the top, records a release commit carrying only what the release wrote, runs its scripts in the root, and releases again on the next commit. |
+| `TestRootPathPackageOwnsOnlyWhatNoDeeperPackageOwns`     | Ownership stays longest matching path prefix: a commit touching a deeper package's folder releases that package alone, one touching the top releases the repository package, one touching both releases both, each package's own manifest is versioned, and a space rooted at the repository beside it behaves the same. |
+| `TestRootPathPackageIgnoresItsOwnRootConfigAsAPackageLayer` | The file in the package's folder is the root configuration file, not the package's own layer: the repository-wide keys it carries do not fail the package's load, and the entry's tag format still beats the root file's while a package stating nothing keeps inheriting it.                    |
+| `TestRootPathPackageRefusals`                            | `revertOnFail` on a package rooted at the repository is refused whether it was written on the entry or inherited from the root file, an explicit `false` there keeps the setting for everything else, a build output holding another package's folder is refused, local changes under the release commit refuse the run, and the path refusals that did not change still hold. |
+| `TestRootPathPackageInALinkedPeer`                       | A fleet member may be a single-package repository: the peer's own configuration names its own root, and the package releases and is tagged in that repository with its changelog at the top while the entry repository keeps its own layout.                                                     |
 
 ### Goal 16: release records (`records_test.go`)
 
