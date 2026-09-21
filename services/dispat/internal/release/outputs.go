@@ -151,19 +151,33 @@ func (s Sequence) capture(ctx context.Context, source string) (outs []plan.Outpu
 // export is an error of its own (surfaced like a failing command; warn-only
 // sequences warn).
 func (s Sequence) RunMergingOutputs(ctx context.Context, rel *plan.Release) error {
-	if len(s.Commands) == 0 {
-		return nil
-	}
-	outs, seqErr, parseErr := s.capture(ctx, rel.Pkg.Name+":"+s.Stage)
+	outs, err := s.RunCollectingOutputs(ctx, rel.Pkg.Name+":"+s.Stage)
 	MergeOutputs(rel, outs)
+	return err
+}
+
+// RunCollectingOutputs is RunMergingOutputs without the release: it answers
+// what the sequence exported instead of folding it onto a plan value.
+//
+// It exists for the node that runs somebody else's stage frame. A worker has
+// the commands, the folder and the environment of one frame and no plan at
+// all, so the export rules — the temporary file, the all-or-nothing parse, the
+// warn-only mode's tolerance of a malformed line — have to be reachable
+// without one. Exported so that both callers run the same rules rather than
+// two implementations of them.
+func (s Sequence) RunCollectingOutputs(ctx context.Context, source string) ([]plan.Output, error) {
+	if len(s.Commands) == 0 {
+		return nil, nil
+	}
+	outs, seqErr, parseErr := s.capture(ctx, source)
 	if seqErr != nil {
-		return seqErr
+		return outs, seqErr
 	}
 	if parseErr != nil {
 		if s.FailFast {
-			return parseErr
+			return outs, parseErr
 		}
 		s.Log.Warn().Err(parseErr).Str("stage", s.Stage).Msg("script outputs invalid (not fatal)")
 	}
-	return nil
+	return outs, nil
 }

@@ -329,6 +329,22 @@ func CommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []string {
 // record text interpolates as well; everything below it is what a release
 // alone cannot answer — the stage, the workspace, the live provider updates.
 func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpdate, stage string) []string {
+	// The configuration's static env, already resolved for this package (the
+	// top-level, space and package layers merged at load time), goes in front
+	// so every computed variable below wins a name clash.
+	return StaticEnv(p.Releases[pkg].Pkg.Space.Env, computedPackageEnv(p, pkg, wsVars, updates, stage))
+}
+
+// computedPackageEnv is packageEnv without the configuration's own static
+// pairs: the DISPAT_* variables dispat computes from the plan alone.
+//
+// The two halves are separable because a stage frame that travels to another
+// node has to carry them apart (§28.3). What is computed here is public
+// metadata of the run and is transported as it is; a static pair may name a
+// secret through `$NAME` and is therefore expanded on the node that runs the
+// command, from that node's own environment, which is why the expansion is
+// the caller's last step rather than this function's.
+func computedPackageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpdate, stage string) []string {
 	rel := p.Releases[pkg]
 	env := append(rel.Vars(), "DISPAT_STAGE="+stage)
 	// The release notes, grouped exactly as the changelog and the GitHub
@@ -356,11 +372,7 @@ func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpd
 	// The accumulated script outputs: everything earlier scripts of the
 	// package exported through their DISPAT_OUTPUT files, as
 	// DISPAT_OUTPUT_<NAME> variables plus the DISPAT_OUTPUTS listing.
-	env = append(env, rel.OutputVars()...)
-	// The configuration's static env, already resolved for this package (the
-	// top-level, space and package layers merged at load time), goes in front
-	// so every computed variable above wins a name clash.
-	return StaticEnv(rel.Pkg.Space.Env, env)
+	return append(env, rel.OutputVars()...)
 }
 
 // dependencyLines renders the live provider updates the way the changelog's

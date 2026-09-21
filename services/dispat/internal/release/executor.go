@@ -181,7 +181,12 @@ type Executor struct {
 	// outcomes); nil disables observation. It only observes: nothing it does
 	// with an event can affect the run. See Observerx.
 	Observer Observerx
-	Log      zerolog.Logger
+	// Remote executes the stage frames this run delegates to other execution
+	// nodes (CCME §28). nil is local execution, byte for byte as before: the
+	// task graph, the budgets and the order are the same either way, and the
+	// only thing it decides is where one frame's commands run. See remote.go.
+	Remote Remotex
+	Log    zerolog.Logger
 }
 
 type taskKind uint8
@@ -827,7 +832,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 	}
 
-	if what, err := tc.stageFrame(ctx, frame); err != nil {
+	if what, err := tc.runStage(ctx, frame); err != nil {
 		fail(err, what)
 		return
 	}

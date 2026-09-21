@@ -1,0 +1,343 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
+package release
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
+)
+
+// fakeRemote stands in for a pool of nodes: it records every frame it was
+// given, answers what a scenario told it to, and reports how the guard was
+// taken.
+type fakeRemote struct {
+	mu sync.Mutex
+	// builds are the requests Build was called with, in order.
+	builds []StageRequest
+	// guards are the stage names Guard was called for, in order.
+	guards []string
+	// held counts the guards taken and not yet given back, with its peak, so
+	// a test can prove a frame ran inside its bracket.
+	held, peakHeld int
+	// exports is what every build reports as its frame's exports.
+	exports []plan.Output
+	// failBuild fails the build of this package, at this part.
+	failBuild, failPart string
+	// guardErr fails every guard.
+	guardErr error
+	// beforeBuild runs inside Build, before it answers, which is how a
+	// scenario cancels a run from inside a dispatched frame.
+	beforeBuild func()
+}
+
+func (f *fakeRemote) Guard(_ context.Context, stage string) (func(), error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.guardErr != nil {
+		return nil, f.guardErr
+	}
+	f.guards = append(f.guards, stage)
+	f.held++
+	if f.held > f.peakHeld {
+		f.peakHeld = f.held
+	}
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.held--
+	}, nil
+}
+
+func (f *fakeRemote) Build(_ context.Context, request StageRequest) (StageOutcome, error) {
+	f.mu.Lock()
+	f.builds = append(f.builds, request)
+	isHeld := f.held
+	shouldFail := f.failBuild == request.Release.Pkg.Name
+	f.mu.Unlock()
+	if f.beforeBuild != nil {
+		f.beforeBuild()
+	}
+	outcome := StageOutcome{Node: "build-a", Exports: f.exports}
+	if isHeld > 0 {
+		// A build dispatched while a version frame holds the guard would be
+		// snapshotting a folder somebody is writing into.
+		return outcome, errors.New("a guard was held while a frame was dispatched")
+	}
+	if shouldFail {
+		outcome.FailedPart = f.failPart
+		return outcome, errors.New("the node reported a failure")
+	}
+	return outcome, nil
+}
+
+func (f *fakeRemote) Publish(context.Context, StageRequest, func(context.Context) error) (StageOutcome, error) {
+	return StageOutcome{}, errors.New("publication is not delegated in this build")
+}
+
+// requests answers the recorded builds under the lock.
+func (f *fakeRemote) requests() []StageRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]StageRequest(nil), f.builds...)
+}
+
+// TestRunWithoutARemoteIsTheLocalRun: the seam with nothing behind it runs the
+// frames it always ran, in the order it always ran them, and reports the same
+// events. It is the whole containment of the distributed profile: a
+// repository that configures no worker pays nothing for the existence of one.
+func TestRunWithoutARemoteIsTheLocalRun(t *testing.T) {
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	runner := &fakeRunner{}
+	observer := &fakeObserver{}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 4, Publish: 4})
+	executor.Observer = observer
+	require.Nil(t, executor.Remote, "the local run is the zero value")
+
+	results := executor.Run(context.Background(), p)
+
+	for _, name := range []string{"a", "b"} {
+		require.Equal(t, StatusPublished, results[name].Status, "%s: %v", name, results[name].Err)
+	}
+	assert.Equal(t, []string{"build a", "publish a", "build b", "publish b"}, runner.events,
+		"the launch order of a local run")
+	assert.Equal(t, []string{
+		"stage.started:build", "stage.succeeded:build",
+		"stage.started:publish", "stage.succeeded:publish",
+		"package.published:",
+	}, observer.forPackage("a"), "the event sequence of a package with no version stage")
+	assert.Equal(t, []string{
+		"stage.started:version", "stage.succeeded:version",
+		"stage.started:build", "stage.succeeded:build",
+		"stage.started:publish", "stage.succeeded:publish",
+		"package.published:",
+	}, observer.forPackage("b"), "the event sequence of a package the provider moved")
+}
+
+// TestRemoteBuildsRunOnceWithTheLocalFrame: every releasing package's build
+// frame is handed to the pool exactly once, and what travels is what the local
+// path would have executed — the same commands, the same folder, the computed
+// environment, and the configuration's static pairs still unresolved.
+func TestRemoteBuildsRunOnceWithTheLocalFrame(t *testing.T) {
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	space := p.Releases["a"].Pkg.Space
+	space.BeforeBuildScript = []string{"pre"}
+	space.PostBuildScript = []string{"post"}
+	space.Env = []string{"NPM_TOKEN=$NPM_TOKEN"}
+	remote := &fakeRemote{exports: []plan.Output{{Name: "IMAGE", Value: "acme/a:1.0.1", Source: "a:build"}}}
+	runner := &fakeRunner{}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 4, Publish: 4})
+	executor.Remote = remote
+
+	results := executor.Run(context.Background(), p)
+
+	for _, name := range []string{"a", "b"} {
+		require.Equal(t, StatusPublished, results[name].Status, "%s: %v", name, results[name].Err)
+	}
+	requests := remote.requests()
+	require.Len(t, requests, 2, "one build frame per releasing package")
+	byPackage := map[string]StageRequest{}
+	for _, request := range requests {
+		byPackage[request.Release.Pkg.Name] = request
+	}
+	request := byPackage["a"]
+	assert.Equal(t, "build", request.Stage)
+	assert.Equal(t, []string{"pre"}, request.Frame.Before, "the bracketing hooks travel with the stage")
+	assert.Equal(t, []string{"build"}, request.Frame.Commands)
+	assert.Equal(t, []string{"post"}, request.Frame.After)
+	assert.Equal(t, "a", request.Dir, "the folder the local path would have run in")
+	assert.Contains(t, request.Env, "DISPAT_STAGE=build")
+	assert.Contains(t, request.Env, "DISPAT_VERSION=1.0.1")
+	assert.Equal(t, []string{"NPM_TOKEN=$NPM_TOKEN"}, request.StaticEnv,
+		"a static pair travels as the reference it is, never as a resolved secret")
+	for _, pair := range request.Env {
+		assert.NotContains(t, pair, "NPM_TOKEN=", "the static pairs are not folded into the computed ones")
+	}
+
+	assert.Equal(t, 0, runner.countPrefix("pre"), "no part of the build frame ran here")
+	assert.Equal(t, 0, runner.countPrefix("build"))
+	assert.Equal(t, 0, runner.countPrefix("post"))
+	assert.Equal(t, 2, runner.countPrefix("publish"), "publication stays on the orchestrator")
+	assert.Equal(t, "acme/a:1.0.1", envValue(t, runner.envPrefix(t, "publish"),
+		"DISPAT_OUTPUT_IMAGE"), "what the node exported reaches the stages after it")
+}
+
+// TestRemoteBuildFailureFailsThePackageLocally: a node reporting a failure
+// fails the package at its build stage with the label the failing part
+// deserves, and the outcome scripts still run here, on the orchestrator.
+func TestRemoteBuildFailureFailsThePackageLocally(t *testing.T) {
+	for name, tc := range map[string]struct {
+		part string
+		what string
+	}{
+		"a hook before the stage": {part: PartBefore, what: "beforeBuild hook failed"},
+		"the stage's own script":  {part: PartCommands, what: "build script failed"},
+		"a hook after the stage":  {part: PartAfter, what: "postBuild hook failed"},
+		"a node that never said":  {part: "", what: "remote build failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+			p.Releases["a"].Pkg.Space.OnFailScript = []string{"onfail"}
+			runner := &fakeRunner{}
+			executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 4, Publish: 4})
+			executor.Remote = &fakeRemote{failBuild: "a", failPart: tc.part}
+
+			results := executor.Run(context.Background(), p)
+
+			require.Equal(t, StatusFailed, results["a"].Status)
+			assert.Equal(t, "build", results["a"].FailedStage)
+			assert.Equal(t, StatusSkipped, results["b"].Status, "the consumer is blocked")
+			assert.Equal(t, "a", results["b"].BlockedBy)
+			assert.Equal(t, 1, runner.countPrefix("onfail"), "the outcome script ran on the orchestrator")
+			assert.Equal(t, tc.what, formatRemoteFailure(taskBuild, tc.part))
+		})
+	}
+}
+
+// TestRemoteBuildCancellationCancelsThePackage: a run interrupted while a
+// frame is in flight cancels the package rather than failing it, and runs no
+// outcome script — the same rule a killed local script follows.
+func TestRemoteBuildCancellationCancelsThePackage(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.OnFailScript = []string{"onfail"}
+	ctx, cancel := context.WithCancel(context.Background())
+	remote := &fakeRemote{failBuild: "a", failPart: PartCommands}
+	remote.beforeBuild = cancel
+	runner := &fakeRunner{}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 1, Publish: 1})
+	executor.Remote = remote
+
+	results := executor.Run(ctx, p)
+
+	require.Equal(t, StatusCancelled, results["a"].Status)
+	assert.Equal(t, 0, runner.countPrefix("onfail"), "an interruption runs no outcome script")
+}
+
+// TestGuardBracketsTheOrchestratorsOwnFrames: the version and syncLock stages
+// are the writers of the working tree a dispatched build is snapshotted from,
+// so each of them runs inside the guard, and a guard that cannot be taken
+// fails the package at its own stage.
+func TestGuardBracketsTheOrchestratorsOwnFrames(t *testing.T) {
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true, SyncLock: []string{"locksync"}})
+	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
+	p := avPlan(root, space, "a")
+	fillUpdates(p)
+	remote := &fakeRemote{}
+	executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 2, Publish: 2})
+	executor.Remote = remote
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, results["a"].Status, "%v", results["a"].Err)
+	assert.Equal(t, []string{"version", "syncLock"}, remote.guards,
+		"the two frames that write the folder a snapshot is taken of")
+	assert.Equal(t, 0, remote.held, "every guard was given back")
+	assert.Len(t, remote.requests(), 1, "and the build still went to a node")
+	assert.Equal(t, filepath.Join(root, "a"), remote.requests()[0].Dir)
+}
+
+// TestGuardFailureFailsTheStageItBrackets: a guard that cannot be taken is a
+// run that cannot keep its snapshots whole, so the stage fails rather than
+// proceeding unguarded.
+func TestGuardFailureFailsTheStageItBrackets(t *testing.T) {
+	root := t.TempDir()
+	space := avSpace(&model.AutoVersion{Kinds: allKinds(), WriteVersion: true})
+	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
+	p := avPlan(root, space, "a")
+	fillUpdates(p)
+	executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 2, Publish: 2})
+	executor.Remote = &fakeRemote{guardErr: errors.New("the run was interrupted")}
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusFailed, results["a"].Status)
+	assert.Equal(t, "version", results["a"].FailedStage)
+}
+
+// TestRemoteStageRequestCarriesTheAccumulatedExports: a build frame dispatched
+// after an earlier stage exported something carries that state, because the
+// computed environment is the one the local path would have built at the same
+// moment.
+func TestRemoteStageRequestCarriesTheAccumulatedExports(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Outputs = []plan.Output{{Name: "TOKEN", Value: "earlier", Source: "a:version"}}
+	remote := &fakeRemote{}
+	executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 1, Publish: 1})
+	executor.Remote = remote
+
+	executor.Run(context.Background(), p)
+
+	require.Len(t, remote.requests(), 1)
+	assert.Contains(t, remote.requests()[0].Env, "DISPAT_OUTPUT_TOKEN=earlier")
+	assert.Contains(t, remote.requests()[0].Env, "DISPAT_OUTPUTS=TOKEN")
+}
+
+// TestRunCollectingOutputsIsRunMergingOutputsWithoutAPlan: the export rules a
+// node runs somebody else's frame under are the rules the local path runs its
+// own under, which is what makes one implementation enough.
+func TestRunCollectingOutputsIsRunMergingOutputsWithoutAPlan(t *testing.T) {
+	runner := &exportingRunner{line: "DISPAT_OUTPUT_IMAGE=acme/core:1"}
+	sequence := Sequence{Runner: runner, Dir: "core", Stage: "build",
+		Commands: []string{"build"}, Log: zerolog.Nop(), FailFast: true}
+
+	outs, err := sequence.RunCollectingOutputs(context.Background(), "core:build")
+
+	require.NoError(t, err)
+	require.Len(t, outs, 1)
+	assert.Equal(t, plan.Output{Name: "IMAGE", Value: "acme/core:1", Source: "core:build"}, outs[0])
+
+	rel := &plan.Release{Pkg: &model.Package{Name: "core", Space: &model.Space{Name: "libs"}}}
+	require.NoError(t, sequence.RunMergingOutputs(context.Background(), rel))
+	assert.Equal(t, outs, rel.Outputs, "the merging caller folds exactly what the collecting one answers")
+}
+
+// TestEmptyCollectingSequenceRunsNothing pins the one shape both callers share
+// with the local path: a stage with no configured command executes nothing and
+// exports nothing.
+func TestEmptyCollectingSequenceRunsNothing(t *testing.T) {
+	runner := &exportingRunner{}
+	sequence := Sequence{Runner: runner, Dir: "core", Stage: "build", Log: zerolog.Nop()}
+
+	outs, err := sequence.RunCollectingOutputs(context.Background(), "core:build")
+
+	require.NoError(t, err)
+	assert.Empty(t, outs)
+	assert.Zero(t, runner.runs)
+}
+
+// exportingRunner is a runner that writes one export line into whatever file
+// DISPAT_OUTPUT names, which is the only thing the collecting sequence is
+// about.
+type exportingRunner struct {
+	line string
+	runs int
+}
+
+func (r *exportingRunner) Run(_ context.Context, _, _ string, env []string, _, _ io.Writer) error {
+	r.runs++
+	if r.line == "" {
+		return nil
+	}
+	for _, pair := range env {
+		path, isOutput := strings.CutPrefix(pair, OutputEnvVar+"=")
+		if !isOutput {
+			continue
+		}
+		return os.WriteFile(path, []byte(r.line+"\n"), 0o644)
+	}
+	return nil
+}
