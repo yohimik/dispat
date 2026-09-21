@@ -63,6 +63,14 @@ type App struct {
 	// invocation is a step command wired to a running release; see stepenv.go.
 	ignoreTags             []string
 	ignoreTagsByRepository map[string][]string
+
+	// plannedOptions are the planner inputs the last plan was computed from,
+	// kept for the one consumer that needs the input rather than the result:
+	// a distributed run digests the plan together with what it was planned
+	// from (§28.3), and assembling those inputs a second time would walk the
+	// workspace again. Written by plan alone, which is the only place a plan
+	// is computed.
+	plannedOptions plan.Options
 }
 
 // packages is the discovered workspace, walked once per App.
@@ -198,6 +206,12 @@ func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan
 	if opts.RequireRelease && !pl.IsFatal() && len(pl.Releasing()) == 0 {
 		a.log.Error().Err(ErrNothingToRelease).Msg("refusing to release")
 		return nil, ErrNothingToRelease
+	}
+	// The plan both commands work from is settled here, selection included, so
+	// this is where a distributed run fixes it and says which one it is. With
+	// no worker links nothing is computed and nothing is written.
+	if err := a.recordFixedPlan(ctx, pl, opts); err != nil {
+		return nil, err
 	}
 	return pl, nil
 }
@@ -358,6 +372,7 @@ func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.plannedOptions = opts
 	// Capture workload counts only when they will be logged. Large fleets can
 	// then distinguish repeated history reads from graph work without paying
 	// for diagnostic counters during ordinary releases.
