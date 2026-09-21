@@ -109,9 +109,12 @@ $ dispat compute
 
 - `+ link <repository> <peer>` creates a missing link. With `--topology minimal`, the default, dispat preserves every
   existing link and proposes the fewest additions that connect everything the rosters name, chosen so that no two
-  repositories are ever joined twice. With `--topology star`, it proposes a direct link from the entry repository to
-  every peer. Star mode errors when existing links are incompatible with that shape; it does not convert or remove them.
-  The same line also proposes the half of a
+  repositories are ever joined twice. Every such proposal adds the same number of links, so dispat joins the groups
+  the existing links leave the fleet in at their centres, the repository in each group whose farthest group member is
+  nearest. That keeps the longest route between two repositories as short as the existing links allow, and the work
+  of reading link evidence and of settling a release across the fleet grows with that route. With `--topology star`,
+  it proposes a direct link from the entry repository to every peer. Star mode errors when existing links are
+  incompatible with that shape; it does not convert or remove them. The same line also proposes the half of a
   link only one of its two repositories declares, which is what `W332` reports: the pair is already joined, so nothing
   is fetched and only the missing declaration is written.
 - `+ init <repository> <path>` materialises a link the fleet declares and this checkout does not have.
@@ -129,7 +132,8 @@ The `--check` flag overrides both apply modes. It writes nothing and exits `1` w
 source, fleet links included. Use this as the CI gate for a config lagging the manifests.
 
 `--topology` chooses the shape used for fleet-link suggestions. `minimal` is the default and adds the fewest links
-needed while preserving the links already present. New links use the path declared by their owning repository,
+needed while preserving the links already present, attached at the centres of the groups those links join. New links
+use the path declared by their owning repository,
 or `.links/<peer>` when that owner states none. `star` links every peer directly to the entry repository and
 errors when existing links cannot fit that shape. Both choices preserve existing links.
 An existing cycle (`E338`) or invalid repository identity (`E339`) stops compute, including under `--check`;
@@ -178,7 +182,9 @@ lagging the manifests, and it overrides both apply modes.
 ### `--topology`
 
 Choose the fleet-link shape proposed by `compute`: `minimal` (the default) or `star`. Minimal preserves existing links
-and adds the fewest needed to connect the roster. Star proposes a direct link from every peer to the entry repository
-and errors if the existing links are incompatible. `--write` and `--interactive` apply these suggestions in the same
+and adds the fewest needed to connect the roster, joining the groups those links leave the fleet in at their centres
+so that the longest route between two repositories stays as short as the existing links allow. Star proposes a direct
+link from every peer to the entry repository and errors if the existing links are incompatible.
+`--write` and `--interactive` apply these suggestions in the same
 way as other compute suggestions; no topology mode removes a link. `star` requires a linked fleet with a repository identity.
 `minimal` also works with ordinary configurations, where compute still derives dependencies and baselines.

@@ -128,8 +128,11 @@ honour a policy written for one, and a key nothing reads is how a fleet comes to
 still the invocation's question and is read from the entry repository alone, while commit policy, lock policy and
 release records belong to each peer. The links must form a tree, so exactly one route joins any two repositories and
 cross-repository evidence has one reading. `dispat compute --topology minimal` preserves existing links and proposes
-the fewest additions that connect the roster; `--topology star` proposes a direct link from the entry repository to
-every peer and errors when existing links cannot fit that shape. Neither mode commits nor removes a link. The full contract is
+the fewest additions that connect the roster. Every such proposal adds the same number of links, so it joins the
+groups the existing links leave the fleet in at their centres, which keeps the longest route between two repositories
+as short as those links allow: the work of reading link evidence and of settling a release across the fleet grows
+with that route. `--topology star` proposes a direct link from the entry repository to every peer and errors when
+existing links cannot fit that shape. Neither mode commits nor removes a link. The full contract is
 [A choreographed fleet](packages/docs/docs/choreographed-repositories.md).
 
 ### Linked configuration

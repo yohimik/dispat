@@ -114,8 +114,14 @@ There are three kinds of fleet change beside the dependency edges and baselines 
 - `+ link <repository> <peer>` creates a link that is missing. `--topology minimal`, the default, preserves existing
   links and proposes the fewest additions that connect everything the rosters name, chosen so no two repositories are
   ever joined twice. Three repositories get two links,
-  never three, because a third would be a second route between two of them and a run refuses that with `E338`. The
-  same line also proposes the half of a link only one of its two repositories declares, which is the state `W332`
+  never three, because a third would be a second route between two of them and a run refuses that with `E338`. Every
+  proposal that connects the roster adds the same number of links, so the count does not choose between them. What
+  does is the longest route between two repositories: the work of reading link evidence and of settling a release
+  across the fleet grows with it. Minimal therefore joins the groups the existing links leave the fleet in at their
+  centres, the repository in each group whose farthest group member is nearest, so that the longest route stays as
+  short as the existing links allow. Two chains of five repositories joined at their centres leave a longest route of
+  five where joining them end to end leaves nine. The same line also proposes the half of a link only one of its two
+  repositories declares, which is the state `W332`
   reports: the pair is already joined, so the proposal adds no route, fetches nothing, and writes the missing
   declaration inside the checkout the declaring repository already holds.
 - `+ init <repository> <path>` materialises a link the fleet declares and this checkout does not have.
