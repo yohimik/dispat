@@ -1019,6 +1019,23 @@ func TestExecutionCraftedOutputSetsNeverReachAConsumer(t *testing.T) {
 			},
 			reason: "link-escape",
 		},
+		"a symlink that climbs after it descended": {
+			// Lexically dist/app.js, inside the root: refused because a `sub`
+			// that is itself a link upwards would carry it outside.
+			craft: func(c *executionCraftedOutputs) {
+				target := "sub/../app.js"
+				c.entries = map[string]executionTreeFile{"dist/link": {mode: "120000", content: target}}
+				c.manifest = c.manifest.set("entries", []any{executionOrderedJSON{}.with(
+					executionField{"path", "dist/link"},
+					executionField{"type", "symlink"},
+					executionField{"mode", "0644"},
+					executionField{"size", len(target)},
+					executionField{"sha256", executionDigestOf(target)},
+					executionField{"target", target},
+				)}).set("bytes", len(target))
+			},
+			reason: "link-escape",
+		},
 		"an absolute symlink": {
 			craft: func(c *executionCraftedOutputs) {
 				target := "/etc/passwd"

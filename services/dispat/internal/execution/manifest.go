@@ -666,12 +666,39 @@ func checkLinkTarget(carried, target string, roots []string) error {
 	if strings.HasPrefix(target, "/") || filepath.IsAbs(filepath.FromSlash(target)) {
 		return refuseOutputs(ReasonLinkAbsolute)
 	}
+	if isClimbingAfterDescending(target) {
+		return refuseOutputs(ReasonLinkEscape)
+	}
 	root := resolveOwningRoot(carried, roots)
 	resolved := path.Join(path.Dir(carried), target)
 	if resolved != root && !strings.HasPrefix(resolved, root+"/") {
 		return refuseOutputs(ReasonLinkEscape)
 	}
 	return nil
+}
+
+// isClimbingAfterDescending reports a target that steps up (`..`) after it has
+// stepped into a name, such as `sub/../x`.
+//
+// The lexical check below is only as good as the assumption that `name/..` is
+// where it started, and a link breaks that assumption: when `sub` is itself a
+// link to a folder higher up, `sub/../x` reads as `x` beside the link and
+// resolves somewhere above it, outside the root the set travelled in. Steps up
+// at the front of a target are different, because they are taken from the
+// link's own folder, and every folder of a staged set is a real one. So a
+// target may climb first and descend after, which is what every tool that
+// writes relative links produces, and may not do it the other way round.
+func isClimbingAfterDescending(target string) bool {
+	hasDescended := false
+	for _, component := range strings.Split(target, "/") {
+		if component == ".." && hasDescended {
+			return true
+		}
+		if component != ".." && component != "." && component != "" {
+			hasDescended = true
+		}
+	}
+	return false
 }
 
 // checkOutputTree walks the tree the manifest names and requires the two to

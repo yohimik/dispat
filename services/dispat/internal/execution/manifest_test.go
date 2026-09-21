@@ -460,6 +460,9 @@ func TestValidationRefusesALinkThatLeavesItsRoot(t *testing.T) {
 		"a target with no name":     {target: "", want: ReasonLinkTargetEmpty},
 		"a target with backslash":   {target: `..\..\x`, want: ReasonPathBackslash},
 		"a target leaving sideways": {target: "../sibling/x", want: ReasonLinkEscape},
+		// Lexically this is dist/x, inside the root; it is refused because a
+		// `sub` that is itself a link upwards would carry it outside.
+		"a target climbing after it descended": {target: "sub/../x", want: ReasonLinkEscape},
 	} {
 		t.Run(name, func(t *testing.T) {
 			fixture := newOutputFixture(t, "packages/core")
