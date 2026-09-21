@@ -151,6 +151,13 @@ type File struct {
 	// the inherited one whole, and an explicit empty list means any node
 	// again.
 	BuildPlatforms []string `json:"buildPlatforms,omitempty"`
+	// RunOnly is where a package's build and publish may run when a release
+	// is executed across several machines: "both" (the default), "worker" or
+	// "orchestrator", written once for both stages or as a [build, publish]
+	// pair. It is how an operator keeps work that must not leave this machine
+	// on it, a build that signs its artefact above all. Overridable per
+	// space and per package, where the nearest statement wins whole.
+	RunOnly *RunOnly `json:"runOnly,omitempty"`
 
 	// The repository-wide defaults for the space-shaped keys. Each is the
 	// bottom of the same ladder a package's configuration is folded through —
@@ -913,6 +920,9 @@ type SpaceConfig struct {
 	// BuildPlatforms replaces the inherited platform list for this level; see
 	// File.BuildPlatforms. An empty list declared here means any node.
 	BuildPlatforms []string `json:"buildPlatforms,omitempty"`
+	// RunOnly replaces the inherited placement for this level; see
+	// File.RunOnly.
+	RunOnly *RunOnly `json:"runOnly,omitempty"`
 	// Versioning selects how versions relate across the space's packages:
 	// "independent" (default) or one of the shared modes. See the Versioning*
 	// constants.
@@ -1016,6 +1026,7 @@ type SpaceFile struct {
 	// level; see SpaceConfig.BuildOutputs.
 	BuildOutputs   []string           `json:"buildOutputs,omitempty"`
 	BuildPlatforms []string           `json:"buildPlatforms,omitempty"`
+	RunOnly        *RunOnly           `json:"runOnly,omitempty"`
 	Versioning     string             `json:"versioning,omitempty"`
 	VersionGroup   string             `json:"versionGroup,omitempty"`
 	Scripts        map[string]Script  `json:"scripts,omitempty"`
@@ -1136,6 +1147,10 @@ type PackageConfig struct {
 	// BuildPlatforms replaces the inherited platform list for this level; see
 	// File.BuildPlatforms. An empty list declared here means any node.
 	BuildPlatforms []string `json:"buildPlatforms,omitempty"`
+	// RunOnly replaces the inherited placement for this level; see
+	// File.RunOnly. It is the narrowest place to pin one package's build to
+	// the machine that may run it.
+	RunOnly *RunOnly `json:"runOnly,omitempty"`
 	// Versioning overrides how the package relates to its space's shared
 	// version — most usefully "independent", opting one package out of a
 	// fixed space. Mutually exclusive with naming a declared versionGroup,
