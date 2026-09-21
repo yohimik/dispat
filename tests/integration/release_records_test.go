@@ -255,7 +255,9 @@ func TestReleaseRecordsCreateOnlyPush(t *testing.T) {
 
 		other := harness.Clone(t, bare)
 		other.CommitEmpty("chore: another run's release commit")
-		other.Git("tag", "-a", "core@0.1.0", "-m", "another run's record")
+		// Lightweight on purpose: a record written by hand carries no tag
+		// object, so the store advertises one line for it rather than two.
+		other.Git("tag", "core@0.1.0")
 		theirs := other.Git("rev-list", "-n1", "core@0.1.0")
 
 		cfg := recordsConfig(registry)
@@ -278,6 +280,45 @@ func TestReleaseRecordsCreateOnlyPush(t *testing.T) {
 			"the record the store published is exactly where it was")
 		assert.Contains(t, res.Stdout, "\"status\":\"published\"",
 			"the package published; it is the recording that failed")
+		assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+	})
+
+	t.Run("a store that cannot say what it holds fails the recording", func(t *testing.T) {
+		registry := filepath.Join(t.TempDir(), "registry.log")
+		r := harness.New(t)
+		r.SeedPackage("packages", "core")
+		bare := r.AddBareRemote()
+		r.Commit("feat(core): first")
+		r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+
+		other := harness.Clone(t, bare)
+		other.CommitEmpty("chore: another run's release commit")
+		other.Git("tag", "core@0.1.0")
+		theirs := other.Git("rev-list", "-n1", "core@0.1.0")
+
+		cfg := recordsConfig(registry)
+		cfg.Spaces["libs"] = models.SpaceConfig{
+			Path: models.PathList{"packages"},
+			Flow: &models.SpaceFlowConfig{
+				Build: []string{"build"}, Publish: []string{"publish"},
+				PostPublish: []string{"inject"},
+			},
+		}
+		cfg.Scripts["inject"] = inject(t, other)
+		r.WriteConfigModel(cfg)
+		r.Commit("chore: let another run record while this one publishes")
+		r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+		// The refused name is read back once to tell a retry from a published
+		// record. A store that cannot answer that question leaves the run
+		// unable to say which of the two it met.
+		fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*ls-remote -- origin refs/tags/*"})
+
+		res := r.CommandEnv(fault.Env())
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Equal(t, 1, fault.Matches(), "one read back per refused name")
+		assert.Contains(t, res.Stdout, "push failed")
+		assert.Equal(t, theirs, remoteRecord(t, bare, "core@0.1.0"),
+			"and the record the store published is still where it was")
 		assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
 	})
 
@@ -391,6 +432,70 @@ func TestReleaseRecordsRespectVerifyOffAndNoPush(t *testing.T) {
 		assert.True(t, stale.IsTagged("core@0.1.0"), "it recorded in its own repository")
 		assert.Equal(t, recorded, remoteRecord(t, bare, "core@0.1.0"), "and pushed nothing anywhere")
 	})
+}
+
+// TestReleaseRecordsLeaveAnUndiscoverableWorkspaceToThePlanner: the
+// comparison needs the workspace to know which names are records at all, and
+// it is the first thing on a pushing release to ask for it. A configuration
+// the walk refuses is still the planner's failure to report, in the planner's
+// own words: a run whose workspace cannot be read has no records to compare
+// and no plan either.
+func TestReleaseRecordsLeaveAnUndiscoverableWorkspaceToThePlanner(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	r, _ := newRecordsOrigin(t, recordsConfig(registry))
+	r.WriteFile("packages/core/dispat.json", `{
+  "changelog": {
+    "sections": [{"title": "Added", "types": ["add"], "bump": "minor"}]
+  }
+}`)
+	r.Commit("feat(core): a folder config the walk refuses")
+
+	res := r.CommandEnv(harness.LockEnabled)
+	require.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "package discovery failed",
+		"the failure keeps the name the run has always given it")
+	assert.Contains(t, res.Stdout, "bump cannot be set in a folder's own config file")
+	assert.False(t, harness.IsCodePresent(res.Events, "E196"),
+		"a workspace nobody could read is not a records problem")
+	assert.Empty(t, publishedVersions(t, registry))
+}
+
+// TestReleaseRecordsUnreadableCheckoutRefusesTheRun: the comparison reads two
+// inventories, the store's and this checkout's, and asks the checkout's own
+// history about the records it lacks. A repository that cannot answer either
+// question refuses the run rather than guessing, which is what the store read
+// already does.
+func TestReleaseRecordsUnreadableCheckoutRefusesTheRun(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pattern string
+		wanted  string
+	}{
+		{name: "its own release tags", pattern: "*for-each-ref*",
+			wanted: "reading this checkout's release tags"},
+		{name: "the history the records are held against", pattern: "*rev-list --parents HEAD*",
+			wanted: "is in this checkout's history"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := filepath.Join(t.TempDir(), "registry.log")
+			r, bare := newRecordsOrigin(t, recordsConfig(registry))
+			// The record is on the store and the branch is not, so nothing
+			// before the comparison asks this checkout about its history.
+			r.Git("tag", "-a", "core@0.1.0", "-m", "an earlier release")
+			r.Git("push", "-q", "origin", "core@0.1.0")
+			recorded := remoteRecord(t, bare, "core@0.1.0")
+			r.Git("tag", "-d", "core@0.1.0")
+			bareGit(t, bare, "update-ref", "-d", "refs/heads/"+harness.DefaultBranch)
+			fault := harness.NewGitFault(t, harness.GitFault{Pattern: tc.pattern})
+
+			res := r.CommandEnv(fault.Env())
+			assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.True(t, harness.IsCodePresent(res.Events, "E196"), "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout, tc.wanted)
+			assert.Empty(t, publishedVersions(t, registry), "nothing ran")
+			assert.Equal(t, recorded, remoteRecord(t, bare, "core@0.1.0"), "and nothing moved")
+		})
+	}
 }
 
 // TestReleaseRecordsUnreadableStoreRefusesTheRun: the records are read with

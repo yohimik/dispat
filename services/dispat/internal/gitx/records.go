@@ -33,9 +33,6 @@ import (
 // them out: the release lock is a tag on HEAD for the whole of a run, and a
 // format broad enough to match it would otherwise read it as a record.
 func (c *LocalGitx) RemoteReleaseTags(ctx context.Context, remote string, formats map[string]TagFormat) (map[string]Tags, error) {
-	if len(formats) == 0 {
-		return map[string]Tags{}, nil
-	}
 	out, err := c.run(ctx, "ls-remote", "--tags", "--", remote)
 	if err != nil {
 		return nil, fmt.Errorf("reading the release records of %s: %w", RedactURL(remote), err)
@@ -92,14 +89,15 @@ func parseRemoteTagInventory(out string) []tagInventoryEntry {
 // It is a membership test rather than an ancestry question: the commit graph
 // this asks is exactly the commits reachable from HEAD, so a commit absent
 // from it is either one the checkout does not hold at all or one that sits off
-// its head, and neither can affect what this run plans. That matters for the
-// shape this is asked in, which is once per record the checkout lacks: a clone
-// made without tags lacks every one of them, and a fork per record would turn
-// one comparison into a process per release the repository ever made.
+// its head, and neither can affect what this run plans. A name that is no
+// commit at all, the empty string included, is absent for the same reason and
+// needs no arm of its own.
+//
+// That matters for the shape this is asked in, which is once per record the
+// checkout lacks: a clone made without tags lacks every one of them, and a
+// fork per record would turn one comparison into a process per release the
+// repository ever made.
 func (c *LocalGitx) IsReachableFromHead(ctx context.Context, commit string) (bool, error) {
-	if commit == "" {
-		return false, nil
-	}
 	graph, err := c.commitDAG(ctx)
 	if err != nil {
 		return false, err
