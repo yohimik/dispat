@@ -91,6 +91,12 @@ whatever you build.
 | [npm and Docker in one graph](./mixed.md) | Two ecosystems, one graph: the mixed case dispat was built for. |
 | [Registry login, once per space](./login.md) | The `login` slot: one authentication per space, whatever the registry. |
 
+## Releasing on several machines
+
+| Example | What it covers |
+|---------|----------------|
+| [Worker nodes on Kubernetes](./kubernetes-workers.md) | Workers as an Indexed Job for one release, machines added for pending pods, and why CPU autoscaling does not fit. |
+
 ## Which example covers my manifest
 
 dispat reads and writes thirty-six manifest formats. You will find every one of them worked through on these pages.

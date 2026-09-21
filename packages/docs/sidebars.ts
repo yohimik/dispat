@@ -98,6 +98,14 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: 'examples/login', label: 'Registry login'},
           ],
         },
+        {
+          type: 'category',
+          label: 'Releasing on several machines',
+          collapsed: true,
+          items: [
+            {type: 'doc', id: 'examples/kubernetes-workers', label: 'Worker nodes on Kubernetes'},
+          ],
+        },
       ],
     },
     {
