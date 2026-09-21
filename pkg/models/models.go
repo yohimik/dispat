@@ -165,9 +165,12 @@ type File struct {
 	// AutoVersion is the default manifest-rewriting policy. Like every other
 	// autoVersion, a level that states one replaces it wholesale rather than
 	// merging into it: its empty fields carry meaning against their siblings.
-	AutoVersion           *AutoVersionConfig `json:"autoVersion,omitempty"`
-	IsBuildWaitingPublish *bool              `json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool              `json:"revertOnFail,omitempty"`
+	AutoVersion *AutoVersionConfig `json:"autoVersion,omitempty"`
+	// IsBuildWaitingPublish is the default provider relation: what the
+	// consumers of a package wait for, written as a boolean or as the object
+	// StageRelation describes.
+	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
 	// Versioning is the default versioning mode. It applies under each
 	// space's own implicit group, so `fixed` here means every space versions
 	// its own packages as one, not that all spaces share a version. Joining
@@ -883,10 +886,10 @@ func (p *PathList) UnmarshalJSON(data []byte) error {
 // runs — stages, hooks, outcome scripts — lives in its `flow` object.
 type SpaceConfig struct {
 	Path PathList `json:"path,omitempty"`
-	// The scalar booleans are pointers for the same reason SpaceFile's and
+	// The scalar options are pointers for the same reason SpaceFile's and
 	// PackageConfig's are: the root file now states defaults for them, and a
 	// space that cannot say "false" could not override a root "true".
-	IsBuildWaitingPublish *bool            `json:"isBuildWaitingPublish,omitempty"`
+	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
@@ -997,10 +1000,10 @@ type SpaceConfig struct {
 // than half-merged.
 //
 // A field left unset inherits from the root file's space entry, which is why
-// the scalar booleans are pointers here where SpaceConfig's are plain: an
+// the scalar options are pointers here where SpaceConfig's are plain: an
 // override must be able to say nothing.
 type SpaceFile struct {
-	IsBuildWaitingPublish *bool            `json:"isBuildWaitingPublish,omitempty"`
+	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
 	TagFormat             string           `json:"tagFormat,omitempty"`
@@ -1109,7 +1112,7 @@ type PackageConfig struct {
 	// naming the package by scope still addresses it, the release commit
 	// still stages the whole folder, and manifest discovery is untouched.
 	Ignore                []string         `json:"ignore,omitempty"`
-	IsBuildWaitingPublish *bool            `json:"isBuildWaitingPublish,omitempty"`
+	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
 	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
 	TagFormat             string           `json:"tagFormat,omitempty"`

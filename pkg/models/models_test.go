@@ -575,7 +575,7 @@ func TestSpaceFileRoundTrip(t *testing.T) {
 		Scripts:      map[string]Script{"build": {"make"}},
 		Flow:         &SpaceFlowConfig{Build: []string{"build"}},
 		Packages: map[string]PackageConfig{
-			"core": {IsBuildWaitingPublish: Bool(true), Dependencies: Providers("utils")},
+			"core": {IsBuildWaitingPublish: StageRelationOf(true), Dependencies: Providers("utils")},
 		},
 	}
 	data, err := json.Marshal(sf)
@@ -614,7 +614,7 @@ func TestSpaceFileRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("packages entry lost in the round trip: %s", data)
 	}
-	if pc.IsBuildWaitingPublish == nil || !*pc.IsBuildWaitingPublish {
+	if pc.IsBuildWaitingPublish.ResolveBuildWait() != StageWaitPublish {
 		t.Errorf("the entry's own pointer must survive: %+v", pc)
 	}
 	if len(pc.Dependencies) != 1 || pc.Dependencies[0].Provider != "utils" {
