@@ -48,7 +48,15 @@ func (c *Coordinator) buildHere(ctx context.Context, lease *Lease, task string,
 	if err := c.prepareProviderOutputs(ctx, request); err != nil {
 		return release.StageOutcome{FailedPart: release.PartInputs}, c.refuseTask(task, "", err)
 	}
-	what, err := c.runFrameHere(ctx, here)
+	// The frame holds this node's pool slot and nothing else. It is not run
+	// under the snapshot guard a version or syncLock frame holds, on purpose:
+	// those frames write the tracked files other tasks are snapshotted from
+	// and last moments, while a build lasts as long as the build does and
+	// writes outputs no snapshot carries. Holding the guard across it would
+	// make every dispatch that needs a fresh snapshot wait for the longest
+	// build placed here, and this node takes a build exactly when the workers
+	// are busy, which is when the next dispatch is about to be needed.
+	what, err := here(ctx)
 	if err != nil {
 		// The executor's own sentence, unchanged: a build that failed on this
 		// machine fails its package exactly as it did before any of this
@@ -61,20 +69,6 @@ func (c *Coordinator) buildHere(ctx context.Context, lease *Lease, task string,
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("status", StatusSucceeded).
 		Msg("task finished")
 	return release.StageOutcome{}, nil
-}
-
-// runFrameHere runs the frame under the shared side of the snapshot guard.
-//
-// It is the guard a version or syncLock frame holds, and for the same reason:
-// a build placed here writes into the working tree other tasks are
-// snapshotted from, so no dispatch may be hashing that tree while it runs.
-// The capacity this frame holds is the pool's, not the guard's, because this
-// machine is one node of the pool now and counting it twice would halve a
-// capacity nobody asked to halve.
-func (c *Coordinator) runFrameHere(ctx context.Context, here release.LocalFrame) (string, error) {
-	c.guard.RLock()
-	defer c.guard.RUnlock()
-	return here(ctx)
 }
 
 // prepareProviderOutputs makes sure every provider output this build reads is
