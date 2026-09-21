@@ -128,6 +128,29 @@ type File struct {
 	// WebhookConfig. Deliveries are asynchronous and observe only: a failed or
 	// unreachable endpoint warns and never affects the release.
 	Webhooks []WebhookConfig `json:"webhooks,omitempty"`
+	// BuildOutputs are the paths a successful build of a package produces and
+	// its consumers, or its own publish stage, need: a `dist` folder, a
+	// generated types folder, a bundle. They are declared rather than
+	// discovered because a build product is normally ignored by Git, so
+	// nothing else in the repository says it exists and a machine that did not
+	// run the build cannot learn what to ask for.
+	//
+	// Each entry is one literal file or folder path, with no globs, relative
+	// to the package folder and written with forward slashes. Ignored files
+	// are included on purpose: being ignored is most of what makes a path a
+	// build output. Overridable per space and per package, where a stated list
+	// replaces the inherited one whole rather than adding to it, so an
+	// explicit empty list is how a level opts out.
+	BuildOutputs []string `json:"buildOutputs,omitempty"`
+	// BuildPlatforms are the node platforms allowed to run a package's build
+	// and publish tasks, written as `os/arch` in Go's GOOS/GOARCH spelling
+	// ("linux/amd64", "darwin/arm64"). An empty list means any node, which is
+	// what a package that builds the same everywhere wants; a package whose
+	// build links against a platform names the platforms it builds on.
+	// Overridable on the same terms as BuildOutputs: a stated list replaces
+	// the inherited one whole, and an explicit empty list means any node
+	// again.
+	BuildPlatforms []string `json:"buildPlatforms,omitempty"`
 
 	// The repository-wide defaults for the space-shaped keys. Each is the
 	// bottom of the same ladder a package's configuration is folded through —
@@ -875,6 +898,14 @@ type SpaceConfig struct {
 	// deliver to the top-level list alone: they describe the run, which no one
 	// package speaks for.
 	Webhooks []WebhookConfig `json:"webhooks,omitempty"`
+	// BuildOutputs replaces the inherited build output list for this level;
+	// see File.BuildOutputs. An empty list declared here means "this space
+	// produces nothing a consumer needs", which is how a level opts out of
+	// what it would otherwise inherit.
+	BuildOutputs []string `json:"buildOutputs,omitempty"`
+	// BuildPlatforms replaces the inherited platform list for this level; see
+	// File.BuildPlatforms. An empty list declared here means any node.
+	BuildPlatforms []string `json:"buildPlatforms,omitempty"`
 	// Versioning selects how versions relate across the space's packages:
 	// "independent" (default) or one of the shared modes. See the Versioning*
 	// constants.
@@ -972,14 +1003,18 @@ type SpaceFile struct {
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
-	AliasTags    []AliasTagConfig   `json:"aliasTags,omitempty"`
-	Webhooks     []WebhookConfig    `json:"webhooks,omitempty"`
-	Versioning   string             `json:"versioning,omitempty"`
-	VersionGroup string             `json:"versionGroup,omitempty"`
-	Scripts      map[string]Script  `json:"scripts,omitempty"`
-	AutoVersion  *AutoVersionConfig `json:"autoVersion,omitempty"`
-	Env          map[string]string  `json:"env,omitempty"`
-	Custom       map[string]any     `json:"custom,omitempty"`
+	AliasTags []AliasTagConfig `json:"aliasTags,omitempty"`
+	Webhooks  []WebhookConfig  `json:"webhooks,omitempty"`
+	// BuildOutputs and BuildPlatforms replace the inherited lists for this
+	// level; see SpaceConfig.BuildOutputs.
+	BuildOutputs   []string           `json:"buildOutputs,omitempty"`
+	BuildPlatforms []string           `json:"buildPlatforms,omitempty"`
+	Versioning     string             `json:"versioning,omitempty"`
+	VersionGroup   string             `json:"versionGroup,omitempty"`
+	Scripts        map[string]Script  `json:"scripts,omitempty"`
+	AutoVersion    *AutoVersionConfig `json:"autoVersion,omitempty"`
+	Env            map[string]string  `json:"env,omitempty"`
+	Custom         map[string]any     `json:"custom,omitempty"`
 	// Changelog, GitHub, Src and Concurrency are this space's; see
 	// SpaceConfig.
 	Changelog   *ChangelogConfig `json:"changelog,omitempty"`
@@ -1085,6 +1120,15 @@ type PackageConfig struct {
 	// deliver to the top-level list alone: they describe the run, which no one
 	// package speaks for.
 	Webhooks []WebhookConfig `json:"webhooks,omitempty"`
+	// BuildOutputs replaces the inherited build output list for this level;
+	// see File.BuildOutputs. The paths are relative to this package's own
+	// folder, and an empty list declared here means the package produces
+	// nothing that has to travel, which is how a package opts out of its
+	// space's list.
+	BuildOutputs []string `json:"buildOutputs,omitempty"`
+	// BuildPlatforms replaces the inherited platform list for this level; see
+	// File.BuildPlatforms. An empty list declared here means any node.
+	BuildPlatforms []string `json:"buildPlatforms,omitempty"`
 	// Versioning overrides how the package relates to its space's shared
 	// version — most usefully "independent", opting one package out of a
 	// fixed space. Mutually exclusive with naming a declared versionGroup,
