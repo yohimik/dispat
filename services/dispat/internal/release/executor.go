@@ -1343,7 +1343,6 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 	rel := p.Releases[pkg]
 	badProvider := ""
 	blockingProvider := ""
-	anyPublished := false
 	for _, prov := range slices.Concat(p.Providers[pkg], reached) {
 		r, ok := results[prov]
 		if !ok { // unchanged provider
@@ -1352,14 +1351,12 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 		if r.RecordBlocked {
 			return true, prov
 		}
-		switch r.Status {
-		case StatusFailed, StatusSkipped:
-			badProvider = prov
-			if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
-				blockingProvider = prov
-			}
-		case StatusPublished:
-			anyPublished = true
+		if r.Status != StatusFailed && r.Status != StatusSkipped {
+			continue
+		}
+		badProvider = prov
+		if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
+			blockingProvider = prov
 		}
 	}
 	if badProvider == "" {
@@ -1368,8 +1365,27 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 	if blockingProvider != "" {
 		return true, blockingProvider
 	}
-	if rel.IsFreshOwnBump() || rel.IsChannelChanged() || anyPublished {
+	if rel.IsFreshOwnBump() || rel.IsChannelChanged() ||
+		isAnyProviderPublished(p.Providers[pkg], results) {
 		return false, ""
 	}
 	return true, badProvider
+}
+
+// isAnyProviderPublished reports whether one of the package's own providers
+// published, which is a release reason exactly as fresh own work is: the
+// package is picking that version up.
+//
+// The declared providers, not the reached ones. A provider reached through a
+// package this run does not release hands the consumer no version to pick up
+// (§9.4 syncs manifests, and the consumer's manifest does not name it), so a
+// publication behind the gap is a reason to order the two, never a reason to
+// release the consumer past a provider of its own that failed.
+func isAnyProviderPublished(providers []string, results map[string]*Result) bool {
+	for _, prov := range providers {
+		if r, ok := results[prov]; ok && r.Status == StatusPublished {
+			return true
+		}
+	}
+	return false
 }

@@ -201,6 +201,37 @@ func TestPublishOrderBlocksAConsumerBehindAReachedProvider(t *testing.T) {
 	}
 }
 
+// TestPublishOrderCountsOnlyDeclaredProvidersAsAReleaseReason: a provider that
+// published is a reason to release a consumer because the consumer is picking
+// that version up, and a provider reached through a package this run does not
+// release hands it nothing to pick up. Counting one would let a consumer
+// publish past a provider of its own that failed, naming a version that never
+// went out, which is the mistake the cascade exists to prevent.
+func TestPublishOrderCountsOnlyDeclaredProvidersAsAReleaseReason(t *testing.T) {
+	p := mkPublishOrderPlan(models.StageWaitBuild, models.StageWaitBuild)
+	app := p.Releases["app"]
+	app.OwnBump, app.Units, app.FreshUnits = ccme.BumpNone, nil, nil
+	// `lib` is the provider `app` declares and that failed; `core` sits behind
+	// the unreleasing `ui` and published.
+	p.Providers["app"] = []string{"ui", "lib"}
+	p.Releases["lib"] = &plan.Release{Pkg: &model.Package{Name: "lib", Dir: "lib",
+		Space: &model.Space{Name: "lib"}}}
+	results := map[string]*Result{
+		"app":  {Name: "app"},
+		"lib":  {Status: StatusFailed},
+		"core": {Status: StatusPublished},
+	}
+
+	skip, blocker := shouldSkip("app", p, results, []string{"core"})
+	assert.True(t, skip, "a publication behind the gap is no substitute for the failed provider")
+	assert.Equal(t, "lib", blocker)
+
+	// A declared provider that published is the reason it always was.
+	p.Providers["app"] = []string{"ui", "lib", "core"}
+	skip, _ = shouldSkip("app", p, results, nil)
+	assert.False(t, skip, "a version the package does pick up is a reason to release it")
+}
+
 // TestPublishOrderSkipsAConsumerItReachesOnlyThroughAnUnreleasingPackage is
 // the same claim through the executor: nothing about `app` names `core`, and a
 // `core` that failed still leaves `app` skipped rather than published against
