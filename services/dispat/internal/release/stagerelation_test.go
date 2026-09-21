@@ -5,6 +5,7 @@ package release
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -127,6 +128,83 @@ func TestStageRelationDiamondLaunchOrder(t *testing.T) {
 			assert.Less(t, r.indexOf("publish "+after), r.indexOf("build d"))
 		}
 	})
+}
+
+// mkReachPlan builds a workspace whose packages each sit in their own space,
+// so every edge can carry its own relation, and whose `changed` set is only
+// the packages named as releasing. It is what the build-order walk needs and
+// mkPlan cannot express: a package in the graph that this run does not build.
+func mkReachPlan(relations map[string]models.StageWait, providers map[string][]string,
+	releasing ...string) (*plan.Plan, map[string]bool) {
+	p := &plan.Plan{Releases: map[string]*plan.Release{}, Providers: providers}
+	for name, wait := range relations {
+		p.Releases[name] = &plan.Release{Pkg: &model.Package{Name: name, Dir: name,
+			Space: &model.Space{Name: name,
+				ProviderRelation: model.NewStageRelation(&models.StageRelation{Build: wait})}}}
+		p.Order = append(p.Order, name)
+	}
+	sort.Strings(p.Order)
+	changed := make(map[string]bool, len(releasing))
+	for _, name := range releasing {
+		changed[name] = true
+	}
+	return p, changed
+}
+
+// TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild walks the three
+// rows of the specification's vector 80c: app -> ui -> core, where app and
+// core build in this run and ui does not, so the only thing that can order
+// them is the graph rather than the plan. The relation of a hop is the
+// provider side's, so `app -> ui` is ui's and `ui -> core` is core's.
+func TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild(t *testing.T) {
+	for name, c := range map[string]struct {
+		toUI, toCore models.StageWait
+		want         []string
+	}{
+		"a readable chain orders the far build": {
+			models.StageWaitBuild, models.StageWaitBuild, []string{"core"}},
+		"a none hop behind the gap ends the path": {
+			models.StageWaitBuild, models.StageWaitNone, nil},
+		"a none hop at the gap ends it too": {
+			models.StageWaitNone, models.StageWaitBuild, nil},
+		"a publish hop is still a readable hop": {
+			models.StageWaitPublish, models.StageWaitPublish, []string{"core"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, changed := mkReachPlan(
+				map[string]models.StageWait{"app": models.StageWaitBuild, "ui": c.toUI, "core": c.toCore},
+				map[string][]string{"app": {"ui"}, "ui": {"core"}},
+				"app", "core")
+			assert.Equal(t, c.want, newBuildReach(p, changed).Indirect("app"))
+		})
+	}
+}
+
+// TestStageRelationBuildReachConvergesThroughTwoGaps: a diamond whose two arms
+// are both packages that do not build. The far provider is ordered once, the
+// answer is sorted so the edges enter the scheduler the same way on every run,
+// and a direct changed provider is left to the loop that reads its own
+// relation rather than counted twice.
+func TestStageRelationBuildReachConvergesThroughTwoGaps(t *testing.T) {
+	p, changed := mkReachPlan(
+		map[string]models.StageWait{
+			"app": models.StageWaitBuild, "left": models.StageWaitBuild, "right": models.StageWaitBuild,
+			"core": models.StageWaitBuild, "util": models.StageWaitBuild, "direct": models.StageWaitBuild,
+		},
+		map[string][]string{
+			"app":   {"left", "right", "direct"},
+			"left":  {"core"},
+			"right": {"util", "core"},
+		},
+		"app", "core", "util", "direct")
+
+	reach := newBuildReach(p, changed)
+	assert.Equal(t, []string{"core", "util"}, reach.Indirect("app"),
+		"one edge per far provider, sorted, and the direct provider is not restated")
+	assert.Empty(t, reach.Indirect("core"), "a package with no providers reaches nothing")
+
+	// A second reading answers from the memo rather than walking again.
+	assert.Equal(t, []string{"core", "util"}, reach.Indirect("app"))
 }
 
 // TestStageRelationBlockingOutranksOwnWork is the skip cascade's half of the

@@ -362,6 +362,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// building the edges in name order is what makes launch order — not just
 	// completion semantics — deterministic run to run (§17.2).
 	sched := graph.NewScheduler[task]()
+	reach := newBuildReach(p, changed)
 	for _, name := range slices.Sorted(maps.Keys(changed)) {
 		b, pub := task{name, taskBuild}, task{name, taskPublish}
 		sched.AddEdge(b, pub)
@@ -392,6 +393,15 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 				sched.AddEdge(waited, first)
 			}
 			sched.AddEdge(task{prov, taskPublish}, pub)
+		}
+		// A consumer reads a provider through whatever lies between them, and
+		// what lies between them need not be releasing, so the build order is
+		// taken over the whole dependency graph and then restricted to the
+		// packages that build (§19.2a). These are the orderings that reach
+		// past a package this run does not build; the loop above states the
+		// ones the consumer's own providers impose.
+		for _, behind := range reach.Indirect(name) {
+			sched.AddEdge(task{behind, taskBuild}, first)
 		}
 	}
 	if e.PublishGroup != nil {

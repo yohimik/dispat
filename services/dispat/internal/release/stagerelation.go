@@ -14,7 +14,10 @@ package release
 // relation answers from its own branch.
 
 import (
+	"sort"
+
 	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
 // resolveFirstTaskWaits answers which of a changed provider's tasks a
@@ -35,6 +38,116 @@ func resolveFirstTaskWaits(relation model.StageRelation, provider string) []task
 		return []task{{provider, taskBuild}, {provider, taskPublish}}
 	}
 	return []task{{provider, taskBuild}}
+}
+
+// buildReach indexes the build orderings the dependency graph imposes beyond a
+// consumer's own changed providers (§19.2a).
+//
+// A consumer reads its providers through whatever sits between them, and what
+// sits between them need not be releasing: `app` depends on `ui`, `ui` depends
+// on `core`, and a run that releases `app` and `core` while `ui` has nothing
+// to release still has to build `core` first, because whatever `app` reads of
+// `ui` may be `core`'s. Ordering only against the providers that are in the
+// plan loses exactly that case, which is the commonest shape there is: any
+// package with no bump this run sits where `ui` sits.
+//
+// A path ends at the first hop whose relation is `none`. That relation is the
+// declaration that nothing the provider builds reaches the consumer's build,
+// and what a package does not read it cannot pass on.
+//
+// It is an index rather than extra nodes in the task graph. The specification
+// suggests a pass-through node per package that does not build, which is the
+// same asymptotics; here it would mean the scheduler holding nodes that no
+// stage budget prices and that nothing executes, so every task the drain hands
+// out would have to be asked first whether it is real. Answering the question
+// beside the graph instead leaves the drain and the task execution exactly as
+// they were. The walk visits each package once and memoises its answer, so the
+// whole index costs one pass over the graph rather than a search per pair.
+type buildReach struct {
+	providers map[string][]string
+	changed   map[string]bool
+	relations map[string]model.StageRelation
+	// nearest memoises, per package, the changed packages it reaches without
+	// crossing a `none` hop, stopping at each one: a changed package's own
+	// edges carry whatever lies behind it.
+	nearest map[string][]string
+}
+
+// newBuildReach indexes the plan's relations once, so the walk below asks a
+// map rather than following a pointer chain per edge. A name the plan carries
+// no release for reads as the zero relation, which is the default one, and the
+// walk goes on through it.
+func newBuildReach(p *plan.Plan, changed map[string]bool) *buildReach {
+	relations := make(map[string]model.StageRelation, len(p.Releases))
+	for name, rel := range p.Releases {
+		relations[name] = rel.Pkg.Space.ProviderRelation
+	}
+	return &buildReach{
+		providers: p.Providers,
+		changed:   changed,
+		relations: relations,
+		nearest:   make(map[string][]string, len(p.Releases)),
+	}
+}
+
+// Indirect lists the changed packages whose build must precede one consumer's
+// first task and that the consumer does not name as a provider itself: the
+// orderings reached through packages this run does not build. The direct ones
+// are stated where each provider's own relation is read, so the graph is
+// written once in the place a reader looks for it.
+//
+// The result is sorted, so the derived edges enter the scheduler in the same
+// order on every run, which is what keeps launch order deterministic (§17.2).
+func (b *buildReach) Indirect(consumer string) []string {
+	var reached []string
+	seen := make(map[string]bool)
+	for _, provider := range b.providers[consumer] {
+		if b.changed[provider] || !b.relations[provider].IsBuildWaitingBuild() {
+			continue
+		}
+		for _, behind := range b.resolve(provider) {
+			if seen[behind] {
+				continue
+			}
+			seen[behind] = true
+			reached = append(reached, behind)
+		}
+	}
+	sort.Strings(reached)
+	return reached
+}
+
+// resolve is the memoised walk: the changed packages one package reaches
+// without crossing a `none` hop. It recurses along dependency edges alone, and
+// the workspace graph is acyclic by the time a release executes — a cycle is
+// E197/E200 and no plan survives one — so the recursion terminates.
+func (b *buildReach) resolve(name string) []string {
+	if cached, isKnown := b.nearest[name]; isKnown {
+		return cached
+	}
+	var reached []string
+	seen := make(map[string]bool)
+	add := func(candidate string) {
+		if seen[candidate] {
+			return
+		}
+		seen[candidate] = true
+		reached = append(reached, candidate)
+	}
+	for _, provider := range b.providers[name] {
+		if !b.relations[provider].IsBuildWaitingBuild() {
+			continue
+		}
+		if b.changed[provider] {
+			add(provider)
+			continue
+		}
+		for _, behind := range b.resolve(provider) {
+			add(behind)
+		}
+	}
+	b.nearest[name] = reached
+	return reached
 }
 
 // formatSkipReason renders why a package the run planned produced nothing. The
