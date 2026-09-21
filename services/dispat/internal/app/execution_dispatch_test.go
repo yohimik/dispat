@@ -159,6 +159,48 @@ func TestAPreparedFrameIsTheProvidersOwnBuildFrame(t *testing.T) {
 	require.NotNil(t, prepared.Here)
 }
 
+// TestAnInputClosureIsMaterializedOutsideIn: a node creates one worktree per
+// repository of the closure, and a worktree cannot be created at a folder that
+// already exists. A fleet link's checkout sits inside the peer holding it and
+// a source sits inside its control repository, so the order a closure travels
+// in decides whether the outer repository can still be materialized at all.
+func TestAnInputClosureIsMaterializedOutsideIn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		sources []execution.Source
+		want    []string
+	}{
+		"a linked peer's consumer reaches the entry it sits in": {
+			sources: []execution.Source{{Name: "beta", Path: ".links/beta"}, {Name: "alpha", Path: "."}},
+			want:    []string{"alpha", "beta"},
+		},
+		"a source of a control repository that is itself an input": {
+			sources: []execution.Source{{Name: "beta", Path: "sources/beta"},
+				{Name: "control", Path: "."}, {Name: "alpha", Path: "sources/alpha"}},
+			want: []string{"control", "beta", "alpha"},
+		},
+		"repositories at one depth keep the order they arrived in": {
+			sources: []execution.Source{{Name: "beta", Path: "sources/beta"},
+				{Name: "alpha", Path: "sources/alpha"}},
+			want: []string{"beta", "alpha"},
+		},
+		"a link inside a link is created last": {
+			sources: []execution.Source{{Name: "gamma", Path: ".links/beta/.links/gamma"},
+				{Name: "beta", Path: ".links/beta"}, {Name: "alpha", Path: "."}},
+			want: []string{"alpha", "beta", "gamma"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			orderSourcesByCheckoutDepth(tc.sources)
+
+			var got []string
+			for _, source := range tc.sources {
+				got = append(got, source.Name)
+			}
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // TestAPlanWithoutTheProviderCannotPrepareIt: a name the plan holds no entry
 // for has no folder, no space and no build frame, so the run says so instead
 // of building something it cannot describe.

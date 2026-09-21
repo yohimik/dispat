@@ -18,6 +18,8 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -137,11 +139,18 @@ func (a *App) resolveInputSources(pl *plan.Plan) func(string) []execution.Source
 }
 
 // composedInputSources is the input closure of one package in a composed
-// workspace, the repository that owns the package first so that every other
-// checkout is created inside one that already exists.
+// workspace, ordered so that every checkout is created inside one that already
+// exists.
+//
+// The order is the layout's rather than the plan's or the package's. A fleet
+// link's checkout sits inside the peer that holds it and a source sits inside
+// its control repository, so a node handed the nested repository first would
+// be asked to create the outer one at a folder the nested one had already
+// made. Depth answers that on its own: a path that contains another always has
+// fewer segments than it, so shallowest first is a materialization order
+// whatever the fleet's shape is.
 func (a *App) composedInputSources(pl *plan.Plan, packageName string) []execution.Source {
-	rel := pl.Releases[packageName]
-	if rel == nil {
+	if pl.Releases[packageName] == nil {
 		return nil
 	}
 	words := pl.RepositoryInputs[packageName]
@@ -154,19 +163,34 @@ func (a *App) composedInputSources(pl *plan.Plan, packageName string) []executio
 		if repository == nil {
 			continue
 		}
-		source := execution.Source{
+		sources = append(sources, execution.Source{
 			Name: name,
 			Path: relativeRepositoryPath(a.workspace.ControlRoot, repository.Root),
 			Dir:  repository.Root,
 			Head: a.plannedHeads[name],
-		}
-		if name == rel.Pkg.Repository {
-			sources = append([]execution.Source{source}, sources...)
-			continue
-		}
-		sources = append(sources, source)
+		})
 	}
+	orderSourcesByCheckoutDepth(sources)
 	return sources
+}
+
+// orderSourcesByCheckoutDepth puts every repository after the repositories
+// whose checkout holds it, keeping the plan's own order among the ones at the
+// same depth so that a run places the same closure the same way twice.
+func orderSourcesByCheckoutDepth(sources []execution.Source) {
+	sort.SliceStable(sources, func(i, j int) bool {
+		return calculateCheckoutDepth(sources[i].Path) < calculateCheckoutDepth(sources[j].Path)
+	})
+}
+
+// calculateCheckoutDepth is how far below the run's anchor one repository's
+// checkout sits. The anchor itself is zero, and a path holding another is
+// always shallower than it.
+func calculateCheckoutDepth(path string) int {
+	if path == "" || path == "." {
+		return 0
+	}
+	return strings.Count(path, "/") + 1
 }
 
 // relativeRepositoryPath is where one repository's checkout sits relative to
