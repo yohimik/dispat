@@ -176,17 +176,23 @@ func (p *preparation) await(ctx context.Context, packageName string) error {
 // this run prepared them, so that the report can print them beside the
 // packages the run released.
 func (c *Coordinator) rememberPreparation(packageName string, pending *preparation) {
-	record := PreparedRecord{
-		Package: packageName, Task: formatPrepareTask(packageName), Node: pending.node,
-		Computation: PreparationCompleted, Outputs: PreparationAdmitted,
-		Publication: PreparationNone,
-	}
-	if pending.err != nil {
-		record.Computation, record.Outputs = PreparationFailed, PreparationNone
-	}
 	c.preparing.Lock()
 	defer c.preparing.Unlock()
-	c.preparedRecords = append(c.preparedRecords, record)
+	c.preparedRecords = append(c.preparedRecords, formatPreparedRecord(packageName, pending))
+}
+
+// formatPreparedRecord is what one finished preparation says about itself: a
+// computation that ran or did not, the output set that came of it, and the
+// publication that never happens either way.
+func formatPreparedRecord(packageName string, pending *preparation) PreparedRecord {
+	record := PreparedRecord{Package: packageName, Task: formatPrepareTask(packageName),
+		Node: pending.node, Publication: PreparationNone}
+	if pending.err != nil {
+		record.Computation, record.Outputs = PreparationFailed, PreparationNone
+		return record
+	}
+	record.Computation, record.Outputs = PreparationCompleted, PreparationAdmitted
+	return record
 }
 
 // PreparedRecords is what this run built without releasing it, in the order
@@ -229,7 +235,7 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 	}
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("package", packageName).
 		Str("version", prepared.Request.Release.Next.String()).
-		Msg("provider built without a release")
+		Msg("building a provider this run does not release")
 	if lease.IsLocal {
 		_, err := c.buildHere(ctx, lease, task, prepared.Request, prepared.Here)
 		return c.Local.Name, err
