@@ -295,14 +295,38 @@ func Locate(dir string, ws Workspace) Location {
 }
 
 // infer turns the invocation folder into the terms the user did not type.
+//
+// A package whose folder is the repository root is not one of them, for the
+// reason a space rooted there stands for nothing: the top of the repository is
+// where a bare command is normally run, and reading it as that one package
+// would silently leave every other package out of the run. The guard lives
+// here rather than in Locate because where a folder *is* does not change: a
+// subject asked for with `--for cwd` at the top of a single-package repository
+// still stands in that package, and only the terms nobody typed are withheld.
 func infer(dir string, ws Workspace) Filter {
 	switch at := Locate(dir, ws); {
 	case at.Package != "":
+		if isPackageRootedAtRepository(at.Package, ws) {
+			return Filter{}
+		}
 		return Filter{Packages: []string{at.Package}}
 	case at.Space != "":
 		return Filter{Spaces: []string{at.Space}}
 	}
 	return Filter{}
+}
+
+// isPackageRootedAtRepository reports whether the named package's folder is
+// the repository root itself, which a standalone entry with `path: .` is how
+// a single-package repository declares.
+func isPackageRootedAtRepository(name string, ws Workspace) bool {
+	root := absClean(ws.Root)
+	for _, pkg := range ws.Packages {
+		if pkg.Name == name {
+			return absClean(pkg.Dir) == root
+		}
+	}
+	return false
 }
 
 // spaceNames resolves one --space term onto the configured spaces it matches.

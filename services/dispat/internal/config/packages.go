@@ -192,8 +192,13 @@ func resolveSpaceVersioning(c *File, spaceName string, sc SpaceConfig) (spaceVer
 
 // validatePackageEntries checks the top-level packages map on its own: keys
 // must be named, and a standalone entry's path must stay inside the
-// repository. Whether a key without a path matches a package folder needs
-// the folders on disk and is checked in discovery instead.
+// repository. The repository root itself (".") is inside it, so a
+// single-package repository names its one package there, exactly as a space
+// may be rooted at the repository; what such a package owns is then the
+// ordinary longest-prefix rule, and the rules its folder cannot honour are
+// refused where the package is built (see rootpackage.go). Whether a key
+// without a path matches a package folder needs the folders on disk and is
+// checked in discovery instead.
 func validatePackageEntries(c *File) error {
 	for name, po := range c.Packages {
 		if name == "" {
@@ -208,9 +213,6 @@ func validatePackageEntries(c *File) error {
 		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(po.Path)))
 		if clean == ".." || strings.HasPrefix(clean, "../") {
 			return fmt.Errorf("packages[%q]: path %q escapes the repository root", name, po.Path)
-		}
-		if clean == "." {
-			return fmt.Errorf("packages[%q]: path %q must name a folder inside the repository", name, po.Path)
 		}
 	}
 	return nil

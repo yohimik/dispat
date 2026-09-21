@@ -1451,13 +1451,15 @@ func TestStandaloneInFolderLayerIsValidatedToo(t *testing.T) {
 
 // TestStandalonePathValidation: a standalone path must stay inside the
 // repository — absolute paths and .. escapes are load errors, before any
-// folder is consulted.
+// folder is consulted. The repository root itself is inside the repository
+// and names the package a single-package repository declares, which
+// rootpackage_test.go covers.
 func TestStandalonePathValidation(t *testing.T) {
 	abs := "/abs/cli"
 	if os.PathSeparator == '\\' {
 		abs = `C:\abs\cli`
 	}
-	for _, bad := range []string{abs, "../outside", "sub/../..", "."} {
+	for _, bad := range []string{abs, "../outside", "sub/../.."} {
 		cfg := validConfig()
 		cfg.Packages = map[string]PackageConfig{"cli": {Path: bad}}
 		_, err := loadModel(t, cfg, "packages/libs/core", "packages/apps/app")

@@ -345,6 +345,33 @@ func TestLocateSkipsAPackageRootedAtTheMonorepoRoot(t *testing.T) {
 		"a package below it is still the deeper, and therefore the better, match")
 }
 
+func TestResolveInferenceSkipsAPackageRootedAtTheMonorepoRoot(t *testing.T) {
+	// The package counterpart of the space guard below. A single-package
+	// repository declares its one package with `path: .`, and a repository
+	// that holds deeper packages as well must not lose them because the
+	// command was run where such a command is normally run. The place itself
+	// is unchanged — Locate still answers with the package, above — so only
+	// the terms nobody typed are withheld.
+	ws := fixture(t)
+	ws.Packages = append(ws.Packages, &model.Package{Name: "rooted", Dir: ws.Root})
+
+	res, err := Resolve(Filter{Dir: ws.Root}, ws)
+	require.NoError(t, err)
+	assert.False(t, res.IsActive(), "standing at the top must not narrow anything")
+
+	res, err = Resolve(Filter{Dir: filepath.Join(ws.Root, "docs")}, ws)
+	require.NoError(t, err)
+	assert.False(t, res.IsActive(), "nor must standing in a folder only the root package holds")
+
+	res, err = Resolve(Filter{Packages: []string{"rooted"}}, ws)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"rooted"}, res.Names, "an explicit term still reaches it")
+
+	res, err = Resolve(Filter{Dir: filepath.Join(ws.Root, "packages", "core")}, ws)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core"}, res.Names, "a package below it still infers itself")
+}
+
 func TestResolveInferenceSkipsASpaceRootedAtTheMonorepoRoot(t *testing.T) {
 	ws := fixture(t)
 	ws.Spaces["top"] = []string{"."}

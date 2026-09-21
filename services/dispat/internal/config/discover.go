@@ -523,7 +523,13 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 	layers := []overrideLayer{{po, label,
 		DepSource{KeyPath: []string{"packages", key, "dependencies"}}}}
 	allowed := d.folderInputs(dir)
-	if allowed {
+	// A package rooted at the repository itself has no in-folder layer, for
+	// the reason resolveSpaceConfig gives a space rooted there no space-file
+	// layer: the file in that folder is the root config, so merging it in
+	// would read one statement twice, and the repository-wide keys it carries
+	// are not keys a package level may hold.
+	isRootPackage := sameDir(dir, d.root)
+	if allowed && !isRootPackage {
 		filePO, fileSrc, err := loadPackageFile(dir)
 		if err != nil {
 			return nil, fmt.Errorf("config: %s: %w", label, err)
@@ -547,6 +553,11 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 	d.declared = withDeps
 	if merged, err = validateSpaceAs(label, merged); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
+	}
+	if isRootPackage {
+		if err := refuseRootPackageRevert(label, merged); err != nil {
+			return nil, err
+		}
 	}
 	scope := packageScope(d.c, merged)
 	if err := scope.checkSpaceRefs(label, merged); err != nil {
