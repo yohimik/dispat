@@ -17,8 +17,12 @@ package execution
 // admitted rather than about whatever the branch holds later.
 //
 // A set that is refused is refused whole. The package fails at its build
-// stage, its consumers are blocked by the ordinary rules, and nothing is
-// substituted: no registry contents, no second build under a different input.
+// stage and nothing at all is put in its place: no registry contents, no
+// second build under a different input, no leftover folder from an earlier
+// run. Whether a consumer is then attempted is the task graph's ordinary
+// decision (a package with changes of its own is), and a consumer that is
+// attempted finds the bytes absent and fails on them, which is what §28.5
+// means by failing the prerequisite.
 
 import (
 	"context"
