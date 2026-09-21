@@ -120,7 +120,7 @@ func TestInFolderPathRejected(t *testing.T) {
 func TestPackageOverrideScalarInherit(t *testing.T) {
 	cfg := validConfig()
 	cfg.Packages = map[string]PackageConfig{
-		"core": {RevertOnFail: models.Bool(false), IsBuildWaitingPublish: models.Bool(false)},
+		"core": {RevertOnFail: models.Bool(false), IsBuildWaitingPublish: models.StageRelationOf(false)},
 	}
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	pkgs, err := discoverPackages(t, root)
@@ -128,8 +128,8 @@ func TestPackageOverrideScalarInherit(t *testing.T) {
 	byName := packagesByName(pkgs)
 
 	assert.False(t, byName["core"].Space.RevertOnFail, "explicit false overrides the space's true")
-	assert.False(t, byName["core"].Space.BuildWaitsPublish, "both scalar pointers override independently")
-	assert.True(t, byName["utils"].Space.BuildWaitsPublish, "unset pointers inherit the space value")
+	assert.False(t, byName["core"].Space.ProviderRelation.IsBuildWaitingPublish(), "both scalar pointers override independently")
+	assert.True(t, byName["utils"].Space.ProviderRelation.IsBuildWaitingPublish(), "unset pointers inherit the space value")
 	assert.True(t, byName["utils"].Space.RevertOnFail, "siblings keep the space config")
 	assert.NotSame(t, byName["utils"].Space, byName["core"].Space, "an override gets a derived Space")
 	assert.Equal(t, "libs", byName["core"].Space.Name, "the derived Space keeps the space's name")
@@ -276,7 +276,7 @@ func TestInFolderConfigPrecedence(t *testing.T) {
 	core := byName["core"].Space
 	assert.Equal(t, "file-{name}@{version}", core.TagFormat, "the in-folder file is the most local layer")
 	assert.False(t, core.RevertOnFail, "fields the file leaves unset keep the entry's value")
-	assert.True(t, core.BuildWaitsPublish, "fields neither layer sets keep the space's")
+	assert.True(t, core.ProviderRelation.IsBuildWaitingPublish(), "fields neither layer sets keep the space's")
 }
 
 // TestInFolderConfigFormats: the in-folder file resolves through the same
@@ -1894,7 +1894,7 @@ func TestSpacePackagesEntryBeatsRootEntry(t *testing.T) {
 	}
 	withLibs(&cfg, func(s *SpaceConfig) {
 		s.Packages = map[string]PackageConfig{
-			"core": {TagFormat: "space-{name}@{version}", IsBuildWaitingPublish: models.Bool(false)},
+			"core": {TagFormat: "space-{name}@{version}", IsBuildWaitingPublish: models.StageRelationOf(false)},
 		}
 	})
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app")
@@ -1904,7 +1904,7 @@ func TestSpacePackagesEntryBeatsRootEntry(t *testing.T) {
 
 	assert.Equal(t, "space-{name}@{version}", core.Space.TagFormat)
 	assert.False(t, core.Space.RevertOnFail, "the root entry still applies where the space says nothing")
-	assert.False(t, core.Space.BuildWaitsPublish)
+	assert.False(t, core.Space.ProviderRelation.IsBuildWaitingPublish())
 }
 
 // TestSpaceFileOverridesRootSpace: the space folder's own config file is the
@@ -1926,7 +1926,7 @@ func TestSpaceFileOverridesRootSpace(t *testing.T) {
 	for _, name := range []string{"core", "utils"} {
 		assert.Equal(t, "file-{name}@{version}", byName[name].Space.TagFormat, name)
 		assert.False(t, byName[name].Space.RevertOnFail, "an explicit false overrides the root's true")
-		assert.True(t, byName[name].Space.BuildWaitsPublish, "an unset key inherits")
+		assert.True(t, byName[name].Space.ProviderRelation.IsBuildWaitingPublish(), "an unset key inherits")
 		assert.Equal(t, []string{"echo space-file build"}, byName[name].Space.BuildScript)
 		assert.Equal(t, []string{"echo publish"}, byName[name].Space.PublishScript, "an unset stage inherits")
 	}
@@ -2801,7 +2801,7 @@ func TestSpaceFileDependencies(t *testing.T) {
 func TestRootDefaultsReachEverySpace(t *testing.T) {
 	cfg := validConfig()
 	cfg.Flow = &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
-	cfg.IsBuildWaitingPublish = models.Bool(true)
+	cfg.IsBuildWaitingPublish = models.StageRelationOf(true)
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Versioning = "fixed"
 	cfg.AutoVersion = &AutoVersionConfig{Enabled: models.Bool(true)}
@@ -2820,7 +2820,7 @@ func TestRootDefaultsReachEverySpace(t *testing.T) {
 	for _, name := range []string{"core", "app", "tool"} {
 		sp := byName[name].Space
 		assert.Equal(t, []string{"echo build"}, sp.BuildScript, name)
-		assert.True(t, sp.BuildWaitsPublish, name)
+		assert.True(t, sp.ProviderRelation.IsBuildWaitingPublish(), name)
 		assert.True(t, sp.RevertOnFail, name)
 		assert.Equal(t, model.Versioning("fixed"), sp.Versioning, name)
 		assert.NotNil(t, sp.AutoVersion, name)

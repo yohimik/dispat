@@ -131,15 +131,16 @@ type Reverterx interface {
 // task; packages bumped because of provider updates additionally get a
 // version task that runs exactly before their build (its job is syncing
 // manifests to the new provider versions). Publish always depends on the
-// package's own build. A consumer's first task (version when present,
-// otherwise build) depends on each changed provider's build — and on the
-// provider's publish when the provider's space sets isBuildWaitingPublish. A
-// consumer's publish always waits for its providers' publishes regardless of
-// the flag, since publishing against a not-yet-published provider version
-// would be invalid; a provider whose publish failed therefore skips its
-// consumers unless they have a release reason of their own — and skips them
-// unconditionally when its space sets isBuildWaitingPublish, because that
-// flag declares their builds consume the publish that never happened.
+// package's own build. What a consumer's first task (version when present,
+// otherwise build) waits for on each changed provider is the provider space's
+// isBuildWaitingPublish relation: nothing at all under `none`, the provider's
+// build under `build`, its build and its publish under `publish`. A consumer's
+// publish always waits for its providers' publishes under all three, since
+// publishing against a not-yet-published provider version would be invalid; a
+// provider whose publish failed therefore skips its consumers unless they have
+// a release reason of their own — and skips them unconditionally when its
+// relation is a blocking one, which `none` and `publish` are unless the
+// configuration says otherwise.
 //
 // A stage with no configured script still runs — orderings, statuses,
 // changelogs and tags are preserved — it just executes no shell command.
@@ -387,9 +388,8 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			if !changed[prov] {
 				continue
 			}
-			sched.AddEdge(task{prov, taskBuild}, first)
-			if p.Releases[prov].Pkg.Space.BuildWaitsPublish {
-				sched.AddEdge(task{prov, taskPublish}, first)
+			for _, waited := range resolveFirstTaskWaits(p.Releases[prov].Pkg.Space.ProviderRelation, prov) {
+				sched.AddEdge(waited, first)
 			}
 			sched.AddEdge(task{prov, taskPublish}, pub)
 		}
@@ -660,13 +660,8 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 		res.Status = StatusSkipped
 		res.Blocked, res.BlockedBy = true, blocker
 		res.RecordBlocked = r.results[blocker].RecordBlocked
-		reason := "provider " + blocker + " failed or was skipped, and the package has no changes of its own"
-		if res.RecordBlocked {
-			reason = "provider " + blocker + " has incomplete release records; repair its records before releasing dependents"
-		}
-		if pr := r.plan.Releases[blocker]; !res.RecordBlocked && pr != nil && pr.Pkg.Space.BuildWaitsPublish {
-			reason = "provider " + blocker + " failed or was skipped, and this package's build takes its publish as input"
-		}
+		reason := formatSkipReason(blocker,
+			r.plan.Releases[blocker].Pkg.Space.ProviderRelation, res.RecordBlocked)
 		_, ran := r.started[t.pkg] // earlier stages already modified the folder?
 		tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
 		r.mu.Unlock()
@@ -1283,18 +1278,22 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 // neither; the check runs again before publish, when all provider publishes
 // are final thanks to the task-graph edges.
 //
-// A provider whose space sets isBuildWaitingPublish outranks every reason of
-// the package's own. The flag declares that consumers' builds take the
-// provider's *published* release as their input — the dispat images install
-// the binary the CLI leg's publish attached — so when that publish never
-// happened the input does not exist, and no amount of own work substitutes
-// for it. Proceeding would either fail on the missing artifact or, worse,
-// quietly build against the provider's previous release and publish it under
-// a version that promises the new one.
+// A provider under a blocking relation outranks every reason of the package's
+// own. Under `publish` that is because consumers' builds take the provider's
+// *published* release as their input — the dispat images install the binary
+// the CLI leg's publish attached — so when that publish never happened the
+// input does not exist, and no amount of own work substitutes for it.
+// Proceeding would either fail on the missing artifact or, worse, quietly
+// build against the provider's previous release and publish it under a version
+// that promises the new one. Under `none` it is because the consumer's
+// publication is the whole of what follows the provider: a deployment onto
+// infrastructure that was never applied is the same mistake one stage later.
+// Only `build` leaves the own-reason rule standing by default, which is what
+// the key's `false` has always done.
 func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, string) {
 	rel := p.Releases[pkg]
 	badProvider := ""
-	waitedProvider := ""
+	blockingProvider := ""
 	anyPublished := false
 	for _, prov := range p.Providers[pkg] {
 		r, ok := results[prov]
@@ -1307,8 +1306,8 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, str
 		switch r.Status {
 		case StatusFailed, StatusSkipped:
 			badProvider = prov
-			if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.BuildWaitsPublish {
-				waitedProvider = prov
+			if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
+				blockingProvider = prov
 			}
 		case StatusPublished:
 			anyPublished = true
@@ -1317,8 +1316,8 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, str
 	if badProvider == "" {
 		return false, ""
 	}
-	if waitedProvider != "" {
-		return true, waitedProvider
+	if blockingProvider != "" {
+		return true, blockingProvider
 	}
 	if rel.IsFreshOwnBump() || rel.IsChannelChanged() || anyPublished {
 		return false, ""

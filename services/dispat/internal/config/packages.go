@@ -515,8 +515,8 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 }
 
 // boolValue reads a tri-state option that has reached the bottom of the
-// ladder with nobody having set it: nil means the default, which for both of
-// the space-shaped booleans is false.
+// ladder with nobody having set it: nil means the default, which for the
+// space-shaped boolean is false.
 func boolValue(b *bool) bool { return b != nil && *b }
 
 // rootDefaults renders the root file's space-shaped keys as the base of the

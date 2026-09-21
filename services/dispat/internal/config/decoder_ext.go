@@ -155,6 +155,34 @@ func versionGroupVersioning(dst *VersionGroupConfig) setter {
 	}
 }
 
+// stageRelation fills an `isBuildWaitingPublish` key at any of the four levels
+// that carry one: the boolean the key has always been, or the object naming
+// what a consumer's build waits for and what a failed provider does to it.
+//
+// The scalar goes through the weak reading every other boolean key of the
+// language gets, so `true`, `"true"` and `1` keep meaning what they meant;
+// only the object reaches the public normaliser, which is what the public
+// type's own UnmarshalJSON reads it through as well, so a config file and the
+// model cannot come to disagree about what a relation is.
+func stageRelation(dst **StageRelation) setter {
+	return func(val any, at string) error {
+		if _, isObject := val.(map[string]any); !isObject {
+			written, err := weakBool(val, at)
+			if err != nil {
+				return err
+			}
+			*dst = public.StageRelationOf(written)
+			return nil
+		}
+		out, err := public.NormalizeStageRelation(val, at)
+		if err != nil {
+			return err
+		}
+		*dst = out
+		return nil
+	}
+}
+
 // versioningMode fills a `versioning` key anywhere else: the root file, a
 // space, a space folder's file, a package. Those four levels state which mode
 // a package versions under and never a sharing rule, which belongs to the

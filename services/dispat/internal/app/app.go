@@ -376,6 +376,14 @@ func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency, exclu
 			if len(s.BuildPlatforms) > 0 {
 				ev = ev.Strs("buildPlatforms", s.BuildPlatforms)
 			}
+			// What the package's space imposes on the consumers of its
+			// packages, named only where it is not the relation every space
+			// has by default, so the line a workspace that never states the
+			// key writes is the line it always wrote.
+			if relation := s.ProviderRelation; !relation.IsDefault() {
+				ev = ev.Str("providerRelation", string(relation.Build)).
+					Bool("providerBlocking", relation.IsBlocking)
+			}
 		}
 		if len(p.Ignore) > 0 {
 			ev = ev.Int("ignoreLevels", len(p.Ignore))

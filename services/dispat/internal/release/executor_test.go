@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -174,15 +175,28 @@ func (f *fakeReverter) RevertDir(_ context.Context, dir string) error {
 // set, mirroring plan.Compute (every listed package is changed).
 type planSpec struct {
 	WaitPublish bool
-	OwnBump     map[string]ccme.Bump
-	Deps        map[string][]string
-	Names       []string
+	// Relation states the space's provider relation outright, for the
+	// fixtures whose relation is one of the values a boolean cannot name. It
+	// supersedes WaitPublish, which is the same key written the old way.
+	Relation *model.StageRelation
+	OwnBump  map[string]ccme.Bump
+	Deps     map[string][]string
+	Names    []string
+}
+
+// spaceRelation is the relation mkPlan's one space states.
+func (spec planSpec) spaceRelation() model.StageRelation {
+	if spec.Relation != nil {
+		return *spec.Relation
+	}
+	return model.NewStageRelation(models.StageRelationOf(spec.WaitPublish))
 }
 
 // mkPlan builds a plan of changed packages from its spec.
 func mkPlan(spec planSpec) *plan.Plan {
-	waitPublish, ownBump, deps, names := spec.WaitPublish, spec.OwnBump, spec.Deps, spec.Names
-	libs := &model.Space{Name: "libs", BuildWaitsPublish: waitPublish, BuildScript: []string{"build"}, PublishScript: []string{"publish"}}
+	ownBump, deps, names := spec.OwnBump, spec.Deps, spec.Names
+	libs := &model.Space{Name: "libs", ProviderRelation: spec.spaceRelation(),
+		BuildScript: []string{"build"}, PublishScript: []string{"publish"}}
 	p := &plan.Plan{
 		Releases:  map[string]*plan.Release{},
 		Providers: map[string][]string{},
@@ -1902,7 +1916,8 @@ func TestShouldSkipBuildWaitsPublishOutranksOwnWork(t *testing.T) {
 		Next:       ccme.Version{Minor: 3},
 	}
 	core := &plan.Release{
-		Pkg: &model.Package{Name: "core", Space: &model.Space{Name: "libs", BuildWaitsPublish: true}},
+		Pkg: &model.Package{Name: "core", Space: &model.Space{Name: "libs",
+			ProviderRelation: model.NewStageRelation(models.StageRelationOf(true))}},
 	}
 	p := &plan.Plan{
 		Releases:  map[string]*plan.Release{"app": rel, "core": core},
@@ -1920,7 +1935,7 @@ func TestShouldSkipBuildWaitsPublishOutranksOwnWork(t *testing.T) {
 	skip, _ = shouldSkip("app", p, results)
 	assert.True(t, skip, "a graduation is still a build against a missing artifact")
 
-	core.Pkg.Space.BuildWaitsPublish = false
+	core.Pkg.Space.ProviderRelation = model.NewStageRelation(models.StageRelationOf(false))
 	skip, _ = shouldSkip("app", p, results)
 	assert.False(t, skip, "without the flag the own-reason rule stands unchanged")
 }

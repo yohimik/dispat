@@ -140,6 +140,54 @@ func (s Sharing) String() string {
 	return string(s)
 }
 
+// StageRelation is a space's resolved `isBuildWaitingPublish`: what the
+// consumers of its packages wait for, and what one of its packages failing
+// does to them. The ladder has already answered by the time a Space exists, so
+// this is a value rather than a pointer and every reader asks it a question
+// instead of re-deriving a default.
+//
+// The zero value is the relation a workspace that never states the key is
+// under: a consumer waits for the provider's build, and a failed provider
+// leaves a consumer's own release reason standing.
+type StageRelation struct {
+	// Build is what a consumer's version and build stage waits for.
+	Build public.StageWait
+	// IsBlocking is whether a package of this space that failed or was skipped
+	// skips its consumers whatever release reason they carry of their own.
+	IsBlocking bool
+}
+
+// NewStageRelation resolves a configured relation onto the two values every
+// reader asks about. It is the one place an unstated isBlocking is filled in
+// with what its wait implies, so no reader downstream has to know that `none`
+// and `publish` block where `build` does not. Nil-safe: a ladder nobody wrote
+// the key on resolves to the default relation.
+func NewStageRelation(configured *public.StageRelation) StageRelation {
+	return StageRelation{
+		Build:      configured.ResolveBuildWait(),
+		IsBlocking: configured.IsProviderBlocking(),
+	}
+}
+
+// IsBuildWaitingBuild reports whether a consumer's first task waits for this
+// provider's build. It is the question the task graph asks first, and the one
+// a `none` relation answers no to: nothing the provider builds reaches the
+// consumer's build, so there is nothing for it to wait for.
+func (r StageRelation) IsBuildWaitingBuild() bool { return r.Build != public.StageWaitNone }
+
+// IsBuildWaitingPublish reports whether a consumer's first task waits for this
+// provider's publish as well. It implies IsBuildWaitingBuild, because a
+// provider publishes what it built.
+func (r StageRelation) IsBuildWaitingPublish() bool { return r.Build == public.StageWaitPublish }
+
+// IsDefault reports whether this is the relation every space has until a
+// configuration says otherwise. It exists so the resolved-package log line can
+// stay the line it always was for a workspace that never states the key, and
+// name the relation exactly where one was stated.
+func (r StageRelation) IsDefault() bool {
+	return r.Build != public.StageWaitNone && !r.IsBuildWaitingPublish() && !r.IsBlocking
+}
+
 // Space groups packages that share build and publish behaviour. A package
 // whose configuration overrides its space's carries its own Space value — a
 // derived copy with the overrides applied — so every consumer of Space reads
@@ -222,10 +270,12 @@ type Space struct {
 	// shadow a computed one — and expands $NAME references in the values
 	// against the computed set and the process environment.
 	Env []string
-	// BuildWaitsPublish: when true, consumers of packages from this space may
-	// only start building after the provider has been published (not merely
-	// built).
-	BuildWaitsPublish bool
+	// ProviderRelation is what this space imposes on the consumers of its
+	// packages: what their version and build stage waits for, and whether one
+	// of this space's packages failing skips them unconditionally. See
+	// StageRelation; the zero value is the relation the key's `false` has
+	// always named.
+	ProviderRelation StageRelation
 	// RevertOnFail: when true, all local changes inside the package folder
 	// are rolled back (tracked files restored, untracked files removed) if
 	// the package fails during its version, build or publish stage.

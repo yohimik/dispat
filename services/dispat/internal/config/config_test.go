@@ -44,7 +44,7 @@ func validConfig() File {
 	return File{
 		Scripts: map[string]Script{"build": {"echo build"}, "publish": {"echo publish"}},
 		Spaces: map[string]SpaceConfig{
-			"libs": {Path: PathList{"packages/libs"}, IsBuildWaitingPublish: models.Bool(true), RevertOnFail: models.Bool(true),
+			"libs": {Path: PathList{"packages/libs"}, IsBuildWaitingPublish: models.StageRelationOf(true), RevertOnFail: models.Bool(true),
 				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 			"apps": {Path: PathList{"packages/apps"},
 				Flow: &SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
@@ -119,7 +119,7 @@ func TestLoadValid(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, cfg.BuildConcurrency, "single value applies to build")
 	assert.Equal(t, 3, cfg.PublishConcurrency, "single value applies to publish")
-	assert.True(t, *cfg.Spaces["libs"].IsBuildWaitingPublish)
+	assert.True(t, cfg.Spaces["libs"].IsBuildWaitingPublish.IsProviderBlocking())
 	assert.True(t, *cfg.Spaces["libs"].RevertOnFail)
 	assert.Nil(t, cfg.Spaces["apps"].RevertOnFail, "unset stays unset, so a root default can still reach it")
 }
@@ -159,7 +159,7 @@ func TestLoadFormats(t *testing.T) {
 			loaded, err := Load(path, nil)
 			require.NoError(t, err)
 			assert.Equal(t, 3, loaded.BuildConcurrency)
-			assert.True(t, *loaded.Spaces["libs"].IsBuildWaitingPublish)
+			assert.True(t, loaded.Spaces["libs"].IsBuildWaitingPublish.IsProviderBlocking())
 			assert.Equal(t, []string{"echo build"}, loaded.Commands(loaded.Spaces["libs"].Flow.Build))
 			assert.Equal(t, []string{"echo publish", "echo published"},
 				loaded.Commands(loaded.Spaces["libs"].Flow.Publish),

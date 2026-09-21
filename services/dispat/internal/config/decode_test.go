@@ -223,7 +223,7 @@ func TestDecodeWeakScalarsFillTypedFields(t *testing.T) {
 	require.NotNil(t, cfg.UpdateCheck)
 	assert.True(t, *cfg.UpdateCheck, `"true" is true`)
 	require.NotNil(t, cfg.IsBuildWaitingPublish)
-	assert.True(t, *cfg.IsBuildWaitingPublish, "and so is 1")
+	assert.True(t, cfg.IsBuildWaitingPublish.IsProviderBlocking(), "and so is 1")
 	assert.Equal(t, map[string]string{"core": "3", "utils": "1.5"}, cfg.Initials,
 		"a generic map's values render the way the env pass renders them")
 }

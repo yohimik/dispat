@@ -69,7 +69,7 @@ func fileFields(dst *File) fields {
 		"buildplatforms":        strs(&dst.BuildPlatforms),
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
-		"isbuildwaitingpublish": flagPtr(&dst.IsBuildWaitingPublish),
+		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"versioning":            versioningMode(&dst.Versioning),
 		"src":                   str(&dst.Src),
@@ -88,7 +88,7 @@ func fileFields(dst *File) fields {
 func spaceConfigFields(dst *SpaceConfig) fields {
 	return fields{
 		"path":                  pathList(&dst.Path),
-		"isbuildwaitingpublish": flagPtr(&dst.IsBuildWaitingPublish),
+		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"tagformat":             str(&dst.TagFormat),
@@ -116,7 +116,7 @@ func spaceConfigFields(dst *SpaceConfig) fields {
 // space folder: spaceConfigFields without `path`, which the folder already is.
 func spaceFileFields(dst *SpaceFile) fields {
 	return fields{
-		"isbuildwaitingpublish": flagPtr(&dst.IsBuildWaitingPublish),
+		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"tagformat":             str(&dst.TagFormat),
@@ -154,7 +154,7 @@ func packageConfigFields(dst *PackageConfig) fields {
 		"path":                  str(&dst.Path),
 		"src":                   str(&dst.Src),
 		"ignore":                strs(&dst.Ignore),
-		"isbuildwaitingpublish": flagPtr(&dst.IsBuildWaitingPublish),
+		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"tagformat":             str(&dst.TagFormat),

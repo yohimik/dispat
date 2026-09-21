@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -346,7 +347,8 @@ func TestSharedCommitWindowsKeepDistinctBaselineMembership(t *testing.T) {
 // testPackages is the standard three-package workspace: two libraries and an
 // app consuming both.
 func testPackages() ([]*model.Package, []model.Dependency) {
-	libs := &model.Space{Name: "libs", BuildWaitsPublish: true}
+	libs := &model.Space{Name: "libs",
+		ProviderRelation: model.StageRelation{Build: models.StageWaitPublish, IsBlocking: true}}
 	apps := &model.Space{Name: "apps"}
 	pkgs := []*model.Package{
 		{Name: "core", Dir: "/r/libs/core", Space: libs},

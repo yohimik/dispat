@@ -53,6 +53,7 @@ type (
 	SpaceConfig              = public.SpaceConfig
 	SpaceFile                = public.SpaceFile
 	PathList                 = public.PathList
+	StageRelation            = public.StageRelation
 	SpaceFlowConfig          = public.SpaceFlowConfig
 	PackageConfig            = public.PackageConfig
 	VersionGroupConfig       = public.VersionGroupConfig
@@ -2207,7 +2208,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		// invariant packageScope relies on — so only the top level is left to
 		// put underneath.
 		Env:                  EnvPairs(MergeEnv(c.Env, sc.Env)),
-		BuildWaitsPublish:    boolValue(sc.IsBuildWaitingPublish),
+		ProviderRelation:     model.NewStageRelation(sc.IsBuildWaitingPublish),
 		RevertOnFail:         boolValue(sc.RevertOnFail),
 		Versioning:           model.Versioning(versioning.mode),
 		VersionGroup:         versioning.group,
