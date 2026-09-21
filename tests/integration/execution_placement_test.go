@@ -535,3 +535,55 @@ func TestExecutionOrchestratorOnlyBuildIsNotHeldToTheWorkersPlatforms(t *testing
 	assert.Empty(t, rig.repo.TagList(), "nothing was published")
 	stopAll(t, workers)
 }
+
+// TestExecutionOrchestratorOnlyBuildOwesItsOutputsToo: a build the run keeps
+// is held to what it declared exactly as a delegated one is. A pinned build
+// that wrote its declared root and took it away again fails its own package
+// with the integrity code, nothing is substituted for the bytes it owed, and
+// the refusal names no worker because no worker was involved.
+func TestExecutionOrchestratorOnlyBuildOwesItsOutputsToo(t *testing.T) {
+	rig := newExecutionOutputWorkspaceWith(t, func(*harness.Repo) string {
+		return executionOutputBuild + ` && { [ "$DISPAT_PACKAGE" != assets ] || rm -rf dist; }`
+	}, pinPackages(map[string]*models.RunOnly{
+		"assets": placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator),
+	}))
+	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
+
+	res := rig.release()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "assets"),
+		"the pinned package whose outputs are missing fails with the integrity code\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, executionOrchestratorLabel, rig.nodesByPackage()["assets"],
+		"it ran here: %v", rig.runs())
+	rejected, isRejected := executionLine(res, "outputs rejected")
+	require.True(t, isRejected, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, "root-absent", rejected.Str("reason"))
+	assert.Empty(t, rejected.Str("worker"), "a set this machine produced names no worker")
+	assert.False(t, rig.repo.IsTagged("assets@0.1.0"), "and nothing of it was published")
+	stopAll(t, workers)
+}
+
+// TestExecutionALoginKeepsThePublishHere: a space that configures a login
+// publishes on the machine the release was started on whatever else is
+// stated, so a release of it with no worker link is never refused for a
+// placement it did not ask for: it releases, here, exactly as it always did.
+func TestExecutionALoginKeepsThePublishHere(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(markerBuild, 1)
+	cfg.Scripts["login"] = models.Script{"echo logging in"}
+	libs := cfg.Spaces["libs"]
+	libs.Flow.Login = []string{"login"}
+	cfg.Spaces["libs"] = libs
+	cfg.RunOnly = placedOn(models.RunOnlyBoth, models.RunOnlyBoth)
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	res := r.ReleaseOK()
+
+	assert.False(t, harness.IsCodePresent(executionEvents(res), executionRefusalCode),
+		"the default placement of a space that logs in is one this run can satisfy")
+	assert.Equal(t, []string{"core@0.1.0"}, r.TagList())
+	assert.Equal(t, 1, buildRuns(r), "and the package was built and published here")
+}
