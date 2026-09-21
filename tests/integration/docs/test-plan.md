@@ -127,7 +127,10 @@ integration suite itself.
     explicit worker role and a process executing somebody else's task each refuse initiation before a lock is pushed,
     the commands that write a native release ref are refused under that authority however deeply they are nested, and
     a run that would dispatch work refuses both the unsafe lock bypass and a signing secret that is not there, so a
-    release nothing could coordinate reaches no mailbox.
+    release nothing could coordinate reaches no mailbox. The fifth is attribution: a release read from several logs at
+    once is only readable if every line says which machine wrote it, so every process taking part names itself with a
+    role and a node on every line and in every webhook event, a line or event about another node names that node
+    separately, and a repository that states no `execution` object writes and delivers exactly what it always did.
 
 ### Configuration
 
@@ -427,6 +430,7 @@ tests/integration/
   execution_worker_test.go  goal 57 (a serving node: what it answers, what it refuses, how it stops)
   execution_preflight_test.go  goal 57 (what a release asks its pool before it dispatches anything)
   execution_build_test.go   goal 57 (build stages executed on other machines, from a prepared input state)
+  execution_identity_test.go  goal 57 (which machine wrote this line, and which machine sent this event)
 
   configuration
   config_test.go            goal 10
@@ -668,7 +672,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_build_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_build_test.go`, `execution_identity_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -685,7 +689,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionBuildOutputsInAPackageFolderFileAreRefusedToo` | The layer a checkout carries with it is held to the rules as well: a package folder's own file naming repository metadata is refused with E225. |
 | `TestExecutionBuildKeysAreAbsentFromAnOrdinaryRun` | A workspace that states neither key writes the resolved debug line it always wrote, with no field for either of them. |
 | `TestExecutionWorkerRoleRefusesRelease` | A node whose `execution.role` is `worker` refuses to start a release: it exits 1 with E226 and the `execution-authority` class, the lock push never happens (counted through a git fault that fails nothing), the remote holds no lock and nothing is tagged. The same node still answers `dispat status`, because reading the plan is not initiating a release. |
-| `TestExecutionWorkerAuthorityRefusesNativeRefWrites` | Under the worker-authority marker the bare release, `release`, `commit --tag --push`, `github`, `changelog`, `autoversion`, `compute` and `trigger` are each refused with E226 before anything is read, leaving no tag and no commit, while `status`, `exec` of a declared script and `if` still succeed under the same marker. |
+| `TestExecutionWorkerAuthorityRefusesNativeRefWrites` | Under the worker-authority marker the bare release, `release`, `commit --tag --push`, `github`, `changelog`, `autoversion` and `compute` are each refused with E226 before anything is read, leaving no tag and no commit, while `status`, `exec` of a declared script, `if` and `trigger` still succeed under the same marker, because a build script that reports its own progress has to keep reporting it from whichever machine runs it. |
 | `TestExecutionNestedCommandInheritsWorkerAuthority` | The marker travels into a declared script exactly as any other variable does, so a build script that runs `dispat release` is refused with E226 and tags nothing: the indirect initiation the specification names is refused through a real script. |
 | `TestExecutionRefusesUnsafeLockBypass` | With worker links configured, the environment kill switch, a configured `unsafeDisableLock` and a linked peer that states one for itself are each refused with E225 and the `execution-configuration` class, naming the repositories and the setting, before any lock push and with no branch left in the mailbox. With an empty worker list the same bypass is the W331 warning it always was and the release completes. |
 | `TestExecutionMissingSecretRefusesDistributedRelease` | A distributed run whose `secretEnv` variable is unset or empty is refused with E225 naming the variable rather than reading it; with the variable set the same configuration is not refused, releases and gives its lock back. |
@@ -718,6 +722,10 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionWorkerTaskGitFaults` | A node's git failing around a task's checkout is answered by what the call was for: a worktree that cannot be made fails the task and the release, while an inspection for stray writes and a removal that fail are warnings the release survives, and the node carries on serving either way. |
 | `TestExecutionLostResultPushIsRecognized` | A node whose push applied and whose answer was lost re-reads the branch, finds the object it meant to put there and carries on: the attempt produces exactly one of each message rather than failing work it had already finished. |
 | `TestExecutionTaskTimeoutLeaksTheSlot` | A node that has not reported within `timeouts.task` keeps its slot and leaves the pool: the attempt is abandoned with E227, the unhealthy node is named, nothing is published, the lock is given back, the run exits 1, and the node stops cleanly afterwards without having reported any prepared input state as a rejected message. |
+| `TestExecutionEveryLogLineNamesItsNode` | Both processes of a distributed release name themselves on every line they write: every line the orchestrator wrote after reading its configuration carries its own role and node, every line the node wrote carries `role=worker` and its own name, the orchestrator names the node it is reporting on in `worker` and never in `node`, and a build script's relayed output and a whole nested dispat invocation on that node carry the node's identity too, whatever the transported checkout's configuration says. The degenerate cases still name a machine rather than an empty field: a command handed the authority marker without a node beside it, and a node whose file tells it nothing at all and is refused for it. |
+| `TestExecutionAbsentAddsNoIdentityFields` | The same fixture with no `execution` object adds nothing anywhere: no log line and no webhook payload carries a `role`, `node` or `worker` key, and every package is built here as it always was. |
+| `TestExecutionWebhooksNameTheirSender` | Every delivery of a distributed run carries `role=orchestrator` and the one node name that run sent from, which is a non-empty name even when the file states none; `stage.succeeded` of a delegated build and the package's own `package.published` name the node the work ran on, while a stage the orchestrator kept and the event that opens a delegated stage name none; and a `format` template renders `{role}`, `{node}` and `{worker}`. |
+| `TestExecutionTriggerFromAWorkerNamesTheWorker` | A build script placed on a node reports its own progress from there: the `script.progress` delivery carries `role=worker`, the node's name, the package and the stage the task gave it, its header value and its signature resolve from that node's environment rather than the orchestrator's, and the run's own brackets are still the orchestrator's and unsigned. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
 
