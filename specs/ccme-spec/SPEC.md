@@ -10,12 +10,13 @@ Requirement levels follow RFC 2119 (§2). This specification is itself versioned
 constitutes a patch, minor, and major revision of the document.
 
 **Implementation boundary.** The published CCME 3 line specifies VCS adapters and explicit rollback; the current
-source also defines the optional polyrepository Git profile of §27. Implementing that profile does not implement the
-adapter or rollback protocols, and it does not change the message parser grammar. The version markers are stamped by
-the specification release process. Publishing a specification does not implement its behavior. The immutable
+source also defines the optional polyrepository Git profile of §27 and distributed execution profile of §28.
+The distributed profile is an unimplemented specification contract with no measured performance result. Implementing
+one profile does not implement the others or the adapter and rollback protocols. Neither changes the message parser
+grammar. The version markers are stamped by the specification release process. Publishing a specification does not implement its behavior. The immutable
 [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
 remains the reference for existing CCME 2 consumers. New protocol examples MUST NOT be presented as runnable dispat
-configuration for external adapters or rollback. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
+configuration for external adapters, rollback or distributed execution. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
 
 ---
 
@@ -48,13 +49,14 @@ configuration for external adapters or rollback. The dated design history is in 
 25. [VCS adapters](#25-vcs-adapters)
 26. [Explicit rollback](#26-explicit-rollback)
 27. [Polyrepository Git profile](#27-polyrepository-git-profile)
+28. [Distributed task and release execution](#28-distributed-task-and-release-execution)
 
 ---
 
 ## 1. Summary
 
-CCME adds nine capabilities to Conventional Commits, chosen so that a single commit can fully describe its release
-intent across a workspace of many packages:
+CCME extends Conventional Commits with release intent across a workspace of many packages and contracts for
+planning, publication and recovery. Optional execution profiles preserve the message grammar:
 
 | # | Capability                                                                                                     | Syntax                                                         |
 |---|----------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
@@ -67,6 +69,7 @@ intent across a workspace of many packages:
 | 7 | **VCS adapters**: use trusted shell commands behind a fixed snapshot and immutable-record contract | `vcs` configuration; Git remains the default (§25) |
 | 8 | **Explicit rollback**: withdraw an identified published artifact while retaining its release history | `rollback(api)` + `Rollback-Version: 1.4.2` (§26) |
 | 9 | **Polyrepository planning**: combine explicitly linked Git histories into one release graph without copying their commits | optional polyrepository profile (§27) |
+| 10 | **Distributed execution**: assign tasks across nodes and reuse verified build outputs while preserving the release plan and native records | optional execution profile (§28); implementation pending |
 
 Capabilities 2 and 5 are two **independent axes** of the same idea. A commit says separately how far a *version bump*
 travels (`^`, `^^`, `+N`) and how far a *channel* travels (`%%`, `++N`), because the answers differ: a change usually
@@ -144,6 +147,11 @@ to be interpreted as described in RFC 2119.
 | **Repository identity**  | In the polyrepository profile, `control` for the control repository, the exact `.gitmodules` name of a source repository, or a peer's own `repository` value (§§27.2, 27.11). |
 | **Repository revision**  | A pair `(repository identity, full commit object ID)`. A bare commit ID is never a fleet-wide identity (§27.2).          |
 | **Fleet link**           | A submodule joining two peers of a linked peer tree, named by the linked peer's identity and declared by its roster (§27.11). |
+| **Execution node** | A machine or runner executing the release engine; independent of repository identity (§28.1). |
+| **Orchestrator** | The node that owns one run's locks, fixed planning input, task assignment, admission and finalization (§28). |
+| **Worker** | A node executing assigned tasks without authority to initiate or finalize a release (§28.1). |
+| **Execution link** | An authenticated worker endpoint used for task assignment, distinct from a repository or fleet link (§28.2). |
+| **Task receipt** | Identity-bound execution evidence; never an ordinary release or rollback-completion record (§28.6). |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
 
@@ -1098,7 +1106,7 @@ closure onto a prerelease line in one commit (§18.1), so the reach belongs in t
 The default costs less than it appears to, because **a channel is derived from a tag** (§11.1). A package already on a
 prerelease line stays on it whatever this unit says, so depth `0` does not fragment an existing train; it only stops
 the train recruiting packages that were not on it. Where consumers genuinely should be dragged along, `++1` or `++*`
-says so in four characters, and a repository whose answer is always the same says it once with
+says so in three characters, and a repository whose answer is always the same says it once with
 `propagation.channelDepth` (§14).
 
 ### 8.4 Which edges propagate
@@ -1401,11 +1409,14 @@ propagate(units, graph, held, W):
         if sources is empty:                        continue
         c      = commitOf(u)                                      # loop-invariant
         pscope = resolve(u.propagateChannelScope)                 # §8.5a: resolved once,
+        origin = UNCOMPUTED                                     # memoized on first admitted target
         for (d, level) in reach(edges, sources, u.channelDepth):  #   never per target
             if d not in pscope:                           continue
             if c not in Wfresh(d):                             continue # admission, §13.4a
             if cancelledFor(c, d):                        continue # §13.5a
-            v = propagatedChannelFor(u, d)                         # §9.3
+            if u.propagateChannel == 'inherit' and origin == UNCOMPUTED:
+                origin = originChannel(u)
+            v = propagatedChannelFor(u, d, origin)                 # §9.3; origin computed once
             if v is NONE:                                 continue
             chan[d] = newerOf(chan[d], (v, u))                     # W160 on conflict
 
@@ -1423,7 +1434,7 @@ propagate(units, graph, held, W):
         c       = commitOf(u)
         pscope  = resolve(u.propagateScope)                        # §8.5: once per unit
         # §9.3a resolvability depends only on the unit's sources, so it is decided here,
-        # once, and reduces to a membership test on a set of 1-3 channels per target.
+        # once, and reduces to membership in the distinct source-channel set per target.
         srcChan   = { channel[P] : P in sources }                  # §9.3a
         anyStable = 'stable' in srcChan
         for (d, level) in reach(edges, sources, u.depth):
@@ -1500,7 +1511,7 @@ Properties. Except where noted, each holds for **both** axes:
   `<to>`.
 
 ```
-propagatedChannelFor(u, d):
+propagatedChannelFor(u, d, origin):
     spec = u.propagateChannel                    # default config.propagation.channel
     cur  = channelOf(baseline(d))                # §11.1: from d's tag, not from this run
 
@@ -1509,7 +1520,7 @@ propagatedChannelFor(u, d):
         if not matchesFrom(cur, from):           return NONE      # W206 if nothing matches
         target = to
     else:
-        target = (spec == 'inherit') ? originChannel(u) : spec
+        target = (spec == 'inherit') ? origin : spec
         if target == 'stable' and cur != 'stable':
             warn W200;                           return NONE      # never graduates; below
 
@@ -1847,8 +1858,8 @@ This yields the standard, correct behaviours:
 | `1.3.0-beta.0` | minor (same window)     | `beta`   | `1.3.0-beta.1`                                |
 | `1.3.0-beta.1` | minor + a new `fix`     | `beta`   | `1.3.0-beta.2`; target unchanged              |
 | `1.3.0-beta.2` | a breaking change lands | `beta`   | `2.0.0-beta.0`; target moved, counter resets  |
-| `1.3.0-beta.2` | none                       | `rc`     | `1.3.0-rc.0`; channel switch, counter resets  |
-| `1.3.0-rc.1`   | none                       | `stable` | `1.3.0`; graduation                           |
+| `1.3.0-beta.2` | nothing new; `E` is still the window's `minor` | `rc`     | `1.3.0-rc.0`; channel switch, counter resets  |
+| `1.3.0-rc.1`   | nothing new; `E` is still the window's `minor` | `stable` | `1.3.0`; graduation                           |
 
 Because `target` is recomputed from the stable baseline on every run, a breaking change arriving mid-train correctly
 moves the whole train, and the counter resets rather than continuing under a version that no longer describes the
@@ -1899,8 +1910,18 @@ Rules, common to both:
 * The published version is `applyBump(S, E)`, the same `target` as §11.4, with no prerelease suffix. For a member of a
   shared-version group it is raised to the core of the group's line where it falls below it (§13.9a), which is what
   lets a half-finished graduation be retried.
-* Graduation never lowers a version: if `target` is not greater than the baseline core, `E185` is raised (this can only
-  happen if tags were hand-edited).
+* Graduation never lowers a version: if `target` is lower than the core of the baseline, `E185` is raised. A `target`
+  equal to that core is the ordinary graduation, because `1.3.0` ranks above `1.3.0-rc.1`. `E185` is reachable from
+  hand-edited tags, and from a train that an exact `Release-As` raised above what its window computes, whose graduation
+  must then be pinned too.
+* A train entered by the channel-entry patch graduates by it. Its window carries no bump, so `applyBump(S, E)` returns
+  the stable baseline itself, below the core the train was published under: from `2.0.0`, entered as `2.0.1-beta.0`,
+  it returns `2.0.0`. The step of §11.4 therefore applies to a graduation exactly as it is written there. With
+  `effective(P) == none`, a release made only for its channel, and a `target` not greater than `baseline(P)`, the
+  engine recomputes `target` with `E = patch` and reports `W204`: from `2.0.0` that is `2.0.1`, the core the train
+  carried. If the result is still lower than the core of the baseline, `E185` stands. Without this step the two
+  canonical forms compose into a run that cannot complete: `feat(core)%beta++1` enters the consumers by the patch
+  (vector 39b), and `release(core)%stable%%beta>stable++*` then raises `E185` against every one of them.
 * Graduating a package already on `stable` is a no-op with `W185`, unless the window contains bumps, in which case it is
   an ordinary stable release. Written as a transition it is not even that: a stable package does not match a `<from>` of
   any prerelease channel, so nothing is proposed and no `W185` arises.
@@ -2048,6 +2069,11 @@ ordinary way.
 
 The complete ordinary-release procedure. It is a pure function of (repository history, immutable release records, workspace graph, configuration) and
 MUST be deterministic.
+
+Under §28, the complete semantic plan remains `P = Plan(I)`: worker placement and scheduling MUST NOT alter it.
+A distributed release MUST acquire every participating repository's lock before fixing `I` and computing `P`;
+read-only planning remains lock-free (§28.3). Preparation and output-transfer prerequisites do not add release
+intent or discharge pending work.
 
 The procedure below computes the **ordinary forward-release projection**. Before applying it, a CCME 3 engine parses
 and validates rollback units under §26, collects their separate operational requests, and excludes them from ordinary
@@ -2204,6 +2230,7 @@ applyCorrections(tuples, units):
             for T in shaSets:
                 if S is not a subset of T:  raise E213 # widening someone else's record
         u.effectiveScope = S                           # replaces §6 resolution for u
+        u.targets = targets;  corr.append(u)           # a unit that raised above is never appended
 
     # ---- apply, newest commit first, last unit first (§8.6 order) ----
     # dropped[(P, C, i)] records every discarded (package, record) pair; a
@@ -2398,7 +2425,7 @@ staleSources(D):
     return out
 ```
 
-Three details carry the duality, and all three are places an implementation drifts:
+Four details carry the duality, and all four are places an implementation drifts:
 
 * **`D` is excluded from its own unit's sources.** §9.2 seeds `seen = set(sources)`, so a unit never propagates to a
   package it already bumps directly; the `D in sources` test is that seeding, read from the other end. Without it a
@@ -2563,16 +2590,19 @@ resolveChannels(chan, units):                   # chan from §9.2 phase 1
 
 directChannelFor(P, cands, base):               # cands already in §11.6 order
     if cands is empty:  return NONE             # the overwhelmingly common case
+    winner = NONE
+    proposalCount = 0
     for u in cands:
         v = u.channel
         if v is a transition (from, to):
             if from == to:                  warn W207; continue
             if not matchesFrom(base, from):            continue     # not a competitor
-            if len(cands with a proposal) > 1: warn W186
-            return to
-        if len(cands with a proposal) > 1:   warn W186
-        return v
-    return NONE
+            v = to
+        if v == base:                       warn W199; continue     # not a competitor
+        proposalCount += 1
+        if winner is NONE: winner = v
+    if proposalCount > 1:                    warn W186              # retain required values
+    return winner
 ```
 
 The precedence body is unchanged; only the way `cands` is obtained has been inverted. Written the other way, with `cands` as
@@ -2584,10 +2614,12 @@ appears in `cands[P]` under the inverted form exactly when `u sets Channel and P
 which is the comprehension's condition read in the other direction.
 
 Two obligations come with the inversion. The push MUST visit units in §11.6 order, or `cands[P]` arrives unordered and
-the first-match-wins loop below it silently picks a different directive, a determinism bug that shows up only when one
-package is named by two commits. And `len(cands with a proposal)` for `W186` counts over the whole candidate list, not
-over the prefix examined before the winner was found, so the list MUST be complete before `directChannelFor` runs; an
-implementation that fuses the two passes and evaluates a package as soon as its first candidate arrives loses `W186`.
+the first-proposal-wins loop silently picks a different directive, a determinism bug that shows up only when one
+package is named by two commits. The `W186` count covers the whole candidate list, not only the prefix before the
+winner. A package's result and diagnostics MUST NOT be finalized before all its candidates have been accounted for.
+An implementation MAY accumulate the winner, proposal count and required diagnostic values while pushing candidates,
+then emit in the specified package order. This saves candidate-list storage when the remaining output does not require
+the lists. Finalizing on the first candidate loses `W186`; ignoring a later diagnostic changes conformance.
 
 Three precedence rules, in force order: a **direct** directive beats every propagated one regardless of age; among
 direct directives, and separately among propagated ones, the newest commit beats the older, and the last unit within a
@@ -2821,16 +2853,27 @@ The table accounts for indexed, in-memory phase work after input decoding and va
 identifiers are fixed-width or interned and adjacency and precedence inputs are already in their specified order.
 Otherwise comparisons, decoding, sorting, allocation, adapter calls, record matching and emitted bytes add their
 ordinary input/output costs. The symbols make those costs visible where they dominate; the table is not an
-unqualified end-to-end upper bound.
+unqualified end-to-end upper bound. Hash-table operations have expected constant cost under the chosen hashing
+assumptions; a deterministic worst-case claim needs a suitable index and must include its construction. A faster
+representation is not automatically optimal in either time or memory, and this section makes no global optimality claim.
 
 Notation: `P` packages, `E` workspace dependency edges, `H` commits and `A` parent edges in the history reachable from
 the fixed `HEAD`, `C` commits in the union of all pending windows, `U` units in those commits, `N` total bytes of their
 messages and changed paths, `T` reachable tags, and `M` tag-record/package-format matches examined while partitioning
 the inventory (at worst `P · T`). `k` is the number of **distinct** commits carrying a boundary: a stable baseline, or
-a package's newest baseline of any channel where that is another commit. `R` is the
+a package's newest baseline of any channel where that is another commit. `m` is the number of distinct **marker**
+commits, the commits some ancestry question of §13 is asked about: the `k` boundaries, every `cancel` commit, and every
+commit carrying an `Edits`, `Deletes` or `Reverts` footer. `R` is the
 actual work of resolving scopes and changed paths against the workspace, including candidates examined when the result
 is empty. `I` is the number of resulting unit-to-package incidences (and can be `P · U`). `Z` is the number of
-unit/source/target contribution or provenance incidences retained or emitted. `F` is the number of publish failures,
+unit/source/target contribution or provenance incidences retained or emitted. `Zv` counts incidences examined while
+constructing them, including duplicate insertions; `Zv` may exceed `Z`. Let `Fc` count correction footer selectors,
+`Jcorr` the package/target incidences examined for correction scope containment, live scopes and application, including
+unsuccessful probes, and `wildcards` the wildcard selectors. Let `Ic` count cancel-scope incidences, `Pc` the number of
+packages named by a cancel, and `Jc` the number of cancellation queries across direct admission and **both** propagation
+axes, including candidates rejected by cancellation. `Jc` is not bounded by direct incidence count `I` or retained
+contribution count `Z`. Write `bw(x) = max(1, ceil(x / wordSize))`, so a zero-marker phase still pays for traversal or
+query dispatch. `F` is the number of publish failures,
 and `Oout` is the size of diagnostics and other emitted output.
 In the per-target row, and there only, `D` is the number of targets one unit reaches, `S` its source-set size, and `Σ`
 its resolved scope-set size.
@@ -2838,38 +2881,40 @@ its resolved scope-set size.
 For the polyrepository profile, `H` and `A` below mean the sums over the fixed reachable snapshots of all repositories,
 not the size of a fictitious merged history. Let `Q` be the number of repositories, `Hq` and `Aq` one repository's
 reachable commits and parent edges, `G` the number of control-repository gitlink transitions examined, and `Kq` the
-number of distinct boundary revisions used in repository `q`, stable and newest-baseline boundaries counted together
-and the no-boundary class counted once. `Kq` counts revisions and not `(stable, fresh)` pairs, which can number the
-product of the two. Let `V` be the number of package memberships in shared-version groups (`V <= P`). Under the linked
-peer topology of §27.11 there is no control index and `G` is zero; let `X` be the number of `(consumer release tag,
-repository)` boundaries resolved, `Y` the number of hops in the longest route between two peers (at most `Q - 1`, and at
-most 2 in a star), and `B` the number of distinct `(repository, revision)` trees whose fleet links are read (`B <= X ·
-Y`). The implementation MUST preserve repository identity in every index and cache key.
+number of distinct boundary revisions used in repository `q`, stable and newest-baseline boundaries counted together and
+the no-boundary class counted once. `Kq` counts revisions and not `(stable, fresh)` pairs, which can number the product
+of the two. `mq` is the marker count `m` restricted to the commits of repository `q`. Let `V` be the number of package
+memberships in shared-version groups (`V <= P`). Under the linked peer topology of §27.11 there is no control index and
+`G` is zero; let `X` be the number of `(consumer release tag, repository)` boundaries resolved, `Y` the number of hops
+in the longest route between two peers (at most `Q - 1`, and at most 2 in a star), and `B` the number of distinct
+`(repository, revision)` trees whose fleet links are read (`B <= X · Y`). The implementation MUST preserve repository
+identity in every index and cache key.
 
 | Phase                      | Literal transcription | Achievable            | Note                                        |
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
 | Load workspace (§13.1)     | `O(P + E)`            | `O(P + E)`            |                                             |
-| Load tags (§13.2)          | `O(T log T + M)`      | `O(T log T + M)`      | One inventory can still require many matches |
-| Pending windows (§13.3)    | **`O(P · (H + A))`**  | `O((k + 1) · (H + A) + Iw)` | Includes no-baseline class       |
+| Load tags (§13.2)          | `O(T log T + M)`      | `O(T + M)`            | Running maximum per package; hash `(package, version)` for `E191`. One inventory can still require many matches |
+| Pending windows (§13.3)    | **`O(P · (H + A))`**  | `O((H + A) · bw(m) + Iw)` | One marker pass; `O((k + 1) · (H + A) + Iw)` with a walk per boundary |
 | Parse and resolve (§13.4)  | `O(N + R + I)`        | `O(N + R + I)`        | Lexing and resolution have different cache keys |
-| Cancellation (§13.5)       | `O(cancels · (H + A))`| input-dependent       | Cache ancestry answers or closures          |
+| Corrections (§13.4b)       | repeated ancestry and scope scans | `O(H + Fc + Jcorr + wildcards · I + Oout)` | Indexed ancestry charged above; count package/target probes even with no wildcards |
+| Cancellation predicates (§13.5, §9.2) | a cancel scan per query | `O(Ic + (Pc + Jc) · bw(cancels))` | Build per-package cancel masks; ancestry charged above; diagnostic attribution adds its own work |
 | Direct bumps (§13.6)       | `O(U + I)`            | `O(U + I)`            | Consume resolved incidences                 |
 | Holds (§13.6a)             | `O(U + I)`            | `O(U + I)`            | Consume resolved incidences                 |
 | Propagation (§13.7) graph walks | **`O(U · (P + E))`** | input-dependent    | Reuse walks only when full inputs match     |
-| Propagation materialisation| `O(Z)`                | `O(Z)`                | Required contribution/provenance output     |
+| Propagation materialisation| repeated set unions | `O(Zv + Z)` | In-place indexed insertion; only unique required output has the lower bound `Ω(Z)` |
 | per-target predicates      | **`O(D · (S + Σ))`**  | `O(D + S + Σ)`        | Per unit. Hoist `resolvableBy`, `resolve()` |
 | Channel resolution (§13.8) | **`O(P · U)`**        | `O(U + I + P)`        | Invert unit-to-package incidences           |
-| Versions/plan (§13.9–10)   | `O(P + I + Z + Oout)` | `O(P + I + Z + Oout)` | Includes aggregates, provenance, diagnostics |
-| Publish order (§19.2)      | `O(P + E)` unordered  | `O(E + P log P)`      | Comparison heap for byte-wise ties           |
-| Blocking closure (§19.3)   | `O(F · (P + E))`      | `O(P + E)` per run    | One multi-source reverse traversal          |
+| Versions/plan (§13.9–10)   | repeated member/record scans | `O(P + I + Z + Oout)` | Consume already-built aggregates/provenance; scan each disjoint version group once |
+| Publish order (§19.2)      | `O(P² + E)`           | `O(E + P log P)`      | Scanning the ready set for the least name; a comparison heap instead |
+| Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead |
 | Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
-| Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum(Kq · (Hq + Aq)) + Iw)` | Boundaries share only within one repository |
+| Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum((Hq + Aq) · bw(mq)) + Iw)` | One marker pass per repository; `O(sum(Kq · (Hq + Aq)) + Iw)` with a walk per boundary |
 | Publication input closure (§27.2) | `O(P · (P + E + V))` | `O((P + E + V) · ceil(Q / wordSize))` | Condense the augmented graph, then one bitset union per edge |
 | Link evidence (§27.11)     | `O(X · (Q + Y))`, `X · Y` tree reads | `O(Q + X · Y)`, `B` tree reads | Root the link tree once; read each `(repository, revision)` tree once |
 | Link settlement (§27.11)   | one commit per route hop | one commit per recording repository | Merge a package's routes into one tree: at most `Q - 1` commits, 2 in a star |
 
-The bold rows are the ones that matter. Each contains quantities that can be large in a workspace with thousands of
-packages and a long history. Window classes safely share history reachability work. Propagation traversal is reusable
+The bold rows highlight common multiplicative costs; corrections, cancellation, provenance and retained indexes can
+also dominate. Each must be charged even when its final result is empty. Window classes safely share history reachability work. Propagation traversal is reusable
 only under the stricter conditions below; predicate hoisting and channel incidence inversion remain safe independently.
 
 The polyrepository bounds are deliberately sums over repositories. They are not globally linear in fleet history:
@@ -2878,7 +2923,10 @@ can still materialise `Z` contributions. An implementation MUST NOT scan the con
 SHOULD index every relevant gitlink transition in one pass per fixed control snapshot, then answer consumer baseline
 lookups from that immutable index. It MUST parse and store each `(repository, commit)` record at most once per plan.
 Ancestry and walk caches MUST be bounded by configured memory or by an eviction policy; a cache of every queried pair
-can itself grow quadratically in `Hq`. No cache may synthesize ancestry between repositories.
+can itself grow quadratically in `Hq`. The bound covers **all** cache tiers, including single-source walks, exact-source
+walks, empty results, keys and index metadata, not just the number of stored target entries. Per-plan lifetime alone
+is not a memory bound. Recomputing after eviction preserves semantics but may lose the cached time bound; that tradeoff
+must be stated. No cache may synthesize ancestry between repositories.
 
 The publication input closure is over the graph augmented with shared-version-group membership, as §27.2 defines.
 Dependency edges alone are acyclic, but a group joins its members in both directions, so dependency and group edges can
@@ -2898,7 +2946,8 @@ once and visit its members as one adjacency list instead.
 `stableCommit(P)`. Different package tags that resolve to the same commit therefore share a window. A release MAY
 record packages at different commits; `k` counts distinct boundary commits, not release runs, and can be as large as
 `2P`. Computing reachability once per distinct boundary commit, plus once for packages with no baseline, and testing
-membership by lookup replaces `P` traversals with at most `k + 1`. The fresh window needs no class of its own. By
+membership by lookup replaces `P` traversals with at most `k + 1`, and the marker pass below replaces those with one.
+The fresh window needs no class of its own. By
 §13.3, `Wfresh(P) = W(P) - reach(baselineCommit(P))`, so with `after(b) = reach(HEAD) - reach(b)` a commit is in
 `Wfresh(P)` exactly when it is in both `after(stableCommit(P))` and `after(baselineCommit(P))`. Every window is
 therefore a function of one boundary commit, a fresh membership test is the conjunction of two lookups, and no
@@ -2941,6 +2990,48 @@ Alternatively, after the pending union is known, a representation indexed only b
 representation costs in `Iw`, the actual membership incidences. Each makes §13.4a admission a membership lookup; none
 turns the history traversal itself into `O(C)`.
 
+**Ancestry: one marker pass, not one walk per question.** Every ancestry question §13 asks has one shape: is commit
+`c` an ancestor-or-self of a marker `x`? The markers are the window boundaries (§13.3), the `cancel` commits (§10.3),
+and the commits carrying a correction (§13.4b) or a `Reverts` footer (§7.3). Give each of the `m` markers one bit and
+visit the reachable history once, children before parents, which is the reverse of the order §25 requires of an
+adapter: set a marker's own bit when it is visited, then OR the visited commit's mask into each of its parents. `c` is
+an ancestor-or-self of `x` exactly when `c` is `x` or some child of `c` is an ancestor-or-self of `x`, so when the pass
+ends, bit `x` of `mask(c)` is set exactly when `c ∈ reach(x)`. The pass costs `O((H + A) · ceil(m / wordSize))` word
+operations for `m > 0`, with `O(H + A)` indexing/traversal overhead also when `m = 0`; a walk per marker
+costs `O(m · (H + A))`. Dense rows occupy `H · ceil(m / wordSize)` words, including word padding.
+Transposed per-marker columns occupy `m · ceil(H / wordSize)` words. These have the same `H · m` logical bits,
+but neither layout is universally optimal. Retaining both layouts adds their space costs. A transpose that enumerates
+every set bit adds `Θ(H · m)` scalar work on a chain with many markers, losing the stated word-parallel saving.
+Keep row masks when queries need one ancestry bit, or charge the chosen transpose algorithm separately. Afterwards `c ∈ after(b)` is one clear bit, `cancelledFor(c, X)` is a non-empty
+intersection of `mask(c)` with the cancel markers whose scope contains `X`, and the proper-ancestor test of §13.4b is
+one set bit together with `c ≠ x`. Under §27 the pass runs once per repository over that repository's own markers,
+and repository identity stays in every key.
+
+The pass need not leave the union of the pending windows. A window is closed under descendants, so every commit on a
+path from a marker down to a commit of the union is itself in the union: no path leaves the union and returns to it.
+A pass over the union's commits and the parent edges between them therefore sets exactly the bits the full pass sets
+for those commits, at `O((C + Ac) · ceil(m / wordSize))` with `Ac` the parent edges inside the union, and a marker
+the union does not hold is an ancestor of none of its commits, provided it is reachable from `HEAD`, which a release
+tag is (§12.2). What remains in `H + A` is finding the union in the first place. A backend that can name it in one
+query, as Git can (`HEAD` with the best common ancestors of the boundaries excluded), reads messages and changed
+paths once for the union where a read per boundary repeats every commit two windows share; each window is then the
+union minus one marker's bits, in the union's order.
+
+Two refinements bound the pass further, and neither changes its worst case. Equal masks SHOULD be interned: on a
+linear release history the boundaries are nested, `reach(b1) ⊆ reach(b2) ⊆ …`, so at most `k + 1` distinct boundary
+masks exist. This `k + 1` count concerns **boundary bits only**; with correction and cancel markers, a chain
+can have `m + 1` distinct masks. Interning stores an identifier per commit in addition to the mask dictionary and
+its construction costs. A direct chain representation can instead store commit positions and answer ancestry by
+comparing positions, using `O(H + m)` words and `O(H + A + m)` preprocessing without constructing dense masks.
+Such a shortcut requires verifying that the reachable history is a chain; it is invalid for a general DAG.
+An OR-result cache MAY reuse equal mask pairs, but its keys and values also need a memory budget. The pass MAY also stop early when its visiting order is known to be child-before-parent without a full
+walk, as decreasing commit-graph generation number is. A window is closed under descendants, so its complement is
+closed under ancestors. Once every unvisited commit that has a visited child carries all `k` boundary bits, every
+unvisited commit is an ancestor-or-self of one of them, lies in no window, and is named by no tuple of §13.4. The stop
+is sound only when no package lacks a stable baseline, because such a package keeps the whole history in its window,
+and only after every commit named by an `Edits`, `Deletes` or `Reverts` footer has been visited, because `E210` and
+`W213` read the ancestry of a target that lies outside every window.
+
 **Propagation: cache traversal, preserve unit identity.** A graph walk may be reused when its source set, depth and edge
 kinds are identical. Its reached nodes and distances are then the same. The remaining work MUST still be evaluated per
 unit and target: admission uses that unit's commit in `Wfresh(d)`; cancellation uses the `(commit, d)` pair; scope
@@ -2949,6 +3040,21 @@ identify the contributing unit and sources. Thus `(window class, directive)` is 
 the union of source sets is not generally semantics-preserving. A safe implementation caches walks and hoisted per-unit
 predicates, or uses indexes that retain the contributing unit for every reached target. No sublinear bound in
 `U · (P + E)` follows merely from there being few directive spellings or window classes.
+
+A walk keyed by **one source package** composes exactly, and recurs far more often than a whole source set does: there
+are at most `P` source packages, and as many distinct source sets as there are units. A multi-source breadth-first
+search assigns each node its least distance from any source, so for a unit with source set `S` and depth `N`, `reach`
+returns exactly the packages `d ∉ S` with `min over p ∈ S of dist(p, d) ≤ N`, each at that minimum as its level. An
+implementation MAY therefore cache one unbounded walk per `(source package, edge kinds)`, serve every depth from it by
+filtering on level, and form a unit's reach as the union of its sources' walks minus `S`, taking the least level per
+target. The union is sound **within** one unit; the union **across** units criticised above is not, and the trap below
+is about exactly that. The union costs the summed size of its sources' walks, so for a unit whose scope-set covers
+much of the workspace one multi-source walk is cheaper, and the choice is per unit. An unbounded single-source walk
+is a preprocessing option, not a cost-free answer to a shallow query: on a chain of `P` packages, one depth-one unit
+per package needs `Θ(P)` total reached-target work, while computing and retaining every unbounded source walk takes
+`Θ(P²)` time and target entries. On a cache miss, prefer a walk bounded by the requested depth, or lazily extend a
+cached breadth-first frontier. Charge extensions and use the cache budget across all entries; reuse the literal walk
+when retaining or combining an index would cost more than the requested traversal.
 
 The channel **propagation walk** can be skipped when no unit can propagate a channel. Direct channel resolution (§13.8)
 must still run: a depth-zero `%beta` or `Channel: beta` names its own package without any propagation walk, and phase 3
@@ -2971,13 +3077,18 @@ their graph walks and contribution incidences are counted in the propagation row
 > propagation against a literal per-unit one over randomised workspaces; the two MUST agree exactly.
 
 **Per-target predicates: hoist everything that does not read the target.** Inside the target loop of §9.2, three things
-are loop-invariant and one is not. `commitOf(u)`, `resolve(u.propagateScope)`, and the source-channel set of §9.3a
+are loop-invariant and three are not. `commitOf(u)`, `resolve(u.propagateScope)`, and the source-channel set of §9.3a
 depend only on the unit; only `Wfresh(d)`, `cancelledFor(·, d)` and the final `channel[d]` membership read the target. A
 transcription that resolves the scope-set and re-scans the source set once per target turns an `O(D + S + Σ)` unit into
 an `O(D · (S + Σ))` one, and the unit where that bites is precisely the one an author reaches for when they mean it: a
 `^^` across a wide scope-set has a large `D`, and re-deriving a two-element channel set thousands of times to answer a
 question whose inputs never changed is pure waste. Hoisting is not an optimisation to be justified by profiling; it is
-what the predicate's own dependency structure already says (§9.3a).
+what the predicate's own dependency structure already says (§9.3a). The inherited origin channel in phase 1 is
+likewise memoized once per unit when first needed. Deferring it until an admitted target needs it avoids emitting
+diagnostics from an otherwise unevaluated branch; required diagnostic attribution and order must be preserved.
+This bound covers the hoisted
+scope/channel predicates only. Cancellation intersections cost up to `bw(cancels)` per queried target; materialising
+`prov[d] |= sources` must also charge the source insertions in `Zv`, even when deduplication leaves `Z` unchanged.
 
 The saving compounds with safe traversal caching: caching can reduce the number of graph walks, while hoisting reduces
 the work in each unit's target loop. Neither subsumes the other, and a wide `^^` unit is the case where both can help.
@@ -2989,7 +3100,9 @@ almost all of it spent confirming that no directive names the package at all. In
 §13.4 has already performed, and touches only the packages some directive actually names. This is the same shape as
 §13.4, which resolves units to packages for exactly the same reason, and an implementation that has already built that
 mapping can often reuse it directly rather than rebuilding it here. The ordering and `W186` obligations that come with
-the inversion are stated in §13.8 and are not optional.
+the inversion are stated in §13.8 and are not optional. Reduce each completed candidate list in one pass, retaining the
+newest actual proposal and the information required for `W186`. A directive equal to the baseline proposes nothing;
+returning it before examining older candidates contradicts the precedence rule.
 
 **Cache lexical parsing separately from resolution.** The union window spans all history whenever any package is
 unreleased (§13.3), so a workspace that has just gained a package may revisit every record. Lexical parsing is a pure
@@ -3000,14 +3113,59 @@ Scope and changed-path resolution additionally depends on the current workspace 
 resolution configuration. It MUST use a digest of those inputs or be recomputed. A cache hit for lexing therefore saves
 `N` work but does not imply that `R` or `I` is cached, and no whole-plan cache follows from record immutability alone.
 
+**Scope resolution: index the workspace, do not scan it.** `R` is where a transcription of §6 spends time that no row
+above accounts for, because both of its lookups read naturally as loops over every package. File ownership (§6.2) is a
+longest-prefix question, and the prefixes of a path are its ancestor directories: probe them, longest first, in a map
+from package root to package, and the first hit owns the file. That costs the path's own components, where comparing
+the path against every package root costs `P` per changed path, in every commit of every window. A literal scope term
+is one map lookup. A glob whose only `*` is its last byte, which `@acme/*` and nearly every written glob is, selects a
+contiguous range of the byte-wise sorted package names and costs `O(log P)` plus its matches; only a glob with an
+interior `*` needs a pass over the names, at the per-candidate cost §18.3 requires. A scope-set's resolution depends
+on its commit only through `.` and, under §27, through the repository that owns the commit, so every other scope-set,
+a `Propagate-Scope` repeated along a train in particular, MAY be resolved once per distinct text. None of this changes
+`I`, which is output.
+
 **Deterministic order and failure closure.** Kahn's topological sort is `O(P + E)` if any available zero-indegree node
-may be chosen. CCME requires the byte-wise least available package, so a comparison heap gives `O(E + P log P)`.
-Another data structure may improve that bound only if it provably returns the same least element at every step.
-During publish, testing each package by a fresh transitive walk gives `O(F · (P + E))` in the worst case. For blocked
-membership alone, add failures to an incremental multi-source reverse traversal and mark each newly reached consumer
-once; total traversal work is `O(P + E)` per run. If output records every failed ancestor or path, its additional cost
-is the size of that provenance. The first cause and `W194` ordering MUST still follow deterministic publish/failure
-order rather than queue or hash iteration order.
+may be chosen. CCME requires the byte-wise least available package: scanning the ready set for it at every step is `O(P²
++ E)`, and a comparison heap gives `O(E + P log P)`. No comparison-based structure improves that bound, because a
+workspace with unsorted names and no edges makes the sequence a sort of its names; any other structure MUST provably return the same least
+element at every step. This is a worst-case bound for unsorted comparison keys, not an instance-optimality result:
+if name ranks or sorted names are already provided, the sorting reduction alone proves no new `P log P` lower bound.
+During publish, `run` as §19.3 writes it tests each planned package by a fresh transitive walk,
+which is `O(P · (P + E))` in the worst case whatever the number of failures, and a walk from each failure instead is
+`O(F · (P + E))`. For blocked membership alone, add failures to an incremental multi-source reverse traversal and mark
+each newly reached consumer once; total traversal work is `O(P + E)` per run. If output records every failed ancestor or
+path, its additional cost is the size of that provenance. The first cause and `W194` ordering MUST still follow
+deterministic publish/failure order rather than queue or hash iteration order.
+
+**Space and lower bounds.** Memory is counted in machine words below, except input/output byte buffers. With indexed
+inputs retained, a conservative storage ledger is:
+
+| Representation | Retained or auxiliary space | Qualification |
+|----------------|-----------------------------|---------------|
+| Package/history adjacency | `O(P + E + H + A)` | Input indexes; not repeated per package |
+| Parsed messages and resolved incidences | `O(N + U + I)` | Byte buffers plus unit/incidence records; cached resolution has its own key |
+| Dense history marker rows | `O(H · ceil(m / wordSize))` | Plus history traversal state; zero markers need no rows |
+| Explicit package windows | `O(Iw)` | Optional materialisation; shared boundary indexes can avoid it |
+| Cancel masks | `O(Pc · ceil(cancels / wordSize))` | Plus scoped-package lookup and diagnostic state |
+| One propagation BFS | `O(P)` auxiliary | On top of shared adjacency; retained walk caches have a separate budget |
+| Direct channel candidates | `O(P + I)` as lists, or `O(P)` summaries | Summaries require the §13.8 deferred-output rule; diagnostics/provenance storage is additional |
+| Contribution/provenance records | `O(Z)` | Streaming can reduce retention only if subsequent phases and output permit it |
+| Heap publish order / blocking membership | `O(P)` auxiliary | Shared graph excluded; all-cause/path diagnostics add output-sized storage |
+| Publication input closure bitsets | `O(P · ceil(Q / wordSize))` | Shared SCC sets may reduce actual storage; expanded lists cost up to `O(P · Q)` |
+| Link evidence cache | number of retained pins plus keys | `B` counts trees, not their entries or bytes; dense hub revisions can be large |
+
+No implementation should add every alternative in this ledger by default. Account for peak simultaneously live
+allocations, construction scratch space, immutable input buffers, retained output and cache keys. Batching marker
+computation limits scratch space but does not bound all retained marker columns, and eviction changes recomputation
+cost. Tree reads, decoding and output bytes remain separate from in-memory lookup counts.
+
+Linear scanning is worst-case time-optimal when every input byte must be inspected; explicit output needs time at
+least its size. A single adjacency-list traversal and blocked-membership closure have tight worst-case linear scan
+bounds. The publish heap matches the comparison-sorting lower bound for unsorted names. These are conditional,
+phase-specific statements. Neither `Ω(Z)` output work nor a dense `H × m` or `P × Q` representation proves that every
+instance requires that representation or that the complete planner is jointly time- and space-optimal. Correction,
+reachability, scope and cache choices retain input-dependent tradeoffs.
 
 **What none of this may change.** These are all internal representations. The plan, the diagnostics, and their order
 MUST be identical to the literal reading (§17.2), and an implementation that trades a different plan for speed does not
@@ -3026,9 +3184,11 @@ name is still the implementer's to justify.
 ## 14. Configuration
 
 CCME 3 additionally defines `vcs` (§25), explicit rollback activation plus package/space handler declarations (§26),
-and the optional polyrepository Git profile (§27). External VCS adapters and rollback remain future engine contracts;
-implementing the polyrepository profile does not implement either one. Omitting `vcs` selects Git. Omitting rollback
-execution enablement never authorizes withdrawal. Omitting `polyrepo` preserves the single-repository model.
+the optional polyrepository Git profile (§27), and optional distributed execution (§28). External VCS adapters,
+rollback and distributed execution remain future engine contracts; implementing one profile does not implement the
+others. Omitting `vcs` selects Git. Omitting rollback execution enablement never authorizes withdrawal. Omitting all
+§27 activation inputs preserves the single-history model. Section 28.2 defines prospective `execution` settings,
+not current dispat CLI options: the default role is orchestrator, and an empty worker list preserves local execution.
 
 Defaults are chosen so that an unconfigured repository behaves conservatively and predictably.
 
@@ -3080,7 +3240,7 @@ implementation that lets a message opt out of them is not conforming.
 |----------------------------|-----------|--------------|----------------------------------------------------------------------------------------------------------------|
 | `maxMajorJump`             | `1`       | yes (`null`) | Reject an exact `Release-As` raising the major version more than this far above the computed version (`E157`). |
 | `limits.unitsPerMessage`   | `64`      | **no**       | Cap on units in one commit message (`E158`).                                                                   |
-| `limits.scopeTermsPerUnit` | `256`     | **no**       | Cap on scope terms in one scope-set (`E158`).                                                                  |
+| `limits.scopeTermsPerUnit` | `256`     | **no**       | Cap on scope terms in one scope-set, a header's or a `Propagate-Scope` or `Propagate-Channel-Scope` footer's (`E158`). |
 | `limits.messageBytes`      | `1048576` | **no**       | Cap on message length (`E158`).                                                                                |
 
 **Null until configured.** These are inert as shipped. Nothing about a default run consults them, and no diagnostic can
@@ -3118,6 +3278,8 @@ Configuration MUST NOT be able to change:
 * the fact that every workspace package is a release unit (§13.10a).
 * repository-qualified revision identity, the ban on timestamp baseline inference, and source-first durable recording
   in the polyrepository profile (§27).
+* worker authority restrictions, complete locking before distributed planning, exact input/output identity and
+  exclusion of transport state from native release history in the distributed execution profile (§28).
 
 These are the guarantees the format rests on. A tool that makes any of them configurable is not conforming, however it
 is labelled.
@@ -3260,7 +3422,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 60u | `%%beta>inherit`, `%%none>beta`, `%%beta>*`                            | `E111`; `inherit` and `none` are values, not channels, and `*` is legal only as a `<from>` (§11.2).                                                      |
 | 60v | `%%a>b>c`                                                              | `E111`; a transition has exactly one `>`.                                                                                                                |
 | 60w | Graduating a consumer whose provider stays on `beta`                   | Permitted and reported: the stable consumer's range admits a prerelease, `W203` (§9.4). Graduate the provider too.                                        |
-| 61  | Graduation with no pending bumps                                       | Publishes the accumulated `target`; if that equals the baseline core, `E185`.                                                                             |
+| 61  | Graduation with no pending bumps                                       | Publishes the accumulated `target`. A `target` equal to the baseline's core is the ordinary case; one lower than it is `E185`, after the channel-entry patch where the window carries no bump at all (§11.5). |
 | 62  | Graduating a package already stable                                    | `W185` no-op, or an ordinary release if bumps are pending.                                                                                                |
 | 63  | Prerelease with no stable baseline ever                                | Virtual stable baseline `0.0.0` → `target` is `initialVersion`; e.g. `0.1.0-beta.0`.                                                                      |
 | 63a | Channel-only entry from a clean stable baseline `1.2.0`                | `1.2.1-beta.0`; the channel-entry patch, `W204` (§11.4). Without it the computed `1.2.0-beta.0` would rank **below** the baseline.                       |
@@ -3389,7 +3551,7 @@ Every row assumes an engine that offers groups (§13.9a). `d` is the group's sha
 | 150 | A member on a prerelease riding a **stable** group version                 | It takes the new core on its own channel at counter `0`. A ride never graduates a member.                                                                                    |
 | 151 | `counter: fixed` declared beside `channels: independent`                   | A configuration error. One counter counts one train, and a train runs on one channel (§13.9a).                                                                               |
 | 152 | A sharing axis declared for packages that share no version prefix          | A configuration error: there is nothing for the axis to be an axis of.                                                                                                       |
-| 153 | A quiet group whose members all hold the shared prefix                     | Nothing releases, under every axis. Under `counter: independent` a member behind the group's counter is aligned and is not caught up.                                        |
+| 153 | A quiet group whose members all hold the shared prefix                     | Nothing releases where every member is aligned. Under `counter: independent` a member behind the group's counter is aligned and is not caught up; under `counter: fixed` it is a laggard and rides to the line (vector 153). |
 | 154 | A member on `stable` releases work of its own while the line is a prerelease | It joins the shared prefix on the line's channel at its own counter. The floor is withheld from it (it must not publish that core as `stable`) and staying below the prefix is excused by no axis (§13.9a). |
 
 ---
@@ -3504,7 +3666,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `E180` | Reserved channel name `latest`.                                                                                                                                                                           |
 | `E181` | Channel name contains uppercase or illegal characters, or is outside `channels.allowed`. Applies to both sides of a transition.                                                                           |
 | `E182` | Existing prerelease tag uses a non-numeric counter (§15.5 #64). Repository-scoped; no offending unit.                                                                                                     |
-| `E185` | Graduation would not increase the version (§11.5). Repository-scoped; only reachable from hand-edited tags.                                                                                               |
+| `E185` | Graduation would not increase the version (§11.5). Repository-scoped; reachable from hand-edited tags or a pinned train.                                                                                               |
 | `E191` | Two reachable tags carry the same version for one package on different commits.                                                                                                                           |
 | `E195` | Computed version not greater than baseline.                                                                                                                                                               |
 | `E196` | Repository is shallow or grafted; history is incomplete.                                                                                                                                                  |
@@ -3621,6 +3783,11 @@ that does not advertise it remains conforming for a single repository and MUST p
 and `configs` are absent. Merely discovering nested Git repositories or accepting source paths is not profile
 conformance.
 
+Distributed execution (§28) is a separate **optional conformance profile**. An implementation advertising it MUST
+satisfy every §28 rule and vector across all three history modes, including transfer and reuse of actual dependent
+build outputs. Remote command dispatch alone is insufficient. This profile is unimplemented; its vectors specify
+required behavior and are not executed test results or measured speedups.
+
 A CCME 2 parser or an engine implementing only the ordinary forward-release projection MUST identify that narrower
 support and MUST NOT claim full CCME 3 conformance. Specification publication, prose examples, and static protocol
 vectors are not implementation or experimental evidence.
@@ -3658,6 +3825,10 @@ For §27, fixed repository state means the complete map from repository identity
 gitlink snapshot, reachable release tags, and explicit baseline tuples. Output order compares repository identities
 byte-wise before repository-local topological commit index and unit index. Commit dates never provide an order.
 
+For §28, placement settings, worker availability, transient run identifiers, branch names and completion order
+MUST NOT change the semantic plan. Operational receipt metadata is separate from its canonical serialization;
+diagnostics retain deterministic semantic ordering rather than worker arrival order.
+
 ### 17.3 Versioning of this specification
 
 This document is CCME **3.1.0-rc.1** and is itself versioned under SemVer:
@@ -3674,7 +3845,9 @@ VCS-dependent canonical revision operands. It also expands full-engine conforman
 protocols. These semantic and conformance changes require a major revision. A new optional key alone would not.
 The activation boundary prevents an engine upgrade from silently executing old rollback-shaped messages.
 An optional execution profile that preserves the previous plan exactly when omitted is a minor addition; §27 is such a
-profile. Its repository-qualified state and recovery rules become mandatory only for implementations advertising it.
+profile. Section 28 is also optional: its task transport and execution obligations apply only to implementations
+advertising that profile and preserve the semantic plan. Adding this draft does not itself stamp a new version;
+the specification release process owns the version declarations.
 
 The escape hatches that make minor versions safe are `W140` and `W150`. Implementations MUST NOT convert either into an
 error by default; `strictTypes` is opt-in for exactly this reason.
@@ -3759,14 +3932,20 @@ Appendix A, since a careless regex implementation reintroduces the risk it was d
 
 Remaining bounds implementations MUST enforce:
 
-* Depth values saturate at 1024 (§20.3); a graph is never deeper.
+* Depth values saturate at 1024 (§20.3): a larger value means `all`, and the digit loop holds a bounded integer
+  however long the run is.
 * Scope-set length, unit count per message, and message length **MUST** be capped, and are, by the defaults of
   `limits.*` (§14.1): these are the parser bounds, they are on without configuration, and they cannot be disabled. An
   operator may raise or lower the numbers; setting them to `null` or to zero is not conforming. Exceeding a cap is a
   diagnostic (`E158`), never a crash.
-* Each glob/candidate match MUST be linear in the pattern and candidate bytes; patterns are never compiled to a
-  backtracking engine. Whole-run scope cost also includes every candidate examined, including zero-match patterns, as
-  `R` in §13.11.
+* Each glob/candidate match MUST cost `O(|pattern| + |candidate|)`; patterns are never compiled to a backtracking
+  engine. `*` is the only metacharacter, so the bound is met by splitting the pattern at `*` into literal segments: the
+  first is a prefix test, the last is a suffix test on what remains, and each segment between them takes its leftmost
+  occurrence after the previous one, found by a linear-time substring search. Leftmost placement is sufficient, because
+  a match that places a segment further right still matches with that segment moved left. The familiar two-pointer walk
+  that restarts one byte after its last `*` is `O(|pattern| · |candidate|)`, as `*aaab` against a run of `a` shows, and
+  does not meet the bound. Whole-run scope cost also includes every candidate examined, including zero-match patterns,
+  as `R` in §13.11.
 
 Parser hardening bounds one message. It says nothing about the cost of the run as a whole, which is bounded in §13.11; a
 workspace large enough for that section to matter is also a workspace where a hostile commit has more leverage, and
@@ -3795,6 +3974,11 @@ that is consistent, inspectable, and resumable without operator intervention.
 CCME 3 runs execute explicitly requested rollback under §26 before ordinary publication; a rollback failure prevents
 ordinary publication in that attempt. No rollback is inferred from failure below. Existing tags remain immutable,
 including tags whose external artifacts have been withdrawn. §19.4 adoption cannot revive a withdrawn identity.
+
+Delegating tasks under §28 does not replace these obligations. Verified local build outputs satisfy only their
+local-output prerequisites; registry-availability edges still require publication and applicable native records.
+Task receipts and transport commits MUST NOT become release evidence or release-tag ancestry. Section 28.6
+adds per-owner publication serialization, fencing and reconciliation while preserving ordinary native recording.
 
 ### 19.1 Tagging
 
@@ -4031,6 +4215,7 @@ parseHeader(line):
     sc = Scanner(line)
     h  = { type:'', scopes:[], inline:{}, breaking:false, description:'' }
     sawCaret   = false     # scratch: a '^' or '^^' has been consumed (one sigil, §5.3)
+    sawPlus    = false     # scratch: a '+N' has been consumed, whichever token holds the depth
     depthFrom  = none      # scratch: which token supplied h.inline['depth']: '^', '^^' or '+'
     cdepthFrom = none      # scratch: which token supplied h.inline['channelDepth']: '%%' or '++'
 
@@ -4119,6 +4304,8 @@ parseHeader(line):
             continue
 
         if key == 'depth':
+            if sawPlus: raise E110                     # one +N per header, after '^^' as well
+            sawPlus = true
             if depthFrom == '^^':                      # '^^' asserts 'all'; disagreement is
                 if validateInline('depth', value) != ALL: raise E113
                 warn W110                              # '^^…+*': redundant, not wrong
@@ -4159,9 +4346,9 @@ validateInline('depth', v):
     if v[0] == '0' and length(v) > 1:      raise E111   # no leading zeros: '00', '007'
     n = 0
     for c in v:
-        if not isDigit(c): raise E111
-        n = n * 10 + (c - '0')
-        if n > 1024: return ALL          # saturate; no graph is deeper
+        if not isDigit(c): raise E111    # every byte is checked, saturated or not
+        if n <= 1024: n = n * 10 + (c - '0')   # saturate; n stays below 10250
+    if n > 1024: return ALL
     return n
 
 validateInline('channel', v):           return parseChannelValue(v, allowInherit = false)
@@ -4192,6 +4379,12 @@ channelSide(v, asFrom):
     return v
 ```
 
+The digit loop saturates without returning. A loop that returns `all` at the first value above `1024` never reads the
+rest of the run, so it accepts `+99999x`, which Appendix A rejects as `E111` because its depth pattern is `[1-9][0-9]*`
+to the end of the value. Holding `n` once it has passed `1024` also keeps it below `10250`, so no digit run overflows
+an integer. Saturation is a definition and not a fact about graphs: a depth above `1024` **means** `all`, including in
+a workspace whose longest dependency chain exceeds `1024` edges.
+
 `isChannel` (§20.1) does not admit `>`, so the split is unambiguous: a channel name can never contain the separator, and
 `indexOf` needs no lookahead. `readUntilAny('^+%!:')` does not stop at `>`, so the whole transition arrives as one
 value.
@@ -4209,10 +4402,12 @@ An empty value is legal **only** after `^` and `^^`. `%%`, `++`, `%` and `+` all
 channel with no name and a depth with no number carry no default worth guessing, whereas a caret's value is a bump and
 bumps have one.
 
-`sawCaret`, `depthFrom` and `cdepthFrom` in the listing are scanner scratch state, not part of the parsed result.
-`sawCaret` enforces the once-per-header rule across both caret spellings, so `^minor^^` and `^+2^^` are alike `E110`
-rather than one of them falling through to a depth check. `depthFrom` and `cdepthFrom` record *which token* supplied
-each depth, which is what keeps every combination order-independent:
+`sawCaret`, `sawPlus`, `depthFrom` and `cdepthFrom` in the listing are scanner scratch state, not part of the parsed
+result. `sawCaret` enforces the once-per-header rule across both caret spellings, so `^minor^^` and `^+2^^` are alike
+`E110` rather than one of them falling through to a depth check. `sawPlus` enforces the same rule for `+N`, and
+`depthFrom` cannot carry it alone: after `^^` it reads `'^^'` whether or not a `+*` has been consumed, so a listing
+without `sawPlus` accepts `^^+*+*` with two `W110` where §5.3 requires `E110`. `depthFrom` and `cdepthFrom` record
+*which token* supplied each depth, which is what keeps every combination order-independent:
 
 | Header             | transitions                      | Result                                                   |
 |--------------------|----------------------------------|----------------------------------------------------------|
@@ -4221,6 +4416,7 @@ each depth, which is what keeps every combination order-independent:
 | `^^minor+2`        | `depthFrom: none → '^^'`         | `E113`                                                   |
 | `+2^^minor`        | `depthFrom: none → '+'`          | `E113`                                                   |
 | `^^minor+*`        | `depthFrom: none → '^^'`         | depth `all`, `W110`                                      |
+| `^^minor+*+*`      | `depthFrom: none → '^^'`         | `E110` on the second `+*`, by `sawPlus`                  |
 | `^minor+2+3`       | `depthFrom: none → '^' → '+'`    | `E110` on `+3`; one `+N` per header                     |
 | `%%beta++3`        | `cdepthFrom: none → '%%' → '++'` | channel depth `3`; the `++N` overrides `%%`'s implied 1 |
 | `++3%%beta`        | `cdepthFrom: none → '++'`        | channel depth `3`; `%%` supplies nothing, none needed   |
@@ -4345,16 +4541,28 @@ Where a pattern and §20 appear to disagree, §20 is wrong or the pattern is wro
 the other. The depth patterns below are where the two formulations most easily diverge, so they deserve particular
 care when either side is changed.
 
-All patterns are PCRE, anchored, and free of nested quantifiers, so they cannot backtrack catastrophically.
+All patterns are PCRE and anchored. One of them, the `inline` group of the header pattern, nests a quantifier, so its
+safety is argued rather than assumed: every alternative begins with a sigil that no value class admits, and the
+lookahead below leaves each input exactly one tokenisation. With one way to parse there is nothing to backtrack into,
+and no pattern here can backtrack catastrophically.
 
 **Header (single pattern):**
 
 ```regex
-^(?<type>[a-z]+)(?:\((?<scopes>[^()\r\n]+)\))?(?<inline>(?:\^\^[^\^+%!:\r\n]*|%%[^\^+%!:\r\n]+|\+\+[^\^+%!:\r\n]+|\^[^\^+%!:\r\n]*|[+%][^\^+%!:\r\n]+)*)(?<breaking>!)?: (?<description>\S[^\r\n]*)$
+^(?<type>[a-z]+)(?:\((?<scopes>[^()\r\n]+)\))?(?<inline>(?:\^\^[^\^+%!:\r\n]*|%%[^\^+%!:\r\n]+|\+\+[^\^+%!:\r\n]+|\^(?!\^)[^\^+%!:\r\n]*|[+%][^\^+%!:\r\n]+)*)(?<breaking>!)?: (?<description>\S[^\r\n]*)$
 ```
 
 Group notes: `scopes` still requires splitting on `,` and per-term validation; `inline` still requires tokenising by
 sigil. The pattern recognises shape, not validity.
+
+**The `(?!\^)` after the single caret is load-bearing.** Both caret alternatives accept an empty value, so without the
+lookahead `^^` tokenises two ways, as one doubled caret or as two single ones, and a run of `n` carets tokenises in
+`Fib(n + 1)` ways. A backtracking engine tries every one of them before it reports that a header with no `: ` does
+not match: `feat`, forty carets and ` x` costs on the order of `10^8` steps, and sixty carets cost `10^12`. That is
+the superlinear behaviour §18.3 forbids, reachable from one commit message. With the lookahead a single caret is
+never followed by another, a run of carets has exactly one reading (pairs, then at most one single), and a failed
+match is linear. The accepted language and every capture are unchanged, because any caret run the old pattern matched
+is matched by that one reading. An engine without lookahead, such as RE2, does not backtrack and may drop it.
 
 The description group opens with `\S`, not `[^\r\n]`, so that the two-space form `feat:  x` is rejected rather than
 parsed with a leading space in the description (`E120`, vector 18). A `+` quantifier over `[^\r\n]` silently accepts it.
@@ -4459,6 +4667,7 @@ A prerelease tag that does not match this pattern but is otherwise valid SemVer 
 |--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
 | `[\^+%]` before `\^\^` in the tokeniser    | `^^minor` silently becomes `^minor` at depth 1                                                                               | Order the alternation longest-first                                     |
 | `\^+` to match the caret run               | `^^^minor` accepted as `^^minor`; carets read as a repetition count                                                          | Match the literal two-character token, then guard against a third caret |
+| `\^` without `(?!\^)` in the header        | A caret run tokenises in `Fib(n + 1)` ways; a non-matching header costs exponential time                                     | Keep the lookahead, or parse with §20                                   |
 | `[\^+%]` before `%%` in the tokeniser      | `%%rc` becomes `%` with an empty value followed by `%rc`, silently setting the unit's own channel instead of its dependents' | Order the alternation longest-first, exactly as for `\^\^`              |
 | `[\^+%]` before `\+\+` in the tokeniser    | `++2` becomes `+` with an empty value followed by `+2`, silently setting the bump depth instead of the channel depth         | Order the alternation longest-first                                     |
 | Splitting a channel value at the first `-` | `beta-2>stable` loses its channel name; hyphens are legal in channel names                                                   | Split at `>`, which `isChannel` excludes                                |
@@ -4517,6 +4726,7 @@ shared-version group is a relationship this one does not have.
 | 14b  | `feat(core)^^: x`                        | propagate `patch` (default), depth `all`, identical to `+*`                             |
 | 14c  | `feat(core)^^!: x`                       | breaking, propagate `patch`, depth `all`                                                 |
 | 14d  | `feat(core)^^minor+*: x`                 | as #14a, plus `W110` for the redundant `+*`                                              |
+| 14d1 | `feat(core)^^minor+*+*: x`               | `E110` on the second `+*`; one `+N` per header, after `^^` as well (§20.3)               |
 | 14e  | `feat(core)^^minor+2: x`                 | `E113`                                                                                   |
 | 14f  | `feat(core)+2^^minor: x`                 | `E113`; order-independent                                                               |
 | 14g  | `feat(core)^minor^^: x`                  | `E110`; `^` and `^^` are one sigil                                                      |
@@ -4536,6 +4746,7 @@ shared-version group is a relationship this one does not have.
 | 14r3 | `feat(core)++20000: x`                   | channel depth `all`; identical treatment on the channel axis                            |
 | 14r4 | `feat(core)+00: x`                       | `E111`; leading zeros rejected; `0` alone is the only depth that may start with `0`     |
 | 14r5 | `feat(core)+007: x`                      | `E111`, not `7`                                                                         |
+| 14r6 | `feat(core)+99999x: x`                   | `E111`, not `all`; saturation never excuses the rest of the digit run (§20.3)           |
 | 14s  | `feat(core)%beta>rc: x`                  | `Channel` transition, `from` `beta`, `to` `rc`                                           |
 | 14t  | `feat(core)%%*>stable++*: x`             | `Propagate-Channel` transition from any prerelease to stable, channel depth `all`        |
 | 14u  | `feat(core)%%beta>*: x`                  | `E111`; `*` is a `from`-value only                                                      |
@@ -4655,7 +4866,7 @@ Given `feat(core)` and the workspace above:
 | 39b | `feat(core)%beta++1: x`                              | `core` `1.5.0-beta.0`; `cli` `2.0.1-beta.0`, `ui` `0.9.2-beta.0`, `api` `1.2.1-beta.0`; channel-only releases (`W202`, `W204`)                                                                      |
 | 39c | `feat(core)^%beta: x`                                | **`core` `1.5.0-beta.0` alone.** The caret reaches all three; each is suppressed by §9.3a with `W208`                                                                                                |
 | 39d | `feat(core)^%beta++1: x`                             | `core` `1.5.0-beta.0`; `cli` `2.0.1-beta.0`, `ui` `0.9.2-beta.0`, `api` `1.2.1-beta.0`; bump and channel together, no `W204`                                                                        |
-| 39e | `feat(core)^^minor++1: x`                            | `minor` reaches all six; the origin's channel reaches only the three direct consumers. Axes are independent                                                                                          |
+| 39e | `feat(core)^^minor++1: x`                            | `minor` reaches all five dependents; the origin's channel reaches only the three direct consumers. Axes are independent                                                                                          |
 | 40  | `feat(ui)^: x`                                       | `ui` minor; `docs-site` and `@acme/theme` patch; `docs-site` released to the internal registry and tagged                                                                                            |
 
 ### B.4 Cancel
@@ -4818,10 +5029,10 @@ implementation emitting `ui` before `core`, or `@acme/theme` before `ui`, fails 
 
 **Vector 70**: blocking. Same plan, `ui`'s publish fails.
 
-→ published `core@1.5.0`, `api@1.2.1`, `cli@2.0.1`; failed `ui`; **blocked** `@acme/theme` (`W194`), planned but never
-attempted. Run exits non-zero. On resume: `ui@0.9.2` then `@acme/theme@1.0.1`, both at the versions planned in run 1
-(§13.7c G3). Run 3 is empty. Note that `cli` and `api` publish normally in run 1: an unrelated subtree is not punished
-for `ui`'s failure.
+→ published `core@1.5.0`, `api@1.2.1`, `cli@2.0.1`; failed `ui`; **blocked** `@acme/theme` and `docs-site` (`W194`
+each), planned but never attempted, because both depend on `ui`. Run exits non-zero. On resume: `ui@0.9.2`, then
+`@acme/theme@1.0.1` and `docs-site@0.1.0`, all at the versions planned in run 1 (§13.7c G3). Run 3 is empty. Note that
+`cli` and `api` publish normally in run 1: an unrelated subtree is not punished for `ui`'s failure.
 
 **Vector 71**: `cancel` on the consumer. `C1`: `feat(core)^: x`; `C2`: `cancel(cli): reset release state`. `core`
 published at run 1.
@@ -4970,10 +5181,11 @@ set, and the set may have more than one element.
 
 **Vector 82d**: the hoist must be recomputed per unit, not per run. Two units in one commit, `feat(core)^: x` and
 `feat(legacy)^: y`, with `core` on `stable` and `legacy` on `beta`, dependents as above.
+Also let stable `app` depend only on `legacy`.
 
-→ Each unit is admitted against its own sources: `cli` from the first, `old` from the second. An implementation that
-lifts `srcChannels` out of the *unit* loop as well as the target loop (computing one set for the whole run) admits
-`old` from `core`'s unit and fails §9.2's per-unit property.
+→ Each unit is admitted against its own sources: `cli` from the first, `old` from the second, and no bump for `app`
+from the beta-only `legacy` source. A run-wide `{stable, beta}` set wrongly admits `app` because an unrelated unit
+contributed `stable`. Graph traversal still stays per unit; a channel-cache defect cannot invent a missing edge.
 
 **Vector 82e**: inverting `resolveChannels` must preserve §11.6 order. `cli` named by two commits, the older
 `release(cli)%rc` and the newer `release(cli)%beta`, both in `W(cli)`.
@@ -4994,9 +5206,10 @@ emits `W186` in both; one that counts only the prefix examined before the winner
 **Vector 82g**: skipping the channel pass must be observationally equivalent. Any workspace where no unit in the union
 window sets `Propagate-Channel-Depth` above `0` and `propagation.channelDepth` is `0`.
 
-→ Identical plan whether phase 1 runs or is skipped, because §13.8 then assigns every package its baseline channel and
-§9.3a reads those baselines. An implementation whose skip path also skips §13.8, leaving `channel(P)` unset rather than
-set to the baseline, suppresses every propagated bump under §9.3a and produces an empty plan.
+→ Identical plan whether phase 1 runs or is skipped, provided §13.8 still resolves direct channel directives and uses
+the baseline where none applies. Baseline-only initialization is valid only when direct proposals are also absent.
+An implementation whose skip path leaves `channel(P)` unset can wrongly suppress propagated bumps; direct bumps need
+not disappear. Vector 82h distinguishes the direct-channel case.
 
 **Vector 82h**: skipping channel propagation must retain direct channel resolution. `core` is on `stable`; one pending
 unit is `feat(core)^%beta: x`; `cli → core`; channel depth is `0` everywhere.
@@ -5019,6 +5232,19 @@ diverge around `app`'s stable baseline.
 
 → Only `C1` contributes to `app`. A bucket that admits the union once by window class and directive over-admits `C2`;
 admission remains the per-unit test `commitOf(u) ∈ Wfresh(app)`.
+
+**Vector 82k**: a no-op direct channel cannot hide an older proposal. `ui` has baseline channel `beta`, an older
+`release(ui)%stable` and a newer `release(ui)%beta`, both in `Wfresh(ui)`.
+
+→ The newer directive proposes nothing (`W199`); the older directive graduates `ui` to `stable`. There is no `W186`
+because only one directive proposes a change. Returning the first candidate's value incorrectly leaves `ui` on beta.
+Candidate-list and summary-based implementations of §13.8 MUST agree on this result and diagnostics.
+
+**Cost workload (informative): shallow walks on a chain.** Let `p1 → p0`, `p2 → p1`, ..., `p(P-1) → p(P-2)`,
+with one depth-one propagation unit for each package. With fixed edge kinds and no admission suppressions, there are
+`P - 1` reached targets in total. Computing every unbounded single-source walk instead retains `P(P-1)/2` target
+entries. Compare the same plans and provenance while measuring cold and warm query work, peak live memory and cache
+metadata. This workload tests §13.11's cache tradeoff, not a wall-clock conformance threshold.
 
 ### B.8 Workspace graph constraints
 
@@ -5068,7 +5294,7 @@ manifests declare a range on a prerelease.
 **Vector 95a**: taking the consumers along. `feat(core)^%beta++1: x`.
 
 → `core@1.5.0-beta.0`, `cli@2.0.1-beta.0`, `ui@0.9.2-beta.0`, `api@1.2.1-beta.0`. The channel axis puts them on the beta
-line, so §9.3a admits the bump, so there is no `W208` and no `W204`. Compare vector 95: one four-character token is the
+line, so §9.3a admits the bump, so there is no `W208` and no `W204`. Compare vector 95: one three-character token is the
 whole difference, and it is written in the commit.
 
 **Vector 95b**: an established train needs no directives. Baselines `core@1.5.0-beta.0`, `cli@2.0.1-beta.0`; commit
@@ -5095,8 +5321,8 @@ graduates `api` here has ended a prerelease train on behalf of a commit that nev
 **Vector 97a**: the same, with the `stable` arriving by inheritance rather than by `%%`: `feat(core)++1: x`, where
 `core` is on stable and `propagation.channel` is `inherit`.
 
-→ Identical outcome and identical `W200`. The prohibition is on the *propagated value*, not on the syntax that produced
-it.
+→ The same outcome for `api` and the same `W200`. The prohibition is on the *propagated value*, not on the syntax that
+produced it. This header has no caret, so `cli` and `ui` take `W199` and no release, as in vector 39a.
 
 **Vector 97b**: the deliberate exception. Same baselines; commit `release(core)%%rc>stable++1: x`.
 
@@ -5193,7 +5419,7 @@ unless stated otherwise.
 | 88  | `release(core): x` + `Release-As: 5.0.0`, computed `1.5.0`, **no configuration at all** | `E157`; `maxMajorJump` defaults to `1` and is enforced by default (§14.1); the pin exceeds the computed version by more than one major.                   |
 | 88c | the same with `maxMajorJump: null`                                                      | Accepted at `5.0.0`; the bound is the one default-enforced limit that may be disabled.                                                                    |
 | 88a | the same with `Release-As: 2.0.0`                                                       | Accepted; one major above the computed version is within the bound.                                                                                       |
-| 88b | `release(core): x` + `Release-As: 1.4.0`, computed `2.0.0`, `lenient: true`             | Accepted at `1.4.0`, `W159`; the lenient form of `E156` (§8.6).                                                                                           |
+| 88b | `release(core): x` + `Release-As: 1.5.0`, computed `2.0.0`, `lenient: true`             | Accepted at `1.5.0`, `W159`; the lenient form of `E156` (§8.6). The pin is above the baseline `1.4.2`, so `E153` does not arise.                          |
 | 89  | `feat(core)%latest: x`                                                                  | `E180`; `latest` is reserved (§11.2).                                                                                                                     |
 | 89a | `feat(core)%Beta: x`                                                                    | `E181`; channel names are lowercase.                                                                                                                      |
 | 90  | `feat(core): x` with a footer `X-Internal-Ticket: AB-1`                                 | Footer ignored, `W150`. Unknown keys never block (§17.3).                                                                                                  |
@@ -5319,12 +5545,13 @@ only the shared `fix`, so `applyBump(1.10.0, patch)` is `1.10.1`.
 → `target` is raised to `1.11.0`, the core of the group's line, and `b` releases **`1.11.0-rc.1`**. Without the floor
 the computed `1.10.1-rc.0` would raise `E195` against `b`'s own baseline `1.11.0-rc.0`.
 
-**Vector 142**: any rule, the graduation retry. Stable baselines all `1.10.0`; `C1` is `feat(d)%rc: start` and every
-member rides to `1.11.0-rc.0`; `C2` is `release(a,b,d)%rc>stable: graduate`, and only `a` published `1.11.0` before the
-run died. Re-run at the same `HEAD`.
+**Vector 142**: any rule, the graduation retry. Stable baselines all `1.10.0`; `C1` is `feat(d)%rc: start`, which
+takes `d` to `1.11.0-rc.0`, and `a` and `b` ride with it; `C2` is `release(a,b,d)%rc>stable: graduate`, and only `a`
+published `1.11.0` before the run died. Re-run at the same `HEAD`.
 
-→ **`b` and `d` release `1.11.0`.** Their own windows carry no bump at all, since the feature was `d`'s and `a`'s
-release already contains it, so §11.5 computes `1.10.0` for them and the floor raises it to the line. **No `E185`.**
+→ **`b` and `d` release `1.11.0`.** `d`'s own window still carries the feature, so §11.5 computes `1.11.0` for it
+directly. `b`'s window carries no bump at all, since the feature was `d`'s, so §11.5 computes `1.10.0` for it and the
+floor raises it to the line. **No `E185`.**
 
 **Vector 143**: any rule. `a` and `d` are on `1.11.5` on `stable`; `b` was tagged `1.11.3-rc.0` by hand, a patch above
 the group's line `1.11.0`; `C1` is `release(b)%rc` and `C2` is `release(b)%rc>stable`.
@@ -5487,8 +5714,8 @@ advertising compatibility they no longer have; with no caret at all nothing beyo
 `inherit` the dependents would take the default `patch`, which understates a removed interface. This is the case the
 conservative defaults are designed to make you write out.
 
-`^^inherit` and `^inherit+*` are the same directive. The doubled form is preferred in a header this dense: it is two
-characters shorter and keeps the depth idea attached to the propagation idea instead of trailing after it.
+`^^inherit` and `^inherit+*` are the same directive. The doubled form is preferred in a header this dense: it is one
+character shorter and keeps the depth idea attached to the propagation idea instead of trailing after it.
 
 ### D.3 Squash-merged pull request
 
@@ -5540,12 +5767,14 @@ From `core@1.4.2`, `cli@2.0.0`:
 
 Three things in that sequence are worth reading carefully.
 
-**Commit 1 needs `++1`, and would release `core` alone without it.** `%beta` puts `core` on the prerelease line; the
-caret reaches `cli`; and §9.3a then suppresses the bump, because a `cli` still on `stable` cannot resolve
-`core@1.5.0-beta.0`. `++1` moves `cli` onto the line in the same commit, and the suppression no longer applies. This is
-the boundary of the train and it is the one place a channel directive is needed on the way in. (`cli` is also named
-directly in the scope-set here, so it would have entered the line anyway; the `++1` is what carries any *other* direct
-consumer along, and is written for that reason.)
+**Commit 1 carries `++1` for the consumers it does not name.** Both packages of its scope-set take `%beta` and their
+own `minor` directly, so `core` and `cli` enter the line whatever else is written, and the caret never reaches `cli`,
+because a unit does not propagate to its own packages (§9.2). The caret and the `++1` concern every *other* direct
+consumer of the two. The caret reaches them, and §9.3a would then suppress the bump, because a consumer still on
+`stable` cannot resolve `core@1.5.0-beta.0`; `++1` moves them onto the line in the same commit, and the suppression no
+longer applies. This is the boundary of the train and it is the one place a channel directive is needed on the way in.
+Written as `feat(@acme/core)^%beta`, with `cli` unnamed and no `++1`, the commit would have released `core` alone
+(§11.7).
 
 **Commit 3 needs nothing but the caret.** `cli` is already on `beta`, so its channel comes from its own baseline (§11.1)
 and §9.3a admits the propagated bump because origin and target are on the same line. No `%%`, no `++`, no repetition of
@@ -5803,6 +6032,10 @@ them:
 
 Existing configurations of the second mode retain their established behavior.
 
+The optional execution profile (§28) works with all three history modes. Execution links connect worker nodes;
+fleet links connect repositories. Neither worker placement nor the run's orchestrator role changes repository
+discovery or makes a peer a separate control repository.
+
 The control repository of the second mode is where the fleet's configuration, its fleet-wide intent and its optional
 checkpoint evidence live. It is not the place releases come from, and nothing in this profile confines publication to
 it. Every package is built and published from its own path and is recorded by a tag in its owning repository (§27.7), a
@@ -5869,6 +6102,9 @@ packages in one repository so later packages observe that admitted transition; p
 retain their normal publication concurrency.
 Other Git commits or relevant ref mutations performed during build or hook commands are not admitted automatically:
 if they affect a later revalidation, the package fails with `E330` and requires a new plan.
+For §28, task transport commits MUST NOT become admitted native heads, intent or settlement evidence. Only
+validated release-file writes enter ordinary native recording. Isolated builds may overlap, while publication
+and recording retain the owner lane and input-revalidation rules (§§28.4–28.6).
 
 An implementation MAY carry an admitted exact source revision to nested commands through private, transient state for
 the current run. That state MUST be bound to the same control root, configuration, source identity, and run; it MUST
@@ -6067,6 +6303,9 @@ Source and control release commits are OPTIONAL exactly as their effective `comm
 MUST NOT force an empty commit, force a source commit merely because the profile is active, or require a control
 checkpoint. With commits disabled, tags point at the planned source heads and ordinary tag-only operation is valid.
 With a source commit enabled, it is created only when the configured release writes produced something to commit.
+Under §28, temporary task branches are never merged or tagged as release evidence. The same optional-commit
+and tag-only policies apply; artifact provenance binds the source and admitted release-file state actually used
+for the build (§28.4).
 
 When source commit and push are enabled, the engine MUST durably record the source release first. Only after the source
 branch/commit and tags are reachable from its configured remote may the control worktree advance that source's gitlink.
@@ -6124,7 +6363,8 @@ under the keys in §27.5. It SHOULD use bounded reachability and ancestry caches
 quadratic memory even when history is walked once. Equal SHA spellings across repositories MUST occupy distinct keys.
 
 With the notation of §13.11, input traversal is realistically `O(G + sum(Hq + Aq))` before distinct-boundary window
-work, and window reachability is `O(sum(Kq * (Hq + Aq)) + Iw)` for an indexed implementation. Parsing, scope
+work, and window reachability is `O(sum((Hq + Aq) * bw(mq)) + Iw)` with one marker pass per repository,
+or `O(sum(Kq * (Hq + Aq)) + Iw)` with a walk per boundary. Parsing, scope
 incidences, propagation, provenance, sorting, and output retain their separate `N`, `R`, `I`, `Z`, and `Oout` costs.
 This profile makes no globally linear end-to-end claim and permits no synthetic ancestry shortcut.
 
@@ -6243,6 +6483,19 @@ implementations MUST test that compatibility as part of conformance. An explicit
 composition for the invocation and is the standalone escape hatch: the stating repository releases alone, its
 fleet links are not walked, and no other repository is planned, locked, settled or recorded. The engine MUST report
 that the fleet was skipped, because a release commit written by such a run carries no cross-repository evidence.
+
+**CI entry points.** Any participating peer MAY be the entry repository for a CI release, including a star leaf
+or any node of a minimal tree. Implementations MUST NOT require a hub or any other distinguished peer as the
+exclusive entry point. Link topology determines discovery and evidence routes, not permission to initiate a
+release. A deployment MAY configure one CI entry point or several; repository-specific entry workflows MAY
+call a shared reusable workflow, and workflow definitions need not reside in the entry repository. Neither
+topology requires copying package manifests or other peers' package configuration into the entry repository.
+The entry checkout MUST satisfy the same link
+initialization, history, configuration and release requirements as any other invocation; choosing a different
+entry point does not waive those requirements.
+Under §28, repository entry points and execution-node roles are distinct: an explicit worker MUST refuse
+release initiation, including nested hooks, before acquiring locks or forwarding the request. The CI-starting
+orchestrator MUST acquire every participating repository's lock before planning and assigning tasks (§28.3).
 
 **Peer identity.** `repository` is a repository's own identity in its fleet. It is REQUIRED in this topology and is
 written as `[A-Za-z0-9._-]+`. `control` and its case variants remain reserved for a central control repository and MUST NOT
@@ -6370,6 +6623,8 @@ consumer's own before publication begins, which is what keeps two consumers with
 each other. An unsafe lock bypass stated in a configuration disables the lock of the repository stating it and no
 other, because one peer cannot decide another peer's safety; an environment kill switch is the invocation's and
 applies to every repository it releases. `W331` names the repositories releasing without a lock.
+This bypass does not authorize distributed release execution: §28.3 MUST refuse it and requires every
+participating repository to remain locked for the authorized effects.
 
 **`--since`.** `--since <revision>` names a revision of the entry repository. The engine projects it into one range
 per repository by following the same routes the boundary evidence uses, and evaluates each repository once. A
@@ -6466,3 +6721,407 @@ computation repairs.
 29. Consumers owned by `web` and by `api` have the same boundary `S0` in `sdk`. **One immutable window over `sdk` may
     serve both.** A window is keyed by the repository it ranges over and the boundary revision, not by the owner of
     the package that reads it; two boundaries that differ remain two windows.
+
+---
+
+## 28. Distributed task and release execution
+
+This is an **optional execution profile**, independent of the history-selection modes in §27. It is a
+specification contract, not a claim that dispat implements distributed execution. No message syntax changes,
+implemented speedup, or executed distributed conformance results are asserted here. Git is REQUIRED for the
+source/result transport defined by this profile; external VCS adapter support does not imply support for it.
+Omitting worker links preserves local execution. Implementations advertising this profile MUST satisfy all
+of its safety, output-transfer and conformance requirements, not only remote command dispatch.
+
+### 28.1 Scope and roles
+
+An execution node is a machine or runner executing the same release engine and
+configuration schema. It is distinct from a repository peer. One repository
+may have work on several nodes; one node may work on several repositories.
+
+Every node MUST support both roles. The default role is **orchestrator**; an
+explicit **worker** role MUST refuse release initiation, including indirect
+initiation from a delegated hook. A worker executes authorized tasks in an
+existing run and MUST NOT substitute a locally recomputed plan, acquire competing release
+ownership, dispatch to another pool, or independently finalize a release.
+An orchestrator-capable node MAY accept delegated tasks; for that assignment it
+has only worker authority. Role changes MUST NOT transfer a live run's ownership.
+
+The orchestrator-role node on which CI starts the release is the run's orchestrator. A CI release
+invoked on an explicit worker MUST fail before acquiring release locks or forwarding an initiation request.
+The orchestrator owns repository lock acquisition, the fixed planning input, task allocation, result admission, and
+release finalization. It MAY execute tasks locally under the same rules.
+There is one orchestrator per run, not a permanent leader of the repositories.
+
+Workers MAY be added to **every history mode**: single history (including a
+large monorepo), specified histories, or discovered histories. They MUST NOT
+require a control repository, a particular peer topology, or polyrepo activation.
+Worker endpoint links are execution links, not Git submodule/fleet links, and
+MUST NOT alter source discovery, repository identity or release scope.
+
+### 28.2 Configuration and concurrency
+
+The same configuration format and schema MUST serve both roles. The following keys belong to this proposed
+profile; they are **not current dispat CLI configuration**:
+
+| Key | Default | Contract |
+| --- | --- | --- |
+| `execution.role` | `orchestrator` | `orchestrator` or `worker`; governs release initiation on this node. |
+| `execution.concurrency` | `1` | Positive integer bounding simultaneous assigned command tasks on this node, including tasks from different runs. |
+| `execution.workers` | `[]` | Orchestrator's execution links, each with a unique nonempty node `name` and authenticated transport `endpoint`. |
+
+These are node-startup settings. A package, space, linked repository, or delegated policy snapshot MUST NOT
+change the local role, local capacity, or worker list when execution enters another checkout. A worker MUST
+have an empty worker list. An orchestrator receiving a delegated task MUST NOT use its own list for that task.
+Endpoint schemes, protocol framing and credential references are implementation-defined and MUST be documented
+in this same schema; secrets MUST NOT appear in endpoint URLs, receipts or logs. Node names identify authenticated
+execution endpoints, not repository peers. A node may serve both capabilities, but each assignment has exactly
+one authority scope.
+
+Prospective example, not runnable configuration for a published dispat version:
+
+```yaml
+execution:
+  role: orchestrator
+  concurrency: 2
+  workers:
+    - name: build-a
+      endpoint: https://build-a.example.invalid/ccme-execution
+    - name: build-b
+      endpoint: https://build-b.example.invalid/ccme-execution
+```
+
+The corresponding worker uses the same schema with `execution.role: worker`, its own concurrency limit and
+no worker links. Package configuration, commands and release policy remain the orchestrator's resolved input.
+Node settings select the role, execution concurrency and worker-node links. A worker needs no worker-specific release graph, package
+policy, version rules or workflow; it receives the run's resolved configuration.
+Transport credentials and node authentication are deployment prerequisites,
+not a second release-policy format.
+
+Worker concurrency is a positive local upper bound on simultaneous assigned
+tasks. Effective capacity is the intersection of that bound and the run's
+existing stage limits and resource exclusions. Existing build/publish limits
+MUST be respected across the whole run, not multiplied by the number of workers.
+Preparation, test, build and publish command tasks MUST consume node capacity, plus their applicable
+run-wide stage budgets. Transfer, recording and control work MUST have separately documented bounded capacity;
+recording still takes its owner's publication lane. An in-flight attempt retains its capacity reservation until
+completion or acknowledged cancellation, or until execution has been safely fenced. A timeout alone cannot free
+capacity for a possibly overlapping attempt. Shared
+workspace writes MUST serialize or use separate task worktrees.
+
+The orchestrator MUST validate the effective configuration, protocol/toolchain
+compatibility and output-transfer capability before dispatch. Worker-local
+settings MUST NOT override package policy, planned versions, commands or inputs.
+An empty worker list preserves local execution. Malformed links, an invalid
+role or nonpositive concurrency MUST be configuration errors. Unsupported protocol versions, target platforms or declared output sizes MUST fail preflight rather than
+silently dropping a worker or omitting required bytes. Implementations MUST document their task input/output
+schema, transfer limits and workspace integration policy; these are part of the shared configuration contract,
+not worker-specific copies of release policy.
+
+### 28.3 Lock, snapshot, plan, assign
+
+Before creating a write-capable run, the orchestrator MUST identify every
+participating repository, including any control repository, and acquire all
+release locks in one stable total order. It MUST verify ownership before
+planning or dispatch; failure releases acquired locks in reverse order and
+dispatches no write-capable task. Repository lock resource identities MUST be stable across CI entry points
+and endpoint aliases, so runs addressing the same repository compete for the same exclusion. Under the Git
+release-lock convention, every participant's lock is its own `dispat-release-lock`; one entry lock does not
+cover unlocked sources. It MUST revalidate discovery under those
+locks; a changed participant set requires releasing the partial acquisition and acquiring the complete set again
+in the stable order, not silent expansion. Discovery and compatibility inspection before locking MUST be
+read-only; hooks or task setup that can write run only after the complete locked snapshot is validated.
+Distributed release execution MUST refuse a configured or environment-based unsafe lock bypass, including
+the bypass described for local peer execution in §27.11. Read-only
+planning remains lock-free and does not dispatch side effects.
+
+Let `I` contain the fixed repository-qualified heads and complete relevant history, release records, graph,
+resolved semantic configuration and explicit release options, plus the verified withdrawal inventory and
+receipts required by §§13 and 26. The semantic release plan is the pure function `P = Plan(I)`, including
+both forward-release and applicable rollback projections. Node placement configuration is not semantic input:
+worker count, placement, completion order, wall-clock time, run IDs and transport branch names MUST NOT change
+`P`. A plan digest MUST use a documented canonical serialization of semantic input and plan content;
+transient execution identity MUST be bound separately. The cost obligations of §13.11 still apply to planning;
+parallel execution is not evidence that a planner satisfies them. Native records
+and peer settlement retain their narrowly defined admission under §27; they
+do not authorize replacing the original planning input with an arbitrary ref.
+
+The orchestrator derives a task DAG from `P`, including required preparation,
+tests, builds, transfers, publications and recording gates. A task can be placed
+only on a compatible node and only when its exact prerequisites are available.
+Independent ready tasks MAY run concurrently. The assignment schedule need not
+be deterministic; selected packages, versions, commands and dependency semantics
+MUST remain those of the same fixed plan.
+
+Shared manifest/lockfile reconciliation MUST be one explicit preparation task per affected input state,
+performed once before the affected builds fan out and producing one admitted prepared input snapshot.
+Workers MUST NOT each regenerate and race to merge a workspace-wide lockfile
+as an implicit part of otherwise independent package builds. A later required
+shared mutation creates a new dependency gate and invalidates affected outputs;
+it MUST NOT force all builds in the repository onto one node when their prepared
+inputs and output write sets allow independent execution.
+
+Each assignment MUST identify the run, plan digest, task, attempt, ownership
+generation, repository-qualified source object IDs, effective configuration and resolved command environment, toolchain/platform requirements, input receipts,
+permitted writes and outputs. Secret references are separate from logged or transported public metadata.
+Workers MUST authenticate the assigning orchestrator and the assignment's integrity; a matching digest alone
+is not proof of authority. Nested hooks and commands retain the assigned policy, package-root mapping and
+worker authority; they MUST NOT rediscover policy or source history from a transport checkout.
+Duplicate delivery MUST be recognized. Only one attempt may be authorized to
+perform a given external side effect; an uncertain previous attempt is reconciled
+before another is authorized. A task receipt is execution evidence, never a
+package release record.
+
+### 28.4 Git synchronization branches
+
+The orchestrator MUST provision isolated task worktrees and temporary branches
+named `worker-<date>-<random>`, with a collision-resistant random suffix and
+atomic creation under `refs/heads/`. The date SHOULD use UTC `YYYYMMDD`; the random suffix MUST provide at
+least 128 bits of cryptographic randomness. The date is a diagnostic label only. A branch is bound to one
+run, repository and task attempt; parallel attempts MUST NOT share a mutable
+branch. The manifest, rather than the branch name, identifies node and task.
+
+Workers synchronize declared source changes and result manifests through these
+branches. Each acknowledged checkpoint MUST identify an exact full object ID;
+consumers fetch that object and validate its manifest rather than following a
+moving branch tip. Ref updates and deletions MUST check the expected previous object ID and attempt ownership. Transport-only
+credentials MUST NOT authorize a worker to update native release branches, tags or fleet settlement refs.
+Acknowledged checkpoints MUST remain fetchable until all required consumers have retrieved and verified them.
+Where concurrency permits several tasks at once, use separate branches/worktrees
+and admit their results independently as their dependencies become ready.
+Concurrency one still supports the same protocol in sequence.
+
+Transport commits MUST NOT be treated as release intent, a pending-window
+boundary, a successful release, or a §27 native-head admission. They MUST NOT
+be merged wholesale into a release branch or made ancestors of release tags.
+The orchestrator validates declared changes against the task's exact base and
+write set, detects overlapping/conflicting writes, and admits only authorized
+release-file changes through the ordinary native release transaction. Build
+outputs remain transport data. Hooks needing to change release-relevant inputs
+beyond the admitted writes require a new plan under the existing rules.
+
+Artifact provenance MUST bind the exact source revision and admitted release-file state actually used
+for its build. The ordinary native record MUST identify that publication: tag-only recording retains the
+planned source head under §19.1, while an enabled native release commit follows §27.7. Neither policy is
+replaced by tagging a transport commit or requiring a source commit solely for distributed execution.
+Generated release-file digests remain execution provenance when ordinary tag-only policy does not commit them.
+
+Before authorizing publication, the orchestrator MUST compare the result's full effective input identity
+against the current admitted relevant input closure. A native head advance preserves a completed result only
+when its effective input state still matches; admitting a head is not permission to ignore changed source
+bytes. Integrating one task MUST NOT silently alter another task's inputs. Overlapping writes require explicit
+ordering, revalidation and rebuilding when necessary; a change outside permitted native transitions requires
+a new plan. Transport branches MUST remain outside the heads, release refs and gitlinks supplied to `Plan(I)`. This is not an automatic merge
+policy for arbitrary generated files.
+
+### 28.5 Dependent build outputs are first-class inputs
+
+**Source synchronization alone is insufficient.** A provider's Git revision or
+worker branch does not make its ignored/untracked `dist` files, generated
+types, assets or package bundle available to a consumer on another machine.
+A conforming implementation MUST transport the outputs needed by a local-output
+dependency, including declared ignored/generated files. It MUST NOT satisfy
+distributed execution merely by recloning sources and rebuilding the provider
+closure on every consumer node, or by pinning the entire connected JS graph
+to one worker.
+
+A successful build MUST emit a manifest binding its outputs to the run, plan,
+task and attempt, repository-qualified source revision, admitted release-file
+state, target package/version, toolchain and platform, and input/output digests.
+Required metadata includes relative paths, file types, modes and link targets
+where relevant. The transfer MUST preserve the package's required layout while
+rejecting paths or links escaping the destination. Consumers MUST verify the authenticated manifest, content integrity and compatibility before their stage
+becomes ready. Installation MUST be atomic at the task-input boundary: a task cannot observe a partial output
+set. A completed build publishes one admitted output set for its exact attempt, not a moving directory shared
+between consumers. Metadata size, file count, decompressed byte count and transfer time MUST have documented
+bounds. Undeclared or unverifiable required inputs prevent cache reuse; they MUST be declared and validated
+before an output can satisfy a task's prerequisite.
+Missing, stale, incomplete or incompatible outputs fail that prerequisite;
+they MUST NOT be silently substituted with registry contents or a new build
+under a different input.
+
+Required output bytes MUST be available through the temporary Git transport
+branch (for example a task result tree containing explicitly added outputs),
+or through immutable content-addressed bundles whose references and digests are
+in that branch. Such bundle transfer is a transient data service, not an
+additional authoritative release-state database. References alone are not a
+transfer: every receiving node MUST be able to retrieve and verify the bytes.
+If no bundle service is configured, Git transport MUST still support the
+declared outputs. Ordinary source checkout rules ignoring build output MUST
+NOT exclude it from the output manifest.
+
+On the receiving node the engine materializes the consumer's pinned source,
+applies its admitted release-file state, restores the provider outputs, and
+links/installs them according to the declared workspace integration. The
+integration MUST prevent an install lifecycle from rebuilding already supplied
+providers implicitly. A raw `node_modules` copy is neither required nor a
+portable default; native outputs require compatible platforms/toolchains.
+Task inputs MUST include all required build dependencies, including dependencies whose packages need no
+new release and build-only edges outside the release propagation kinds. The task graph MUST itself be acyclic;
+an unschedulable build cycle is an execution-configuration error, not a reason to change release intent or to
+ignore a required build dependency. Required preparation tasks do not create
+new release obligations or change `P`.
+
+For a local-output dependency where package `B` consumes provider `A` (package edge `B → A` in §2),
+readiness is the following **task precedence**, whose arrows denote happens-before rather than package edges:
+
+`build(A) -> export(A) -> verify/materialize(A at B's node) -> build(B)`.
+
+For a registry-availability edge, readiness still requires the provider's
+publication and all applicable recording gates; transferring local bytes MUST
+NOT replace that condition. Transfers to different ready consumers MAY overlap
+and identical immutable blobs SHOULD be reused. Implementations SHOULD retain
+incremental Git objects and verified outputs between assignments, but any cache MUST be dispensable and validated against the complete semantic input identity. Cross-run
+reuse preserves the original output manifest as provenance and requires a new admission receipt bound to the
+current run, plan and task attempt. An old run's receipt never grants current execution or publication authority.
+
+### 28.6 Publication, recording and recovery
+
+Build, test and publish commands MAY execute on workers. Repository ownership
+does not change: publication uses the owning package's checkout and policy.
+The orchestrator alone admits results and authorizes publication after all
+ordinary test, dependency, settlement and relevant-input checks. For this profile it serializes publication and recording within one owner, including a single-history
+monorepo, extending §27.2's owner lane to distributed execution; isolated builds
+within that owner may still run concurrently. Independent owners retain allowed
+publication concurrency. A worker MUST NOT independently move release branches,
+create release tags, settle peer links or finalize the fleet. The orchestrator
+performs those native transactions under the existing ownership/locking rules.
+
+The orchestrator MUST retain and verify lock ownership for the lifetime of all
+authorized effects. Assignments and results are bound to its ownership
+generation; stale results cannot authorize publication or native recording.
+After lock loss, no new effect may start. A timed-out worker is not proof its
+publisher stopped: cancellation must be acknowledged, a fencing mechanism must
+be enforced where the effect occurs, or the outcome must be reconciled before
+ownership is safely handed over. A generation field alone does not fence an
+arbitrary registry command. No automatic takeover may simply expire ownership
+and republish while the previous process can still act.
+
+If a worker fails before publication, retry eligible computation under a new
+attempt without discharging the package. If publication may have succeeded,
+use §19.4 identity reconciliation or a safely repeatable publisher before a
+new attempt; neither a missing reply nor a missing tag proves failure. Only the
+ordinary durable source release record discharges the release obligation.
+Preserve prior successes, block affected dependents, and continue unrelated
+safe work under the ordinary failure rules. Worker completion order does not
+alter the consumer-owned release boundaries.
+
+Fresh invocations reconstruct pending releases from authoritative repository records. Rollback requests and
+withdrawal receipts retain the separate rules of §26; task receipts MUST NOT discharge either rollback or
+ordinary release intent. Scheduling a rollback handler remotely does not relax its activation, identity,
+consumer-first order or reconciliation obligations. Verified task outputs MAY be reused when their full input identity
+still matches, but loss of a worker, branch, bundle or cache cannot erase
+pending work or successful release records. Synchronization state is not a
+second recovery ledger. Cleanup removes only owned temporary refs and bundles,
+after all consumers and uncertain operations are settled. Failed attempts and
+receipts retain diagnostic provenance. Cleanup failure is reported without
+rewriting successful package outcomes; borrowed nodes' unrelated data is never
+deleted. Repository locks are released only after authorized operations have quiesced or been safely fenced, then
+in reverse acquisition order. If that cannot be proved, the run MUST fail and retain or restore exclusion
+rather than report successful cleanup and permit overlapping effects. A changed ownership generation rejects
+stale receipts but is not, by itself, an external publication fence.
+
+### 28.7 Required example and performance boundary
+
+In one large JS repository, let the task-precedence notation `assets => {ui, docs} => app` mean that `ui` and `docs` consume
+`assets`, and `app` consumes both. The package edges of §2 point in the opposite direction. Worker A builds `assets` once and exports its required outputs.
+Workers B and C receive verified outputs and build `ui` and `docs` concurrently.
+The assigned app worker receives both output sets and builds `app`. Publication
+and source recording then obey the existing stage/owner constraints; an isolated
+registry-based image consumer still waits for image publication when required.
+Neither B nor C rebuilds `assets`, and the app worker does not rebuild their
+closures. This example MUST work without converting the monorepo to a polyrepo
+or publishing private intermediate JS packages solely for transport.
+
+The required gain is actual distribution and reuse of dependent builds with
+parallel ready branches, including large local JS workspaces. Git provides
+source/result transport; it does not itself schedule tasks, transfer omitted
+build products, guarantee compatible environments, or make effects exactly-once.
+A strictly serial dependency chain retains its critical path. Transfer and
+setup overhead can outweigh saved compute on small jobs, so universal speedup
+is not a semantic guarantee. Before making an implementation performance claim,
+compare the same pinned large-JS fixture locally and on multiple nodes, including cold/warm setup, per-node resources, transfer bytes/time, task execution counts, total work,
+wall time, repetitions and variability, and artifact equivalence. The fixture and environment MUST be
+identified with the measurements; skipped or failed trials MUST NOT be described as successful speedups. Require demonstrated wall-time benefit on a
+declared representative parallel fixture; do not call source-only dispatch or
+duplicate prerequisite compilation a distributed-build success.
+
+### 28.8 Conformance vectors (specification cases, not executed results)
+
+1. No role or worker list: local orchestrator behavior remains unchanged.
+2. A worker receives direct or nested release initiation: refuse before locks
+   or side effects. An orchestrator-capable node accepts a delegated task with
+   worker authority and does not initiate another run.
+3. Add workers independently to each of the three history modes: same fixed
+   inputs produce identical package/version plans and source owners.
+4. Two CI entry nodes target overlapping repository sets: at most one acquires
+   the complete lock set and dispatches effects; failure releases its partial
+   set. An unsafe lock bypass refuses distributed execution.
+5. Vary worker count, date, randomness and completion order: `Plan(I)` is
+   unchanged. Concurrency limits hold locally and across the run.
+6. Two ready tasks share a repository: use isolated worktrees and branches;
+   conflicting declared release-file writes are detected before admission.
+7. Branch tips move after dispatch or a stale receipt arrives: use only the
+   assigned full object ID and matching plan/attempt/ownership generation.
+8. Ignored JS outputs from `assets` reach `ui` and `docs` on separate workers:
+   both builds use those bytes, overlap when ready and never rebuild `assets`.
+   The app consumes both output sets without rebuilding either provider.
+9. An unselected provider is needed by a selected consumer: supply or prepare
+   its verified output without adding a package release to the semantic plan.
+10. An output is absent, corrupt, incompatible, or path-escaping: fail the
+    prerequisite before consumer execution; preserve its release obligation.
+11. A registry-based consumer has local provider bytes but no required
+    publication/record: remain blocked. Local transport does not weaken the edge.
+12. A worker's Git transport commit is fetched: no new intent, release baseline,
+    tag, or admitted native head arises. Temporary commits stay outside release
+    ancestry; only validated release-file changes enter native recording.
+13. A worker publishes and its reply is lost: reconcile artifact identity before
+    reauthorization; never infer a failed publish from the timeout.
+14. A worker disconnects or the orchestrator loses its lock with an in-flight
+    publisher: no new effects, no unsafe handover, no unfenced duplicate attempt.
+15. A source tag succeeds and later checkpoint/cleanup fails: preserve source
+    success and report the specific failure; no source republication for cleanup.
+16. Delete temporary branches/caches after a completed run and replan unchanged
+    inputs: release debt remains discharged by source records. Delete them after
+    a prepublication failure: unfinished work remains discoverable and rebuildable.
+17. Repeat the JS fixture without a separate bundle service: branch-backed
+    transport still carries every declared build output.
+18. Shared JS manifest/lockfile preparation happens once before fan-out; workers
+    consume the same admitted prepared state without competing lockfile writes.
+19. Independent builds in one repository overlap, but its publication/recording
+    transactions serialize; cross-owner publication remains dependency-safe.
+20. A cached output has matching semantic inputs but belongs to an earlier run: verify its original provenance
+    and issue a current admission receipt before reuse; the old receipt alone authorizes no task or effect.
+21. A worker pool accepts two runs: its total active command tasks remain within each node's local capacity,
+    and each run's stage budgets remain global. An unacknowledged timed-out attempt still consumes capacity.
+22. A build-only dependency outside propagation kinds supplies ignored output: transfer it before the consumer
+    builds. An execution-only cycle fails preflight without changing the semantic release plan.
+23. An authenticated assignment declares `worker` authority but its hook invokes release or writes a native
+    release ref: refuse the operation. A role or endpoint in a linked repository cannot elevate the assignment.
+24. A native record changes an in-flight task's relevant effective input bytes: withhold its publication and
+    rebuild or require a new plan as the input rules dictate. An unrelated admitted change alone does not
+    invalidate an otherwise matching result.
+25. A receiver sees a valid manifest but only part of its file set: remain unready until all required bytes
+    have been verified and installed. A digest, filename or branch reference without retrievable bytes fails.
+26. Enabled rollback work precedes ordinary publication and records only its §26 completion receipt; a worker
+    task receipt cannot replace it or discharge a release obligation.
+
+### 28.9 Operational diagnostics
+
+The following named categories are normative outcome classes, not allocations of new `E` or `W` numbers.
+Implementations MUST expose stable machine-readable categories and the applicable run, task, attempt and
+repository identities without credentials. Existing numbered diagnostics retain their exact §16 conditions;
+profile-specific failures MUST NOT be recast as malformed commit units or suppressed by parser leniency.
+
+| Category | Required handling |
+| --- | --- |
+| Execution configuration | Invalid role, concurrency, endpoint, protocol, task graph or transfer capability fails before dispatch. |
+| Execution authority | Worker initiation, unauthenticated assignment, stale ownership or unauthorized writes are refused before the affected operation. A duplicate receipt cannot create a second side effect. |
+| Input or output integrity | Missing, changed, incomplete, incompatible or escaping input/output data fails the affected prerequisite and blocks required consumers. Preserve unrelated successful work. |
+| Publication outcome unknown | A lost acknowledgement or unfenced in-flight publisher withholds reauthorization and unsafe lock handover until quiescence, effective fencing or identity reconciliation is proven. Report the run as incomplete and return nonzero. |
+| Native recording or lock failure | Apply §§19 and 27, preserve successful publication and fail the run; do not retag transport work or release unsafe exclusion. |
+| Transport cleanup | Report owned temporary refs or bundles that could not be removed. Their existence cannot erase a release record. Harmless retained transport data MAY be a warning; lost exclusion or unresolved effects MUST be an error. |
+
+The task/run summary MUST distinguish completed computation, admitted outputs, successful publication, durable
+native recording, blocked dependents and unknown external outcomes. A completed task is not synonymous with a
+released package. Diagnostic output order follows the semantic order of §17.2, independently of arrival order.

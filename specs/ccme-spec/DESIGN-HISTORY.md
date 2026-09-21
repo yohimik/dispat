@@ -19,3 +19,18 @@ Creating a source revision is distinct from writing an immutable release record.
 not adapter requests, and validation must account for native editor, hook and cleanup effects. This is an informative
 clarification, with no grammar, release-plan, adapter capability or full-engine conformance change. It does not claim
 that external adapter support or rollback has been implemented.
+
+
+## 2026-09-21: Distributed execution profile draft
+
+[Section 28](./SPEC.md#28-distributed-task-and-release-execution) defines an optional execution profile for single,
+specified and discovered Git histories. One orchestrator acquires every participating repository's lock before
+planning; workers execute identity-bound tasks under the same configuration schema without release-initiation
+authority. Shared manifest and lockfile preparation precedes parallel builds. Verified output bytes, including
+ignored JS build products, move between dependent tasks through temporary Git branches or referenced immutable
+bundles. Transport commits remain outside native release ancestry; ordinary source records preserve recovery.
+
+The profile specifies capacity limits, publication fencing and reconciliation, output admission and conformance
+cases. It is unimplemented and unmeasured: this draft does not establish a performance improvement, execute its
+conformance vectors, change the message grammar or lift the parser hold. Implementation and experimental
+validation require separate evidence. Version markers remain owned by the specification release process.
