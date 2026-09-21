@@ -86,17 +86,23 @@ const retryDelayMs = calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs });
 
 ### TSX components
 
-- After imports, start each component file with an `interface ComponentProps` that declares its props.
+- After imports, start each component file with two exported interfaces: `BaseComponentProps` declares every prop except `children`, and `ComponentProps extends BaseComponentProps` declares `children`. Export both interfaces from the component file.
 - Define components only as `const` arrow functions typed as `FC<ComponentProps>`. Import `FC` as a type from React.
-- Accept a `props` object and destructure it with `const` as the first statement in the component body, before hooks or other logic. Define default values for optional props in that destructuring declaration. Do not destructure component props in the function signature.
-- When a component accepts children, declare `children?: ReactNode` explicitly in `ComponentProps` and import `ReactNode` as a type. Omit the property when children are not supported.
-- Keep one component per file. Move additional components into their own files, each with its own `ComponentProps` interface.
+- Accept a `props` object and destructure it with `const` as the first statement in the component body, before reading context or rendering. Define default values for optional props in that destructuring declaration. Do not destructure component props in the function signature.
+- Keep UI components responsible only for rendering props and context values and wiring events to context actions. Do not put business logic, local state, or lifecycle hooks in rendering components: no `useState`, `useReducer`, `useEffect`, or `useLayoutEffect`, including through custom hooks that introduce state or effects.
+- Put all state, business logic, calculations, event handling, data fetching, subscriptions, and lifecycle management in the owning context and its provider. Rendering components may consume context through `useContext` or a context accessor hook; those accessors must only read the context. Context providers own the state and lifecycle hooks and expose the values and actions needed for rendering.
+- When a component accepts children, declare `children?: ReactNode` explicitly in `ComponentProps` and import `ReactNode` as a type. For components that do not support children, declare `children?: never`. Keep `children` out of `BaseComponentProps`.
+- Keep one component per file. Move additional components into their own files, each with its own exported `BaseComponentProps` and `ComponentProps` interfaces.
+- Use only named exports for components and their props; do not use default exports. Provide `index.ts` files with explicit ES module re-exports for components and `export type` re-exports for props. Keep index files free of side effects and initialization logic so bundlers can tree-shake unused exports. When an index exposes multiple components, alias their props with component-specific names to avoid collisions.
 
 ```tsx
 import type { FC, ReactNode } from 'react';
 
-interface ComponentProps {
+export interface BaseComponentProps {
   title: string;
+}
+
+export interface ComponentProps extends BaseComponentProps {
   children?: ReactNode;
 }
 
@@ -110,6 +116,23 @@ export const ReleaseSummary: FC<ComponentProps> = (props) => {
     </section>
   );
 };
+```
+
+The component folder's `index.ts` exposes the component and its props:
+
+```ts
+export { ReleaseSummary } from './ReleaseSummary';
+export type { BaseComponentProps, ComponentProps } from './ReleaseSummary';
+```
+
+An index exposing multiple components uses distinct prop names:
+
+```ts
+export { ReleaseSummary } from './ReleaseSummary';
+export type {
+  BaseComponentProps as ReleaseSummaryBaseProps,
+  ComponentProps as ReleaseSummaryProps,
+} from './ReleaseSummary';
 ```
 
 ### Shell and documentation
