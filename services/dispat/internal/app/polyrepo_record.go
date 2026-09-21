@@ -173,22 +173,11 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 }
 
 // lockBypass decides whether one repository releases without its remote lock,
-// and whether a configuration said so.
-//
-// An orchestrated fleet releases under one repository's policy: the control
-// configuration is the run's configuration, and its unsafeDisableLock speaks
-// for every source. A choreographed peer owns its policy as it owns everything
-// else, so the entry's setting speaks for the entry alone and one peer cannot
-// unlock another. The environment kill switch is the invocation's, and applies
-// to whatever that invocation releases.
-func (w *workspaceRecorder) lockBypass(r *repositoryRecord) (bypassed, byConfig bool) {
-	if r.repo.Config != nil && r.repo.Config.UnsafeDisableLock {
-		return true, true
-	}
-	if !w.app.workspace.IsLinked() && w.app.cfg.UnsafeDisableLock {
-		return true, true
-	}
-	return lockDisabledByEnv(), false
+// and whether a configuration said so. The rule is the run's rather than the
+// acquisition's, and is stated once in lockBypassOf: this run refuses to
+// dispatch work to other machines under exactly the bypass this reports.
+func (w *workspaceRecorder) lockBypass(r *repositoryRecord) (isBypassed, isByConfig bool) {
+	return w.app.lockBypassOf(r.repo)
 }
 
 // repositoryNames lists the participating repositories in lock order.

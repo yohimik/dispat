@@ -21,6 +21,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/app"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/install"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
@@ -1138,6 +1139,12 @@ func (r *runner) runConfigured() int {
 // the work and logs its own findings; the controller only maps the outcome
 // onto an exit code.
 func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath string, log zerolog.Logger) int {
+	// A process executing somebody else's task may not start a release or
+	// write a release record of its own, however it was invoked. This is the
+	// one point every such command passes.
+	if code, isRefused := r.refuseWorkerAuthority(log); isRefused {
+		return code
+	}
 	o := r.o
 	// The one selection every package-selecting command shares. Dir is --root
 	// as the user spelled it, where they stood, and not the resolved monorepo
@@ -1282,6 +1289,42 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 		}
 	}
 	return 0
+}
+
+// refuseWorkerAuthority refuses the commands a process holding worker
+// authority may not run, before the command does anything at all.
+//
+// A worker's task runs real build scripts, and those scripts run dispat: that
+// is the point of the helpers. What they may not do is start a second release
+// or write this release's records from inside a task the release authorized,
+// because either one would be a run competing with the run that assigned the
+// work. The refusal is the command line's rather than the release path's so
+// that it costs nothing to reach and covers every command word at once.
+func (r *runner) refuseWorkerAuthority(log zerolog.Logger) (int, bool) {
+	if !execution.IsWorkerAuthority(os.Environ()) || !isRefusedUnderWorkerAuthority(r.inv.cmd) {
+		return 0, false
+	}
+	logConfigError(log, execution.NewDiagnostic(execution.CodeAuthority, execution.CategoryAuthority,
+		"%s cannot run under worker authority: a task executes what its assignment authorized and records no release of its own",
+		r.inv.cmd)).Str("command", r.inv.cmd).Msg("refusing the command")
+	return 1, true
+}
+
+// isRefusedUnderWorkerAuthority reports the command words a task may not run.
+//
+// The refused list is the release itself, including the bare invocation that
+// is one, and every command that writes a native release ref or announces a
+// release: a tag, a release commit, a GitHub release, a changelog entry, a
+// version write, a computed configuration, a webhook event. Everything else
+// stays allowed, because a build script legitimately reads the plan, runs a
+// declared script, branches on a condition and edits manifests, and a worker
+// that could not do those could not run a build at all.
+func isRefusedUnderWorkerAuthority(command string) bool {
+	switch command {
+	case cmdRelease, cmdCommit, cmdGithub, cmdChangelog, cmdAutoversion, cmdCompute, cmdTrigger:
+		return true
+	}
+	return false
 }
 
 // sameDir reports whether two paths name the same folder, resolved through

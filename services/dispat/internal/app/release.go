@@ -70,6 +70,13 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		a.log.Error().Err(err).Msg("cannot start release")
 		return nil, err
 	}
+	// Who may start this release, and whether a run that delegates work could
+	// be coordinated at all. Both are refused before the first lock is pushed
+	// and report themselves; with no execution settings this returns nil
+	// without writing a line.
+	if err := a.checkExecutionEntry(); err != nil {
+		return nil, err
+	}
 	fleet, unlock, err := a.acquireReleaseLocks(ctx)
 	if err != nil {
 		return nil, err

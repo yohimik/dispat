@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
@@ -29,16 +30,24 @@ const codeLockDisabled = "W331"
 // identities. A single repository has no such identity, so it names itself by
 // the root the run was given, which is what a reader has to recognise it by.
 func warnLockDisabled(log zerolog.Logger, repositories []string, byConfig bool) {
+	log.Warn().Str("code", codeLockDisabled).Strs("repositories", repositories).
+		Strs("setting", lockBypassSettings(byConfig)).
+		Msg("UNSAFE: releasing without the release lock; a concurrent release of these repositories cannot be prevented")
+}
+
+// lockBypassSettings names the settings that switched the lock off, which is
+// the half of the bypass report that is the same wherever it is made: the
+// warning a bypassed release prints, and the refusal a run that would
+// dispatch work to other machines makes instead of printing it.
+func lockBypassSettings(isByConfig bool) []string {
 	var settings []string
-	if byConfig {
+	if isByConfig {
 		settings = append(settings, "unsafeDisableLock")
 	}
 	if lockDisabledByEnv() {
 		settings = append(settings, lockDisableEnv)
 	}
-	log.Warn().Str("code", codeLockDisabled).Strs("repositories", repositories).
-		Strs("setting", settings).
-		Msg("UNSAFE: releasing without the release lock; a concurrent release of these repositories cannot be prevented")
+	return settings
 }
 
 // lockDisableEnv turns the release lock off for one invocation, as the
@@ -56,6 +65,29 @@ const lockDisableEnv = "DISPAT_UNSAFE_DISABLE_LOCK"
 // through at all), the variable states one invocation's.
 func (a *App) lockDisabled() bool {
 	return a.cfg.UnsafeDisableLock || lockDisabledByEnv()
+}
+
+// lockBypassOf decides whether one repository of a composed workspace
+// releases without its remote lock, and whether a configuration said so.
+//
+// An orchestrated fleet releases under one repository's policy: the control
+// configuration is the run's configuration, and its unsafeDisableLock speaks
+// for every source. A choreographed peer owns its policy as it owns
+// everything else, so the entry's setting speaks for the entry alone and one
+// peer cannot unlock another. The environment kill switch is the
+// invocation's, and applies to whatever that invocation releases.
+//
+// It is an App method rather than the lock acquisition's own so that the
+// question can be asked before any lock is taken, which is where a run that
+// delegates work has to ask it.
+func (a *App) lockBypassOf(repository *config.Repository) (isBypassed, isByConfig bool) {
+	if repository.Config != nil && repository.Config.UnsafeDisableLock {
+		return true, true
+	}
+	if !a.workspace.IsLinked() && a.cfg.UnsafeDisableLock {
+		return true, true
+	}
+	return lockDisabledByEnv(), false
 }
 
 // lockDisabledByEnv reads the environment kill switch. Only a value that
