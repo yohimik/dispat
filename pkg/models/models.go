@@ -204,6 +204,14 @@ type File struct {
 	// field is optional and defaults to the specification value.
 	Parser *ParserConfig `json:"parser,omitempty"`
 
+	// Execution holds this node's own role, capacity and worker links; see
+	// ExecutionConfig. It is a node-startup setting rather than release
+	// policy, so it is read from the entry configuration alone and no space,
+	// package or folder file may state it. Unlike the other optional objects
+	// it is never filled in after decoding: nil is what keeps a repository
+	// that has never heard of worker nodes on exactly the path it was on.
+	Execution *ExecutionConfig `json:"execution,omitempty"`
+
 	// SourceFiles are the files this configuration was read from: the config
 	// file itself, followed by every file a `$ref` in it named, in the order
 	// they were read. Populated by the loader, so that a configuration split
