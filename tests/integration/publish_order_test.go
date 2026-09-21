@@ -142,6 +142,45 @@ func TestPublishOrderBlocksAConsumerBehindAFailedProviderItDoesNotNameDirectly(t
 			"a fresh own bump proceeds under a relation that does not block")
 		assert.Equal(t, 1, r.TagCount("app@"), "tags: %v", r.TagList())
 	})
+
+	t.Run("a consumer whose declared provider published proceeds", func(t *testing.T) {
+		// The other side of the same decision, and the reason the reached
+		// providers are kept out of it: `app` carries no work of its own and is
+		// in the plan only because both providers propagated to it. One of them
+		// published, which is a version `app` really does pick up, so the other
+		// one's failure does not withhold it.
+		r := harness.New(t)
+		cfg := harness.BaseFile(3)
+		cfg.Scripts = map[string]models.Script{
+			"build":        {echoBuild},
+			"publish":      {"echo publishing"},
+			"fail-publish": {"exit 1"},
+		}
+		cfg.Spaces = map[string]models.SpaceConfig{
+			"libs": {Path: models.PathList{"packages/libs"},
+				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
+			"broken": {Path: models.PathList{"packages/broken"},
+				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"fail-publish"}}},
+			"apps": {Path: models.PathList{"packages/apps"},
+				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
+		}
+		cfg.Dependencies = []models.DependencyConfig{
+			{Consumer: "app", Provider: "core"},
+			{Consumer: "app", Provider: "lib"},
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages/libs", "core")
+		r.SeedPackage("packages/broken", "lib")
+		r.SeedPackage("packages/apps", "app")
+		r.Commit("feat(core,lib)^: both providers reach the application")
+
+		res := r.Release()
+		require.Equal(t, 1, res.Code, "the failing provider fails the run\nstdout:\n%s", res.Stdout)
+		assert.False(t, harness.IsCodePresentForPackage(res.Events, "W194", "app"),
+			"a provider that published is a reason to release: %s", res.Stdout)
+		assert.Equal(t, 1, r.TagCount("app@"), "tags: %v", r.TagList())
+		assert.Zerof(t, r.TagCount("lib@"), "the failed provider published nothing; tags: %v", r.TagList())
+	})
 }
 
 // publishOrderBlockedBy reads the `blockedBy` field of one package's summary
