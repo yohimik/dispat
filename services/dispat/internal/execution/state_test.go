@@ -61,6 +61,46 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, release())
 	})
+
+	t.Run("a lock its owner has created and not yet written is waited for", func(t *testing.T) {
+		// The owner creates the file and writes its id in two steps. A second
+		// process arriving between them used to read the empty file as stale
+		// and remove a live owner's claim.
+		lock := filepath.Join(state.Dir, stateLockFile)
+		require.NoError(t, os.WriteFile(lock, nil, 0o644))
+		written := make(chan error, 1)
+		go func() {
+			time.Sleep(10 * stateLockWritePoll)
+			written <- os.WriteFile(lock, []byte(strconv.Itoa(os.Getpid())), 0o644)
+		}()
+
+		_, _, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
+
+		require.NoError(t, <-written)
+		require.Error(t, err, "the owner was starting, not gone")
+		assert.Contains(t, err.Error(), strconv.Itoa(os.Getpid()))
+		require.NoError(t, os.Remove(lock))
+	})
+
+	leftovers := map[string]struct {
+		content string
+	}{
+		"a lock whose writer died before writing is taken over after the grace": {content: ""},
+		"content that is no process id names nobody":                            {content: "not-a-pid"},
+		"a negative id is a process group, not an owner":                        {content: "-1"},
+		"zero is this process group, not an owner":                              {content: "0"},
+	}
+	for name, leftover := range leftovers {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, os.WriteFile(filepath.Join(state.Dir, stateLockFile),
+				[]byte(leftover.content), 0o644))
+
+			_, release, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
+
+			require.NoError(t, err)
+			require.NoError(t, release())
+		})
+	}
 }
 
 // TestNodeStateKeepsOneCachePerEndpoint: a node serving two mailboxes keeps

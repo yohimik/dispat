@@ -36,6 +36,15 @@ const (
 	stateLockFile = "worker.lock"
 )
 
+// A lock file may stay empty this long before its writer is taken for dead,
+// polled at the second interval. The grace is orders of magnitude longer than
+// the gap it covers (one write after one open) and short enough that a node
+// restarted over such a leftover starts within a second.
+const (
+	stateLockWriteGrace = time.Second
+	stateLockWritePoll  = 10 * time.Millisecond
+)
+
 // NodeState is one serving node's own folder: where its object cache lives,
 // where the record of answered work is kept, and the lock that says this
 // process owns both.
@@ -122,18 +131,57 @@ func claimNodeLock(path string) (int, error) {
 	if !os.IsExist(err) {
 		return 0, fmt.Errorf("execution: opening the worker state lock %s: %w", path, err)
 	}
-	held, err := os.ReadFile(path)
+	owner, err := readNodeLockOwner(path)
 	if err != nil {
 		return 0, fmt.Errorf("execution: reading the worker state lock %s: %w", path, err)
 	}
-	owner, err := strconv.Atoi(strings.TrimSpace(string(held)))
-	if err == nil && IsProcessRunning(owner) {
+	if owner != 0 && IsProcessRunning(owner) {
 		return owner, nil
 	}
 	if err := os.Remove(path); err != nil {
 		return 0, fmt.Errorf("execution: taking over the worker state lock %s: %w", path, err)
 	}
 	return claimNodeLockAfterTakeover(path)
+}
+
+// readNodeLockOwner answers the process id a lock names, and zero when it
+// names nobody: content that is no process id, or a file that stayed empty
+// past the grace.
+//
+// The wait is what keeps a live owner's claim. Creating the lock and writing
+// the process id into it are two operations, so a second process can open the
+// file in the instant between them; reading that instant as a stale lock would
+// remove the claim of a process that is starting up and leave two processes
+// serving one folder, each holding half the record of answered work. A file
+// that is still empty after the grace belongs to a writer that died between
+// the two steps, and is taken over like any other stale lock.
+func readNodeLockOwner(path string) (int, error) {
+	deadline := time.Now().Add(stateLockWriteGrace)
+	for {
+		held, err := os.ReadFile(path)
+		if err != nil {
+			return 0, err
+		}
+		content := strings.TrimSpace(string(held))
+		if content != "" {
+			return parseNodeLockOwner(content), nil
+		}
+		if !time.Now().Before(deadline) {
+			return 0, nil
+		}
+		time.Sleep(stateLockWritePoll)
+	}
+}
+
+// parseNodeLockOwner reads a lock's content as a process id. Anything else
+// names nobody, which makes the lock stale rather than an error: the file is
+// this engine's own, and content it never writes is a leftover to replace.
+func parseNodeLockOwner(content string) int {
+	owner, err := strconv.Atoi(content)
+	if err != nil || owner < 0 {
+		return 0
+	}
+	return owner
 }
 
 // claimNodeLockAfterTakeover is the second and last attempt, after a stale
