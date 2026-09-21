@@ -203,7 +203,7 @@ func formatRemoteFailure(kind taskKind, part string) string {
 	case PartInputs:
 		return kind.String() + " inputs could not be installed"
 	case PartOutputs:
-		return kind.String() + " outputs could not be captured"
+		return kind.String() + " outputs could not be carried"
 	default:
 		return "remote " + kind.String() + " failed"
 	}

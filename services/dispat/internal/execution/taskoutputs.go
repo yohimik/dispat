@@ -166,10 +166,41 @@ func (w *Worker) captureTaskOutputs(ctx context.Context, assignment Assignment, 
 		outcome.reason = OutputFaultReason(err)
 		return outcome
 	}
+	if err := checkManifestSize(manifest, assignment.Limits); err != nil {
+		log.Warn().Err(err).Str("reason", string(ReasonManifestOversize)).
+			Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
+			Msg("the task's declared outputs could not be described within the run's ceiling")
+		outcome.status, outcome.failedPart = StatusFailed, release.PartOutputs
+		outcome.reason = ReasonManifestOversize
+		return outcome
+	}
 	log.Debug().Int("files", manifest.Files).Int64("bytes", manifest.Bytes).
 		Str("outputTree", manifest.OutputTree).Msg("outputs captured")
 	outcome.outputs = manifest
 	return outcome
+}
+
+// checkManifestSize refuses a description too large for the ceiling the run
+// holds it to, on the node that wrote it.
+//
+// Here rather than only at the reader, because the reader's refusal would be a
+// document it could not read at all: a node that reported an oversized
+// manifest would look exactly like a node that never answered, and the run
+// would wait out the task deadline to find out. Refusing it where it is
+// produced turns that into one sentence naming the ceiling.
+func checkManifestSize(manifest *OutputManifest, limits TransferLimits) error {
+	if limits.MaxManifestBytes <= 0 {
+		return nil
+	}
+	document, err := json.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("execution: writing the output manifest: %w", err)
+	}
+	if int64(len(document)) <= limits.MaxManifestBytes {
+		return nil
+	}
+	return fmt.Errorf("execution: the manifest of %d files is %d bytes and the run allows %d: %w",
+		manifest.Files, len(document), limits.MaxManifestBytes, refuseOutputs(ReasonManifestOversize))
 }
 
 // formatManifestRepositories is the prepared input states a build consumed, as
