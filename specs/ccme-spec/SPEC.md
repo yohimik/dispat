@@ -6385,8 +6385,9 @@ free of deadlock. One that fails instead, releasing what it took, cannot deadloc
 for progress: the lock a run stopped at sorts after every lock it held, so among contending runs the chain of who
 stopped whom never closes, and one of them acquires its whole set. The guarantee reaches only runs that spell the
 contended identities alike. Two control repositories that name one source differently may order it differently, and
-both runs can then fail; that is lost progress, never lost exclusion, because each repository's lock is still one lock. Per-worktree mutation locks cover only the complete native Git
-transaction that reads, commits, tags, pushes, or checkpoints the affected repositories. Hooks and arbitrary scripts
+both runs can then fail; that is lost progress, never lost exclusion, because each repository's lock is still one lock.
+Per-worktree mutation locks cover only the complete native Git transaction that reads, commits, tags, pushes, or
+checkpoints the affected repositories. Hooks and arbitrary scripts
 run outside those mutation locks; their changes remain subject to the fixed-input checks of §27.2.
 
 No rollback is inferred after a partial publish. Record every success that can still be recorded, stop dependent work,
@@ -6441,8 +6442,9 @@ and with at most `Y` when it reads one repository. Both topologies of §27.11 us
 and every settlement at two commits, while another tree can reach `Q - 1` of each. A minimal proposal that joins group
 centres (§27.11) has the least `Y` any proposal keeping the existing links can have. For the groups an engine can see,
 one linked group and unlinked identities, that is the group's own longest route `d`, against `d + 1` when an identity
-is linked to an end of that route; between two linked groups the difference can reach the sum of their radii. A pin that already records the
-revision to settle costs no commit, so consecutive packages of one repository that read unchanged peers settle once.
+is linked to an end of that route; between two linked groups the difference can reach the sum of their radii. A pin
+that already records the revision to settle costs no commit, so consecutive packages of one repository that read
+unchanged peers settle once.
 
 Publication revalidation has a separate output-sensitive cost. If repository `q` participates in `Jq` fleet or
 package checks and its relevant tag snapshot contains `Tq` refs, a full-ref implementation performs
@@ -6677,9 +6679,9 @@ converge: it reads what each repository already records, does nothing where thos
 remote does not hold yet. Nothing is deleted or rewritten to make a settlement look atomic.
 
 **Locks.** The fleet lock of §27.7 covers every participating peer. The order is the participants' identities sorted
-byte-wise by name, with no reserved position for any of them, and the locks are released in reverse. The settlement of one
-package takes the publish lanes of every repository on its route in that same name order and gives back all but the
-consumer's own before publication begins, which is what keeps two consumers with overlapping routes from waiting on
+byte-wise by name, with no reserved position for any of them, and the locks are released in reverse. The settlement of
+one package takes the publish lanes of every repository on its route in that same name order and gives back all but
+the consumer's own before publication begins, which is what keeps two consumers with overlapping routes from waiting on
 each other. An unsafe lock bypass stated in a configuration disables the lock of the repository stating it and no
 other, because one peer cannot decide another peer's safety; an environment kill switch is the invocation's and
 applies to every repository it releases. `W331` names the repositories releasing without a lock.
@@ -7015,8 +7017,8 @@ against the current admitted relevant input closure. A native head advance prese
 when its effective input state still matches; admitting a head is not permission to ignore changed source
 bytes. Integrating one task MUST NOT silently alter another task's inputs. Overlapping writes require explicit
 ordering, revalidation and rebuilding when necessary; a change outside permitted native transitions requires
-a new plan. Transport branches MUST remain outside the heads, release refs and gitlinks supplied to `Plan(input)`. This is not an automatic merge
-policy for arbitrary generated files.
+a new plan. Transport branches MUST remain outside the heads, release refs and gitlinks supplied to `Plan(input)`.
+This is not an automatic merge policy for arbitrary generated files.
 
 ### 28.5 Dependent build outputs are first-class inputs
 
