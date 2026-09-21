@@ -412,6 +412,7 @@ tests/integration/
   execution_config_test.go  goal 57 (the `execution` key: local release unchanged, and every refusal)
   execution_outputs_config_test.go  goal 57 (`buildOutputs` and `buildPlatforms`: the ladder, the shapes, one owner)
   execution_authority_test.go  goal 57 (who may start a release, and what a delegating run may not start with)
+  execution_digest_test.go  goal 57 (the plan a distributed run fixes, and what may not change it)
 
   configuration
   config_test.go            goal 10
@@ -652,7 +653,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -674,6 +675,8 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionRefusesUnsafeLockBypass` | With worker links configured, the environment kill switch, a configured `unsafeDisableLock` and a linked peer that states one for itself are each refused with E225 and the `execution-configuration` class, naming the repositories and the setting, before any lock push and with no branch left in the mailbox. With an empty worker list the same bypass is the W331 warning it always was and the release completes. |
 | `TestExecutionMissingSecretRefusesDistributedRelease` | A distributed run whose `secretEnv` variable is unset or empty is refused with E225 naming the variable rather than reading it; with the variable set the same configuration is not refused, releases and gives its lock back. |
 | `TestExecutionLinkedPeerExecutionKeysAreIgnored` | An imported source of a control repository and a peer of a linked fleet may each state `execution` of their own: the entry's release writes exactly the tags it writes without them, and one debug line per such repository says whose settings were ignored. |
+| `TestExecutionPlanDigestIgnoresPlacementAndTime` | A distributed run names the plan it fixed in one `plan fixed` line, and that name follows what is released rather than how the release is placed: one worker link, three differently named links in another order at another capacity, a second checkout at another path and a second run a second later all name the same plan, while a new commit, a changed build command and a changed `buildOutputs` each name a different one. Read through `dispat status`, which needs no worker and no secret. |
+| `TestExecutionPlanIsIndependentOfWorkers` | Configuring worker links adds the one line naming the fixed plan and changes nothing else a reader sees: the diagnostics, the graph and the summary of `dispat status` are identical with and without them, and a repository with no links computes no digest at all. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
 
