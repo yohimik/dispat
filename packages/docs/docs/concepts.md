@@ -180,6 +180,10 @@ declares itself would. A package with no bump this run is the commonest shape an
 gap in the chain: the consumer still resolves what lies behind it at install time. The `blockedBy` field of a skipped
 package names the provider that actually failed rather than whatever stands between them.
 
+Such a provider orders and blocks, and that is all. The release reason a consumer may carry is still its own commits or
+a provider it declares that published, because those are the versions it picks up: a publication on the far side of a
+package with nothing to release is no substitute for a declared provider that failed.
+
 A consumer that proceeds on its own reason runs its pipeline normally, with two adjustments. First, failed and skipped
 providers are filtered out of the `DISPAT_UPDATED_*` variables. Second, if it had providers to pick up and none
 survive, the version script does not execute at all.
