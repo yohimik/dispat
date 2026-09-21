@@ -8,9 +8,10 @@ import (
 )
 
 // logError writes one failure with whatever names it carries for itself: the
-// numbered code a dispat log has always printed, and, for the failures of the
-// distributed execution profile, the outcome class a machine switches on. An
-// error carrying neither is logged exactly as it always was.
+// numbered code a dispat log has always printed, the outcome class a machine
+// switches on for the failures of the distributed execution profile, and the
+// run, node, task and attempt when the failure happened to one of them. An
+// error carrying none of it is logged exactly as it always was.
 func (a *App) logError(err error) *zerolog.Event {
 	event := a.log.Error().Err(err)
 	if code := config.DiagnosticCode(err); code != "" {
@@ -19,5 +20,5 @@ func (a *App) logError(err error) *zerolog.Event {
 	if category := execution.DiagnosticCategory(err); category != "" {
 		event.Str("category", category)
 	}
-	return event
+	return execution.AttachIdentity(event, err)
 }

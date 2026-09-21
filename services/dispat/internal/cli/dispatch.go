@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
@@ -704,6 +705,43 @@ func (r *runner) runDiagnostics() int {
 	return 0
 }
 
+// runWorker performs `dispat worker`: it loads the node's configuration and
+// serves until the process is signalled or the node goes idle.
+//
+// The configuration is loaded as a node's rather than as a release's, so a
+// file holding an execution object and nothing else is a complete one. What
+// a serving node needs from it is validated by the app, which reports every
+// missing setting by name.
+//
+// Both ways of stopping exit 0. A release that was interrupted exits 1
+// because it left work undone; a serving command that was asked to stop has
+// done exactly what it was asked, and a CI job that starts a node beside a
+// release must not fail because the node it started ended cleanly.
+func (r *runner) runWorker(cfgPath, root string) int {
+	cfg, err := config.LoadNode(cfgPath, r.fs)
+	if err != nil {
+		logConfigError(r.boot, err).Msg("invalid configuration")
+		return 1
+	}
+	log := newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout)
+	// The same refusal every other command gets, reached here because a
+	// serving node never travels through dispatch: a process executing
+	// somebody else's task may not start serving work of its own.
+	if code, isRefused := r.refuseWorkerAuthority(log); isRefused {
+		return code
+	}
+	ctx, stop := signalCtx()
+	defer stop()
+	if err := app.New(root, cfg, log).ServeTasks(ctx, app.WorkerOptions{
+		StateDir:    *r.o.workerStateDir,
+		IdleTimeout: time.Duration(*r.o.workerIdleTimeout) * time.Second,
+		Version:     selfupdate.Describe(Version).Version,
+	}); err != nil {
+		return 1
+	}
+	return 0
+}
+
 func (r *runner) runInit() int {
 	name, err := app.InitConfig(*r.o.root, *r.o.initFormat)
 	if err != nil {
@@ -939,6 +977,13 @@ func (r *runner) runConfigured() int {
 		}
 		r.boot.Error().Err(err).Msg("config file not found")
 		return 1
+	}
+	if r.inv.cmd == cmdWorker {
+		// A serving node reads the node-startup settings of this file and
+		// nothing else: it plans nothing, so it composes no workspace, needs
+		// no package and needs no git repository at the root. It stops here
+		// for that reason and not as an optimisation.
+		return r.runWorker(cfgPath, resolvedRoot)
 	}
 	cfg, err := config.LoadControl(cfgPath, r.fs, len(*r.o.configs) > 0)
 	if err != nil {
@@ -1315,13 +1360,16 @@ func (r *runner) refuseWorkerAuthority(log zerolog.Logger) (int, bool) {
 // The refused list is the release itself, including the bare invocation that
 // is one, and every command that writes a native release ref or announces a
 // release: a tag, a release commit, a GitHub release, a changelog entry, a
-// version write, a computed configuration, a webhook event. Everything else
-// stays allowed, because a build script legitimately reads the plan, runs a
-// declared script, branches on a condition and edits manifests, and a worker
-// that could not do those could not run a build at all.
+// version write, a computed configuration, a webhook event. Serving is
+// refused for a reason of its own: a task that started a node serving the
+// same mailbox would give one node two processes racing over what it has
+// already answered. Everything else stays allowed, because a build script
+// legitimately reads the plan, runs a declared script, branches on a
+// condition and edits manifests, and a worker that could not do those could
+// not run a build at all.
 func isRefusedUnderWorkerAuthority(command string) bool {
 	switch command {
-	case cmdRelease, cmdCommit, cmdGithub, cmdChangelog, cmdAutoversion, cmdCompute, cmdTrigger:
+	case cmdRelease, cmdCommit, cmdGithub, cmdChangelog, cmdAutoversion, cmdCompute, cmdTrigger, cmdWorker:
 		return true
 	}
 	return false

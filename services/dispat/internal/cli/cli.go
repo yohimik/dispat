@@ -32,6 +32,11 @@ const (
 	cmdPreview     = "preview"     // print one package's pending release notes
 	cmdCompute     = "compute"     // derive the graph and the baselines from manifests
 	cmdDiagnostics = "diagnostics" // diagnose one commit message, without repository discovery
+	// cmdWorker serves the tasks an orchestrator addressed to this node. It
+	// is the one command that starts nothing and finishes nothing: it reads
+	// the node-startup settings of the config file, so it needs neither
+	// packages nor a git repository, and it never plans.
+	cmdWorker = "worker"
 
 	// The shell helpers, which run one script rather than sweeping a
 	// selection: a condition picks the script for one, the configuration
@@ -517,7 +522,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 	}
 	inv.args = forwarded
 	switch inv.cmd {
-	case cmdRelease, cmdStatus, cmdInit, cmdCompute, cmdSelfUpdate:
+	case cmdRelease, cmdStatus, cmdInit, cmdCompute, cmdSelfUpdate, cmdWorker:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			return inv, true

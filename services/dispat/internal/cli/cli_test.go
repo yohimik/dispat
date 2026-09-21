@@ -375,14 +375,17 @@ func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
 		cmdGithub:       {"github"},
 		cmdTrigger:      {"trigger", "deployed"},
 		cmdCompute:      {"compute"},
-		cmdIf:           {"if", "CI", "--then", "true"},
-		cmdFor:          {"for", "--do", "true"},
-		cmdExec:         {"exec", "build"},
-		cmdSelfUpdate:   {"self-update", "--api-url", srv.URL},
-		cmdInstall:      {"install", "acme/tool", "--api-url", srv.URL},
-		cmdScanner:      {"scanner"},
-		cmdWriter:       {"writer", absent, "--set-version", "1.0.0"},
-		cmdReplacer:     {"replacer", absent, "--replace", "a=>b"},
+		// The serving command stops at the missing config file of this empty
+		// folder, well before it would poll anything.
+		cmdWorker:     {"worker"},
+		cmdIf:         {"if", "CI", "--then", "true"},
+		cmdFor:        {"for", "--do", "true"},
+		cmdExec:       {"exec", "build"},
+		cmdSelfUpdate: {"self-update", "--api-url", srv.URL},
+		cmdInstall:    {"install", "acme/tool", "--api-url", srv.URL},
+		cmdScanner:    {"scanner"},
+		cmdWriter:     {"writer", absent, "--set-version", "1.0.0"},
+		cmdReplacer:   {"replacer", absent, "--replace", "a=>b"},
 	}
 	// The values a flag has to be given to parse, or to be validated rather
 	// than refused for its own reasons. Everything else takes a placeholder.
@@ -402,6 +405,9 @@ func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
 		"set":         "core=1.0.0",
 		"link":        "core=../core",
 		"replace":     "a=>b",
+		// Seconds, and a folder the invocation never gets far enough to use.
+		"idle-timeout": "1",
+		"state-dir":    root,
 	}
 
 	master := pflag.NewFlagSet("dispat", pflag.ContinueOnError)

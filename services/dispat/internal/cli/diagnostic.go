@@ -19,5 +19,5 @@ func logConfigError(log zerolog.Logger, err error) *zerolog.Event {
 	if category := execution.DiagnosticCategory(err); category != "" {
 		event.Str("category", category)
 	}
-	return event
+	return execution.AttachIdentity(event, err)
 }

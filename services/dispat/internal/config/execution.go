@@ -22,6 +22,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/spf13/pflag"
+
 	lib "github.com/yohimik/dispat/pkg/config"
 	public "github.com/yohimik/dispat/pkg/models"
 
@@ -38,6 +40,19 @@ type (
 	ExecutionTimeoutsConfig = public.ExecutionTimeoutsConfig
 	ExecutionTransferConfig = public.ExecutionTransferConfig
 )
+
+// LoadNode reads a configuration as a serving node's rather than as a
+// release's.
+//
+// The difference is one rule: a file that declares no space and no package is
+// complete here. A node serving tasks is told what to do by the assignments
+// it receives, so a machine that only ever serves has nothing to declare
+// beyond what it is, and refusing its file for holding no packages would be
+// refusing it for being exactly what it is. Everything else about the load is
+// the same, the `execution` object's own validation included.
+func LoadNode(path string, flags *pflag.FlagSet) (*File, error) {
+	return load(path, flags, true)
+}
 
 // DiagnosticExecution reports a configuration no distributed run could be
 // executed under. That is an `execution` object with an unknown role, a

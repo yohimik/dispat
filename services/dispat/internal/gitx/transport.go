@@ -338,6 +338,34 @@ func (c *LocalGitx) ResolveFetchedCommit(ctx context.Context, localRef, wantOID 
 		wantOID, maxDepth, localRef, ErrCommitNotOnRef)
 }
 
+// InitBareStore makes this handle's folder a bare repository, and leaves one
+// that is already there as it is.
+//
+// It is what a serving node opens its object cache with. The cache holds
+// nothing but fetched coordination objects, so it is dispensable by design: a
+// node whose cache was deleted, or never existed, creates it again and pays
+// one full fetch, which is why this is safe to call on every recovery rather
+// than only once. git init is idempotent, so no caller has to ask first
+// whether the folder is already a repository.
+func (c *LocalGitx) InitBareStore(ctx context.Context) error {
+	if _, err := c.run(ctx, "init", "--bare", "--quiet"); err != nil {
+		return fmt.Errorf("gitx: opening the bare object store at %s: %w", c.Dir, err)
+	}
+	return nil
+}
+
+// GitVersion is what the git behind this repository calls itself, and the
+// empty string when it cannot be asked.
+//
+// The failure is deliberately not returned. The version travels in a node's
+// description of itself, where it is a diagnostic a person reads and never a
+// decision anything is made from, so a node whose git could not be asked
+// reports nothing rather than refusing to serve over it.
+func (c *LocalGitx) GitVersion(ctx context.Context) string {
+	out, _ := c.run(ctx, "--version")
+	return strings.TrimSpace(out)
+}
+
 // RemoteTagObject is the object id the remote advertises for a tag, empty when
 // the remote does not carry it.
 //

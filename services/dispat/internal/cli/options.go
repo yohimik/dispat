@@ -111,6 +111,11 @@ type options struct {
 
 	// release and status: the CI gate that turns an empty plan into a failure.
 	requireRelease *bool
+
+	// worker: where the node keeps what it may not lose, and how long it
+	// serves with nothing to do.
+	workerStateDir    *string
+	workerIdleTimeout *int
 }
 
 // declareFlags declares every flag on fs and records the pointers. It is
@@ -306,6 +311,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a replacement that matched nothing; for autowriter, an edit that matched no manifest anywhere")
 	o.requireRelease = fs.Bool("require-release", false,
 		"release and status: exit 1 when the plan releases nothing, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
+	o.workerStateDir = fs.String("state-dir", "",
+		"worker: the folder this node keeps its object cache and its record of answered work in; without it, dispat/worker under the user cache directory")
+	o.workerIdleTimeout = fs.Int("idle-timeout", 0,
+		"worker: stop after this many seconds with nothing claimed and nothing in flight (0 serves until the process is signalled)")
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
 	// Declaring help is what makes it a flag rather than pflag's own
 	// interception, which fires during Parse — before the command word has

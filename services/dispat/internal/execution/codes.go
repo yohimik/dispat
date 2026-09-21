@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/rs/zerolog"
+
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 )
 
@@ -89,6 +91,20 @@ const (
 	CategoryTransportCleanup = "transport-cleanup"
 )
 
+// Identity names the distributed work a failure belongs to: which run, which
+// node, which task and which attempt of it.
+//
+// Every field is optional, because most execution failures are about a
+// configuration rather than about work: a run that refuses to start has no
+// task to name, and naming an empty one would put four meaningless fields in
+// every line. What is set is what the failure knows.
+type Identity struct {
+	Run     string
+	Node    string
+	Task    string
+	Attempt int
+}
+
 // Diagnostic is one execution failure carrying both names for itself.
 //
 // It implements DiagnosticCode the way the configuration package's own coded
@@ -98,6 +114,7 @@ const (
 type Diagnostic struct {
 	code     string
 	category string
+	identity Identity
 	err      error
 }
 
@@ -110,6 +127,18 @@ type Diagnostic struct {
 // Wrapping still works: a caller writes %w in the format, as anywhere else.
 func NewDiagnostic(code, category, format string, args ...any) error {
 	return &Diagnostic{code: code, category: category, err: fmt.Errorf(format, args...)}
+}
+
+// NewIdentifiedDiagnostic is NewDiagnostic for the failures that happened to
+// one piece of work rather than to the configuration as a whole.
+//
+// It is a second constructor rather than a field the caller fills afterwards
+// because a diagnostic is built where it is decided and logged immediately:
+// an error that could be relabelled after it was created would be an error
+// two callers could disagree about.
+func NewIdentifiedDiagnostic(identity Identity, code, category, format string, args ...any) error {
+	return &Diagnostic{code: code, category: category, identity: identity,
+		err: fmt.Errorf(format, args...)}
 }
 
 // Error is the sentence the reader is owed, which is the wrapped error's.
@@ -125,6 +154,37 @@ func (e *Diagnostic) DiagnosticCode() string { return e.code }
 
 // DiagnosticCategory is the §28.9 outcome class.
 func (e *Diagnostic) DiagnosticCategory() string { return e.category }
+
+// DiagnosticIdentity is the work this failure is about, as the error carries
+// it. A diagnostic built without one answers the zero identity.
+func (e *Diagnostic) DiagnosticIdentity() Identity { return e.identity }
+
+// AttachIdentity adds to a log event whatever work err names itself against,
+// and nothing at all for an error that names none.
+//
+// It lives here rather than in each logger because the fields are the
+// specification's vocabulary (§28.3) and there is one right spelling of them:
+// two loggers writing `task` and `taskName` would be two log formats.
+func AttachIdentity(event *zerolog.Event, err error) *zerolog.Event {
+	var carrier interface{ DiagnosticIdentity() Identity }
+	if !errors.As(err, &carrier) {
+		return event
+	}
+	identity := carrier.DiagnosticIdentity()
+	if identity.Run != "" {
+		event.Str("run", identity.Run)
+	}
+	if identity.Node != "" {
+		event.Str("node", identity.Node)
+	}
+	if identity.Task != "" {
+		event.Str("task", identity.Task)
+	}
+	if identity.Attempt > 0 {
+		event.Int("attempt", identity.Attempt)
+	}
+	return event
+}
 
 // DiagnosticCategory returns the first §28.9 category in err's unwrap chain,
 // and the empty string for the errors that carry none.
