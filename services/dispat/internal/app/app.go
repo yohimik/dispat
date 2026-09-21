@@ -80,6 +80,12 @@ type App struct {
 	// one place that computes it so that the coordinator can state it in
 	// every assignment without digesting the plan a second time.
 	planDigest string
+	// plannedHeads are the repository heads the fixed plan was computed
+	// against, keyed by repository identity and by the empty name for a single
+	// history. Every prepared input state a node builds from descends from
+	// exactly these commits (§28.3), so they are read once, where the digest
+	// reads them, rather than asked of git again later.
+	plannedHeads map[string]string
 
 	// plannedOptions are the planner inputs the last plan was computed from,
 	// kept for the one consumer that needs the input rather than the result:

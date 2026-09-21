@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog"
 
@@ -60,12 +61,19 @@ type transportx interface {
 // ever grows a local branch: the only refs a mailbox writes locally are the
 // fetched ones under refs/dispat-transport/, and they are deleted on close.
 type GitMailbox struct {
-	endpoint  string
-	remote    transportx
-	plumbing  *gitx.LocalGitx
-	signer    *Signer
-	log       zerolog.Logger
-	maxDepth  int
+	endpoint string
+	remote   transportx
+	plumbing *gitx.LocalGitx
+	signer   *Signer
+	log      zerolog.Logger
+	maxDepth int
+	// mu makes one mailbox serve several goroutines: a run dispatches its
+	// tasks concurrently while one poller watches for their replies, and a
+	// serving node answers a task while its own poll goes on. What it guards
+	// is the memo below and the ordering of the git invocations; both are the
+	// mailbox's own state, so the lock is the mailbox's own rather than every
+	// caller's problem.
+	mu        sync.Mutex
 	observed  map[string]string
 	fetchSize int
 }
@@ -107,6 +115,8 @@ func (m *GitMailbox) Endpoint() string { return m.endpoint }
 // taken is a name this run did not choose, and 128 bits of randomness say
 // that did not happen.
 func (m *GitMailbox) Assign(ctx context.Context, message *Assignment) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	document, err := json.Marshal(message)
 	if err != nil {
 		return "", fmt.Errorf("execution: writing the assignment document: %w", err)
@@ -136,6 +146,8 @@ func (m *GitMailbox) Assign(ctx context.Context, message *Assignment) (string, e
 // moved it and the caller has to look at where the branch now is before it
 // decides anything.
 func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	oid, err := m.commitMessage(ctx, kind, document, []string{expectedOld})
 	if err != nil {
 		return "", err
@@ -184,6 +196,8 @@ func (m *GitMailbox) resolveLostPush(ctx context.Context, branch, oid string, re
 // with more branches than one batch is fetched over several polls rather than
 // in one unbounded invocation.
 func (m *GitMailbox) Observe(ctx context.Context, pattern string) ([]gitx.RemoteHead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("execution: polling %s: %w", gitx.RedactURL(m.endpoint), err)
@@ -224,10 +238,30 @@ func (m *GitMailbox) Observe(ctx context.Context, pattern string) ([]gitx.Remote
 	return moved, nil
 }
 
+// Fetch brings named coordination branches into this node's store without
+// going through the poll, which is what a task does with the extra input
+// states its assignment named: they are branches nobody advertises to this
+// node's pattern and they are needed before a single command runs.
+func (m *GitMailbox) Fetch(ctx context.Context, branches []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(branches) == 0 {
+		return nil
+	}
+	if err := m.remote.FetchRefs(ctx, m.endpoint, branches); err != nil {
+		return fmt.Errorf("execution: fetching %d input states: %w", len(branches), err)
+	}
+	return nil
+}
+
 // Forget drops what the memo remembers, which is what a node does when the
 // object store behind it has been rebuilt: the tips are still where they
 // were, but the objects they name are no longer here to be read.
-func (m *GitMailbox) Forget() { clear(m.observed) }
+func (m *GitMailbox) Forget() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clear(m.observed)
+}
 
 // Inspect resolves an observed tip to the message it carries and to the step
 // that produced it.
@@ -238,6 +272,8 @@ func (m *GitMailbox) Forget() { clear(m.observed) }
 // describes the chain and holds the blobs of the message, which is everything
 // the state machine and the acceptance rules need.
 func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTip, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	localRef := gitx.TransportRefPrefix + head.Name
 	if err := m.remote.ResolveFetchedCommit(ctx, localRef, head.OID, m.maxDepth); err != nil {
 		return ChainTip{}, fmt.Errorf("execution: resolving %s on %s: %w", head.OID, head.Name, err)
@@ -304,6 +340,8 @@ func (m *GitMailbox) readTree(ctx context.Context, oid string) (kind MessageKind
 // comes back is bytes this node's own secret signed, or a Rejection naming
 // why they are not.
 func (m *GitMailbox) Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if tip.Kind == "" {
 		return nil, &Rejection{Reason: ReasonUnreadable}
 	}
@@ -336,6 +374,8 @@ const maxSignatureBytes = 128
 // retained rather than retried, and the branches this run still owns are
 // closed either way.
 func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gitx.BranchOutcome, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if len(leases) == 0 {
 		return nil, nil
 	}

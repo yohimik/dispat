@@ -31,6 +31,7 @@ type fakeMailbox struct {
 	rejection map[string]RejectReason
 
 	written   []MessageKind
+	fetched   []string
 	forgotten int
 	polls     int
 }
@@ -58,6 +59,11 @@ func (m *fakeMailbox) Advance(_ context.Context, branch, _ string, kind MessageK
 	m.written = append(m.written, kind)
 	m.documents[branch+"/"+string(kind)] = document
 	return string(kind) + "-oid", nil
+}
+
+func (m *fakeMailbox) Fetch(_ context.Context, branches []string) error {
+	m.fetched = append(m.fetched, branches...)
+	return nil
 }
 
 func (m *fakeMailbox) Forget() { m.forgotten++ }

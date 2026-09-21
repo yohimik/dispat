@@ -97,5 +97,12 @@ func (a *App) calculatePlanDigest(ctx context.Context, computed *plan.Plan, opts
 		}
 		input.Heads = map[string]string{"": head}
 	}
+	// The same heads the digest is taken over are the parents every prepared
+	// input state descends from: one reading, so that what a node builds from
+	// cannot belong to a different plan than the one it was told it executes.
+	a.plannedHeads = input.Heads
+	if len(a.plannedHeads) == 0 {
+		a.plannedHeads = computed.RepositoryHeads
+	}
 	return computed.CalculateDigest(input)
 }

@@ -120,7 +120,7 @@ func TestProtocolDocumentsRoundTrip(t *testing.T) {
 		Header: assignment.Header, Assignment: "cafe", Status: StatusFailed,
 		FailedPart: "build", Exit: 2,
 		Platform:   Platform{OS: "linux", Arch: "amd64", Dispat: "1.11.0"},
-		Exports:    []string{"DISPAT_EXPORT_A=b"},
+		Exports:    []ExportedValue{{Name: "IMAGE", Value: "acme/core:1", Source: "core:build"}},
 		Manifest:   []ManifestEntry{{Path: "dist/a.js", Type: "blob", Mode: "100644", Size: 3, SHA256: "aa"}},
 		OutputTree: "feed", StrayWrites: 1,
 		Report: &NodeReport{Protocol: ProtocolVersion, Dispat: "1.11.0", OS: "linux",

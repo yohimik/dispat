@@ -89,6 +89,7 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 		StateDir:    state.Dir,
 		IdleTimeout: opts.IdleTimeout,
 		Mailbox:     execution.NewGitMailbox(settings.Endpoint, git, signer, a.log),
+		Cache:       git,
 		Seen:        seen,
 		Log:         a.log,
 		Report: execution.FormatNodeReport(opts.Version, git.GitVersion(ctx),

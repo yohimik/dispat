@@ -16,6 +16,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
@@ -135,6 +136,11 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err != nil {
 		return nil, err
 	}
+	if coordinator != nil {
+		// The pool passed: from here the run owns one poller per endpoint, and
+		// the deferred close above stops them before it deletes the refs.
+		a.openDispatch(ctx, coordinator, pl)
+	}
 	// Resolve the GitHub releasers: one per distinct target the packages'
 	// resolved policies name — most runs resolve to a single one. Empty
 	// means every package is disabled or unresolvable. It needs the plan, so
@@ -178,7 +184,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		wh.Event(a.releaseStartedEvent(pl))
 	}
 
-	executor := a.newReleaseExecutor(pl, fleet, gh, runner, obs)
+	executor := a.newReleaseExecutor(pl, fleet, gh, runner, obs, coordinator)
 	start := time.Now()
 	results := executor.Run(ctx, pl)
 	return a.completeRelease(ctx, pl, results, hooks, gh, fleet, finishCleanup, wh, start)
@@ -438,7 +444,7 @@ func (a *App) runGatingHooks(ctx context.Context, hooks *runHooks, fleet *worksp
 // fleet recorder instead, which owns tags, commits and checkpoints per
 // repository.
 func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *ghDispatch,
-	runner script.Runnerx, obs release.Observerx) *release.Executor {
+	runner script.Runnerx, obs release.Observerx, coordinator *execution.Coordinator) *release.Executor {
 	commitMode := a.cfg.Commit.IsEnabled()
 	var tagger release.Taggerx = a.git
 	if commitMode || fleet != nil {
@@ -455,6 +461,14 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		Scanner:            a.scan,
 		Observer:           obs,
 		Log:                a.log,
+	}
+	if coordinator != nil {
+		// The build frames of this run are executed on the pool, and
+		// publication and recording serialize per owner: a distributed run
+		// writes release records for several packages of one repository from
+		// one machine, and §28.6 requires those writes to be ordered.
+		executor.Remote = coordinator
+		executor.PublishGroup = publishByRepository
 	}
 	if fleet == nil {
 		return executor
@@ -476,6 +490,25 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		return fleet.verifySnapshot(ctx, rel)
 	}
 	return executor
+}
+
+// singleHistoryPublishGroup is the lane every package of an uncomposed
+// repository publishes in. It is a constant rather than the empty string
+// because an empty group means "no lane at all", and a single history is one
+// shared history: §28.6 requires the publications and the records written into
+// it to be ordered, whichever machine the builds ran on.
+const singleHistoryPublishGroup = "."
+
+// publishByRepository is the publication lane one package belongs to: its
+// repository in a composed workspace, and the one history everywhere else.
+func publishByRepository(rel *plan.Release) string {
+	if rel == nil || rel.Pkg == nil {
+		return ""
+	}
+	if rel.Pkg.Repository != "" {
+		return rel.Pkg.Repository
+	}
+	return singleHistoryPublishGroup
 }
 
 // completeRelease runs the closing phase: the post-run hooks, the durable

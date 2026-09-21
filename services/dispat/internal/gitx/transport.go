@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -352,6 +353,54 @@ func (c *LocalGitx) InitBareStore(ctx context.Context) error {
 		return fmt.Errorf("gitx: opening the bare object store at %s: %w", c.Dir, err)
 	}
 	return nil
+}
+
+// IndexPath is where this repository keeps the index, as an absolute path.
+//
+// It exists for the one operation that has to start from the real index and
+// must not touch it: capturing a working tree as a tree object through a copy
+// (see the execution package's snapshots). The path is asked of git rather
+// than assembled, because a repository whose git directory is elsewhere — a
+// worktree, a separate GIT_DIR, a configured index file — keeps its index
+// where git says it does and nowhere a caller could guess.
+func (c *LocalGitx) IndexPath(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, "rev-parse", "--git-path", "index")
+	if err != nil {
+		return "", fmt.Errorf("gitx: locating the index of %s: %w", c.Dir, err)
+	}
+	path := strings.TrimSpace(out)
+	if path == "" {
+		return "", fmt.Errorf("gitx: %s reported no index path", c.Dir)
+	}
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	// git answers relative to the repository it was asked in, which is this
+	// handle's folder because every invocation carries -C.
+	return filepath.Join(c.Dir, path), nil
+}
+
+// CountChangedPaths is how many tracked paths of this checkout differ from
+// what it was materialized at.
+//
+// Untracked paths are deliberately not counted. A build's own products are
+// untracked by construction, so counting them would report every successful
+// build as a build that wrote where it should not have; what this asks about
+// is the source a task was given, and whether it came back changed.
+func (c *LocalGitx) CountChangedPaths(ctx context.Context) (int, error) {
+	out, err := c.run(ctx, "status", "--porcelain")
+	if err != nil {
+		return 0, fmt.Errorf("gitx: reading the status of %s: %w", c.Dir, err)
+	}
+	changed := 0
+	for line := range strings.Lines(out) {
+		entry := strings.TrimRight(line, "\n")
+		if entry == "" || strings.HasPrefix(entry, "??") {
+			continue
+		}
+		changed++
+	}
+	return changed, nil
 }
 
 // GitVersion is what the git behind this repository calls itself, and the

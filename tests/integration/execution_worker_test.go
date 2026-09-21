@@ -204,9 +204,9 @@ func executionLabel(name string) string {
 func TestExecutionWorkerLeavesWorkItCannotRun(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	build := executionBranchName("buildwork")
+	build := executionBranchName("publishwork")
 	orchestrator.offer(build, orchestrator.probe(build, "core",
-		func(m map[string]any) { m["kind"] = "build" }))
+		func(m map[string]any) { m["kind"] = "publish" }))
 	valid := executionBranchName("probework")
 	orchestrator.offer(valid, orchestrator.probe(valid, "preflight"))
 

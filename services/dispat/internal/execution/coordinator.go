@@ -61,6 +61,9 @@ type Coordinator struct {
 	Limits   TransferLimits
 	// Log is the run logger.
 	Log zerolog.Logger
+	// Pool is where this run places its work, assembled by Preflight from what
+	// the nodes reported about themselves.
+	Pool *Pool
 
 	// mailboxes is one open mailbox per link, opened by the caller so that
 	// this type never decides what a local object store is.
@@ -71,6 +74,33 @@ type Coordinator struct {
 	// nothing else in the process knows what this run put on a mailbox.
 	mu    sync.Mutex
 	owned map[string][]gitx.BranchLease
+
+	// What Start assembles and Close takes down. They are nil on a coordinator
+	// that only ever preflighted, which is what a refused run is.
+	dispatch Dispatch
+	// guard is the snapshot guard: shared by the frames that write the working
+	// tree, exclusive while one is captured.
+	guard sync.RWMutex
+	// local is this node's own capacity, as a slot per frame it keeps.
+	local chan struct{}
+	// snapshots is what this run has already captured, and offered is what it
+	// has already pushed to which node, with the mutex that lets several
+	// dispatches share both.
+	snapshots *snapshots
+	offers    sync.Mutex
+	offered   map[string]offeredState
+	// watchers is one poller per endpoint, with the cancellation and the wait
+	// that stop them.
+	watchers     map[string]*watcher
+	stopWatching context.CancelFunc
+	watching     sync.WaitGroup
+}
+
+// offeredState is one prepared input state as one node has already been given
+// it: which commit, and the immutable branch it was put on.
+type offeredState struct {
+	commit string
+	branch string
 }
 
 // Timeouts are the bounded waits a distributed run makes, in the shape this
@@ -135,7 +165,14 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 			Str("arch", reports[index].Arch).Int("capacity", reports[index].Capacity).
 			Str("dispat", reports[index].Dispat).Str("run", c.Run).Msg("worker ready")
 	}
-	return c.checkPlatforms(packages, reports)
+	if err := c.checkPlatforms(packages, reports); err != nil {
+		return err
+	}
+	// The pool is what the reports were collected for: a node's capacity and
+	// its platform are the node's own statements about itself, and the only
+	// moment this run hears them is here.
+	c.Pool = NewPool(c.Links, reports, c.Log)
+	return nil
 }
 
 // probe offers one node a probe and waits for its report.
@@ -347,6 +384,12 @@ func (c *Coordinator) recordOwnedRef(node, branch, oid string) {
 // close is a warning with the retained code and never a failed release. The
 // run's own error, when it has one, stays the run's error.
 func (c *Coordinator) Close(ctx context.Context) error {
+	if c.stopWatching != nil {
+		// The pollers go first: a poll that ran while the refs were being
+		// deleted would be fetching objects nobody owns any more.
+		c.stopWatching()
+		c.watching.Wait()
+	}
 	c.mu.Lock()
 	owned := c.owned
 	c.owned = map[string][]gitx.BranchLease{}

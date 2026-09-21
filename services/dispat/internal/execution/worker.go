@@ -13,18 +13,23 @@ package execution
 // the cheapest way to keep two answers from disagreeing is for one goroutine
 // to give both.
 //
-// What the loop does with a claimed assignment is not here. This build
-// answers probes, which run no command and consume no capacity, and leaves
-// every kind of work that does for the gate that executes it: a branch it
-// does not claim is a branch that stays exactly where the orchestrator put
-// it, which is what lets an older node and a newer orchestrator share a
-// mailbox without either of them losing work.
+// A claimed task is the one thing that leaves that goroutine. It runs under a
+// WaitGroup, holds one of this node's capacity slots until it has reported,
+// and shares the mailbox rather than owning one, which is why the mailbox
+// carries a lock of its own. What it does with the frame it was given is in
+// task.go.
+//
+// A kind this build does not execute is left exactly where the orchestrator
+// put it: a branch this node does not claim stays queued for a node that can
+// do the work, which is what lets an older node and a newer orchestrator share
+// a mailbox without either of them losing anything.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -43,6 +48,7 @@ type mailboxx interface {
 	Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTip, error)
 	Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error)
 	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte) (string, error)
+	Fetch(ctx context.Context, branches []string) error
 	Forget()
 }
 
@@ -86,6 +92,10 @@ type Worker struct {
 	IdleTimeout time.Duration
 	// Mailbox is the endpoint this node serves.
 	Mailbox mailboxx
+	// Cache is the object store the task checkouts are materialized from: the
+	// same store the mailbox fetches into, because a worktree can only be made
+	// of objects the repository holds.
+	Cache *gitx.LocalGitx
 	// Seen is the record of the work this node has already answered.
 	Seen *SeenSet
 	// PrepareStore opens the object store behind the mailbox, and is called
@@ -99,6 +109,13 @@ type Worker struct {
 	// false again after any failure, which is what makes the cache
 	// dispensable rather than a prerequisite.
 	isStorePrepared bool
+	// slots is this node's capacity, one entry per task it may run at once.
+	// It is filled lazily by the poll goroutine, which is the only one that
+	// takes a slot; the task goroutines give theirs back.
+	slots chan struct{}
+	// running is the tasks in flight, so that a node asked to stop stops when
+	// they have reported rather than while they are running.
+	running sync.WaitGroup
 }
 
 // Serve polls until the process is signalled or goes idle, and answers the
@@ -110,10 +127,15 @@ type Worker struct {
 // on a network, and a node that exited on it would have to be restarted by
 // somebody.
 func (w *Worker) Serve(ctx context.Context) string {
+	w.slots = make(chan struct{}, max(w.Report.Capacity, 1))
 	w.Log.Info().Str("node", w.Node).Str("endpoint", gitx.RedactURL(w.Endpoint)).
 		Int("concurrency", w.Report.Capacity).Str("stateDir", w.StateDir).
 		Msg("worker started")
 	reason := w.poll(ctx)
+	// A node that stopped claiming still owes a report for everything it took
+	// on: the commands are already dead when the stop reached them, and the
+	// run that dispatched them is waiting to hear so.
+	w.running.Wait()
 	w.Log.Info().Str("node", w.Node).Str("reason", reason).Msg("worker stopped")
 	return reason
 }
@@ -244,16 +266,95 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		w.reportRejection(tip, reason)
 		return false, nil
 	}
-	if assignment.Kind != KindProbe {
-		// The kinds that run commands belong to the gate that executes them.
-		// Leaving the branch untouched is what keeps the work queued for a
-		// node that can do it rather than consuming it here.
-		w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("kind", assignment.Kind).
-			Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
-			Msg("assignment inspected")
+	if assignment.Kind == KindProbe {
+		return true, w.answerProbe(ctx, tip, assignment)
+	}
+	if assignment.Kind == KindBuild {
+		return w.takeTask(ctx, tip, assignment)
+	}
+	// The kinds that are not executed by this build belong to the gate that
+	// executes them. Leaving the branch untouched is what keeps the work
+	// queued for a node that can do it rather than consuming it here.
+	w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("kind", assignment.Kind).
+		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
+		Msg("assignment inspected")
+	return false, nil
+}
+
+// takeTask claims one assignment and starts it, and leaves it alone when this
+// node has no free slot for it.
+//
+// The claim is what says the work is this node's, so it is pushed before the
+// task starts and by the goroutine that owns the poll: an assignment nobody
+// claimed is an assignment another node may still take, which is what makes a
+// full node queue work rather than lose it.
+func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignment) (bool, error) {
+	select {
+	case w.slots <- struct{}{}:
+	default:
+		w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("run", assignment.Run).
+			Str("task", assignment.Task).Msg("assignment left queued: this node is full")
 		return false, nil
 	}
-	return true, w.answerProbe(ctx, tip, assignment)
+	claimed, err := w.advance(ctx, tip, tip.OID, MessageClaim, Claim{
+		Header: w.formatReplyHeader(assignment.Header), Assignment: tip.OID,
+	})
+	if err != nil {
+		<-w.slots
+		return false, err
+	}
+	w.Log.Info().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", claimed).
+		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
+		Str("kind", assignment.Kind).Msg("task claimed")
+	// Remembered before the work starts: an attempt this node took on and then
+	// failed to report must not be taken on again.
+	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
+		<-w.slots
+		return false, err
+	}
+	w.running.Add(1)
+	go func() {
+		defer w.running.Done()
+		defer func() { <-w.slots }()
+		w.answerTask(ctx, tip, claimed, assignment)
+	}()
+	return true, nil
+}
+
+// answerTask runs one claimed assignment and reports what became of it.
+//
+// The report goes out on a context detached from the run's, bounded by its own
+// deadline: a node asked to stop has already had its commands killed by that
+// same cancellation, and the one thing it still owes is the sentence saying so.
+func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, assignment Assignment) {
+	log := w.Log.With().Str("node", w.Node).Str("run", assignment.Run).
+		Str("task", assignment.Task).Int("attempt", assignment.Attempt).
+		Str("branch", tip.Branch).Logger()
+	outcome := w.runTask(ctx, assignment, log)
+	if ctx.Err() != nil && outcome.status != StatusSucceeded {
+		// The commands died of the stop rather than of anything about the
+		// package, which is a different thing for the run to hear.
+		outcome.status, outcome.failedPart = StatusCancelled, ""
+	}
+	report := Result{
+		Header:      w.formatReplyHeader(assignment.Header),
+		Assignment:  tip.OID,
+		Status:      outcome.status,
+		FailedPart:  outcome.failedPart,
+		Platform:    Platform{OS: w.Report.OS, Arch: w.Report.Arch, Dispat: w.Report.Dispat},
+		Exports:     formatExports(outcome.exports),
+		StrayWrites: outcome.strayWrites,
+	}
+	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+	defer done()
+	reported, err := w.advance(reportCtx, tip, claimed, MessageResult, report)
+	if err != nil {
+		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
+			Msg("the task result could not be reported")
+		return
+	}
+	log.Info().Str("commit", reported).Str("status", outcome.status).
+		Int("strayWrites", outcome.strayWrites).Msg("task finished")
 }
 
 // checkAssignment applies the acceptance rules to one assignment: the ones

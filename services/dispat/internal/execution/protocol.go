@@ -233,6 +233,11 @@ type Assignment struct {
 	// that reference and is expanded on the executing node from its own
 	// environment, so a resolved secret never reaches a branch (§28.3).
 	StaticEnv []string `json:"staticEnv,omitempty"`
+	// Exports are the values the run's earlier stages of this package already
+	// exported, so that the scripts of this frame read the same accumulated
+	// state they would read at home. What this frame exports travels back in
+	// the result rather than being echoed here.
+	Exports []ExportedValue `json:"exports,omitempty"`
 	// Shell is the interpreter the commands run through.
 	Shell []string `json:"shell,omitempty"`
 	// Platforms are the node platforms the task may run on, in GOOS/GOARCH
@@ -252,12 +257,19 @@ type Assignment struct {
 }
 
 // AssignmentRepository is one checkout a task needs: the repository's
-// identity in the run, where it sits relative to the task folder, and the
-// exact commit the node materializes.
+// identity in the run, where it sits relative to the task folder, the exact
+// commit the node materializes, and the immutable branch that commit is
+// reachable from.
+//
+// The branch is named because a node fetches objects by ref and then reads the
+// exact object: the name is how the state gets there, and the object id is
+// what decides what is checked out, so a branch somebody moved cannot change
+// what a task builds.
 type AssignmentRepository struct {
 	Name     string `json:"name"`
 	Path     string `json:"path,omitempty"`
 	Snapshot string `json:"snapshot"`
+	Branch   string `json:"branch,omitempty"`
 }
 
 // AssignmentPackage names the package a task belongs to: the package's name
@@ -379,8 +391,8 @@ type Result struct {
 	// Platform is what the work actually ran on, which is how a run's records
 	// can say where an artefact was built rather than where it was planned.
 	Platform Platform `json:"platform"`
-	// Exports are the DISPAT_EXPORT_* pairs the stage's scripts produced.
-	Exports []string `json:"exports,omitempty"`
+	// Exports are what the stage's scripts wrote to their DISPAT_OUTPUT files.
+	Exports []ExportedValue `json:"exports,omitempty"`
 	// Manifest is the verified description of the outputs this attempt
 	// captured, empty when it produced none.
 	Manifest []ManifestEntry `json:"manifest,omitempty"`
@@ -393,6 +405,19 @@ type Result struct {
 	// Report is the node's description of itself, carried by the result of a
 	// probe and by nothing else.
 	Report *NodeReport `json:"report,omitempty"`
+}
+
+// ExportedValue is one value a task's scripts exported through their
+// DISPAT_OUTPUT file, on its way back to the run that dispatched the task.
+//
+// The exporting sequence travels with the value rather than being guessed at
+// the other end: an export written by a stage's own script and one written by
+// the hook that preceded it reach every later script as the same variable, and
+// the provenance variable beside it is the only thing that tells them apart.
+type ExportedValue struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Source string `json:"source,omitempty"`
 }
 
 // Platform is where work ran: the operating system and architecture in Go's
