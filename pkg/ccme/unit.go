@@ -9,8 +9,9 @@ import (
 // errors: the semantic pass turns each into an E151 diagnostic carrying the
 // footer's position.
 var (
-	errEmptyScopeSet    = errors.New("empty scope term")
-	errIllegalScopeChar = errors.New("illegal character in scope term")
+	errEmptyScopeSet     = errors.New("empty scope term")
+	errIllegalScopeChar  = errors.New("illegal character in scope term")
+	errTooManyScopeTerms = errors.New("too many scope terms")
 )
 
 // Unit is one <header>[body][footers] block of a commit message (§2, §4.4).
@@ -86,6 +87,17 @@ func (b *unitBuilder) errf(code string, pos Position, format string, args ...any
 		Message:  formatMessage(format, args),
 		Position: pos,
 	})
+}
+
+// scopeSetErr reports a footer scope-set that failed to parse: E158 past the
+// term cap of §14.1, without echoing a value that is by definition enormous,
+// and E151 for everything else.
+func (b *unitBuilder) scopeSetErr(f Footer, err error, limit int) {
+	if errors.Is(err, errTooManyScopeTerms) {
+		b.errf(CodeE158, f.Position, "%s has more than %d terms", f.CanonicalKey, limit)
+		return
+	}
+	b.errf(CodeE151, f.Position, "invalid %s value %q", f.CanonicalKey, f.Value)
 }
 
 func (b *unitBuilder) warnf(code string, pos Position, format string, args ...any) {
@@ -215,9 +227,9 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 			fd.depth = &d
 
 		case FooterPropagateScope:
-			scope, err := parseScopeSetValue(f.Value, f.Position)
+			scope, err := parseScopeSetValue(f.Value, f.Position, p.cfg.Limits.ScopeTermsPerUnit)
 			if err != nil {
-				b.errf(CodeE151, f.Position, "invalid %s value %q", f.CanonicalKey, f.Value)
+				b.scopeSetErr(f, err, p.cfg.Limits.ScopeTermsPerUnit)
 				continue
 			}
 			fd.scope, fd.scopeSet = scope, true
@@ -240,9 +252,9 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 			fd.channelDepth = &d
 
 		case FooterPropagateChannelScope:
-			scope, err := parseScopeSetValue(f.Value, f.Position)
+			scope, err := parseScopeSetValue(f.Value, f.Position, p.cfg.Limits.ScopeTermsPerUnit)
 			if err != nil {
-				b.errf(CodeE151, f.Position, "invalid %s value %q", f.CanonicalKey, f.Value)
+				b.scopeSetErr(f, err, p.cfg.Limits.ScopeTermsPerUnit)
 				continue
 			}
 			fd.cscope, fd.cscopeSet = scope, true
@@ -558,8 +570,11 @@ func isScopeChar(c byte) bool {
 }
 
 // parseScopeSetValue parses a scope-set written as a footer value, applying
-// the scope-term charset of §5.2.
-func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {
+// the scope-term charset of §5.2 and the term cap of §14.1. A footer scope-set
+// is an ordinary scope-set (§8.5), so the cap that bounds a header's bounds
+// it too: without it one message carries a few hundred thousand glob terms
+// past the parser, each of which the planner matches against every package.
+func parseScopeSetValue(v string, pos Position, limit int) (ScopeSet, error) {
 	if v == "" {
 		return nil, errEmptyScopeSet
 	}
@@ -580,6 +595,9 @@ func parseScopeSetValue(v string, pos Position) (ScopeSet, error) {
 			if !isScopeChar(trimmed[j]) {
 				return nil, errIllegalScopeChar
 			}
+		}
+		if limit > 0 && len(out) >= limit {
+			return nil, errTooManyScopeTerms
 		}
 		out = append(out, newScopeTerm(trimmed, pos))
 		start = i + 1

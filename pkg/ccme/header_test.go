@@ -113,6 +113,9 @@ func TestAppendixB1Parsing(t *testing.T) {
 			typ: "feat", scopes: []string{"core"}, cdepth: ptrD(DepthAll), desc: "x"}},
 		{"B1/14r4 leading zero", "feat(core)+00: x", expect{errCode: CodeE111}},
 		{"B1/14r5 leading zero 007", "feat(core)+007: x", expect{errCode: CodeE111}},
+		{"B1/14r6 saturation still validates the run", "feat(core)+99999x: x", expect{errCode: CodeE111}},
+		{"B1/14d1 repeated + after ^^", "feat(core)^^minor+*+*: x", expect{errCode: CodeE110}},
+		{"B1/14d1 repeated + around ^^", "feat(core)+*^^+*: x", expect{errCode: CodeE110}},
 		{"B1/14s channel transition", "feat(core)%beta>rc: x", expect{
 			typ: "feat", scopes: []string{"core"}, channel: tr("beta", "rc"), desc: "x"}},
 		{"B1/14t any prerelease to stable", "feat(core)%%*>stable++*: x", expect{

@@ -149,7 +149,11 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	// sawCaret enforces the once-per-header rule across both caret spellings,
 	// and the two depthSource fields record which token supplied each depth,
 	// which is what makes every combination order-independent (§20.3).
-	sawCaret := false
+	//
+	// sawPlus enforces the same rule for "+N". depthFrom cannot carry it
+	// alone: after "^^" it reads depthFromDoubleCaret whether or not a "+*"
+	// has been consumed, so "^^+*+*" would repeat a sigil unnoticed.
+	sawCaret, sawPlus := false, false
 	for !sc.eof() && isSigil(sc.peek()) {
 		sigilPos := sc.i
 		sigil := sc.next()
@@ -285,12 +289,15 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 			}
 
 		case '+':
+			if sawPlus {
+				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '+' directive")
+			}
+			sawPlus = true
 			dv, err := parseDepthValue(value, at(valPos))
 			if err != nil {
 				return h, warns, err
 			}
-			switch h.Inline.depthFrom {
-			case depthFromDoubleCaret:
+			if h.Inline.depthFrom == depthFromDoubleCaret {
 				if !dv.IsAll() {
 					return h, warns, fail(CodeE113, at(sigilPos),
 						"'+%s' contradicts the depth of all asserted by '^^'", value)
@@ -298,8 +305,6 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 				warns = append(warns, warn(CodeW110, at(sigilPos),
 					"'+%s' redundantly restates the depth implied by '^^'", value))
 				continue
-			case depthFromPlus:
-				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '+' directive")
 			}
 			// Unset, or implied by "^": the explicit depth supplies the value.
 			h.Inline.Depth = &dv

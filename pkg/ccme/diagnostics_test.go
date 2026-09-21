@@ -251,6 +251,25 @@ func TestParserLimits(t *testing.T) {
 		}
 	})
 
+	t.Run("scope terms in a footer scope-set", func(t *testing.T) {
+		// A Propagate-Scope value is an ordinary scope-set (§8.5), so the cap
+		// bounds it like a header's. Uncapped, one message carries a few
+		// hundred thousand glob terms to the planner.
+		p := MustNewParser(Config{Limits: Limits{ScopeTermsPerUnit: 4}})
+		for _, key := range []string{"Propagate-Scope", "Propagate-Channel-Scope"} {
+			res, err := p.Parse("feat(core)^%%beta: x\n\n" + key + ": a*, b*, c*, d*, e*")
+			if err == nil || firstError(res) != CodeE158 {
+				t.Errorf("%s with 5 terms = %v (%s), want E158", key, err, codesOf(res))
+			}
+			if len(res.ValidUnits()) != 0 {
+				t.Errorf("%s: E158 is message-scoped even when detected in a footer", key)
+			}
+			if _, err := p.Parse("feat(core)^%%beta: x\n\n" + key + ": a*, b*, c*, d*"); err != nil {
+				t.Errorf("%s with 4 terms should be within the limit: %v", key, err)
+			}
+		}
+	})
+
 	t.Run("defaults are applied and the bounds cannot be disabled", func(t *testing.T) {
 		got := DefaultParser().Config().Limits
 		if got.UnitsPerMessage != DefaultUnitsPerMessage ||
