@@ -6739,8 +6739,11 @@ An execution node is a machine or runner executing the same release engine and
 configuration schema. It is distinct from a repository peer. One repository
 may have work on several nodes; one node may work on several repositories.
 
-Every node MUST support both roles. The default role is **orchestrator**; an
-explicit **worker** role MUST refuse release initiation, including indirect
+Every node MUST support both roles, and one engine provides both. Serving
+delegated tasks MAY be a distinct invocation or process of that same engine,
+for example a long-running serving command; no separate worker product and no
+second configuration format is required. The default role is **orchestrator**;
+an explicit **worker** role MUST refuse release initiation, including indirect
 initiation from a delegated hook. A worker executes authorized tasks in an
 existing run and MUST NOT substitute a locally recomputed plan, acquire competing release
 ownership, dispatch to another pool, or independently finalize a release.
@@ -6853,17 +6856,26 @@ Independent ready tasks MAY run concurrently. The assignment schedule need not
 be deterministic; selected packages, versions, commands and dependency semantics
 MUST remain those of the same fixed plan.
 
-Shared manifest/lockfile reconciliation MUST be one explicit preparation task per affected input state,
-performed once before the affected builds fan out and producing one admitted prepared input snapshot.
+Every reconciliation that writes a shared manifest or lockfile MUST be an explicit task executed under the
+orchestrator's authority, never implicitly by a worker. Such tasks MUST serialize per shared file, and each
+admitted result is one prepared input state. Builds fan out only from an admitted state, and every build MUST
+bind, in its own manifest, the exact admitted prepared input state it consumed.
 Workers MUST NOT each regenerate and race to merge a workspace-wide lockfile
 as an implicit part of otherwise independent package builds. A later required
-shared mutation creates a new dependency gate and invalidates affected outputs;
-it MUST NOT force all builds in the repository onto one node when their prepared
-inputs and output write sets allow independent execution.
+shared mutation creates a new prepared input state rather than mutating one a running build consumes; it
+creates a new dependency gate and invalidates affected outputs, and it MUST NOT force all builds in the
+repository onto one node when their prepared inputs and output write sets allow independent execution.
 
 Each assignment MUST identify the run, plan digest, task, attempt, ownership
-generation, repository-qualified source object IDs, effective configuration and resolved command environment, toolchain/platform requirements, input receipts,
-permitted writes and outputs. Secret references are separate from logged or transported public metadata.
+generation, repository-qualified source object IDs, effective configuration and command environment,
+toolchain/platform requirements, input receipts, permitted writes and outputs.
+The ownership generation identifies the exclusion the run holds: under the Git
+release-lock convention it is a value derived from the identities of the lock objects the run holds, for
+example the lock tag object IDs of every participating repository, so that a new acquisition always yields a
+new generation. Secret references are separate from logged or transported public metadata. A command
+environment derived from secret references travels as those references and is resolved on the executing node
+from that node's own environment; resolved secret values MUST NOT be written to transport branches,
+manifests, receipts or logs.
 Workers MUST authenticate the assigning orchestrator and the assignment's integrity; a matching digest alone
 is not proof of authority. Nested hooks and commands retain the assigned policy, package-root mapping and
 worker authority; they MUST NOT rediscover policy or source history from a transport checkout.
@@ -6874,18 +6886,26 @@ package release record.
 
 ### 28.4 Git synchronization branches
 
-The orchestrator MUST provision isolated task worktrees and temporary branches
-named `worker-<date>-<random>`, with a collision-resistant random suffix and
-atomic creation under `refs/heads/`. The date SHOULD use UTC `YYYYMMDD`; the random suffix MUST provide at
-least 128 bits of cryptographic randomness. The date is a diagnostic label only. A branch is bound to one
-run, repository and task attempt; parallel attempts MUST NOT share a mutable
-branch. The manifest, rather than the branch name, identifies node and task.
+The orchestrator MUST provision isolated task worktrees and temporary coordination branches named
+`dispat-worker-<id>-<workinfo>`, created atomically under `refs/heads/`. `<id>` is the node name of the
+execution link the branch is addressed to. `<workinfo>` is `<date>-<kind>-<random>`: the date SHOULD use UTC
+`YYYYMMDD`, `<kind>` is a short lowercase label of the work (for example `probe`, `build`, `publish`,
+`prepare`, `snapshot` or `relay`), and the random suffix MUST provide at least 128 bits of cryptographic
+randomness. The date and the kind are diagnostic labels only. The name is an untrusted routing hint that lets
+a node list only the branches addressed to it; the authenticated manifest, not the branch name, identifies
+node, run, task and attempt, and a node MUST reject a manifest whose node or branch binding disagrees with
+where it was found. A branch is bound to one run, repository and task attempt; parallel attempts MUST NOT
+share a mutable branch.
 
 Workers synchronize declared source changes and result manifests through these
 branches. Each acknowledged checkpoint MUST identify an exact full object ID;
 consumers fetch that object and validate its manifest rather than following a
-moving branch tip. Ref updates and deletions MUST check the expected previous object ID and attempt ownership. Transport-only
-credentials MUST NOT authorize a worker to update native release branches, tags or fleet settlement refs.
+moving branch tip. A consumer MAY obtain the object by fetching a ref that advertises it and then resolving
+the exact object ID locally; it MUST then read only from that object ID and never from a ref whose tip can
+still move. Both the orchestrator and the assigned worker MAY advance an attempt's branch. Ref updates and
+deletions MUST check the expected previous object ID and attempt ownership, so that an update racing the
+other party's update fails instead of overwriting it. Transport-only credentials MUST NOT authorize a worker
+to update native release branches, tags or fleet settlement refs.
 Acknowledged checkpoints MUST remain fetchable until all required consumers have retrieved and verified them.
 Where concurrency permits several tasks at once, use separate branches/worktrees
 and admit their results independently as their dependencies become ready.
@@ -6987,6 +7007,17 @@ publication concurrency. A worker MUST NOT independently move release branches,
 create release tags, settle peer links or finalize the fleet. The orchestrator
 performs those native transactions under the existing ownership/locking rules.
 
+Hooks that bracket a delegated stage execute with that stage on the executing node, under that assignment's
+worker authority. Run-level hooks, native recording, hooks that observe a completed publication, failure
+hooks and any restoration of a package's working tree after failure execute under the orchestrator.
+
+Authorization to publish is an explicit, single-use step bound to one task attempt. The orchestrator issues
+it only after the package's `beforePublish` hook has completed on the executing node and after the
+relevant-input and lock-ownership checks of this section, which is how §27.2's revalidation immediately after
+`beforePublish` and before the publish command is preserved when that hook runs on a worker. The publisher
+MUST NOT start its publication command before it has observed that authorization for its own attempt, and an
+authorization already issued MUST NOT be reused by another attempt or for another effect.
+
 The orchestrator MUST retain and verify lock ownership for the lifetime of all
 authorized effects. Assignments and results are bound to its ownership
 generation; stale results cannot authorize publication or native recording.
@@ -7018,8 +7049,13 @@ receipts retain diagnostic provenance. Cleanup failure is reported without
 rewriting successful package outcomes; borrowed nodes' unrelated data is never
 deleted. Repository locks are released only after authorized operations have quiesced or been safely fenced, then
 in reverse acquisition order. If that cannot be proved, the run MUST fail and retain or restore exclusion
-rather than report successful cleanup and permit overlapping effects. A changed ownership generation rejects
-stale receipts but is not, by itself, an external publication fence.
+rather than report successful cleanup and permit overlapping effects. An attempt that was never authorized to
+perform an external effect, holding neither publication authorization nor permission to write native refs, is
+safely fenced by revoking its coordination ref: its expected-previous-object-ID updates can no longer succeed.
+Releasing repository locks need not await such an attempt's acknowledgement. An authorized publisher is not
+fenced this way and still requires acknowledged cancellation, an effective fence where the effect occurs, or
+reconciliation. A changed ownership generation rejects stale receipts but is not, by itself, an external
+publication fence.
 
 ### 28.7 Required example and performance boundary
 
@@ -7048,6 +7084,10 @@ duplicate prerequisite compilation a distributed-build success.
 
 ### 28.8 Conformance vectors (specification cases, not executed results)
 
+Some vectors state a condition on the implementation. A vector whose condition does not hold for an
+implementation is not applicable to it: it is neither satisfied nor violated, and every remaining vector
+still applies in full.
+
 1. No role or worker list: local orchestrator behavior remains unchanged.
 2. A worker receives direct or nested release initiation: refuse before locks
    or side effects. An orchestrator-capable node accepts a delegated task with
@@ -7075,10 +7115,12 @@ duplicate prerequisite compilation a distributed-build success.
 12. A worker's Git transport commit is fetched: no new intent, release baseline,
     tag, or admitted native head arises. Temporary commits stay outside release
     ancestry; only validated release-file changes enter native recording.
-13. A worker publishes and its reply is lost: reconcile artifact identity before
-    reauthorization; never infer a failed publish from the timeout.
-14. A worker disconnects or the orchestrator loses its lock with an in-flight
-    publisher: no new effects, no unsafe handover, no unfenced duplicate attempt.
+13. Where publication commands execute on workers, a worker publishes and its
+    reply is lost: reconcile artifact identity before reauthorization; never
+    infer a failed publish from the timeout.
+14. A worker disconnects or the orchestrator loses its lock: no new effects and
+    no unsafe handover. Where publication commands execute on workers and a
+    publisher is in flight, no unfenced duplicate attempt arises.
 15. A source tag succeeds and later checkpoint/cleanup fails: preserve source
     success and report the specific failure; no source republication for cleanup.
 16. Delete temporary branches/caches after a completed run and replan unchanged
@@ -7086,16 +7128,20 @@ duplicate prerequisite compilation a distributed-build success.
     a prepublication failure: unfinished work remains discoverable and rebuildable.
 17. Repeat the JS fixture without a separate bundle service: branch-backed
     transport still carries every declared build output.
-18. Shared JS manifest/lockfile preparation happens once before fan-out; workers
-    consume the same admitted prepared state without competing lockfile writes.
+18. Shared JS manifest/lockfile preparation executes under the orchestrator only
+    and serializes per shared file; each build records the admitted prepared
+    state it consumed, consumers of one state see identical bytes, and no worker
+    competes to write the lockfile.
 19. Independent builds in one repository overlap, but its publication/recording
     transactions serialize; cross-owner publication remains dependency-safe.
-20. A cached output has matching semantic inputs but belongs to an earlier run: verify its original provenance
-    and issue a current admission receipt before reuse; the old receipt alone authorizes no task or effect.
+20. Where verified outputs are reused across runs, a cached output has matching semantic inputs but belongs to
+    an earlier run: verify its original provenance and issue a current admission receipt before reuse. An old
+    run's receipt alone authorizes no task or effect.
 21. A worker pool accepts two runs: its total active command tasks remain within each node's local capacity,
     and each run's stage budgets remain global. An unacknowledged timed-out attempt still consumes capacity.
 22. A build-only dependency outside propagation kinds supplies ignored output: transfer it before the consumer
-    builds. An execution-only cycle fails preflight without changing the semantic release plan.
+    builds. Where the implementation admits execution-only edges that the release graph does not already
+    reject, an execution-only cycle fails preflight without changing the semantic release plan.
 23. An authenticated assignment declares `worker` authority but its hook invokes release or writes a native
     release ref: refuse the operation. A role or endpoint in a linked repository cannot elevate the assignment.
 24. A native record changes an in-flight task's relevant effective input bytes: withhold its publication and
@@ -7103,24 +7149,27 @@ duplicate prerequisite compilation a distributed-build success.
     invalidate an otherwise matching result.
 25. A receiver sees a valid manifest but only part of its file set: remain unready until all required bytes
     have been verified and installed. A digest, filename or branch reference without retrievable bytes fails.
-26. Enabled rollback work precedes ordinary publication and records only its §26 completion receipt; a worker
-    task receipt cannot replace it or discharge a release obligation.
+26. Where the implementation advertises the rollback profile of §26, enabled rollback work precedes ordinary
+    publication and records only its §26 completion receipt. A worker task receipt never replaces that receipt
+    and never discharges a release obligation.
 
 ### 28.9 Operational diagnostics
 
 The following named categories are normative outcome classes, not allocations of new `E` or `W` numbers.
-Implementations MUST expose stable machine-readable categories and the applicable run, task, attempt and
-repository identities without credentials. Existing numbered diagnostics retain their exact §16 conditions;
-profile-specific failures MUST NOT be recast as malformed commit units or suppressed by parser leniency.
+Implementations MUST expose stable machine-readable categories, named by the identifier each row states, and
+the applicable run, task, attempt and repository identities without credentials. An implementation MAY
+additionally attach its own numbered codes to a category. Existing numbered diagnostics retain their exact
+§16 conditions; profile-specific failures MUST NOT be recast as malformed commit units or suppressed by
+parser leniency.
 
-| Category | Required handling |
-| --- | --- |
-| Execution configuration | Invalid role, concurrency, endpoint, protocol, task graph or transfer capability fails before dispatch. |
-| Execution authority | Worker initiation, unauthenticated assignment, stale ownership or unauthorized writes are refused before the affected operation. A duplicate receipt cannot create a second side effect. |
-| Input or output integrity | Missing, changed, incomplete, incompatible or escaping input/output data fails the affected prerequisite and blocks required consumers. Preserve unrelated successful work. |
-| Publication outcome unknown | A lost acknowledgement or unfenced in-flight publisher withholds reauthorization and unsafe lock handover until quiescence, effective fencing or identity reconciliation is proven. Report the run as incomplete and return nonzero. |
-| Native recording or lock failure | Apply §§19 and 27, preserve successful publication and fail the run; do not retag transport work or release unsafe exclusion. |
-| Transport cleanup | Report owned temporary refs or bundles that could not be removed. Their existence cannot erase a release record. Harmless retained transport data MAY be a warning; lost exclusion or unresolved effects MUST be an error. |
+| Category | Identifier | Required handling |
+| --- | --- | --- |
+| Execution configuration | `execution-configuration` | Invalid role, concurrency, endpoint, protocol, task graph or transfer capability fails before dispatch. |
+| Execution authority | `execution-authority` | Worker initiation, unauthenticated assignment, stale ownership or unauthorized writes are refused before the affected operation. A duplicate receipt cannot create a second side effect. |
+| Input or output integrity | `io-integrity` | Missing, changed, incomplete, incompatible or escaping input/output data fails the affected prerequisite and blocks required consumers. Preserve unrelated successful work. |
+| Publication outcome unknown | `publication-unknown` | A lost acknowledgement or unfenced in-flight publisher withholds reauthorization and unsafe lock handover until quiescence, effective fencing or identity reconciliation is proven. Report the run as incomplete and return nonzero. |
+| Native recording or lock failure | `native-recording-or-lock` | Apply §§19 and 27, preserve successful publication and fail the run; do not retag transport work or release unsafe exclusion. |
+| Transport cleanup | `transport-cleanup` | Report owned temporary refs or bundles that could not be removed. Their existence cannot erase a release record. Harmless retained transport data MAY be a warning; lost exclusion or unresolved effects MUST be an error. |
 
 The task/run summary MUST distinguish completed computation, admitted outputs, successful publication, durable
 native recording, blocked dependents and unknown external outcomes. A completed task is not synonymous with a
