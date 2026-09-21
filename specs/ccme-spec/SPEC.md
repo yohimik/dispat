@@ -2938,7 +2938,7 @@ repository.
 | Versions/plan (§13.9–10)   | repeated member/record scans | `O(P + I + Z + Oout)` | Consume already-built aggregates/provenance; scan each disjoint version group once |
 | Publish order (§19.2)      | `O(P² + E)`           | `O(E + P log P)`      | Scanning the ready set for the least name; a comparison heap instead |
 | Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead |
-| Build readiness (§19.2a)   | `O(P · (P + E))`      | `O(P + E)`            | A search per building pair through the packages between them; a pass-through node per package that does not build instead. At most two task edges per dependency edge survive transitive reduction |
+| Build readiness (§19.2a)   | `O(P · (P + E))`      | `O(P + E)`            | A search per building pair through the packages between them; a pass-through node per package that does not build, or one memoised visit per package, instead. At most two task edges per dependency edge survive transitive reduction |
 | Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
 | Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum((Hq + Aq) · bw(mq)) + Iw)` | One marker pass per repository; `O(sum(Kq · (Hq + Aq)) + Iw)` with a walk per boundary |
 | Publication input closure (§27.2) | `O(P · (P + E + V))` | `O((P + E + V) · ceil(Q / wordSize))` | Condense the augmented graph, then one bitset union per edge |
@@ -4140,7 +4140,8 @@ deployment order: infrastructure before the application that runs on it, a schem
   restricted to the packages that build. For two packages `C` and `P` that build in this run, a path from `C` to `P`
   with no `none` edge on it places `P`'s build before `C`'s, whether or not the packages between them are in the plan,
   because `C` can read `P` through them. A `none` edge ends the constraint of every path through it: beyond it nothing
-  is read. A pass-through node for each package that does not build keeps the task graph at `O(P + E)`.
+  is read. Either a pass-through node for each package that does not build, or a memoised index of the nearest building
+  packages each package reaches without a `none` edge, keeps this at `O(P + E)`; a search per pair does not.
 * **No new cycle.** Every build constraint runs along a dependency path and every package builds before it publishes,
   so the task graph stays acyclic for every choice of relations, and weakening a relation only removes constraints.
   `E197` cannot arise from a relation, because the publication order does not depend on it.
