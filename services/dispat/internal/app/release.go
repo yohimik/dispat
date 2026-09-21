@@ -493,6 +493,10 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		executor.PublishGroup = publishByRepository
 	}
 	if fleet == nil {
+		// A single history composes nothing here unless the run delegates:
+		// the check exists for the questions a distributed publication has to
+		// ask again, and a local release has always asked none of them.
+		executor.BeforePublish = a.resolvePrePublishCheck(pl, nil, coordinator)
 		return executor
 	}
 	executor.Recorders = []release.ReleaseRecorderx{fleet}
@@ -505,12 +509,7 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		}
 		return rel.Pkg.Repository
 	}
-	executor.BeforePublish = func(ctx context.Context, rel *plan.Release) error {
-		if err := fleet.verifyPublishBranch(ctx, rel); err != nil {
-			return err
-		}
-		return fleet.verifySnapshot(ctx, rel)
-	}
+	executor.BeforePublish = a.resolvePrePublishCheck(pl, fleet, coordinator)
 	return executor
 }
 

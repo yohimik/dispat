@@ -440,6 +440,33 @@ func (c *LocalGitx) GitVersion(ctx context.Context) string {
 	return strings.TrimSpace(out)
 }
 
+// ChangedPathsBetween is the tracked paths that differ between two commits,
+// restricted to the pathspecs the caller names.
+//
+// It is a tree-to-tree comparison and touches neither the working tree nor the
+// index, which is what makes it safe to ask while a release is running: a run
+// that had to hold a folder still to ask whether that folder changed would be
+// a run serialising itself on its own question.
+//
+// The pathspecs are git's own, magic included, because the one caller needs to
+// say "these folders except these files" and git already has a spelling for
+// it. The listing is NUL separated, so a path holding a space or a newline
+// arrives as itself rather than as git's quoted rendering of it.
+func (c *LocalGitx) ChangedPathsBetween(ctx context.Context, from, to string, pathspecs []string) ([]string, error) {
+	out, err := c.run(ctx, append([]string{"diff", "--name-only", "-z", from, to, "--"}, pathspecs...)...)
+	if err != nil {
+		return nil, fmt.Errorf("gitx: comparing %s with %s in %s: %w", from, to, c.Dir, err)
+	}
+	var changed []string
+	for _, path := range strings.Split(out, "\x00") {
+		if path == "" {
+			continue
+		}
+		changed = append(changed, path)
+	}
+	return changed, nil
+}
+
 // RemoteTagObject is the object id the remote advertises for a tag, empty when
 // the remote does not carry it.
 //
