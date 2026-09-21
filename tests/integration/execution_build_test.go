@@ -540,7 +540,8 @@ func TestExecutionTaskTimeoutLeaksTheSlot(t *testing.T) {
 		"the abandoned attempt is reported\nstdout:\n%s", res.Stdout)
 	unhealthy, isUnhealthy := executionLine(res, "the node stopped answering and its capacity is held")
 	require.True(t, isUnhealthy, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, executionNode, unhealthy.Str("node"))
+	assert.Equal(t, executionNode, unhealthy.Str("worker"),
+		"the orchestrator names the node it is reporting on in worker, never in node")
 	assert.Empty(t, rig.repo.TagList(), "nothing was published")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock was given back")
 

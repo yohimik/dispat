@@ -92,15 +92,20 @@ const (
 )
 
 // Identity names the distributed work a failure belongs to: which run, which
-// node, which task and which attempt of it.
+// worker, which task and which attempt of it.
 //
 // Every field is optional, because most execution failures are about a
 // configuration rather than about work: a run that refuses to start has no
 // task to name, and naming an empty one would put four meaningless fields in
 // every line. What is set is what the failure knows.
+//
+// The node is called Worker because these failures are decided on the
+// orchestrator and are about somebody else: `node` names the process that
+// wrote the line, and a line that used it for the machine it is reporting on
+// would say the worker reported its own abandonment.
 type Identity struct {
 	Run     string
-	Node    string
+	Worker  string
 	Task    string
 	Attempt int
 }
@@ -174,8 +179,8 @@ func AttachIdentity(event *zerolog.Event, err error) *zerolog.Event {
 	if identity.Run != "" {
 		event.Str("run", identity.Run)
 	}
-	if identity.Node != "" {
-		event.Str("node", identity.Node)
+	if identity.Worker != "" {
+		event.Str("worker", identity.Worker)
 	}
 	if identity.Task != "" {
 		event.Str("task", identity.Task)

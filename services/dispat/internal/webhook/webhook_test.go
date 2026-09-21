@@ -426,3 +426,45 @@ func TestResolveEmptySecretDeliversUnsigned(t *testing.T) {
 	require.Len(t, eps, 1)
 	assert.Nil(t, eps[0].Secret)
 }
+
+func TestDispatcherNamesTheProcessThatSentTheEvent(t *testing.T) {
+	// Every delivery of a distributed run says which machine sent it, and it
+	// says so once, here, rather than at each of the dozen places an event is
+	// built. What the event already said about another node travels beside it
+	// untouched, and a template may render all three.
+	c := newCaptureServer(t)
+	endpoint := endpointFor(c)
+	endpoint.Format = `{"from": "{role} {node}", "ran on": "{worker}"}`
+	d := NewDispatcher([]Endpoint{endpoint}, nil, zerolog.Nop())
+	d.Sender = release.Sender{Role: "orchestrator", Node: "ci-1"}
+
+	d.Event(release.Event{Name: release.EventStageSucceeded, Package: "core",
+		Stage: "build", Worker: "build-a"})
+	d.Close(context.Background())
+
+	requests := c.all()
+	require.Len(t, requests, 1)
+	var payload struct {
+		From  string `json:"from"`
+		RanOn string `json:"ran on"`
+	}
+	require.NoError(t, json.Unmarshal(requests[0].Body, &payload), "the rendered template is valid JSON: %s", requests[0].Body)
+	assert.Equal(t, "orchestrator ci-1", payload.From)
+	assert.Equal(t, "build-a", payload.RanOn)
+}
+
+func TestADispatcherWithNoSenderAddsNothing(t *testing.T) {
+	// The containment, on the wire: a run that states no execution object
+	// delivers the payload it always delivered, with no key added to it.
+	c := newCaptureServer(t)
+	dispatch(t, []Endpoint{endpointFor(c)},
+		release.Event{Name: release.EventPackagePublished, Package: "core"})
+
+	requests := c.all()
+	require.Len(t, requests, 1)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(requests[0].Body, &payload))
+	for _, field := range []string{"role", "node", "worker"} {
+		assert.NotContains(t, payload, field)
+	}
+}

@@ -75,7 +75,7 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 	// next process, and an operator should still be able to see that it was.
 	defer func() {
 		if err := release(); err != nil {
-			a.log.Warn().Err(err).Str("node", settings.Name).Msg("the worker state lock was not released")
+			a.log.Warn().Err(err).Msg("the worker state lock was not released")
 		}
 	}()
 	seen, err := execution.LoadSeenSet(state.Seen, time.Now())

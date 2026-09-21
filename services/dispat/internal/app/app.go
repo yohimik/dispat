@@ -25,6 +25,7 @@ import (
 	"github.com/yohimik/dispat/pkg/scanner"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -43,6 +44,12 @@ type App struct {
 	// workspace is nil for legacy single-repository behavior. In polyrepo
 	// mode it is the immutable ownership map shared by every command.
 	workspace *config.Workspace
+
+	// sender is who this process is when it takes part in distributed
+	// execution, and the zero sender when it does not. It is resolved once,
+	// here, so that every event this run sends is named by the same decision
+	// the run logger was named by.
+	sender release.Sender
 
 	// The discovered workspace, remembered for the run. Discovery walks the
 	// filesystem and is repeatable rather than cheap, and one exec invocation
@@ -143,7 +150,8 @@ func NewWorkspace(root string, cfg *config.File, workspace *config.Workspace, lo
 		// run creates, so CI needs no `git config` step.
 		git.Name, git.Email = cfg.Commit.Name, cfg.Commit.Email
 	}
-	return &App{root: root, cfg: cfg, workspace: workspace, log: log, git: git, scan: scanner.New()}
+	return &App{root: root, cfg: cfg, workspace: workspace, log: log, git: git, scan: scanner.New(),
+		sender: execution.ResolveSender(cfg.Execution, false, os.Environ())}
 }
 
 // Status computes the plan and reports it — diagnostics, then the full graph

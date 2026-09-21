@@ -127,7 +127,7 @@ func (m *GitMailbox) Assign(ctx context.Context, message *Assignment) (string, e
 	// Remembered as observed at the value this run put there, so the next poll
 	// reports the branch only once the other side has moved it.
 	m.observed[message.Branch] = oid
-	m.log.Debug().Str("node", message.Node).Str("branch", message.Branch).
+	m.log.Debug().Str("worker", message.Node).Str("branch", message.Branch).
 		Str("commit", oid).Str("kind", message.Kind).Msg("assignment created")
 	return oid, nil
 }

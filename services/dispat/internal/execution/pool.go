@@ -106,7 +106,7 @@ func (p *Pool) Acquire(ctx context.Context, platforms []string) (*Lease, error) 
 		changed := p.changed
 		p.mu.Unlock()
 		if lease != nil {
-			p.log.Debug().Str("node", lease.Node).Msg("node slot acquired")
+			p.log.Debug().Str("worker", lease.Node).Msg("node slot acquired")
 			return lease, nil
 		}
 		if !isPlacementPossible {
@@ -226,9 +226,9 @@ func (l *Lease) settle(isLeaked bool) {
 	pool.changed = make(chan struct{})
 	pool.mu.Unlock()
 	if isLeaked {
-		pool.log.Warn().Str("node", l.Node).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
+		pool.log.Warn().Str("worker", l.Node).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
 			Msg("the node stopped answering and its capacity is held")
 		return
 	}
-	pool.log.Debug().Str("node", l.Node).Msg("node slot returned")
+	pool.log.Debug().Str("worker", l.Node).Msg("node slot returned")
 }

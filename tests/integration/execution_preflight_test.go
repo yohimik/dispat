@@ -132,7 +132,8 @@ func TestExecutionPreflightPassesThenReleasesLocally(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	ready, isReady := executionLine(res, "worker ready")
 	require.True(t, isReady, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, executionNode, ready.Str("node"))
+	assert.Equal(t, executionNode, ready.Str("worker"),
+		"the orchestrator names the node it is reporting on in worker, never in node")
 	assert.NotEmpty(t, ready.Str("os"))
 	assert.NotEmpty(t, ready.Str("run"))
 	fixed, isFixed := executionLine(res, "plan fixed")

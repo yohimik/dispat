@@ -153,7 +153,7 @@ func (c *Coordinator) runTask(ctx context.Context, lease *Lease, task, dir strin
 	}
 	c.recordOwnedRef(lease.Node, assignment.Branch, offered)
 	observer.bind(assignment.Branch, offered, assignment)
-	c.Log.Info().Str("run", c.Run).Str("task", task).Str("node", lease.Node).
+	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
 		Msg("task assigned")
 	defer observer.forget(assignment.Branch)
@@ -192,7 +192,7 @@ func (c *Coordinator) readTaskOutcome(task, node string, outcome release.StageOu
 	outcome.Exports = formatOutputs(result.Exports)
 	outcome.FailedPart = result.FailedPart
 	if result.StrayWrites > 0 {
-		c.Log.Warn().Str("run", c.Run).Str("task", task).Str("node", node).
+		c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", node).
 			Int("files", result.StrayWrites).Str("code", CodeTransportRetained).
 			Str("category", CategoryTransportCleanup).
 			Msg("the task wrote tracked files outside what it declared, and they are not admitted")
@@ -201,7 +201,7 @@ func (c *Coordinator) readTaskOutcome(task, node string, outcome release.StageOu
 		return outcome, c.refuseTask(task, node, fmt.Errorf(
 			"the node reported the %s frame as %s (exit %d)", result.Kind, result.Status, result.Exit))
 	}
-	c.Log.Info().Str("run", c.Run).Str("task", task).Str("node", node).
+	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", node).
 		Str("status", result.Status).Int("exports", len(outcome.Exports)).
 		Str("os", result.Platform.OS).Str("arch", result.Platform.Arch).Msg("task finished")
 	return outcome, nil
@@ -210,7 +210,7 @@ func (c *Coordinator) readTaskOutcome(task, node string, outcome release.StageOu
 // refuseTask is the failure one dispatched task reports, with the work it is
 // about already named on it.
 func (c *Coordinator) refuseTask(task, node string, err error) error {
-	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Node: node, Task: task, Attempt: 1},
+	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: node, Task: task, Attempt: 1},
 		CodeIntegrity, CategoryIntegrity, "%s could not be executed: %w", task, err)
 }
 
@@ -278,7 +278,7 @@ func (c *Coordinator) offerInput(ctx context.Context, node string, source Source
 	}
 	c.recordOwnedRef(node, branch, commit)
 	c.offered[key] = offeredState{commit: commit, branch: branch}
-	c.Log.Debug().Str("node", node).Str("repository", source.Name).Str("branch", branch).
+	c.Log.Debug().Str("worker", node).Str("repository", source.Name).Str("branch", branch).
 		Str("commit", commit).Str("run", c.Run).Msg("input state pushed")
 	return branch, nil
 }
@@ -442,7 +442,7 @@ func (w *watcher) tick(ctx context.Context) bool {
 	heads, err := w.mailbox.Observe(ctx, FormatBranchPattern(w.link.Name))
 	if err != nil {
 		if ctx.Err() == nil {
-			w.coordinator.Log.Warn().Err(err).Str("node", w.link.Name).
+			w.coordinator.Log.Warn().Err(err).Str("worker", w.link.Name).
 				Msg("the mailbox could not be polled")
 		}
 		return false
@@ -466,13 +466,13 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 	tip, err := w.mailbox.Inspect(ctx, head)
 	if err != nil {
 		if ctx.Err() == nil {
-			w.coordinator.Log.Warn().Err(err).Str("node", w.link.Name).Str("branch", head.Name).
+			w.coordinator.Log.Warn().Err(err).Str("worker", w.link.Name).Str("branch", head.Name).
 				Msg("a coordination branch could not be read")
 		}
 		return false
 	}
 	if tip.Kind != MessageResult {
-		w.coordinator.Log.Debug().Str("node", w.link.Name).Str("branch", tip.Branch).
+		w.coordinator.Log.Debug().Str("worker", w.link.Name).Str("branch", tip.Branch).
 			Str("message", string(tip.Kind)).Msg("the attempt moved on")
 		return false
 	}
@@ -481,7 +481,7 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 		// A reply nobody signed, one bound to another attempt and a node that
 		// has not answered yet are one situation from here, and the task
 		// deadline is what decides how long that is tolerated.
-		w.coordinator.Log.Warn().Str("node", w.link.Name).Str("branch", tip.Branch).
+		w.coordinator.Log.Warn().Str("worker", w.link.Name).Str("branch", tip.Branch).
 			Str("commit", tip.OID).Str("reason", string(reason)).Str("code", CodeAuthority).
 			Str("category", CategoryAuthority).Msg("result rejected")
 		return false

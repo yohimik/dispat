@@ -86,6 +86,12 @@ type Result struct {
 	// from using a release whose required durable records are incomplete.
 	// Skipped dependents carry it forward through the package graph.
 	RecordBlocked bool
+	// Worker is the node this package's delegated stages were placed on, and
+	// is empty for every package a run executed by itself. It belongs to the
+	// package rather than to one task because it is what the package's own
+	// outcome is attributed to: a receiver asking "where was this version
+	// built" is asking about the release, not about the stage it heard last.
+	Worker string
 }
 
 // Taggerx creates release tags; *gitx.LocalGitx satisfies it. A nil Taggerx on the
@@ -561,6 +567,26 @@ type taskCtx struct {
 	updates        []providerUpdate
 	log            zerolog.Logger
 	publishRelease func()
+	// worker is the node this task's frame was executed on, empty for a frame
+	// this run executed itself. Owned by the one goroutine that runs the task,
+	// written before the frame's outcome is reported and read by the events
+	// that report it.
+	worker string
+}
+
+// recordPlacement remembers where one task's frame was executed: on the task,
+// whose stage events report it, and on the package's result, whose outcome
+// events do.
+//
+// Both are written because they answer different questions. A stage event says
+// where that stage ran, so a publish the orchestrator kept names no worker
+// even when the build before it was delegated; a package event says where the
+// package's work happened, and it outlives the task that did it.
+func (tc *taskCtx) recordPlacement(node string) {
+	tc.worker = node
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	tc.results[tc.t.pkg].Worker = node
 }
 
 func (tc *taskCtx) finishPublishGuard() {
@@ -776,6 +802,10 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 		ev := packageEvent(t.pkg, rel, EventPackageFailed)
 		ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), t.kind.String(), err.Error()
+		// Where the package's work was placed, which the reader of a failure
+		// needs first: a build that failed on one node of several is a
+		// failure somebody has to go and look at on that node.
+		ev.Worker = res.Worker
 		var diagnostic interface{ DiagnosticCode() string }
 		if errors.As(err, &diagnostic) {
 			ev.Code = diagnostic.DiagnosticCode()
@@ -811,7 +841,9 @@ func (r *run) execute(ctx context.Context, t task) {
 
 	// The event reports the task starting, not a script: a stage with no
 	// configured command still runs and still transitions, so it is still
-	// observed.
+	// observed. It names no worker even for a frame this run delegates,
+	// because a frame is placed on a node while it waits for one: at this
+	// moment there is no node to name, and the event that follows carries it.
 	stageEv := packageEvent(t.pkg, rel, EventStageStarted)
 	stageEv.Stage = t.kind.String()
 	r.notify(stageEv)
@@ -842,6 +874,11 @@ func (r *run) execute(ctx context.Context, t task) {
 		tc.markManifestsChanged()
 	}
 	stageEv.Name = EventStageSucceeded
+	// The node that ran it, which the starting event could not name: a frame
+	// is placed while it waits for a node, so at the moment the stage starts
+	// there is no answer yet. The stage's own placement rather than the
+	// package's, so a stage this run kept names nobody.
+	stageEv.Worker = tc.worker
 	r.notify(stageEv)
 	if t.kind != taskPublish {
 		log.Info().Msg(t.kind.String() + " succeeded")
@@ -1003,6 +1040,9 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	tc.mu.Unlock()
 	ev := packageEvent(tc.t.pkg, rel, EventPackagePublished)
 	ev.Status, ev.Tag = StatusPublished.String(), rel.TagName()
+	// The node the package's delegated work ran on, so a published version
+	// can be traced back to the machine that produced it.
+	ev.Worker = res.Worker
 	tc.notify(ev)
 	// In release-commit mode the tag does not exist yet — finalize creates it
 	// — so the line names it as planned rather than stating it as a fact.

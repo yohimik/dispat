@@ -129,7 +129,7 @@ type Worker struct {
 // somebody.
 func (w *Worker) Serve(ctx context.Context) string {
 	w.slots = make(chan struct{}, max(w.Report.Capacity, 1))
-	w.Log.Info().Str("node", w.Node).Str("endpoint", gitx.RedactURL(w.Endpoint)).
+	w.Log.Info().Str("endpoint", gitx.RedactURL(w.Endpoint)).
 		Int("concurrency", w.Report.Capacity).Str("stateDir", w.StateDir).
 		Msg("worker started")
 	reason := w.poll(ctx)
@@ -137,7 +137,7 @@ func (w *Worker) Serve(ctx context.Context) string {
 	// on: the commands are already dead when the stop reached them, and the
 	// run that dispatched them is waiting to hear so.
 	w.running.Wait()
-	w.Log.Info().Str("node", w.Node).Str("reason", reason).Msg("worker stopped")
+	w.Log.Info().Str("reason", reason).Msg("worker stopped")
 	return reason
 }
 
@@ -173,7 +173,7 @@ func (w *Worker) poll(ctx context.Context) string {
 		case <-idleC:
 			return StopIdle
 		case <-next.C:
-			w.Log.Trace().Str("node", w.Node).Dur("interval", interval).Msg("polling the mailbox")
+			w.Log.Trace().Dur("interval", interval).Msg("polling the mailbox")
 		}
 	}
 }
@@ -204,7 +204,7 @@ func (w *Worker) tick(ctx context.Context) bool {
 		return isProgress
 	}
 	w.isStorePrepared = false
-	w.Log.Error().Err(err).Str("node", w.Node).Msg("the mailbox could not be served")
+	w.Log.Error().Err(err).Msg("the mailbox could not be served")
 	return isProgress
 }
 
@@ -244,7 +244,7 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 // reason and never the contents, because a rejected message is exactly the
 // input nobody has authenticated.
 func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error) {
-	w.Log.Trace().Str("node", w.Node).Str("branch", head.Name).Str("commit", head.OID).
+	w.Log.Trace().Str("branch", head.Name).Str("commit", head.OID).
 		Msg("coordination branch inspected")
 	tip, err := w.Mailbox.Inspect(ctx, head)
 	if err != nil {
@@ -276,7 +276,7 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 	// The kinds that are not executed by this build belong to the gate that
 	// executes them. Leaving the branch untouched is what keeps the work
 	// queued for a node that can do it rather than consuming it here.
-	w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("kind", assignment.Kind).
+	w.Log.Debug().Str("branch", tip.Branch).Str("kind", assignment.Kind).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Msg("assignment inspected")
 	return false, nil
@@ -297,7 +297,7 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 		// memo, so that the next poll offers it to this node again: nobody
 		// else is going to move the branch on this node's behalf.
 		w.Mailbox.Reconsider(tip.Branch)
-		w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("run", assignment.Run).
+		w.Log.Debug().Str("branch", tip.Branch).Str("run", assignment.Run).
 			Str("task", assignment.Task).Msg("assignment left queued: this node is full")
 		return false, nil
 	}
@@ -308,7 +308,7 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 		<-w.slots
 		return false, err
 	}
-	w.Log.Info().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", claimed).
+	w.Log.Info().Str("branch", tip.Branch).Str("commit", claimed).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("kind", assignment.Kind).Msg("task claimed")
 	// Remembered before the work starts: an attempt this node took on and then
@@ -332,7 +332,7 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 // deadline: a node asked to stop has already had its commands killed by that
 // same cancellation, and the one thing it still owes is the sentence saying so.
 func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, assignment Assignment) {
-	log := w.Log.With().Str("node", w.Node).Str("run", assignment.Run).
+	log := w.Log.With().Str("run", assignment.Run).
 		Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("branch", tip.Branch).Logger()
 	outcome := w.runTask(ctx, assignment, log)
@@ -387,7 +387,7 @@ func (w *Worker) answerProbe(ctx context.Context, tip ChainTip, assignment Assig
 	if err != nil {
 		return err
 	}
-	w.Log.Info().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", claimed).
+	w.Log.Info().Str("branch", tip.Branch).Str("commit", claimed).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("kind", assignment.Kind).Msg("task claimed")
 	// Remembered before the answer is written: the record says what this node
@@ -407,7 +407,7 @@ func (w *Worker) answerProbe(ctx context.Context, tip ChainTip, assignment Assig
 	if err != nil {
 		return err
 	}
-	w.Log.Info().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", reported).
+	w.Log.Info().Str("branch", tip.Branch).Str("commit", reported).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("status", StatusSucceeded).Msg("task finished")
 	return nil
@@ -465,7 +465,7 @@ func (w *Worker) reportIgnoredTip(tip ChainTip) {
 		// A commit carrying nothing of this protocol at all is a prepared
 		// input state, which is what the source of every dispatched task sits
 		// on and is an ordinary thing to find in a mailbox.
-		w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", tip.OID).
+		w.Log.Debug().Str("branch", tip.Branch).Str("commit", tip.OID).
 			Msg("input state inspected")
 		return
 	}
@@ -477,14 +477,14 @@ func (w *Worker) reportIgnoredTip(tip ChainTip) {
 		w.reportRejection(tip, ReasonChain)
 		return
 	}
-	w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", tip.OID).
+	w.Log.Debug().Str("branch", tip.Branch).Str("commit", tip.OID).
 		Str("message", string(tip.Kind)).Msg("assignment inspected")
 }
 
 // reportRejection writes the one line a refused message produces: which
 // branch, which commit, and why. Never what it said.
 func (w *Worker) reportRejection(tip ChainTip, reason RejectReason) {
-	w.Log.Warn().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", tip.OID).
+	w.Log.Warn().Str("branch", tip.Branch).Str("commit", tip.OID).
 		Str("reason", string(reason)).Str("code", CodeAuthority).Str("category", CategoryAuthority).
 		Msg("assignment rejected")
 }

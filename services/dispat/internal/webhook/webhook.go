@@ -78,6 +78,12 @@ type worker struct {
 // Dispatcher fans release events out to every subscribed endpoint. It
 // implements release.Observerx; see the package comment for the contract.
 type Dispatcher struct {
+	// Sender names the process every event is sent from, and is written once
+	// by whoever builds the dispatcher, before the first event reaches it.
+	// It is a field rather than a constructor argument because a run that
+	// takes no part in distributed execution leaves it at its zero value and
+	// sends exactly the payloads it always sent.
+	Sender  release.Sender
 	client  *http.Client
 	log     zerolog.Logger
 	workers []*worker
@@ -116,7 +122,13 @@ func NewDispatcher(endpoints []Endpoint, client *http.Client, log zerolog.Logger
 // immediately. A queue with no room drops the delivery with a warning rather
 // than waiting: the caller is the release executor, and nothing here may ever
 // hold it up.
+//
+// The sender is named here rather than where each event is built, because
+// every event of a run leaves through this one method: an emission site that
+// could forget to say which machine it is on would be an event a receiver
+// cannot attribute, and there are a dozen such sites.
 func (d *Dispatcher) Event(ev release.Event) {
+	ev = d.Sender.Stamp(ev)
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if d.closed {
@@ -348,6 +360,9 @@ func formatFields(ev release.Event) map[string]string {
 		"failed":          strconv.Itoa(ev.Failed),
 		"skipped":         strconv.Itoa(ev.Skipped),
 		"cancelled":       strconv.Itoa(ev.Cancelled),
+		"role":            esc(ev.Role),
+		"node":            esc(ev.Node),
+		"worker":          esc(ev.Worker),
 	}
 }
 

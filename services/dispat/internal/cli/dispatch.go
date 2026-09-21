@@ -723,7 +723,13 @@ func (r *runner) runWorker(cfgPath, root string) int {
 		logConfigError(r.boot, err).Msg("invalid configuration")
 		return 1
 	}
-	log := newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout)
+	// A serving node says which node it is on every line it writes, before it
+	// has decided whether it can serve at all: the refusals below are the
+	// first thing an operator reads off a machine they have just configured,
+	// and a refusal that does not name the node is a refusal they have to
+	// guess the owner of.
+	log := execution.ResolveSender(cfg.Execution, true, os.Environ()).
+		Attach(newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout))
 	// The same refusal every other command gets, reached here because a
 	// serving node never travels through dispatch: a process executing
 	// somebody else's task may not start serving work of its own.
@@ -990,6 +996,13 @@ func (r *runner) runConfigured() int {
 		logConfigError(r.boot, err).Msg("invalid configuration")
 		return 1
 	}
+	// Who this process is, now that the file has said so, and on everything
+	// the command builds from here: the run logger below, and the loader's
+	// own events, which are still being written while the workspace is
+	// composed. A configuration that states no execution object answers the
+	// zero sender, and both loggers stay exactly the loggers they were.
+	sender := execution.ResolveSender(cfg.Execution, false, os.Environ())
+	config.UseLogger(sender.Attach(r.boot))
 	// Config imports add to the control file's list. They are intentionally
 	// resolved later, from resolvedRoot, while paths authored in a config are
 	// resolved from the declaring file.
@@ -1049,7 +1062,7 @@ func (r *runner) runConfigured() int {
 			workspace.SetParserQuietOverride(*r.o.quietParser)
 		}
 	}
-	log := newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout)
+	log := sender.Attach(newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout))
 	// The first thing worth knowing about any run is which file it read and
 	// which folder it decided was the monorepo root, because both are inferred
 	// when no flag names them and "it ran with the wrong config" looks exactly

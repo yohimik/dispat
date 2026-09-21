@@ -168,8 +168,12 @@ func (tc *taskCtx) remoteStage(ctx context.Context, s stage) (string, error) {
 		Dir:       tc.rel.Pkg.Dir,
 	})
 	MergeOutputs(tc.rel, outcome.Exports)
+	// Before the error is looked at, for the reason the exports are: a frame
+	// that failed on a node is a failure that node is reported for, and the
+	// event saying so is built from this.
+	tc.recordPlacement(outcome.Node)
 	if err == nil {
-		tc.log.Debug().Str("node", outcome.Node).Int("exports", len(outcome.Exports)).
+		tc.log.Debug().Str("worker", outcome.Node).Int("exports", len(outcome.Exports)).
 			Msg(tc.t.kind.String() + ": the node reported the frame finished")
 		return "", nil
 	}

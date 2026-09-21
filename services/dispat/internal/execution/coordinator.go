@@ -161,7 +161,7 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 		if err := c.checkReport(reports[index]); err != nil {
 			return c.refuse(link.Name, err)
 		}
-		c.Log.Info().Str("node", link.Name).Str("os", reports[index].OS).
+		c.Log.Info().Str("worker", link.Name).Str("os", reports[index].OS).
 			Str("arch", reports[index].Arch).Int("capacity", reports[index].Capacity).
 			Str("dispat", reports[index].Dispat).Str("run", c.Run).Msg("worker ready")
 	}
@@ -252,7 +252,7 @@ func (c *Coordinator) readReport(ctx context.Context, link Link, branch, offered
 			// logged and left where it is: from here it is indistinguishable
 			// from a node that has not answered, and the deadline is what
 			// decides how long that is tolerated.
-			c.Log.Warn().Str("node", link.Name).Str("branch", tip.Branch).Str("commit", tip.OID).
+			c.Log.Warn().Str("worker", link.Name).Str("branch", tip.Branch).Str("commit", tip.OID).
 				Str("reason", string(reason)).Str("code", CodeAuthority).
 				Str("category", CategoryAuthority).Msg("result rejected")
 			continue
@@ -356,7 +356,7 @@ func (c *Coordinator) isPlacementPossible(platforms []string, reports []*NodeRep
 // refuse is the one diagnostic a failed preflight produces: the node it is
 // about, and what it could not be.
 func (c *Coordinator) refuse(node string, err error) error {
-	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Node: node, Task: PreflightTask, Attempt: 1},
+	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: node, Task: PreflightTask, Attempt: 1},
 		CodeConfiguration, CategoryConfiguration,
 		"worker node %s did not pass preflight: %w", node, err)
 }

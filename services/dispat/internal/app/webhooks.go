@@ -33,7 +33,20 @@ func (a *App) webhookDispatcher(pl *plan.Plan) *webhook.Dispatcher {
 		// no endpoint to reach, the run needs no dispatcher at all.
 		return nil
 	}
-	return webhook.NewDispatcher(endpoints, nil, a.log)
+	return a.newDispatcher(endpoints)
+}
+
+// newDispatcher builds one routed dispatcher and names the process every
+// event it will send comes from.
+//
+// Every dispatcher this application builds is built here, so that naming the
+// sender is one statement rather than a habit each construction site has to
+// remember. A run that states no execution object names nothing, and its
+// payloads stay byte for byte what they were.
+func (a *App) newDispatcher(endpoints []webhook.Endpoint) *webhook.Dispatcher {
+	dispatcher := webhook.NewDispatcher(endpoints, nil, a.log)
+	dispatcher.Sender = a.sender
+	return dispatcher
 }
 
 // Trigger delivers one script-raised event to the configured webhooks:
@@ -83,7 +96,7 @@ func (a *App) triggerDispatcher() *webhook.Dispatcher {
 		if len(endpoints) == 0 {
 			return nil
 		}
-		return webhook.NewDispatcher(endpoints, nil, a.log)
+		return a.newDispatcher(endpoints)
 	}
 	perPackage := map[string][]public.WebhookConfig{}
 	declared := len(a.cfg.Webhooks) > 0
@@ -98,7 +111,7 @@ func (a *App) triggerDispatcher() *webhook.Dispatcher {
 	if len(endpoints) == 0 {
 		return nil
 	}
-	return webhook.NewDispatcher(endpoints, nil, a.log)
+	return a.newDispatcher(endpoints)
 }
 
 // releaseStartedEvent snapshots the plan the run is about to execute: one
