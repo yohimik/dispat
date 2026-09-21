@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -726,7 +727,42 @@ func (c *LocalGitx) run(ctx context.Context, args ...string) (string, error) {
 // its arguments: GIT_INDEX_FILE, which is how a commit can be built from a
 // temporary index without the repository's own index or worktree being touched
 // at all. The variables are appended, so they win over the inherited ones.
+//
+// A failed invocation returns no output, as it always has: a caller that
+// ignores the error must not be handed whatever git happened to print before
+// it failed (`rev-parse` echoes an unknown argument on its way out). The one
+// family that reads its answer off a failed command asks runStream directly.
 func (c *LocalGitx) runEnv(ctx context.Context, env []string, args ...string) (string, error) {
+	out, err := c.runStream(ctx, gitStream{env: env}, args...)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// gitStream is the input and output of one invocation that does not fit in a
+// returned string: a blob hashed from a reader, a blob written to a writer, a
+// listing scanned entry by entry. Its zero value is the buffered invocation
+// every other caller makes.
+type gitStream struct {
+	stdin  io.Reader
+	stdout io.Writer
+	env    []string
+}
+
+// runStream is the one place a git subprocess is started. It exists apart
+// from runEnv so that the transport's bounded streaming (see transport.go)
+// shares the identical environment, process group, cancellation, redaction
+// and trace logging rather than reimplementing them beside it.
+//
+// The standard output is returned whether or not git succeeded. One family of
+// commands reports its machine-readable answer there and still exits
+// non-zero: `git push --porcelain` writes a status flag per ref and exits 1
+// when any one of them was rejected, and telling a rejected lease from an
+// unreachable remote is exactly what the caller has to do. Only the callers
+// that need that answer come here; run and runEnv keep the contract every
+// other caller was written against and return nothing beside an error.
+func (c *LocalGitx) runStream(ctx context.Context, stream gitStream, args ...string) (string, error) {
 	gitInvocations.Add(1)
 	base := []string{"-C", c.Dir}
 	if c.Name != "" {
@@ -741,9 +777,14 @@ func (c *LocalGitx) runEnv(ctx context.Context, env []string, args ...string) (s
 	// branch that moved is recognised by its wording (see classifyPush). A
 	// localised checkout would defeat that silently, so every invocation asks
 	// for the C locale.
-	cmd.Env = append(append(os.Environ(), "LC_ALL=C", "LANG=C"), env...)
+	cmd.Env = append(append(os.Environ(), "LC_ALL=C", "LANG=C"), stream.env...)
 	var out, stderr bytes.Buffer
+	cmd.Stdin = stream.stdin
 	cmd.Stdout = &out
+	written := &countingWriter{to: stream.stdout}
+	if stream.stdout != nil {
+		cmd.Stdout = written
+	}
 	cmd.Stderr = &stderr
 	// A network call forks ssh, a credential helper or git-remote-https, and
 	// those inherit the output pipes. Killing git alone would leave them
@@ -767,11 +808,25 @@ func (c *LocalGitx) runEnv(ctx context.Context, env []string, args ...string) (s
 	if err != nil {
 		safeStderr := strings.TrimSpace(redactGitOutput(stderr.String(), args))
 		ev.Err(err).Str("stderr", safeStderr).Msg("git failed")
-		return "", fmt.Errorf("git %s: %w: %s",
+		return out.String(), fmt.Errorf("git %s: %w: %s",
 			strings.Join(safeArgs, " "), err, safeStderr)
 	}
-	ev.Int("outBytes", out.Len()).Msg("git")
+	ev.Int("outBytes", out.Len()+written.count).Msg("git")
 	return out.String(), nil
+}
+
+// countingWriter forwards to a caller's writer and remembers how much went
+// through, so an invocation whose output never lands in a buffer still writes
+// the same trace line as every other one.
+type countingWriter struct {
+	to    io.Writer
+	count int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	n, err := w.to.Write(p)
+	w.count += n
+	return n, err
 }
 
 func redactGitOutput(output string, args []string) string {
