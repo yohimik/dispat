@@ -52,7 +52,7 @@ func stepRepo(t *testing.T) (*harness.Repo, string) {
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages"},
-			IsBuildWaitingPublish: models.Bool(true),
+			IsBuildWaitingPublish: models.StageRelationOf(true),
 			Flow:                  &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
 		"svc": {Path: models.PathList{"services"},
 			Flow: &models.SpaceFlowConfig{Build: []string{"check-remote", "build"}, Publish: []string{"build"}}},
@@ -318,7 +318,7 @@ func TestStepsCatchUpEntrySpansTheProvidersMovement(t *testing.T) {
 	// Both spaces record through the wired steps, so the consumer's catch-up
 	// entry is the step command's own writing.
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, IsBuildWaitingPublish: models.Bool(true),
+		"libs": {Path: models.PathList{"packages"}, IsBuildWaitingPublish: models.StageRelationOf(true),
 			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
 		"svc": {Path: models.PathList{"services"},
 			Flow: &models.SpaceFlowConfig{Build: []string{"span-log"}, Publish: []string{"record"}}},
@@ -391,7 +391,7 @@ func TestStepsAlignedRecordsKeepTheirDependencyLinks(t *testing.T) {
 		"stray": {"git tag core@0.2.0"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, IsBuildWaitingPublish: models.Bool(true),
+		"libs": {Path: models.PathList{"packages"}, IsBuildWaitingPublish: models.StageRelationOf(true),
 			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"record"}}},
 		"svc": {Path: models.PathList{"services"},
 			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"stray", "record"}}},

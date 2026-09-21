@@ -70,7 +70,7 @@ func smokeConfig() models.File {
 		// js: its build consumes the publish, exactly as the dispat images
 		// install the CLI release, so a failed js leg must skip img (cycle 8).
 		"web": {Path: models.PathList{"web"}, Flow: buildPublish(), VersionGroup: "app",
-			IsBuildWaitingPublish: models.Bool(true),
+			IsBuildWaitingPublish: models.StageRelationOf(true),
 			AutoVersion:           &models.AutoVersionConfig{Manifests: "root"}},
 		"images": {Path: models.PathList{"images"}, Flow: buildPublish(), VersionGroup: "app",
 			AutoVersion: &models.AutoVersionConfig{Manifests: "root"}},

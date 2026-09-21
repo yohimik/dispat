@@ -29,7 +29,7 @@ func npmDistributionConfig() models.File {
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"services": {
 			Path: models.PathList{"services"}, VersionGroup: "cli",
-			IsBuildWaitingPublish: models.Bool(true), Flow: buildPublish(),
+			IsBuildWaitingPublish: models.StageRelationOf(true), Flow: buildPublish(),
 			TagFormat: "services/{name}/v{version}",
 			Scripts: map[string]models.Script{
 				"build":   {"echo build"},

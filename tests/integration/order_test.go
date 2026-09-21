@@ -82,7 +82,7 @@ func providerConsumerRepo(t *testing.T, isBuildWaitingPublish bool, providerPubl
 		"consumer-publish": {r.TsmarkScript("timeline.log", "consumer-publish", 0)},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"provider": {Path: models.PathList{"packages/provider"}, IsBuildWaitingPublish: models.Bool(isBuildWaitingPublish),
+		"provider": {Path: models.PathList{"packages/provider"}, IsBuildWaitingPublish: models.StageRelationOf(isBuildWaitingPublish),
 			Flow: &models.SpaceFlowConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
 		"consumer": {Path: models.PathList{"packages/consumer"},
 			Flow: &models.SpaceFlowConfig{Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},
@@ -249,7 +249,7 @@ func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
 		}
 		cfg.Spaces = map[string]models.SpaceConfig{
 			"provider": {Path: models.PathList{"packages/provider"},
-				IsBuildWaitingPublish: models.Bool(isBuildWaitingPublish),
+				IsBuildWaitingPublish: models.StageRelationOf(isBuildWaitingPublish),
 				Flow:                  &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"fail-publish"}}},
 			"consumer": {Path: models.PathList{"packages/consumer"},
 				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},

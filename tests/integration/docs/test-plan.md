@@ -131,6 +131,20 @@ integration suite itself.
     once is only readable if every line says which machine wrote it, so every process taking part names itself with a
     role and a node on every line and in every webhook event, a line or event about another node names that node
     separately, and a repository that states no `execution` object writes and delivers exactly what it always did.
+60. **The provider relation** (`stage_relation_test.go`): `isBuildWaitingPublish` answers two questions rather than
+    one, so it accepts an object beside the boolean it has always been. The first question is what a consumer's
+    version and build stage waits for on a changed provider: nothing under `none`, the provider's build under `build`,
+    its build and its publish under `publish`. The second is whether a provider that failed or was skipped outranks a
+    release reason of the consumer's own, which `none` and `publish` do and `build` does not. The claims are that the
+    two booleans still order a run exactly as they did and mean the same as the objects they are shorthand for; that
+    under `none` an infrastructure package and the applications deployed onto it build at once, proven with a gate the
+    provider's build waits on rather than with a sleep, while each application still deploys only after the
+    infrastructure applied; that a failed provider under a blocking relation skips a consumer that already built and
+    carries a fresh bump of its own, with `W194`, its `onSkip` script and its `revertOnFail` rollback, and that the
+    relaxed relation releases it; that the key folds through the ordinary ladder and a level stating it replaces the
+    whole relation; that the object's rules are load-time rules on every level that carries the key; and that build
+    order is taken over the whole dependency graph, so a provider reached through a package with nothing to release
+    still builds first.
 
 ### Configuration
 
@@ -445,6 +459,7 @@ tests/integration/
   execution_build_test.go   goal 57 (build stages executed on other machines, from a prepared input state)
   execution_identity_test.go  goal 57 (which machine wrote this line, and which machine sent this event)
   execution_outputs_test.go goal 57 (declared build outputs travelling from the node that made them to the node that needs them)
+  stage_relation_test.go    goal 60 (what a consumer waits for, and what a failed provider does to it)
 
   configuration
   config_test.go            goal 10
@@ -752,6 +767,17 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionOversizedManifestIsRefusedWhereItIsWritten` | A manifest larger than `execution.transfer.maxManifestBytes` is refused on the node that wrote it with the `manifest-oversize` reason, so the package fails with E227 and nothing is published, rather than the run waiting out a task deadline for a document nobody could read. |
 | `TestExecutionRelayFailureFailsTheConsumer` | A copy that could not be pushed onto the consumer's endpoint is a prerequisite that did not arrive, so the consumer is refused with E227, the package that needed it publishes nothing and both mailboxes are closed. |
 | `TestExecutionTriggerFromAWorkerNamesTheWorker` | A build script placed on a node reports its own progress from there: the `script.progress` delivery carries `role=worker`, the node's name, the package and the stage the task gave it, its header value and its signature resolve from that node's environment rather than the orchestrator's, and the run's own brackets are still the orchestrator's and unsigned. |
+
+### Goal 60: the provider relation (`stage_relation_test.go`)
+
+| Test | Claim proven |
+|------|--------------|
+| `TestStageRelationBuildsOverlapWhilePublishesFollowTheProvider` | Under `{build: none}` an infrastructure package and the two applications deployed onto it build at once, proven with a gate file the infrastructure build waits on until an application build has opened it rather than with a sleep, while each application's deployment still starts only after the infrastructure's ended and all three packages release. |
+| `TestStageRelationBooleansKeepTheirMeaning` | `false` holds a consumer's build behind the provider's build and lets it overlap the provider's publish; `true` holds it behind the publish; and the objects `{build: build}` and `{build: publish}` order the same fixture identically, so an existing configuration means exactly what it meant. |
+| `TestStageRelationBlockingSkipsAConsumerWithItsOwnChanges` | A failed provider under `{build: none}` skips a consumer that has already built and carries a fresh bump of its own, with `W194` naming the provider, nothing tagged, the `onSkip` script run and `revertOnFail` rolling the finished build back out of the folder; `{build: none, isBlocking: false}` releases that same consumer instead. |
+| `tests/integration/stage_relation_test.go::TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild` | With `app -> ui -> core` and only `app` and `core` in the plan, `core`'s build still finishes before `app`'s starts: build order is taken over the whole dependency graph rather than over the subgraph the plan induces. |
+| `TestStageRelationLadder` | The key folds through the ordinary ladder and a level that states it replaces the whole relation: the repository default reaches a space that says nothing, a space entry replaces it, a package entry replaces the space's and a package folder's own file replaces that again, read out of the resolved debug lines of `dispat status`. |
+| `TestStageRelationConfigRefusals` | An object with no `build`, an unknown or wrongly cased wait, an unknown key, a blocking rule that is not a boolean and `{build: publish, isBlocking: false}` each exit 1 naming `isBuildWaitingPublish` and tag nothing, at the root file, a space entry, a package entry, a space folder's own file and a package folder's own file alike. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
 
@@ -2593,14 +2619,17 @@ checks the exported normaliser directly, including the fast path that returns it
 `TestPublicAPICCMEVersionArithmetic` covers the exported semver surface the release engine shares with the parser, and
 `TestPublicAPICCMEValueTypeContracts` and `TestPublicAPICCMEConfigurationSurface` cover the value types a consumer of
 a result reads and every configuration the constructors accept or refuse.
-Seven drivers carry `pkg/models`, the published configuration model, through its own surface rather than through a
+Eight drivers carry `pkg/models`, the published configuration model, through its own surface rather than through a
 loaded configuration. `TestPublicAPIModelOptionPredicates` drives every tri-state option field through its nil, false
 and true states and checks each deprecated spelling against its preferred one; `TestPublicAPIModelFoldLookups` drives
 the case-insensitive name resolution at each level a package resolves a script through;
 `TestPublicAPIModelScriptShapes` and `TestPublicAPIModelDependencyShapes` round-trip the `scripts` and `dependencies`
 keys through both written shapes and every error their normalisers report, including the map shape a YAML reader
 produces; `TestPublicAPIModelPathListShapes` round-trips a space's `path` key; `TestPublicAPIModelWebhookVocabulary`
-drives the event vocabulary, the subscription grammar and the format tokenizer; and `TestPublicAPIModelFileRoundTrip`
+drives the event vocabulary, the subscription grammar and the format tokenizer;
+`TestPublicAPIModelStageRelationShapes` round-trips `isBuildWaitingPublish` through the boolean and the object it also
+accepts, the defaults an unstated `isBlocking` follows and every error its normaliser reports; and
+`TestPublicAPIModelFileRoundTrip`
 authors a whole configuration as typed values and checks that marshalling it twice is stable.
 Fifteen drivers carry `pkg/config`, the published configuration library, and its optional `watch` subpackage.
 `TestPublicAPIConfigFoldingAndKeyPaths`, `TestPublicAPIConfigErrorVocabulary` and `TestPublicAPIConfigEventSurface`
