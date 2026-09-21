@@ -127,6 +127,20 @@ If your manifest already lives beside the code in a subfolder, commands can run 
 In this layout, the folder contains its own manifest, and its scripts and changelog use that folder. The dispat
 configuration lives at the root, and tags belong to the repository.
 
+Write commits scoped with the package name to drive releases. A commit with no scope also counts when it touches files
+inside the folder. Watch how dispat handles a new feature:
+
+```console
+$ git commit -m "feat(app): first version"
+$ dispat status
+09:31:07 INF ● changed bump=minor channel=stable dueToProviders=[] ownCommits=1 package=app reason=direct space=app version="0.0.0 -> 0.1.0"
+09:31:07 INF release plan ready held=0 packages=1 releasing=1
+```
+
+Everything else works unchanged with one package. You can use channels, the changelog, GitHub releases, hooks, and
+`dispat run` exactly as documented. If the repository grows a second deliverable later, add another entry or a space
+and declare the edge between them.
+
 ## The repository itself as the package
 
 A `path` of `.` names the repository root, so the package is the repository and no folder-relative detour is needed.
@@ -158,20 +172,6 @@ manifest and the lockfile are already inside the package. The release commit cov
 from a clean checkout. Two settings are refused for a package rooted this way: `revertOnFail`, which would discard
 every local change in the tree, and a `buildOutputs` root holding another package's folder. See
 [The repository as the package](../configuration/packages.md#the-repository-as-the-package).
-
-Write commits scoped with the package name to drive releases. A commit with no scope also counts when it touches files
-inside the folder. Watch how dispat handles a new feature:
-
-```console
-$ git commit -m "feat(app): first version"
-$ dispat status
-09:31:07 INF ● changed bump=minor channel=stable dueToProviders=[] ownCommits=1 package=app reason=direct space=app version="0.0.0 -> 0.1.0"
-09:31:07 INF release plan ready held=0 packages=1 releasing=1
-```
-
-Everything else works unchanged with one package. You can use channels, the changelog, GitHub releases, hooks, and
-`dispat run` exactly as documented. If the repository grows a second deliverable later, add another entry or a space
-and declare the edge between them.
 
 ## When it grows
 
