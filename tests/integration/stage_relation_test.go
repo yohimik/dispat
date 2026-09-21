@@ -224,38 +224,68 @@ func TestStageRelationBlockingSkipsAConsumerWithItsOwnChanges(t *testing.T) {
 // TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild: a consumer
 // reads its providers through whatever lies between them, and what lies
 // between them need not be releasing. `app` depends on `ui`, `ui` depends on
-// `core`, and only `app` and `core` have work of their own, so `ui` is not in
-// the plan at all; `core` must still build first, because what `app` reads of
-// `ui` may be `core`'s.
+// `core`, and only `app`, `core` and `deploy` have work of their own, so
+// `ui` is not in the plan at all; `core` must still build first, because what
+// `app` reads of `ui` may be `core`'s.
+//
+// The graph converges on purpose. `core` is reached by three routes, two of
+// them through a second unreleasing package, so one ordering is stated once
+// however many paths lead to it; and `deploy` is reached only across a `none`
+// hop, which ends the constraint of every path through it, so it stays free to
+// build beside `app`.
 func TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild(t *testing.T) {
 	r := harness.New(t)
-	cfg := harness.BaseFile(3)
+	cfg := harness.BaseFile(4)
 	cfg.Scripts = map[string]models.Script{
-		"build":   {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 400*time.Millisecond)},
-		"publish": {"echo publishing"},
+		"short-build": {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 200*time.Millisecond)},
+		"long-build":  {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 900*time.Millisecond)},
+		"publish":     {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()},
+		"libs": {Path: models.PathList{"packages"},
+			Flow: &models.SpaceFlowConfig{Build: []string{"short-build"}, Publish: []string{"publish"}}},
+		"deployments": {Path: models.PathList{"deployments"},
+			IsBuildWaitingPublish: &models.StageRelation{Build: models.StageWaitNone},
+			Flow:                  &models.SpaceFlowConfig{Build: []string{"long-build"}, Publish: []string{"publish"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "app", Provider: "ui"},
+		{Consumer: "app", Provider: "side"},
 		{Consumer: "ui", Provider: "core"},
+		{Consumer: "ui", Provider: "alt"},
+		{Consumer: "ui", Provider: "deploy"},
+		{Consumer: "alt", Provider: "core"},
+		{Consumer: "side", Provider: "core"},
 	}
 	r.WriteConfigModel(cfg)
-	for _, name := range []string{"core", "ui", "app"} {
+	for _, name := range []string{"core", "ui", "alt", "side", "app"} {
 		r.SeedPackage("packages", name)
 	}
-	// No caret: the bumps reach nobody, so `ui` has nothing to release and the
-	// two packages that do have no edge between them inside the plan.
-	r.Commit("feat(core,app): each for its own reasons")
+	r.SeedPackage("deployments", "deploy")
+	// No caret: the bumps reach nobody, so the four middle packages have
+	// nothing to release and the packages that do have no edge between them
+	// inside the plan.
+	r.Commit("feat(core,app,deploy): each for its own reasons")
 
 	res := r.ReleaseOK()
-	require.Zero(t, r.TagCount("ui@"), "the middle package is not in the plan; tags: %v", r.TagList())
-	require.Equal(t, 1, r.TagCount("core@"), "tags: %v", r.TagList())
-	require.Equal(t, 1, r.TagCount("app@"), "tags: %v\nstdout:\n%s", r.TagList(), res.Stdout)
+	for _, name := range []string{"ui", "alt", "side"} {
+		require.Zerof(t, r.TagCount(name+"@"), "%s is not in the plan; tags: %v", name, r.TagList())
+	}
+	for _, name := range []string{"core", "app", "deploy"} {
+		require.Equalf(t, 1, r.TagCount(name+"@"), "%s released; tags: %v\nstdout:\n%s",
+			name, r.TagList(), res.Stdout)
+	}
 
 	build := r.Timeline("build.log")
-	harness.AssertSequential(t, harness.Find(t, build, "core"), harness.Find(t, build, "app"))
+	appBuild := harness.Find(t, build, "app")
+	harness.AssertSequential(t, harness.Find(t, build, "core"), appBuild)
+
+	// The `none` hop ends the path, so nothing orders `app` against `deploy`:
+	// `app` starts while the long deployment build is still running.
+	deployBuild := harness.Find(t, build, "deploy")
+	assert.Truef(t, appBuild.Start.Before(deployBuild.End),
+		"app built at %s, after the deployment build ended at %s: a none hop orders nothing behind it",
+		appBuild.Start, deployBuild.End)
 }
 
 // TestStageRelationLadder: the key folds through the ordinary ladder and a
@@ -318,6 +348,10 @@ func TestStageRelationConfigRefusals(t *testing.T) {
 		"an unknown key":                   map[string]any{"build": "none", "blocking": true},
 		"a publish that cannot block":      map[string]any{"build": "publish", "isBlocking": false},
 		"a blocking rule that is not one":  map[string]any{"build": "none", "isBlocking": "yes"},
+		// Not an object at all: the scalar keeps the weak reading every other
+		// boolean key of the language gets, and a word that is neither true
+		// nor false is refused there rather than read as one of them.
+		"a scalar that is neither true nor false": "sometimes",
 	} {
 		for level, write := range stageRelationLevels() {
 			t.Run(name+" at "+level, func(t *testing.T) {
