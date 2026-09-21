@@ -131,6 +131,7 @@ to be interpreted as described in RFC 2119.
 | **Stale**                | A package that would receive a non-`none` propagated bump: it has not released past a commit that propagates to it.    |
 | **Catch-up release**     | A release whose entire cause is a propagation from a dependency that has **already** been published (§13.7a).           |
 | **Publish graph**        | The graph used to order publication, and to decide what a failed publish blocks (§19.2).                                |
+| **Build readiness**      | What a consumer's build waits for in its provider: `none`, `build` or `publish` (§19.2a). Execution policy; it never changes the plan. |
 | **Blocked**              | Planned, but not attempted in this run because a dependency's publish failed (`W194`).                                  |
 | **Convergence**          | The property that re-running the engine at a fixed `HEAD` eventually yields an empty plan (§13.7c).                     |
 | **Publish target**       | The registry a package's artefact is uploaded to, or `none`. Does not affect whether the package is released (§13.10a). |
@@ -2937,6 +2938,7 @@ repository.
 | Versions/plan (§13.9–10)   | repeated member/record scans | `O(P + I + Z + Oout)` | Consume already-built aggregates/provenance; scan each disjoint version group once |
 | Publish order (§19.2)      | `O(P² + E)`           | `O(E + P log P)`      | Scanning the ready set for the least name; a comparison heap instead |
 | Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead |
+| Build readiness (§19.2a)   | `O(P · (P + E))`      | `O(P + E)`            | A search per building pair through the packages between them; a pass-through node per package that does not build instead. At most two task edges per dependency edge survive transitive reduction |
 | Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
 | Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum((Hq + Aq) · bw(mq)) + Iw)` | One marker pass per repository; `O(sum(Kq · (Hq + Aq)) + Iw)` with a walk per boundary |
 | Publication input closure (§27.2) | `O(P · (P + E + V))` | `O((P + E + V) · ceil(Q / wordSize))` | Condense the augmented graph, then one bitset union per edge |
@@ -3201,6 +3203,30 @@ bounds. The publish heap matches the comparison-sorting lower bound for unsorted
 phase-specific statements. Neither `Ω(Z)` output work nor a dense `H × m` or `P × Q` representation proves that every
 instance requires that representation or that the complete planner is jointly time- and space-optimal. Correction,
 reachability, scope and cache choices retain input-dependent tradeoffs.
+
+**Build readiness: what a weaker relation can and cannot buy.** Let `b_i` and `p_i` be the build and publication
+durations of package `i`, and let every slot be free. A run then lasts as long as the longest path of the task graph
+of §19.2a, and a weaker relation never lengthens it, because its constraints are a subset of the stronger one's. On a
+chain of `n` packages, each consuming the one before it, under one relation throughout: `publish` gives
+`sum(b_i + p_i)`; `build` gives the greatest over `k` of `b_1 + … + b_k + p_k + … + p_n`; `none` gives the greatest
+over `k` of `b_k + p_k + … + p_n`. With equal durations these are `n · (b + p)`, `max(n · b + p, b + n · p)` and
+`b + n · p`: `build` saves `(n - 1) · min(b, p)` over `publish`, and `none` saves a further `(n - 1) · (b - p)`, and
+only where builds outlast publications. For one provider `0` and consumers `i` the three are
+`b_0 + p_0 + max(b_i + p_i)`, `b_0 + max(max(b_i, p_0) + p_i)` and `max(max(b_i, b_0 + p_0) + p_i)`. For providers `i`
+of one consumer `c` they are `max(b_i + p_i) + b_c + p_c`, `max(max(b_i) + b_c, max(b_i + p_i)) + p_c` and
+`max(b_c, max(b_i + p_i)) + p_c`. Where one owner's publications are serialized (§27.2, §28.6) in the order `1 … n`,
+every relation gives the greatest over `k` of `e_k + p_k + … + p_n`, with `e_k` the instant the build of `k` ends: the
+floor is `sum(p_i)` whatever the relation, and a weaker relation only lowers the `e_k`.
+
+Under budgets of `m_b` build slots and `m_p` publication slots, write `Wb = sum(b_i)`, `Wp = sum(p_i)` and `L` for the
+longest path. No schedule beats `max(L, Wb / m_b, Wp / m_p)`. A placement that never idles a slot of a stage while a
+task of that stage is ready finishes within `L + Wb / m_b + Wp / m_p`, because at every instant either a task of one
+fixed chain is running or the stage that chain waits for has every slot busy; that is within three times the best
+possible, and it is not claimed tight for this shape of graph. The unlimited-slot result does not carry over: under
+budgets a weaker relation can lengthen such a schedule, although never the best one. With two build slots and one
+publication slot, packages `(b, p) = (2, 3)`, `(1, 2)` consuming the first, and an unrelated `(8, 3)` finish at 11
+under `build` and at 12 under `none`, because the consumer's early build takes the slot the long build would have had.
+This is Graham's scheduling anomaly, and it is why §19.2a promises a happens-before relation and no duration.
 
 **Distributed execution: what placement can and cannot buy.** Let `Wk` be the summed duration of a run's command
 tasks, `Lk` the duration of its longest precedence chain, and `s` the task slots usable at once, the lesser of the
@@ -4081,6 +4107,54 @@ it is prevented rather than diagnosed. An implementation that detects it MUST ra
 constrains the order, whether or not either package's bump arrived by propagation: a dependent that is in the plan for
 its own unrelated `feat` still resolves its dependency at install time (vector 80a). An `E197` that fires only for
 propagated pairs is under-reporting.
+
+### 19.2a Build readiness
+
+§19.2 orders publication. An engine that also runs the packages' builds has a second question for every edge `C → P`
+between two packages that build in this run: what `C`'s build reads of `P`. The answer is a declared property of the
+edge, its **build readiness relation**, with three values named for what `C`'s build waits for:
+
+| Relation  | `C`'s build reads                                                      | `C`'s build starts after              |
+|-----------|------------------------------------------------------------------------|---------------------------------------|
+| `publish` | `P` as an installer resolves it: the published artefact and its record | `P` is published and recorded (§19.1) |
+| `build`   | what `P`'s build leaves in the workspace                               | `P`'s build has succeeded             |
+| `none`    | nothing that `P`'s build or publication produces in this run           | nothing of `P`                        |
+
+`C`'s build here includes every preparation step of `C` that can read the provider, lockfile regeneration in
+particular. Manifest reconciliation (§19.5) reads planned versions only and waits for nothing.
+
+The values are ordered `none < build < publish`, and each precondition implies the one before it, because a package
+builds before it publishes. Under all three, `P` publishes before `C` does: §19.2 is unchanged, is not a fourth value,
+and cannot be declared away. `none` therefore means build in parallel and publish in order, which is the relation of a
+deployment order: infrastructure before the application that runs on it, a schema before the service that reads it.
+
+* **Declared, never inferred.** `none` states that `C`'s build reads nothing of `P`, and an engine cannot check that. It
+  MUST NOT infer `none` and MUST NOT make it a default. A consumer whose preparation resolves the provider from a
+  registry needs `publish`; one that reads the provider's workspace output needs `build`. An implementation documents
+  where the relation is declared and what its default is.
+* **Policy, not plan.** The relation is execution policy. It never changes which packages release or at which versions,
+  it is no part of the input of §13 or of a plan digest, and two runs of one plan under different relations record the
+  same releases when every task succeeds. Under §28 it travels with the run's resolved configuration, and a node's own
+  settings MUST NOT change it.
+* **Ordered over the whole graph.** Build order, like publication order, is taken over the whole graph and then
+  restricted to the packages that build. For two packages `C` and `P` that build in this run, a path from `C` to `P`
+  with no `none` edge on it places `P`'s build before `C`'s, whether or not the packages between them are in the plan,
+  because `C` can read `P` through them. A `none` edge ends the constraint of every path through it: beyond it nothing
+  is read. A pass-through node for each package that does not build keeps the task graph at `O(P + E)`.
+* **No new cycle.** Every build constraint runs along a dependency path and every package builds before it publishes,
+  so the task graph stays acyclic for every choice of relations, and weakening a relation only removes constraints.
+  `E197` cannot arise from a relation, because the publication order does not depend on it.
+* **Failure is §19.3's.** Under `build` and `none`, `C` may be prepared and built against `P`'s planned version
+  (§19.5) before the outcome of `P`'s publication is known. That is sound only because §19.3 then blocks `C`: a
+  manifest naming a version that was never published is never published itself. A build finished for a blocked consumer
+  confers nothing. It is not published, discharges no obligation, and the next run builds again or reuses it under the
+  identity rules of §28.5. Restoring the working tree of a blocked consumer is the implementation's business.
+* **Under §28.** A `build` edge is the local-output dependency of §28.5 and a `publish` edge its registry-availability
+  edge. A `none` edge carries no output into the consumer's build task; the requirement that task inputs include every
+  build dependency is met because the declaration says there is none. `C`'s publication task runs after `P`'s
+  publication and MAY read what that publication exported.
+
+§13.11 gives the run durations the three values lead to, and what no value promises.
 
 ### 19.3 Partial failure
 
@@ -5176,6 +5250,32 @@ reaches `core` at depth 2 *through* `ui`, are both in it.
 Compute both over the full workspace graph and filter to the plan afterwards (§19.2, §19.3). This is not an exotic
 configuration: any package that merely has no bump in this run sits in exactly the position `ui` occupies here, which
 makes this the most commonly hit vector in B.7.
+
+**Vector 80b**: the three build readiness relations on one edge (§19.2a). `api → core`, both in the plan, for an
+engine that runs builds.
+
+| Relation of `api → core` | `api`'s build may start                  | `api` publishes      |
+|--------------------------|------------------------------------------|----------------------|
+| `publish`                | after `core` is published and tagged     | after `core` does    |
+| `build`                  | after `core`'s build has succeeded       | after `core` does    |
+| `none`                   | at once, beside `core`'s build           | after `core` does    |
+
+→ The plan, its versions and its publication order are identical in all three rows. If `core`'s publication fails,
+`api` is **blocked** (`W194`) in all three, including the `none` row where `api`'s build has already finished: that
+build is not published and discharges nothing. An engine that treats `none` as permission to publish `api` first, or
+that infers `none` for an edge nobody declared it on, fails conformance.
+
+**Vector 80c**: build order through a package that does not build. `app → ui → core`; `app` and `core` build in this
+run and `ui` does not.
+
+| `app → ui` | `ui → core` | Build constraint between `app` and `core`            |
+|------------|-------------|------------------------------------------------------|
+| `build`    | `build`     | `core`'s build before `app`'s                        |
+| `build`    | `none`      | none: `ui`'s build reads nothing of `core`           |
+| `none`     | `build`     | none: `app`'s build reads nothing of `ui`            |
+
+→ In every row `core` publishes before `app` (§19.2, vector 80a). Adding build edges only between a package and its
+direct providers in the plan loses the first row, exactly as inducing the publish graph on the plan loses vector 80a.
 
 **Vector 81**: suppressing a catch-up from the consumer. `C1`: `feat(core)^: x`; run 1 publishes `core@1.5.0` and fails
 on `cli`. Then a new commit `C2` lands.
@@ -7075,7 +7175,9 @@ readiness is the following **task precedence**, whose arrows denote happens-befo
 
 For a registry-availability edge, readiness still requires the provider's
 publication and all applicable recording gates; transferring local bytes MUST
-NOT replace that condition. Transfers to different ready consumers MAY overlap
+NOT replace that condition. These are the `build` and `publish` relations of §19.2a. Under its third relation, `none`,
+the edge carries no output and the two builds are independent tasks; only the publications keep their order.
+Transfers to different ready consumers MAY overlap
 and identical immutable blobs SHOULD be reused. Implementations SHOULD retain
 incremental Git objects and verified outputs between assignments, but any cache MUST be dispensable and validated against the complete semantic input identity. Cross-run
 reuse preserves the original output manifest as provenance and requires a new admission receipt bound to the
