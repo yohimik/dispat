@@ -290,6 +290,13 @@ func TestExecutionBranchTransportCarriesEveryDeclaredOutput(t *testing.T) {
 		executionOneWorker(cfg)
 	})
 	rig.repo.WriteFile(".gitignore", "dist/\nassets-out/\n")
+	// A file the repository tracks inside a declared root: every checkout
+	// starts with it, so the transfer has to replace a folder that is already
+	// there rather than create one, the file travels as part of the root, and
+	// a build that leaves it alone is not reported as writing outside what it
+	// declared.
+	rig.repo.WriteFile(filepath.Join("packages", "assets", "dist", "stale.txt"), "previous\n")
+	rig.repo.Git("add", "-f", "--", filepath.Join("packages", "assets", "dist", "stale.txt"))
 	rig.repo.Commit("chore(assets,ui,docs,app): ignore the second output root")
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 0)
@@ -315,7 +322,32 @@ func TestExecutionBranchTransportCarriesEveryDeclaredOutput(t *testing.T) {
 	assert.Equal(t, "second\n",
 		readRepoFile(t, rig.repo, filepath.Join("packages", "assets", "assets-out", "logo.svg")),
 		"and so did the second declared root")
+	assert.Equal(t, "previous\n",
+		readRepoFile(t, rig.repo, filepath.Join("packages", "assets", "dist", "stale.txt")),
+		"a tracked file inside a declared root travels with it, and the folder that was already "+
+			"there was replaced by the one that came back")
+	assert.Empty(t, asideLeftoverNames(t, root), "and nothing was moved aside and left")
+	_, isStray := executionLine(res,
+		"the task wrote tracked files outside what it declared, and they are not admitted")
+	assert.False(t, isStray,
+		"a tracked file inside a declared root is carried on purpose, not a stray write\nstdout:\n%s",
+		res.Stdout)
 	stopAll(t, []*executionWorker{worker})
+}
+
+// asideLeftoverNames is every folder an interrupted installation would have
+// left beside a declared root.
+func asideLeftoverNames(t *testing.T, dir string) []string {
+	t.Helper()
+	var left []string
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".dispat-old-") {
+			left = append(left, entry.Name())
+		}
+	}
+	return left
 }
 
 // executionEveryOutputBuild writes one of every kind of file a build really
