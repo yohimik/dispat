@@ -331,14 +331,21 @@ Gating on `DueTo` made a scripted version stage and a native `autoVersion` block
 (The two provider edges land on web's *first* task, its `version`, and on its `publish`. Read the bullets below for the
 precise rule.)
 
-- A consumer's **first** task (version when present, build otherwise) waits for each changed provider's `build`. It
-  additionally waits for that provider's `publish` when the provider's space sets `isBuildWaitingPublish: true`. This
-  covers the Docker case, where the consumer can only build after the base image is pushed.
+- What a consumer's **first** task (version when present, build otherwise) waits for on each changed provider is that
+  provider's [relation](../configuration/spaces.md#the-provider-relation): nothing under `{build: none}`, the
+  provider's `build` under `isBuildWaitingPublish: false`, and its `build` and its `publish` under `true`. The last
+  covers the Docker case, where the consumer can only build after the base image is pushed; the first covers the
+  deployment case, where nothing the provider builds reaches the consumer's build at all.
+- Build order is taken over the **whole dependency graph** and then restricted to the packages that build, exactly as
+  the publish order is. A provider reached only through a package with nothing to release still builds first, because
+  the consumer can read it through that package. A `{build: none}` hop ends the constraint of every path through it:
+  beyond it nothing is read.
 - A consumer's `publish` **always** waits for its providers' publishes. Publishing against an unpublished provider
-  version would be broken regardless of the flag.
+  version would be broken under any relation.
 - When a changed provider fails or is skipped, its consumers are skipped unless they have a fresh release reason of
-  their own. A provider under `isBuildWaitingPublish: true` skips them unconditionally: their builds consume the
-  publish that never happened, so a reason of their own cannot proceed them past the missing artifact.
+  their own. A provider under a blocking relation skips them unconditionally: under `publish` their builds consume the
+  publish that never happened, and under `none` their publications are the whole of what was meant to follow it, so a
+  reason of their own cannot proceed them either way.
 - The `syncLock` node sits between `version` and `build` in a scheduling class of its own.
 
 ### Drain: the one scheduling pump
@@ -436,10 +443,11 @@ failed or was skipped AND the package has no fresh own commits, no channel chang
 changed provider. A bump in the changeset its baseline has not published counts as fresh own commits, but own work an
 earlier prerelease shipped on a prerelease train does not.
 
-A consumer's terminal outcome is deterministic in both modes. Its publish always waits for its providers' publishes, so
-a provider's publish failure is guaranteed to be seen at the latest there. With `isBuildWaitingPublish: true`, provider
-outcomes are already final before the consumer's version stage. With `false`, the consumer may spend a version or build
-on a release that its publish then skips. This is the trade-off that flag opts into. The version stage filters failed
+A consumer's terminal outcome is deterministic under every relation. Its publish always waits for its providers'
+publishes, so a provider's publish failure is guaranteed to be seen at the latest there. With
+`isBuildWaitingPublish: true`, provider outcomes are already final before the consumer's version stage. With `false`
+or `{build: none}`, the consumer may spend a version or build on a release that its publish then skips. This is the
+trade-off the weaker relations opt into. The version stage filters failed
 or skipped providers out of the `DISPAT_UPDATED_*` variables. It skips its script entirely when it had providers to
 pick up and none of them survive.
 

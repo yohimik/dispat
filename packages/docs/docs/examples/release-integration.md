@@ -11,11 +11,11 @@ For each consumer, identify whether it needs its provider's local build output o
 |---|---|
 | A workspace package or locally built SDK | Keep `isBuildWaitingPublish` false on the provider. The consumer can build after the provider builds. |
 | A base image, remote artifact or release binary | Set `isBuildWaitingPublish: true` on the provider package or space when the consumer must fetch it remotely. |
-| Infrastructure needed only for deployment | Keep the provider's build-wait flag false. Builds can finish before infrastructure publication. |
+| Infrastructure needed only for deployment | Set `isBuildWaitingPublish: {build: none}` on the provider. Nothing it builds reaches the consumer's build, so the builds run at once and only the deployments follow. |
 | An external CI workflow | Retain its invocation ID, wait for completion and propagate its final status. A dispatch response is not completion. |
 
-The flag belongs to the provider and affects all its consumers. If one artifact needs a different publication boundary,
-give it a separate package. See [space options](../configuration/spaces.md#space-options) and
+The relation belongs to the provider and affects all its consumers. If one artifact needs a different publication
+boundary, give it a separate package. See [space options](../configuration/spaces.md#space-options) and
 [dependencies](../configuration/dependencies.md).
 
 A consumer using local output does not need a registry hop. A consumer that pulls

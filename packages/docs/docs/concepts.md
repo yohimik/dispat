@@ -161,15 +161,18 @@ A provider that failed at any stage (version, build, or publish) or was skipped 
 unless they have a release reason of their own. This means they need either their own conventional commits or another
 changed provider that published successfully.
 
-A provider whose space sets `isBuildWaitingPublish: true` outranks every reason of the consumer's own. The flag
-declares that consumers' builds take the provider's published release as their input, so when that publish never
-happened the input does not exist, and no pending work of the consumer's substitutes for it. Such consumers are
-skipped unconditionally and catch up on the next run.
+A provider under a blocking [provider relation](./configuration/spaces.md#the-provider-relation) outranks every reason
+of the consumer's own. Under `publish` the relation declares that consumers' builds take the provider's published
+release as their input, so when that publish never happened the input does not exist, and no pending work of the
+consumer's substitutes for it. Under `none` the consumer's publication is the whole of what was supposed to follow the
+provider, so a deployment onto infrastructure that was never applied is the same mistake one stage later. Such
+consumers are skipped unconditionally and catch up on the next run. Only `build` leaves the own-reason rule standing by
+default, which is what `isBuildWaitingPublish: false` has always done.
 
-The publish half holds in both modes, because a consumer's publish always waits for its providers'
-publishes. Even a consumer that already built, which `isBuildWaitingPublish: false` allows while the provider is still
-publishing, gets skipped at its publish once the provider's publish failure is known. dispat never publishes against an
-unpublished provider version, and skips cascade down the dependency chain by the same rule.
+The publish half holds under all three relations, because a consumer's publish always waits for its providers'
+publishes. Even a consumer that already built, which `false` allows while the provider is still publishing and `none`
+allows from the start, gets skipped at its publish once the provider's publish failure is known. dispat never publishes
+against an unpublished provider version, and skips cascade down the dependency chain by the same rule.
 
 A consumer that proceeds on its own reason runs its pipeline normally, with two adjustments. First, failed and skipped
 providers are filtered out of the `DISPAT_UPDATED_*` variables. Second, if it had providers to pick up and none
@@ -213,8 +216,10 @@ release.
 
 1. **version**: runs when any provider of the package moved in this run, and for every releasing package of a space
    with [`autoVersion`](./configuration/autoversion.md), where native reconciliation checks the baselines too. It runs
-   right before the build. With `isBuildWaitingPublish: true` on the provider's space it waits for that provider's
-   build *and publish*, but with `false` it waits for the provider's *build* only.
+   right before the build. What it waits for on each moving provider is that provider's
+   [relation](./configuration/spaces.md#the-provider-relation): the provider's build *and publish* under
+   `isBuildWaitingPublish: true`, the provider's *build* only under `false`, and nothing of the provider at all under
+   `{build: none}`.
 2. **build**: the package's build command. Like every script, it may export outputs by appending
    `DISPAT_OUTPUT_NAME=value` (or bare `NAME=value`) lines to the file `$DISPAT_OUTPUT` points at. Each value travels
    to every later script of the package as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the

@@ -18,7 +18,7 @@ every package.
 | Key                     | Type                     | Required   | Description                                                                                                                                                                                                                                                                                                                                                                             |
 |-------------------------|--------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `path`                  | string or `[string, ...]` | yes        | One folder, or a list of folders, relative to the root, `.` included. Every direct sub-folder of every listed folder is a package named after it (hidden folders are skipped, and [`.dispatexclude`](#dispatexclude) excludes more). Package names must be unique across all spaces and across the folders of one space. Listed folders must not repeat or contain one another, so a space rooted at the repository lists nothing beside it. The first folder is the space's primary one. The [login script](#flowlogin) runs there, and [`dispat exec --in space:`](../cli/exec.md) resolves there.                                                    |
-| `isBuildWaitingPublish` | bool                     | no (false) | When `true`, consumers of packages from this space may only start their version/build stages after the provider is *published*, not merely built, and a provider that failed or was skipped skips its consumers unconditionally: their builds consume the publish that never happened, so no release reason of their own proceeds them. When `false`, consumers may build as soon as the provider is built. In both modes a consumer's own publish always waits for the provider's publish and is skipped if it failed (unless the consumer has a release reason of its own). |
+| `isBuildWaitingPublish` | bool or object           | no (false) | What the consumers of this space's packages wait for, and what a failed package of this space does to them. `false` (the default) lets a consumer build as soon as the provider is built; `true` holds its version and build stages until the provider is *published*. The object form adds a third relation and lets the failure rule be stated separately. See [The provider relation](#the-provider-relation). Under all three a consumer's own publish waits for the provider's publish. |
 | `revertOnFail`          | bool                     | no (false) | When `true`, dispat rolls back all local changes inside the package folder if the package fails at any stage, or is skipped after its version stage already modified files. Tracked files are restored from HEAD, and untracked files are removed.                                                                                                                                                   |
 | `flow`                  | object                   | no         | What the space runs at which stage. See the table below.                                                                                                                                                                                                                                                                                                                                |
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
@@ -150,6 +150,53 @@ is `onFail` / `onSkip`) plus the specifics:
 Neither runs for a package that published. That job belongs to `flow.postPublish` and the announce frame. The run-level
 [run outcome listing](../reference/environment.md#run-outcome-data) carries the same information for every package at
 once.
+
+## The provider relation
+
+`isBuildWaitingPublish` is read on the *provider's* space, because what a consumer may do with a provider is a property
+of what that provider produces. It answers two questions, which is why it accepts an object as well as a boolean:
+
+```yaml
+spaces:
+  infra:
+    path: infra
+    isBuildWaitingPublish:
+      build: none        # none | build | publish
+      isBlocking: true   # optional; see the defaults below
+```
+
+`build` says what a consumer's version and build stages wait for. It is required in the object form and matched
+exactly, so `Publish` is refused rather than guessed at. `isBlocking` says what a package of this space that failed or
+was skipped does to a consumer that has a release reason of its own.
+
+| `build`   | The consumer's build waits for | The consumer's publish waits for | A failed provider          |
+|-----------|--------------------------------|----------------------------------|----------------------------|
+| `none`    | nothing of the provider        | the provider's publish           | skips it (default)         |
+| `build`   | the provider's build           | the provider's publish           | skips it only if it has no release reason of its own (default) |
+| `publish` | the provider's publish         | the provider's publish           | skips it (always)          |
+
+The two booleans are the two relations most repositories want, written short. `false` is `{build: build}` and `true` is
+`{build: publish}`, exactly as they have always behaved, and a configuration dispat rewrites keeps them as booleans.
+
+Choose the relation by what the consumer's build actually reads:
+
+- `publish` when the consumer resolves the provider from a registry: a lock file regenerated against the new version,
+  an image built `FROM` a published one, an installer that downloads a release asset.
+- `build` when the consumer reads what the provider's build left in the workspace. This is the default.
+- `none` when the consumer's build reads nothing the provider's build or publication produces, and only the
+  deployments must follow one another: infrastructure before the application deployed onto it, a schema migration
+  before the service that reads it.
+
+`none` is a declaration dispat cannot check. It is never inferred and is never a default: a consumer whose build in
+fact reads the provider and says otherwise will build against whatever was there before.
+
+`isBlocking` defaults to `true` under `none` and `publish` and to `false` under `build`. Under `publish` it may not be
+written any other way, because the consumer's build takes the provider's publish as input and no work of the
+consumer's own can substitute for an input that never existed. Under `none` it may be relaxed with
+`isBlocking: false`, which lets a consumer release its own work beside a provider that failed. Relax it only where a
+release of the consumer alone is meaningful: under `build` with `isBlocking: false`, a consumer's version stage may
+already have written the provider's planned version into its manifests while that provider's publish was still
+pending, and if the publish then fails, the consumer publishes a manifest naming a version nobody published.
 
 ## `versioning`
 

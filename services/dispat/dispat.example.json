@@ -66,7 +66,9 @@
     },
     "apps": {
       "path": "packages/apps",
-      "isBuildWaitingPublish": false,
+      "isBuildWaitingPublish": {
+        "build": "none"
+      },
       "flow": {
         "build": "build-go",
         "publish": "publish-go"

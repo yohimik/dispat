@@ -74,8 +74,10 @@ these package-only keys:
 For an entry overriding a space package, a field left unset **inherits** from the space. A field you set overrides it.
 The per-field rules follow from what each object means:
 
-- The boolean options (`isBuildWaitingPublish`, `revertOnFail`) are tri-state in an override. An absent field inherits.
-  An explicit `false` overrides a space's `true`.
+- The tri-state options (`isBuildWaitingPublish`, `revertOnFail`) inherit when absent. An explicit `false` overrides a
+  space's `true`. `isBuildWaitingPublish` may also be written as an object, and a level that states one **replaces the
+  whole relation**: its two fields carry meaning against each other, so a half-inherited relation would be one nobody
+  wrote. See [The provider relation](./spaces.md#the-provider-relation).
 - `flow` merges **entry by entry**. An overridden stage or hook replaces that entry's list, every other entry inherits,
   and an explicit empty array (`"build": []`) clears an inherited entry. dispat looks up the names inside against this
   package first, then its space, then the file, so a package can keep its space's `flow.build: build` and still supply
