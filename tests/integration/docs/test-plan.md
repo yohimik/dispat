@@ -1774,7 +1774,7 @@ cannot make the rest of the goal pass.
 | `TestLinkedConfigRejectsTwoIdentitiesAtOneGitlinkPath` | Two roster identities cannot share one initialized Git link path. |
 | `TestLinkedConfigRejectsDuplicatePackageOwnershipAcrossPeers` | Case-insensitive duplicate package identities across peers refuse fleet composition. |
 | `TestLinkedConfigCannotDeclareAPackageInsideItsPeer` | An entry configuration cannot claim a package inside another peer checkout. |
-| `TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks` | Minimal computation connects a missing member while preserving the existing component links and pins. |
+| `TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks` | Minimal computation connects a missing member at the existing component's centre, and not at the entry, while preserving the existing component links and pins. |
 | `TestComputeStarAddsOnlyMissingHubEdges` | Star computation preserves an existing spoke and adds only the missing hub connection. |
 | `TestPlanningReleaseEdgesCrossesADependencyAndThenASharedGroup` | A provider change reaches its shared version group across repositories and then the dependent consumer without publishing during status. |
 | `TestChoreographyPlansAFirstReleaseWithoutEvidence` | A fleet that has never released has no boundary to prove and needs no tuple to say so. |

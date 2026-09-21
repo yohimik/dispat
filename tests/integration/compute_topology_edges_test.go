@@ -14,6 +14,11 @@ import (
 // minimal topology treats a healthy link as part of the spanning tree. It
 // adds the single edge needed to reach that component and keeps the component's
 // existing edge as the only route between its members.
+//
+// The edge lands at the component's centre, which is sdk and not the entry:
+// api is an end of the chain api-sdk-web, so joining shop there would leave a
+// route of three hops where joining it at sdk leaves two, and section 27.9
+// charges link evidence and settlement by the longest route there is.
 func TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks(t *testing.T) {
 	fleet := newChoreographyFleet(t, "api", "sdk", "web", "shop")
 	fleet.link("api", "sdk")
@@ -26,20 +31,24 @@ func TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks(t *test
 
 	preview := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "minimal", "--check")
 	assert.Equal(t, 1, preview.Code, "%s\n%s", preview.Stdout, preview.Stderr)
-	assert.Contains(t, preview.Stdout, "+ link api shop")
+	assert.Contains(t, preview.Stdout, "+ link sdk shop")
+	assert.NotContains(t, preview.Stdout, "+ link api shop")
 	assert.NotContains(t, preview.Stdout, "+ link api sdk")
 	assert.NotContains(t, preview.Stdout, "+ link api web")
 	assert.NotContains(t, preview.Stdout, "+ link sdk web")
 
 	result := entry.CommandEnv(fileProtocolEnv(), "compute", "--topology", "minimal", "--write")
 	require.Equal(t, 0, result.Code, "%s\n%s", result.Stdout, result.Stderr)
-	assert.Contains(t, result.Stdout, "linked shop from api")
+	assert.Contains(t, result.Stdout, "linked shop from sdk")
 	assert.NotContains(t, result.Stdout, "linked sdk from api")
 	assert.NotContains(t, result.Stdout, "linked web from api")
 	assert.Equal(t, ".links/shop",
-		entry.Git("config", "--file", ".gitmodules", "submodule.shop.path"))
-	assert.NotContains(t, readAbs(t, entry.Path(".gitmodules")), "submodule \"web\"",
+		entry.Git("-C", ".links/sdk", "config", "--file", ".gitmodules", "submodule.shop.path"))
+	modules := readAbs(t, entry.Path(".gitmodules"))
+	assert.NotContains(t, modules, "submodule \"web\"",
 		"minimal topology must not add a second route from api to web")
+	assert.NotContains(t, modules, "submodule \"shop\"",
+		"the entry is an end of the chain, so the link to shop is not written there")
 	assert.Equal(t, sdkPin, entry.Git("rev-parse", "HEAD:.links/sdk"),
 		"compute must keep the existing edge from the entry")
 	assert.Equal(t, webPin, entry.Git("-C", ".links/sdk", "rev-parse", "HEAD:.links/web"),
