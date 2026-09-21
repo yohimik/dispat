@@ -299,6 +299,12 @@ Three consequences follow from the folder being the repository root:
   `buildOutputs: [packages]` beside a space at `packages/` is refused, as it is for any package that contains
   another.
 
+In a fleet, each repository's own configuration names its own root, so a source repository of a
+[control repository](../control-repository.md) or a [linked peer](../choreographed-repositories.md) may be a
+single-package repository and releases as one. A repository holding other repositories' checkouts is the exception: a
+package spanning a source repository is refused, as it always was, so a control repository's own root is a package
+only while it holds no sources.
+
 The [release commit](./records.md) covers what it stages, which here is the whole repository. With `commit.enabled`,
 dispat therefore refuses to release while the working tree carries local changes, exactly as it does for a package
 whose folder holds another package's folder. A continuous integration run starts from a clean checkout, which is the

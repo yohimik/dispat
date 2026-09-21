@@ -205,6 +205,73 @@ func TestRootPackageInAFolderWithItsOwnFileStillReadsIt(t *testing.T) {
 		"a package folder that is not the repository root keeps its own file as the nearest layer")
 }
 
+// TestRootPackageInAnImportedSourceConfig: a source repository imported into
+// a fleet may be a single-package repository. Its own configuration names its
+// own root, so the package is that repository and the repository that owns it
+// is the source, not the control checkout it sits inside.
+func TestRootPackageInAnImportedSourceConfig(t *testing.T) {
+	sdk := workspaceRepo(t, "sdk", &File{Packages: map[string]PackageConfig{"sdk": {Path: "."}}})
+	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, File{
+		Configs: []string{"sources/sdk/dispat.json"},
+	})
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	require.NoError(t, err)
+
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	wantDir, err := filepath.EvalSymlinks(filepath.Join(root, "sources", "sdk"))
+	require.NoError(t, err)
+	assert.Equal(t, "sdk", pkgs[0].Repository)
+	assert.Equal(t, wantDir, pkgs[0].Dir, `"." inside an imported config is that repository's root`)
+}
+
+// TestCentralWorkspacePackageAtASourceRoot: a control repository configuring
+// its sources centrally names them by their folder under the control
+// checkout, which is a source repository's root rather than ".". That path is
+// unaffected by the root being a legal one, and the package still belongs to
+// the repository whose checkout holds it.
+func TestCentralWorkspacePackageAtASourceRoot(t *testing.T) {
+	sdk := workspaceRepo(t, "sdk", nil)
+	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, File{
+		Polyrepo: true,
+		Packages: map[string]PackageConfig{"sdk": {Path: "sources/sdk"}},
+	})
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	require.NoError(t, err)
+
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
+	require.NoError(t, err)
+	require.Len(t, pkgs, 1)
+	assert.Equal(t, "sdk", pkgs[0].Repository)
+}
+
+// TestRootPackageMayNotSpanASourceRepository: a repository whose root is a
+// package may not also hold another repository's checkout. That is the
+// existing ownership rule rather than a rule about the root: a package's
+// folder belongs to one repository, and the control checkout's root holds the
+// sources beneath it.
+func TestRootPackageMayNotSpanASourceRepository(t *testing.T) {
+	sdk := workspaceRepo(t, "sdk", &File{Packages: map[string]PackageConfig{"sdk": {Path: "pkgs/sdk"}}})
+	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, File{
+		Configs:  []string{"sources/sdk/dispat.json"},
+		Packages: map[string]PackageConfig{"control": {Path: "."}},
+	})
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	require.NoError(t, err)
+
+	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `package "control"`)
+	assert.Contains(t, err.Error(), `spans source repository "sdk"`)
+}
+
 // TestRootPackageIgnoresAConfigFileOfAnotherName: the root file is skipped by
 // the folder it sits in and not by its name, so a repository loaded through
 // --config still leaves whatever other dispat file lies at the top out of the
