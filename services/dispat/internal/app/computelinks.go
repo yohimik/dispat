@@ -192,14 +192,18 @@ func (a *App) missingLinks(fleet []rosterEntry, topology string) ([]linkSuggesti
 	if topology == "star" {
 		return a.suggestStarLinks(fleet)
 	}
+	// The groups and the union-find are read from one set of pairs, so a group
+	// the centres join is always a set the union-find has apart, and neither
+	// pass can propose the second route between two repositories that E338
+	// refuses.
+	adjacency := fleetLinkAdjacency(fleet, a.workspace.Repositories)
 	joined := newFleetGroups(fleet)
-	for i := range a.workspace.Repositories {
-		repository := &a.workspace.Repositories[i]
-		for _, peer := range repository.LinkPeers() {
-			joined.join(repository.Name, peer)
+	for linker, peers := range adjacency {
+		for _, peer := range peers {
+			joined.join(linker, peer)
 		}
 	}
-	out := a.suggestCentreLinks(fleet, joined)
+	out := a.suggestCentreLinks(fleet, adjacency, joined)
 	return append(out, a.suggestReachableLinks(fleet, joined)...), nil
 }
 
@@ -208,8 +212,8 @@ func (a *App) missingLinks(fleet []rosterEntry, topology string) ([]linkSuggesti
 // two repositories is shortest. Section 27.9 of the specification charges link
 // evidence and settlement by that route, so the shape is worth choosing rather
 // than taking whichever pair a pass over the roster reaches first.
-func (a *App) suggestCentreLinks(fleet []rosterEntry, joined *fleetGroups) []linkSuggestion {
-	groups := splitFleetIntoGroups(fleet, fleetLinkAdjacency(fleet, a.workspace.Repositories))
+func (a *App) suggestCentreLinks(fleet []rosterEntry, adjacency map[string][]string, joined *fleetGroups) []linkSuggestion {
+	groups := splitFleetIntoGroups(fleet, adjacency)
 	if len(groups) < 2 {
 		return nil
 	}
@@ -227,10 +231,8 @@ func (a *App) suggestCentreLinks(fleet []rosterEntry, joined *fleetGroups) []lin
 				Msg("no end of this group's link to the fleet is a checkout this run holds, so the pair is left to what compute can reach")
 			continue
 		}
-		if !joined.join(from.name, to.name) {
-			continue
-		}
 		owner, peer := chooseLinkOwner(from, to)
+		joined.join(owner.name, peer.name)
 		a.log.Trace().Str("repository", owner.name).Str("peer", peer.name).Int("radius", group.radius).
 			Msg("proposing the link that joins this group to the fleet at its centre")
 		out = append(out, a.proposeLink(owner, peer))

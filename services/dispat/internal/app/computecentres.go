@@ -70,8 +70,8 @@ func (g centredGroup) nearestComposedMember() (rosterEntry, bool) {
 // whichever end named it first, and the order is fixed so that a walk over it
 // answers the same member whatever order the fleet was composed in. A link
 // naming a repository the roster does not hold, which is what a disabled
-// participant leaves behind, joins nothing here; the union-find that seeds the
-// groups still sees it, and a pair it already joined is never proposed again.
+// participant leaves behind, joins nothing: this is the one reading of the
+// fleet's shape, and what it leaves out has no route through it either.
 func fleetLinkAdjacency(fleet []rosterEntry, repositories []config.Repository) map[string][]string {
 	isMember := make(map[string]bool, len(fleet))
 	for _, entry := range fleet {
