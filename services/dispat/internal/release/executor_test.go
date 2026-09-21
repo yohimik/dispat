@@ -1884,18 +1884,18 @@ func TestShouldSkipReadsTheFreshChangeset(t *testing.T) {
 	}
 	results := map[string]*Result{"core": {Status: StatusFailed}}
 
-	skip, prov := shouldSkip("app", p, results)
+	skip, prov := shouldSkip("app", p, results, nil)
 	assert.True(t, skip, "published train work is not a reason to release beside a failed provider")
 	assert.Equal(t, "core", prov)
 
 	rel.FreshUnits = units // now the work is this release's own
-	skip, _ = shouldSkip("app", p, results)
+	skip, _ = shouldSkip("app", p, results, nil)
 	assert.False(t, skip, "a fresh own bump is a reason a failed provider cannot invalidate")
 
 	rel.FreshUnits = nil
 	rel.BaselineChannel = "beta"
 	rel.Channel = "stable" // a graduation proceeds whatever the provider did
-	skip, _ = shouldSkip("app", p, results)
+	skip, _ = shouldSkip("app", p, results, nil)
 	assert.False(t, skip)
 }
 
@@ -1925,17 +1925,17 @@ func TestShouldSkipBuildWaitsPublishOutranksOwnWork(t *testing.T) {
 	}
 	results := map[string]*Result{"core": {Status: StatusFailed}}
 
-	skip, prov := shouldSkip("app", p, results)
+	skip, prov := shouldSkip("app", p, results, nil)
 	assert.True(t, skip, "own work cannot substitute for the publish the build consumes")
 	assert.Equal(t, "core", prov)
 
 	rel.FreshUnits = nil
 	rel.BaselineChannel = "beta"
 	rel.Channel = "stable"
-	skip, _ = shouldSkip("app", p, results)
+	skip, _ = shouldSkip("app", p, results, nil)
 	assert.True(t, skip, "a graduation is still a build against a missing artifact")
 
 	core.Pkg.Space.ProviderRelation = model.NewStageRelation(models.StageRelationOf(false))
-	skip, _ = shouldSkip("app", p, results)
+	skip, _ = shouldSkip("app", p, results, nil)
 	assert.False(t, skip, "without the flag the own-reason rule stands unchanged")
 }

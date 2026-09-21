@@ -142,6 +142,12 @@ type Reverterx interface {
 // relation is a blocking one, which `none` and `publish` are unless the
 // configuration says otherwise.
 //
+// Both orders are taken over the whole workspace graph and restricted to the
+// packages this run releases afterwards, never over the subgraph the plan
+// induces (§19.2, §19.2a), and the skip cascade follows the same closure
+// (§19.3): a provider reached only through a package with nothing to release
+// still publishes first, and still blocks the consumers behind it.
+//
 // A stage with no configured script still runs — orderings, statuses,
 // changelogs and tags are preserved — it just executes no shell command.
 // Scripts receive DISPAT_* environment variables (package, space, versions,
@@ -362,7 +368,14 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// building the edges in name order is what makes launch order — not just
 	// completion semantics — deterministic run to run (§17.2).
 	sched := graph.NewScheduler[task]()
-	reach := newBuildReach(p, changed)
+	buildOrder := newBuildReach(p, changed)
+	publishOrder := newPublishReach(p, changed)
+	// What each consumer reaches over the publication order, kept for the skip
+	// cascade: §19.3 computes its closure over the full workspace graph, so the
+	// providers that can block a package are the same set that orders it. It is
+	// filled here, while nothing else runs, and only read afterwards, so every
+	// task goroutine reads one finished index.
+	reachedProviders := make(map[string][]string, len(changed))
 	for _, name := range slices.Sorted(maps.Keys(changed)) {
 		b, pub := task{name, taskBuild}, task{name, taskPublish}
 		sched.AddEdge(b, pub)
@@ -400,8 +413,19 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		// packages that build (§19.2a). These are the orderings that reach
 		// past a package this run does not build; the loop above states the
 		// ones the consumer's own providers impose.
-		for _, behind := range reach.Indirect(name) {
+		for _, behind := range buildOrder.Indirect(name) {
 			sched.AddEdge(task{behind, taskBuild}, first)
+		}
+		// The publication order is taken over the same whole graph and filtered
+		// afterwards, never over the subgraph the plan induces (§19.2): `app`
+		// resolves `core` through an unreleasing `ui` at install time, so
+		// publishing `app` first would record a range reconciled against a
+		// version nobody published. No relation ends such a path, because under
+		// all three of them a provider publishes before its consumer does.
+		reached := publishOrder.Indirect(name)
+		reachedProviders[name] = reached
+		for _, behind := range reached {
+			sched.AddEdge(task{behind, taskPublish}, pub)
 		}
 	}
 	if e.PublishGroup != nil {
@@ -422,7 +446,8 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	}
 
 	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins,
-		results: results, started: make(map[string]time.Time), scan: e.Scanner,
+		reachedProviders: reachedProviders,
+		results:          results, started: make(map[string]time.Time), scan: e.Scanner,
 		avChanged: make(map[string]bool)}
 
 	// The native rewriting inputs — the manifest-name and folder indexes of
@@ -510,12 +535,17 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 // built it.
 type run struct {
 	*Executor
-	plan    *plan.Plan
-	wsVars  []string
-	logins  map[spaceLoginKey]*spaceLogin
-	results map[string]*Result
-	mu      sync.Mutex
-	started map[string]time.Time
+	plan   *plan.Plan
+	wsVars []string
+	logins map[spaceLoginKey]*spaceLogin
+	// reachedProviders lists, per changed consumer, the changed providers it
+	// reaches only through packages this run does not release (§19.2, §19.3).
+	// Built with the task graph and never written again, so the task
+	// goroutines share it without the mutex.
+	reachedProviders map[string][]string
+	results          map[string]*Result
+	mu               sync.Mutex
+	started          map[string]time.Time
 	// The native auto-versioning inputs, built once in Run when any releasing
 	// package's space enables it: the manifest scanner and the workspace's
 	// manifest-name and folder indexes (see workspaceNames).
@@ -666,7 +696,7 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 		r.notify(ev)
 		return false
 	}
-	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results); skip {
+	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results, r.reachedProviders[t.pkg]); skip {
 		res.Status = StatusSkipped
 		res.Blocked, res.BlockedBy = true, blocker
 		res.RecordBlocked = r.results[blocker].RecordBlocked
@@ -1278,6 +1308,15 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 // of its changed providers failed (at any stage) or was skipped, and the
 // package has no release reason of its own. It returns the blocking provider.
 //
+// reached names the changed providers the package does not declare itself and
+// reaches through packages this run does not release. They are considered
+// exactly as the declared ones are, because §19.3 computes the closure over
+// the full workspace graph: a package with no bump this run is still a path
+// from a dependent to a failed dependency, and a consumer that publishes
+// behind one records a provider movement that never happened. Which relation
+// blocks is read from the provider that failed, since a relation is a
+// statement about that provider's own consumers wherever they sit.
+//
 // A "reason of its own" is a *fresh* direct bump or a channel change: a
 // package moving between channels is being released for something a failed
 // provider cannot invalidate, so it proceeds. Fresh, not train-wide — own
@@ -1300,12 +1339,12 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 // infrastructure that was never applied is the same mistake one stage later.
 // Only `build` leaves the own-reason rule standing by default, which is what
 // the key's `false` has always done.
-func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result) (bool, string) {
+func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []string) (bool, string) {
 	rel := p.Releases[pkg]
 	badProvider := ""
 	blockingProvider := ""
 	anyPublished := false
-	for _, prov := range p.Providers[pkg] {
+	for _, prov := range slices.Concat(p.Providers[pkg], reached) {
 		r, ok := results[prov]
 		if !ok { // unchanged provider
 			continue

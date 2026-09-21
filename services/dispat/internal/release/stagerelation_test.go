@@ -243,7 +243,7 @@ func TestStageRelationBlockingOutranksOwnWork(t *testing.T) {
 			}
 			results := map[string]*Result{"core": {Status: StatusFailed}}
 
-			skip, blocker := shouldSkip("app", p, results)
+			skip, blocker := shouldSkip("app", p, results, nil)
 			assert.Equal(t, c.isSkipped, skip, "a fresh own bump beside a failed provider")
 			if c.isSkipped {
 				assert.Equal(t, "core", blocker)
@@ -254,7 +254,7 @@ func TestStageRelationBlockingOutranksOwnWork(t *testing.T) {
 			consumer.FreshUnits = nil
 			consumer.OwnBump = ccme.BumpNone
 			consumer.Units = nil
-			skip, blocker = shouldSkip("app", p, results)
+			skip, blocker = shouldSkip("app", p, results, nil)
 			assert.True(t, skip, "nothing of its own to release")
 			assert.Equal(t, "core", blocker)
 		})
