@@ -428,9 +428,14 @@ func TestFinalPolyrepoImportedConfigFaultRefusesUnattributedOwnership(t *testing
 // correction is valid only when its target is an ancestor in that source's
 // DAG. If the source graph itself is unreadable, the composed plan must fail
 // rather than treating log order as equivalent to ancestry.
+//
+// The target is a released source commit on purpose: ancestry inside the
+// pending windows is read off the parent lists the window read carries, so
+// only a commit behind the baseline still puts the question to the source DAG.
 func TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder(t *testing.T) {
 	f := finalPolyrepo(t)
 	target := f.control.Git("-C", "sources/lib", "rev-parse", "HEAD")
+	f.control.Git("-C", "sources/lib", "tag", "-a", "core@0.1.0", "-m", "the bootstrap, released")
 	f.control.Git("-C", "sources/lib", "commit", "--allow-empty", "-q", "-m",
 		"fix(core): correct bootstrap\n\nEdits: "+target)
 	checkpointPolyrepoSource(t, f.control, "sources/lib")
@@ -445,7 +450,8 @@ func TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder(t *testing
 	assert.Contains(t, combined, "ancestry query failed")
 	assert.NotContains(t, combined, "release plan ready")
 	assert.Equal(t, 1, fault.Matches(), "the source DAG was requested once")
-	assert.Empty(t, polyrepoTags(f.control, "sources/lib"), "an untrusted source plan records nothing")
+	assert.Equal(t, []string{"core@0.1.0"}, polyrepoTags(f.control, "sources/lib"),
+		"an untrusted source plan records nothing")
 }
 
 // TestFinalPolyrepoRunSinceFaultStopsBeforeTheSelectedScript: projecting a

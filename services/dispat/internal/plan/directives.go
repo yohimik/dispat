@@ -156,7 +156,12 @@ func kindSet(kinds []ccme.DependencyKind) map[model.DepKind]bool {
 //
 // "inherit" is resolved against the unit's own bump here rather than at the
 // point of use, so that §9.2's per-target loop reads a plain Bump.
-func (cp *computation) unitPropagation(u *ccme.Unit, rec *commitRec) propagation {
+//
+// propagateScope is the unit's resolved Propagate-Scope, shared with the
+// channel axis, which defaults to it: whichever axis asks first resolves it.
+// Its diagnostics are this axis's to report, in this position, whoever
+// resolved it.
+func (cp *computation) unitPropagation(u *ccme.Unit, rec *commitRec, propagateScope **scopeResult) propagation {
 	d := u.Directives
 	p := propagation{
 		Bump:  d.Propagate.Bump(u.Bump),
@@ -164,11 +169,21 @@ func (cp *computation) unitPropagation(u *ccme.Unit, rec *commitRec) propagation
 		kinds: kindSet(d.Kinds),
 	}
 	if d.PropagateScopeSet {
-		res := cp.resolveScopeSet(d.PropagateScope, true, rec)
+		res := cp.unitPropagateScope(u, rec, propagateScope)
 		cp.reportScope(res, rec, ccme.FooterPropagateScope)
 		p.targets, p.scoped = res.packages, true
 	}
 	return p
+}
+
+// unitPropagateScope resolves the unit's Propagate-Scope once for both axes.
+// The resolved set is read-only from here on: both axes hold the same map.
+func (cp *computation) unitPropagateScope(u *ccme.Unit, rec *commitRec, resolved **scopeResult) scopeResult {
+	if *resolved == nil {
+		res := cp.resolveScopeSet(u.Directives.PropagateScope, true, rec)
+		*resolved = &res
+	}
+	return **resolved
 }
 
 // unitChannelPropagation resolves the channel axis for one unit.
@@ -176,7 +191,7 @@ func (cp *computation) unitPropagation(u *ccme.Unit, rec *commitRec) propagation
 // Propagate-Channel-Scope defaults to the unit's Propagate-Scope (§8.5a): a
 // unit that restricts propagation once restricts both axes, which is nearly
 // always the intent.
-func (cp *computation) unitChannelPropagation(u *ccme.Unit, rec *commitRec) channelPropagation {
+func (cp *computation) unitChannelPropagation(u *ccme.Unit, rec *commitRec, propagateScope **scopeResult) channelPropagation {
 	d := u.Directives
 	p := channelPropagation{
 		Value: d.PropagateChannel,
@@ -189,7 +204,7 @@ func (cp *computation) unitChannelPropagation(u *ccme.Unit, rec *commitRec) chan
 		cp.reportScope(res, rec, ccme.FooterPropagateChannelScope)
 		p.targets, p.scoped = res.packages, true
 	case d.PropagateScopeSet:
-		res := cp.resolveScopeSet(d.PropagateScope, true, rec)
+		res := cp.unitPropagateScope(u, rec, propagateScope)
 		p.targets, p.scoped = res.packages, true
 	}
 	return p

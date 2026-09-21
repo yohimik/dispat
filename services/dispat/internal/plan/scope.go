@@ -6,6 +6,7 @@ package plan
 import (
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -99,15 +100,11 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		// A scope is written in a commit message and a package name in a folder
 		// or a config file, so the two are matched case-insensitively, the way
 		// every other selector in dispat matches a name.
-		matched := false
-		pattern := strings.ToLower(t.Name)
-		for _, p := range cp.pkgs {
-			if cp.commitCanScope(rec, p) && IsGlobMatch(pattern, strings.ToLower(p.Name)) {
-				out[p.Name] = true
-				matched = true
-			}
+		matches := cp.globMatches(strings.ToLower(t.Name), rec)
+		for _, i := range matches {
+			out[cp.pkgs[i].Name] = true
 		}
-		if !matched {
+		if len(matches) == 0 {
 			res.emptyGlobs = append(res.emptyGlobs, t.Name)
 		}
 
@@ -140,6 +137,75 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 			res.unknownExcludes = append(res.unknownExcludes, t.Name)
 		}
 	}
+}
+
+// globIndex is what makes a glob term cost its matches rather than the
+// workspace (CCME §13.11). The names are folded once, where a scan folded every
+// name for every term of every unit. A glob whose only "*" is its last byte,
+// which "@acme/*" and nearly every written glob is, selects a contiguous run
+// of the sorted folded names and is found by binary search. And a pattern is
+// resolved once per repository it is read from, because a train repeats the
+// same Propagate-Scope on every commit.
+type globIndex struct {
+	folded []string // by package index
+	sorted []int    // package indices, by folded name
+	memo   map[globKey][]int
+}
+
+// globKey is a folded pattern and the ownership class of the commit reading
+// it: the folded repository whose packages it may address, or "" for all.
+type globKey struct{ pattern, class string }
+
+// globMemoLimit bounds the memo. Patterns come from commit messages, so their
+// number is somebody else's choice; past the limit a pattern is resolved and
+// not kept.
+const globMemoLimit = 4096
+
+// globMatches lists, in workspace order, the packages a folded glob addresses
+// from this commit.
+func (cp *computation) globMatches(pattern string, rec *commitRec) []int {
+	if cp.globs == nil {
+		gi := &globIndex{folded: make([]string, len(cp.pkgs)), sorted: make([]int, len(cp.pkgs)),
+			memo: make(map[globKey][]int)}
+		for i, p := range cp.pkgs {
+			gi.folded[i], gi.sorted[i] = strings.ToLower(p.Name), i
+		}
+		sort.SliceStable(gi.sorted, func(a, b int) bool { return gi.folded[gi.sorted[a]] < gi.folded[gi.sorted[b]] })
+		cp.globs = gi
+	}
+	gi := cp.globs
+	// commitCanScope, as a key: unrestricted unless a source history reads it.
+	class := ""
+	if rec != nil && rec.repository != "" && len(cp.histories) > 0 && !strings.EqualFold(rec.repository, cp.controlRepo) {
+		class = strings.ToLower(rec.repository)
+	}
+	key := globKey{pattern: pattern, class: class}
+	if matches, ok := gi.memo[key]; ok {
+		return matches
+	}
+	var matches []int
+	consider := func(i int) {
+		if class == "" || strings.EqualFold(cp.pkgs[i].Repository, class) {
+			matches = append(matches, i)
+		}
+	}
+	if prefix := pattern[:len(pattern)-1]; strings.HasSuffix(pattern, "*") && !strings.Contains(prefix, "*") {
+		from := sort.Search(len(gi.sorted), func(k int) bool { return gi.folded[gi.sorted[k]] >= prefix })
+		for k := from; k < len(gi.sorted) && strings.HasPrefix(gi.folded[gi.sorted[k]], prefix); k++ {
+			consider(gi.sorted[k])
+		}
+		sort.Ints(matches)
+	} else {
+		for i := range cp.pkgs {
+			if IsGlobMatch(pattern, gi.folded[i]) {
+				consider(i)
+			}
+		}
+	}
+	if len(gi.memo) < globMemoLimit {
+		gi.memo[key] = matches
+	}
+	return matches
 }
 
 // commitCanScope enforces the repository ownership boundary. A source
@@ -197,9 +263,9 @@ func (cp *computation) reportScope(res scopeResult, rec *commitRec, where string
 // does not deserve a release.
 //
 // The result is memoised per commit because every unresolved unit in the
-// commit asks for it, and the scope folders are prepared once per run: this
-// loop is files times packages, and it runs for every commit in every pending
-// window.
+// commit asks for it, and the scope folders are indexed once per run: this
+// loop runs for every commit in every pending window, so a file costs its own
+// path components and not a comparison against every package (CCME §13.11).
 func (cp *computation) derived(rec *commitRec) map[string]bool {
 	if rec.derivedSet != nil {
 		return rec.derivedSet
@@ -221,19 +287,7 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 			root = cp.rootSlash()
 		}
 		full := path.Clean(path.Join(filepath.ToSlash(root), filepath.ToSlash(file)))
-		var owner *scopeDir
-		for i := range cp.scopeDirs {
-			sd := &cp.scopeDirs[i]
-			if !cp.commitCanDerive(rec, sd.pkg) {
-				continue
-			}
-			if !underDir(full, sd.dir) {
-				continue
-			}
-			if owner == nil || len(sd.dir) > len(owner.dir) {
-				owner = sd
-			}
-		}
+		owner := cp.ownerOf(rec, full)
 		if owner == nil || !owner.pkg.IsCounted(full) {
 			continue
 		}
@@ -278,24 +332,57 @@ func (cp *computation) prepareScopeDirs() {
 			pkg: p,
 		})
 	}
+	cp.scopeByDir = make(map[string][]int, len(cp.scopeDirs))
+	for i, sd := range cp.scopeDirs {
+		cp.scopeByDir[sd.dir] = append(cp.scopeByDir[sd.dir], i)
+	}
+}
+
+// ownerOf is the longest-prefix rule of §6.2. The prefixes of a path are the
+// path itself and its ancestor folders, so they are probed longest first in
+// the index of scope folders; the first folder holding a package this commit
+// may derive owns the file. Among packages sharing one folder the earliest in
+// workspace order wins, which is what scanning every package in that order
+// and keeping the strictly longest match decided.
+func (cp *computation) ownerOf(rec *commitRec, full string) *scopeDir {
+	best := -1
+	consider := func(dir string) {
+		for _, i := range cp.scopeByDir[dir] {
+			if cp.commitCanDerive(rec, cp.scopeDirs[i].pkg) && (best < 0 || i < best) {
+				best = i
+			}
+		}
+	}
+	for dir := full; ; {
+		consider(dir)
+		// "." is a folder that owns everything, and it is as long as "/": the
+		// two tie, and the tie goes to workspace order like any other.
+		if len(dir) == 1 {
+			consider(".")
+		}
+		if best >= 0 {
+			return &cp.scopeDirs[best]
+		}
+		cut := strings.LastIndexByte(dir, '/')
+		if cut < 0 || dir == "/" {
+			break
+		}
+		if cut == 0 {
+			cut = 1 // the parent of "/a" is "/", not ""
+		}
+		dir = dir[:cut]
+	}
+	// A package rooted at the repository root owns everything; this only
+	// arises in tests and degenerate configurations. "." is longer than "".
+	for _, catchAll := range []string{".", ""} {
+		if consider(catchAll); best >= 0 {
+			return &cp.scopeDirs[best]
+		}
+	}
+	return nil
 }
 
 func (cp *computation) rootSlash() string { return cp.root }
-
-// underDir reports whether file sits inside dir, respecting path boundaries so
-// that /r/libs/core-extra is not mistaken for a file of /r/libs/core.
-func underDir(file, dir string) bool {
-	if dir == "" || dir == "." {
-		// A package rooted at the repository root owns everything; this only
-		// arises in tests and degenerate configurations.
-		return true
-	}
-	clean := path.Clean(dir)
-	if file == clean {
-		return true
-	}
-	return strings.HasPrefix(file, strings.TrimSuffix(clean, "/")+"/")
-}
 
 // IsGlobMatch reports whether s matches pattern, where "*" matches any run of
 // bytes, path separators included. Exported so the executor's autoVersion

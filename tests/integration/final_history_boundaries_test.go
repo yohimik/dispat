@@ -38,11 +38,11 @@ func TestFinalHistoryRejectsDuplicateVersionsInsideAComposedSource(t *testing.T)
 		polyrepoTags(f.control, "sources/lib"))
 }
 
-// TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow selects the second
-// source-history read: the latest prerelease boundary differs from the stable
-// boundary, so planning must read both windows. Losing the fresh read aborts
-// the whole plan rather than treating everything after the prerelease as
-// already published.
+// TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow: the latest
+// prerelease boundary differs from the stable boundary, so planning needs both
+// windows. They are one read, the union of the two in a single walk from which
+// each window is recovered by ancestry, and losing it aborts the whole plan
+// rather than treating everything after the prerelease as already published.
 func TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow(t *testing.T) {
 	f := finalPolyrepo(t)
 	f.control.Git("-C", "sources/lib", "tag", "-a", "core@0.1.0", "-m", "stable record")
@@ -55,8 +55,7 @@ func TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow(t *testing.T) {
 	checkpointPolyrepoSource(t, f.control, "sources/lib")
 
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*-C */sources/lib log --format=*--diff-merges=first-parent *..HEAD*",
-		Nth:     2,
+		Pattern: "*-C */sources/lib log --format=*--diff-merges=first-parent HEAD --not *",
 	})
 	res := f.control.CommandEnv(fault.Env(), "status")
 	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -64,7 +63,7 @@ func TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow(t *testing.T) {
 	assert.Contains(t, combined, harness.GitFaultMarker)
 	assert.Contains(t, combined, "lib-source history for core")
 	assert.NotContains(t, combined, "release plan ready")
-	assert.Equal(t, 2, fault.Matches(), "stable and fresh source windows are distinct reads")
+	assert.Equal(t, 1, fault.Matches(), "stable and fresh source windows are one union read")
 	assert.ElementsMatch(t, []string{"core@0.1.0", "core@0.2.0-beta.0"},
 		polyrepoTags(f.control, "sources/lib"))
 

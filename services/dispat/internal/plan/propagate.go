@@ -6,6 +6,7 @@ package plan
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
@@ -54,7 +55,162 @@ type target struct {
 // intermediate package: a unit written "+1" reaches exactly the direct
 // consumers of its own packages, in this run and in every later catch-up run,
 // whatever released in between.
+//
+// The result is shared and MUST NOT be modified: a traversal depends on the
+// graph at HEAD and on (sources, depth, kinds) alone, so it is computed once
+// and handed to every unit that asks the same question (CCME §13.11). Two
+// cache keys, because they recur differently. A unit written over one package
+// is nearly every unit, and its walk at any depth is a prefix of that
+// package's unbounded walk, which lists level by level. A unit over several
+// packages is composed from its sources' walks where they are few, walked
+// outright where they are many, and kept under its exact key either way: a
+// control unit is asked about several times a run.
+//
+// With tracing on nothing is cached, so that every unit still narrates the
+// edges it crossed.
 func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.DepKind]bool) []target {
+	if len(sources) == 0 || cp.log.Trace().Enabled() {
+		return cp.walkLiteral(sources, depth, kinds)
+	}
+	if cp.walks == nil {
+		cp.walks = &walkCache{single: make(map[walkKey][]target), exact: make(map[walkKey][]target)}
+	}
+	kindsKey := kindsCacheKey(kinds)
+	if len(sources) == 1 {
+		for s := range sources {
+			return withinDepth(cp.walks.from(cp, s, kindsKey, kinds), depth)
+		}
+	}
+	names := sortedKeys(sources)
+	key := walkKey{sources: strings.Join(names, "\x00"), depth: depth, kinds: kindsKey}
+	if walked, ok := cp.walks.exact[key]; ok {
+		return walked
+	}
+	var walked []target
+	if len(names) <= walkComposeLimit {
+		walked = cp.walks.compose(cp, names, sources, depth, kindsKey, kinds)
+	} else {
+		walked = cp.walkLiteral(sources, depth, kinds)
+	}
+	if cp.walks.held+len(walked) <= walkCacheBudget {
+		cp.walks.held += len(walked)
+		cp.walks.exact[key] = walked
+	}
+	return walked
+}
+
+// walkComposeLimit is the source-set size up to which a unit's walk is composed
+// from its sources' cached walks. Composition costs the summed size of those
+// walks, one multi-source walk costs the graph once, so a unit scoped over much
+// of the workspace is walked outright.
+const walkComposeLimit = 8
+
+// walkCacheBudget bounds the targets retained under exact keys. Past it a walk
+// is still computed, just not kept.
+const walkCacheBudget = 4 << 20
+
+// walkKey names one traversal. sources is one package for the single cache and
+// the sorted set, NUL-joined, for the exact one, where depth also counts.
+type walkKey struct {
+	sources string
+	depth   int
+	kinds   string
+}
+
+type walkCache struct {
+	single map[walkKey][]target // one source, unbounded, level by level
+	exact  map[walkKey][]target
+	held   int
+}
+
+// from is the unbounded walk from one source package.
+func (wc *walkCache) from(cp *computation, source, kindsKey string, kinds map[model.DepKind]bool) []target {
+	key := walkKey{sources: source, kinds: kindsKey}
+	walked, ok := wc.single[key]
+	if !ok {
+		walked = cp.walkLiteral(map[string]bool{source: true}, depthUnbounded, kinds)
+		wc.single[key] = walked
+	}
+	return walked
+}
+
+// withinDepth is the part of an unbounded walk a bounded one would have
+// produced. A breadth-first walk lists its targets by level, and the walk to
+// depth N is exactly its targets at level N or less, so that part is a prefix.
+// The capacity is clipped so that nothing appended by a caller can reach the
+// shared tail.
+func withinDepth(walked []target, depth int) []target {
+	if depth == depthUnbounded {
+		return walked
+	}
+	n := sort.Search(len(walked), func(i int) bool { return walked[i].level > depth })
+	return walked[:n:n]
+}
+
+// compose is the multi-source walk read off its sources' walks.
+//
+// A multi-source breadth-first walk with its sources queued in name order
+// gives every target its least distance from any source, credits it to the
+// least-named source at that distance, and lists each level source by source,
+// every source's targets in the order that source's own walk found them. All
+// three follow from the queue being first-in first-out: a level is discovered
+// by scanning the one before it in order, so each level stays grouped by
+// origin in source order, and a target is found by the first node that can
+// find it. The sources themselves are never targets (§9.2, seen = sources).
+func (wc *walkCache) compose(cp *computation, names []string, sources map[string]bool,
+	depth int, kindsKey string, kinds map[model.DepKind]bool) []target {
+
+	type best struct{ level, source int }
+	assigned := make(map[string]best)
+	walks := make([][]target, len(names))
+	deepest := 0
+	for i, s := range names {
+		walks[i] = withinDepth(wc.from(cp, s, kindsKey, kinds), depth)
+		for _, t := range walks[i] {
+			if sources[t.name] {
+				continue
+			}
+			if b, ok := assigned[t.name]; !ok || t.level < b.level {
+				assigned[t.name] = best{level: t.level, source: i}
+			}
+			deepest = max(deepest, t.level)
+		}
+	}
+	out := make([]target, 0, len(assigned))
+	next := make([]int, len(names)) // how far into each walk the levels so far reach
+	for level := 1; level <= deepest; level++ {
+		for i, s := range names {
+			for ; next[i] < len(walks[i]) && walks[i][next[i]].level == level; next[i]++ {
+				t := walks[i][next[i]]
+				if b, ok := assigned[t.name]; ok && b.level == level && b.source == i {
+					out = append(out, target{name: t.name, from: s, level: level})
+				}
+			}
+		}
+	}
+	return out
+}
+
+// kindsCacheKey names a kind set. nil is every kind and an empty set is none,
+// so the two must not share a key (kindSet); and a kind may be the empty
+// string, which model.KindDependencies is, so each is quoted: the set holding
+// only that kind must not read as the empty set either.
+func kindsCacheKey(kinds map[model.DepKind]bool) string {
+	if kinds == nil {
+		return "*"
+	}
+	names := make([]string, 0, len(kinds))
+	for k, on := range kinds {
+		if on {
+			names = append(names, strconv.Quote(string(k)))
+		}
+	}
+	sort.Strings(names)
+	return "[" + strings.Join(names, ",") + "]"
+}
+
+// walkLiteral is reach() written as §9.2 writes it, uncached.
+func (cp *computation) walkLiteral(sources map[string]bool, depth int, kinds map[model.DepKind]bool) []target {
 	seen := make(map[string]bool, len(sources))
 	origin := make(map[string]string, len(sources))
 	var out []target
@@ -290,7 +446,9 @@ func (cp *computation) resolveChannels() {
 			if u.IsCancel() || !u.Directives.ChannelSet {
 				continue
 			}
-			for _, name := range sortedKeys(rec.scope[i]) {
+			// Map order is enough: every effect below is on the one package
+			// it names, and cancelledFor only ever sets a flag.
+			for name := range rec.scope[i] {
 				if !cp.inWindow(name, rec.key) { // §13.4a
 					continue
 				}
@@ -452,6 +610,7 @@ func (cp *computation) channelFrontierConflict(candidates []channelPick) bool {
 // ---------------------------------------------------------------------------
 
 func (cp *computation) propagateBumps() {
+	tracing := cp.log.Trace().Enabled() // read once: the loop below is per target
 	for _, rec := range cp.commits {
 		for i, u := range rec.units {
 			if u.IsCancel() || u.Bump == ccme.BumpNone {
@@ -552,7 +711,7 @@ func (cp *computation) propagateBumps() {
 						Bump:      prop.Bump,
 					})
 				}
-				if cp.log.Trace().Enabled() {
+				if tracing {
 					cp.log.Trace().Str("package", t.name).Str("from", joinSorted(sources)).
 						Int("level", t.level).Str("bump", prop.Bump.String()).
 						Str("commit", rec.key).Msg("plan: bump propagated")

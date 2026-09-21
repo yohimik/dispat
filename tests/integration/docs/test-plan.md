@@ -1998,7 +1998,7 @@ These cases extend the existing planning, configuration, publication, command an
 | Test | Claim proven |
 | --- | --- |
 | `TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot` | completeness, tag inventory, and pending history Git failures abort a monorepo status without a plan or release record. |
-| `TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder` | correction ancestry requires the repository DAG and never falls back to log order. |
+| `TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder` | correction ancestry about a released commit, the one question no pending window answers, requires the repository DAG and never falls back to log order. |
 | `TestFinalPlanFaultStopsRunSinceBeforeTheScript` | an unreadable selection window prevents the selected script from running. |
 | `TestFinalPolyrepoCompositionFaultsNameTheUntrustedBoundary` | each control/source identity, completeness, inventory, pin, and HEAD inquiry fails closed and a healed retry composes the same fleet. |
 | `TestFinalPolyrepoMalformedSubmoduleInventoryCannotEraseARepository` | corrupt successful git-config output cannot shrink the source inventory. |
@@ -2006,7 +2006,7 @@ These cases extend the existing planning, configuration, publication, command an
 | `TestFinalPolyrepoBaselineFaultsRefuseAnUnprovenRevision` | a baseline revision must resolve and be reachable in the named source. |
 | `TestFinalPolyrepoPlanningFaultsDoNotShrinkTheFleetSnapshot` | source completeness, HEAD, refs, commits, and control-history failures abort planning. |
 | `TestFinalPolyrepoImportedConfigFaultRefusesUnattributedOwnership` | imported configuration ownership requires a successful Git-root proof and a healed retry converges. |
-| `TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder` | source correction ancestry remains repository-scoped and fail-closed. |
+| `TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder` | source correction ancestry about a released source commit remains repository-scoped and fail-closed. |
 | `TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex` | corrupt control-history framing cannot become an empty checkpoint index. |
 | `TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow` | truncated framing and invalid commit or parent identities are rejected without shrinking the pending release window; healthy retries retain it. |
 | `TestFinalPolyrepoMalformedTagInventoryCannotEraseThePublishedBaseline` | missing or extra ref fields, missing tag names and invalid object or peeled identities cannot erase or move a published tag; a healthy retry plans the pending fix. |
@@ -2110,7 +2110,7 @@ These cases extend the existing planning, configuration, publication, command an
 | Test | Claim proven |
 | --- | --- |
 | `TestFinalHistoryRejectsDuplicateVersionsInsideAComposedSource` | equal-precedence release refs on different commits are fatal in the composed LocalGitx tag path, with no package plan rows or release mutation. |
-| `TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow` | an active prerelease requires its distinct fresh history window; failure of that second LocalGitx log read aborts planning and a healthy retry resumes the train correctly. |
+| `TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow` | an active prerelease requires its distinct fresh history window, read with the stable one as a single union walk; failure of that LocalGitx log read aborts planning and a healthy retry resumes the train correctly. |
 | `TestFinalHistoryRequiresTheLatestPrereleaseBoundarySeparately` | a valid stable cross-repository tuple cannot substitute for missing evidence at the consumer's newer prerelease tag. |
 | `TestFinalHistorySharesAControlCheckpointAcrossSourceReleases` | two source release tags recorded by one canonical control commit resolve through the same immutable fleet snapshot. |
 | `TestFinalHistoryAppliesControlCancellationWithoutPropagatingIt` | a bounded control cancel clears newer source work without becoming a cross-repository release proposal. |

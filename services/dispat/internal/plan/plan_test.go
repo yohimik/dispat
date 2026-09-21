@@ -9,7 +9,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -261,12 +260,8 @@ func TestPlanningSharesHistoryForDifferentTagsAtTheSameCommit(t *testing.T) {
 	assert.Equal(t, 1, git.logQueries["a@1.0.0"]+git.logQueries["b@2.0.0"],
 		"different tag names at one peeled commit share a history query")
 
-	cache := make(map[string]map[string]bool)
-	first := sharedCommitWindow(cache, commitWindowCacheKey("c1", "a@1.0.0"), []gitx.Commit{{SHA: "c2"}})
-	second := sharedCommitWindow(cache, commitWindowCacheKey("c1", "b@2.0.0"), []gitx.Commit{{SHA: "ignored"}})
-	assert.Equal(t, reflect.ValueOf(first).Pointer(), reflect.ValueOf(second).Pointer(),
-		"the same peeled boundary shares immutable membership storage")
-	assert.False(t, second["ignored"])
+	assert.Equal(t, commitWindowCacheKey("c1", "a@1.0.0"), commitWindowCacheKey("c1", "b@2.0.0"),
+		"the same peeled boundary is one window, whatever the tags naming it are called")
 }
 
 func TestPlanningDoesNotShareHistoryForDistinctStableCommits(t *testing.T) {
@@ -306,19 +301,26 @@ func TestPlanningReturnsBulkTagInventoryError(t *testing.T) {
 }
 
 func TestCommitWindowsShareStorageOnlyForTheSameBaseline(t *testing.T) {
-	commits := []gitx.Commit{{SHA: "one"}, {SHA: "two"}}
-	cache := make(map[string]map[string]bool)
+	git := newFakeGit(
+		commit{sha: "c1", message: "chore: released by a and b"},
+		commit{sha: "c2", message: "chore: released by c"},
+		commit{sha: "c3", message: "fix(a,b,c): pending"},
+	).tag("a", "1.0.0", "c1").tag("b", "2.0.0", "c1").tag("c", "1.0.0", "c2")
+	pkgs := []*model.Package{{Name: "a", Dir: "/r/a"}, {Name: "b", Dir: "/r/b"}, {Name: "c", Dir: "/r/c"}}
+	cp := &computation{ctx: context.Background(), git: git, pkgs: pkgs, log: zerolog.Nop(),
+		rel: map[string]*Release{}, tags: map[string]gitx.Tags{}, window: map[string]*commitSet{},
+		windowKey: map[string]string{}, byKey: map[string]*commitRec{}, parents: map[string][]string{}}
+	require.NoError(t, cp.loadLegacyTagsAndWindows())
 
-	first := sharedCommitWindow(cache, "v1", commits)
-	same := sharedCommitWindow(cache, "v1", append(commits, gitx.Commit{SHA: "ignored"}))
-	other := sharedCommitWindow(cache, "v2", commits)
-
-	require.Equal(t, first, same)
-	assert.Equal(t, reflect.ValueOf(first).Pointer(), reflect.ValueOf(same).Pointer(),
+	assert.Same(t, cp.window["a"], cp.window["b"],
 		"packages sharing a baseline must share one immutable commit set")
-	assert.NotEqual(t, reflect.ValueOf(first).Pointer(), reflect.ValueOf(other).Pointer(),
+	assert.NotSame(t, cp.window["a"], cp.window["c"],
 		"distinct baselines must retain distinct membership sets")
-	assert.False(t, same["ignored"], "a cached baseline cannot be rebuilt from another package's input")
+	assert.Equal(t, 2, cp.window["a"].len())
+	assert.Equal(t, 1, cp.window["c"].len())
+	assert.True(t, cp.inWindow("a", "c2"))
+	assert.False(t, cp.inWindow("c", "c2"), "a window holds its own boundary's commits only")
+	assert.False(t, cp.inWindow("a", "never-read"), "a commit outside the union is in no window")
 }
 
 func TestSharedCommitWindowsKeepDistinctBaselineMembership(t *testing.T) {
@@ -1436,6 +1438,40 @@ func TestChannelOnlyReleaseGetsTheEntryPatch(t *testing.T) {
 	assertVersion(t, pre(1, 2, 1, "beta", "0"), core.Next, "the entry patch lifts it above 1.2.0")
 	assert.True(t, hasCode(p, CodeChannelEntryPatch), "W204, got %v", codes(p))
 	assert.True(t, hasCode(p, CodeChannelOnly), "W202, got %v", codes(p))
+}
+
+func TestTrainEnteredByTheEntryPatchGraduates(t *testing.T) {
+	// §11.5: a train entered by the channel-entry patch carries no bump, so
+	// its graduation computes the stable baseline, below the core the train
+	// was published under. The same patch applies on the way out; without it
+	// the two canonical forms (vector 39b, then the transition of vector 97d)
+	// compose into a run that aborts with E185.
+	git := newFakeGit(
+		commit{sha: "c1", message: "feat(core)%beta++1: x"},
+		commit{sha: "c2", message: "release(core)%stable%%beta>stable++*: graduate"},
+	).tag("core", "1.4.2", "").tag("core", "1.5.0-beta.0", "c1").
+		tag("app", "2.0.0", "").tag("app", "2.0.1-beta.0", "c1")
+
+	p := compute(t, git, nil)
+
+	assert.False(t, hasCode(p, CodeGraduateNoIncrease), "no E185, got %v", codes(p))
+	assertVersion(t, v(1, 5, 0), p.Releases["core"].Next, "core carries its own feat")
+	app := p.Releases["app"]
+	assert.Equal(t, ccme.BumpNone, app.Bump)
+	assertVersion(t, v(2, 0, 1), app.Next, "the core the train carried")
+	assert.True(t, hasCode(p, CodeChannelEntryPatch), "W204, got %v", codes(p))
+}
+
+func TestEntryPatchDoesNotExcuseAnUnexplainedTrain(t *testing.T) {
+	// Vector 93: a train a whole minor above its stable baseline, with no bump
+	// in the window, is not what one patch explains. E185 stands.
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(core)%stable: x"},
+	).tag("core", "1.4.2", "").tag("core", "1.5.0-beta.2", "")
+
+	p := compute(t, git, nil)
+
+	assert.True(t, hasCode(p, CodeGraduateNoIncrease), "E185, got %v", codes(p))
 }
 
 func TestEstablishedTrainNeedsNoDirectives(t *testing.T) {

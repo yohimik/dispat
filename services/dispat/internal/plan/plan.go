@@ -1352,8 +1352,8 @@ type pin struct {
 type cancelRec struct {
 	key       string
 	scope     map[string]bool
-	closure   map[string]bool // commit keys that are ancestors-or-self
-	discarded bool            // whether it actually discarded anything
+	closure   func(commitKey string) bool // is it an ancestor-or-self of key
+	discarded bool                        // whether it actually discarded anything
 	pkgLabel  string
 }
 
@@ -1451,20 +1451,32 @@ type computation struct {
 	// which is what makes a remedy naming a control repository wrong advice.
 	linkedFleet bool
 
-	pkgs      []*model.Package
-	scopeDirs []scopeDir // prepared once; see prepareScopeDirs
-	byName    map[string]*model.Package
-	byFold    map[string]string
-	order     []string
-	providers map[string][]string
-	edges     map[string][]edge
+	pkgs       []*model.Package
+	scopeDirs  []scopeDir       // prepared once; see prepareScopeDirs
+	scopeByDir map[string][]int // scope folder -> indices into scopeDirs, in order
+	byName     map[string]*model.Package
+	byFold     map[string]string
+	order      []string
+	providers  map[string][]string
+	edges      map[string][]edge
 
 	parser *ccme.Parser
 
-	rel        map[string]*Release
-	tags       map[string]gitx.Tags         // package -> its tag listing, newest first
-	window     map[string]map[string]bool   // package -> commit keys it has not released
-	windowRefs map[string][]map[string]bool // composed package -> shared repository windows
+	rel    map[string]*Release
+	tags   map[string]gitx.Tags  // package -> its tag listing, newest first
+	window map[string]*commitSet // package -> the commits it has not released
+	// anc answers ancestry among the union's commits by the marker pass, for
+	// the repositories whose Git implementation lets Parents be trusted
+	// (gitx.UnionHistoryx). behindUnion holds the tag commits the union does
+	// not contain: a tag is reachable from HEAD (Gitx.Tags), a window is closed
+	// under descendants, so such a commit has no ancestor inside the union.
+	anc         *ancestryIndex
+	ancTrusted  map[string]bool // folded repository name -> Parents are ancestry
+	behindUnion map[string]bool
+	closures    map[string]func(string) bool // cancel commit -> its closure, built once
+	walks       *walkCache                   // §9.2 traversals, shared between units
+	globs       *globIndex                   // §6.1 glob terms, resolved once each
+	windowRefs  map[string][]map[string]bool // composed package -> shared repository windows
 	// windowKeys names the history views a composed package's window was
 	// assembled from, in the order they were attached; windowKey is the
 	// single-history equivalent. Both are the cache keys the loaders already
@@ -1566,10 +1578,15 @@ type computation struct {
 //	§13.9  versions
 //	§13.10 emit
 //
-// Graph work is O((V+E) log V) per propagation phase. The CLI inventories
-// reachable tags once for the workspace, then reads one bounded log range per
-// distinct window origin. Git implementations without bulk tag support retain
-// the per-package tag-query fallback.
+// Graph work is one walk of the graph, O(V+E), per distinct (source package,
+// edge kinds) a propagating unit names, and a prefix of it or a composition of
+// several for every unit after the first (propagate.go, walk); the literal
+// reading is a walk per propagating unit per phase. The CLI inventories
+// reachable tags once for the workspace, reads the union of the pending
+// windows in one bounded log walk and recovers each window from it by the
+// marker pass (ancestry.go). Git implementations without those capabilities
+// retain the per-package tag query and the log range per distinct window
+// origin.
 func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 	pkgs := opts.Packages
 	cp := &computation{
@@ -1588,7 +1605,7 @@ func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 		byFold:              make(map[string]string, len(pkgs)),
 		rel:                 make(map[string]*Release, len(pkgs)),
 		tags:                make(map[string]gitx.Tags, len(pkgs)),
-		window:              make(map[string]map[string]bool, len(pkgs)),
+		window:              make(map[string]*commitSet, len(pkgs)),
 		windowRefs:          make(map[string][]map[string]bool, len(pkgs)),
 		windowKeys:          make(map[string][]string, len(pkgs)),
 		windowKey:           make(map[string]string, len(pkgs)),
@@ -1750,6 +1767,7 @@ func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 		}
 		return nil, err
 	}
+	cp.markDirectiveCommits()  // §13.11: one marker pass for the phases below
 	cp.collectCancels()        // §13.5
 	cp.applyCorrections()      // §13.4b, on the stream every phase below reads
 	cp.suppressRevertedNotes() // §7.3, on the corrected stream
@@ -1813,7 +1831,9 @@ func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 func (cp *computation) releaseWorkspaceScratch() {
 	cp.repositoryReach = nil
 	cp.controlInputs = nil
+	cp.window = nil
 	cp.windowRefs = nil
+	cp.closures = nil
 	// The attribution is on the releases now, and the keys that indexed it
 	// answer no question the plan can still be asked.
 	cp.windowAuthors = nil
@@ -2068,9 +2088,6 @@ schedule:
 }
 
 func (cp *computation) loadLegacyTagsAndWindows() error {
-	// Per-package commit lists, kept so the union can be ranked afterwards.
-	lists := make([][]gitx.Commit, 0, len(cp.pkgs))
-
 	// The real CLI can inventory all reachable tags in one git process and
 	// partition them with each package's own format. Other Git implementations
 	// keep the bounded concurrent per-package fallback, so the public Git
@@ -2100,12 +2117,12 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		return fmt.Errorf("plan: loading tags: %w", err)
 	}
 
-	// Windows are one `git log` per DISTINCT starting commit: packages whose
-	// differently named stable tags point at the same commit share the listing
-	// and immutable membership set. The tag name remains the query argument for
+	// Windows are keyed by DISTINCT starting commit: packages whose differently
+	// named stable tags point at the same commit share the listing and the
+	// immutable membership set. The tag name remains the query argument for
 	// Git implementations whose Commits API accepts a ref rather than an OID.
-	commitsBySince := make(map[string][]gitx.Commit)
-	windowsBySince := make(map[string]map[string]bool)
+	var boundaries []windowBoundary
+	seenBoundary := make(map[string]bool)
 
 	// Every package's aliases, compiled once: an alias of one package can land
 	// in another's listing, so the filter is the workspace's rather than the
@@ -2182,35 +2199,222 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		cp.rel[p.Name] = rel
 
 		cacheKey := commitWindowCacheKey(rel.StableCommit, since)
-		commits, ok := commitsBySince[cacheKey]
-		if !ok {
-			// A Git implementation that ignores its context would otherwise
-			// keep reading one window per package after an interrupt. The
-			// check costs one atomic load per distinct boundary.
-			if err := cp.ctx.Err(); err != nil {
-				return fmt.Errorf("plan: loading windows: %w", err)
-			}
-			commits, err = cp.git.Commits(cp.ctx, since)
-			if err != nil {
-				return fmt.Errorf("plan: %s: %w", p.Name, err)
-			}
-			commitsBySince[cacheKey] = commits
-			lists = append(lists, commits)
-			if cp.stats != nil {
-				cp.stats.CommitWindows.Add(1)
-				cp.stats.WindowCommitRefs.Add(int64(len(commits)))
-			}
-			cp.log.Debug().Str("boundary", cacheKey).Int("commits", len(commits)).
-				Msg("plan: history window indexed")
+		if !seenBoundary[cacheKey] {
+			seenBoundary[cacheKey] = true
+			boundaries = append(boundaries, windowBoundary{
+				key: cacheKey, since: since, commit: rel.StableCommit, pkg: p.Name})
 		}
-		cp.window[p.Name] = sharedCommitWindow(windowsBySince, cacheKey, commits)
 		cp.windowKey[p.Name] = cacheKey
 	}
 
-	cp.buildUnion(lists)
-	cp.log.Debug().Int("packages", len(cp.pkgs)).Int("windows", len(commitsBySince)).
+	windows, err := cp.loadLegacyWindows(boundaries)
+	if err != nil {
+		return err
+	}
+	for _, p := range cp.pkgs {
+		cp.window[p.Name] = windows[cp.windowKey[p.Name]]
+	}
+	cp.log.Debug().Int("packages", len(cp.pkgs)).Int("windows", len(boundaries)).
 		Int("commits", len(cp.commits)).Msg("plan: tags and windows loaded")
 	return nil
+}
+
+// windowBoundary is one distinct stable baseline a window is measured from:
+// its cache key, the tag naming it, its peeled commit where the Git
+// implementation provides one, and the first package that needed it, which
+// is the name a failure to read it is reported against.
+type windowBoundary struct {
+	key, since, commit, pkg string
+}
+
+// loadLegacyWindows is §13.3 over one history: the union of the pending
+// windows, ranked, and the membership set of every distinct boundary.
+//
+// A Git implementation with gitx.UnionHistoryx reads the union in one walk.
+// The windows are then recovered from it by the marker pass (ancestry.go): a
+// commit is in the window after b exactly when it is not an ancestor-or-self
+// of b. Messages and changed paths are read and parsed once, where a read
+// per boundary repeats every commit two windows share.
+func (cp *computation) loadLegacyWindows(boundaries []windowBoundary) (map[string]*commitSet, error) {
+	windows := make(map[string]*commitSet, len(boundaries))
+	sizes, err := cp.readUnionWindow(boundaries, windows)
+	if err != nil {
+		return nil, err
+	}
+	if sizes == nil {
+		if sizes, err = cp.readWindowPerBoundary(boundaries, windows); err != nil {
+			return nil, err
+		}
+	}
+	for i, b := range boundaries {
+		if cp.stats != nil {
+			cp.stats.CommitWindows.Add(1)
+			cp.stats.WindowCommitRefs.Add(int64(sizes[i]))
+		}
+		cp.log.Debug().Str("boundary", b.key).Int("commits", sizes[i]).
+			Msg("plan: history window indexed")
+	}
+	cp.indexAncestry()
+	return windows, nil
+}
+
+// readWindowPerBoundary reads one listing per distinct boundary. It is every
+// Git implementation's path but the real one's, and the real one's when there
+// is a single boundary and therefore nothing to share.
+func (cp *computation) readWindowPerBoundary(boundaries []windowBoundary, windows map[string]*commitSet) ([]int, error) {
+	// Per-boundary commit lists, kept so the union can be ranked afterwards.
+	lists := make([][]gitx.Commit, 0, len(boundaries))
+	sizes := make([]int, 0, len(boundaries))
+	for _, b := range boundaries {
+		// A Git implementation that ignores its context would otherwise keep
+		// reading one window per boundary after an interrupt. The check costs
+		// one atomic load per distinct boundary.
+		if err := cp.ctx.Err(); err != nil {
+			return nil, fmt.Errorf("plan: loading windows: %w", err)
+		}
+		commits, err := cp.git.Commits(cp.ctx, b.since)
+		if err != nil {
+			return nil, fmt.Errorf("plan: %s: %w", b.pkg, err)
+		}
+		lists = append(lists, commits)
+		sizes = append(sizes, len(commits))
+	}
+	cp.buildUnion(lists)
+	for i, b := range boundaries {
+		windows[b.key] = commitSetOf(len(cp.commits), func(yield func(int)) {
+			for _, c := range lists[i] {
+				yield(cp.byKey[commitKey(c)].rank)
+			}
+		})
+	}
+	return sizes, nil
+}
+
+// readUnionWindow reads every window in one walk. It answers nil sizes when
+// the single read does not apply: the Git implementation lacks the capability,
+// there is one boundary and so nothing shared, or a boundary has no peeled
+// commit id to name it by.
+func (cp *computation) readUnionWindow(boundaries []windowBoundary, windows map[string]*commitSet) ([]int, error) {
+	union, ok := cp.git.(gitx.UnionHistoryx)
+	if !ok || len(boundaries) < 2 {
+		return nil, nil
+	}
+	ids := make([]string, len(boundaries))
+	for i, b := range boundaries {
+		if b.commit == "" && b.since != "" {
+			return nil, nil
+		}
+		ids[i] = b.commit // "" is the package never stably released: the whole history
+	}
+	if err := cp.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("plan: loading windows: %w", err)
+	}
+	all, err := union.CommitsSinceAny(cp.ctx, ids)
+	if errors.Is(err, gitx.ErrBoundaryNotBehindHead) {
+		return nil, nil // a window cannot be recovered by ancestry then; read them one by one
+	}
+	if err != nil {
+		return nil, fmt.Errorf("plan: %s: %w", boundaries[0].pkg, err)
+	}
+
+	// The marker pass over the listing as read: position is rank for now.
+	at := make(map[string]int32, len(all))
+	for i, c := range all {
+		at[c.SHA] = int32(i)
+	}
+	index := newAncestryIndex(len(all), func(pos int) []int32 {
+		var parents []int32
+		for _, p := range all[pos].Parents {
+			if i, ok := at[p]; ok {
+				parents = append(parents, i)
+			}
+		}
+		return parents
+	})
+	if index == nil {
+		return nil, nil // not a DAG; let the per-boundary reads say what is wrong
+	}
+	var markers []int32
+	for _, id := range ids {
+		if pos, ok := at[id]; ok {
+			markers = append(markers, pos)
+		}
+	}
+	index.mark(markers)
+	// behind is what boundary i excludes. A boundary the union does not hold is
+	// behind every other one, so it excludes nothing: its window is the union.
+	behind := func(i int) *commitSet {
+		if pos, ok := at[ids[i]]; ok {
+			return index.ancestors(pos)
+		}
+		return nil
+	}
+	sizes := make([]int, len(boundaries))
+	for i := range boundaries {
+		if _, held := at[ids[i]]; held && behind(i) == nil {
+			return nil, nil // past the index's budget; read the windows one by one
+		}
+		sizes[i] = len(all) - behind(i).len()
+	}
+
+	// The union is ranked exactly as buildUnion ranks per-boundary listings:
+	// the longest window first, then whatever each shorter one adds, in its own
+	// order. A window's order is its order in the union (gitx.UnionHistoryx),
+	// so nested boundaries, which is nearly every history, rank as read.
+	byLength := make([]int, len(boundaries))
+	for i := range byLength {
+		byLength[i] = i
+	}
+	sort.SliceStable(byLength, func(a, b int) bool { return sizes[byLength[a]] > sizes[byLength[b]] })
+	ranked, placed := all, make([]bool, len(all))
+	if sizes[byLength[0]] != len(all) {
+		ranked = make([]gitx.Commit, 0, len(all))
+		for _, i := range byLength {
+			excluded := behind(i)
+			for pos, c := range all {
+				if !placed[pos] && !excluded.has(pos) {
+					placed[pos] = true
+					ranked = append(ranked, c)
+				}
+			}
+			if len(ranked) == len(all) {
+				break
+			}
+		}
+	}
+	cp.buildUnion([][]gitx.Commit{ranked})
+
+	// In rank space. Positions are ranks when the union ranked as read, and
+	// the pass is cheap enough to repeat when it did not.
+	if sizes[byLength[0]] != len(all) {
+		if index = cp.newUnionAncestry(); index == nil {
+			return nil, fmt.Errorf("plan: %s: the union history is not a DAG", boundaries[0].pkg)
+		}
+		markers = markers[:0]
+		for _, id := range ids {
+			if rec := cp.byKey[id]; rec != nil {
+				markers = append(markers, int32(rec.rank))
+			}
+		}
+		index.mark(markers)
+	}
+	cp.anc = index
+	for i, b := range boundaries {
+		var excluded *commitSet
+		if rec := cp.byKey[ids[i]]; rec != nil {
+			if excluded = index.ancestors(int32(rec.rank)); excluded == nil {
+				return nil, fmt.Errorf("plan: %s: window boundary %s was not indexed", b.pkg, b.key)
+			}
+		}
+		windows[b.key] = commitSetOf(len(cp.commits), func(yield func(int)) {
+			for rank := range cp.commits {
+				if !excluded.has(rank) {
+					yield(rank)
+				}
+			}
+		})
+	}
+	return sizes, nil
 }
 
 // commitWindowCacheKey identifies the history boundary independently of the
@@ -2226,21 +2430,6 @@ func commitWindowCacheKey(commit, tag string) string {
 		return "tag:" + tag
 	}
 	return "root:"
-}
-
-// sharedCommitWindow returns the immutable membership set for one stable
-// baseline. Every consumer of computation.window only reads membership, so
-// packages with the same baseline can share this potentially large set.
-func sharedCommitWindow(cache map[string]map[string]bool, since string, commits []gitx.Commit) map[string]bool {
-	if window, ok := cache[since]; ok {
-		return window
-	}
-	window := make(map[string]bool, len(commits))
-	for _, commit := range commits {
-		window[commitKey(commit)] = true
-	}
-	cache[since] = window
-	return window
 }
 
 // duplicateVersionTags finds two parsed tags carrying the same version on
@@ -2307,7 +2496,8 @@ func (cp *computation) containedInBaseline(pkg, key string) bool {
 
 func (cp *computation) inWindow(pkg, key string) bool {
 	if len(cp.histories) == 0 {
-		return cp.window[pkg][key]
+		rec := cp.byKey[key]
+		return rec != nil && cp.window[pkg].has(rec.rank)
 	}
 	repository, _ := splitHistoryKey(key)
 	if p := cp.byName[pkg]; p != nil && strings.EqualFold(repository, cp.controlRepo) &&
@@ -2325,7 +2515,7 @@ func (cp *computation) inWindow(pkg, key string) bool {
 
 func (cp *computation) windowSize(pkg string) int {
 	if len(cp.histories) == 0 {
-		return len(cp.window[pkg])
+		return cp.window[pkg].len()
 	}
 	n := 0
 	for _, window := range cp.windowRefs[pkg] {
@@ -2380,6 +2570,9 @@ func (cp *computation) ancestorOrSelf(a, b string) bool {
 	if a == b {
 		return true
 	}
+	if yes, known := cp.markedAncestor(a, b); known {
+		return yes
+	}
 	key := [2]string{a, b}
 	if v, ok := cp.ancCache[key]; ok {
 		return v
@@ -2396,6 +2589,154 @@ func (cp *computation) ancestorOrSelf(a, b string) bool {
 	}
 	cp.ancCache[key] = v
 	return v
+}
+
+// markedAncestor answers from the marker pass when it can: a is a commit of the
+// union, b is one too (it becomes a marker on first asking, and the batches
+// the phases register up front share one pass) or a tag commit behind the
+// union, and both belong to one repository whose parent pointers are ancestry.
+// Anything else is unknown here and goes to the Git implementation, exactly as
+// every question did before.
+func (cp *computation) markedAncestor(a, b string) (yes, known bool) {
+	if cp.anc == nil {
+		return false, false
+	}
+	ra := cp.byKey[a]
+	if ra == nil || !cp.parentsAreAncestry(ra.repository) {
+		return false, false
+	}
+	rb := cp.byKey[b]
+	if rb == nil {
+		return false, cp.behindUnion[b]
+	}
+	if !strings.EqualFold(ra.repository, rb.repository) {
+		return false, false
+	}
+	set := cp.anc.ancestors(int32(rb.rank))
+	if set == nil {
+		cp.anc.mark([]int32{int32(rb.rank)})
+		if set = cp.anc.ancestors(int32(rb.rank)); set == nil {
+			return false, false // past the index's budget
+		}
+	}
+	return set.has(ra.rank), true
+}
+
+// parentsAreAncestry reports whether the repository's Git implementation
+// promises complete parent lists (gitx.UnionHistoryx), which is what lets
+// ancestry among its commits be read off them.
+func (cp *computation) parentsAreAncestry(repository string) bool {
+	folded := strings.ToLower(repository)
+	if trusted, ok := cp.ancTrusted[folded]; ok {
+		return trusted
+	}
+	git := cp.git
+	if len(cp.histories) > 0 {
+		git = cp.histories[folded].Git
+	}
+	_, trusted := git.(gitx.UnionHistoryx)
+	if cp.ancTrusted == nil {
+		cp.ancTrusted = make(map[string]bool)
+	}
+	cp.ancTrusted[folded] = trusted
+	return trusted
+}
+
+// newUnionAncestry indexes the ranked union. A commit of a repository whose
+// parents are not trusted is left without any, and is never asked about.
+func (cp *computation) newUnionAncestry() *ancestryIndex {
+	return newAncestryIndex(len(cp.commits), func(rank int) []int32 {
+		rec := cp.commits[rank]
+		if !cp.parentsAreAncestry(rec.repository) {
+			return nil
+		}
+		var parents []int32
+		for _, p := range cp.parents[rec.key] {
+			if parent := cp.byKey[p]; parent != nil {
+				parents = append(parents, int32(parent.rank))
+			}
+		}
+		return parents
+	})
+}
+
+// indexAncestry builds the index where the loader has not, and marks every
+// baseline commit in one pass: stable and newest alike, since containment in
+// a prerelease baseline is the question a train asks about every commit.
+func (cp *computation) indexAncestry() {
+	if len(cp.histories) > 0 || !cp.parentsAreAncestry("") {
+		return
+	}
+	if cp.anc == nil {
+		if cp.anc = cp.newUnionAncestry(); cp.anc == nil {
+			return
+		}
+	}
+	cp.behindUnion = make(map[string]bool)
+	var markers []int32
+	for _, p := range cp.pkgs {
+		rel := cp.rel[p.Name]
+		for _, commit := range []string{rel.StableCommit, rel.BaselineCommit} {
+			if commit == "" {
+				continue
+			}
+			if rec := cp.byKey[commit]; rec != nil {
+				markers = append(markers, int32(rec.rank))
+			} else {
+				cp.behindUnion[commit] = true
+			}
+		}
+	}
+	cp.anc.mark(markers)
+}
+
+// indexRepositoryAncestry is indexAncestry over a composed workspace. The
+// index is per repository without saying so: parents never leave the
+// repository that owns them, so no set ever crosses one. A boundary the union
+// does not hold stays unknown here, because a fleet's boundaries are pins and
+// tuples as well as tags, and only a tag is promised to be behind HEAD.
+func (cp *computation) indexRepositoryAncestry() {
+	trusted := false
+	for _, history := range cp.histories {
+		trusted = trusted || cp.parentsAreAncestry(history.Name)
+	}
+	if !trusted {
+		return
+	}
+	if cp.anc = cp.newUnionAncestry(); cp.anc == nil {
+		return
+	}
+	var markers []int32
+	for _, boundaries := range []map[string]map[string]string{cp.stableBoundaries, cp.publishedBoundaries} {
+		for _, p := range cp.pkgs {
+			// Marker order decides which bit a marker takes and nothing else.
+			for _, boundary := range boundaries[p.Name] {
+				if rec := cp.byKey[boundary]; rec != nil {
+					markers = append(markers, int32(rec.rank))
+				}
+			}
+		}
+	}
+	cp.anc.mark(markers)
+}
+
+// markDirectiveCommits registers, in one pass, the commits the phases after
+// parsing ask about: every cancel barrier (§10.3) and every commit carrying a
+// correction or a Reverts footer (§7.3, §13.4b).
+func (cp *computation) markDirectiveCommits() {
+	if cp.anc == nil {
+		return
+	}
+	var markers []int32
+	for _, rec := range cp.commits {
+		for _, u := range rec.units {
+			if u.IsCancel() || len(u.Directives.Edits)+len(u.Directives.Deletes)+len(u.Directives.Reverts) > 0 {
+				markers = append(markers, int32(rec.rank))
+				break
+			}
+		}
+	}
+	cp.anc.mark(markers)
 }
 
 // ancestorLookup answers one uncached ancestry question. Three sources of
@@ -2517,9 +2858,12 @@ func (cp *computation) parseAndResolve() error {
 			}
 			rec.scope[i] = res.packages
 			if !u.IsCancel() {
-				rec.channelPropagations[i] = cp.unitChannelPropagation(u, rec)
+				// The unit's Propagate-Scope restricts both axes (§8.5a), so
+				// it is resolved once, by whichever axis asks first.
+				var propagateScope *scopeResult
+				rec.channelPropagations[i] = cp.unitChannelPropagation(u, rec, &propagateScope)
 				if u.Bump != ccme.BumpNone {
-					rec.propagations[i] = cp.unitPropagation(u, rec)
+					rec.propagations[i] = cp.unitPropagation(u, rec, &propagateScope)
 				}
 			}
 		}
@@ -2572,14 +2916,38 @@ func (cp *computation) collectCancels() {
 // key. Commits outside every pending window are irrelevant by construction:
 // cancellation only ever reaches unreleased work and never a published tag
 // (§10.3).
-func (cp *computation) ancestorClosure(key string) map[string]bool {
-	out := make(map[string]bool)
-	for _, rec := range cp.commits {
-		if cp.ancestorOrSelf(rec.key, key) {
-			out[rec.key] = true
-		}
+//
+// With the marker pass the closure is the barrier's ancestor set itself, a bit
+// per commit and already computed. Without it, it is asked a commit at a time
+// and kept as the keys that answered yes.
+func (cp *computation) ancestorClosure(key string) func(commitKey string) bool {
+	if closure, ok := cp.closures[key]; ok {
+		return closure
 	}
-	return out
+	var closure func(string) bool
+	// One history only: a control repository's barrier also reaches the source
+	// commits its snapshot observed, which no ancestor set of its own says.
+	if rec := cp.byKey[key]; rec != nil && len(cp.histories) == 0 && cp.anc != nil &&
+		cp.parentsAreAncestry(rec.repository) && cp.anc.ancestors(int32(rec.rank)) != nil {
+		set := cp.anc.ancestors(int32(rec.rank))
+		closure = func(commitKey string) bool {
+			c := cp.byKey[commitKey]
+			return c != nil && set.has(c.rank)
+		}
+	} else {
+		keys := make(map[string]bool)
+		for _, rec := range cp.commits {
+			if cp.ancestorOrSelf(rec.key, key) {
+				keys[rec.key] = true
+			}
+		}
+		closure = func(commitKey string) bool { return keys[commitKey] }
+	}
+	if cp.closures == nil {
+		cp.closures = make(map[string]func(string) bool)
+	}
+	cp.closures[key] = closure
+	return closure
 }
 
 // cancelledFor is cancelledFor(C, X) from §13.4a: C is an ancestor-or-self of
@@ -2592,6 +2960,11 @@ func (cp *computation) ancestorClosure(key string) map[string]bool {
 // below the baseline's core, and abort the run with E195 — for work that is
 // already public and cannot be unshipped.
 func (cp *computation) cancelledFor(commitKey, pkg string) bool {
+	if len(cp.cancels) == 0 {
+		// The common case, asked once per incidence and once per propagation
+		// target: no cancel, so no containment question worth asking.
+		return false
+	}
 	if cp.containedInBaseline(pkg, commitKey) {
 		return false
 	}
@@ -2599,7 +2972,7 @@ func (cp *computation) cancelledFor(commitKey, pkg string) bool {
 		if !c.scope[pkg] {
 			continue
 		}
-		if c.closure[commitKey] {
+		if c.closure(commitKey) {
 			c.discarded = true
 			return true
 		}
@@ -2672,7 +3045,9 @@ func (cp *computation) resolveHolds() {
 			if !ok {
 				continue
 			}
-			for _, name := range sortedKeys(rec.scope[i]) {
+			// Map order is enough: names is sorted once below, and each
+			// package's directives stay in the order the commits are visited.
+			for name := range rec.scope[i] {
 				if !cp.inWindow(name, rec.key) {
 					continue // already released: no longer in force
 				}
@@ -2802,7 +3177,10 @@ func (cp *computation) directBumps() {
 			if bump == ccme.BumpNone {
 				continue
 			}
-			for _, name := range sortedKeys(rec.scope[i]) {
+			// Map order is enough, and a sort here is paid per unit: every
+			// effect below is on the one package it names, in the order the
+			// commits and units are visited, and cancelledFor only sets a flag.
+			for name := range rec.scope[i] {
 				if !cp.inWindow(name, rec.key) {
 					continue
 				}
@@ -2985,7 +3363,21 @@ func (cp *computation) computeVersion(rel *Release) {
 		// Graduation and the ordinary stable release are the same
 		// computation: applyBump over the stable baseline, no suffix (§11.5).
 		next := cp.raisedToFloor(rel, rel.Current.Bumped(rel.Bump))
-		if rel.BaselineChannel != ccme.ChannelStable && versionLess(next, rel.Baseline.Core()) {
+		graduating := rel.BaselineChannel != ccme.ChannelStable
+		// The channel-entry patch, on the way out (§11.5). A train entered by
+		// that patch has no bump in its window, so the computation above
+		// returns the stable baseline itself, below the core the train was
+		// published under: 2.0.0 for a train at 2.0.1-beta.0. The same one
+		// patch that let it in lets it out, at the core it carried. Anything
+		// the patch does not explain still fails below.
+		if graduating && rel.Bump == ccme.BumpNone && versionLess(next, rel.Baseline.Core()) {
+			patched := cp.raisedToFloor(rel, rel.Current.Bumped(ccme.BumpPatch))
+			cp.pkgWarn(rel, CodeChannelEntryPatch, "",
+				fmt.Sprintf("channel-entry patch applied: graduating to %s would go backwards from the baseline %s, so %s is released instead",
+					next.String(), rel.Baseline.String(), patched.String()))
+			next = patched
+		}
+		if graduating && versionLess(next, rel.Baseline.Core()) {
 			// Reachable from hand-edited tags, and from a train an exact
 			// Release-As raised above what the window computes (§11.5): the
 			// pin's effect lives in the baseline tag, not in the window, so
@@ -3332,7 +3724,11 @@ func (cp *computation) versionForConsumerAt(provider, consumer string, stable bo
 //
 // The formats are compiled once, when the filter is made, rather than once per
 // tag each listing holds.
-type AliasFilter struct{ matchers []gitx.AliasMatcher }
+//
+// The formats are indexed by the literal text they open with
+// (gitx.AliasIndex), so an unparsed tag is tried against the aliases that
+// could have written it rather than against every package's.
+type AliasFilter struct{ aliases gitx.AliasIndex }
 
 // NewAliasFilter compiles the alias formats of every package in the workspace.
 // The zero AliasFilter matches nothing, which is what a workspace declaring no
@@ -3347,7 +3743,7 @@ func NewAliasFilter(pkgs []*model.Package) AliasFilter {
 			matchers = append(matchers, gitx.AliasFormat(a.Format).Matcher(p.Name))
 		}
 	}
-	return AliasFilter{matchers: matchers}
+	return AliasFilter{aliases: gitx.NewAliasIndex(matchers)}
 }
 
 // Without drops the workspace's alias tags from one package's listing.
@@ -3369,12 +3765,12 @@ func NewAliasFilter(pkgs []*model.Package) AliasFilter {
 // Every reader of a baseline goes through this, which is what stops the two
 // answers drifting: the planner, and the compute command's manifest baselines.
 func (f AliasFilter) Without(tags gitx.Tags, pkg string, log zerolog.Logger) gitx.Tags {
-	if len(f.matchers) == 0 {
+	if f.aliases.Len() == 0 {
 		return tags
 	}
 	kept := tags[:0:0]
 	for _, t := range tags {
-		if t.Parsed || !f.matches(t.Name) {
+		if t.Parsed || !f.aliases.IsMatch(t.Name) {
 			kept = append(kept, t)
 			continue
 		}
@@ -3382,17 +3778,6 @@ func (f AliasFilter) Without(tags gitx.Tags, pkg string, log zerolog.Logger) git
 			Msg("tag is one of the workspace's moving aliases, not a release")
 	}
 	return kept
-}
-
-// matches reports whether any package's alias format could have written this
-// name.
-func (f AliasFilter) matches(tag string) bool {
-	for _, m := range f.matchers {
-		if m.IsMatch(tag) {
-			return true
-		}
-	}
-	return false
 }
 
 // withoutIgnoredTags drops the masked tag names from a package's tag listing

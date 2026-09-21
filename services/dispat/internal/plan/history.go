@@ -3,6 +3,7 @@ package plan
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -320,6 +321,17 @@ type windowIndex struct {
 	canonical    map[string]historyCommit
 	internedKeys map[string]string
 	lists        [][]string
+	// unions holds, per cache key, a window already read as part of its
+	// repository's single union walk; see readRepositoryUnions.
+	unions map[string]unionWindow
+}
+
+// unionWindow is one boundary's window inside a union listing: the listing,
+// and the commits of it the boundary is an ancestor-or-self of, which are the
+// ones the window leaves out. The window is what remains, in listing order.
+type unionWindow struct {
+	all      []gitx.Commit
+	excluded *commitSet
 }
 
 func newWindowIndex() *windowIndex {
@@ -328,6 +340,7 @@ func newWindowIndex() *windowIndex {
 		windowSets:   make(map[string]map[string]bool),
 		canonical:    make(map[string]historyCommit),
 		internedKeys: make(map[string]string),
+		unions:       make(map[string]unionWindow),
 	}
 }
 
@@ -345,6 +358,14 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 		var err error
 		if history.Control && cp.controlIndexed {
 			raw = cp.controlCommitsAfter(rawBoundary)
+		} else if window, read := idx.unions[cacheKey]; read {
+			raw = make([]gitx.Commit, 0, len(window.all)-window.excluded.len())
+			for pos, commit := range window.all {
+				if !window.excluded.has(pos) {
+					raw = append(raw, commit)
+				}
+			}
+			delete(idx.unions, cacheKey)
 		} else {
 			// Stop reading one window after another once the caller has gone,
 			// for the same reason the tag fallback does.
@@ -397,6 +418,123 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 	return set, cacheKey, nil
 }
 
+// readRepositoryUnions reads, once, every repository whose windows start at
+// more than one boundary, and leaves each of those windows in idx.unions for
+// load to pick up. It is loadLegacyWindows' single read (plan.go) per
+// repository: the union in one walk, the windows recovered from it by the
+// marker pass. A repository it does not apply to is simply left to load: a Git
+// implementation without gitx.UnionHistoryx, a single boundary, a boundary
+// that is not a full commit id, or the control history where it is served
+// from its own index.
+func (cp *computation) readRepositoryUnions(idx *windowIndex) error {
+	type repositoryBoundaries struct {
+		history RepositoryHistory
+		raw     []string
+		seen    map[string]bool
+		pkg     string
+	}
+	var order []string
+	byRepository := make(map[string]*repositoryBoundaries)
+	for _, p := range cp.pkgs {
+		for _, repository := range cp.relevantRepositories(p.Name) {
+			folded := strings.ToLower(repository)
+			history := cp.histories[folded]
+			if history.Control && cp.controlIndexed {
+				continue
+			}
+			rb := byRepository[folded]
+			if rb == nil {
+				rb = &repositoryBoundaries{history: history, seen: make(map[string]bool), pkg: p.Name}
+				byRepository[folded] = rb
+				order = append(order, folded)
+			}
+			for _, boundary := range []string{cp.stableBoundaries[p.Name][folded], cp.publishedBoundaries[p.Name][folded]} {
+				_, raw := splitHistoryKey(boundary)
+				if !rb.seen[raw] {
+					rb.seen[raw] = true
+					rb.raw = append(rb.raw, raw)
+				}
+			}
+		}
+	}
+	for _, folded := range order {
+		rb := byRepository[folded]
+		union, ok := rb.history.Git.(gitx.UnionHistoryx)
+		if !ok || len(rb.raw) < 2 || !allCommitIDs(rb.raw) {
+			continue
+		}
+		if err := cp.ctx.Err(); err != nil {
+			return fmt.Errorf("plan: %s history for %s: %w", rb.history.Name, rb.pkg, err)
+		}
+		all, err := union.CommitsSinceAny(cp.ctx, rb.raw)
+		if errors.Is(err, gitx.ErrBoundaryNotBehindHead) {
+			continue // a pin off this head: no window is recoverable by ancestry
+		}
+		if err != nil {
+			return fmt.Errorf("plan: %s history for %s: %w", rb.history.Name, rb.pkg, err)
+		}
+		at := make(map[string]int32, len(all))
+		for i, c := range all {
+			at[c.SHA] = int32(i)
+		}
+		index := newAncestryIndex(len(all), func(pos int) []int32 {
+			var parents []int32
+			for _, p := range all[pos].Parents {
+				if i, ok := at[p]; ok {
+					parents = append(parents, i)
+				}
+			}
+			return parents
+		})
+		if index == nil {
+			continue
+		}
+		var markers []int32
+		for _, raw := range rb.raw {
+			if pos, ok := at[raw]; ok {
+				markers = append(markers, pos)
+			}
+		}
+		index.mark(markers)
+		windows := make(map[string]unionWindow, len(rb.raw))
+		for _, raw := range rb.raw {
+			window := unionWindow{all: all}
+			if pos, ok := at[raw]; ok {
+				if window.excluded = index.ancestors(pos); window.excluded == nil {
+					windows = nil // past the index's budget: read them one by one
+					break
+				}
+			}
+			// A boundary the union does not hold is behind every other one, or
+			// is no boundary at all: its window is the whole union.
+			windows[historyKey(rb.history.Name, raw)] = window
+		}
+		for key, window := range windows {
+			idx.unions[key] = window
+		}
+	}
+	return nil
+}
+
+// allCommitIDs reports whether every boundary is a full object id or empty,
+// the empty one being the repository read from its first commit.
+func allCommitIDs(boundaries []string) bool {
+	for _, b := range boundaries {
+		if b == "" {
+			continue
+		}
+		if len(b) != 40 && len(b) != 64 {
+			return false
+		}
+		for i := 0; i < len(b); i++ {
+			if c := b[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // controlIntentLabel names the control history's own window in the trace. It
 // is not a package, and it is deliberately left out of the per-package window
 // counts the scale tests read.
@@ -412,6 +550,8 @@ func (cp *computation) loadRepositoryWindows() error {
 	snapshots, ambiguous := cp.controlSnapshots, cp.controlAmbiguous
 
 	idx := newWindowIndex()
+	// Every boundary first, so that a repository read through more than one of
+	// them is read once (readRepositoryUnions), then the windows themselves.
 	for _, p := range cp.pkgs {
 		stable, latest := cp.stableTags[p.Name], cp.latestTags[p.Name]
 		cp.stableBoundaries[p.Name] = make(map[string]string)
@@ -427,6 +567,15 @@ func (cp *computation) loadRepositoryWindows() error {
 				return err
 			}
 			cp.publishedBoundaries[p.Name][strings.ToLower(repository)] = published
+		}
+	}
+	if err := cp.readRepositoryUnions(idx); err != nil {
+		return err
+	}
+	for _, p := range cp.pkgs {
+		for _, repository := range cp.relevantRepositories(p.Name) {
+			boundary := cp.stableBoundaries[p.Name][strings.ToLower(repository)]
+			published := cp.publishedBoundaries[p.Name][strings.ToLower(repository)]
 
 			history := cp.histories[strings.ToLower(repository)]
 			stableWindow, stableKey, err := cp.load(idx, history, boundary, p.Name)
@@ -458,6 +607,7 @@ func (cp *computation) loadRepositoryWindows() error {
 		}
 	}
 	cp.buildRepositoryUnion(idx.lists, idx.canonical)
+	cp.indexRepositoryAncestry()
 	cp.log.Debug().Int("packages", len(cp.pkgs)).Int("windows", len(idx.commitLists)).
 		Int("commits", len(cp.commits)).Msg("plan: repository tags and windows loaded")
 	// Every retained commit, parent and control-state scalar has been cloned or
@@ -1186,8 +1336,16 @@ func (cp *computation) resolveApplicableControlBoundaries() error {
 
 // releaseRepositoryInputs closes the history inputs used by each package
 // over dependency propagation and shared-version groups. Dependency closure
-// is already available in repositoryReach. Each repository then traverses
-// the package graph once, which avoids a separate graph search per release.
+// is already available in repositoryReach.
+//
+// An input flows from a provider to its dependents and between the members of
+// a version group in both directions, so dependency and group edges together
+// can form a cycle and one pass in dependency order does not reach the fixed
+// point. Each group is one node adjacent to its members, never a clique. The
+// strongly connected components of that graph are condensed, every member of
+// a component has the same closure, and the components are visited providers
+// first with one bitset union per edge: O((P+E+V)·ceil(Q/64)), where a walk of
+// the graph per repository is O(Q·(P+E+V)) (CCME §13.11).
 func (cp *computation) releaseRepositoryInputs() ([]string, map[string][]uint64) {
 	if len(cp.histories) == 0 {
 		return nil, nil
@@ -1202,91 +1360,69 @@ func (cp *computation) releaseRepositoryInputs() ([]string, map[string][]uint64)
 		index[strings.ToLower(repository)] = i
 	}
 	wordCount := (len(repositories) + 63) / 64
-	sets := make(map[string][]uint64, len(cp.order))
-	groups := make(map[string][]string)
-	groupSets := make(map[string][]uint64)
-	dependents := make(map[string][]string, len(cp.order))
-	for _, name := range cp.order {
+
+	// Nodes are the packages in plan order, then the groups as first met.
+	node := make(map[string]int, len(cp.order))
+	for i, name := range cp.order {
+		node[name] = i
+	}
+	groupNode := make(map[string]int)
+	out := make([][]int, len(cp.order)) // the nodes an input flows on to
+	initial := make([][]uint64, len(cp.order))
+	for i, name := range cp.order {
 		bits := make([]uint64, wordCount)
 		for _, repository := range cp.repositoryReach[name] {
-			if i, ok := index[strings.ToLower(repository)]; ok {
-				bits[i/64] |= uint64(1) << uint(i%64)
+			if r, ok := index[strings.ToLower(repository)]; ok {
+				bits[r/64] |= uint64(1) << uint(r%64)
 			}
 		}
 		if cp.controlInputs[name] {
-			if i, ok := index[strings.ToLower(cp.controlRepo)]; ok {
-				bits[i/64] |= uint64(1) << uint(i%64)
+			if r, ok := index[strings.ToLower(cp.controlRepo)]; ok {
+				bits[r/64] |= uint64(1) << uint(r%64)
 			}
 		}
-		sets[name] = bits
+		initial[i] = bits
 		if pkg := cp.byName[name]; pkg != nil {
 			if group := pkg.VersionGroupIdentity(); group != "" {
-				groups[group] = append(groups[group], name)
-				if groupSets[group] == nil {
-					groupSets[group] = make([]uint64, wordCount)
+				g, met := groupNode[group]
+				if !met {
+					g = len(out)
+					groupNode[group] = g
+					out = append(out, nil)
+					initial = append(initial, make([]uint64, wordCount))
 				}
-				for i, word := range bits {
-					groupSets[group][i] |= word
-				}
+				out[i] = append(out[i], g)
+				out[g] = append(out[g], i)
 			}
 		}
 		seen := make(map[string]bool)
 		for _, provider := range cp.providers[name] {
-			if !seen[provider] {
-				dependents[provider] = append(dependents[provider], name)
+			if p, known := node[provider]; known && !seen[provider] {
+				out[p] = append(out[p], i)
 				seen[provider] = true
 			}
 		}
 	}
 
-	for group, members := range groups {
-		for _, name := range members {
-			for i, word := range groupSets[group] {
-				sets[name][i] |= word
+	component, emitted := stronglyConnected(out)
+	closure := make([][]uint64, len(emitted))
+	for c, members := range emitted {
+		closure[c] = make([]uint64, wordCount)
+		for _, n := range members {
+			for w, word := range initial[n] {
+				closure[c][w] |= word
 			}
 		}
 	}
-
-	// Dependency and group edges can alternate (a group member can introduce
-	// a provider input that changes a downstream group). Propagating one
-	// repository bit at a time reaches the exact fixed point in
-	// O(Q*(P+E+V)), where Q is repositories and V is shared-group membership,
-	// without repeatedly scanning whole bitsets as individual inputs arrive.
-	for repositoryIndex := range repositories {
-		word := repositoryIndex / 64
-		mask := uint64(1) << uint(repositoryIndex%64)
-		queue := make([]string, 0, len(cp.order))
-		seen := make(map[string]bool, len(cp.order))
-		seenGroups := make(map[string]bool, len(groups))
-		for _, name := range cp.order {
-			if sets[name][word]&mask != 0 {
-				seen[name] = true
-				queue = append(queue, name)
-			}
-		}
-		for len(queue) > 0 {
-			name := queue[0]
-			queue = queue[1:]
-			sets[name][word] |= mask
-			for _, dependent := range dependents[name] {
-				if !seen[dependent] {
-					seen[dependent] = true
-					queue = append(queue, dependent)
-				}
-			}
-			pkg := cp.byName[name]
-			if pkg == nil || pkg.VersionGroupIdentity() == "" {
-				continue
-			}
-			group := pkg.VersionGroupIdentity()
-			if seenGroups[group] {
-				continue
-			}
-			seenGroups[group] = true
-			for _, member := range groups[group] {
-				if !seen[member] {
-					seen[member] = true
-					queue = append(queue, member)
+	// Tarjan emits a component after everything it flows on to, so the reverse
+	// order meets every provider before its dependents.
+	for c := len(emitted) - 1; c >= 0; c-- {
+		for _, n := range emitted[c] {
+			for _, to := range out[n] {
+				if d := component[to]; d != c {
+					for w, word := range closure[c] {
+						closure[d][w] |= word
+					}
 				}
 			}
 		}
@@ -1294,8 +1430,8 @@ func (cp *computation) releaseRepositoryInputs() ([]string, map[string][]uint64)
 
 	result := make(map[string][]uint64, len(cp.order))
 	interned := make(map[string][]uint64)
-	for _, name := range cp.order {
-		values := sets[name]
+	for i, name := range cp.order {
+		values := closure[component[i]]
 		key := repositoryWordsKey(values)
 		if shared, ok := interned[key]; ok {
 			values = shared
@@ -1305,6 +1441,71 @@ func (cp *computation) releaseRepositoryInputs() ([]string, map[string][]uint64)
 		result[name] = values
 	}
 	return repositories, result
+}
+
+// stronglyConnected is Tarjan's algorithm, iterative so that a long dependency
+// chain costs heap and not stack. It returns each node's component and the
+// components in the order they complete, which is reverse topological: a
+// component is emitted only after every component it has an edge into.
+func stronglyConnected(out [][]int) (component []int, emitted [][]int) {
+	const unvisited = -1
+	n := len(out)
+	component = make([]int, n)
+	indexOf, low := make([]int, n), make([]int, n)
+	onStack := make([]bool, n)
+	for i := range indexOf {
+		indexOf[i], component[i] = unvisited, unvisited
+	}
+	type frame struct{ node, edge int }
+	var stack []int
+	next := 0
+	for root := 0; root < n; root++ {
+		if indexOf[root] != unvisited {
+			continue
+		}
+		work := []frame{{node: root}}
+		indexOf[root], low[root] = next, next
+		next++
+		stack, onStack[root] = append(stack, root), true
+		for len(work) > 0 {
+			f := &work[len(work)-1]
+			if f.edge < len(out[f.node]) {
+				to := out[f.node][f.edge]
+				f.edge++
+				switch {
+				case indexOf[to] == unvisited:
+					indexOf[to], low[to] = next, next
+					next++
+					stack, onStack[to] = append(stack, to), true
+					work = append(work, frame{node: to})
+				case onStack[to]:
+					low[f.node] = min(low[f.node], indexOf[to])
+				}
+				continue
+			}
+			done := f.node
+			work = work[:len(work)-1]
+			if len(work) > 0 {
+				parent := work[len(work)-1].node
+				low[parent] = min(low[parent], low[done])
+			}
+			if low[done] != indexOf[done] {
+				continue
+			}
+			var members []int
+			for {
+				top := stack[len(stack)-1]
+				stack, onStack[top] = stack[:len(stack)-1], false
+				component[top] = len(emitted)
+				members = append(members, top)
+				if top == done {
+					break
+				}
+			}
+			emitted = append(emitted, members)
+		}
+	}
+	return component, emitted
 }
 
 func repositoryWordsKey(words []uint64) string {

@@ -73,9 +73,15 @@ func TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot(t *testing.T) {
 // an ancestry answer; commit order alone is not enough under merges and
 // rebases. A failed DAG read therefore aborts the plan instead of accepting a
 // correction on the weaker fallback.
+//
+// The target is a released commit on purpose. Ancestry between two commits of
+// the pending windows is read off the parent lists the window read already
+// carries, and asks git nothing; a commit behind the baseline is in no window,
+// so that question is the one still put to the repository DAG.
 func TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder(t *testing.T) {
 	r := finalPlanRepo(t)
 	target := r.Git("rev-parse", "HEAD")
+	r.Git("tag", "-a", "core@0.1.0", "-m", "the bootstrap, released")
 	r.CommitEmpty("fix(core): correct the bootstrap\n\nEdits: " + target)
 	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*rev-list --parents HEAD*"})
 
@@ -86,7 +92,7 @@ func TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder(t *testing.T) {
 	assert.Contains(t, combined, "ancestry query failed")
 	assert.NotContains(t, combined, "release plan ready")
 	assert.Equal(t, 1, fault.Matches(), "the repository DAG was requested once")
-	assert.Empty(t, r.TagList(), "an untrusted correction plan records nothing")
+	assert.Equal(t, []string{"core@0.1.0"}, r.TagList(), "an untrusted correction plan records nothing")
 }
 
 // TestFinalPlanFaultStopsRunSinceBeforeTheScript: run --since selects packages
