@@ -111,6 +111,14 @@ integration suite itself.
    whole thing. What these prove is *authority* rather than mere ordering: a hook before the point of no return may
    fail its package, one after it may only warn, and the same split decides where `revertOnFail` applies, how far a
    login failure reaches, and how script outputs accumulate across stages and hooks.
+57. **Distributed execution across worker nodes** (`execution_*_test.go`): the optional execution profile, where one
+    orchestrator owns the locks, the plan and the finalization while worker nodes execute the build and publish tasks
+    it authorizes. The first claim is the one everything else is measured against: with the `execution` key absent, or
+    with an empty worker list, a release writes the same tags and the same run it always did, reaches no mailbox and
+    needs no secret. The second is that the key is refused at load or not at all: it is a node-startup setting, so it
+    belongs to the root file alone, an imported or linked peer may state its own and it is never consulted, and every
+    rule it is held to (the role, the capacity, the node names, the credential-free mailbox addresses and the variable
+    naming the signing secret) is one diagnostic code and one key path before any lock, plan or command.
 
 ### Configuration
 
@@ -392,6 +400,7 @@ tests/integration/
   order_test.go             goal 7
   interrupt_test.go         goal 8
   hooks_test.go             goal 9
+  execution_config_test.go  goal 57 (the `execution` key: local release unchanged, and every refusal)
 
   configuration
   config_test.go            goal 10
@@ -631,6 +640,18 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksRunLevelHookFailureSemantics`               | A failure in a warn-only hook like `postAll` logs a warning and allows the sequence to finish, whereas a failure in a gating hook like `beforeAll` halts the run before release work starts. |
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
+
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`)
+
+| Test | Claim proven |
+|------|--------------|
+| `TestExecutionAbsentKeepsLocalReleaseUnchanged` | One repository released with no `execution` key, with an empty worker list, and with an orchestrator role and a capacity of its own writes the same tag and the same sequence of log lines in all three, leaves no coordination branch on the remote, and needs no signing secret. |
+| `TestExecutionAcceptsEveryMailboxForm` | A mailbox may be written as an https, ssh or file URL, as an absolute path, or in the scp-like form with or without a user, and a configuration stating this node's own name, mailbox, secret variable, waits and ceilings loads unchanged: the plan `dispat status` reports is the plan it always was and nothing is reached. |
+| `TestExecutionConfigRefusals` | Every rule the key is held to, through the binary: the role's vocabulary and its case, a capacity below one, a negative wait or ceiling, a node name that is not one, a worker that states workers, a link with no name, no mailbox or a name another link already used, a mailbox carrying credentials, a password, a query, a fragment, a leading dash, a transport helper, an unauthenticated or unknown scheme, an unparseable URL, no host or a relative path, and worker links with no signing secret. Each exits 1 naming the key path, carries E225, and tags nothing. |
+| `TestExecutionRefusesAnUnreadableNumber` | A ceiling written as text is refused by the decoder naming the key, rather than read as a zero that would silently become the default. |
+| `TestExecutionRefusalNeverPrintsACredential` | A mailbox address is refused because of what it carries, so the refusal never writes that credential into a CI log: a password in the scp form or in a URL, a token in a query or a fragment, and a password behind a leading dash are each redacted while the link is still named. |
+| `TestExecutionIsRefusedOutsideTheRootFile` | The key is a node-startup setting: stated on a space, on a package entry or in a package folder's own file it is an unknown key, so a checkout travelling to another machine cannot tell that machine what role it plays. |
+| `TestExecutionInAnImportedConfigIsValidatedNotConsulted` | An imported peer may carry its own `execution` object, because any peer may be another run's entry: a worker role stated there changes nothing about a run started from the control repository, while a malformed object still fails that file's own load with E225. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
 
