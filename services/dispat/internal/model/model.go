@@ -290,6 +290,18 @@ type Space struct {
 	// under, resolved through the same override ladder as TagFormat. They are
 	// only ever written: nothing reads a tag back through them.
 	AliasTags []AliasTag
+	// BuildOutputs are the paths a successful build of this package produces
+	// and its consumers, or its own publish stage, need, resolved through the
+	// same ladder as AliasTags and replaced whole by the nearest level that
+	// stated any. They are literal paths relative to the package folder,
+	// slash-separated, and usually ignored by Git, which is the whole reason
+	// they have to be declared rather than discovered. Empty means the
+	// package's build leaves nothing anyone else has to see.
+	BuildOutputs []string
+	// BuildPlatforms are the node platforms allowed to run this package's
+	// build and publish, in Go's GOOS/GOARCH spelling. Empty means any node,
+	// so a workspace that never says otherwise places its work anywhere.
+	BuildPlatforms []string
 	// AutoVersion is the space's resolved native manifest-rewriting policy
 	// for the version stage; nil means the feature is off and manifest
 	// syncing stays the VersionScript's job alone.

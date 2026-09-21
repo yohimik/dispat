@@ -39,11 +39,14 @@ type (
 	ExecutionTransferConfig = public.ExecutionTransferConfig
 )
 
-// DiagnosticExecution reports an `execution` object no distributed run could
-// be started under: an unknown role, a capacity that is not a capacity, a
-// worker link that names no node or no reachable mailbox, or a missing
-// signing secret. It is a load-time refusal, so it fires before any lock,
-// plan or command.
+// DiagnosticExecution reports a configuration no distributed run could be
+// executed under. That is an `execution` object with an unknown role, a
+// capacity that is not a capacity, a worker link that names no node or no
+// reachable mailbox, or a missing signing secret; and it is a `buildOutputs`
+// or `buildPlatforms` list that does not describe a place a build product can
+// travel from, two packages that claimed one folder included. Every one of
+// them is refused as the configuration is read, so the code fires before any
+// lock, plan or command.
 const DiagnosticExecution = "E225"
 
 // executionNodeName is the whole vocabulary of a node name. It is the fleet

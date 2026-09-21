@@ -1014,6 +1014,9 @@ func validate(c *File, allowEmpty bool) error {
 	if err := validateAliasTags("aliasTags", c.AliasTags); err != nil {
 		return err
 	}
+	if err := validateBuildKeys("", c.BuildOutputs, c.BuildPlatforms); err != nil {
+		return err
+	}
 	if err := gitx.TagFormat(c.TagFormat).Validate(); err != nil {
 		return err
 	}
@@ -1474,6 +1477,9 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 		return s, err
 	}
 	if err := validateWebhookList(label+": webhooks", s.Webhooks); err != nil {
+		return s, err
+	}
+	if err := validateBuildKeys(label, s.BuildOutputs, s.BuildPlatforms); err != nil {
 		return s, err
 	}
 	if err := validateSrc(label, s.Src); err != nil {
@@ -2226,6 +2232,8 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		OnSkipScript:         scope.commands(sc.Flow.OnSkip),
 		TagFormat:            sc.TagFormat,
 		AliasTags:            resolvedAliases,
+		BuildOutputs:         sc.BuildOutputs,
+		BuildPlatforms:       sc.BuildPlatforms,
 		AutoVersion:          resolveAutoVersion(scope, sc.AutoVersion),
 	}, nil
 }

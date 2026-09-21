@@ -320,6 +320,17 @@ func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency, exclu
 			if s.ChannelSharing.IsIndependent() {
 				ev = ev.Str("channels", string(s.ChannelSharing))
 			}
+			// What the package's build is declared to produce and where it may
+			// run, named only when something declared them, so the line a
+			// workspace without them writes is the line it always wrote. It is
+			// the one place a reader can check what the ladder resolved to
+			// without starting a release.
+			if len(s.BuildOutputs) > 0 {
+				ev = ev.Strs("buildOutputs", s.BuildOutputs)
+			}
+			if len(s.BuildPlatforms) > 0 {
+				ev = ev.Strs("buildPlatforms", s.BuildPlatforms)
+			}
 		}
 		if len(p.Ignore) > 0 {
 			ev = ev.Int("ignoreLevels", len(p.Ignore))

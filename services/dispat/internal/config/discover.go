@@ -582,6 +582,9 @@ func (d *discovery) checkAll(spaceNames []string) error {
 	if err := checkSpaceDependencies(d.declared, d.owner); err != nil {
 		return err
 	}
+	if err := d.checkBuildOutputRoots(); err != nil {
+		return err
+	}
 	return checkAliasTagsAreWriteOnly(d.pkgs)
 }
 

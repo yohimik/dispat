@@ -390,6 +390,9 @@ func validatePackageLayer(label string, po PackageConfig) error {
 	if err := validateWebhookList(label+": webhooks", po.Webhooks); err != nil {
 		return err
 	}
+	if err := validateBuildKeys(label, po.BuildOutputs, po.BuildPlatforms); err != nil {
+		return err
+	}
 	return validateSrc(label, po.Src)
 }
 
@@ -454,6 +457,16 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	// an explicit empty list is how a level opts out entirely.
 	if po.Webhooks != nil {
 		sc.Webhooks = po.Webhooks
+	}
+	// The two build keys replace on those same terms, and for the same
+	// reason twice over: a package inside a space that declares `dist` may
+	// produce nothing at all, and a package built only on one platform must
+	// be able to narrow a list its space stated rather than add to it.
+	if po.BuildOutputs != nil {
+		sc.BuildOutputs = po.BuildOutputs
+	}
+	if po.BuildPlatforms != nil {
+		sc.BuildPlatforms = po.BuildPlatforms
 	}
 	if po.Versioning != "" {
 		sc.Versioning = po.Versioning
@@ -523,6 +536,8 @@ func rootDefaults(c *File) SpaceConfig {
 		TagFormat:             c.TagFormat,
 		AliasTags:             c.AliasTags,
 		Webhooks:              c.Webhooks,
+		BuildOutputs:          c.BuildOutputs,
+		BuildPlatforms:        c.BuildPlatforms,
 		Versioning:            c.Versioning,
 		AutoVersion:           c.AutoVersion,
 		Changelog:             c.Changelog,
@@ -544,6 +559,8 @@ func spaceAsOverride(sc SpaceConfig) PackageConfig {
 		TagFormat:             sc.TagFormat,
 		AliasTags:             sc.AliasTags,
 		Webhooks:              sc.Webhooks,
+		BuildOutputs:          sc.BuildOutputs,
+		BuildPlatforms:        sc.BuildPlatforms,
 		Versioning:            sc.Versioning,
 		VersionGroup:          sc.VersionGroup,
 		Scripts:               sc.Scripts,
@@ -587,6 +604,8 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		TagFormat:             f.TagFormat,
 		AliasTags:             f.AliasTags,
 		Webhooks:              f.Webhooks,
+		BuildOutputs:          f.BuildOutputs,
+		BuildPlatforms:        f.BuildPlatforms,
 		Versioning:            f.Versioning,
 		VersionGroup:          f.VersionGroup,
 		Scripts:               f.Scripts,
