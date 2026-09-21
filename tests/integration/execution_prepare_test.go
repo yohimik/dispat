@@ -538,24 +538,149 @@ func TestExecutionAPreparedBuildIsToldItIsNotReleasing(t *testing.T) {
 	stopAll(t, workers)
 }
 
-// stageRelationNoneBuild is the infrastructure build of the `none` fixture: it
-// refuses to finish until the application build has started, which is what
-// turns "these two overlapped" into something the run either did or could not
-// finish at all.
-const stageRelationNoneBuild = executionRecordingScript + ` &&
-` + stageRelationGateWaitEnv + ` &&
+// pinPreparedPackage gives one package a placement of its own, through the
+// root file's `packages` override layer.
+func pinPreparedPackage(name string, placement *models.RunOnly) func(*harness.Repo, *models.File) {
+	return func(_ *harness.Repo, cfg *models.File) {
+		if cfg.Packages == nil {
+			cfg.Packages = map[string]models.PackageConfig{}
+		}
+		entry := cfg.Packages[name]
+		entry.RunOnly = placement
+		cfg.Packages[name] = entry
+	}
+}
+
+// TestExecutionPreparedProviderObeysItsOwnPlacement: a preparation is that
+// package's build frame, so it is placed by that package's own `runOnly`. A
+// provider pinned to the machine the release was started on is built there
+// although this run releases nothing of it, and its outputs still reach the
+// consumer on a node over a relay branch.
+func TestExecutionPreparedProviderObeysItsOwnPlacement(t *testing.T) {
+	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
+		// Which branch the consumers were handed is a debug decision rather
+		// than user-visible progress, and it is part of the claim.
+		cfg.LogLevel = "debug"
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyBoth)
+	}, pinPreparedPackage("assets", placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator)))
+	rig.commitTo("the page and the manual use the new asset", "docs", "ui")
+	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2)
+
+	res := rig.release()
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	placed := rig.nodesByPackage()
+	assert.Equal(t, executionOrchestratorLabel, placed["assets"],
+		"the pinned preparation ran here: %v", rig.runs())
+	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(res))
+	for _, name := range []string{"ui", "docs"} {
+		assert.Contains(t, []string{executionNode, executionSecondNode}, placed[name],
+			"%s was still delegated: %v", name, rig.runs())
+	}
+	produced := executionProbeValues(rig, "inputs")
+	bundle := produced["assets"]
+	require.NotEmpty(t, bundle)
+	assert.Contains(t, bundle, executionOrchestratorLabel, "the bytes say where they were built")
+	assert.Equal(t, bundle, produced["ui"], "and the node read exactly them")
+	assert.Contains(t, executionRelayedPackages(res), "assets",
+		"which reached it over a relay branch\nstdout:\n%s", res.Stdout)
+	assert.False(t, rig.repo.IsTagged("assets@1.1.0"), "the provider still released nothing")
+	stopAll(t, workers)
+}
+
+// TestExecutionPreparedProviderObeysItsOwnPlatforms: a preparation is held to
+// the provider's own `buildPlatforms`, because a package that may only be
+// built on one platform may only be built there whoever asked for it. Nothing
+// in the pool satisfies them here, so the consumers fail at their build stage
+// with the integrity code rather than reading bytes built on the wrong machine.
+func TestExecutionPreparedProviderObeysItsOwnPlatforms(t *testing.T) {
+	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
+		cfg.Packages = map[string]models.PackageConfig{
+			"assets": {BuildPlatforms: []string{"plan9/mips"}},
+		}
+	})
+	rig.commitTo("the page and the manual use the new asset", "docs", "ui")
+	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2)
+
+	res := rig.release()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, 0, executionBuildCount(rig, "assets"),
+		"a provider nothing could build was never built: %v", rig.runs())
+	for _, name := range []string{"ui", "docs"} {
+		assert.Truef(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, name),
+			"%s failed with the integrity code\nstdout:\n%s", name, res.Stdout)
+	}
+	assert.True(t, rig.repo.IsTagged("solo@"+executionPrepareBaseline))
+	assert.False(t, rig.repo.IsTagged("ui@1.1.0"))
+	reports := executionPreparedReports(res)
+	require.Len(t, reports, 1)
+	assert.Equal(t, "failed", reports[0].Str("computation"))
+	assert.Empty(t, reports[0].Str("worker"), "nothing was placed anywhere to name")
+	stopAll(t, workers)
+}
+
+// TestExecutionAPreparationThatFailedHereIsTheConsumersFailure: a preparation
+// placed on the machine the release was started on fails its consumers exactly
+// as a delegated one does, with the part of the frame that failed named in the
+// orchestrator's own words.
+func TestExecutionAPreparationThatFailedHereIsTheConsumersFailure(t *testing.T) {
+	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
+		cfg.Scripts["build"] = models.Script{executionPrepareFailingBuild}
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyBoth)
+	}, pinPreparedPackage("assets", placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator)))
+	rig.commitTo("the page, the manual and the standalone all changed", "docs", "solo", "ui")
+	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2)
+
+	res := rig.release()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, executionOrchestratorLabel, rig.nodesByPackage()["assets"],
+		"the preparation that failed ran here: %v", rig.runs())
+	for _, name := range []string{"ui", "docs"} {
+		assert.Truef(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, name),
+			"%s failed with the integrity code\nstdout:\n%s", name, res.Stdout)
+	}
+	assert.True(t, rig.repo.IsTagged("solo@1.1.0"),
+		"a package that reads nothing of it released: %v", rig.repo.TagList())
+	reports := executionPreparedReports(res)
+	require.Len(t, reports, 1)
+	assert.Equal(t, "failed", reports[0].Str("computation"))
+	stopAll(t, workers)
+}
+
+// The two gate files of the `none` fixture's rendezvous: each build opens its
+// own and then refuses to go on until the other's is open. The consumer's is
+// the file the scenario names, and the provider's sits beside it, so that one
+// variable carries both between three processes.
+const (
+	stageRelationConsumerGate = `"$DISPAT_IT_EXECUTION_GATE"`
+	stageRelationProviderGate = `"$DISPAT_IT_EXECUTION_GATE.infra"`
+)
+
+// stageRelationRendezvous is one half of a meeting between two builds: it
+// opens this build's gate and waits for the other's, and it fails the build
+// rather than carrying on when the other never arrives.
+//
+// That is what makes the overlap a fact about the run rather than a fact about
+// the machine's load. Two builds that were never in flight together cannot
+// both pass this, so the release either completes, which proves they were, or
+// fails, which the scenario reads as the ordering it was asserting against.
+func stageRelationRendezvous(own, other string) string {
+	return `touch ` + own + ` && { i=0; while [ ! -f ` + other + ` ]; do ` +
+		`[ $i -lt 600 ] || exit 7; sleep 0.05; i=$((i+1)); done; }`
+}
+
+// stageRelationNoneBuild is the infrastructure build of the `none` fixture.
+var stageRelationNoneBuild = executionRecordingScript + " &&\n" +
+	stageRelationRendezvous(stageRelationProviderGate, stageRelationConsumerGate) + ` &&
 mkdir -p dist && printf 'infra %s\n' "$DISPAT_NEW_VERSION" > dist/plan.tf`
 
-// stageRelationGateWaitEnv blocks until the gate file exists, bounded so that
-// a missing overlap fails an assertion rather than hanging the suite.
-const stageRelationGateWaitEnv = `i=0; while [ ! -f "$DISPAT_IT_EXECUTION_GATE" ] && [ $i -lt 600 ]; ` +
-	`do sleep 0.05; i=$((i+1)); done`
-
-// stageRelationNoneConsumerBuild is the application build: it opens the gate
-// and records whether the provider's declared output folder was in the
-// checkout it was given.
-const stageRelationNoneConsumerBuild = executionRecordingScript + ` &&
-touch "$DISPAT_IT_EXECUTION_GATE" &&
+// stageRelationNoneConsumerBuild is the application build: it meets the
+// provider's build and records whether the provider's declared output folder
+// was in the checkout it was given.
+var stageRelationNoneConsumerBuild = executionRecordingScript + " &&\n" +
+	stageRelationRendezvous(stageRelationConsumerGate, stageRelationProviderGate) + ` &&
 { [ -d ../../infra/infra/dist ] && state=present || state=absent; } &&
 printf '%s %s %s\n' probe-inputs "$DISPAT_PACKAGE" "$state" >> "$DISPAT_IT_EXECUTION_LOG"`
 
@@ -625,12 +750,12 @@ func TestStageRelationNoneCarriesNoBuildOutputs(t *testing.T) {
 	placed := rig.nodesByPackage()
 	assert.Contains(t, []string{executionNode, executionSecondNode}, placed["front"],
 		"the consumer built on a node: %v", rig.runs())
+	// The rendezvous is the evidence, and it is the run's own: neither build
+	// could get past it until the other had started, so a release that
+	// completed at all is a release whose two builds were in flight together.
+	// A relation that held the consumer back would have failed it at the gate
+	// instead, which is what the exit code above reads.
 	timeline := rig.repo.Timeline("timeline.log")
-	// The gate is the evidence: the provider's build could not finish until
-	// the consumer's had started, so a run that held the consumer back would
-	// have timed out rather than produced this timeline.
-	harness.AssertOverlaps(t, harness.Find(t, timeline, "infra-build"),
-		harness.Find(t, timeline, "front-build"))
 	assert.Equal(t, "absent", executionProbeValues(rig, "inputs")["front"],
 		"the consumer's checkout never held the provider's declared outputs")
 	harness.AssertSequential(t, harness.Find(t, timeline, "infra-publish"),
@@ -649,9 +774,11 @@ func TestStageRelationNoneCarriesNoBuildOutputs(t *testing.T) {
 func TestStageRelationNoneNeedsNoPreparation(t *testing.T) {
 	gate := filepath.Join(t.TempDir(), "front-build.gate")
 	rig := newStageRelationNoneWorkspace(t)
-	// The gate is opened before the run: nothing here waits for the
-	// infrastructure build, because this run has none to wait for.
+	// Both gates are opened before the run: the application's build has
+	// nobody to meet, because this run builds no provider at all, and that is
+	// the claim rather than a deadlock to be waited out.
 	require.NoError(t, os.WriteFile(gate, nil, 0o644))
+	require.NoError(t, os.WriteFile(gate+".infra", nil, 0o644))
 	rig.commitTo("only the application moved", "front")
 	assert.Equal(t, []string{"front"}, executionPlannedPackages(t, rig))
 	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2,
