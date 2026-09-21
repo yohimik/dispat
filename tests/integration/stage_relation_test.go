@@ -256,6 +256,9 @@ func TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild(t *testing.T) 
 		{Consumer: "ui", Provider: "deploy"},
 		{Consumer: "alt", Provider: "core"},
 		{Consumer: "side", Provider: "core"},
+		// The second route into `alt`: what that package reaches is answered
+		// once and remembered, however many routes arrive at it.
+		{Consumer: "side", Provider: "alt"},
 	}
 	r.WriteConfigModel(cfg)
 	for _, name := range []string{"core", "ui", "alt", "side", "app"} {
