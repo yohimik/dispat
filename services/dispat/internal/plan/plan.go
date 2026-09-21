@@ -2627,19 +2627,19 @@ func (cp *computation) markedAncestor(a, b string) (yes, known bool) {
 // ancestry among its commits be read off them.
 func (cp *computation) parentsAreAncestry(repository string) bool {
 	folded := strings.ToLower(repository)
-	if trusted, ok := cp.ancTrusted[folded]; ok {
-		return trusted
+	if isTrusted, ok := cp.ancTrusted[folded]; ok {
+		return isTrusted
 	}
 	git := cp.git
 	if len(cp.histories) > 0 {
 		git = cp.histories[folded].Git
 	}
-	_, trusted := git.(gitx.UnionHistoryx)
+	_, isTrusted := git.(gitx.UnionHistoryx)
 	if cp.ancTrusted == nil {
 		cp.ancTrusted = make(map[string]bool)
 	}
-	cp.ancTrusted[folded] = trusted
-	return trusted
+	cp.ancTrusted[folded] = isTrusted
+	return isTrusted
 }
 
 // newUnionAncestry indexes the ranked union. A commit of a repository whose
@@ -2696,11 +2696,11 @@ func (cp *computation) indexAncestry() {
 // does not hold stays unknown here, because a fleet's boundaries are pins and
 // tuples as well as tags, and only a tag is promised to be behind HEAD.
 func (cp *computation) indexRepositoryAncestry() {
-	trusted := false
+	isTrusted := false
 	for _, history := range cp.histories {
-		trusted = trusted || cp.parentsAreAncestry(history.Name)
+		isTrusted = isTrusted || cp.parentsAreAncestry(history.Name)
 	}
-	if !trusted {
+	if !isTrusted {
 		return
 	}
 	if cp.anc = cp.newUnionAncestry(); cp.anc == nil {
@@ -2924,30 +2924,35 @@ func (cp *computation) ancestorClosure(key string) func(commitKey string) bool {
 	if closure, ok := cp.closures[key]; ok {
 		return closure
 	}
-	var closure func(string) bool
-	// One history only: a control repository's barrier also reaches the source
-	// commits its snapshot observed, which no ancestor set of its own says.
-	if rec := cp.byKey[key]; rec != nil && len(cp.histories) == 0 && cp.anc != nil &&
-		cp.parentsAreAncestry(rec.repository) && cp.anc.ancestors(int32(rec.rank)) != nil {
-		set := cp.anc.ancestors(int32(rec.rank))
-		closure = func(commitKey string) bool {
-			c := cp.byKey[commitKey]
-			return c != nil && set.has(c.rank)
-		}
-	} else {
-		keys := make(map[string]bool)
-		for _, rec := range cp.commits {
-			if cp.ancestorOrSelf(rec.key, key) {
-				keys[rec.key] = true
-			}
-		}
-		closure = func(commitKey string) bool { return keys[commitKey] }
-	}
+	closure := cp.newAncestorClosure(key)
 	if cp.closures == nil {
 		cp.closures = make(map[string]func(string) bool)
 	}
 	cp.closures[key] = closure
 	return closure
+}
+
+// newAncestorClosure computes one barrier's closure, from the marker pass
+// where it answers and a commit at a time where it does not.
+func (cp *computation) newAncestorClosure(key string) func(commitKey string) bool {
+	// One history only: a control repository's barrier also reaches the source
+	// commits its snapshot observed, which no ancestor set of its own says.
+	if rec := cp.byKey[key]; rec != nil && len(cp.histories) == 0 && cp.anc != nil &&
+		cp.parentsAreAncestry(rec.repository) {
+		if set := cp.anc.ancestors(int32(rec.rank)); set != nil {
+			return func(commitKey string) bool {
+				c := cp.byKey[commitKey]
+				return c != nil && set.has(c.rank)
+			}
+		}
+	}
+	keys := make(map[string]bool)
+	for _, rec := range cp.commits {
+		if cp.ancestorOrSelf(rec.key, key) {
+			keys[rec.key] = true
+		}
+	}
+	return func(commitKey string) bool { return keys[commitKey] }
 }
 
 // cancelledFor is cancelledFor(C, X) from §13.4a: C is an ancestor-or-self of
@@ -3363,21 +3368,21 @@ func (cp *computation) computeVersion(rel *Release) {
 		// Graduation and the ordinary stable release are the same
 		// computation: applyBump over the stable baseline, no suffix (§11.5).
 		next := cp.raisedToFloor(rel, rel.Current.Bumped(rel.Bump))
-		graduating := rel.BaselineChannel != ccme.ChannelStable
+		isGraduating := rel.BaselineChannel != ccme.ChannelStable
 		// The channel-entry patch, on the way out (§11.5). A train entered by
 		// that patch has no bump in its window, so the computation above
 		// returns the stable baseline itself, below the core the train was
 		// published under: 2.0.0 for a train at 2.0.1-beta.0. The same one
 		// patch that let it in lets it out, at the core it carried. Anything
 		// the patch does not explain still fails below.
-		if graduating && rel.Bump == ccme.BumpNone && versionLess(next, rel.Baseline.Core()) {
+		if isGraduating && rel.Bump == ccme.BumpNone && versionLess(next, rel.Baseline.Core()) {
 			patched := cp.raisedToFloor(rel, rel.Current.Bumped(ccme.BumpPatch))
 			cp.pkgWarn(rel, CodeChannelEntryPatch, "",
 				fmt.Sprintf("channel-entry patch applied: graduating to %s would go backwards from the baseline %s, so %s is released instead",
 					next.String(), rel.Baseline.String(), patched.String()))
 			next = patched
 		}
-		if graduating && versionLess(next, rel.Baseline.Core()) {
+		if isGraduating && versionLess(next, rel.Baseline.Core()) {
 			// Reachable from hand-edited tags, and from a train an exact
 			// Release-As raised above what the window computes (§11.5): the
 			// pin's effect lives in the baseline tag, not in the window, so

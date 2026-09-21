@@ -460,7 +460,7 @@ func (cp *computation) readRepositoryUnions(idx *windowIndex) error {
 	for _, folded := range order {
 		rb := byRepository[folded]
 		union, ok := rb.history.Git.(gitx.UnionHistoryx)
-		if !ok || len(rb.raw) < 2 || !allCommitIDs(rb.raw) {
+		if !ok || len(rb.raw) < 2 || !areCommitIDs(rb.raw) {
 			continue
 		}
 		if err := cp.ctx.Err(); err != nil {
@@ -516,9 +516,9 @@ func (cp *computation) readRepositoryUnions(idx *windowIndex) error {
 	return nil
 }
 
-// allCommitIDs reports whether every boundary is a full object id or empty,
+// areCommitIDs reports whether every boundary is a full object id or empty,
 // the empty one being the repository read from its first commit.
-func allCommitIDs(boundaries []string) bool {
+func areCommitIDs(boundaries []string) bool {
 	for _, b := range boundaries {
 		if b == "" {
 			continue
