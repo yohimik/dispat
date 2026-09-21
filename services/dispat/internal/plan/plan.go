@@ -501,13 +501,18 @@ const (
 	CodePinMajorJump = "E157"
 	// CodeDuplicateVersionTag rejects two reachable tags that parse to the
 	// same version of one package but point at different commits (§12.1): the
-	// baseline selection is ambiguous, so no correct plan exists.
-	// Repository-scoped.
+	// baseline selection is ambiguous, so no correct plan exists. It also
+	// rejects the same version recorded at two commits across the two stores
+	// a write-capable run reads, its checkout and the remote it records to
+	// (§13.2). Repository-scoped.
 	CodeDuplicateVersionTag = "E191"
 	// CodeShallowRepository rejects a shallow or grafted repository (§16): an
 	// incomplete history hides tags and commits, and every window computed
-	// over it is wrong in ways nothing downstream can detect.
-	// Repository-scoped.
+	// over it is wrong in ways nothing downstream can detect. A checkout whose
+	// history is complete and whose release records are not is the same
+	// failure and the same code: a write-capable run whose remote records a
+	// release on a commit its head reaches, and which it does not hold, plans
+	// that version again (§13.2). Repository-scoped.
 	CodeShallowRepository = "E196"
 	// CodeDependencyCycle rejects a configured dependency graph with a cycle
 	// (§16): no publish order exists. Repository-scoped.

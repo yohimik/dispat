@@ -305,6 +305,16 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 		}
 	}
 
+	// The records of the store this run writes to, held against the ones it is
+	// about to plan from. It is under the locks and before the plan on
+	// purpose: the lock is what makes a single comparison sufficient, and a
+	// plan built from records that have moved on is wrong rather than late
+	// (CCME §13.2).
+	if err := a.compareReleaseRecords(ctx, fleet); err != nil {
+		a.logError(err).Msg("refusing to release")
+		return nil, err
+	}
+
 	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
 		return nil, err

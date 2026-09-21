@@ -440,9 +440,14 @@ func (c *LocalGitx) RemoteTagObject(ctx context.Context, remote, tag string) (st
 }
 
 // The porcelain status flags this package reads. Anything else git may print
-// is a successful update of some shape, and only the rejection has to be
-// recognised.
-const pushRejected = '!'
+// is a successful update of some shape. The coordination protocol only has to
+// recognise the rejection; a release record additionally tells a name that was
+// already there from one this push created (see records.go).
+const (
+	pushRejected = '!'
+	pushUpToDate = '='
+	pushForced   = '+'
+)
 
 // findPushStatus reads the flag of one ref out of `git push --porcelain`
 // output, and reports whether the ref was mentioned at all.

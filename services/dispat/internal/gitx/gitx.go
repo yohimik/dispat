@@ -1004,8 +1004,32 @@ func (m packageTagMatcher) read(entry tagInventoryEntry) Tag {
 // that is the real candidate overlap between custom formats. Empty-prefix
 // formats deliberately remain candidates for every tag.
 func parseTagsForPackages(out string, formats map[string]TagFormat) (map[string]Tags, error) {
-	result := make(map[string]Tags, len(formats))
-	prefixes := &tagPrefixNode[packageTagMatcher]{}
+	index := newPackageTagIndex(formats)
+	for line := range strings.Lines(out) {
+		entry, err := parseTagInventoryLine(line)
+		if err != nil {
+			return nil, err
+		}
+		index.add(entry)
+	}
+	return index.tags, nil
+}
+
+// packageTagIndex dispatches a tag inventory to the packages whose format
+// could have written each name. It is shared by the local listing above and
+// the remote one (see records.go), so a record is recognised by the same rule
+// wherever it is read, and it consumes one entry at a time so neither reader
+// has to hold a parsed copy of a large inventory.
+type packageTagIndex struct {
+	prefixes *tagPrefixNode[packageTagMatcher]
+	tags     map[string]Tags
+}
+
+func newPackageTagIndex(formats map[string]TagFormat) *packageTagIndex {
+	index := &packageTagIndex{
+		prefixes: &tagPrefixNode[packageTagMatcher]{},
+		tags:     make(map[string]Tags, len(formats)),
+	}
 	templates := make(map[TagFormat]*tagTemplate)
 	names := make([]string, 0, len(formats))
 	for name := range formats {
@@ -1013,7 +1037,7 @@ func parseTagsForPackages(out string, formats map[string]TagFormat) (map[string]
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		result[name] = nil
+		index.tags[name] = nil
 		format := formats[name].WithDefault()
 		tpl, compiled := templates[format]
 		if !compiled {
@@ -1029,37 +1053,33 @@ func parseTagsForPackages(out string, formats map[string]TagFormat) (map[string]
 		}
 		matcher, ok := packageTagMatcherFromTemplate(name, tpl)
 		if ok {
-			prefixes.add(matcher.prefix, matcher)
+			index.prefixes.add(matcher.prefix, matcher)
 		}
 	}
+	return index
+}
 
-	for line := range strings.Lines(out) {
-		entry, err := parseTagInventoryLine(line)
-		if err != nil {
-			return nil, err
-		}
-		if entry.name == "" || entry.name == LockTagName || strings.HasPrefix(entry.name, LockAttemptTagPrefix) {
-			continue
-		}
-		detached := false
-		node := prefixes
-		for depth := 0; node != nil; depth++ {
-			for _, matcher := range node.matchers {
-				if matcher.matches(entry.name) {
-					if !detached {
-						entry = entry.detach()
-						detached = true
-					}
-					result[matcher.packageName] = append(result[matcher.packageName], matcher.read(entry))
-				}
-			}
-			if depth == len(entry.name) {
-				break
-			}
-			node = node.child(entry.name[depth])
-		}
+func (x *packageTagIndex) add(entry tagInventoryEntry) {
+	if entry.name == "" || entry.name == LockTagName || strings.HasPrefix(entry.name, LockAttemptTagPrefix) {
+		return
 	}
-	return result, nil
+	detached := false
+	node := x.prefixes
+	for depth := 0; node != nil; depth++ {
+		for _, matcher := range node.matchers {
+			if matcher.matches(entry.name) {
+				if !detached {
+					entry = entry.detach()
+					detached = true
+				}
+				x.tags[matcher.packageName] = append(x.tags[matcher.packageName], matcher.read(entry))
+			}
+		}
+		if depth == len(entry.name) {
+			break
+		}
+		node = node.child(entry.name[depth])
+	}
 }
 
 func parseTags(out, pkg string, format TagFormat) (Tags, error) {
