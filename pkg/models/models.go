@@ -667,16 +667,20 @@ type CommitConfig struct {
 	// Branch is the explicit push target used when the repository is detached.
 	// Empty uses the current branch and therefore cannot push a detached HEAD.
 	Branch string `json:"branch,omitempty"`
-	// Force writes tags that the repository or the remote already carries,
-	// instead of leaving them as they are. Default true.
+	// Force writes a tag this repository already carries at the release's own
+	// commit, instead of failing on it. Default true.
 	//
-	// It exists because a tag the remote already has is otherwise skipped
-	// forever, which is what a moving tag (see PackageConfig.AliasTags) can
-	// never live with, and because a tag appearing between the check and the
-	// push would otherwise reject the whole push at the very end of a release.
-	// The branch is never force pushed under either setting, and a release tag
-	// found sitting at a different commit is still left alone: force means
-	// "do not fail because the ref exists", not "overwrite whatever is there".
+	// It exists because a tag that is already there is otherwise an error at
+	// the very end of a release, which a moving tag (see
+	// PackageConfig.AliasTags) can never live with. It means "do not fail
+	// because the ref exists", never "overwrite whatever is there", and that
+	// holds on both sides of the push: the branch is never force pushed under
+	// either setting, a release tag found at a different commit is left alone
+	// and reported, and a release tag the remote holds is never replaced at
+	// all. A remote tag naming this release's commit is the retry of a write
+	// whose answer was lost and is reported as already recorded; one naming
+	// another commit is a published record, and the only refs a release ever
+	// replaces on a remote are the aliases declared `moving: true`.
 	Force *bool `json:"force,omitempty"` // default true
 	// Verify controls the upfront remote-access check (git ls-remote) run
 	// before any release work when Push is enabled. Default true; set false
