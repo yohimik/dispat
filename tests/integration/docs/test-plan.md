@@ -123,7 +123,11 @@ integration suite itself.
     are normally ignored by Git and therefore invisible to any machine that did not run the build, and
     `buildPlatforms` names the platforms allowed to run it. Both ride the ordinary configuration ladder and replace
     whole, and because package folders may nest, the one question no single level can answer, whether two packages
-    have claimed one folder, is asked once every package is known.
+    have claimed one folder, is asked once every package is known. The fourth is who may start a release at all: an
+    explicit worker role and a process executing somebody else's task each refuse initiation before a lock is pushed,
+    the commands that write a native release ref are refused under that authority however deeply they are nested, and
+    a run that would dispatch work refuses both the unsafe lock bypass and a signing secret that is not there, so a
+    release nothing could coordinate reaches no mailbox.
 
 ### Configuration
 
@@ -407,6 +411,7 @@ tests/integration/
   hooks_test.go             goal 9
   execution_config_test.go  goal 57 (the `execution` key: local release unchanged, and every refusal)
   execution_outputs_config_test.go  goal 57 (`buildOutputs` and `buildPlatforms`: the ladder, the shapes, one owner)
+  execution_authority_test.go  goal 57 (who may start a release, and what a delegating run may not start with)
 
   configuration
   config_test.go            goal 10
@@ -647,7 +652,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -663,6 +668,12 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionBuildOutputRefusals` | Every shape a level may not write, through the binary: an empty path, a NUL byte, backslashes, a colon, an absolute path, a path leaving the package folder directly or through a folder, `.git` at any depth and in any case, one root stated twice, a root inside another root, two spellings of one root, a platform with no architecture, a third half, capitals or an empty half, and a platform stated twice. A space's and a package entry's own lists are held to the same rules. Each exits 1 naming the key path, carries E225 and tags nothing. |
 | `TestExecutionBuildOutputsInAPackageFolderFileAreRefusedToo` | The layer a checkout carries with it is held to the rules as well: a package folder's own file naming repository metadata is refused with E225. |
 | `TestExecutionBuildKeysAreAbsentFromAnOrdinaryRun` | A workspace that states neither key writes the resolved debug line it always wrote, with no field for either of them. |
+| `TestExecutionWorkerRoleRefusesRelease` | A node whose `execution.role` is `worker` refuses to start a release: it exits 1 with E226 and the `execution-authority` class, the lock push never happens (counted through a git fault that fails nothing), the remote holds no lock and nothing is tagged. The same node still answers `dispat status`, because reading the plan is not initiating a release. |
+| `TestExecutionWorkerAuthorityRefusesNativeRefWrites` | Under the worker-authority marker the bare release, `release`, `commit --tag --push`, `github`, `changelog`, `autoversion`, `compute` and `trigger` are each refused with E226 before anything is read, leaving no tag and no commit, while `status`, `exec` of a declared script and `if` still succeed under the same marker. |
+| `TestExecutionNestedCommandInheritsWorkerAuthority` | The marker travels into a declared script exactly as any other variable does, so a build script that runs `dispat release` is refused with E226 and tags nothing: the indirect initiation the specification names is refused through a real script. |
+| `TestExecutionRefusesUnsafeLockBypass` | With worker links configured, the environment kill switch, a configured `unsafeDisableLock` and a linked peer that states one for itself are each refused with E225 and the `execution-configuration` class, naming the repositories and the setting, before any lock push and with no branch left in the mailbox. With an empty worker list the same bypass is the W331 warning it always was and the release completes. |
+| `TestExecutionMissingSecretRefusesDistributedRelease` | A distributed run whose `secretEnv` variable is unset or empty is refused with E225 naming the variable rather than reading it; with the variable set the same configuration is not refused, releases and gives its lock back. |
+| `TestExecutionLinkedPeerExecutionKeysAreIgnored` | An imported source of a control repository and a peer of a linked fleet may each state `execution` of their own: the entry's release writes exactly the tags it writes without them, and one debug line per such repository says whose settings were ignored. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
 
