@@ -3,9 +3,9 @@ package integration
 // Goal 60: the provider relation, through the binary.
 //
 // `isBuildWaitingPublish` used to be a boolean because it answered one
-// question. It now answers two — what a consumer's version and build stage
-// waits for, and whether a provider that failed outranks a consumer reason of
-// its own — so the key additionally accepts an object. What is proven here is
+// question. It now answers two, what a consumer's version and build stage
+// waits for and whether a provider that failed outranks a consumer reason of
+// its own, so the key additionally accepts an object. What is proven here is
 // that the two booleans still mean exactly what they meant, that the third
 // relation really does let consumers build beside their provider while their
 // publications still follow it, that a provider nobody could read is still a

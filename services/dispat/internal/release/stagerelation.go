@@ -119,8 +119,8 @@ func (b *buildReach) Indirect(consumer string) []string {
 
 // resolve is the memoised walk: the changed packages one package reaches
 // without crossing a `none` hop. It recurses along dependency edges alone, and
-// the workspace graph is acyclic by the time a release executes — a cycle is
-// E197/E200 and no plan survives one — so the recursion terminates.
+// the workspace graph is acyclic by the time a release executes, because a
+// cycle is E197 or E200 and no plan survives one, so the recursion terminates.
 func (b *buildReach) resolve(name string) []string {
 	if cached, isKnown := b.nearest[name]; isKnown {
 		return cached

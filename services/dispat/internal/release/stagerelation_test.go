@@ -24,9 +24,9 @@ import (
 // orderings a relation imposes are read out of the fake runner's recorded
 // order, which is evidence independent of any timing: an edge either kept a
 // task back or it did not. The ordering a relation does NOT impose cannot be
-// read that way at all — the absence of an edge shows up as work happening at
-// once — so it is read out of the peak number of builds in flight, which is
-// how every other budget claim in this file is checked.
+// read that way at all, because the absence of an edge shows up as work
+// happening at once, so it is read out of the peak number of builds in flight,
+// which is how every other budget claim in this file is checked.
 
 // relationOf builds the resolved relation a space states, the way the ladder
 // would have resolved it, so the fixtures below state configuration rather

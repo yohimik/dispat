@@ -138,7 +138,7 @@ type Reverterx interface {
 // publish always waits for its providers' publishes under all three, since
 // publishing against a not-yet-published provider version would be invalid; a
 // provider whose publish failed therefore skips its consumers unless they have
-// a release reason of their own — and skips them unconditionally when its
+// a release reason of their own, and skips them unconditionally when its
 // relation is a blocking one, which `none` and `publish` are unless the
 // configuration says otherwise.
 //
@@ -1290,9 +1290,9 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 //
 // A provider under a blocking relation outranks every reason of the package's
 // own. Under `publish` that is because consumers' builds take the provider's
-// *published* release as their input — the dispat images install the binary
-// the CLI leg's publish attached — so when that publish never happened the
-// input does not exist, and no amount of own work substitutes for it.
+// *published* release as their input (the dispat images install the binary the
+// CLI leg's publish attached), so when that publish never happened the input
+// does not exist, and no amount of own work substitutes for it.
 // Proceeding would either fail on the missing artifact or, worse, quietly
 // build against the provider's previous release and publish it under a version
 // that promises the new one. Under `none` it is because the consumer's
