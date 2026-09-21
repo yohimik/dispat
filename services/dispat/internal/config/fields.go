@@ -78,6 +78,7 @@ func fileFields(dst *File) fields {
 		"unsafedisablelock":     flag(&dst.UnsafeDisableLock),
 		"run":                   obj(&dst.Run, runFields),
 		"parser":                obj(&dst.Parser, parserFields),
+		"execution":             obj(&dst.Execution, executionFields),
 	}
 }
 

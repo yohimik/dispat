@@ -982,6 +982,9 @@ func validate(c *File, allowEmpty bool) error {
 	if err := validateWebhooks(c); err != nil {
 		return err
 	}
+	if err := validateExecution(c); err != nil {
+		return err
+	}
 	if err := validateLinkedConfiguration(c); err != nil {
 		return err
 	}

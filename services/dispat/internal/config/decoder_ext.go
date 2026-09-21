@@ -281,7 +281,9 @@ func sectionOf(item any, at string) (SectionConfig, error) {
 // the file wrote the key, so a layer that says nothing about the option stays
 // nil and a nearer layer's value, or the default, survives. It is the Int
 // counterpart of the library's BoolPtr, which the library does not carry
-// because entrySpacing is so far the only key that needs it.
+// because the two keys that need it, entrySpacing and execution.concurrency,
+// are dispat's own: the second refuses a stated 0 that an absent key means 1
+// for, and a plain int could not tell the two apart.
 func numPtr(dst **int) setter {
 	return func(val any, at string) error {
 		n, err := weakInt(val, at)

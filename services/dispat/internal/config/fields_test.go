@@ -54,6 +54,12 @@ func TestFieldTablesCoverEveryModelField(t *testing.T) {
 		{"ParserPropagationConfig", ParserPropagationConfig{},
 			parserPropagationFields(&ParserPropagationConfig{})},
 		{"ParserLimitsConfig", ParserLimitsConfig{}, parserLimitsFields(&ParserLimitsConfig{})},
+		{"ExecutionConfig", ExecutionConfig{}, executionFields(&ExecutionConfig{})},
+		{"ExecutionWorkerConfig", ExecutionWorkerConfig{}, executionWorkerFields(&ExecutionWorkerConfig{})},
+		{"ExecutionTimeoutsConfig", ExecutionTimeoutsConfig{},
+			executionTimeoutsFields(&ExecutionTimeoutsConfig{})},
+		{"ExecutionTransferConfig", ExecutionTransferConfig{},
+			executionTransferFields(&ExecutionTransferConfig{})},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			assert.ElementsMatch(t, modelKeys(reflect.TypeOf(c.model)), tableKeys(c.table),
