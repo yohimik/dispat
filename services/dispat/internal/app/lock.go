@@ -29,9 +29,9 @@ const codeLockDisabled = "W331"
 // A composed workspace names its repositories by their `.gitmodules`
 // identities. A single repository has no such identity, so it names itself by
 // the root the run was given, which is what a reader has to recognise it by.
-func warnLockDisabled(log zerolog.Logger, repositories []string, byConfig bool) {
+func warnLockDisabled(log zerolog.Logger, repositories []string, isByConfig bool) {
 	log.Warn().Str("code", codeLockDisabled).Strs("repositories", repositories).
-		Strs("setting", lockBypassSettings(byConfig)).
+		Strs("setting", lockBypassSettings(isByConfig)).
 		Msg("UNSAFE: releasing without the release lock; a concurrent release of these repositories cannot be prevented")
 }
 

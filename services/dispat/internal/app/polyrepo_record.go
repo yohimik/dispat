@@ -129,19 +129,19 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 		}
 		return config.WithDiagnostic("E336", errors.Join(cleanupErrs...))
 	}
-	var bypassed []string
-	byConfig := false
+	var bypassedRepositories []string
+	isByConfig := false
 	for _, r := range w.ordered {
-		if skipped, byConfiguration := w.lockBypass(r); skipped {
-			bypassed = append(bypassed, r.repo.Name)
-			byConfig = byConfig || byConfiguration
+		if isBypassed, isStated := w.lockBypass(r); isBypassed {
+			bypassedRepositories = append(bypassedRepositories, r.repo.Name)
+			isByConfig = isByConfig || isStated
 		}
 	}
-	if len(bypassed) > 0 {
-		warnLockDisabled(w.app.log, bypassed, byConfig)
+	if len(bypassedRepositories) > 0 {
+		warnLockDisabled(w.app.log, bypassedRepositories, isByConfig)
 	}
 	for _, r := range w.ordered {
-		if skipped, _ := w.lockBypass(r); skipped {
+		if isBypassed, _ := w.lockBypass(r); isBypassed {
 			continue
 		}
 		order := len(held)
