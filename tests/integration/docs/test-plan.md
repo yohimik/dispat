@@ -1864,6 +1864,7 @@ cannot make the rest of the goal pass.
 | `TestChoreographyComputeRefusesABackLinkURLCarryingASecret` | The remote written into the peer's `.gitmodules` is held to the same rule a roster URL is, and the secret never reaches the run's output. |
 | `TestChoreographyComputeDeclaresTheHalfOfAOneSidedLink` | A link one repository declares and its peer does not declare back is `+ link <peer> <repository>`: `--check` exits 1, `--write` writes the missing declaration into the checkout that already exists without cloning or adding a route, and the repaired fleet composes with no `W332` and no `E338`. |
 | `TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote` | The missing half pins the repository that holds the link at a revision its own remote can serve, so a repository with no remote has it withheld with a warning and `W332` stands. |
+| `TestComputeMinimalWritesTheJoiningLinkWhereACheckoutExists` | A component whose centre was never materialised has the joining link written by the member nearest that centre which this run does hold, and the missing checkout is reported as its own change. |
 
 ### Goal 53: coverage scenarios: application and configuration (`cov_app_*`, `cov_cli_*`, `cov_config_*`, `cov_ignore_*`, `cov_fsx_*`)
 

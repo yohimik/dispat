@@ -57,6 +57,27 @@ func TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks(t *test
 		entry.Git("-C", ".links/sdk", "config", "--file", ".gitmodules", "submodule.web.path"))
 }
 
+// TestComputeMinimalWritesTheJoiningLinkWhereACheckoutExists proves the centre
+// of a component is where the link goes only while that centre is a checkout
+// this run holds. Here the component is zed and a peer whose checkout was
+// never materialised, so the centre is the peer that sorts first and is a name
+// and nothing else; the member nearest it that does have a checkout writes the
+// link instead, and the missing checkout is reported as its own change.
+func TestComputeMinimalWritesTheJoiningLinkWhereACheckoutExists(t *testing.T) {
+	fleet := newChoreographyFleet(t, "zed", "mid", "alpha")
+	fleet.link("zed", "mid")
+	zed := fleet.peer("zed")
+	zed.Git("submodule", "deinit", "-f", "--", ".links/mid")
+
+	check := zed.CommandEnv(fileProtocolEnv(), "compute", "--topology", "minimal", "--check")
+	assert.Equal(t, 1, check.Code, "%s\n%s", check.Stdout, check.Stderr)
+	assert.Contains(t, check.Stdout, "+ link zed alpha")
+	assert.Contains(t, check.Stdout, "+ init zed .links/mid")
+	assert.NotContains(t, check.Stdout, "+ link zed mid", "zed and mid are joined already")
+	assert.NotContains(t, check.Stdout, "+ link alpha mid",
+		"neither end of that pair is a checkout this run can write in")
+}
+
 // TestComputeStarAddsOnlyMissingHubEdges proves star topology preserves a
 // direct entry edge that already exists and creates only the missing spoke.
 func TestComputeStarAddsOnlyMissingHubEdges(t *testing.T) {
