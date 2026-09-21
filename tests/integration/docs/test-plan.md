@@ -118,7 +118,12 @@ integration suite itself.
     needs no secret. The second is that the key is refused at load or not at all: it is a node-startup setting, so it
     belongs to the root file alone, an imported or linked peer may state its own and it is never consulted, and every
     rule it is held to (the role, the capacity, the node names, the credential-free mailbox addresses and the variable
-    naming the signing secret) is one diagnostic code and one key path before any lock, plan or command.
+    naming the signing secret) is one diagnostic code and one key path before any lock, plan or command. The third is
+    what a package declares for the machines that may run it: `buildOutputs` names the paths its build produces, which
+    are normally ignored by Git and therefore invisible to any machine that did not run the build, and
+    `buildPlatforms` names the platforms allowed to run it. Both ride the ordinary configuration ladder and replace
+    whole, and because package folders may nest, the one question no single level can answer, whether two packages
+    have claimed one folder, is asked once every package is known.
 
 ### Configuration
 
@@ -401,6 +406,7 @@ tests/integration/
   interrupt_test.go         goal 8
   hooks_test.go             goal 9
   execution_config_test.go  goal 57 (the `execution` key: local release unchanged, and every refusal)
+  execution_outputs_config_test.go  goal 57 (`buildOutputs` and `buildPlatforms`: the ladder, the shapes, one owner)
 
   configuration
   config_test.go            goal 10
@@ -641,7 +647,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -652,6 +658,11 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionRefusalNeverPrintsACredential` | A mailbox address is refused because of what it carries, so the refusal never writes that credential into a CI log: a password in the scp form or in a URL, a token in a query or a fragment, and a password behind a leading dash are each redacted while the link is still named. |
 | `TestExecutionIsRefusedOutsideTheRootFile` | The key is a node-startup setting: stated on a space, on a package entry or in a package folder's own file it is an unknown key, so a checkout travelling to another machine cannot tell that machine what role it plays. |
 | `TestExecutionInAnImportedConfigIsValidatedNotConsulted` | An imported peer may carry its own `execution` object, because any peer may be another run's entry: a worker role stated there changes nothing about a run started from the control repository, while a malformed object still fails that file's own load with E225. |
+| `TestExecutionBuildOutputsLadder` | `buildOutputs` and `buildPlatforms` resolve through the ordinary ladder and replace whole: a package folder's own file wins over the space folder's file, which wins over the root file's space entry, which wins over the repository default a standalone package reaches too, an explicit empty list opts a package out of what it would inherit, and the two keys travel independently. Read out of the resolved debug lines of `dispat status`. |
+| `TestExecutionOverlappingBuildOutputsFailPreflight` | Package folders may nest, so two packages can claim one folder: the same folder from two packages, one package's folder inside another's declared root, and two spellings of one folder are each refused by `dispat status` with E225 naming both packages and both paths, while the same name in two sibling package folders is the ordinary workspace and resolves. |
+| `TestExecutionBuildOutputRefusals` | Every shape a level may not write, through the binary: an empty path, a NUL byte, backslashes, a colon, an absolute path, a path leaving the package folder directly or through a folder, `.git` at any depth and in any case, one root stated twice, a root inside another root, two spellings of one root, a platform with no architecture, a third half, capitals or an empty half, and a platform stated twice. A space's and a package entry's own lists are held to the same rules. Each exits 1 naming the key path, carries E225 and tags nothing. |
+| `TestExecutionBuildOutputsInAPackageFolderFileAreRefusedToo` | The layer a checkout carries with it is held to the rules as well: a package folder's own file naming repository metadata is refused with E225. |
+| `TestExecutionBuildKeysAreAbsentFromAnOrdinaryRun` | A workspace that states neither key writes the resolved debug line it always wrote, with no field for either of them. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
 
