@@ -77,14 +77,17 @@ func fleetLinkAdjacency(fleet []rosterEntry, repositories []config.Repository) m
 	for _, entry := range fleet {
 		isMember[strings.ToLower(entry.name)] = true
 	}
+	composed := make(map[string]*config.Repository, len(repositories))
+	for i := range repositories {
+		composed[strings.ToLower(repositories[i].Name)] = &repositories[i]
+	}
 	adjacency := make(map[string][]string, len(fleet))
 	recorded := make(map[string]bool)
-	for i := range repositories {
-		linker := strings.ToLower(repositories[i].Name)
-		if !isMember[linker] {
-			continue
-		}
-		for _, name := range repositories[i].LinkPeers() {
+	for _, entry := range fleet {
+		linker := strings.ToLower(entry.name)
+		// A fleet member this run never walked into declares nothing, and
+		// LinkPeers answers nothing for it.
+		for _, name := range composed[linker].LinkPeers() {
 			peer := strings.ToLower(name)
 			if peer == linker || !isMember[peer] || recorded[linker+"\x00"+peer] {
 				continue
@@ -114,8 +117,7 @@ func splitFleetIntoGroups(fleet []rosterEntry, adjacency map[string][]string) []
 		if isVisited[start] {
 			continue
 		}
-		distances, _ := walkGroupFrom(start, adjacency)
-		for member := range distances {
+		for member := range walkGroupFrom(start, adjacency) {
 			isVisited[member] = true
 		}
 		groups = append(groups, resolveCentredGroup(start, byFold, adjacency))
@@ -131,7 +133,7 @@ func splitFleetIntoGroups(fleet []rosterEntry, adjacency map[string][]string) []
 // picked in.
 func resolveCentredGroup(member string, byFold map[string]rosterEntry, adjacency map[string][]string) centredGroup {
 	centre, radius := chooseGroupCentre(member, adjacency)
-	distances, _ := walkGroupFrom(centre, adjacency)
+	distances := walkGroupFrom(centre, adjacency)
 	ordered := make([]string, 0, len(distances))
 	for name := range distances {
 		ordered = append(ordered, name)
@@ -154,29 +156,32 @@ func resolveCentredGroup(member string, byFold map[string]rosterEntry, adjacency
 //
 // The existing links form a forest, because composition refuses a second route
 // between two repositories with E338 and compute refuses to run on one. A
-// group is therefore a tree, and the two walks are the whole computation: the
-// member farthest from anywhere is one end of a longest route, the member
-// farthest from that end is the other, and the centre is the middle of that
-// route. A route of an odd number of links has two middles, and the identity
+// group is therefore a tree, where every member's farthest member is an end of
+// a longest route, so three walks are the whole computation: one finds an end,
+// one measures from that end and finds the other, one measures from the other,
+// and each member's farthest member is the greater of its two distances. The
+// least of those is the radius and the member holding it is the centre. A
+// route of an odd number of links leaves two such members, and the identity
 // that sorts first under case folding is taken.
 func chooseGroupCentre(member string, adjacency map[string][]string) (string, int) {
-	reached, _ := walkGroupFrom(member, adjacency)
-	oneEnd, _ := farthestMember(reached)
-	distances, cameFrom := walkGroupFrom(oneEnd, adjacency)
-	otherEnd, diameter := farthestMember(distances)
-	route := routeBackFrom(otherEnd, cameFrom)
-	if diameter%2 == 0 {
-		return route[diameter/2], diameter / 2
+	oneEnd, _ := farthestMember(walkGroupFrom(member, adjacency))
+	fromOneEnd := walkGroupFrom(oneEnd, adjacency)
+	otherEnd, diameter := farthestMember(fromOneEnd)
+	fromOtherEnd := walkGroupFrom(otherEnd, adjacency)
+	centre, radius := "", diameter+1
+	for name, distance := range fromOneEnd {
+		reach := max(distance, fromOtherEnd[name])
+		if reach < radius || (reach == radius && name < centre) {
+			centre, radius = name, reach
+		}
 	}
-	return chooseEarlierIdentity(route[diameter/2], route[diameter/2+1]), (diameter + 1) / 2
+	return centre, radius
 }
 
 // walkGroupFrom walks the existing links outward from one member and answers
-// how many links away every member of its group is, and which member each one
-// was reached from, which is what lets a longest route be read back.
-func walkGroupFrom(start string, adjacency map[string][]string) (map[string]int, map[string]string) {
+// how many links away every member of its group is.
+func walkGroupFrom(start string, adjacency map[string][]string) map[string]int {
 	distances := map[string]int{start: 0}
-	cameFrom := map[string]string{}
 	queue := []string{start}
 	for len(queue) > 0 {
 		current := queue[0]
@@ -186,11 +191,10 @@ func walkGroupFrom(start string, adjacency map[string][]string) (map[string]int,
 				continue
 			}
 			distances[peer] = distances[current] + 1
-			cameFrom[peer] = current
 			queue = append(queue, peer)
 		}
 	}
-	return distances, cameFrom
+	return distances
 }
 
 // farthestMember answers the member a walk reached last and how far that is.
@@ -204,30 +208,6 @@ func farthestMember(distances map[string]int) (string, int) {
 		}
 	}
 	return farthest, reach
-}
-
-// routeBackFrom reads a walk back from one member to where the walk started,
-// so that route[0] is that member and route[n] is the start.
-func routeBackFrom(member string, cameFrom map[string]string) []string {
-	route := []string{member}
-	current := member
-	for {
-		previous, isReached := cameFrom[current]
-		if !isReached {
-			return route
-		}
-		route = append(route, previous)
-		current = previous
-	}
-}
-
-// chooseEarlierIdentity answers whichever of two folded identities sorts
-// first, which is how every tie in this computation is settled.
-func chooseEarlierIdentity(first, second string) string {
-	if second < first {
-		return second
-	}
-	return first
 }
 
 // chooseFleetHub answers the group whose centre every other group's centre
@@ -261,19 +241,14 @@ func isHubPreferred(candidate, current centredGroup) bool {
 //
 // The two centres are the ends that give the shortest longest route. A link is
 // a checkout, though, so at least one end has to be a repository this run
-// walked into: where neither centre is, the nearest composed member of the
-// joining group stands in for its centre, and failing that the nearest
-// composed member of the hub stands in for the hub's centre. The longest-route
-// optimum is not guaranteed once an end moves off a centre, because the route
-// then runs through whatever the substitute's own distance from its centre is.
-// A group no member of which was composed, and a hub in the same state, can
-// hold no link at all; the caller proposes what it can and leaves the rest.
+// walked into: where neither centre is, the member of the hub nearest its
+// centre stands in for it, and the longest-route optimum is then not
+// guaranteed, because the route runs through that member's own distance from
+// the centre as well. Where the hub has no composed member either, nothing
+// here can be written and the caller falls back to whatever pair it can reach.
 func chooseGroupJoinEnds(group, hub centredGroup) (rosterEntry, rosterEntry, bool) {
 	if group.centre().composed || hub.centre().composed {
 		return group.centre(), hub.centre(), true
-	}
-	if nearest, isComposed := group.nearestComposedMember(); isComposed {
-		return nearest, hub.centre(), true
 	}
 	if nearest, isComposed := hub.nearestComposedMember(); isComposed {
 		return group.centre(), nearest, true
