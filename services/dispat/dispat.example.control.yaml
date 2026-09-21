@@ -1,0 +1,116 @@
+# A control repository: one configuration releasing packages that live in
+# several Git repositories.
+#
+# The source repositories are submodules of this one. The control repository
+# holds the fleet's configuration, its fleet-wide commits and, optionally, a
+# checkpoint of what was released; every package is still built and published
+# from its own folder and recorded by a tag in the repository that owns it.
+#
+#   git submodule add git@github.com:acme/sdk.git sources/sdk
+#   git submodule add git@github.com:acme/api.git sources/api
+#   git submodule add git@github.com:acme/web.git sources/web
+#   dispat --polyrepo status
+#
+# A fleet with no control repository at all is dispat.example.peer.yaml.
+
+# Every package belongs to the initialized Git repository that contains it:
+# its history, its tags and its release commit are that repository's. The
+# --polyrepo flag says the same thing for one invocation.
+polyrepo: true
+
+scripts:
+  install: "npm ci"
+  build: "npm run build"
+  publish: "npm publish --access public"
+  npm-login: "npm config set //registry.npmjs.org/:_authToken $NPM_TOKEN"
+
+# Space paths start at the control repository and reach into the sources.
+spaces:
+  libraries:
+    path: sources/sdk/packages
+    isBuildWaitingPublish: true
+    flow:
+      login: npm-login
+      build: [install, build]
+      publish: publish
+  services:
+    path:
+      - sources/api/packages
+      - sources/web/packages
+    flow:
+      login: npm-login
+      build: [install, build]
+      publish: publish
+
+# The other way to compose the fleet: each source carries its own dispat
+# configuration and the control file imports them. Paths inside an imported
+# file are relative to that file. `--configs <path>` adds one per invocation.
+#
+# configs:
+#   - sources/sdk/release/dispat.yaml
+#   - sources/api/release/dispat.yaml
+#   - sources/web/release/dispat.yaml
+
+# Edges may cross repositories. `external: true` marks a provider this fleet
+# consumes and does not release: the edge documents the relation and nothing
+# propagates along it.
+dependencies:
+  api:
+    - sdk
+    - provider: design-tokens
+      external: true
+  web: [api]
+
+# Participation and commit policy per source repository, keyed by the exact
+# .gitmodules name, case included. `enabled: false` takes a repository out of
+# the run before its checkout is inspected: it contributes no packages, no
+# hooks and no release lock, and its paths stay reserved so nothing else may
+# claim them.
+repositoryOverrides:
+  sdk:
+    commit:
+      enabled: true
+      push: true
+      remote: origin
+      branch: main
+  api:
+    commit:
+      enabled: true
+      push: true
+      branch: main
+  legacy:
+    enabled: false
+
+# An explicit history boundary, for the rare consumer whose last release
+# cannot be tied to a provider revision from the recorded gitlinks alone.
+# The revision is resolved to a full commit id when the file loads, so it has
+# to exist in that repository.
+#
+# repositoryBaselines:
+#   - consumer: web
+#     releaseTag: web@2.4.0
+#     repository: api
+#     revision: 6f1a9f0d2b90c8f96a4d74dcb6568fd373b22c16
+
+# The control repository's own release commit: the checkpoint of the fleet.
+commit:
+  enabled: true
+  push: true
+
+# A release takes every participating repository's release lock, in one fixed
+# order, before it plans, and gives them back in reverse.
+unsafeDisableLock: false
+
+# Worker nodes are added to a fleet exactly as to one repository: the
+# `execution` object of dispat.example.orchestrator.yaml goes in this file.
+# Execution links join machines; submodules join repositories. Neither changes
+# the other, and an `execution` object an imported configuration states for
+# itself is ignored here.
+
+parser:
+  propagation:
+    depth: 1
+
+nonPackageScopes: [release, sync]
+
+concurrency: [4, 2]

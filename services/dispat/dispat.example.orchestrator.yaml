@@ -1,0 +1,139 @@
+# A monorepo whose builds and publishes run on worker nodes.
+#
+# This is the node a release is started on. It keeps everything that decides
+# and records the release: the release locks, the plan, the version edits and
+# lock-file regeneration, the tags, the changelog, the release commit and the
+# run-level hooks. Worker nodes run the build and publish stages it assigns,
+# and hand their declared build outputs to the packages that consume them.
+# The matching worker file is dispat.example.worker.yaml.
+#
+#   dispat --config dispat.yaml status    # the plan and its `plan fixed` line
+#   dispat --config dispat.yaml release   # locks, plans, probes every worker,
+#                                         # then dispatches
+#
+# Leave `execution` out, or leave `workers` empty, and the same file releases
+# locally exactly as it always did.
+
+# Node-startup settings. They exist in the root file only and are read from
+# the configuration a run is started with: a space, a package, an imported
+# configuration or a linked repository can neither set nor change them.
+execution:
+  # orchestrator (the default) starts releases. A node with role: worker
+  # refuses to start one.
+  role: orchestrator
+  # How many command tasks this node itself runs at once: the version and
+  # lock-file stages stay here. It is the node's capacity, not the run's
+  # budget: the stage budgets of `concurrency` below bound the whole run and
+  # are never multiplied by the number of workers.
+  concurrency: 2
+  # The name of the environment variable holding the secret every message in
+  # a mailbox is signed with. The name goes in the file, the secret never
+  # does. Every worker reads the same secret from its own environment.
+  secretEnv: DISPAT_EXECUTION_SECRET
+  # The worker nodes this run may delegate to. `name` is the node's identity:
+  # coordination branches addressed to it are named
+  # dispat-worker-<name>-<date>-<kind>-<random>. `endpoint` is the Git
+  # repository used as that node's mailbox: an https, ssh or file URL, an
+  # absolute path, or host:path. It carries no credentials; Git's own
+  # credentials reach it. Several workers may share one mailbox. A mailbox
+  # holds full source and command text, so give it the access control the
+  # source has, and protect release branches and tags from the credentials
+  # that can write to it.
+  workers:
+    - name: build-a
+      endpoint: git@github.com:acme/release-mailbox.git
+    - name: build-b
+      endpoint: git@github.com:acme/release-mailbox.git
+    - name: build-arm
+      endpoint: git@github.com:acme/release-mailbox.git
+  # How long the run waits at the three points where a node can stop
+  # answering, in seconds. 0 or absent keeps the default shown.
+  timeouts:
+    preflight: 60     # one worker's answer to the probe sent before dispatch
+    task: 3600        # one assigned build or publish
+    cancel: 60        # a cancelled task's acknowledgement; its capacity stays
+                      # held until then
+  # What one task's declared build outputs may weigh. An output set over a
+  # ceiling is refused where it is captured and again where it is installed.
+  transfer:
+    maxFiles: 20000
+    maxBytes: 2147483648          # 2 GiB
+    maxManifestBytes: 8388608     # 8 MiB
+    timeout: 1800
+
+scripts:
+  install: "npm ci"
+  build: "npm run build"
+  # The registry token is read where the command runs. `env` values travel to
+  # a worker unresolved and expand there, from the worker's environment, so a
+  # secret is never written to a mailbox.
+  publish: "npm publish --access public"
+  npm-login: "npm config set //registry.npmjs.org/:_authToken $NPM_TOKEN"
+  npm-lock: "npm install --package-lock-only"
+  smoke-test: "npm run smoke"
+
+# What a build leaves behind for its consumers and for its own publish stage:
+# literal paths relative to the package folder, slash-separated, ignored files
+# included on purpose (a `dist` folder is normally git-ignored, which is why a
+# checkout alone cannot supply it). A level replaces the inherited list whole,
+# and an explicit empty list opts out. A root is captured, verified and
+# installed whole, so it may not be the package folder itself, may not sit
+# inside another root, and may not hold another package's folder.
+buildOutputs: [dist]
+
+spaces:
+  web:
+    path: packages
+    # The shared manifest and lock-file preparation runs on this node, once
+    # per package that changed, serialized; a worker never regenerates the
+    # lock file. Each build binds the prepared state it consumed.
+    autoVersion:
+      range: caret
+      syncLock: [npm-lock]
+      syncLockConcurrency: 1
+    flow:
+      login: npm-login            # runs on the worker that publishes, once
+                                  # per run and space on that worker
+      build: [install, build]     # runs on a worker
+      postBuild: smoke-test       # a hook travels with its stage
+      publish: publish            # runs on a worker, after this node
+                                  # authorized it
+
+packages:
+  assets:
+    buildOutputs: [dist, generated/types]
+  ui: {}
+  docs:
+    # Which nodes may run this package's tasks, as os/arch in Go's spelling.
+    # Empty or absent means any node. A platform no configured worker reports
+    # refuses the run before anything is dispatched.
+    buildPlatforms: [linux/amd64, linux/arm64]
+  app:
+    buildOutputs: [dist, bin]
+
+# `assets` is built once. `ui` and `docs` receive its verified output on
+# whichever nodes they were placed and may build at the same time; `app`
+# receives both. A provider that is not releasing in this run is still built
+# once so its consumer has its output, and is neither tagged nor published.
+dependencies:
+  ui: [assets]
+  docs:
+    - provider: assets
+      kind: devDependencies       # a build-only edge still supplies outputs
+  app: [ui, docs]
+
+# The run-wide stage budgets: at most four builds and one publish at a time
+# across every node. Publication and recording are also serialized per
+# repository whenever workers are configured.
+concurrency: [4, 1]
+
+# Distributed execution refuses to run without the release lock, in either
+# spelling: this key and DISPAT_UNSAFE_DISABLE_LOCK.
+unsafeDisableLock: false
+
+commit:
+  enabled: true
+  push: true
+  include: [package-lock.json]
+
+logFormat: json

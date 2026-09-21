@@ -929,6 +929,46 @@ func TestExampleConfigsAreValid(t *testing.T) {
 	assert.Equal(t, loaded[0], loaded[1], "the two examples must describe one configuration")
 }
 
+// TestModeExampleConfigsAreValid: the examples beside the main pair each show
+// one way of running a release that cannot share a file with another, a fleet
+// with a control repository, a peer of a fleet without one, a node that
+// delegates its builds and publishes, and a node that serves them. They are
+// copied as written, so each has to load as written, under the loader the
+// command it is meant for uses.
+func TestModeExampleConfigsAreValid(t *testing.T) {
+	for name, row := range map[string]struct {
+		file  string
+		load  func(string, *pflag.FlagSet) (*File, error)
+		check func(*testing.T, *File)
+	}{
+		"a control repository": {"dispat.example.control.yaml", Load, func(t *testing.T, cfg *File) {
+			assert.True(t, cfg.Polyrepo)
+			assert.False(t, cfg.IsLinked(), "a control repository states no identity of its own")
+			assert.False(t, cfg.RepositoryOverrides["legacy"].IsEnabled())
+		}},
+		"a linked peer": {"dispat.example.peer.yaml", Load, func(t *testing.T, cfg *File) {
+			assert.True(t, cfg.IsLinked())
+			assert.Len(t, cfg.Repositories, 2)
+		}},
+		"an orchestrator with worker links": {"dispat.example.orchestrator.yaml", Load, func(t *testing.T, cfg *File) {
+			assert.True(t, cfg.Execution.IsDistributed())
+			assert.False(t, cfg.Execution.IsWorker())
+			assert.Equal(t, []string{"dist"}, cfg.BuildOutputs)
+		}},
+		"a worker node": {"dispat.example.worker.yaml", LoadNode, func(t *testing.T, cfg *File) {
+			assert.True(t, cfg.Execution.IsWorker())
+			assert.False(t, cfg.Execution.IsDistributed(), "a worker delegates nothing")
+			assert.Empty(t, cfg.Spaces, "a worker states no release policy of its own")
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := row.load(filepath.Join("..", "..", row.file), nil)
+			require.NoError(t, err, row.file)
+			row.check(t, cfg)
+		})
+	}
+}
+
 func TestLoadVersioning(t *testing.T) {
 	// Every mode loads and normalizes case-insensitively; the default is
 	// independent; an unknown value is rejected with the valid set named.

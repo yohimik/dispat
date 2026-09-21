@@ -1,5 +1,15 @@
 # Same configuration as dispat.example.json in YAML. dispat defaults to
 # dispat.json; point at this file with: dispat --config dispat.yaml
+#
+# This is one repository released on one machine. The ways of running a
+# release that cannot share a file with it each have an example of their own:
+#   dispat.example.control.yaml       a control repository over several
+#                                     source repositories
+#   dispat.example.peer.yaml          one peer of a linked fleet that has no
+#                                     control repository
+#   dispat.example.orchestrator.yaml  builds and publishes delegated to
+#                                     worker nodes
+#   dispat.example.worker.yaml        a worker node
 scripts:
   install: "npm ci"
   build: "npm run build"
@@ -39,6 +49,15 @@ spaces:
     # Roll back all local changes inside the package folder when a package
     # from this space fails during version, build or publish.
     revertOnFail: true
+    # What a build of this space's packages leaves behind: literal paths
+    # relative to the package folder, slash-separated, ignored files included
+    # on purpose. Nothing reads the list while a release runs on one machine.
+    # When builds are delegated to worker nodes it is what travels, verified,
+    # to the packages that consume this one and to its own publish stage. A
+    # level replaces the inherited list whole, and an empty list opts out. A
+    # root is installed whole, so it may not be the package folder itself,
+    # sit inside another root, or hold another package's folder.
+    buildOutputs: [dist]
     # How versions relate across the space's packages:
     # How much of the version the space's packages hold in common. Whatever
     # is shared is always equal across the group; whatever is not is each
@@ -190,6 +209,10 @@ packages:
       - "!docs/api.md"
   cli:
     path: tools/cli                   # standalone: lives outside the spaces
+    buildOutputs: [bin]               # replaces whatever it would inherit
+    # Which worker nodes may run this package's build and publish, as os/arch
+    # in Go's spelling. Empty or absent means any node.
+    buildPlatforms: [linux/amd64, linux/arm64]
     flow:
       build: build-go
       publish: publish-go
@@ -269,6 +292,7 @@ webhooks:
     events: [release.started, release.finished]
   - name: deploy-tracker
     url: https://tracker.internal/dispat
+    method: POST                      # POST (default), PUT or PATCH
     events: [package.published, package.failed]
     headers:
       - name: X-Api-Key
@@ -363,16 +387,33 @@ logFormat: pretty
 # thing for a single invocation.
 unsafeDisableLock: false
 
+# Ask, alongside the command, whether a newer stable dispat exists, and print
+# one line when there is one. Default true. It never slows a run down, and it
+# is skipped when logFormat is json.
+updateCheck: true
+
 # Per-package changelog file; enabled by default. All fields optional.
 changelog:
   enabled: true
   file: CHANGELOG.md
   fileTitle: "# Changelog"          # heads the file, above every entry
   dateFormat: "2006-01-02"
+  entrySpacing: 2                   # blank lines between entries, 1 to 10
   breakingTitle: "Breaking Changes"
   featuresTitle: "Features"
   fixesTitle: "Fixes"
   dependenciesTitle: "Dependencies"
+  # Turn each line of the dependencies section into a link to that provider's
+  # release: auto derives it from the github owner and repo, off writes the
+  # plain line, anything else is a URL template ($DISPAT_DEP_NAME, _FROM, _TO,
+  # _TAG). auto falls back to the plain line rather than to a broken link.
+  dependencyLink: auto
+  # Append the commit behind each entry line to the line. placement is off
+  # (default) or suffix; link is auto, off or a URL template; format defaults
+  # to "$DISPAT_COMMIT_SHORT".
+  commitRefs:
+    placement: suffix
+    link: auto
   # releaseName names the release: a sub-header under the entry's date line
   # here, the release's own name on GitHub. $VAR and ${VAR} expand against the
   # releasing package's DISPAT_* variables, its script outputs, and the
@@ -419,6 +460,11 @@ commit:
   enabled: false
   messageFormat: "chore(release): {tags}"  # {tags}, {packages}
   push: false
+  # Write a tag the repository already carries instead of failing on it
+  # (default true), which is what a moving alias tag needs. A release tag
+  # found at a different commit is still left alone, and the branch is never
+  # force pushed.
+  force: true
   remote: origin
   verify: true   # ls-remote check before any work when push is enabled
   # Extra repo-relative paths the release commit stages: the shared artifacts
@@ -454,6 +500,10 @@ parser:
 #     channel: inherit
 #   limits: { unitsPerMessage: 64, scopeTermsPerUnit: 256, messageBytes: 1048576 }
 #   allowedChannels: [beta, rc]
+#   quiet: false        # hide the parser's own diagnostics from the log; a
+#                       # hidden error still counts and still blocks
+#   messageLevelTrailers: [Signed-off-by, Co-authored-by, Reviewed-by]
+#   issueTrailers: [Closes, Fixes, Refs]    # each replaces its default list
 
 # GitHub release per published package that exported DISPAT_EXPORT_GITHUB;
 # the recorder is enabled by default (needs a repo and token: owner/repo here
@@ -471,6 +521,10 @@ github:
   repo: monorepo
   apiUrl: https://api.github.com
   tokenEnv: GITHUB_TOKEN
+  # Create a GitHub release for every published package, even one whose
+  # scripts exported no DISPAT_EXPORT_GITHUB (the export then only adds
+  # assets). Default false: the export is the per-package opt-in.
+  allPackages: false
   # Create every release as a draft for a person to publish after reading it.
   # A draft carries no tag ref until then, so nothing that resolves a release
   # by its tag (dispat install, self-update, the alias-tag chain) sees it

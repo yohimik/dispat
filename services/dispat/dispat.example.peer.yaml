@@ -1,0 +1,86 @@
+# One peer of a linked fleet: repositories released together with no control
+# repository.
+#
+# Every peer carries a file like this one: its own identity, the roster of the
+# other peers, its own packages, its own commit policy and its own records. A
+# release may start in any of them. It composes the fleet by walking the
+# links, takes every participating repository's lock, and records each package
+# in the repository that owns it.
+#
+#   dispat compute --topology minimal   # propose the submodule links that
+#                                       # connect the roster; commits nothing
+#   dispat status
+#   dispat release
+#
+# A fleet with a control repository is dispat.example.control.yaml.
+
+# This repository's identity. Stating it is what makes the file a peer's. It
+# is the submodule name every neighbour links this repository under, which is
+# what lets one identity be read from either side of a link. Letters, digits,
+# dot, underscore and hyphen; "control" is reserved.
+repository: api
+
+# The roster: every other peer, by identity, with where it is cloned from.
+# `path` is where a link to it lives in this repository (default
+# .links/<name>), `branch` the release branch a created link is pinned at.
+# The roster states membership; the links themselves are submodules, created
+# from what `dispat compute` proposes. They must form a tree, so exactly one
+# route joins any two repositories.
+repositories:
+  - name: sdk
+    url: git@github.com:acme/sdk.git
+    branch: main
+  - name: web
+    url: git@github.com:acme/web.git
+    path: .links/web
+    branch: main
+
+scripts:
+  install: "npm ci"
+  build: "npm run build"
+  publish: "npm publish --access public"
+  npm-login: "npm config set //registry.npmjs.org/:_authToken $NPM_TOKEN"
+
+# Paths are this repository's own: a peer configures the packages it owns.
+spaces:
+  services:
+    path: packages
+    flow:
+      login: npm-login
+      build: [install, build]
+      publish: publish
+
+# A provider may live in another peer. The direction of a package edge has
+# nothing to do with the direction of a link.
+dependencies:
+  api: [sdk]
+
+# Participation is the invocation's question and is read from the repository
+# the run was started in.
+#
+# repositoryOverrides:
+#   legacy:
+#     enabled: false
+
+# Commit policy, lock policy and release records are each peer's own.
+commit:
+  enabled: true
+  push: true
+  branch: main
+
+# An unsafe lock bypass stated here switches off this repository's lock and no
+# other peer's. A run that delegates work to worker nodes refuses it wherever
+# it is stated.
+unsafeDisableLock: false
+
+# Worker nodes: the `execution` object of dispat.example.orchestrator.yaml,
+# stated in the repository a release is started in. What another peer states
+# about execution is ignored by that run.
+
+parser:
+  propagation:
+    depth: 1
+
+nonPackageScopes: [release]
+
+concurrency: [4, 1]
