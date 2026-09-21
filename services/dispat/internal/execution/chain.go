@@ -88,6 +88,14 @@ type ChainTip struct {
 	Kind     MessageKind
 	Previous MessageKind
 
+	// isProtocol reports whether the commit's tree holds anything this
+	// protocol wrote at all. A commit with no message and nothing under the
+	// message folder is a prepared input state, which is a perfectly ordinary
+	// thing to find on a mailbox; one that has the folder and not a readable
+	// message in it is somebody writing into this node's mailbox, and the two
+	// are told apart here so that only the second is a warning.
+	isProtocol bool
+
 	// The blobs the tip's tree holds for its message, resolved while the tree
 	// was read so that reading the message itself costs no second listing.
 	// They are this package's own plumbing and never leave it.

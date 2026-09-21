@@ -30,10 +30,11 @@ type fakeMailbox struct {
 	documents map[string][]byte
 	rejection map[string]RejectReason
 
-	written   []MessageKind
-	fetched   []string
-	forgotten int
-	polls     int
+	written      []MessageKind
+	fetched      []string
+	reconsidered []string
+	forgotten    int
+	polls        int
 }
 
 func (m *fakeMailbox) Observe(context.Context, string) ([]gitx.RemoteHead, error) {
@@ -65,6 +66,8 @@ func (m *fakeMailbox) Fetch(_ context.Context, branches []string) error {
 	m.fetched = append(m.fetched, branches...)
 	return nil
 }
+
+func (m *fakeMailbox) Reconsider(branch string) { m.reconsidered = append(m.reconsidered, branch) }
 
 func (m *fakeMailbox) Forget() { m.forgotten++ }
 
@@ -197,15 +200,39 @@ func TestWorkerRefusesEveryUnacceptableAssignment(t *testing.T) {
 	})
 
 	t.Run("a kind this build does not execute", func(t *testing.T) {
-		build := validProbe(branch)
-		build.Kind = KindBuild
-		worker, mailbox := newWorkerFixture(t, branch, assignment, build)
+		publish := validProbe(branch)
+		publish.Kind = KindPublish
+		worker, mailbox := newWorkerFixture(t, branch, assignment, publish)
 
 		assert.False(t, worker.tick(t.Context()))
 		assert.Empty(t, mailbox.written, "work this node cannot run stays queued for one that can")
 		assert.False(t, worker.Seen.IsSeen("run-1", PreflightTask, 1),
 			"and is not remembered, so a node that learns to run it still can")
 	})
+}
+
+// TestWorkerLeavesQueuedWorkVisible: a node with no free slot leaves the
+// assignment exactly where it is and forgets what it saw of the branch, so the
+// next poll offers it again.
+//
+// Without the second half the work would wait for ever: nothing else is going
+// to move that branch, so a memo saying "unchanged since the last poll" would
+// mean "already dealt with" for the life of the process.
+func TestWorkerLeavesQueuedWorkVisible(t *testing.T) {
+	branch := "dispat-worker-build-a-20260921-build-abc"
+	build := validProbe(branch)
+	build.Kind, build.Task = KindBuild, "core:build"
+	worker, mailbox := newWorkerFixture(t, branch,
+		ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}, build)
+	worker.slots = make(chan struct{}, 1)
+	worker.slots <- struct{}{}
+
+	isProgress := worker.tick(t.Context())
+
+	assert.False(t, isProgress)
+	assert.Empty(t, mailbox.written, "a full node claims nothing")
+	assert.Equal(t, []string{branch}, mailbox.reconsidered, "and the next poll offers it again")
+	assert.False(t, worker.Seen.IsSeen("run-1", "core:build", 1))
 }
 
 // TestWorkerRecoversFromAStoreThatWentAway: the object cache is dispensable,

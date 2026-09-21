@@ -49,6 +49,7 @@ type mailboxx interface {
 	Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error)
 	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte) (string, error)
 	Fetch(ctx context.Context, branches []string) error
+	Reconsider(branch string)
 	Forget()
 }
 
@@ -292,6 +293,10 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 	select {
 	case w.slots <- struct{}{}:
 	default:
+		// Left exactly where the orchestrator put it, and forgotten by the
+		// memo, so that the next poll offers it to this node again: nobody
+		// else is going to move the branch on this node's behalf.
+		w.Mailbox.Reconsider(tip.Branch)
 		w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("run", assignment.Run).
 			Str("task", assignment.Task).Msg("assignment left queued: this node is full")
 		return false, nil
@@ -456,6 +461,14 @@ func (w *Worker) reportUnusable(tip ChainTip, err error) error {
 // warnings. Everything else is the protocol working: a branch this node
 // already answered, or a step it does not write.
 func (w *Worker) reportIgnoredTip(tip ChainTip) {
+	if tip.Kind == "" && !tip.isProtocol {
+		// A commit carrying nothing of this protocol at all is a prepared
+		// input state, which is what the source of every dispatched task sits
+		// on and is an ordinary thing to find in a mailbox.
+		w.Log.Debug().Str("node", w.Node).Str("branch", tip.Branch).Str("commit", tip.OID).
+			Msg("input state inspected")
+		return
+	}
 	if tip.Kind == "" {
 		w.reportRejection(tip, ReasonUnreadable)
 		return

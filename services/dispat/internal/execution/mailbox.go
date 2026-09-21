@@ -104,10 +104,6 @@ func NewGitMailbox(endpoint string, git *gitx.LocalGitx, signer *Signer, log zer
 	}
 }
 
-// Endpoint is the address this mailbox reads and writes, as configured. Every
-// caller that puts it in a message goes through gitx.RedactURL first.
-func (m *GitMailbox) Endpoint() string { return m.endpoint }
-
 // Assign writes one create-only assignment and answers the commit it created.
 //
 // Create-only is what makes two orchestrators offering the same name produce
@@ -238,6 +234,20 @@ func (m *GitMailbox) Observe(ctx context.Context, pattern string) ([]gitx.Remote
 	return moved, nil
 }
 
+// Reconsider forgets what one branch was last seen at, so that the next poll
+// reports it again although nothing on it has moved.
+//
+// It exists for the one thing a node does with work it cannot take right now:
+// a full node leaves the assignment exactly where the orchestrator put it, and
+// without this the memo would make "unchanged since the last poll" mean
+// "already dealt with" for the rest of the process's life, so queued work
+// would wait for a push nobody is going to make.
+func (m *GitMailbox) Reconsider(branch string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.observed, branch)
+}
+
 // Fetch brings named coordination branches into this node's store without
 // going through the poll, which is what a task does with the extra input
 // states its assignment named: they are branches nobody advertises to this
@@ -279,11 +289,12 @@ func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTi
 		return ChainTip{}, fmt.Errorf("execution: resolving %s on %s: %w", head.OID, head.Name, err)
 	}
 	tip := ChainTip{Branch: head.Name, OID: head.OID}
-	kind, document, signature, err := m.readTree(ctx, head.OID)
+	carried, err := m.readTree(ctx, head.OID)
 	if err != nil {
 		return ChainTip{}, err
 	}
-	tip.Kind, tip.document, tip.signature = kind, document, signature
+	tip.Kind, tip.document, tip.signature = carried.kind, carried.document, carried.signature
+	tip.isProtocol = carried.isProtocol
 	parent, err := m.remote.ResolveCommit(ctx, head.OID+"^")
 	if err != nil {
 		// No first parent: the commit is a root, which is what a probe
@@ -291,28 +302,40 @@ func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTi
 		// would have failed the chain resolution above.
 		return tip, nil
 	}
-	previous, _, _, err := m.readTree(ctx, parent)
+	previous, err := m.readTree(ctx, parent)
 	if err != nil {
 		return ChainTip{}, err
 	}
-	tip.Previous = previous
+	tip.Previous = previous.kind
 	return tip, nil
+}
+
+// transportTree is what one transport commit's tree holds: which message it
+// carries, the blobs of that message, and whether the tree is this protocol's
+// at all.
+type transportTree struct {
+	kind       MessageKind
+	document   string
+	signature  string
+	isProtocol bool
 }
 
 // readTree answers which message a transport commit carries, and the blobs of
 // the document and its signature. A commit carrying none is the source
 // snapshot an assignment sits on, and answers the empty kind.
-func (m *GitMailbox) readTree(ctx context.Context, oid string) (kind MessageKind, document, signature string, err error) {
+func (m *GitMailbox) readTree(ctx context.Context, oid string) (transportTree, error) {
 	plumbing := gitx.NewPlumbing(m.plumbing)
 	signatures := map[MessageKind]string{}
+	carried := transportTree{}
 	documents := 0
 	plumbing.ListTree(ctx, oid, func(entry gitx.TreeEntry) error {
 		name, isMessage := strings.CutPrefix(entry.Name, messageDir+"/")
 		if !isMessage {
 			return nil
 		}
+		carried.isProtocol = true
 		if found, isDocument := strings.CutSuffix(name, ".json"); isDocument {
-			kind, document, documents = MessageKind(found), entry.OID, documents+1
+			carried.kind, carried.document, documents = MessageKind(found), entry.OID, documents+1
 			return nil
 		}
 		if found, isSignature := strings.CutSuffix(name, ".sig"); isSignature {
@@ -321,15 +344,16 @@ func (m *GitMailbox) readTree(ctx context.Context, oid string) (kind MessageKind
 		return nil
 	})
 	if err := plumbing.Err(); err != nil {
-		return "", "", "", fmt.Errorf("execution: listing the transport tree of %s: %w", oid, err)
+		return transportTree{}, fmt.Errorf("execution: listing the transport tree of %s: %w", oid, err)
 	}
 	// Exactly one message, with its signature beside it. Anything else is not
 	// a commit this protocol wrote, and guessing which of two documents was
 	// meant is precisely the guess an attacker would be making it take.
-	if documents != 1 || signatures[kind] == "" {
-		return "", "", "", nil
+	if documents != 1 || signatures[carried.kind] == "" {
+		return transportTree{isProtocol: carried.isProtocol}, nil
 	}
-	return kind, document, signatures[kind], nil
+	carried.signature = signatures[carried.kind]
+	return carried, nil
 }
 
 // Read answers the verified document of an inspected tip, refusing anything

@@ -18,7 +18,6 @@ package execution
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"strings"
 	"time"
 )
 
@@ -99,21 +98,9 @@ const (
 
 // messageDir is the one folder every transport tree puts its message in, so
 // that build outputs travelling in the same tree can never collide with the
-// protocol's own files.
+// protocol's own files. One message's document is `<kind>.json` inside it and
+// the signature over its exact bytes is `<kind>.sig` beside it.
 const messageDir = "dispat"
-
-// FormatMessagePath is where one message's document sits in a transport tree,
-// and FormatSignaturePath is where the signature over its exact bytes sits
-// beside it.
-func FormatMessagePath(kind MessageKind) string {
-	return messageDir + "/" + string(kind) + ".json"
-}
-
-// FormatSignaturePath is the detached signature of the document at
-// FormatMessagePath.
-func FormatSignaturePath(kind MessageKind) string {
-	return messageDir + "/" + string(kind) + ".sig"
-}
 
 // branchPrefix is what every branch addressed to one node begins with. The
 // node name is written as the file spelled it, because that is what the node
@@ -158,13 +145,6 @@ func formatRandomHex(n int) string {
 	value := make([]byte, n)
 	_, _ = rand.Read(value)
 	return hex.EncodeToString(value)
-}
-
-// IsAddressedTo reports whether a branch name routes to this node, which is
-// the cheapest half of the acceptance rules and the only one that can be
-// answered before anything is fetched.
-func IsAddressedTo(branch, node string) bool {
-	return strings.HasPrefix(branch, FormatBranchPrefix(node))
 }
 
 // Header is what every message of the protocol carries, whatever it is.

@@ -141,23 +141,13 @@ func TestBranchNamesRouteAndDoNotRepeat(t *testing.T) {
 
 	branch := FormatBranch("build-a", KindProbe, at)
 
-	assert.True(t, IsAddressedTo(branch, "build-a"))
-	assert.False(t, IsAddressedTo(branch, "build-b"))
 	assert.Contains(t, branch, "dispat-worker-build-a-20260921-probe-")
 	assert.Len(t, branch, len("dispat-worker-build-a-20260921-probe-")+32)
 	assert.NotEqual(t, branch, FormatBranch("build-a", KindProbe, at))
 	assert.Equal(t, "refs/heads/dispat-worker-build-a-*", FormatBranchPattern("build-a"))
 	// A node whose name is a prefix of another's lists the other's branches
 	// too, which is harmless because the signed message decides.
-	assert.True(t, IsAddressedTo(branch, "build"))
+	assert.Equal(t, "dispat-worker-build-", FormatBranchPrefix("build"))
 	assert.NotEqual(t, FormatRunID(), FormatRunID())
 	assert.Len(t, FormatRunID(), 32)
-}
-
-// TestMessagePathsAreOnePerKind: the document and the signature of one
-// message sit beside each other under a folder nothing else writes into.
-func TestMessagePathsAreOnePerKind(t *testing.T) {
-	assert.Equal(t, "dispat/assignment.json", FormatMessagePath(MessageAssignment))
-	assert.Equal(t, "dispat/assignment.sig", FormatSignaturePath(MessageAssignment))
-	assert.Equal(t, "dispat/result.json", FormatMessagePath(MessageResult))
 }
