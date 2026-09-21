@@ -88,6 +88,7 @@ const retryDelayMs = calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs });
 
 - After imports, start each component file with an `interface ComponentProps` that declares its props.
 - Define components only as `const` arrow functions typed as `FC<ComponentProps>`. Import `FC` as a type from React.
+- Accept a `props` object and destructure it with `const` as the first statement in the component body, before hooks or other logic. Define default values for optional props in that destructuring declaration. Do not destructure component props in the function signature.
 - When a component accepts children, declare `children?: ReactNode` explicitly in `ComponentProps` and import `ReactNode` as a type. Omit the property when children are not supported.
 - Keep one component per file. Move additional components into their own files, each with its own `ComponentProps` interface.
 
@@ -99,7 +100,9 @@ interface ComponentProps {
   children?: ReactNode;
 }
 
-export const ReleaseSummary: FC<ComponentProps> = ({ title, children }) => {
+export const ReleaseSummary: FC<ComponentProps> = (props) => {
+  const { title, children = null } = props;
+
   return (
     <section>
       <h2>{title}</h2>
