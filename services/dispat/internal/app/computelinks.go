@@ -13,12 +13,14 @@ package app
 // its two repositories declares, the checkouts a declared link is missing, and
 // the roster entries a peer has not heard about.
 //
-// The link set is a spanning tree chosen by Kruskal over the fleet's pairs in
-// folded-identity order, against a union-find seeded with the links that
+// The link set is a spanning tree over a union-find seeded with the links that
 // already exist. That gives three properties worth having: exactly one link
-// per component beyond the first, never a second path between two
-// repositories (which composition would refuse as E338), and the same answer
-// whatever order the fleet was assembled in.
+// per group beyond the first, never a second path between two repositories
+// (which composition would refuse as E338), and the same answer whatever order
+// the fleet was assembled in. Which tree it is is chosen in computecentres.go,
+// by joining the groups at their centres, and Kruskal over the fleet's pairs
+// in folded-identity order is what is left for a group no centre of which can
+// hold a link.
 //
 // Nothing here commits and nothing here deletes. A link is created and staged;
 // the operator reads the diff and commits it. A link the fleet no longer needs
@@ -179,8 +181,10 @@ func (a *App) fleetRoster() []rosterEntry {
 	return out
 }
 
-// missingLinks is the spanning tree the fleet still needs: Kruskal over the
-// fleet's pairs in folded order, seeded with the links that exist.
+// missingLinks is the spanning tree the fleet still needs, seeded with the
+// links that exist: the group centres joined to the hub's centre first,
+// because that is the proposal with the shortest longest route, and then
+// whatever pair Kruskal can still reach for a group the centres could not join.
 func (a *App) missingLinks(fleet []rosterEntry, topology string) ([]linkSuggestion, error) {
 	if len(fleet) < 2 {
 		return nil, nil
@@ -188,38 +192,85 @@ func (a *App) missingLinks(fleet []rosterEntry, topology string) ([]linkSuggesti
 	if topology == "star" {
 		return a.suggestStarLinks(fleet)
 	}
-	groups := newFleetGroups(fleet)
+	joined := newFleetGroups(fleet)
 	for i := range a.workspace.Repositories {
 		repository := &a.workspace.Repositories[i]
 		for _, peer := range repository.LinkPeers() {
-			groups.join(repository.Name, peer)
+			joined.join(repository.Name, peer)
 		}
 	}
+	out := a.suggestCentreLinks(fleet, joined)
+	return append(out, a.suggestReachableLinks(fleet, joined)...), nil
+}
+
+// suggestCentreLinks joins every group of the fleet to the hub group at their
+// centres, which is the proposal of fewest links whose longest route between
+// two repositories is shortest. Section 27.9 of the specification charges link
+// evidence and settlement by that route, so the shape is worth choosing rather
+// than taking whichever pair a pass over the roster reaches first.
+func (a *App) suggestCentreLinks(fleet []rosterEntry, joined *fleetGroups) []linkSuggestion {
+	groups := splitFleetIntoGroups(fleet, fleetLinkAdjacency(fleet, a.workspace.Repositories))
+	if len(groups) < 2 {
+		return nil
+	}
+	hub := chooseFleetHub(groups)
+	a.log.Debug().Str("hub", hub.centre().name).Int("radius", hub.radius).Int("groups", len(groups)).
+		Msg("joining the fleet's groups at their centres, which keeps the longest route between two repositories short")
+	var out []linkSuggestion
+	for _, group := range groups {
+		if strings.EqualFold(group.centre().name, hub.centre().name) {
+			continue
+		}
+		from, to, isWritable := chooseGroupJoinEnds(group, hub)
+		if !isWritable {
+			a.log.Debug().Str("centre", group.centre().name).
+				Msg("no end of this group's link to the fleet is a checkout this run holds, so the pair is left to what compute can reach")
+			continue
+		}
+		if !joined.join(from.name, to.name) {
+			continue
+		}
+		owner, peer := chooseLinkOwner(from, to)
+		a.log.Trace().Str("repository", owner.name).Str("peer", peer.name).Int("radius", group.radius).
+			Msg("proposing the link that joins this group to the fleet at its centre")
+		out = append(out, a.proposeLink(owner, peer))
+	}
+	return out
+}
+
+// suggestReachableLinks is what is left of Kruskal: the fleet's pairs in
+// folded order, joining whatever the centres could not, which is a group no
+// member of which this run has a checkout of. It proposes what can be written
+// and leaves the rest to be reported.
+func (a *App) suggestReachableLinks(fleet []rosterEntry, joined *fleetGroups) []linkSuggestion {
 	var out []linkSuggestion
 	for i := 0; i < len(fleet); i++ {
 		for j := i + 1; j < len(fleet); j++ {
-			from, to := fleet[i], fleet[j]
-			if groups.find(from.name) == groups.find(to.name) {
-				continue
-			}
 			// The link is created in whichever end this run can reach; the
 			// other half is written inside the checkout the creation makes.
-			owner, peer := from, to
-			if !owner.composed {
-				owner, peer = to, from
-			}
+			owner, peer := chooseLinkOwner(fleet[i], fleet[j])
 			if !owner.composed {
 				continue
 			}
-			groups.join(from.name, to.name)
-			out = append(out, linkSuggestion{
-				kind: linkChangeLink, repository: owner.name, peer: peer.name,
-				path: resolveRepositoryLinkPath(a.workspace.RepositoryByName(owner.name), peer.name), url: peer.url, branch: peer.branch,
-				detail: fmt.Sprintf("connects %s to the fleet", peer.name),
-			})
+			if !joined.join(owner.name, peer.name) {
+				continue
+			}
+			out = append(out, a.proposeLink(owner, peer))
 		}
 	}
-	return out, nil
+	return out
+}
+
+// proposeLink is one fleet link as compute offers it: created in the end that
+// can write it, at the path that end's own roster asks for.
+func (a *App) proposeLink(owner, peer rosterEntry) linkSuggestion {
+	return linkSuggestion{
+		kind: linkChangeLink, repository: owner.name, peer: peer.name,
+		path:   resolveRepositoryLinkPath(a.workspace.RepositoryByName(owner.name), peer.name),
+		url:    peer.url,
+		branch: peer.branch,
+		detail: fmt.Sprintf("connects %s to the fleet", peer.name),
+	}
 }
 
 // suggestStarLinks proposes one direct link from the entry repository to
