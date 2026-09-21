@@ -135,16 +135,9 @@ func TestCovConfigRefusesCollidingPackageIdentities(t *testing.T) {
 		refuseStatus(t, r, "is not a folder")
 	})
 
-	t.Run("a standalone package whose path is the repository", func(t *testing.T) {
-		r := harness.New(t)
-		cfg := harness.BaseFile(1)
-		cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
-		cfg.Flow = buildPublish()
-		cfg.Packages = map[string]models.PackageConfig{"core": {Path: "."}}
-		r.WriteConfigModel(cfg)
-		r.Commit("feat(core): bootstrap")
-		refuseStatus(t, r, "must name a folder inside the repository")
-	})
+	// A standalone path naming the repository itself is no longer one of
+	// these: it declares the single-package repository, which root_path_test.go
+	// covers.
 
 	t.Run("a standalone package whose path is absolute", func(t *testing.T) {
 		r := harness.New(t)
