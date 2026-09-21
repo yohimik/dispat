@@ -2125,9 +2125,19 @@ reachability decidable locally, because a commit the checkout does not hold cann
 is what makes one comparison sufficient: no other coordinated run can add a record between the comparison and this
 run's own records. Without the comparison the lock serializes runs and isolates nothing, because two runs that never
 overlap still plan the same version when the second one's checkout predates the first one's records. A run that records
-nowhere but its own repository has that repository as its store and nothing to compare. Read-only planning takes no
-lock and makes no comparison; its result describes the checkout. The comparison reads one record inventory per
-repository, `O(T)` each, and asks one ancestry question per record the input lacks, which is none in the ordinary case.
+nowhere but its own repository has that repository as its store and nothing to compare, and neither has a repository
+that owns no package. Read-only planning takes no lock and makes no comparison; its result describes the checkout. The
+comparison reads one record inventory per repository, `O(T)` each, and asks one ancestry question per record the input
+lacks, which is none in the ordinary case.
+
+Only what §12.1 parses as a release tag of a workspace package is a release record here; a ref the implementation
+moves by design, its lock, and a name that merely resembles a tag format are not. A store whose records cannot be read
+is not a store whose records agree: the run is refused as `E196`, because a plan whose completeness nothing could
+check is a plan over incomplete history. An implementation MAY offer a setting that forgoes the engine's reads of a
+store before it writes there, for a store that refuses them. A run under that setting makes no comparison and has
+exactly the exposure this rule removes; the engine MUST NOT describe its records as compared and SHOULD report the
+omission. A run under an unsafe lock bypass (`W331`) still compares. No lock then holds other runs off after the
+comparison, so it narrows the exposure and does not close it.
 
 Under §27, enumerate each package's records in its owning repository and reconstruct cross-repository consumer
 positions from gitlink snapshots or explicit `repositoryBaselines`. Never compare or sort commit IDs from different
@@ -6429,8 +6439,9 @@ repository that has a next hop in it, not once per route. A package therefore se
 and with at most `Y` when it reads one repository. Both topologies of §27.11 use `Q - 1` links, the fewest that join
 `Q` peers and the only count at which every route is unique. They differ in `Y`: a star bounds every route at two hops
 and every settlement at two commits, while another tree can reach `Q - 1` of each. A minimal proposal that joins group
-centres (§27.11) has the least `Y` any proposal keeping the existing links can have; joining two chains of five
-repositories end to end gives `Y = 9` where joining their centres gives 5. A pin that already records the
+centres (§27.11) has the least `Y` any proposal keeping the existing links can have. For the groups an engine can see,
+one linked group and unlinked identities, that is the group's own longest route `d`, against `d + 1` when an identity
+is linked to an end of that route; between two linked groups the difference can reach the sum of their radii. A pin that already records the
 revision to settle costs no commit, so consecutive packages of one repository that read unchanged peers settle once.
 
 Publication revalidation has a separate output-sensitive cost. If repository `q` participates in `Jq` fleet or
@@ -6691,8 +6702,15 @@ to the centre of the group with the greatest radius. With radii `r1 >= r2 >= r3`
 group, the result has `Y = max(d, r1 + r2 + 1, r2 + r3 + 2)`, no proposal has less, and the computation is `O(Q)`.
 Ties, between the two centres a group can have and between groups of equal radius, go to the identity that sorts first
 under case folding, so two computations over one fleet propose the same links. A fleet with no links yet has every
-radius zero and receives a star on its first identity. Where the end a link must be written in is not composed, the
-computation proposes what it can write and reports the rest.
+radius zero and receives a star on its first identity.
+
+An engine learns links only from the repositories it composed, and composition follows links from the entry. The groups
+it can see are therefore the entry's group and the identities no composed repository links, each a group of one, and
+the rule reduces to linking each such identity to a centre of the entry's group. That keeps `Y` at the group's own
+longest route, where linking the identity to an end of that route adds a hop. A link is written in a composed end.
+Where no centre of the group is composed, the computation uses the composed member nearest a centre, ties again to the
+identity that sorts first under case folding, and the least `Y` is then not guaranteed; where no end is composed, it
+proposes what it can write and reports the rest.
 `compute --topology star` MUST propose a direct link from every peer to the entry repository. It is valid only for an
 identity-linked fleet and MUST fail when existing links are incompatible with that shape. Both modes retain the same
 repository-local policy and record ownership. Their proposed set MUST be a tree over the fleet, so it never creates
@@ -6780,10 +6798,10 @@ computation repairs.
 29. Consumers owned by `web` and by `api` have the same boundary `S0` in `sdk`. **One immutable window over `sdk` may
     serve both.** A window is keyed by the repository it ranges over and the boundary revision, not by the owner of
     the package that reads it; two boundaries that differ remain two windows.
-30. Repositories `a`, `b`, `c`, `d`, `e` are linked in a chain in that order, `v`, `w`, `x`, `y`, `z` likewise, and
-    the roster names all ten. `--topology minimal` **proposes exactly one link, and SHOULD propose the one between
-    `c` and `x`**, for a longest route of 5. Proposing the link between `a` and `v` is conforming and leaves a longest
-    route of 9; proposing two links, or a link inside either chain, is not.
+30. Composed repositories `a`, `b`, `c`, `d`, `e` are linked in a chain in that order, and the roster also names `z`,
+    which nothing links. `--topology minimal` **proposes exactly one link, and SHOULD propose the one between `c` and
+    `z`**, which leaves the longest route at 4. Proposing the link between `a` and `z` is conforming and makes it 5;
+    proposing two links, or a link between two members of the chain, is not.
 
 ---
 
