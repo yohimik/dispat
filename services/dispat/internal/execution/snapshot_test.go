@@ -239,7 +239,8 @@ func writeInChunks(t *testing.T, path, body string) {
 // poller and exists for the guard alone.
 func newGuardedCoordinator(t *testing.T) *Coordinator {
 	t.Helper()
-	coordinator := NewCoordinator("run", "digest", "generation", nil, nil,
+	coordinator := NewCoordinator("run", "digest", "generation",
+		LocalNode{Name: "here", Capacity: 1}, nil, nil, nil,
 		Timeouts{}, TransferLimits{}, zerolog.Nop())
 	coordinator.Start(t.Context(), Dispatch{Concurrency: 2})
 	return coordinator

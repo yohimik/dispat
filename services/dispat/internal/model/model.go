@@ -352,6 +352,11 @@ type Space struct {
 	// build and publish, in Go's GOOS/GOARCH spelling. Empty means any node,
 	// so a workspace that never says otherwise places its work anywhere.
 	BuildPlatforms []string
+	// RunOnly is where this package's build and publish frames may be placed,
+	// resolved through the same ladder as BuildPlatforms. nil is the level
+	// nobody stated, which reads as "both" through the nil-safe resolvers, so
+	// a workspace that never says otherwise is placed wherever there is room.
+	RunOnly *public.RunOnly
 	// AutoVersion is the space's resolved native manifest-rewriting policy
 	// for the version stage; nil means the feature is off and manifest
 	// syncing stays the VersionScript's job alone.

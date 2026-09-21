@@ -110,6 +110,7 @@
       "path": "tools/cli",
       "buildOutputs": ["bin"],
       "buildPlatforms": ["linux/amd64", "linux/arm64"],
+      "runOnly": "orchestrator",
       "flow": {
         "build": "build-go",
         "publish": "publish-go"

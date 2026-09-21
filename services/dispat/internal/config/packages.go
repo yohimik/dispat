@@ -470,6 +470,13 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	if po.BuildPlatforms != nil {
 		sc.BuildPlatforms = po.BuildPlatforms
 	}
+	// The placement replaces as a pair rather than a half at a time: a level
+	// that states where this package publishes has stated where it builds as
+	// well, and half an inherited pair beside half a stated one would be a
+	// value no level ever wrote.
+	if po.RunOnly != nil {
+		sc.RunOnly = po.RunOnly
+	}
 	if po.Versioning != "" {
 		sc.Versioning = po.Versioning
 		sc.VersionGroup = ""
@@ -540,6 +547,7 @@ func rootDefaults(c *File) SpaceConfig {
 		Webhooks:              c.Webhooks,
 		BuildOutputs:          c.BuildOutputs,
 		BuildPlatforms:        c.BuildPlatforms,
+		RunOnly:               c.RunOnly,
 		Versioning:            c.Versioning,
 		AutoVersion:           c.AutoVersion,
 		Changelog:             c.Changelog,
@@ -563,6 +571,7 @@ func spaceAsOverride(sc SpaceConfig) PackageConfig {
 		Webhooks:              sc.Webhooks,
 		BuildOutputs:          sc.BuildOutputs,
 		BuildPlatforms:        sc.BuildPlatforms,
+		RunOnly:               sc.RunOnly,
 		Versioning:            sc.Versioning,
 		VersionGroup:          sc.VersionGroup,
 		Scripts:               sc.Scripts,
@@ -608,6 +617,7 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		Webhooks:              f.Webhooks,
 		BuildOutputs:          f.BuildOutputs,
 		BuildPlatforms:        f.BuildPlatforms,
+		RunOnly:               f.RunOnly,
 		Versioning:            f.Versioning,
 		VersionGroup:          f.VersionGroup,
 		Scripts:               f.Scripts,

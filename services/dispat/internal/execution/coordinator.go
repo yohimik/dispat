@@ -37,11 +37,13 @@ type Link struct {
 	Endpoint string
 }
 
-// PackagePlatforms is one releasing package and the node platforms its build
-// may run on. An empty list is every platform.
+// PackagePlatforms is one releasing package, the node platforms its build may
+// run on and where the run is allowed to place it. An empty platform list is
+// every platform.
 type PackagePlatforms struct {
 	Package   string
 	Platforms []string
+	Placement Placement
 }
 
 // Coordinator runs one release's side of the protocol: it names the run,
@@ -56,6 +58,16 @@ type Coordinator struct {
 	Generation string
 	// Links are the configured worker nodes.
 	Links []Link
+	// Local is this machine's own place in the pool: what it calls itself,
+	// and how much of its own run it may execute (§28.1). It is carried
+	// rather than derived because the name is the one every log line and
+	// every manifest of this node already uses.
+	Local LocalNode
+	// Signer signs what this run writes into a mailbox, and what it writes
+	// into its own object store for a worker to read: a build placed here
+	// produces a result a consuming node verifies exactly as it verifies a
+	// worker's, so the orchestrator signs one too.
+	Signer *Signer
 	// Timeouts and Limits are the run's own bounds, as configured.
 	Timeouts Timeouts
 	Limits   TransferLimits
@@ -123,12 +135,12 @@ type Timeouts struct {
 // object store is depends on who is asking: a release's own repository for an
 // orchestrator, a bare cache for a serving node. Keeping that decision at the
 // caller is what lets this type be exercised over any transport.
-func NewCoordinator(run, planDigest, generation string, links []Link,
-	mailboxes map[string]*GitMailbox, timeouts Timeouts, limits TransferLimits,
+func NewCoordinator(run, planDigest, generation string, local LocalNode, links []Link,
+	mailboxes map[string]*GitMailbox, signer *Signer, timeouts Timeouts, limits TransferLimits,
 	log zerolog.Logger) *Coordinator {
 	return &Coordinator{
-		Run: run, PlanDigest: planDigest, Generation: generation, Links: links,
-		Timeouts: timeouts, Limits: limits, Log: log,
+		Run: run, PlanDigest: planDigest, Generation: generation, Local: local, Links: links,
+		Timeouts: timeouts, Limits: limits, Log: log, Signer: signer,
 		mailboxes: mailboxes, owned: map[string][]gitx.BranchLease{},
 	}
 }
@@ -174,7 +186,7 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 	// The pool is what the reports were collected for: a node's capacity and
 	// its platform are the node's own statements about itself, and the only
 	// moment this run hears them is here.
-	c.Pool = NewPool(c.Links, reports, c.Log)
+	c.Pool = NewPool(c.Links, reports, c.Local, c.Log)
 	return nil
 }
 
@@ -334,6 +346,13 @@ func (c *Coordinator) checkReport(report *NodeReport) error {
 // because a package is placed on whichever compatible node is free.
 func (c *Coordinator) checkPlatforms(packages []PackagePlatforms, reports []*NodeReport) error {
 	for _, wanted := range packages {
+		if wanted.Placement == PlacementOrchestrator {
+			// A package pinned to this machine is never offered to a worker,
+			// so what the workers run says nothing about whether this run can
+			// build it. Whether this machine satisfies it is the pool's
+			// question, asked where the frame is placed.
+			continue
+		}
 		if c.isPlacementPossible(wanted.Platforms, reports) {
 			continue
 		}

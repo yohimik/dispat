@@ -384,6 +384,13 @@ func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency, exclu
 				ev = ev.Str("providerRelation", string(relation.Build)).
 					Bool("providerBlocking", relation.IsBlocking)
 			}
+			// Where the package's two delegable stages may be placed, on the
+			// same terms: named only when a level stated it, and as the pair
+			// it resolved to rather than as the shape the file wrote, since
+			// what a reader is checking is what the ladder came to.
+			if s.RunOnly != nil {
+				ev = ev.Strs("runOnly", []string{s.RunOnly.ResolveBuild(), s.RunOnly.ResolvePublish()})
+			}
 		}
 		if len(p.Ignore) > 0 {
 			ev = ev.Int("ignoreLevels", len(p.Ignore))

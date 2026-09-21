@@ -42,6 +42,26 @@ type fakeRemote struct {
 	// beforeBuild runs inside Build, before it answers, which is how a
 	// scenario cancels a run from inside a dispatched frame.
 	beforeBuild func()
+	// placeHere is the package whose build this pool places on the
+	// orchestrator rather than on a node, which is what `runOnly:
+	// orchestrator` and a full pool both come to.
+	placeHere string
+	// ranHere are the packages whose frame was run through the local
+	// sequence, in order.
+	ranHere []string
+}
+
+// buildHere is the placement that keeps the frame: it runs the executor's own
+// sequence and answers a node nobody has to be told about.
+func (f *fakeRemote) buildHere(ctx context.Context, request StageRequest, here LocalFrame) (StageOutcome, error) {
+	what, err := here(ctx)
+	f.mu.Lock()
+	f.ranHere = append(f.ranHere, request.Release.Pkg.Name)
+	f.mu.Unlock()
+	if err != nil {
+		return StageOutcome{LocalFailure: what}, err
+	}
+	return StageOutcome{}, nil
 }
 
 func (f *fakeRemote) Guard(_ context.Context, stage string) (func(), error) {
@@ -62,7 +82,13 @@ func (f *fakeRemote) Guard(_ context.Context, stage string) (func(), error) {
 	}, nil
 }
 
-func (f *fakeRemote) Build(_ context.Context, request StageRequest) (StageOutcome, error) {
+func (f *fakeRemote) Build(ctx context.Context, request StageRequest, here LocalFrame) (StageOutcome, error) {
+	f.mu.Lock()
+	isPlacedHere := f.placeHere == request.Release.Pkg.Name
+	f.mu.Unlock()
+	if isPlacedHere {
+		return f.buildHere(ctx, request, here)
+	}
 	f.mu.Lock()
 	f.builds = append(f.builds, request)
 	isHeld := f.held
@@ -340,4 +366,54 @@ func (r *exportingRunner) Run(_ context.Context, _, _ string, env []string, _, _
 		return os.WriteFile(path, []byte(r.line+"\n"), 0o644)
 	}
 	return nil
+}
+
+// TestABuildPlacedHereRunsTheLocalFrame: a build the run places on the
+// orchestrator runs the executor's own sequence, hooks and all, in the
+// package's own folder; nothing about it travels, and nothing about it names
+// a worker, because the machine that ran it is the machine writing the line.
+func TestABuildPlacedHereRunsTheLocalFrame(t *testing.T) {
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	space := p.Releases["a"].Pkg.Space
+	space.BeforeBuildScript = []string{"pre"}
+	space.PostBuildScript = []string{"post"}
+	remote := &fakeRemote{placeHere: "a"}
+	runner := &fakeRunner{}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 4, Publish: 4})
+	executor.Remote = remote
+
+	results := executor.Run(context.Background(), p)
+
+	for _, name := range []string{"a", "b"} {
+		require.Equal(t, StatusPublished, results[name].Status, "%s: %v", name, results[name].Err)
+	}
+	assert.Equal(t, []string{"a"}, remote.ranHere, "the placed frame ran through the local sequence")
+	assert.Equal(t, 1, runner.countPrefix("pre"), "its hooks ran here with it")
+	assert.Equal(t, 1, runner.countPrefix("build"))
+	assert.Equal(t, 1, runner.countPrefix("post"))
+	assert.Empty(t, results["a"].Worker, "a frame that ran here names no worker")
+
+	requests := remote.requests()
+	require.Len(t, requests, 1, "only the other package's frame travelled")
+	assert.Equal(t, "b", requests[0].Release.Pkg.Name)
+	assert.Equal(t, "build-a", results["b"].Worker, "and that one still names the node it ran on")
+}
+
+// TestABuildPlacedHereFailsLikeALocalBuild: a frame that failed on this
+// machine fails its package at its build stage with the sentence the local
+// path has always printed, and the outcome script still runs.
+func TestABuildPlacedHereFailsLikeALocalBuild(t *testing.T) {
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	p.Releases["a"].Pkg.Space.OnFailScript = []string{"onfail"}
+	runner := &fakeRunner{fail: map[string]bool{"build a": true}}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 4, Publish: 4})
+	executor.Remote = &fakeRemote{placeHere: "a"}
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusFailed, results["a"].Status)
+	assert.Equal(t, "build", results["a"].FailedStage)
+	assert.Empty(t, results["a"].Worker, "a failure here is nobody else's")
+	assert.Equal(t, StatusSkipped, results["b"].Status, "the consumer is blocked")
+	assert.Equal(t, 1, runner.countPrefix("onfail"), "the outcome script ran")
 }

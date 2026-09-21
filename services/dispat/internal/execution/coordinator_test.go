@@ -37,8 +37,9 @@ func newCoordinatorFixture(t *testing.T, limits TransferLimits) *coordinatorFixt
 	orchestrator := newMailboxFixture(t)
 	node := orchestrator.second(t)
 	links := []Link{{Name: "build-a", Endpoint: orchestrator.endpoint}}
-	coordinator := NewCoordinator("run-1", "digest", "generation", links,
-		map[string]*GitMailbox{"build-a": orchestrator.mailbox},
+	coordinator := NewCoordinator("run-1", "digest", "generation",
+		LocalNode{Name: "here", Capacity: 1}, links,
+		map[string]*GitMailbox{"build-a": orchestrator.mailbox}, orchestrator.signer,
 		Timeouts{Preflight: 2 * time.Second}, limits, zerolog.Nop())
 	return &coordinatorFixture{orchestrator: orchestrator, node: node, coordinator: coordinator}
 }

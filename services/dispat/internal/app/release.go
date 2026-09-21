@@ -124,6 +124,13 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err := a.refuseDirtyReleasePaths(ctx, pl, fleet != nil); err != nil {
 		return nil, err
 	}
+	// A plan naming work only a worker may run, on a node with no worker
+	// link, is a plan this run could not execute anywhere. It is refused here
+	// rather than at the stage, because the stage it would fail at is one
+	// nothing should have reached.
+	if err := a.checkStagePlacements(pl); err != nil {
+		return nil, err
+	}
 	// Every configured worker node is asked what it is before anything else
 	// happens: the plan exists, so what would be placed on the pool is known,
 	// and no hook, stage or record has run yet, so a node that cannot take

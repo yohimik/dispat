@@ -229,6 +229,12 @@ packages:
     # Which worker nodes may run this package's build and publish, as os/arch
     # in Go's spelling. Empty or absent means any node.
     buildPlatforms: [linux/amd64, linux/arm64]
+    # Where those two stages may run: `both` (the default), `worker` or
+    # `orchestrator`, as one value for both stages or as a [build, publish]
+    # pair. This build signs the binaries it produces, so it stays on the
+    # machine that holds the key; under `both` the orchestrator is the node
+    # of last resort, chosen only when no worker has room.
+    runOnly: orchestrator
     flow:
       build: build-go
       publish: publish-go

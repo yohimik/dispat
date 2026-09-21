@@ -108,7 +108,11 @@ spaces:
 packages:
   assets:
     buildOutputs: [dist, generated/types]
-  ui: {}
+  ui:
+    # Where this package's two delegable stages may run: `both` (the
+    # default), `worker` or `orchestrator`, as a [build, publish] pair when
+    # the stages differ. Build anywhere there is room, publish here.
+    runOnly: [both, orchestrator]
   docs:
     # Which nodes may run this package's tasks, as os/arch in Go's spelling.
     # Empty or absent means any node. A platform no configured worker reports
@@ -116,6 +120,10 @@ packages:
     buildPlatforms: [linux/amd64, linux/arm64]
   app:
     buildOutputs: [dist, bin]
+    # This build signs the artefact it produces, so it never leaves the
+    # machine that holds the key. Pinning costs the run a worker: the frame
+    # waits for one of this node's own `execution.concurrency` slots.
+    runOnly: orchestrator
 
 # `assets` is built once. `ui` and `docs` receive its verified output on
 # whichever nodes they were placed and may build at the same time; `app`

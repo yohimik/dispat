@@ -22,6 +22,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -52,6 +53,23 @@ type poolNode struct {
 	capacity  int
 	inFlight  int
 	isHealthy bool
+	// isLocal marks the orchestrator's own entry. It is what a placement
+	// filters on, and it is also why the entry is a node here rather than a
+	// mailbox somewhere: this machine runs a frame by running it, so giving
+	// it an endpoint would be giving it a way to talk to itself.
+	isLocal bool
+}
+
+// LocalNode is the orchestrator's own place in the pool: what this machine
+// calls itself, and how much of its own run it may execute (§28.1, the
+// orchestrator "MAY execute tasks locally under the same rules").
+//
+// The capacity is this node's `execution.concurrency`, the same number that
+// bounds the frames it keeps for itself, because it is one machine and the
+// work does not become cheaper for having been placed rather than delegated.
+type LocalNode struct {
+	Name     string
+	Capacity int
 }
 
 // Lease is one node slot held by one attempt.
@@ -63,6 +81,11 @@ type poolNode struct {
 type Lease struct {
 	// Node is the node the slot belongs to.
 	Node string
+	// IsLocal says the slot is this machine's, which is what decides whether
+	// the frame travels or is simply run. It is on the lease rather than
+	// asked of the pool afterwards because it is a property of the placement
+	// that was made, and the pool has moved on by then.
+	IsLocal bool
 
 	pool *Pool
 	// isSettled keeps a slot from being returned twice, which would hand out
@@ -71,13 +94,15 @@ type Lease struct {
 }
 
 // NewPool builds the pool from the reports preflight collected, one entry per
-// configured link.
+// configured link, plus this machine's own.
 //
-// The capacity is the node's own, because the node is the only party that
-// knows what it can run: an orchestrator that decided would be deciding about
-// a machine it cannot see.
-func NewPool(links []Link, reports []*NodeReport, log zerolog.Logger) *Pool {
-	nodes := make([]*poolNode, 0, len(links))
+// A worker's capacity is the node's own, because the node is the only party
+// that knows what it can run: an orchestrator that decided would be deciding
+// about a machine it cannot see. This machine's is its configuration's, and
+// its platform is what this binary was built for, which is the same question
+// a probe answers about a worker.
+func NewPool(links []Link, reports []*NodeReport, local LocalNode, log zerolog.Logger) *Pool {
+	nodes := make([]*poolNode, 0, len(links)+1)
 	for index, link := range links {
 		report := reports[index]
 		nodes = append(nodes, &poolNode{
@@ -88,29 +113,36 @@ func NewPool(links []Link, reports []*NodeReport, log zerolog.Logger) *Pool {
 		})
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].name < nodes[j].name })
-	return &Pool{log: log, nodes: nodes, changed: make(chan struct{})}
+	return &Pool{log: log, changed: make(chan struct{}), nodes: append(nodes, &poolNode{
+		name:      local.Name,
+		platform:  runtime.GOOS + "/" + runtime.GOARCH,
+		capacity:  max(local.Capacity, 1),
+		isHealthy: true,
+		isLocal:   true,
+	})}
 }
 
 // Acquire takes one slot on a node this task may run on, waiting for one when
-// every compatible node is busy.
+// every node the placement allows is busy.
 //
 // The wait is bounded by two things and never by hope. The caller's context
-// ends it, and so does the pool running out of healthy compatible nodes: a
-// task waiting for a machine that no longer exists is a task that will wait
-// for ever, so it is failed at once with the platform it needed and the nodes
-// that could have run it named.
-func (p *Pool) Acquire(ctx context.Context, platforms []string) (*Lease, error) {
+// ends it, and so does the pool running out of healthy nodes the task could
+// run on: a task waiting for a machine that no longer exists is a task that
+// will wait for ever, so it is failed at once with the platform it needed and
+// the nodes that could have run it named.
+func (p *Pool) Acquire(ctx context.Context, platforms []string, placement Placement) (*Lease, error) {
 	for {
 		p.mu.Lock()
-		lease, isPlacementPossible := p.takeSlot(platforms)
+		lease, isPlacementPossible := p.takeSlot(platforms, placement)
 		changed := p.changed
 		p.mu.Unlock()
 		if lease != nil {
-			p.log.Debug().Str("worker", lease.Node).Msg("node slot acquired")
+			p.log.Debug().Str("worker", lease.Node).Str("placement", string(placement)).
+				Bool("isLocal", lease.IsLocal).Msg("node slot acquired")
 			return lease, nil
 		}
 		if !isPlacementPossible {
-			return nil, p.refusePlacement(platforms)
+			return nil, p.refusePlacement(platforms, placement)
 		}
 		select {
 		case <-ctx.Done():
@@ -123,22 +155,29 @@ func (p *Pool) Acquire(ctx context.Context, platforms []string) (*Lease, error) 
 // takeSlot answers the slot this task gets, and whether waiting for one could
 // ever help. It runs under the lock.
 //
-// The preference is deterministic on purpose: the least loaded compatible
-// node, and among equals the first by name. A run placing the same plan on the
-// same pool twice places it the same way, which is what makes a distributed
-// run's behaviour reproducible enough to debug.
-func (p *Pool) takeSlot(platforms []string) (*Lease, bool) {
+// The preference is deterministic on purpose: the least loaded eligible node,
+// and among equals the first by name. A run placing the same plan on the same
+// pool twice places it the same way, which is what makes a distributed run's
+// behaviour reproducible enough to debug.
+//
+// This machine comes last and only when nothing else is free. It is the one
+// node that also owns the version stages, the lock-file preparation, the
+// publications and the records, so a run that spent it on a build that some
+// worker could have taken would be a run that queued its own work behind
+// somebody else's.
+func (p *Pool) takeSlot(platforms []string, placement Placement) (*Lease, bool) {
 	var chosen *poolNode
 	isPlacementPossible := false
 	for _, node := range p.nodes {
-		if !node.isHealthy || !isPlatformCompatible(node.platform, platforms) {
+		if !node.isHealthy || !isNodeAllowed(node, placement) ||
+			!isPlatformCompatible(node.platform, platforms) {
 			continue
 		}
 		isPlacementPossible = true
 		if node.inFlight >= node.capacity {
 			continue
 		}
-		if chosen == nil || node.inFlight < chosen.inFlight {
+		if isNodePreferred(chosen, node) {
 			chosen = node
 		}
 	}
@@ -146,12 +185,37 @@ func (p *Pool) takeSlot(platforms []string) (*Lease, bool) {
 		return nil, isPlacementPossible
 	}
 	chosen.inFlight++
-	return &Lease{Node: chosen.name, pool: p}, isPlacementPossible
+	return &Lease{Node: chosen.name, IsLocal: chosen.isLocal, pool: p}, isPlacementPossible
+}
+
+// isNodeAllowed reports whether one node is a node this placement may use.
+func isNodeAllowed(node *poolNode, placement Placement) bool {
+	switch placement {
+	case PlacementWorker:
+		return !node.isLocal
+	case PlacementOrchestrator:
+		return node.isLocal
+	default:
+		return true
+	}
+}
+
+// isNodePreferred reports whether offered is a better home for this frame
+// than whatever was chosen before it.
+func isNodePreferred(chosen, offered *poolNode) bool {
+	if chosen == nil {
+		return true
+	}
+	if chosen.isLocal != offered.isLocal {
+		return chosen.isLocal
+	}
+	return offered.inFlight < chosen.inFlight
 }
 
 // refusePlacement is the failure a task gets when nothing in the pool could
-// ever run it: every node that satisfied its platforms has stopped answering.
-func (p *Pool) refusePlacement(platforms []string) error {
+// ever run it: every node it was allowed to run on has stopped answering, or
+// none of them satisfied its platforms.
+func (p *Pool) refusePlacement(platforms []string, placement Placement) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	unhealthy := make([]string, 0, len(p.nodes))
@@ -165,8 +229,8 @@ func (p *Pool) refusePlacement(platforms []string) error {
 		wanted = strings.Join(platforms, ", ")
 	}
 	return NewDiagnostic(CodeIntegrity, CategoryIntegrity,
-		"no healthy worker node runs %s: %d of %d nodes stopped answering (%s), so this task has nowhere to run",
-		wanted, len(unhealthy), len(p.nodes), strings.Join(unhealthy, ", "))
+		"no healthy node runs %s and takes a %s placement: %d of %d nodes stopped answering (%s), so this task has nowhere to run",
+		wanted, placement, len(unhealthy), len(p.nodes), strings.Join(unhealthy, ", "))
 }
 
 // isPlatformCompatible reports whether a node's platform is one a task may run

@@ -132,22 +132,42 @@ func (c *Coordinator) Publish(context.Context, release.StageRequest, func(contex
 		"this build does not delegate publication: the publish stage runs on the orchestrator")
 }
 
-// Build prepares one package's input state, places its build frame on a node
-// and waits for that node to report.
-func (c *Coordinator) Build(ctx context.Context, request release.StageRequest) (release.StageOutcome, error) {
+// Build places one package's build frame and runs it where it was placed.
+//
+// The placement comes first because it decides what the rest of the work is.
+// A frame placed on this machine needs no input state prepared, nothing
+// offered to a mailbox and nothing fetched back: it runs against the checkout
+// the run was started in. A frame placed on a node needs all three.
+func (c *Coordinator) Build(ctx context.Context, request release.StageRequest,
+	here release.LocalFrame) (release.StageOutcome, error) {
 	task := request.Release.Pkg.Name + ":" + request.Stage
+	space := request.Release.Pkg.Space
+	placement := ResolveStagePlacement(request.Stage,
+		space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)
+	lease, err := c.Pool.Acquire(ctx, space.BuildPlatforms, placement)
+	if err != nil {
+		return release.StageOutcome{}, c.refuseTask(task, "", err)
+	}
+	if lease.IsLocal {
+		return c.buildHere(ctx, lease, task, request, here)
+	}
+	return c.dispatchBuild(ctx, lease, task, request)
+}
+
+// dispatchBuild prepares one package's input state, offers its build frame to
+// the node the pool chose and waits for that node to report.
+func (c *Coordinator) dispatchBuild(ctx context.Context, lease *Lease, task string,
+	request release.StageRequest) (release.StageOutcome, error) {
 	sources := c.dispatch.Sources(request.Release.Pkg.Name)
 	dir, err := resolvePackageDir(sources, request)
 	if err != nil {
-		return release.StageOutcome{}, c.refuseTask(task, "", err)
+		lease.Release()
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
 	}
 	commits, err := c.captureInputs(ctx, sources)
 	if err != nil {
-		return release.StageOutcome{}, c.refuseTask(task, "", err)
-	}
-	lease, err := c.Pool.Acquire(ctx, request.Release.Pkg.Space.BuildPlatforms)
-	if err != nil {
-		return release.StageOutcome{}, c.refuseTask(task, "", err)
+		lease.Release()
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
 	}
 	repositories, err := c.offerInputs(ctx, lease.Node, sources, commits)
 	if err != nil {
@@ -231,7 +251,10 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome 
 			"the node reported the %s frame as %s%s (exit %d)",
 			result.Kind, result.Status, formatFailedPart(result), result.Exit))
 	}
-	if err := c.admitOutputs(ctx, task, branch, reply.commit, result, request); err != nil {
+	if err := c.admitOutputs(ctx, task, producedOutputs{
+		node: node, store: c.dispatch.Store, endpoint: c.endpointOf(node),
+		branch: branch, commit: reply.commit, manifest: result.Outputs,
+	}, request); err != nil {
 		// A build whose outputs cannot be used is a build that did not
 		// satisfy its consumers, so the package fails here rather than
 		// somewhere downstream with a puzzle about missing files.

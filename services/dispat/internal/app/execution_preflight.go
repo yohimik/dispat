@@ -71,8 +71,12 @@ func (a *App) newCoordinator(fleet *workspaceRecorder) (*execution.Coordinator, 
 		mailboxes[worker.Name] = execution.NewGitMailbox(worker.Endpoint, a.git, signer, a.log)
 	}
 	timeouts := settings.ResolveTimeouts()
+	// This machine joins its own pool: it is a node under the same rules
+	// (§28.1), and the name it joins under is the one it already writes on
+	// every line of this run.
+	local := execution.LocalNode{Name: a.sender.Node, Capacity: settings.ResolveConcurrency()}
 	return execution.NewCoordinator(a.runID, a.planDigest, a.resolveOwnershipGeneration(fleet),
-		links, mailboxes, execution.Timeouts{
+		local, links, mailboxes, signer, execution.Timeouts{
 			Preflight: time.Duration(timeouts.Preflight) * time.Second,
 			Task:      time.Duration(timeouts.Task) * time.Second,
 			Cancel:    time.Duration(timeouts.Cancel) * time.Second,
@@ -98,14 +102,19 @@ func (a *App) resolveOwnershipGeneration(fleet *workspaceRecorder) string {
 }
 
 // planPlatforms is what every releasing package requires of the node that
-// would build it. A package that requires nothing is still listed, because
-// "any node" is only satisfiable when there is a node at all.
+// would build it, and where the run is allowed to place that build. A package
+// that requires nothing is still listed, because "any node" is only
+// satisfiable when there is a node at all.
 func planPlatforms(pl *plan.Plan) []execution.PackagePlatforms {
 	releasing := pl.Releasing()
 	wanted := make([]execution.PackagePlatforms, 0, len(releasing))
 	for _, rel := range releasing {
+		space := rel.Pkg.Space
 		wanted = append(wanted, execution.PackagePlatforms{
-			Package: rel.Pkg.Name, Platforms: rel.Pkg.Space.BuildPlatforms,
+			Package:   rel.Pkg.Name,
+			Platforms: space.BuildPlatforms,
+			Placement: execution.ResolveStagePlacement(execution.StageBuild,
+				space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0),
 		})
 	}
 	return wanted

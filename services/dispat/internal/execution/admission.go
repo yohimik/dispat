@@ -50,6 +50,12 @@ type admittedOutputs struct {
 	branch   string
 	commit   string
 	manifest *OutputManifest
+	// store is the object store the bytes are in, which is what a relay is
+	// pushed out of. It is the run's own repository for a result that came
+	// back through a mailbox, and the repository that owns the package for a
+	// build this machine ran itself, and those are two stores in a composed
+	// workspace.
+	store *gitx.LocalGitx
 }
 
 // outputRegistry is the run's record of what has been admitted and of what has
@@ -102,51 +108,89 @@ func (r *outputRegistry) rememberRelay(endpoint, commit, branch string) {
 	r.relayed[endpoint+"\x00"+commit] = branch
 }
 
-// admitOutputs holds one node's reported outputs to the plan's own declaration
-// and installs what survives into this machine's checkout.
+// producedOutputs is one output set on its way into the run's record: where
+// its bytes are, how a consumer would be pointed at them, and whether this
+// checkout still has to receive them.
 //
-// A package that declares no outputs admits none, whatever a node reported:
-// the declaration is the configuration's, so a result carrying a set nobody
-// asked for describes files no consumer was ever going to be told about.
-func (c *Coordinator) admitOutputs(ctx context.Context, task, branch, commit string,
-	result Result, request release.StageRequest) error {
+// It exists so that admission is one function for both producers. A worker's
+// set arrives through a mailbox and has to be installed here before anything
+// that reads the working tree runs; a set this machine built is already in
+// the working tree it was captured from, and installing it would be copying a
+// folder over itself. Everything else about admitting the two is identical,
+// and the point of one function is that it cannot become two rules.
+type producedOutputs struct {
+	node     string
+	store    *gitx.LocalGitx
+	endpoint string
+	branch   string
+	commit   string
+	manifest *OutputManifest
+	// isInstalledHere says the bytes are already where this checkout needs
+	// them, which is true of exactly one producer: this machine.
+	isInstalledHere bool
+}
+
+// admitOutputs holds one producer's outputs to the plan's own declaration and
+// installs what survives into this machine's checkout.
+//
+// A package that declares no outputs admits none, whatever was reported: the
+// declaration is the configuration's, so a set nobody asked for describes
+// files no consumer was ever going to be told about.
+func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced producedOutputs,
+	request release.StageRequest) error {
 	roots := request.Release.Pkg.Space.BuildOutputs
 	if len(roots) == 0 {
 		return nil
 	}
-	if result.Outputs == nil {
-		return c.refuseOutputSet(task, result.Node, ReasonBytesMissing,
-			fmt.Errorf("the node reported no build outputs for a package that declares %d", len(roots)))
+	if produced.manifest == nil {
+		return c.refuseOutputSet(task, produced.node, ReasonBytesMissing,
+			fmt.Errorf("no build outputs were reported for a package that declares %d", len(roots)))
 	}
-	totals, err := ValidateOutputs(ctx, c.dispatch.Store, result.Outputs, OutputExpectation{
+	totals, err := ValidateOutputs(ctx, produced.store, produced.manifest, OutputExpectation{
 		Run: c.Run, PlanDigest: c.PlanDigest, Generation: c.Generation, Task: task, Attempt: 1,
 		Roots: roots, Platforms: request.Release.Pkg.Space.BuildPlatforms, Limits: c.Limits,
 	})
 	if err != nil {
-		return c.refuseOutputSet(task, result.Node, OutputFaultReason(err), err)
+		return c.refuseOutputSet(task, produced.node, OutputFaultReason(err), err)
 	}
 	took := time.Now()
-	if err := c.installLocally(ctx, request, result.Outputs); err != nil {
-		return c.refuseOutputSet(task, result.Node, OutputFaultReason(err), err)
+	if !produced.isInstalledHere {
+		if err := c.installLocally(ctx, request, produced.store, produced.manifest); err != nil {
+			return c.refuseOutputSet(task, produced.node, OutputFaultReason(err), err)
+		}
 	}
 	c.outputs.remember(request.Release.Pkg.Name, &admittedOutputs{
-		node: result.Node, endpoint: c.endpointOf(result.Node), branch: branch,
-		commit: commit, manifest: result.Outputs,
+		node: produced.node, endpoint: produced.endpoint, branch: produced.branch,
+		commit: produced.commit, manifest: produced.manifest, store: produced.store,
 	})
-	c.Log.Debug().Str("run", c.Run).Str("task", task).Str("worker", result.Node).
-		Int("files", totals.Files).Int64("bytes", totals.Bytes).
-		Dur("took", time.Since(took)).Msg("outputs verified")
-	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", result.Node).
-		Str("package", request.Release.Pkg.Name).Int("files", totals.Files).
-		Int64("bytes", totals.Bytes).Msg("outputs admitted")
+	verified := c.Log.Debug().Str("run", c.Run).Str("task", task).
+		Int("files", totals.Files).Int64("bytes", totals.Bytes).Dur("took", time.Since(took))
+	admitted := c.Log.Info().Str("run", c.Run).Str("task", task).
+		Str("package", request.Release.Pkg.Name).Int("files", totals.Files).Int64("bytes", totals.Bytes)
+	// A set this machine produced names no worker: the writer of the line is
+	// the node it is about, and gate 7b's rule is that `worker` names another
+	// node or nothing at all.
+	if !produced.isInstalledHere {
+		verified = verified.Str("worker", produced.node)
+		admitted = admitted.Str("worker", produced.node)
+	}
+	verified.Msg("outputs verified")
+	admitted.Msg("outputs admitted")
 	return nil
 }
 
 // refuseOutputSet is the one refusal a rejected output set produces: the rule
 // it broke and the work it was about, and never anything the set said.
+//
+// The node is named only when it is another machine: a set this run produced
+// itself is refused on a line that already says who wrote it, and repeating
+// that name in `worker` would read as a report about somebody else.
 func (c *Coordinator) refuseOutputSet(task, node string, reason OutputReason, err error) error {
-	c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", node).
-		Str("reason", string(reason)).Str("code", CodeIntegrity).
+	event := c.Log.Warn().Str("run", c.Run).Str("task", task)
+	if node != "" {
+		event = event.Str("worker", node)
+	}
+	event.Str("reason", string(reason)).Str("code", CodeIntegrity).
 		Str("category", CategoryIntegrity).Msg("outputs rejected")
 	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: node, Task: task, Attempt: 1},
 		CodeIntegrity, CategoryIntegrity,
@@ -164,7 +208,7 @@ func (c *Coordinator) refuseOutputSet(task, node string, reason OutputReason, er
 // the same reason a version frame holds it: a working tree being written is a
 // working tree nobody may be hashing at that moment.
 func (c *Coordinator) installLocally(ctx context.Context, request release.StageRequest,
-	manifest *OutputManifest) error {
+	store *gitx.LocalGitx, manifest *OutputManifest) error {
 	owner, err := c.resolveOwnerRepository(request)
 	if err != nil {
 		return err
@@ -176,7 +220,7 @@ func (c *Coordinator) installLocally(ctx context.Context, request release.StageR
 	c.guard.RLock()
 	defer c.guard.RUnlock()
 	return InstallOutputs(ctx, InstallRequest{
-		Git: c.dispatch.Store, Manifest: manifest, Dir: request.Dir,
+		Git: store, Manifest: manifest, Dir: request.Dir,
 		Staging: filepath.Join(filepath.Dir(index),
 			"dispat-outputs-"+formatPathWord(c.Run)+"-"+formatPathWord(manifest.Package)),
 		Log: c.Log,
@@ -241,7 +285,7 @@ func (c *Coordinator) reachOutputs(ctx context.Context, node string, admitted *a
 		return branch, nil
 	}
 	branch := FormatBranch(node, KindRelay, time.Now())
-	if err := c.dispatch.Store.PushCreate(ctx, endpoint, admitted.commit, branch); err != nil {
+	if err := admitted.store.PushCreate(ctx, endpoint, admitted.commit, branch); err != nil {
 		return "", fmt.Errorf("execution: relaying the outputs of %s to %s: %w",
 			admitted.manifest.Package, node, err)
 	}

@@ -43,11 +43,19 @@ type Remotex interface {
 	// for is the kind of write the frame makes, and a caller naming the stage
 	// cannot pass an implementation something it would have to interpret.
 	Guard(ctx context.Context, stage string) (func(), error)
-	// Build runs one package's build frame on a worker node and answers what
-	// that node reported. The outcome is filled on both paths: a frame that
-	// failed still exported whatever ran before the failure, exactly as a
-	// local frame does.
-	Build(ctx context.Context, request StageRequest) (StageOutcome, error)
+	// Build runs one package's build frame wherever this run places it and
+	// answers what came of it. The outcome is filled on both paths: a frame
+	// that failed still exported whatever ran before the failure, exactly as
+	// a local frame does.
+	//
+	// A frame the run places on this machine is run by here, which is the
+	// executor's own gating sequence: the placement decides, and what it
+	// decided is then the same code running the same commands. Everything
+	// around that (the capacity the frame holds, the provider outputs it
+	// needs, the outputs it produced) is the implementation's, because a
+	// frame placed here has to be as usable by other nodes as a delegated
+	// one.
+	Build(ctx context.Context, request StageRequest, here LocalFrame) (StageOutcome, error)
 	// Publish runs one package's publish frame on a worker node, with
 	// authorize called at the moment the irreversible command may start
 	// (§28.6). Nothing calls it yet: publication stays on the orchestrator
@@ -55,6 +63,15 @@ type Remotex interface {
 	// seam a later gate fills is the seam this one was designed around.
 	Publish(ctx context.Context, request StageRequest, authorize func(context.Context) error) (StageOutcome, error)
 }
+
+// LocalFrame is one stage frame as this process runs it.
+//
+// It answers the pair the executor answers everywhere else: the sentence
+// naming the part that failed, and the failure. Handing the placement the
+// sequence rather than the commands is what keeps a frame that runs here
+// indistinguishable from one that ran here before any of this existed, hooks,
+// labels, exports and all.
+type LocalFrame func(ctx context.Context) (string, error)
 
 // StageRequest is one stage frame as another node has to receive it:
 // everything the frame consists of, and everything it runs under.
@@ -99,12 +116,21 @@ type StageFrame struct {
 // are as real as those of a successful one and reach the outcome scripts the
 // same way.
 type StageOutcome struct {
-	// Node is where the frame ran, for the log and the summary.
+	// Node is the WORKER the frame ran on, and is empty for a frame this run
+	// placed on the orchestrator: the orchestrator is the writer of every
+	// line and every event of the run, so naming it here would be naming the
+	// writer as though it were somebody else.
 	Node string
 	// Exports are what the frame's scripts wrote to their DISPAT_OUTPUT files.
 	Exports []plan.Output
 	// FailedPart names the part of the frame that failed, empty when none did.
 	FailedPart string
+	// LocalFailure is the executor's own sentence for a frame that failed
+	// here, empty for one that travelled. A failure on this machine is
+	// described by the code that ran it, so an operator reads the same words
+	// a local release has always printed; a failure somewhere else is
+	// described by the part the node reported.
+	LocalFailure string
 }
 
 // The parts of a stage frame, as an executing node names the one that failed.
@@ -136,7 +162,7 @@ func (tc *taskCtx) runStage(ctx context.Context, s stage) (what string, err erro
 	}
 	switch tc.t.kind {
 	case taskBuild:
-		return tc.remoteStage(ctx, s)
+		return tc.placedStage(ctx, s)
 	case taskVersion, taskSyncLock:
 		return tc.guardedStage(ctx, s)
 	default:
@@ -159,13 +185,13 @@ func (tc *taskCtx) guardedStage(ctx context.Context, s stage) (string, error) {
 	return tc.stageFrame(ctx, s)
 }
 
-// remoteStage sends one frame to a node and folds what came back into the
-// release.
+// placedStage runs one frame wherever this run places it and folds what came
+// back into the release.
 //
 // The exports are merged before the error is looked at, for the reason the
 // local path merges them before it returns one: what a frame exported before
 // it failed is what the outcome scripts and the summary have to see.
-func (tc *taskCtx) remoteStage(ctx context.Context, s stage) (string, error) {
+func (tc *taskCtx) placedStage(ctx context.Context, s stage) (string, error) {
 	outcome, err := tc.Remote.Build(ctx, StageRequest{
 		Release:   tc.rel,
 		Stage:     tc.t.kind.String(),
@@ -173,16 +199,26 @@ func (tc *taskCtx) remoteStage(ctx context.Context, s stage) (string, error) {
 		Env:       computedPackageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, tc.t.kind.String()),
 		StaticEnv: tc.rel.Pkg.Space.Env,
 		Dir:       tc.rel.Pkg.Dir,
-	})
+	}, func(ctx context.Context) (string, error) { return tc.stageFrame(ctx, s) })
 	MergeOutputs(tc.rel, outcome.Exports)
 	// Before the error is looked at, for the reason the exports are: a frame
 	// that failed on a node is a failure that node is reported for, and the
-	// event saying so is built from this.
-	tc.recordPlacement(outcome.Node)
+	// event saying so is built from this. A frame that ran here names nobody,
+	// which is what keeps the writer of the line and the node it is about the
+	// same thing only when they really are.
+	if outcome.Node != "" {
+		tc.recordPlacement(outcome.Node)
+	}
 	if err == nil {
-		tc.log.Debug().Str("worker", outcome.Node).Int("exports", len(outcome.Exports)).
-			Msg(tc.t.kind.String() + ": the node reported the frame finished")
+		event := tc.log.Debug().Int("exports", len(outcome.Exports))
+		if outcome.Node != "" {
+			event = event.Str("worker", outcome.Node)
+		}
+		event.Msg(tc.t.kind.String() + ": the frame finished where it was placed")
 		return "", nil
+	}
+	if outcome.LocalFailure != "" {
+		return outcome.LocalFailure, err
 	}
 	return formatRemoteFailure(tc.t.kind, outcome.FailedPart), err
 }

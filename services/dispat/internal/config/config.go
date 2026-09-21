@@ -2199,6 +2199,13 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 			Force: a.IsForceEnabled(force),
 		})
 	}
+	// The one runOnly rule that needs the whole ladder: the placement and the
+	// login reach a package from different levels, so whether they contradict
+	// each other is only knowable once both have been resolved onto it.
+	login := scope.commands(sc.Flow.Login)
+	if err := checkRunOnlyAgainstLogin(label, sc.RunOnly, login); err != nil {
+		return nil, err
+	}
 	return &model.Space{
 		Name: spaceName,
 		Path: sc.Path.First(),
@@ -2218,7 +2225,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		BuildScript:          scope.commands(sc.Flow.Build),
 		PublishScript:        scope.commands(sc.Flow.Publish),
 		VersionScript:        scope.commands(sc.Flow.Version),
-		LoginScript:          scope.commands(sc.Flow.Login),
+		LoginScript:          login,
 		AnnounceScript:       scope.commands(sc.Flow.Announce),
 		BeforeAllScript:      scope.commands(sc.Flow.BeforeAll),
 		BeforeVersionScript:  scope.commands(sc.Flow.BeforeVersion),
@@ -2235,6 +2242,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		AliasTags:            resolvedAliases,
 		BuildOutputs:         sc.BuildOutputs,
 		BuildPlatforms:       sc.BuildPlatforms,
+		RunOnly:              sc.RunOnly,
 		AutoVersion:          resolveAutoVersion(scope, sc.AutoVersion),
 	}, nil
 }

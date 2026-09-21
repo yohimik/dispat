@@ -438,9 +438,23 @@ func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gi
 // names the tree by object id.
 func (m *GitMailbox) commitMessage(ctx context.Context, kind MessageKind, document []byte,
 	parents []string, carried []gitx.TreeEntry) (string, error) {
-	plumbing := gitx.NewPlumbing(m.plumbing)
+	return formatMessageCommit(ctx, m.plumbing, m.signer, kind, document, parents, carried)
+}
+
+// formatMessageCommit writes one protocol message into a local object store
+// and answers the commit that carries it.
+//
+// It is a function of a store rather than a method of a mailbox because one
+// writer has no mailbox at all: a build the run placed on the orchestrator
+// produces a result its consumers read exactly as they read a worker's, and
+// that result is written into the repository the outputs were captured in and
+// relayed from there. Everything about the shape of the commit is the same,
+// which is the point of it being one function.
+func formatMessageCommit(ctx context.Context, git *gitx.LocalGitx, signer *Signer,
+	kind MessageKind, document []byte, parents []string, carried []gitx.TreeEntry) (string, error) {
+	plumbing := gitx.NewPlumbing(git)
 	documentOID := plumbing.HashObject(ctx, bytes.NewReader(document))
-	signatureOID := plumbing.HashObject(ctx, strings.NewReader(m.signer.Sign(kind, document)))
+	signatureOID := plumbing.HashObject(ctx, strings.NewReader(signer.Sign(kind, document)))
 	inner := plumbing.MakeTree(ctx, []gitx.TreeEntry{
 		{Mode: gitx.TreeModeFile, Type: "blob", OID: documentOID, Name: string(kind) + ".json"},
 		{Mode: gitx.TreeModeFile, Type: "blob", OID: signatureOID, Name: string(kind) + ".sig"},
