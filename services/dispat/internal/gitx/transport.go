@@ -386,26 +386,46 @@ func (c *LocalGitx) IndexPath(ctx context.Context) (string, error) {
 }
 
 // CountChangedPaths is how many tracked paths of this checkout differ from
-// what it was materialized at.
+// what it was materialized at, ignoring the folders the caller declared.
 //
 // Untracked paths are deliberately not counted. A build's own products are
 // untracked by construction, so counting them would report every successful
 // build as a build that wrote where it should not have; what this asks about
-// is the source a task was given, and whether it came back changed.
-func (c *LocalGitx) CountChangedPaths(ctx context.Context) (int, error) {
-	out, err := c.run(ctx, "status", "--porcelain")
+// is the source a task was given, and whether it came back changed. The
+// declared folders are excluded for the same reason one step further on: a
+// tracked file inside a declared build output root is a file the run carries
+// deliberately, so counting it would report a transfer as a stray write.
+//
+// The listing is NUL separated, so a path holding a space, a quote or a
+// newline arrives as itself rather than as git's quoted rendering of it.
+func (c *LocalGitx) CountChangedPaths(ctx context.Context, declared []string) (int, error) {
+	out, err := c.run(ctx, "status", "--porcelain", "-z")
 	if err != nil {
 		return 0, fmt.Errorf("gitx: reading the status of %s: %w", c.Dir, err)
 	}
 	changed := 0
-	for line := range strings.Lines(out) {
-		entry := strings.TrimRight(line, "\n")
-		if entry == "" || strings.HasPrefix(entry, "??") {
+	for _, record := range strings.Split(out, "\x00") {
+		if len(record) < 4 || strings.HasPrefix(record, "??") {
+			continue
+		}
+		if isPathDeclared(record[3:], declared) {
 			continue
 		}
 		changed++
 	}
 	return changed, nil
+}
+
+// isPathDeclared reports whether one changed path lies in a folder the caller
+// declared. The comparison is by component, so `dist-old/x` is not a file
+// inside `dist`.
+func isPathDeclared(path string, declared []string) bool {
+	for _, folder := range declared {
+		if path == folder || strings.HasPrefix(path, folder+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // GitVersion is what the git behind this repository calls itself, and the

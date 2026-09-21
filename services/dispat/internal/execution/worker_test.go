@@ -31,6 +31,7 @@ type fakeMailbox struct {
 	rejection map[string]RejectReason
 
 	written      []MessageKind
+	carried      []gitx.TreeEntry
 	fetched      []string
 	reconsidered []string
 	forgotten    int
@@ -56,8 +57,10 @@ func (m *fakeMailbox) Read(_ context.Context, tip ChainTip, _ int64) ([]byte, er
 	return m.documents[tip.Branch], nil
 }
 
-func (m *fakeMailbox) Advance(_ context.Context, branch, _ string, kind MessageKind, document []byte) (string, error) {
+func (m *fakeMailbox) Advance(_ context.Context, branch, _ string, kind MessageKind,
+	document []byte, carried []gitx.TreeEntry) (string, error) {
 	m.written = append(m.written, kind)
+	m.carried = append(m.carried, carried...)
 	m.documents[branch+"/"+string(kind)] = document
 	return string(kind) + "-oid", nil
 }

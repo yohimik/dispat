@@ -71,12 +71,12 @@ func (f *coordinatorFixture) answer(t *testing.T, signer *Signer, report func(As
 				return
 			}
 			claim, err := mailbox.Advance(context.Background(), tip.Branch, tip.OID, MessageClaim,
-				mustMarshalValue(Claim{Header: assignment.Header, Assignment: tip.OID}))
+				mustMarshalValue(Claim{Header: assignment.Header, Assignment: tip.OID}), nil)
 			if err != nil {
 				return
 			}
 			_, _ = mailbox.Advance(context.Background(), tip.Branch, claim, MessageResult,
-				mustMarshalValue(report(assignment, tip.OID)))
+				mustMarshalValue(report(assignment, tip.OID)), nil)
 			return
 		}
 	}()

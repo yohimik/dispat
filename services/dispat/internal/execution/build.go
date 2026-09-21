@@ -50,6 +50,25 @@ type Dispatch struct {
 	// OpenRepository opens the plumbing of one repository's working tree, so
 	// that a snapshot is written into the object store it came from.
 	OpenRepository func(dir string) *gitx.LocalGitx
+	// Inputs answers the provider output sets one package's build consumes:
+	// its transitive provider closure over every dependency kind, in
+	// dependency order, restricted to the packages of this run that declare
+	// build outputs. A build-only edge outside the propagation kinds still
+	// supplies bytes, so the closure is the graph's rather than the release
+	// rules'.
+	Inputs func(packageName string) []InputPackage
+	// Store is the object store a reported result and its outputs are read
+	// from, and the one a relay is pushed out of. It is the repository the run
+	// was started in, which is where every mailbox of the run fetches.
+	Store *gitx.LocalGitx
+}
+
+// InputPackage is one provider a consumer's build may need bytes from: which
+// package it is, and where its folder sits in the checkout a node
+// materializes, relative to the run's own anchor.
+type InputPackage struct {
+	Package string
+	Path    string
 }
 
 // Start gives the coordinator what it needs to place work and begins watching
@@ -64,6 +83,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
 	c.stopWatching = stop
 	c.dispatch = dispatch
 	c.snapshots = newSnapshots()
+	c.outputs = newOutputRegistry()
 	c.offered = map[string]offeredState{}
 	c.local = make(chan struct{}, max(dispatch.Concurrency, 1))
 	c.watchers = make(map[string]*watcher, len(c.Links))
@@ -134,15 +154,21 @@ func (c *Coordinator) Build(ctx context.Context, request release.StageRequest) (
 		lease.Release()
 		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
 	}
-	return c.runTask(ctx, lease, task, dir, repositories, request)
+	inputs, err := c.resolveTaskInputs(ctx, lease.Node, request.Release.Pkg.Name)
+	if err != nil {
+		lease.Release()
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
+	}
+	return c.runTask(ctx, lease, task, dir, repositories, inputs, request)
 }
 
 // runTask offers one assignment and waits for its terminal result, settling
 // the node slot exactly once whichever way the attempt ends.
 func (c *Coordinator) runTask(ctx context.Context, lease *Lease, task, dir string,
-	repositories []AssignmentRepository, request release.StageRequest) (release.StageOutcome, error) {
+	repositories []AssignmentRepository, inputs []AssignmentInput,
+	request release.StageRequest) (release.StageOutcome, error) {
 	outcome := release.StageOutcome{Node: lease.Node}
-	assignment := c.formatAssignment(lease.Node, task, dir, repositories, request)
+	assignment := c.formatAssignment(lease.Node, task, dir, repositories, inputs, request)
 	observer := c.watchers[lease.Node]
 	replies := observer.watch(assignment.Branch)
 	offered, err := c.mailboxes[lease.Node].Assign(ctx, assignment)
@@ -157,20 +183,21 @@ func (c *Coordinator) runTask(ctx context.Context, lease *Lease, task, dir strin
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
 		Msg("task assigned")
 	defer observer.forget(assignment.Branch)
-	return c.awaitResult(ctx, lease, task, outcome, replies)
+	return c.awaitResult(ctx, lease, task, outcome, replies, assignment.Branch, request)
 }
 
 // awaitResult waits for the node to report, for the task deadline, or for the
 // run to be interrupted, and settles the slot according to which of the three
 // happened.
 func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string,
-	outcome release.StageOutcome, replies <-chan Result) (release.StageOutcome, error) {
+	outcome release.StageOutcome, replies <-chan taskReply, branch string,
+	request release.StageRequest) (release.StageOutcome, error) {
 	deadline := time.NewTimer(c.Timeouts.Task)
 	defer deadline.Stop()
 	select {
-	case result := <-replies:
+	case reply := <-replies:
 		lease.Release()
-		return c.readTaskOutcome(task, lease.Node, outcome, result)
+		return c.readTaskOutcome(ctx, task, outcome, reply, branch, request)
 	case <-deadline.C:
 		// The work may still be running on that machine, so the slot stays
 		// where it is and the node leaves the pool.
@@ -187,8 +214,10 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 // readTaskOutcome turns one accepted result into what the executor does with
 // it: the exports to merge, the stray writes to report, and the failure to
 // fail the package with.
-func (c *Coordinator) readTaskOutcome(task, node string, outcome release.StageOutcome,
-	result Result) (release.StageOutcome, error) {
+func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome release.StageOutcome,
+	reply taskReply, branch string, request release.StageRequest) (release.StageOutcome, error) {
+	result := reply.result
+	node := result.Node
 	outcome.Exports = formatOutputs(result.Exports)
 	outcome.FailedPart = result.FailedPart
 	if result.StrayWrites > 0 {
@@ -199,12 +228,29 @@ func (c *Coordinator) readTaskOutcome(task, node string, outcome release.StageOu
 	}
 	if result.Status != StatusSucceeded {
 		return outcome, c.refuseTask(task, node, fmt.Errorf(
-			"the node reported the %s frame as %s (exit %d)", result.Kind, result.Status, result.Exit))
+			"the node reported the %s frame as %s%s (exit %d)",
+			result.Kind, result.Status, formatFailedPart(result), result.Exit))
+	}
+	if err := c.admitOutputs(ctx, task, branch, reply.commit, result, request); err != nil {
+		// A build whose outputs cannot be used is a build that did not
+		// satisfy its consumers, so the package fails here rather than
+		// somewhere downstream with a puzzle about missing files.
+		outcome.FailedPart = release.PartOutputs
+		return outcome, err
 	}
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", node).
 		Str("status", result.Status).Int("exports", len(outcome.Exports)).
 		Str("os", result.Platform.OS).Str("arch", result.Platform.Arch).Msg("task finished")
 	return outcome, nil
+}
+
+// formatFailedPart names the rule a task broke when it failed at something
+// that was not a command: the word the node reported, and nothing it read.
+func formatFailedPart(result Result) string {
+	if result.Reason == "" {
+		return ""
+	}
+	return " (" + result.Reason + ")"
 }
 
 // refuseTask is the failure one dispatched task reports, with the work it is
@@ -313,7 +359,8 @@ func resolvePackageDir(sources []Source, request release.StageRequest) (string, 
 
 // formatAssignment is the document one build task travels as.
 func (c *Coordinator) formatAssignment(node, task, dir string,
-	repositories []AssignmentRepository, request release.StageRequest) *Assignment {
+	repositories []AssignmentRepository, inputs []AssignmentInput,
+	request release.StageRequest) *Assignment {
 	branch := FormatBranch(node, KindBuild, time.Now())
 	return &Assignment{
 		Header: Header{
@@ -325,6 +372,7 @@ func (c *Coordinator) formatAssignment(node, task, dir string,
 		Repositories: repositories,
 		Package: &AssignmentPackage{
 			Name:       request.Release.Pkg.Name,
+			Version:    request.Release.Next.String(),
 			Repository: request.Release.Pkg.Repository,
 			Dir:        dir,
 		},
@@ -338,6 +386,8 @@ func (c *Coordinator) formatAssignment(node, task, dir string,
 		Exports:   formatExports(request.Release.Outputs),
 		Shell:     c.dispatch.Shell(request.Dir),
 		Platforms: request.Release.Pkg.Space.BuildPlatforms,
+		Inputs:    inputs,
+		Outputs:   request.Release.Pkg.Space.BuildOutputs,
 		Limits:    c.Limits,
 	}
 }
@@ -362,15 +412,27 @@ type watcher struct {
 type attempt struct {
 	offered    string
 	assignment *Assignment
-	replies    chan Result
+	replies    chan taskReply
+}
+
+// taskReply is one accepted result together with the object it was read at.
+//
+// The object id travels beside the document rather than inside it because it
+// is not the node's to state: what a result is read at is what the
+// orchestrator fetched and proved to be on the branch, and a set of outputs
+// admitted at an object a node named would be a set admitted at whatever that
+// node pointed to.
+type taskReply struct {
+	result Result
+	commit string
 }
 
 // watch registers one branch before it is created, so that a node quick
 // enough to answer between the push and the registration is still heard.
-func (w *watcher) watch(branch string) <-chan Result {
+func (w *watcher) watch(branch string) <-chan taskReply {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	waiting := &attempt{replies: make(chan Result, 1)}
+	waiting := &attempt{replies: make(chan taskReply, 1)}
 	w.attempts[branch] = waiting
 	return waiting.replies
 }
@@ -486,7 +548,7 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 			Str("category", CategoryAuthority).Msg("result rejected")
 		return false
 	}
-	waiting.replies <- result
+	waiting.replies <- taskReply{result: result, commit: tip.OID}
 	w.forget(head.Name)
 	return true
 }

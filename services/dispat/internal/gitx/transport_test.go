@@ -478,3 +478,32 @@ func TestResolveSubtreeNarrowsARepositoryTreeToAFolder(t *testing.T) {
 	absent.ResolveSubtree(ctx, tree, "packages/absent")
 	assert.Error(t, absent.Err(), "a folder the tree does not hold is a failure rather than an empty answer")
 }
+
+// TestCountChangedPathsIgnoresTheFoldersACallerDeclared: a checkout is asked
+// what a task changed in the source it was given, so a build's own products
+// are not counted, and neither are tracked files inside a folder the caller
+// declared as a build output: those the run carries on purpose.
+func TestCountChangedPathsIgnoresTheFoldersACallerDeclared(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	for _, name := range []string{"src/main.go", "packages/core/dist/kept.js", "dist-old/other.js"} {
+		path := filepath.Join(f.root, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte("one"), 0o644))
+	}
+	runGit(t, f.root, "add", "-A")
+	runGit(t, f.root, "commit", "-q", "-m", "tracked")
+	for _, name := range []string{"src/main.go", "packages/core/dist/kept.js", "dist-old/other.js"} {
+		require.NoError(t, os.WriteFile(filepath.Join(f.root, filepath.FromSlash(name)), []byte("two"), 0o644))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(f.root, "untracked.txt"), []byte("three"), 0o644))
+
+	counted, err := f.git.CountChangedPaths(ctx, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 3, counted, "every tracked change counts and the untracked file does not")
+
+	declared, err := f.git.CountChangedPaths(ctx, []string{"packages/core/dist"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, declared,
+		"the declared folder is not a stray write, and a folder whose name only begins like it still is")
+}

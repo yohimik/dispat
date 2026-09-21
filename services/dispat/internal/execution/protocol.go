@@ -102,6 +102,12 @@ const (
 // the signature over its exact bytes is `<kind>.sig` beside it.
 const messageDir = "dispat"
 
+// outputsDir is the folder a result's captured build outputs travel in, beside
+// the message folder rather than inside it. A reader never looks anything up
+// by that name: the signed result names the tree by object id, and the folder
+// exists so that a push of the commit sends the blobs.
+const outputsDir = "outputs"
+
 // branchPrefix is what every branch addressed to one node begins with. The
 // node name is written as the file spelled it, because that is what the node
 // itself lists on.
@@ -253,9 +259,16 @@ type AssignmentRepository struct {
 }
 
 // AssignmentPackage names the package a task belongs to: the package's name
-// in the plan, the repository it lives in and its folder inside it.
+// in the plan, the version this run is releasing it as, the repository it
+// lives in and its folder inside it.
+//
+// The version is carried so that the manifest of what the task produces can
+// name it. A node could read the same number out of the computed environment,
+// but reading policy out of an environment variable is what §28.3 forbids: a
+// task executes the input it was given.
 type AssignmentPackage struct {
 	Name       string `json:"name"`
+	Version    string `json:"version,omitempty"`
 	Repository string `json:"repository,omitempty"`
 	Dir        string `json:"dir,omitempty"`
 }
@@ -382,6 +395,11 @@ type Result struct {
 	// FailedPart names the part of the frame that failed, empty for a
 	// successful attempt.
 	FailedPart string `json:"failedPart,omitempty"`
+	// Reason is the stable word for a failure that was not a command exiting
+	// non-zero: the rule an input or output set broke. It is an enum so that
+	// the orchestrator's log says which rule without echoing anything the
+	// task produced.
+	Reason string `json:"reason,omitempty"`
 	// Exit is the exit status of the failed command.
 	Exit int `json:"exit,omitempty"`
 	// Platform is what the work actually ran on, which is how a run's records

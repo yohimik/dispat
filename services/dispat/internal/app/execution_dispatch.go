@@ -31,9 +31,62 @@ func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinat
 	coordinator.Start(ctx, execution.Dispatch{
 		Concurrency:    a.cfg.Execution.ResolveConcurrency(),
 		Sources:        a.resolveInputSources(pl),
+		Inputs:         a.resolveOutputProviders(pl),
 		Shell:          a.resolveShell,
 		OpenRepository: a.openRepository,
+		Store:          a.git,
 	})
+}
+
+// resolveOutputProviders answers, for one package, the providers whose build
+// outputs its own build may read: the transitive provider closure over every
+// dependency kind, narrowed to the packages this run releases and that declare
+// outputs, in the plan's dependency order.
+//
+// Every kind, because a build-only edge supplies bytes exactly as a runtime
+// edge does: a package that generates types for its consumer is a provider
+// whether or not the release rules propagate a bump along that edge. The
+// planner's provider map is already the whole declared graph, so the closure
+// is read from it rather than from the propagation kinds.
+func (a *App) resolveOutputProviders(pl *plan.Plan) func(string) []execution.InputPackage {
+	return func(packageName string) []execution.InputPackage {
+		closure := map[string]bool{}
+		collectProviderClosure(pl, packageName, closure)
+		providers := make([]execution.InputPackage, 0, len(closure))
+		for _, name := range pl.Order {
+			rel := pl.Releases[name]
+			if !closure[name] || rel == nil || !rel.IsReleasing() || len(rel.Pkg.Space.BuildOutputs) == 0 {
+				continue
+			}
+			providers = append(providers, execution.InputPackage{
+				Package: name, Path: relativeRepositoryPath(a.runAnchor(), rel.Pkg.Dir),
+			})
+		}
+		return providers
+	}
+}
+
+// collectProviderClosure marks every package that is a provider of name,
+// directly or through another provider. The plan's graph is acyclic before
+// anything is dispatched (a cycle is refused at planning), and the seen set
+// makes a diamond cost one visit rather than two.
+func collectProviderClosure(pl *plan.Plan, name string, seen map[string]bool) {
+	for _, provider := range pl.Providers[name] {
+		if seen[provider] {
+			continue
+		}
+		seen[provider] = true
+		collectProviderClosure(pl, provider, seen)
+	}
+}
+
+// runAnchor is the folder every path a node reproduces is relative to: the
+// control root of a composed workspace, and the checkout itself otherwise.
+func (a *App) runAnchor() string {
+	if a.workspace == nil {
+		return a.root
+	}
+	return a.workspace.ControlRoot
 }
 
 // resolveInputSources answers, for one package, the repositories its build

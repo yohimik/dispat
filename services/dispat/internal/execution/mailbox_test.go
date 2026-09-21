@@ -126,11 +126,11 @@ func TestMailboxCarriesOneAttemptEndToEnd(t *testing.T) {
 	assert.Equal(t, branch, read.Branch)
 
 	claimed, err := worker.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
-		mustMarshal(t, Claim{Header: read.Header, Assignment: offered}))
+		mustMarshal(t, Claim{Header: read.Header, Assignment: offered}), nil)
 	require.NoError(t, err)
 	reported, err := worker.mailbox.Advance(t.Context(), branch, claimed, MessageResult,
 		mustMarshal(t, Result{Header: read.Header, Assignment: offered, Status: StatusSucceeded,
-			Report: &NodeReport{Protocol: ProtocolVersion, Capacity: 2}}))
+			Report: &NodeReport{Protocol: ProtocolVersion, Capacity: 2}}), nil)
 	require.NoError(t, err)
 
 	// The orchestrator sees the branch move and reads the result off it.
@@ -175,7 +175,7 @@ func TestMailboxObservesOnlyWhatMoved(t *testing.T) {
 	assert.Empty(t, again, "an unchanged branch costs nothing after the first look")
 
 	_, err = worker.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
-		mustMarshal(t, Claim{Assignment: offered}))
+		mustMarshal(t, Claim{Assignment: offered}), nil)
 	require.NoError(t, err)
 	moved, err := orchestrator.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
 	require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestMailboxResolvesALostPushResponse(t *testing.T) {
 		defer func() { fixture.mailbox.remote = fixture.git }()
 
 		claimed, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
-			mustMarshal(t, Claim{Assignment: offered}))
+			mustMarshal(t, Claim{Assignment: offered}), nil)
 
 		require.NoError(t, err, "a push that applied is a push that worked, however its answer was lost")
 		assert.Equal(t, claimed, fake.applied)
@@ -290,7 +290,7 @@ func TestMailboxResolvesALostPushResponse(t *testing.T) {
 		// The branch is now at the claim, so a second advance leased against
 		// the assignment is refused by the remote itself.
 		_, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
-			mustMarshal(t, Claim{Assignment: offered, Header: Header{Task: "other"}}))
+			mustMarshal(t, Claim{Assignment: offered, Header: Header{Task: "other"}}), nil)
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gitx.ErrLeaseRejected)

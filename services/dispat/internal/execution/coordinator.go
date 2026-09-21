@@ -89,6 +89,9 @@ type Coordinator struct {
 	snapshots *snapshots
 	offers    sync.Mutex
 	offered   map[string]offeredState
+	// outputs is what every package of this run produced, as it was admitted,
+	// and what has already been relayed to which endpoint.
+	outputs *outputRegistry
 	// watchers is one poller per endpoint, with the cancellation and the wait
 	// that stop them.
 	watchers     map[string]*watcher

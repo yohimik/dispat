@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -47,7 +48,8 @@ type mailboxx interface {
 	Observe(ctx context.Context, pattern string) ([]gitx.RemoteHead, error)
 	Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTip, error)
 	Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error)
-	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte) (string, error)
+	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte,
+		carried []gitx.TreeEntry) (string, error)
 	Fetch(ctx context.Context, branches []string) error
 	Reconsider(branch string)
 	Forget()
@@ -129,6 +131,12 @@ type Worker struct {
 // somebody.
 func (w *Worker) Serve(ctx context.Context) string {
 	w.slots = make(chan struct{}, max(w.Report.Capacity, 1))
+	// Whatever a killed process left behind: an attempt's checkout, the
+	// folder a transfer was being assembled in, the copy of a root that was
+	// moved aside. Every one of them lives inside a folder this node owns and
+	// nothing of this process's is in it yet, so the sweep is the removal of
+	// that folder.
+	w.clearTaskDir(filepath.Join(w.StateDir, taskWorkDir), w.Log)
 	w.Log.Info().Str("endpoint", gitx.RedactURL(w.Endpoint)).
 		Int("concurrency", w.Report.Capacity).Str("stateDir", w.StateDir).
 		Msg("worker started")
@@ -303,7 +311,7 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 	}
 	claimed, err := w.advance(ctx, tip, tip.OID, MessageClaim, Claim{
 		Header: w.formatReplyHeader(assignment.Header), Assignment: tip.OID,
-	})
+	}, nil)
 	if err != nil {
 		<-w.slots
 		return false, err
@@ -346,13 +354,15 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 		Assignment:  tip.OID,
 		Status:      outcome.status,
 		FailedPart:  outcome.failedPart,
+		Reason:      string(outcome.reason),
 		Platform:    Platform{OS: w.Report.OS, Arch: w.Report.Arch, Dispat: w.Report.Dispat},
 		Exports:     formatExports(outcome.exports),
+		Outputs:     outcome.outputs,
 		StrayWrites: outcome.strayWrites,
 	}
 	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
 	defer done()
-	reported, err := w.advance(reportCtx, tip, claimed, MessageResult, report)
+	reported, err := w.advance(reportCtx, tip, claimed, MessageResult, report, carriedOutputs(outcome.outputs))
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the task result could not be reported")
@@ -383,7 +393,7 @@ func (w *Worker) checkAssignment(assignment Assignment, tip ChainTip) RejectReas
 func (w *Worker) answerProbe(ctx context.Context, tip ChainTip, assignment Assignment) error {
 	claimed, err := w.advance(ctx, tip, tip.OID, MessageClaim, Claim{
 		Header: w.formatReplyHeader(assignment.Header), Assignment: tip.OID,
-	})
+	}, nil)
 	if err != nil {
 		return err
 	}
@@ -403,7 +413,7 @@ func (w *Worker) answerProbe(ctx context.Context, tip ChainTip, assignment Assig
 		Status:     StatusSucceeded,
 		Platform:   Platform{OS: report.OS, Arch: report.Arch, Dispat: report.Dispat},
 		Report:     &report,
-	})
+	}, nil)
 	if err != nil {
 		return err
 	}
@@ -415,12 +425,25 @@ func (w *Worker) answerProbe(ctx context.Context, tip ChainTip, assignment Assig
 
 // advance writes one reply onto the branch, under a lease over the value this
 // node read.
-func (w *Worker) advance(ctx context.Context, tip ChainTip, expectedOld string, kind MessageKind, message any) (string, error) {
+func (w *Worker) advance(ctx context.Context, tip ChainTip, expectedOld string, kind MessageKind,
+	message any, carried []gitx.TreeEntry) (string, error) {
 	document, err := json.Marshal(message)
 	if err != nil {
 		return "", fmt.Errorf("execution: writing the %s document: %w", kind, err)
 	}
-	return w.Mailbox.Advance(ctx, tip.Branch, expectedOld, kind, document)
+	return w.Mailbox.Advance(ctx, tip.Branch, expectedOld, kind, document, carried)
+}
+
+// carriedOutputs is what a result carries beside itself: the tree of the
+// files it describes, so that the one push that reports the task also sends
+// the bytes of it. A task that produced nothing carries nothing.
+func carriedOutputs(manifest *OutputManifest) []gitx.TreeEntry {
+	if manifest == nil {
+		return nil
+	}
+	return []gitx.TreeEntry{
+		{Mode: gitx.TreeModeDir, Type: "tree", OID: manifest.OutputTree, Name: outputsDir},
+	}
 }
 
 // formatReplyHeader is the header of everything this node writes back: the

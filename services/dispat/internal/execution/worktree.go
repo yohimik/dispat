@@ -112,9 +112,10 @@ func (c *Checkout) Remove(ctx context.Context) {
 // will not carry, and the number is what makes that visible without putting a
 // build's private paths in somebody's log. Untracked files are not counted:
 // build products are untracked by definition, and what this asks about is the
-// source the task was given.
-func (c *Checkout) CountStrayWrites(ctx context.Context, path string) int {
-	changed, err := (&gitx.LocalGitx{Dir: c.Dir(path), Log: c.log}).CountChangedPaths(ctx)
+// source the task was given. Neither are the declared output roots, whose
+// files this run carries on purpose once they are captured.
+func (c *Checkout) CountStrayWrites(ctx context.Context, path string, declared []string) int {
+	changed, err := (&gitx.LocalGitx{Dir: c.Dir(path), Log: c.log}).CountChangedPaths(ctx, declared)
 	if err != nil {
 		c.log.Warn().Err(err).Msg("the task checkout could not be inspected for stray writes")
 		return 0

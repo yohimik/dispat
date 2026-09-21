@@ -115,6 +115,13 @@ const (
 	PartBefore   = "before"
 	PartCommands = "commands"
 	PartAfter    = "after"
+	// PartInputs and PartOutputs are the two parts of a frame that are not
+	// commands at all: installing the verified outputs of the providers this
+	// task consumes, and capturing the outputs this task declared. A node that
+	// failed at either ran no command of the stage, which is a different thing
+	// for an operator to read than a script that exited non-zero.
+	PartInputs  = "inputs"
+	PartOutputs = "outputs"
 )
 
 // runStage runs one task's gating frame wherever this run executes it.
@@ -193,6 +200,10 @@ func formatRemoteFailure(kind taskKind, part string) string {
 		return kind.String() + " script failed"
 	case PartAfter:
 		return "post" + stageTitle(kind) + " hook failed"
+	case PartInputs:
+		return kind.String() + " inputs could not be installed"
+	case PartOutputs:
+		return kind.String() + " outputs could not be captured"
 	default:
 		return "remote " + kind.String() + " failed"
 	}

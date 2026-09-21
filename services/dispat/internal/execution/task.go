@@ -20,6 +20,7 @@ package execution
 import (
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -48,8 +49,10 @@ const taskReportTimeout = 30 * time.Second
 type taskOutcome struct {
 	status      string
 	failedPart  string
+	reason      OutputReason
 	exports     []plan.Output
 	strayWrites int
+	outputs     *OutputManifest
 }
 
 // runTask materializes the task's checkouts, runs its frame and answers what
@@ -85,9 +88,32 @@ func (w *Worker) runTask(ctx context.Context, assignment Assignment, log zerolog
 		return taskOutcome{status: StatusFailed}
 	}
 	owner := ownerPathOf(assignment)
+	installed, reason, err := w.installTaskInputs(ctx, assignment, checkout, dir, log)
+	if err != nil {
+		// No command of the stage has run, and none will: a prerequisite that
+		// could not be verified is a prerequisite, not a build failure (§28.5).
+		log.Warn().Err(err).Str("reason", string(reason)).Str("code", CodeIntegrity).
+			Str("category", CategoryIntegrity).Msg("the task's inputs could not be installed")
+		return taskOutcome{status: StatusFailed, failedPart: release.PartInputs, reason: reason}
+	}
 	outcome := w.runFrame(ctx, assignment, checkout.Dir(owner, assignment.Package.Dir), log)
-	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner)
-	return outcome
+	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner,
+		formatDeclaredPaths(assignment.Package.Dir, assignment.Outputs))
+	if outcome.status != StatusSucceeded {
+		return outcome
+	}
+	return w.captureTaskOutputs(ctx, assignment, checkout, installed, outcome, log)
+}
+
+// formatDeclaredPaths is where one package's declared output roots sit inside
+// the repository that owns it, which is the spelling a checkout's own status
+// reports them under.
+func formatDeclaredPaths(packageDir string, roots []string) []string {
+	declared := make([]string, 0, len(roots))
+	for _, root := range roots {
+		declared = append(declared, path.Join(packageDir, path.Clean(strings.TrimSuffix(root, "/"))))
+	}
+	return declared
 }
 
 // The folders one attempt owns under the node's own state folder.

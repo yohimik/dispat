@@ -117,7 +117,7 @@ func (m *GitMailbox) Assign(ctx context.Context, message *Assignment) (string, e
 	if err != nil {
 		return "", fmt.Errorf("execution: writing the assignment document: %w", err)
 	}
-	oid, err := m.commitMessage(ctx, MessageAssignment, document, nil)
+	oid, err := m.commitMessage(ctx, MessageAssignment, document, nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -141,10 +141,11 @@ func (m *GitMailbox) Assign(ctx context.Context, message *Assignment) (string, e
 // its attempt back off the remote for exactly this reason), or somebody else
 // moved it and the caller has to look at where the branch now is before it
 // decides anything.
-func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte) (string, error) {
+func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, kind MessageKind,
+	document []byte, carried []gitx.TreeEntry) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	oid, err := m.commitMessage(ctx, kind, document, []string{expectedOld})
+	oid, err := m.commitMessage(ctx, kind, document, []string{expectedOld}, carried)
 	if err != nil {
 		return "", err
 	}
@@ -424,10 +425,19 @@ func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gi
 }
 
 // commitMessage writes one message as a transport commit: the document, its
-// signature, the `dispat` folder holding both, and the commit that carries
-// them. The tree is built innermost first because git's mktree writes one
-// level, which is also what keeps a path separator out of every entry name.
-func (m *GitMailbox) commitMessage(ctx context.Context, kind MessageKind, document []byte, parents []string) (string, error) {
+// signature, the `dispat` folder holding both, whatever else the message
+// carries beside them, and the commit over all of it. The tree is built
+// innermost first because git's mktree writes one level, which is also what
+// keeps a path separator out of every entry name.
+//
+// What a message carries beside itself is build output, and it travels in the
+// same commit rather than in one of its own for one reason: a push sends the
+// objects a commit needs, so one compare-and-swap push moves the report and
+// the bytes it is about together or moves neither. Nothing is ever trusted for
+// being in that tree: what a reader believes is the signed document, which
+// names the tree by object id.
+func (m *GitMailbox) commitMessage(ctx context.Context, kind MessageKind, document []byte,
+	parents []string, carried []gitx.TreeEntry) (string, error) {
 	plumbing := gitx.NewPlumbing(m.plumbing)
 	documentOID := plumbing.HashObject(ctx, bytes.NewReader(document))
 	signatureOID := plumbing.HashObject(ctx, strings.NewReader(m.signer.Sign(kind, document)))
@@ -435,9 +445,9 @@ func (m *GitMailbox) commitMessage(ctx context.Context, kind MessageKind, docume
 		{Mode: gitx.TreeModeFile, Type: "blob", OID: documentOID, Name: string(kind) + ".json"},
 		{Mode: gitx.TreeModeFile, Type: "blob", OID: signatureOID, Name: string(kind) + ".sig"},
 	})
-	tree := plumbing.MakeTree(ctx, []gitx.TreeEntry{
+	tree := plumbing.MakeTree(ctx, append([]gitx.TreeEntry{
 		{Mode: gitx.TreeModeDir, Type: "tree", OID: inner, Name: messageDir},
-	})
+	}, carried...))
 	oid := plumbing.CommitTree(ctx, tree, parents, string(kind))
 	if err := plumbing.Err(); err != nil {
 		return "", fmt.Errorf("execution: writing the %s message: %w", kind, err)
