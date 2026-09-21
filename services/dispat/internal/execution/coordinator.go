@@ -104,6 +104,13 @@ type Coordinator struct {
 	// outputs is what every package of this run produced, as it was admitted,
 	// and what has already been relayed to which endpoint.
 	outputs *outputRegistry
+	// preparing guards both fields below it: the providers this run builds
+	// without releasing them, and what became of each. One owner, because
+	// "has anybody started this provider" and "start it" have to be one
+	// decision however many consumers ask at once.
+	preparing       sync.Mutex
+	preparations    map[string]*preparation
+	preparedRecords []PreparedRecord
 	// watchers is one poller per endpoint, with the cancellation and the wait
 	// that stop them.
 	watchers     map[string]*watcher

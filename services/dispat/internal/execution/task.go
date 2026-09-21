@@ -146,7 +146,7 @@ func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string
 	// this frame's own, which is what travels back.
 	carried := &plan.Release{Outputs: formatOutputs(assignment.Exports)}
 	produced := &plan.Release{}
-	stage := assignment.Kind
+	stage := resolveFrameStage(assignment.Kind)
 	for _, part := range []struct {
 		name     string
 		stage    string
@@ -179,6 +179,22 @@ func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string
 		return taskOutcome{status: StatusFailed, failedPart: part.name, exports: produced.Outputs}
 	}
 	return taskOutcome{status: StatusSucceeded, exports: produced.Outputs}
+}
+
+// resolveFrameStage is the stage the scripts of one assignment believe they
+// are running.
+//
+// A preparation runs a package's build frame, so its scripts read
+// DISPAT_STAGE=build and its hooks are beforeBuild and postBuild: the frame is
+// the package's own and a script must not be able to tell whether the run that
+// asked for it is releasing the package. The kind is the run's word for why it
+// asked, and it stays on the assignment, the branch and the log, where it
+// describes the work rather than the environment.
+func resolveFrameStage(kind string) string {
+	if kind == KindPrepare {
+		return KindBuild
+	}
+	return kind
 }
 
 // formatStageTitle renders a stage name as it appears inside a hook name, so

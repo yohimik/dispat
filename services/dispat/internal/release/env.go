@@ -320,6 +320,22 @@ func CommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []string {
 	return packageEnv(p, pkg, wsVars, liveProviderUpdates(pkg, p, nil), stage)
 }
 
+// ComputedCommandEnv is CommandEnv without the configuration's own static
+// pairs: the same DISPAT_* variables, and nothing that could name a secret.
+//
+// It exists for the one frame a distributed run executes outside its plan: the
+// build of a provider the run does not release, run so that a consumer can
+// read what it produces (§28.5). That frame is not a release of anything, so
+// the environment it deserves is the one `dispat run` gives the same package
+// today (the current version as DISPAT_NEW_VERSION, DISPAT_BUMP none, every
+// provider live), which is exactly what CommandEnv renders. What it may not do
+// is carry a resolved `$NPM_TOKEN` into a mailbox, so the two halves are handed
+// back apart and the static pairs are expanded on the node that runs the
+// commands, the same rule every delegated stage frame follows.
+func ComputedCommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []string {
+	return computedPackageEnv(p, pkg, wsVars, liveProviderUpdates(pkg, p, nil), stage)
+}
+
 // packageEnv builds the DISPAT_* environment of one package's script or hook.
 // stage is what DISPAT_STAGE carries: the stage name for a stage script, the
 // hook name ("beforeBuild", "postPublish", ...) for a hook — every hook gets

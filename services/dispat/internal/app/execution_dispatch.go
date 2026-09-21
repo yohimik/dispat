@@ -27,11 +27,18 @@ import (
 
 // openDispatch starts the coordinator's pollers and gives it the run's own
 // answers about repositories, folders and shells.
-func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinator, pl *plan.Plan) {
+//
+// The runner is the release's own rather than one assembled here: a build of a
+// provider this run does not release still runs in this workspace, so a
+// composed run's nested dispat has to see the same context and the same pins
+// it would see in any other script of the same repository.
+func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinator,
+	pl *plan.Plan, runner script.Runnerx) {
 	coordinator.Start(ctx, execution.Dispatch{
 		Concurrency:    a.cfg.Execution.ResolveConcurrency(),
 		Sources:        a.resolveInputSources(pl),
 		Inputs:         a.resolveOutputProviders(pl),
+		Prepare:        a.resolvePreparedProviders(pl, runner),
 		Shell:          a.resolveShell,
 		OpenRepository: a.openRepository,
 		Store:          a.git,
@@ -40,14 +47,21 @@ func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinat
 
 // resolveOutputProviders answers, for one package, the providers whose build
 // outputs its own build may read: the transitive provider closure over every
-// dependency kind, narrowed to the packages this run releases and that declare
-// outputs, in the plan's dependency order.
+// dependency kind, narrowed to the packages that declare outputs, in the
+// plan's dependency order.
 //
 // Every kind, because a build-only edge supplies bytes exactly as a runtime
 // edge does: a package that generates types for its consumer is a provider
 // whether or not the release rules propagate a bump along that edge. The
 // planner's provider map is already the whole declared graph, so the closure
 // is read from it rather than from the propagation kinds.
+//
+// Whether this run releases the provider narrows nothing and is reported
+// instead. §28.5 requires a task's inputs to include every build dependency
+// it reads, "including dependencies whose packages need no new release": a
+// consumer compiles against the same folder either way, so a provider the run
+// leaves alone is a provider the run has to build anyway, and saying so here
+// is what lets the coordinator build it exactly once.
 func (a *App) resolveOutputProviders(pl *plan.Plan) func(string) []execution.InputPackage {
 	return func(packageName string) []execution.InputPackage {
 		closure := map[string]bool{}
@@ -55,11 +69,13 @@ func (a *App) resolveOutputProviders(pl *plan.Plan) func(string) []execution.Inp
 		providers := make([]execution.InputPackage, 0, len(closure))
 		for _, name := range pl.Order {
 			rel := pl.Releases[name]
-			if !closure[name] || rel == nil || !rel.IsReleasing() || len(rel.Pkg.Space.BuildOutputs) == 0 {
+			if !closure[name] || rel == nil || len(rel.Pkg.Space.BuildOutputs) == 0 {
 				continue
 			}
 			providers = append(providers, execution.InputPackage{
-				Package: name, Path: relativeRepositoryPath(a.runAnchor(), rel.Pkg.Dir),
+				Package:    name,
+				Path:       relativeRepositoryPath(a.runAnchor(), rel.Pkg.Dir),
+				IsPrepared: !rel.IsReleasing(),
 			})
 		}
 		return providers

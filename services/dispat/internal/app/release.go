@@ -143,10 +143,16 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err != nil {
 		return nil, err
 	}
+	// The runner every script of this run goes through, assembled before the
+	// dispatch because a prepared provider's build is one of them.
+	runner := a.packageRunner()
+	if fleet != nil {
+		runner = fleet.pins.runner(runner)
+	}
 	if coordinator != nil {
 		// The pool passed: from here the run owns one poller per endpoint, and
 		// the deferred close above stops them before it deletes the refs.
-		a.openDispatch(ctx, coordinator, pl)
+		a.openDispatch(ctx, coordinator, pl, runner)
 	}
 	// Resolve the GitHub releasers: one per distinct target the packages'
 	// resolved policies name — most runs resolve to a single one. Empty
@@ -160,10 +166,6 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		fleet.gh = gh
 	}
 
-	runner := a.packageRunner()
-	if fleet != nil {
-		runner = fleet.pins.runner(runner)
-	}
 	// The run-level hooks share one environment: the workspace listing before
 	// the run, widened to the run outcome once the task graph finishes.
 	hooks := &runHooks{cfg: a.cfg, runner: runner, root: a.root,
@@ -194,6 +196,9 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	executor := a.newReleaseExecutor(pl, fleet, gh, runner, obs, coordinator)
 	start := time.Now()
 	results := executor.Run(ctx, pl)
+	if coordinator != nil {
+		a.reportPreparedProviders(coordinator)
+	}
 	return a.completeRelease(ctx, pl, results, hooks, gh, fleet, finishCleanup, wh, start)
 }
 

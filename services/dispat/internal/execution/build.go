@@ -52,11 +52,16 @@ type Dispatch struct {
 	OpenRepository func(dir string) *gitx.LocalGitx
 	// Inputs answers the provider output sets one package's build consumes:
 	// its transitive provider closure over every dependency kind, in
-	// dependency order, restricted to the packages of this run that declare
-	// build outputs. A build-only edge outside the propagation kinds still
-	// supplies bytes, so the closure is the graph's rather than the release
-	// rules'.
+	// dependency order, restricted to the packages that declare build outputs.
+	// A build-only edge outside the propagation kinds still supplies bytes, so
+	// the closure is the graph's rather than the release rules'.
 	Inputs func(packageName string) []InputPackage
+	// Prepare describes the build frame of one provider this run does not
+	// release, so that its declared outputs can be produced without a release
+	// being invented for it (§28.5). It answers the frame as a node receives
+	// it and the same frame as this process runs it, because where that frame
+	// is placed is the pool's decision and not the caller's.
+	Prepare func(packageName string) (*PreparedProvider, error)
 	// Store is the object store a reported result and its outputs are read
 	// from, and the one a relay is pushed out of. It is the repository the run
 	// was started in, which is where every mailbox of the run fetches.
@@ -69,6 +74,11 @@ type Dispatch struct {
 type InputPackage struct {
 	Package string
 	Path    string
+	// IsPrepared says this run releases no version of the provider, so nothing
+	// in the task graph builds it: its declared outputs exist only because the
+	// run builds it on purpose before the first consumer that reads them
+	// (§28.5).
+	IsPrepared bool
 }
 
 // Start gives the coordinator what it needs to place work and begins watching
@@ -84,6 +94,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
 	c.dispatch = dispatch
 	c.snapshots = newSnapshots()
 	c.outputs = newOutputRegistry()
+	c.preparations = map[string]*preparation{}
 	c.offered = map[string]offeredState{}
 	c.local = make(chan struct{}, max(dispatch.Concurrency, 1))
 	c.watchers = make(map[string]*watcher, len(c.Links))
@@ -134,13 +145,23 @@ func (c *Coordinator) Publish(context.Context, release.StageRequest, func(contex
 
 // Build places one package's build frame and runs it where it was placed.
 //
-// The placement comes first because it decides what the rest of the work is.
+// The providers this run does not release come first, before a node slot is
+// taken: a preparation needs a slot of its own, and a consumer holding one
+// while it waits for a preparation would be a consumer waiting for capacity it
+// is itself occupying. What it does hold meanwhile is the run-wide build slot
+// the task graph gave it, which is what keeps the preparations inside the
+// build budget rather than beside it.
+//
+// The placement comes next because it decides what the rest of the work is.
 // A frame placed on this machine needs no input state prepared, nothing
 // offered to a mailbox and nothing fetched back: it runs against the checkout
 // the run was started in. A frame placed on a node needs all three.
 func (c *Coordinator) Build(ctx context.Context, request release.StageRequest,
 	here release.LocalFrame) (release.StageOutcome, error) {
 	task := request.Release.Pkg.Name + ":" + request.Stage
+	if err := c.prepareProviderOutputs(ctx, task, request); err != nil {
+		return release.StageOutcome{FailedPart: release.PartInputs}, err
+	}
 	space := request.Release.Pkg.Space
 	placement := ResolveStagePlacement(request.Stage,
 		space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)
@@ -151,12 +172,17 @@ func (c *Coordinator) Build(ctx context.Context, request release.StageRequest,
 	if lease.IsLocal {
 		return c.buildHere(ctx, lease, task, request, here)
 	}
-	return c.dispatchBuild(ctx, lease, task, request)
+	return c.dispatchBuild(ctx, lease, KindBuild, task, request)
 }
 
 // dispatchBuild prepares one package's input state, offers its build frame to
 // the node the pool chose and waits for that node to report.
-func (c *Coordinator) dispatchBuild(ctx context.Context, lease *Lease, task string,
+//
+// The kind is the assignment's rather than the frame's: a build this run
+// releases and a build of a provider it does not are the same frame executed
+// under the same rules, and the word is what tells a reader of the mailbox,
+// of the branch names and of the log which of the two it is looking at.
+func (c *Coordinator) dispatchBuild(ctx context.Context, lease *Lease, kind, task string,
 	request release.StageRequest) (release.StageOutcome, error) {
 	sources := c.dispatch.Sources(request.Release.Pkg.Name)
 	dir, err := resolvePackageDir(sources, request)
@@ -179,16 +205,16 @@ func (c *Coordinator) dispatchBuild(ctx context.Context, lease *Lease, task stri
 		lease.Release()
 		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
 	}
-	return c.runTask(ctx, lease, task, dir, repositories, inputs, request)
+	return c.runTask(ctx, lease, kind, task, dir, repositories, inputs, request)
 }
 
 // runTask offers one assignment and waits for its terminal result, settling
 // the node slot exactly once whichever way the attempt ends.
-func (c *Coordinator) runTask(ctx context.Context, lease *Lease, task, dir string,
+func (c *Coordinator) runTask(ctx context.Context, lease *Lease, kind, task, dir string,
 	repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) (release.StageOutcome, error) {
 	outcome := release.StageOutcome{Node: lease.Node}
-	assignment := c.formatAssignment(lease.Node, task, dir, repositories, inputs, request)
+	assignment := c.formatAssignment(lease.Node, kind, task, dir, repositories, inputs, request)
 	observer := c.watchers[lease.Node]
 	replies := observer.watch(assignment.Branch)
 	offered, err := c.mailboxes[lease.Node].Assign(ctx, assignment)
@@ -381,13 +407,13 @@ func resolvePackageDir(sources []Source, request release.StageRequest) (string, 
 }
 
 // formatAssignment is the document one build task travels as.
-func (c *Coordinator) formatAssignment(node, task, dir string,
+func (c *Coordinator) formatAssignment(node, kind, task, dir string,
 	repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) *Assignment {
-	branch := FormatBranch(node, KindBuild, time.Now())
+	branch := FormatBranch(node, kind, time.Now())
 	return &Assignment{
 		Header: Header{
-			Protocol: ProtocolVersion, Kind: KindBuild, Run: c.Run,
+			Protocol: ProtocolVersion, Kind: kind, Run: c.Run,
 			PlanDigest: c.PlanDigest, Task: task, Attempt: 1,
 			Generation: c.Generation, Node: node, Branch: branch,
 			IssuedAt: time.Now().UTC().Format(time.RFC3339),

@@ -45,9 +45,11 @@ func (c *Coordinator) buildHere(ctx context.Context, lease *Lease, task string,
 	defer lease.Release()
 	c.Log.Info().Str("run", c.Run).Str("task", task).
 		Msg("task placed on the node that started the run")
-	if err := c.prepareProviderOutputs(ctx, request); err != nil {
-		return release.StageOutcome{FailedPart: release.PartInputs}, c.refuseTask(task, "", err)
-	}
+	// The provider outputs this frame reads are already in this checkout: a
+	// releasing provider's were installed by its own admission, and a prepared
+	// one's by the admission of the preparation the caller waited for before
+	// it asked for a node at all.
+	//
 	// The frame holds this node's pool slot and nothing else. It is not run
 	// under the snapshot guard a version or syncLock frame holds, on purpose:
 	// those frames write the tracked files other tasks are snapshotted from
@@ -69,19 +71,6 @@ func (c *Coordinator) buildHere(ctx context.Context, lease *Lease, task string,
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("status", StatusSucceeded).
 		Msg("task finished")
 	return release.StageOutcome{}, nil
-}
-
-// prepareProviderOutputs makes sure every provider output this build reads is
-// present in this checkout before a command of it starts.
-//
-// For a provider this run releases there is nothing to do: its own admission
-// installed its outputs here, whichever machine built it. What is left is the
-// provider this run does NOT release and whose outputs a consumer still needs
-// (§28.5, a prepared provider), and that is the gate that adds `ensurePrepared`.
-// The call sits here now so that the local path and the delegated path ask the
-// same question in the same place once it does.
-func (c *Coordinator) prepareProviderOutputs(context.Context, release.StageRequest) error {
-	return nil
 }
 
 // admitLocalOutputs describes what a frame that ran here produced and admits

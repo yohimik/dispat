@@ -278,7 +278,9 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 	if assignment.Kind == KindProbe {
 		return true, w.answerProbe(ctx, tip, assignment)
 	}
-	if assignment.Kind == KindBuild {
+	// A preparation is a build frame and is executed as one: the kind says why
+	// the run asked for it, not what the node does with it.
+	if assignment.Kind == KindBuild || assignment.Kind == KindPrepare {
 		return w.takeTask(ctx, tip, assignment)
 	}
 	// The kinds that are not executed by this build belong to the gate that
