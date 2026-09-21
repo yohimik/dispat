@@ -28,6 +28,13 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: Packages to release
+        type: choice
+        default: all
+        options:
+          - all
+          - ccme-spec
       skip_announcements:
         description: Publish packages without social announcements
         type: boolean
@@ -47,6 +54,7 @@ permissions:
 # or the records it writes. With 1.0.0 out, the
 # bootstrap resolves the latest stable release itself.
 env:
+  RELEASE_PACKAGE: ${{ inputs.package || 'all' }}
   # Missing credentials must fail unattended jobs instead of opening a prompt.
   GIT_TERMINAL_PROMPT: "0"
   GIT_ASKPASS: ""
@@ -113,7 +121,12 @@ jobs:
         id: status
         run: |
           rc=0
-          dispat status --require-release || rc=$?
+          case "$RELEASE_PACKAGE" in
+            all) set -- ;;
+            ccme-spec) set -- --package ccme-spec --strict ;;
+            *) echo "Unsupported release package: $RELEASE_PACKAGE" >&2; exit 1 ;;
+          esac
+          dispat status --require-release "$@" || rc=$?
           case "$rc" in
             0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
             3)
@@ -491,7 +504,13 @@ jobs:
         # changelog` / `dispat commit` / `dispat if` invocations inside the
         # stage scripts resolve it too. The committer identity comes from
         # commit.name/commit.email in dispat.yaml.
-        run: dispat --log-format json
+        run: |
+          case "$RELEASE_PACKAGE" in
+            all) set -- ;;
+            ccme-spec) set -- --package ccme-spec --strict --require-release ;;
+            *) echo "Unsupported release package: $RELEASE_PACKAGE" >&2; exit 1 ;;
+          esac
+          dispat release --log-format json "$@"
 
       # The experiments' records, from the docs package's beforeBuild hook.
       # always(), because a cell that failed is the record most worth keeping:
