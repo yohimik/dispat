@@ -57,7 +57,8 @@ declaration may instead carry `//namingcheck:exempt <reason>` in its own doc com
 ### JavaScript and TypeScript
 
 - Use `const` for every variable declaration, including destructuring and loop bindings. Do not use `let` or `var`.
-- Pass parameters in a single object with named properties, even when there is only one input. Destructure that object in the function signature where useful. Define parameter shapes with named interfaces in TypeScript, rather than type aliases or inline object types. JavaScript uses the same object parameter convention without TypeScript syntax. Adding or reordering properties must not change the meaning of existing arguments. Functions without inputs need no parameter object. Preserve positional signatures required by external callback or library contracts and existing published APIs.
+- Pass parameters in a single object with named properties, even when there is only one input. Define parameter shapes with named interfaces in TypeScript, rather than type aliases or inline object types. JavaScript uses the same object parameter convention without TypeScript syntax. Adding or reordering properties must not change the meaning of existing arguments. Functions without inputs need no parameter object. Preserve positional signatures required by external callback or library contracts and existing published APIs.
+- Accept the parameter object by name and destructure it with `const` as the first statement in the function body. Define default values for optional inputs in that destructuring declaration. Do not destructure parameters in the function signature. Apply this rule to function declarations, arrow functions, and methods; arrow functions with object parameters must use a block body.
 - When a value depends on branching, extract the decision into a function with early returns and bind its result with `const`. Do not replace reassignment with an object used only as a mutable box.
 - Use `for (const item of items)` or `for (const [index, item] of items.entries())` when iteration needs early `continue` or `break`. Use collection operations such as `map`, `filter`, or `reduce` when they express the transformation clearly.
 - A `const` binding does not make an object or array immutable. Keep any mutation explicit and within the owning component.
@@ -69,11 +70,13 @@ For example, calculate a retry delay in a focused function, return directly from
 ```ts
 interface RetryDelayOptions {
   attempt: number;
-  baseDelayMs: number;
-  maxDelayMs: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
 }
 
-function calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs }: RetryDelayOptions): number {
+function calculateRetryDelay(options: RetryDelayOptions): number {
+  const { attempt, baseDelayMs = 1000, maxDelayMs = 30000 } = options;
+
   if (attempt <= 0) {
     return 0;
   }
