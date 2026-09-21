@@ -2069,66 +2069,60 @@ func (c *LocalGitx) PushBranchAt(ctx context.Context, remote, rev, name string) 
 // build a ref name out of things a person configured.
 func ValidRefName(name string) error { return validRefName(name) }
 
-// PushReport says what the push did about tags the remote already carried.// PushReport says what the push did about tags the remote already carried.
-// Exactly one of the two lists is ever populated, decided by force.
+// PushReport says what the push did about tags the remote already carried.// PushReport says what the push did about tag names the remote already
+// carried. A name it did not carry appears in none of the lists: creating a
+// record is the ordinary outcome and says nothing worth reading back.
 type PushReport struct {
-	// Skipped are tags left as they were, because the remote already had
-	// them and force was off.
+	// Skipped are records the remote already held at this release's commit,
+	// which is the retry of a write whose answer was lost (§19.4). Nothing
+	// was written and nothing is wrong.
 	Skipped []string
-	// Replaced are tags the remote already had and that were overwritten.
+	// Replaced are moving aliases that were re-pointed. Only an alias
+	// declared `moving: true` can appear here: a release record is never
+	// replaced, whatever commit.force says.
 	Replaced []string
+	// Conflicts are records the remote holds at another commit. They were
+	// left exactly where they are, and each is a refusal the caller reports
+	// rather than a difference the push resolved.
+	Conflicts []RefOutcome
 }
 
-// Push pushes the current branch (HEAD) and then the given tags to the remote.
+// Push pushes the current branch (HEAD) and then the given refs to the remote.
 // Requires a checked-out branch (not a detached HEAD).
 //
-// With force, the tags are pushed with --force and a tag the remote already
-// carries is overwritten; the report names those, because replacing a
-// published ref is worth saying out loud even when it is what was asked for.
-// Without it, such a tag is left alone and reported as skipped, so a re-run
-// after a partially pushed release converges instead of dying on "already
-// exists".
+// The records travel create-only and the moving aliases travel forced; see
+// PushReleaseRefs, which is where that rule lives. A name the remote already
+// holds is therefore never replaced by a release record, and the report says
+// which of the three things happened to it, because "the remote already had
+// this one at the same commit" and "the remote holds this version somewhere
+// else" are a convergent re-run and an integrity failure.
 //
 // **The branch is never force pushed.** A rejected branch push means someone
 // else pushed while this run was working, and the answer to that is to look,
-// not to overwrite their commits. Only the tag refs, which are dispat's own
-// namespace, are ever forced. A refusal of that kind comes back wrapping
+// not to overwrite their commits. A refusal of that kind comes back wrapping
 // ErrRejected, so the caller can join what landed with MergeRemote and push
 // again rather than reporting a release that never landed.
-func (c *LocalGitx) Push(ctx context.Context, remote string, tags []string, force bool) (PushReport, error) {
+func (c *LocalGitx) Push(ctx context.Context, remote string, refs []ReleaseRef) (PushReport, error) {
 	var report PushReport
 	if _, err := c.run(ctx, "push", remote, "HEAD"); err != nil {
 		return report, classifyPush(err)
 	}
-	if len(tags) == 0 {
-		return report, nil
-	}
-	existing, err := c.RemoteTags(ctx, remote)
-	if err != nil {
-		return report, err
-	}
-	refs := make([]string, 0, len(tags))
-	for _, t := range tags {
-		switch {
-		case !existing[t]:
-		case force:
-			report.Replaced = append(report.Replaced, t)
-		default:
-			report.Skipped = append(report.Skipped, t)
-			continue
-		}
-		refs = append(refs, "refs/tags/"+t)
-	}
 	if len(refs) == 0 {
 		return report, nil
 	}
-	args := []string{"push"}
-	if force {
-		args = append(args, "--force")
-	}
-	args = append(args, remote)
-	if _, err := c.run(ctx, append(args, refs...)...); err != nil {
+	outcomes, err := c.PushReleaseRefs(ctx, remote, refs)
+	if err != nil {
 		return report, err
+	}
+	for _, outcome := range outcomes {
+		switch outcome.Result {
+		case RefExisting:
+			report.Skipped = append(report.Skipped, outcome.Name)
+		case RefMoved:
+			report.Replaced = append(report.Replaced, outcome.Name)
+		case RefAtOtherCommit:
+			report.Conflicts = append(report.Conflicts, outcome)
+		}
 	}
 	return report, nil
 }

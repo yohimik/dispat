@@ -117,14 +117,15 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	// shape the day somebody adds an alias to the config. `dispat commit`
 	// renders its own message from the release tag alone; this keeps the two
 	// spellings of the same placeholder in agreement.
-	var pkgs, tags, pushTags, dirs []string
+	var pkgs, tags, dirs []string
+	var pushTags []gitx.ReleaseRef
 	var rels []*plan.Release
 	for _, name := range pl.Order {
 		if r, ok := results[name]; ok && r.Status == release.StatusPublished {
 			rel := pl.Releases[name]
-			pushTags = append(pushTags, rel.TagName())
+			pushTags = append(pushTags, gitx.ReleaseRef{Name: rel.TagName()})
 			for _, alias := range rel.AliasTags() {
-				pushTags = append(pushTags, alias.Name)
+				pushTags = append(pushTags, gitx.ReleaseRef{Name: alias.Name, IsMoving: alias.Force})
 			}
 			dirs = append(dirs, rel.Pkg.Dir)
 			rels = append(rels, rel)
@@ -192,7 +193,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	var released string
 	if a.cfg.Commit.IsPushEnabled() {
 		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
-		report, err := a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.IsForceEnabled())
+		report, err := a.git.Push(ctx, fin.remote, pushTags)
 		if errors.Is(err, gitx.ErrRejected) {
 			// Somebody pushed to the branch while this run was working. The
 			// release still owes its commit and tags, and the way to deliver
@@ -200,6 +201,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			report, released, err = a.mergeAndPush(ctx, fin, rels, tags, pushTags)
 		}
 		a.reportPush(report, fin.remote)
+		a.recordRecordConflicts(fin.crit, report, fin.remote)
 		if err != nil {
 			// The commit and the tags are local records already; the remote
 			// copy is what is missing, and a later push sends it. The GitHub
@@ -208,7 +210,8 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			fin.crit.record(a.log, plan.CodePushFailed, err, "push failed",
 				func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", gitx.RedactURL(fin.remote)) })
 		} else {
-			a.log.Info().Str("remote", gitx.RedactURL(fin.remote)).Strs("tags", pushTags).Msg("pushed release commit and tags")
+			a.log.Info().Str("remote", gitx.RedactURL(fin.remote)).
+				Strs("tags", gitx.ReleaseRefNames(pushTags)).Msg("pushed release commit and tags")
 			fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
 		}
 	}
@@ -272,7 +275,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 // cannot read it off HEAD afterwards: HEAD is the merge by then, and the
 // records this run still has to write are about the commit underneath it.
 func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Release,
-	tags, pushTags []string) (gitx.PushReport, string, error) {
+	tags []string, pushTags []gitx.ReleaseRef) (gitx.PushReport, string, error) {
 	branch, err := a.git.CurrentBranch(ctx)
 	if err != nil {
 		return gitx.PushReport{}, "", err
@@ -310,7 +313,7 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 			Int("attempt", attempt).
 			Msg("pulled the branch during the release to sync changes that landed while it ran; " +
 				"the release tags point at the tree that was planned and the release commit was merged on top")
-		report, err = a.git.Push(ctx, fin.remote, pushTags, a.cfg.Commit.IsForceEnabled())
+		report, err = a.git.Push(ctx, fin.remote, pushTags)
 		if !errors.Is(err, gitx.ErrRejected) || attempt >= mergeAttempts {
 			return report, release, err
 		}
@@ -478,18 +481,39 @@ func mergeMessage(remote, branch, release string, tags []string) string {
 		safe, branch, safe, branch, short, strings.Join(tags, ", "))
 }
 
-// reportPush logs what the push did about tags the remote already carried.
-// Both push sites report it identically, because the distinction matters to
-// whoever reads the log: a skipped tag means the remote kept what it had,
-// a replaced one means this run overwrote a published ref.
+// reportPush logs what the push did about tag names the remote already
+// carried. Both push sites report it identically, because the distinction
+// matters to whoever reads the log: a skipped record means the remote already
+// held this exact release, a replaced name means a moving alias was
+// re-pointed.
 func (a *App) reportPush(report gitx.PushReport, remote string) {
 	for _, tag := range report.Skipped {
-		a.log.Warn().Str("tag", tag).Str("remote", gitx.RedactURL(remote)).
-			Msg("tag already exists on the remote, skipped")
+		a.log.Warn().Str("code", plan.CodeTagExists).Str("tag", tag).Str("remote", gitx.RedactURL(remote)).
+			Msg("tag already exists on the remote at this release's commit, skipped")
 	}
 	for _, tag := range report.Replaced {
 		a.log.Warn().Str("tag", tag).Str("remote", gitx.RedactURL(remote)).
-			Msg("tag already existed on the remote and was overwritten")
+			Msg("moving alias re-pointed on the remote")
+	}
+}
+
+// recordRecordConflicts reports every release record the remote holds at
+// another commit than this run's.
+//
+// It is the remote half of the refusal CreateReleaseTag already makes locally,
+// under the same code, because it is the same fact: one version named at two
+// commits, which nothing but a person can resolve. The tag is left where the
+// remote has it and the package keeps its published status, since the publish
+// itself succeeded; what failed is this run's attempt to record it, and a run
+// that cannot record what it published exits non-zero.
+func (a *App) recordRecordConflicts(crit *criticals, report gitx.PushReport, remote string) {
+	for _, conflict := range report.Conflicts {
+		err := fmt.Errorf("%w: %s on %s is at %s, and this release's tag is not",
+			release.ErrTagAtOtherCommit, conflict.Name, gitx.RedactURL(remote), conflict.Commit)
+		crit.record(a.log, release.TagFailureCode(err), err, "the remote holds this release at another commit",
+			func(e *zerolog.Event) *zerolog.Event {
+				return e.Str("tag", conflict.Name).Str("remote", gitx.RedactURL(remote))
+			})
 	}
 }
 

@@ -606,7 +606,7 @@ func TestVerifyRemoteAndPush(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, committed)
 	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
-	report, err := cli.Push(ctx, "origin", []string{"core@0.1.0"}, false)
+	report, err := cli.Push(ctx, "origin", []ReleaseRef{{Name: "core@0.1.0"}})
 	require.NoError(t, err)
 	assert.Empty(t, report.Skipped, "a fresh tag is pushed, not skipped")
 
@@ -619,15 +619,15 @@ func TestVerifyRemoteAndPush(t *testing.T) {
 }
 
 func TestPushSkipsTagsAlreadyOnTheRemote(t *testing.T) {
-	// A partially pushed release means some tags already exist on the remote;
-	// a later push must skip exactly those and still deliver the rest, rather
-	// than dying on "tag already exists".
+	// A partially pushed release means some records already exist on the
+	// remote; a later push must report exactly those as already recorded and
+	// still deliver the rest, rather than dying on "tag already exists".
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
 
 	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
-	report, err := cli.Push(ctx, "origin", []string{"core@0.1.0"}, false)
+	report, err := cli.Push(ctx, "origin", []ReleaseRef{{Name: "core@0.1.0"}})
 	require.NoError(t, err)
 	require.Empty(t, report.Skipped)
 
@@ -645,47 +645,57 @@ func TestPushSkipsTagsAlreadyOnTheRemote(t *testing.T) {
 	require.True(t, committed)
 	require.NoError(t, cli.CreateTag(ctx, "core@0.2.0", "release core@0.2.0", ""))
 
-	report, err = cli.Push(ctx, "origin", []string{"core@0.1.0", "core@0.2.0"}, false)
+	report, err = cli.Push(ctx, "origin", []ReleaseRef{{Name: "core@0.1.0"}, {Name: "core@0.2.0"}})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"core@0.1.0"}, report.Skipped, "the existing tag is skipped, not an error")
-	assert.Empty(t, report.Replaced, "nothing is overwritten without force")
+	assert.Equal(t, []string{"core@0.1.0"}, report.Skipped, "the existing record is skipped, not an error")
+	assert.Empty(t, report.Replaced, "and nothing is replaced: a record is never moved")
+	assert.Empty(t, report.Conflicts, "it is the same commit, so there is nothing to reconcile")
 
 	out, err := exec.Command("git", "-C", bare, "tag").Output()
 	require.NoError(t, err)
 	assert.Contains(t, string(out), "core@0.2.0", "the new tag still arrives")
 }
 
-// TestPushForceReplacesTagsOnTheRemote: with force on, a tag the remote
-// already carries is overwritten and reported, rather than skipped forever —
-// which is the only way a moving tag can ever move. The branch is still
-// pushed without force under the same setting: a rejected branch push means
-// someone else pushed, and the answer to that is never to overwrite them.
-func TestPushForceReplacesTagsOnTheRemote(t *testing.T) {
+// TestPushMovesOnlyTheRefsDeclaredMoving: an alias declared moving is
+// re-pointed and reported, which is the only way any ref this push writes can
+// ever move; a release record carrying the same commit is refused instead and
+// the remote keeps what it published. The branch is never forced either way: a
+// rejected branch push means someone else pushed, and the answer to that is
+// never to overwrite them.
+func TestPushMovesOnlyTheRefsDeclaredMoving(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
 
 	require.NoError(t, cli.CreateTag(ctx, "v1", "the 1.x line", ""))
-	report, err := cli.Push(ctx, "origin", []string{"v1"}, true)
+	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
+	report, err := cli.Push(ctx, "origin", []ReleaseRef{{Name: "v1", IsMoving: true}, {Name: "core@0.1.0"}})
 	require.NoError(t, err)
 	require.Empty(t, report.Replaced, "nothing to replace the first time")
 	first := remoteTagCommit(t, bare, "v1")
+	recorded := remoteTagCommit(t, bare, "core@0.1.0")
 
-	// A later release moves the tag locally, then pushes it again.
+	// A later run moves both locally, then pushes them again.
 	pkg := filepath.Join(root, "packages", "core")
 	require.NoError(t, os.WriteFile(filepath.Join(pkg, "CHANGELOG.md"), []byte("# Changelog\n"), 0o644))
 	committed, err := cli.CommitDirs(ctx, []string{pkg}, "chore(release): more")
 	require.NoError(t, err)
 	require.True(t, committed)
 	require.NoError(t, cli.CreateTagForce(ctx, "v1", "the 1.x line", ""))
+	require.NoError(t, cli.CreateTagForce(ctx, "core@0.1.0", "release core@0.1.0", ""))
 
-	report, err = cli.Push(ctx, "origin", []string{"v1"}, true)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"v1"}, report.Replaced, "the overwrite is reported, not silent")
-	assert.Empty(t, report.Skipped, "force skips nothing")
+	report, err = cli.Push(ctx, "origin", []ReleaseRef{{Name: "v1", IsMoving: true}, {Name: "core@0.1.0"}})
+	require.NoError(t, err, "one refused record does not fail the push of the rest")
+	assert.Equal(t, []string{"v1"}, report.Replaced, "the alias moved, and is reported, not silent")
+	assert.Empty(t, report.Skipped)
+	require.Len(t, report.Conflicts, 1, "the record the remote holds elsewhere is reported")
+	assert.Equal(t, "core@0.1.0", report.Conflicts[0].Name)
+	assert.Equal(t, recorded, report.Conflicts[0].Commit, "named at the commit the remote kept")
 
 	moved := remoteTagCommit(t, bare, "v1")
-	assert.NotEqual(t, first, moved, "the remote tag now points at the new commit")
+	assert.NotEqual(t, first, moved, "the remote alias now points at the new commit")
+	assert.Equal(t, recorded, remoteTagCommit(t, bare, "core@0.1.0"),
+		"and the record is exactly where it was published")
 }
 
 // TestPushNeverForcesTheBranch: the tag refs are dispat's own namespace and
@@ -695,7 +705,7 @@ func TestPushNeverForcesTheBranch(t *testing.T) {
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
 
-	_, err := cli.Push(ctx, "origin", nil, true)
+	_, err := cli.Push(ctx, "origin", nil)
 	require.NoError(t, err)
 
 	// A commit lands on the remote that this clone does not have, so a
@@ -715,7 +725,7 @@ func TestPushNeverForcesTheBranch(t *testing.T) {
 	_, err = cli.CommitDirs(ctx, []string{root}, "chore: mine")
 	require.NoError(t, err)
 
-	_, err = cli.Push(ctx, "origin", nil, true)
+	_, err = cli.Push(ctx, "origin", nil)
 	require.Error(t, err, "a diverged branch push is refused even with force on")
 
 	out, err := exec.Command("git", "-C", bare, "rev-parse", "HEAD").Output()
@@ -933,7 +943,7 @@ func TestHeadSHANoCommits(t *testing.T) {
 
 func TestPushNoRemote(t *testing.T) {
 	_, cli := initRepo(t)
-	_, err := cli.Push(context.Background(), "origin", nil, false)
+	_, err := cli.Push(context.Background(), "origin", nil)
 	require.Error(t, err, "pushing without a remote fails loudly")
 }
 
@@ -1176,7 +1186,7 @@ func TestBehindRemote(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, behind, "a branch absent from the remote is not behind")
 
-	_, err = cli.Push(ctx, "origin", nil, false)
+	_, err = cli.Push(ctx, "origin", nil)
 	require.NoError(t, err)
 	behind, err = cli.BehindRemote(ctx, "origin", "main")
 	require.NoError(t, err)
@@ -1221,7 +1231,7 @@ func TestBehindRemoteIgnoresTailMatchingRefs(t *testing.T) {
 	ctx := context.Background()
 	gitIn(t, root, "checkout", "-q", "-B", "main")
 	addBareRemote(t, root)
-	_, err := cli.Push(ctx, "origin", nil, false)
+	_, err := cli.Push(ctx, "origin", nil)
 	require.NoError(t, err)
 
 	// The decoy carries a commit main does not have. Read as the tip it would
@@ -1299,7 +1309,7 @@ func TestPushReportsARejectedBranchAsRecoverable(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
-	_, err := cli.Push(ctx, "origin", nil, false)
+	_, err := cli.Push(ctx, "origin", nil)
 	require.NoError(t, err)
 
 	// Another clone lands a commit, which is what leaves this one unable to
@@ -1325,7 +1335,7 @@ func TestPushReportsARejectedBranchAsRecoverable(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, committed)
 
-	_, err = cli.Push(ctx, "origin", nil, false)
+	_, err = cli.Push(ctx, "origin", nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrRejected, "a branch that moved is something the caller can recover from")
 	assert.Contains(t, err.Error(), "[rejected]", "and the wrapped error still says what git said")
@@ -1342,14 +1352,14 @@ func TestPushReportsARejectedBranchAsRecoverable(t *testing.T) {
 	fields := strings.Fields(strings.TrimSpace(string(parents)))
 	require.Len(t, fields, 3, "the tip is a merge of two commits")
 	assert.Equal(t, before, fields[1], "the release commit is the first parent and was not rewritten")
-	_, err = cli.Push(ctx, "origin", nil, false)
+	_, err = cli.Push(ctx, "origin", nil)
 	assert.NoError(t, err)
 
 	// A remote nobody can reach is a different failure and must not be
 	// mistaken for one worth replaying commits onto.
 	_, err = exec.Command("git", "-C", root, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone")).Output()
 	require.NoError(t, err)
-	_, err = cli.Push(ctx, "origin", nil, false)
+	_, err = cli.Push(ctx, "origin", nil)
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrRejected)
 }
@@ -1367,7 +1377,7 @@ func TestMergeRemoteReportsAConflictItCannotFinish(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
-	_, err := cli.Push(ctx, "origin", nil, false)
+	_, err := cli.Push(ctx, "origin", nil)
 	require.NoError(t, err)
 
 	other := t.TempDir()
@@ -1427,7 +1437,7 @@ func TestPushBranchAtRefusesANameAlreadyTaken(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	addBareRemote(t, root)
-	_, err := cli.Push(ctx, "origin", nil, false)
+	_, err := cli.Push(ctx, "origin", nil)
 	require.NoError(t, err)
 
 	require.NoError(t, cli.PushBranchAt(ctx, "origin", "HEAD", "release-conflicts/core-0.1.0-20260902-053012"))
@@ -1499,7 +1509,7 @@ func TestMergeRemoteOverridesMergeFfOnly(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	bare := addBareRemote(t, root)
-	_, err := cli.Push(ctx, "origin", nil, false)
+	_, err := cli.Push(ctx, "origin", nil)
 	require.NoError(t, err)
 	out, gerr := exec.Command("git", "-C", root, "config", "merge.ff", "only").CombinedOutput()
 	require.NoError(t, gerr, "git config: %s", out)

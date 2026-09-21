@@ -119,15 +119,17 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 	if !opts.Push || rep.Ran == 0 {
 		return work.crit.err()
 	}
-	report, pushErr := git.Push(ctx, remote, work.tags, force)
+	report, pushErr := git.Push(ctx, remote, work.tags)
 	a.reportPush(report, remote)
+	a.recordRecordConflicts(work.crit, report, remote)
 	if pushErr != nil {
 		// The commits and tags this run made are already in the repository,
 		// so the push is the copy that is missing, not the work.
 		work.crit.record(a.log, plan.CodePushFailed, pushErr, "push failed",
 			func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", gitx.RedactURL(remote)) })
 	} else {
-		a.log.Info().Str("remote", gitx.RedactURL(remote)).Strs("tags", work.tags).Msg("pushed")
+		a.log.Info().Str("remote", gitx.RedactURL(remote)).
+			Strs("tags", gitx.ReleaseRefNames(work.tags)).Msg("pushed")
 	}
 	return work.crit.err()
 }
@@ -149,7 +151,10 @@ type commitWork struct {
 	format  string
 	include []string
 	force   bool
-	tags    []string
+	// tags are the refs this invocation wrote and will push: each package's
+	// record, and the aliases beside it with the one property the push turns
+	// on, which is whether the alias is allowed to move.
+	tags []gitx.ReleaseRef
 	// crit collects the failures that happen once this package's commit
 	// exists: the tag, and the push at the end. They do not fail the package —
 	// the commit is made, and failing it would cascade a skip onto consumers
@@ -199,9 +204,13 @@ func (w *commitWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 				w.crit.record(log, release.TagFailureCode(err), err, "tagging failed",
 					func(e *zerolog.Event) *zerolog.Event { return e.Str("tag", tag) })
 			} else {
-				w.tags = append(w.tags, tag)
+				w.tags = append(w.tags, gitx.ReleaseRef{Name: tag})
 				for _, alias := range rel.AliasTags() {
-					w.tags = append(w.tags, alias.Name)
+					// --no-force is the invocation saying it may replace
+					// nothing at all, moving aliases included; it never
+					// decides anything about the record itself.
+					w.tags = append(w.tags, gitx.ReleaseRef{
+						Name: alias.Name, IsMoving: alias.Force && w.force})
 				}
 			}
 		}
