@@ -94,8 +94,10 @@ integration suite itself.
 6. **Concurrency** (`concurrency_test.go`): stable tests *guaranteeing* the budgets work. With concurrency 4 and five
    packages, the fifth's work starts exactly after one of the first four finishes; independent packages are picked up
    concurrently while dependants are awaited.
-7. **Execution order by dependency graph** (`order_test.go`): scripts run in the order the graph dictates, under both
-   `isBuildWaitingPublish` settings.
+7. **Execution order by dependency graph** (`order_test.go`, `publish_order_test.go`): scripts run in the order the
+   graph dictates, under both `isBuildWaitingPublish` settings. The order is the whole graph's rather than the plan's:
+   `publish_order_test.go` holds a consumer behind a provider it reaches only through a package with nothing to
+   release, and blocks it behind that provider's failure.
 8. **Interruption** (`interrupt_test.go`, `cancel_resources_test.go`, `cancel_workspace_test.go`): a SIGINT mid-run
    shuts the run down gracefully
    through the real signal handler: the in-flight script is killed, remaining packages report `cancelled` rather than
@@ -454,6 +456,7 @@ tests/integration/
   scheduling and execution
   concurrency_test.go       goal 6
   order_test.go             goal 7
+  publish_order_test.go     goal 7 (the publication order and the skip cascade through a package that is not releasing)
   interrupt_test.go         goal 8
   hooks_test.go             goal 9
   execution_config_test.go  goal 57 (the `execution` key: local release unchanged, and every refusal)
@@ -681,6 +684,8 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestOrderDiamondDependencyConverges`                     | In a diamond dependency graph (`a -> b,c -> d`), packages `b` and `c` build in parallel, and `d` waits for both during build and publish stages. |
 | `TestOrderVersionTaskPrecedesBuildWithUpdatedProviderEnv` | A `DueTo` consumer executes a version task where `DISPAT_UPDATED_*` points to the active provider. A directly released package in the *same space with the same versionScript* skips the task. |
 | `TestOrderProviderFailureSkipsTheWaitingConsumer`         | A failed `isBuildWaitingPublish` provider skips its consumers unconditionally (W194), their own work notwithstanding — the build consumes the publish that never happened — while without the flag the own-reason rule stands and the consumer releases. |
+| `TestPublishOrderHoldsThroughAPackageThatIsNotReleasing`  | For `app -> ui -> core` with `ui` carrying nothing, the plan holds no edge between the two packages that do release, and `core` still publishes before `app`. The provider's publish is held on a file the consumer's build writes on its way out, so the consumer reaches its publish first and waits there. |
+| `TestPublishOrderBlocksAConsumerBehindAFailedProviderItDoesNotNameDirectly` | A `core` whose publish failed skips an `app` that reaches it only through the unreleasing `ui`: `W194` with `blockedBy` naming `core`, and nothing tagged, when `app` rides a fixed group with no release reason of its own. An `app` with a fresh bump of its own proceeds under the default relation, exactly as it does behind a provider it declares. |
 
 ### Goal 8: interruption (`interrupt_test.go`)
 
@@ -2603,6 +2608,8 @@ than showing up as a puzzling behaviour change somewhere downstream.
 | **A release tag was force-pushed with the rest of the run's refs.** `commit.force` defaults on and the push forced every tag it carried, so a record the remote already held at another commit was replaced rather than reported, and `CommitConfig.Force` promised the opposite. | `TestReleaseRecordsCreateOnlyPush`, `TestReleaseRecordsAliasTagsStillMove`; `services/dispat/internal/gitx/gitx_test.go::TestPushMovesOnlyTheRefsDeclaredMoving` | `release_records_test.go`; `internal/gitx` |
 | **A fleet change `compute --write` could not make failed the run silently.** Every other refusal in that command reports itself before returning and the dispatcher only turns an error into an exit status, so a link that could not be created, declared or pinned left the operator with exit 1, no diagnostic, and no sentence naming the repository, the peer or the cause. | `TestChoreographyFaultStopsComputeAndConvergesOnASecondRun`, `TestChoreographyFaultStopsComputeDeclaringTheOtherHalf`, `TestChoreographyFaultStopsComputeInitializingADeclaredLink` | `choreography_faults_test.go`; `internal/app` |
 | **A worker starting up could lose its state folder to a second worker.** The lock file is created and then filled with the owning process id, two operations, and a second process arriving between them read the empty file as a stale lock, removed it and claimed the folder, which left two nodes each holding half the record of answered work. An empty lock is now waited for, and replaced only when it stays empty past the grace. | `TestExecutionWorkerStartRefusals` (rows "a lock its writer never filled is taken over after the grace", "two nodes may not share one state folder") | `execution_worker_test.go`; `internal/execution` `TestNodeStateIsOwnedByOneProcess` |
+| **The publication order was taken over the subgraph the plan induces.** A consumer and a provider it reaches only through a package with nothing to release had no edge between them, so the two publishes were mutually unordered and the consumer could publish first, carrying a range reconciled against a version nobody had published. A package with no bump this run is the commonest shape an incremental release has. | `TestPublishOrderHoldsThroughAPackageThatIsNotReleasing`; `TestPublishOrderHoldsThroughAPackageThatIsNotInThePlan`, `TestPublishOrderReachesThroughAPackageThatIsNotInThePlan`, `TestPublishOrderConvergesThroughTwoUnreleasingPackages` | `publish_order_test.go`; `internal/release` |
+| **A failed provider blocked its declared consumers only.** The W194 closure read the direct providers of a package, so a provider that failed left every consumer behind an unreleasing package free to publish against a version that never went out. The closure is the same one the order is taken over. | `TestPublishOrderBlocksAConsumerBehindAFailedProviderItDoesNotNameDirectly`; `TestPublishOrderBlocksAConsumerBehindAReachedProvider`, `TestPublishOrderSkipsAConsumerItReachesOnlyThroughAnUnreleasingPackage` | `publish_order_test.go`; `internal/release` |
 
 ## Running
 
