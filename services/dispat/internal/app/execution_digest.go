@@ -44,8 +44,32 @@ func (a *App) recordFixedPlan(ctx context.Context, computed *plan.Plan, opts Rel
 		a.logError(failure).Msg("cannot fix the plan for distributed execution")
 		return failure
 	}
-	a.log.Info().Str("planDigest", digest).Msg("plan fixed")
+	// Remembered for the coordinator, which states it in every assignment: the
+	// digest is the plan's name, and computing it twice would be two chances
+	// to name two different plans.
+	a.planDigest = digest
+	event := a.log.Info().Str("planDigest", digest)
+	if a.runID != "" {
+		// A release names the run beside the plan, because the two together
+		// are what an assignment is bound to. `status` fixes the same plan and
+		// starts no run, so it has nothing to name here.
+		event = event.Str("run", a.runID)
+	}
+	event.Msg("plan fixed")
 	return nil
+}
+
+// startExecutionRun names this run, once, before anything is planned.
+//
+// The identity is 128 bits of randomness rather than anything derived from
+// the clock, the host or the plan: §28.3 requires the transient execution
+// identity to be bound separately from the semantic plan, so that two runs of
+// one unchanged plan are two runs and a node can tell their work apart.
+func (a *App) startExecutionRun() {
+	if !a.cfg.Execution.IsDistributed() {
+		return
+	}
+	a.runID = execution.FormatRunID()
 }
 
 // calculatePlanDigest digests the narrowed plan against the inputs it was

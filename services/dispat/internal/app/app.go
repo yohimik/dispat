@@ -71,6 +71,16 @@ type App struct {
 	// question a distributed run asks again later, not only once.
 	releaseLock *release.Lock
 
+	// runID names this run when it spreads over several machines, and is
+	// empty for every run that does not: it is generated once, before the
+	// plan is fixed, so that the line naming the plan can also name the run
+	// every assignment of it will carry.
+	runID string
+	// planDigest is the name of the plan this run fixed, remembered by the
+	// one place that computes it so that the coordinator can state it in
+	// every assignment without digesting the plan a second time.
+	planDigest string
+
 	// plannedOptions are the planner inputs the last plan was computed from,
 	// kept for the one consumer that needs the input rather than the result:
 	// a distributed run digests the plan together with what it was planned

@@ -77,6 +77,9 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err := a.checkExecutionEntry(); err != nil {
 		return nil, err
 	}
+	// A distributed run is named here, before the plan is fixed, so that the
+	// line naming the plan also names the run every assignment will carry.
+	a.startExecutionRun()
 	fleet, unlock, err := a.acquireReleaseLocks(ctx)
 	if err != nil {
 		return nil, err
@@ -118,6 +121,18 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		}
 	}
 	if err := a.refuseDirtyReleasePaths(ctx, pl, fleet != nil); err != nil {
+		return nil, err
+	}
+	// Every configured worker node is asked what it is before anything else
+	// happens: the plan exists, so what would be placed on the pool is known,
+	// and no hook, stage or record has run yet, so a node that cannot take
+	// this run's work costs nothing but the probe. The coordinator owns every
+	// ref this run creates, and closes them before the locks go back.
+	coordinator, err := a.preflightWorkers(ctx, pl, fleet)
+	if coordinator != nil {
+		defer a.closeCoordinator(ctx, coordinator)
+	}
+	if err != nil {
 		return nil, err
 	}
 	// Resolve the GitHub releasers: one per distinct target the packages'
