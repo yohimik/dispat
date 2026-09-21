@@ -17,6 +17,8 @@ Use small cohesive types, explicit dependencies, and abstractions at the boundar
 
 - Use explicit, descriptive names. The wider a name's scope, the more context its name must carry: package-level and exported names should be more descriptive than names used within a small local block. Avoid unexplained abbreviations and generic names such as `data` or `obj` when a domain name is available.
 - Name variables, parameters, fields, and data types primarily with nouns or noun phrases that describe what they hold or represent, such as `repository`, `packageName`, or `releasePlan`. Use plural nouns for collections, such as `packages`.
+- Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
+- Parameter and component props interfaces follow their specific naming rules below; the capability naming rule applies to behavioral interfaces.
 - Keep types, interfaces, enums, and related declarations in the same folder as the struct, component, context, or module that owns their business logic. For example, a React language context's types belong in that context's folder, even when consumers elsewhere import them. Importing a type from multiple places does not by itself make it global.
 - Put global types and models shared across independent parts of the application, with no specific owning component or module, in a dedicated `types/` or `models/` folder. Use the existing folder for that purpose within the relevant project or package.
 - Reserve `i`, `j`, and `k` for numeric loop counters or indexes, such as `0, 1, 2, 3, ...`. Name iterated values and map keys by their meaning, such as `packageName` or `repository`.
@@ -36,7 +38,6 @@ Use small cohesive types, explicit dependencies, and abstractions at the boundar
 - Name structs with nouns that describe their responsibility. Use Go's exported and unexported casing conventions.
 - Start constructor names with `New` for exported functions or `new` for unexported functions, such as `NewUser` or `newUser`.
 - Name methods that convert a value to a specific type after the target type, such as `User.Int()` for an integer conversion.
-- Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
 - Keep positional parameter lists short: prefer at most two parameters, and require a separate, descriptively named parameter struct when there are more than three. An optional `context.Context` does not count toward this limit; keep it as the first parameter, outside the struct. Construct parameter structs with named fields so adding a field does not change argument order at call sites.
 - Return errors with the operation and safe context. Preserve wrapped errors with `%w` when callers need to inspect them. Never ignore cleanup errors that could leave a release lock or published state ambiguous.
 - Pass the caller's context through cancellable work. Use a bounded detached context only for documented finalization that must survive cancellation.
