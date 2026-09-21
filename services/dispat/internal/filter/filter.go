@@ -317,13 +317,13 @@ func infer(dir string, ws Workspace) Filter {
 }
 
 // isPackageRootedAtRepository reports whether the named package's folder is
-// the repository root itself, which a standalone entry with `path: .` is how
-// a single-package repository declares.
+// the repository root itself, which is what a standalone entry with `path: .`
+// declares.
 func isPackageRootedAtRepository(name string, ws Workspace) bool {
 	root := absClean(ws.Root)
 	for _, pkg := range ws.Packages {
-		if pkg.Name == name {
-			return absClean(pkg.Dir) == root
+		if pkg.Name == name && absClean(pkg.Dir) == root {
+			return true
 		}
 	}
 	return false
