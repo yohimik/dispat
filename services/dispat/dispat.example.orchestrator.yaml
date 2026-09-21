@@ -3,8 +3,10 @@
 # This is the node a release is started on. It keeps everything that decides
 # and records the release: the release locks, the plan, the version edits and
 # lock-file regeneration, the tags, the changelog, the release commit and the
-# run-level hooks. Worker nodes run the build and publish stages it assigns,
-# and hand their declared build outputs to the packages that consume them.
+# run-level hooks. Worker nodes run the build stages it assigns and hand their
+# declared build outputs to the packages that consume them. A publish is
+# delegated only for a space with no login script: a space that logs in
+# publishes here, so its credentials stay on this one machine.
 # The matching worker file is dispat.example.worker.yaml.
 #
 #   dispat --config dispat.yaml status    # the plan and its `plan fixed` line
@@ -64,9 +66,8 @@ execution:
 scripts:
   install: "npm ci"
   build: "npm run build"
-  # The registry token is read where the command runs. `env` values travel to
-  # a worker unresolved and expand there, from the worker's environment, so a
-  # secret is never written to a mailbox.
+  # `env` values travel to a worker unresolved and expand there, from the
+  # worker's own environment, so a secret is never written to a mailbox.
   publish: "npm publish --access public"
   npm-login: "npm config set //registry.npmjs.org/:_authToken $NPM_TOKEN"
   npm-lock: "npm install --package-lock-only"
@@ -92,12 +93,17 @@ spaces:
       syncLock: [npm-lock]
       syncLockConcurrency: 1
     flow:
-      login: npm-login            # runs on the worker that publishes, once
-                                  # per run and space on that worker
       build: [install, build]     # runs on a worker
       postBuild: smoke-test       # a hook travels with its stage
-      publish: publish            # runs on a worker, after this node
-                                  # authorized it
+      # Publishing stays on this node unless a package asks otherwise: the
+      # login, the beforePublish hook and the publish command run here, in
+      # the checkout the package's verified build outputs were installed
+      # into, and nothing about the login ever reaches a mailbox. A publish
+      # runs on a worker only where `runOnly` says `worker` for the publish
+      # stage, which a space with a login script may not say; the token that
+      # publish needs must then be in the worker's own environment.
+      login: npm-login
+      publish: publish
 
 packages:
   assets:
