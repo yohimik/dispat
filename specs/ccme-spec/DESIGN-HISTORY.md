@@ -34,3 +34,18 @@ The profile specifies capacity limits, publication fencing and reconciliation, o
 cases. It is unimplemented and unmeasured: this draft does not establish a performance improvement, execute its
 conformance vectors, change the message grammar or lift the parser hold. Implementation and experimental
 validation require separate evidence. Version markers remain owned by the specification release process.
+
+
+## 2026-09-21: Record authority under the lock
+
+An audit of the release transaction found that taking the release lock before planning serializes runs without
+isolating them: a checkout that lacks release records its remote already holds plans a released version again, under
+a lock it holds legitimately. [Section 13.2](./SPEC.md#132-load-tags) now requires a write-capable run to compare the
+authoritative store's release records with its planning input under the lock, as `E196` or `E191`, and
+[section 19.1](./SPEC.md#191-tagging) makes a release tag create-only. The Git mapping of
+[VCS-PROTOCOL.md](./VCS-PROTOCOL.md#5-git-default-mapping) states how the built-in driver restores the snapshot
+condition Git's push does not give it. Section 28 gains the same rule for an orchestrator, the treatment of a record
+whose publication was authorized before a lock was lost, the evidence an operator needs before removing an abandoned
+lock, and an optional time bound on publication authorizations. Section 13.11 gains informative cost rows for the
+execution profile, and section 27.11 states which of the equally small link proposals a minimal topology should
+prefer. No message grammar changes.

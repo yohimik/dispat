@@ -2070,8 +2070,8 @@ ordinary way.
 The complete ordinary-release procedure. It is a pure function of (repository history, immutable release records, workspace graph, configuration) and
 MUST be deterministic.
 
-Under §28, the complete semantic plan remains `P = Plan(I)`: worker placement and scheduling MUST NOT alter it.
-A distributed release MUST acquire every participating repository's lock before fixing `I` and computing `P`;
+Under §28, the complete semantic plan remains `plan = Plan(input)`: worker placement and scheduling MUST NOT alter it.
+A distributed release MUST acquire every participating repository's lock before fixing `input` and computing `plan`;
 read-only planning remains lock-free (§28.3). Preparation and output-transfer prerequisites do not add release
 intent or discharge pending work.
 
@@ -2112,6 +2112,22 @@ units scoping them resolve to `E130`/
 
 Enumerate tags reachable from `HEAD`, parse per §12.1, and compute `baseline`, `stableBaseline`, `stableCommit` per
 §12.3.
+
+**Records under the lock.** A run that can write plans from the authoritative store's release records, not from
+whatever its checkout happened to fetch. After it holds every release lock it needs and before it fixes the input of
+this section, the engine MUST compare, for each participating repository, the release records of the store that run
+records to with the records it is about to plan from. A stored release record whose commit is reachable from the
+planned head and which the planning input lacks is incomplete history and is `E196`. A stored release record that names
+another commit than the planning input's record of the same package and version is `E191`. The engine MUST NOT repair
+either difference by planning the package as unreleased, and MUST NOT refresh its records silently after the
+comparison: a run that fetches does so before the comparison and plans from what it then holds. Complete history makes
+reachability decidable locally, because a commit the checkout does not hold cannot be reachable from its head. The lock
+is what makes one comparison sufficient: no other coordinated run can add a record between the comparison and this
+run's own records. Without the comparison the lock serializes runs and isolates nothing, because two runs that never
+overlap still plan the same version when the second one's checkout predates the first one's records. A run that records
+nowhere but its own repository has that repository as its store and nothing to compare. Read-only planning takes no
+lock and makes no comparison; its result describes the checkout. The comparison reads one record inventory per
+repository, `O(T)` each, and asks one ancestry question per record the input lacks, which is none in the ordinary case.
 
 Under §27, enumerate each package's records in its owning repository and reconstruct cross-repository consumer
 positions from gitlink snapshots or explicit `repositoryBaselines`. Never compare or sort commit IDs from different
@@ -2890,6 +2906,10 @@ in the longest route between two peers (at most `Q - 1`, and at most 2 in a star
 `(repository, revision)` trees whose fleet links are read (`B <= X · Y`). The implementation MUST preserve repository
 identity in every index and cache key.
 
+For the execution profile of §28, let `Tk` be the run's tasks and `Dk` their precedence edges, `Wn` the worker nodes,
+`Po` the packages whose outputs some other task consumes, and `Lr` the coordination refs alive in one transport
+repository.
+
 | Phase                      | Literal transcription | Achievable            | Note                                        |
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
 | Load workspace (§13.1)     | `O(P + E)`            | `O(P + E)`            |                                             |
@@ -2912,6 +2932,11 @@ identity in every index and cache key.
 | Publication input closure (§27.2) | `O(P · (P + E + V))` | `O((P + E + V) · ceil(Q / wordSize))` | Condense the augmented graph, then one bitset union per edge |
 | Link evidence (§27.11)     | `O(X · (Q + Y))`, `X · Y` tree reads | `O(Q + X · Y)`, `B` tree reads | Root the link tree once; read each `(repository, revision)` tree once |
 | Link settlement (§27.11)   | one commit per route hop | one commit per recording repository | Merge a package's routes into one tree: at most `Q - 1` commits, 2 in a star |
+| Record comparison (§13.2)  | `O(T)` per repository | `O(T)` per repository | One inventory read under the lock; one ancestry question per record the input lacks |
+| Task graph and readiness (§28.3) | `O(Tk · (Tk + Dk))` | `O(Tk + Dk)` | Rescanning every task after each completion; indegree counters decrement each successor once |
+| Placement (§28.2)          | `O(Tk · Wn)`          | `O(Tk · Wn)`          | `Wn` is small; a free list per compatibility class removes the scan and is rarely worth its bookkeeping |
+| Output transfer (§28.5)    | up to `Tk · Po` transfers | at most `Po · Wn` transfers | One per distinct `(output set, node)`, not one per consumer task; verified bytes are not fetched again |
+| Coordination polling (§28.4) | `O(Lr)` refs per tick | refs addressed to the polling node per tick | The branch-name prefix routes; one fetch per changed tip; refs of dead runs tax every tick until removed |
 
 The bold rows highlight common multiplicative costs; corrections, cancellation, provenance and retained indexes can
 also dominate. Each must be charged even when its final result is empty. Window classes safely share history reachability work. Propagation traversal is reusable
@@ -3166,6 +3191,18 @@ bounds. The publish heap matches the comparison-sorting lower bound for unsorted
 phase-specific statements. Neither `Ω(Z)` output work nor a dense `H × m` or `P × Q` representation proves that every
 instance requires that representation or that the complete planner is jointly time- and space-optimal. Correction,
 reachability, scope and cache choices retain input-dependent tradeoffs.
+
+**Distributed execution: what placement can and cannot buy.** Let `Wk` be the summed duration of a run's command
+tasks, `Lk` the duration of its longest precedence chain, and `s` the task slots usable at once, the lesser of the
+summed node capacities and the applicable run-wide stage limits. No schedule finishes before `max(Lk, Wk / s)`. A
+placement that never leaves a usable slot idle while a compatible task is ready finishes within
+`Wk / s + (1 - 1/s) · Lk`, which is at most `(2 - 1/s)` times the best possible, when slots are interchangeable and
+transfers cost nothing; this is Graham's bound for list scheduling under precedence constraints. Neither premise holds
+in general: nodes differ in platform and speed, and an output transfer delays the consumer it feeds. This section
+therefore states no bound once transfers count, and the measurement §28.7 requires stands in its place. The inequality
+still says what to expect. On a chain `Lk = Wk` and no number of nodes helps. Beyond `s = Wk / Lk` the chain and not
+the pool is the limit: the best possible time is `Lk`, and more nodes can only close the gap between a greedy schedule
+and `Lk`, which is below a factor of two.
 
 **What none of this may change.** These are all internal representations. The plan, the diagnostics, and their order
 MUST be identical to the literal reading (§17.2), and an implementation that trades a different plan for speed does not
@@ -3454,6 +3491,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 74  | `0.4.1` with a breaking change, `preserveMajorZero: true`              | `0.5.0`.                                                                                                                                                  |
 | 75  | Untagged package with a breaking change                                | `initialVersion` (`0.1.0`), not `1.0.0`.                                                                                                                  |
 | 76  | Shallow clone missing tags or ancestry                                 | The engine MUST detect a shallow repository and fail with `E196` rather than compute from partial history.                                                |
+| 76a | Complete history, but the checkout lacks release records the authoritative store holds (a clone made without tags, or made before another run recorded) | A write-capable run MUST detect this under its lock and fail with `E196` before any build or publication (§13.2). Planning the package as unreleased republishes a released version. |
 | 77  | Squash-merged PR containing many units                                 | Parsed as a multi-unit message; the primary reason the separator exists.                                                                                 |
 | 78  | Commit reachable by two merge paths                                    | Counted once (§13.3).                                                                                                                                     |
 | 79  | Empty commit (`--allow-empty`) carrying only directives                | Fully supported; this is the normal shape of a `release` or `cancel` commit.                                                                              |
@@ -3667,9 +3705,9 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `E181` | Channel name contains uppercase or illegal characters, or is outside `channels.allowed`. Applies to both sides of a transition.                                                                           |
 | `E182` | Existing prerelease tag uses a non-numeric counter (§15.5 #64). Repository-scoped; no offending unit.                                                                                                     |
 | `E185` | Graduation would not increase the version (§11.5). Repository-scoped; reachable from hand-edited tags or a pinned train.                                                                                               |
-| `E191` | Two reachable tags carry the same version for one package on different commits.                                                                                                                           |
+| `E191` | Two reachable tags carry the same version for one package on different commits, or the authoritative store records a version on another commit than the checkout a write-capable run plans from (§13.2). |
 | `E195` | Computed version not greater than baseline.                                                                                                                                                               |
-| `E196` | Repository is shallow or grafted; history is incomplete.                                                                                                                                                  |
+| `E196` | Repository is shallow or grafted; history is incomplete. Also a write-capable run whose checkout lacks a reachable release record the authoritative store holds (§13.2).                                  |
 | `E197` | Publish order violation: a package was published before a workspace dependency also in this run's plan (§19.2). Run-scoped.                                                                               |
 | `E198` | The registry already holds this version and its identity could not be verified as this run's artefact (§19.4). Run-scoped.                                                                                |
 | `E199` | Fixed-point exhaustion failed: a non-held plan repeated without discharge or has no permitted state-change explanation (§19.6). Run-scoped.                                                                                                       |
@@ -3988,6 +4026,10 @@ adds per-owner publication serialization, fencing and reconciliation while prese
   makes the version unrecoverable, since §13.3 will treat it as released.
 * Tags MUST be created **immediately** after that package publishes, not batched to the end of the run (§19.3).
 * Tags SHOULD be annotated, and MUST NOT be moved or deleted once pushed.
+* A release tag is created, never replaced. Writing it to the authoritative store MUST fail when the store already
+  holds that tag name, unless the stored tag names the same commit for the same package and version, which is the retry
+  of an uncertain write (§19.4). A forced ref update MUST NOT be used for a release tag. A ref an implementation moves
+  by design is not a release record and is outside this rule.
 * For a package whose target is a private or internal registry, all of the above applies unchanged: it is published
   there first, then tagged.
 * For a package whose target is `none` there is no publish step, so there is nothing to wait for: the tag is written
@@ -6328,7 +6370,12 @@ already-published package's outcome, but the run MUST exit nonzero. If a complet
 behavior.
 
 Every operation that can hold more than one fleet or worktree lock MUST use one stable total order over the lock
-resource identities and release them in reverse order. Per-worktree mutation locks cover only the complete native Git
+resource identities and release them in reverse order. An acquisition that waits for a held lock needs the order to be
+free of deadlock. One that fails instead, releasing what it took, cannot deadlock under any order and needs the order
+for progress: the lock a run stopped at sorts after every lock it held, so among contending runs the chain of who
+stopped whom never closes, and one of them acquires its whole set. The guarantee reaches only runs that spell the
+contended identities alike. Two control repositories that name one source differently may order it differently, and
+both runs can then fail; that is lost progress, never lost exclusion, because each repository's lock is still one lock. Per-worktree mutation locks cover only the complete native Git
 transaction that reads, commits, tags, pushes, or checkpoints the affected repositories. Hooks and arbitrary scripts
 run outside those mutation locks; their changes remain subject to the fixed-input checks of §27.2.
 
@@ -6381,7 +6428,9 @@ repositories its plan read form a subtree, and an engine SHOULD settle that subt
 repository that has a next hop in it, not once per route. A package therefore settles with at most `Q - 1` commits,
 and with at most `Y` when it reads one repository. Both topologies of §27.11 use `Q - 1` links, the fewest that join
 `Q` peers and the only count at which every route is unique. They differ in `Y`: a star bounds every route at two hops
-and every settlement at two commits, while another tree can reach `Q - 1` of each. A pin that already records the
+and every settlement at two commits, while another tree can reach `Q - 1` of each. A minimal proposal that joins group
+centres (§27.11) has the least `Y` any proposal keeping the existing links can have; joining two chains of five
+repositories end to end gives `Y = 9` where joining their centres gives 5. A pin that already records the
 revision to settle costs no commit, so consecutive packages of one repository that read unchanged peers settle once.
 
 Publication revalidation has a separate output-sensitive cost. If repository `q` participates in `Jq` fleet or
@@ -6617,7 +6666,7 @@ converge: it reads what each repository already records, does nothing where thos
 remote does not hold yet. Nothing is deleted or rewritten to make a settlement look atomic.
 
 **Locks.** The fleet lock of §27.7 covers every participating peer. The order is the participants' identities sorted
-by name, with no reserved position for any of them, and the locks are released in reverse. The settlement of one
+byte-wise by name, with no reserved position for any of them, and the locks are released in reverse. The settlement of one
 package takes the publish lanes of every repository on its route in that same name order and gives back all but the
 consumer's own before publication begins, which is what keeps two consumers with overlapping routes from waiting on
 each other. An unsafe lock bypass stated in a configuration disables the lock of the repository stating it and no
@@ -6634,6 +6683,16 @@ does under §27.8. `--since all` still selects every package.
 **Configuration computation.** `compute --topology minimal` is the default. It MUST preserve existing links and MAY
 propose the fewest additional links that connect every identity the rosters name, the half of a link only one of its
 two repositories declares, the checkouts a declared link lacks, and roster entries a participant has not heard of.
+Every such proposal adds the same number of links, one fewer than the number of groups the existing links leave the
+fleet in, so the count does not choose between them; the longest route `Y` does, and §27.9 charges link evidence and
+settlement by it. Among the proposals with the fewest links the computation SHOULD choose one with the least `Y`: take
+a centre of each group, a repository whose farthest group member is nearest, and link the centre of every other group
+to the centre of the group with the greatest radius. With radii `r1 >= r2 >= r3` and `d` the longest route inside any
+group, the result has `Y = max(d, r1 + r2 + 1, r2 + r3 + 2)`, no proposal has less, and the computation is `O(Q)`.
+Ties, between the two centres a group can have and between groups of equal radius, go to the identity that sorts first
+under case folding, so two computations over one fleet propose the same links. A fleet with no links yet has every
+radius zero and receives a star on its first identity. Where the end a link must be written in is not composed, the
+computation proposes what it can write and reports the rest.
 `compute --topology star` MUST propose a direct link from every peer to the entry repository. It is valid only for an
 identity-linked fleet and MUST fail when existing links are incompatible with that shape. Both modes retain the same
 repository-local policy and record ownership. Their proposed set MUST be a tree over the fleet, so it never creates
@@ -6721,6 +6780,10 @@ computation repairs.
 29. Consumers owned by `web` and by `api` have the same boundary `S0` in `sdk`. **One immutable window over `sdk` may
     serve both.** A window is keyed by the repository it ranges over and the boundary revision, not by the owner of
     the package that reads it; two boundaries that differ remain two windows.
+30. Repositories `a`, `b`, `c`, `d`, `e` are linked in a chain in that order, `v`, `w`, `x`, `y`, `z` likewise, and
+    the roster names all ten. `--topology minimal` **proposes exactly one link, and SHOULD propose the one between
+    `c` and `x`**, for a longest route of 5. Proposing the link between `a` and `v` is conforming and leaves a longest
+    route of 9; proposing two links, or a link inside either chain, is not.
 
 ---
 
@@ -6838,18 +6901,21 @@ Distributed release execution MUST refuse a configured or environment-based unsa
 the bypass described for local peer execution in §27.11. Read-only
 planning remains lock-free and does not dispatch side effects.
 
-Let `I` contain the fixed repository-qualified heads and complete relevant history, release records, graph,
+Let `input` contain the fixed repository-qualified heads and complete relevant history, release records, graph,
 resolved semantic configuration and explicit release options, plus the verified withdrawal inventory and
-receipts required by §§13 and 26. The semantic release plan is the pure function `P = Plan(I)`, including
-both forward-release and applicable rollback projections. Node placement configuration is not semantic input:
+receipts required by §§13 and 26. Its release records are the authoritative stores' records as compared under the
+locks (§13.2): the orchestrator's checkout is one clone among several, and a plan fixed from records it never fetched
+would be signed, digested and dispatched to every node exactly as a correct one is. The semantic release plan is the
+pure function `plan = Plan(input)`, including both forward-release and applicable rollback projections. Node placement
+configuration is not semantic input:
 worker count, placement, completion order, wall-clock time, run IDs and transport branch names MUST NOT change
-`P`. A plan digest MUST use a documented canonical serialization of semantic input and plan content;
+`plan`. A plan digest MUST use a documented canonical serialization of semantic input and plan content;
 transient execution identity MUST be bound separately. The cost obligations of §13.11 still apply to planning;
 parallel execution is not evidence that a planner satisfies them. Native records
 and peer settlement retain their narrowly defined admission under §27; they
 do not authorize replacing the original planning input with an arbitrary ref.
 
-The orchestrator derives a task DAG from `P`, including required preparation,
+The orchestrator derives a task DAG from `plan`, including required preparation,
 tests, builds, transfers, publications and recording gates. A task can be placed
 only on a compatible node and only when its exact prerequisites are available.
 Independent ready tasks MAY run concurrently. The assignment schedule need not
@@ -6931,7 +6997,7 @@ against the current admitted relevant input closure. A native head advance prese
 when its effective input state still matches; admitting a head is not permission to ignore changed source
 bytes. Integrating one task MUST NOT silently alter another task's inputs. Overlapping writes require explicit
 ordering, revalidation and rebuilding when necessary; a change outside permitted native transitions requires
-a new plan. Transport branches MUST remain outside the heads, release refs and gitlinks supplied to `Plan(I)`. This is not an automatic merge
+a new plan. Transport branches MUST remain outside the heads, release refs and gitlinks supplied to `Plan(input)`. This is not an automatic merge
 policy for arbitrary generated files.
 
 ### 28.5 Dependent build outputs are first-class inputs
@@ -6980,7 +7046,7 @@ Task inputs MUST include all required build dependencies, including dependencies
 new release and build-only edges outside the release propagation kinds. The task graph MUST itself be acyclic;
 an unschedulable build cycle is an execution-configuration error, not a reason to change release intent or to
 ignore a required build dependency. Required preparation tasks do not create
-new release obligations or change `P`.
+new release obligations or change `plan`.
 
 For a local-output dependency where package `B` consumes provider `A` (package edge `B → A` in §2),
 readiness is the following **task precedence**, whose arrows denote happens-before rather than package edges:
@@ -7018,10 +7084,21 @@ relevant-input and lock-ownership checks of this section, which is how §27.2's 
 MUST NOT start its publication command before it has observed that authorization for its own attempt, and an
 authorization already issued MUST NOT be reused by another attempt or for another effect.
 
+An implementation MAY bound an authorization in time. The authorization then states the instant after which the
+publisher MUST NOT start its command, the assignment states the deadline at which the executing node itself ends the
+command and everything it started, and the executing node enforces both without waiting to be told. Under a documented
+bound on clock disagreement between nodes, the later of those two instants plus that bound is then a proof of
+quiescence that needs no reply from the node, which no other rule of this section provides for a node that has become
+unreachable. The bound limits when an effect may begin and how long it may run. It is not an expiry of the release
+lock, which still never lapses by itself (VCS-PROTOCOL.md §4), and it authorizes no automatic takeover.
+
 The orchestrator MUST retain and verify lock ownership for the lifetime of all
 authorized effects. Assignments and results are bound to its ownership
 generation; stale results cannot authorize publication or native recording.
-After lock loss, no new effect may start. A timed-out worker is not proof its
+After lock loss, no new effect may start: the orchestrator issues no further assignment and no further authorization.
+Recording an effect that was authorized before the loss is not a new effect. It MUST still be attempted, as the
+create-only record of §19.1, because a publication left unrecorded is a wedge the next owner can clear only by
+§19.4, and a create-only record cannot overwrite what a successor wrote. A timed-out worker is not proof its
 publisher stopped: cancellation must be acknowledged, a fencing mechanism must
 be enforced where the effect occurs, or the outcome must be reconciled before
 ownership is safely handed over. A generation field alone does not fence an
@@ -7056,6 +7133,16 @@ Releasing repository locks need not await such an attempt's acknowledgement. An 
 fenced this way and still requires acknowledged cancellation, an effective fence where the effect occurs, or
 reconciliation. A changed ownership generation rejects stale receipts but is not, by itself, an external
 publication fence.
+
+A run that ended without releasing its locks leaves them for an operator (VCS-PROTOCOL.md §4), and the operator needs
+the same proof of quiescence the run would have needed. Synchronization state is not a recovery ledger for releases,
+but it is the evidence for this one question: an attempt whose coordination branch carries a publication authorization
+and no terminal result may still be publishing. An implementation MUST therefore make an abandoned run findable from
+its lock, by recording the run identity in the lock object or an equivalent documented place, and MUST document the
+order of recovery: revoke the run's coordination refs first, so that no attempt not yet authorized can begin; then
+establish, for every attempt that was authorized and has no result, acknowledged cancellation, an effective fence,
+elapsed authorization bounds where the implementation states them, or the reconciled outcome of §19.4; only then remove
+the lock. The remedy a lock diagnostic prints MUST NOT tell the operator to delete the lock without naming those steps.
 
 ### 28.7 Required example and performance boundary
 
@@ -7097,7 +7184,7 @@ still applies in full.
 4. Two CI entry nodes target overlapping repository sets: at most one acquires
    the complete lock set and dispatches effects; failure releases its partial
    set. An unsafe lock bypass refuses distributed execution.
-5. Vary worker count, date, randomness and completion order: `Plan(I)` is
+5. Vary worker count, date, randomness and completion order: `Plan(input)` is
    unchanged. Concurrency limits hold locally and across the run.
 6. Two ready tasks share a repository: use isolated worktrees and branches;
    conflicting declared release-file writes are detected before admission.
@@ -7152,6 +7239,18 @@ still applies in full.
 26. Where the implementation advertises the rollback profile of §26, enabled rollback work precedes ordinary
     publication and records only its §26 completion receipt. A worker task receipt never replaces that receipt
     and never discharges a release obligation.
+27. The orchestrator's checkout lacks a release tag that its remote holds on a commit reachable from the planned
+    head: refuse with `E196` under the locks, before the plan is fixed and before any assignment. Planning that
+    package from its older baseline, or replacing the remote tag afterwards, is non-conforming (§13.2, §19.1).
+28. The orchestrator loses its lock after a publication was authorized and before its record is written: issue no
+    further assignment or authorization, and still attempt the create-only record of that publication. A record
+    another owner already wrote is not overwritten.
+29. A run ends with its locks held and one attempt authorized without a terminal result: the lock names the run,
+    and the documented recovery revokes the run's coordination refs and settles that attempt before the lock is
+    removed. A remedy that says only to delete the lock is non-conforming.
+30. Where the implementation bounds authorizations in time, a publisher that observes its authorization after the
+    stated instant does not start its command, and a command still running at its assignment's deadline is ended
+    by the executing node without a request from the orchestrator. The release lock does not lapse in either case.
 
 ### 28.9 Operational diagnostics
 

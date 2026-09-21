@@ -258,13 +258,19 @@ The built-in Git driver is the reference mapping:
 
 | Protocol concept | Git meaning |
 |---|---|
-| snapshot/head | resolved `HEAD` commit plus the relevant ref-state identity |
+| snapshot/head | resolved `HEAD` commit plus the ref state the plan depends on: the local release tags and, for a run that can write, the release tags and lock ref of the remote it records to, as read under the lock |
 | revision/parents/message | peeled commit object ID, native commit-parent order, raw commit message bytes (without log-output transcoding) |
 | ancestry | Git ancestor-or-self reachability |
 | changed paths | root-vs-empty or first-parent diff, with both rename paths |
 | `release/version` record | reachable tag named `<package>@<version>`, peeled to a commit |
 | other immutable record | an implementation-owned append-only Git ref/object representation that cannot collide with release tags |
-| conditional lock | implementation-owned atomic release lock guarding snapshot validation and tag creation |
+| conditional lock | implementation-owned atomic release lock: a create-only ref on the remote the run records to, guarding snapshot validation and tag creation |
+
+Git has no operation that creates a lock conditionally on the remote's other refs, so the built-in driver does not get
+`acquireLock`'s snapshot condition from the push that takes the lock. It restores it in two steps: it takes the lock,
+then compares the remote's release tags with the local ones and answers a difference as `snapshot-changed` would be
+answered, by refusing the run (SPEC.md §13.2). Release tags are pushed create-only, which is `createRecord`'s
+`expectedAbsent`; an identical existing tag is the `existing: true` case.
 
 The mapping MUST preserve all behavior in SPEC.md §§12, 13, 17, 18, and 19. External adapters MUST provide the same
 observable release plan and publication safety for a snapshot mapping that preserves revision identity, parent order and the specified total ordering. They MUST NOT linearize a DAG, omit parents,
@@ -302,6 +308,9 @@ SPEC.md §19. dispat 1.8 offers no such external path.
    **Fail the directive.** Prefix matching is specific to the Git backend.
 10. The command exits zero with valid JSON plus a debug line on stdout, exits non-zero with a success object, exceeds a
     configured bound, or is cancelled. **Operation failure in every case; no partial result is consumed.**
+11. The Git driver holds the lock, and the remote carries `core@1.3.0` on a commit reachable from `HEAD` while the local
+    repository has no such tag. **Refuse with CCME `E196` before planning.** Planning `core` from `1.2.0` again is
+    non-conforming, and so is replacing the remote tag.
 
 ## 7. Diagnostics
 
