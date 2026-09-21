@@ -33,6 +33,7 @@ type fakeMailbox struct {
 	written      []MessageKind
 	carried      []gitx.TreeEntry
 	fetched      []string
+	rereads      []string
 	reconsidered []string
 	forgotten    int
 	polls        int
@@ -68,6 +69,18 @@ func (m *fakeMailbox) Advance(_ context.Context, branch, _ string, kind MessageK
 func (m *fakeMailbox) Fetch(_ context.Context, branches []string) error {
 	m.fetched = append(m.fetched, branches...)
 	return nil
+}
+
+// Reread answers where one branch sits now, which for this fake is the tip it
+// was seeded with: the branch the worker is waiting on is the branch the
+// scenario put there, and a scenario that wants it to move replaces the tip.
+func (m *fakeMailbox) Reread(_ context.Context, branch string) (gitx.RemoteHead, error) {
+	m.rereads = append(m.rereads, branch)
+	tip, isKnown := m.tips[branch]
+	if !isKnown {
+		return gitx.RemoteHead{}, nil
+	}
+	return gitx.RemoteHead{Name: branch, OID: tip.OID}, nil
 }
 
 func (m *fakeMailbox) Reconsider(branch string) { m.reconsidered = append(m.reconsidered, branch) }

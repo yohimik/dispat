@@ -53,6 +53,34 @@ type taskOutcome struct {
 	exports     []plan.Output
 	strayWrites int
 	outputs     *OutputManifest
+	// expectedTip is the object the attempt's terminal message is written on
+	// top of, empty while that is still the claim. A publication moves the
+	// branch twice before its commands run, so the lease its result is pushed
+	// under has to be over what the handshake left there rather than over what
+	// the node claimed.
+	expectedTip string
+	// isAnswered says this node has already written the attempt's terminal
+	// message itself, which exactly one path does: a withdrawal it
+	// acknowledged. The acknowledgement is what the orchestrator is waiting
+	// for, so a result pushed after it would be a second terminal message on a
+	// chain that allows one.
+	isAnswered bool
+}
+
+// resolveTaskDeadline bounds one attempt by the wait its assignment states.
+//
+// The node enforces it rather than only the orchestrator, because the two are
+// different promises: the orchestrator's wait decides when it stops expecting
+// an answer, and this decides when the work actually stops. A node that kept
+// running past the run's own wait would be a machine holding a folder, a
+// registry session and a capacity slot that the run has already written off.
+// Zero seconds is an assignment that states no bound, and the caller's context
+// is then the only one.
+func resolveTaskDeadline(ctx context.Context, seconds int) (context.Context, context.CancelFunc) {
+	if seconds <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 }
 
 // runTask materializes the task's checkouts, runs its frame and answers what
@@ -62,7 +90,8 @@ type taskOutcome struct {
 // whose script exited non-zero are the same thing to the run that dispatched
 // it: a task that did not succeed, reported as one, on a node that carries on
 // serving.
-func (w *Worker) runTask(ctx context.Context, assignment Assignment, log zerolog.Logger) taskOutcome {
+func (w *Worker) runTask(ctx context.Context, tip ChainTip, claimed string,
+	assignment Assignment, log zerolog.Logger) taskOutcome {
 	if assignment.Package == nil || assignment.Frame == nil || len(assignment.Repositories) == 0 {
 		log.Warn().Str("code", CodeAuthority).Str("category", CategoryAuthority).
 			Msg("the assignment describes no frame to run")
@@ -96,7 +125,8 @@ func (w *Worker) runTask(ctx context.Context, assignment Assignment, log zerolog
 			Str("category", CategoryIntegrity).Msg("the task's inputs could not be installed")
 		return taskOutcome{status: StatusFailed, failedPart: release.PartInputs, reason: reason}
 	}
-	outcome := w.runFrame(ctx, assignment, checkout.Dir(owner, assignment.Package.Dir), log)
+	gate := w.resolvePublicationGate(tip, claimed, assignment, log)
+	outcome := w.runFrame(ctx, assignment, checkout.Dir(owner, assignment.Package.Dir), gate, log)
 	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner,
 		formatDeclaredPaths(assignment.Package.Dir, assignment.Outputs))
 	if outcome.status != StatusSucceeded {
@@ -133,6 +163,16 @@ func ownerPathOf(assignment Assignment) string {
 	return "."
 }
 
+// framePermitx is what a node waits for between the part of a frame that only
+// prepares and the part that has an effect nobody can take back.
+//
+// It is declared at the consumer, the frame runner, because that is the whole
+// of what the frame needs to know about authorization: one call, made at one
+// point, that either lets the commands start or says what became of the
+// attempt instead. What it does with the branch is the publication's own, and
+// a build hands in no gate at all.
+type framePermitx func(ctx context.Context, exports []plan.Output) taskOutcome
+
 // runFrame runs the three sequences of one stage frame in order, each
 // fail-fast, and answers at the first one that did not succeed.
 //
@@ -140,13 +180,21 @@ func ownerPathOf(assignment Assignment) string {
 // that exported a value before the stage's own script ran is a hook whose
 // value that script reads, so the environment is rebuilt for each sequence
 // from what the ones before it produced.
-func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string, log zerolog.Logger) taskOutcome {
+//
+// The gate sits between the frame's hook and its own commands, which is where
+// §27.2 and §28.6 both put it: after everything that may still be abandoned
+// for free, immediately before the thing that may not. It is asked even when
+// the stage configured no command, because the question it asks is whether the
+// package may be published at all and not whether a script exists.
+func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string,
+	permit framePermitx, log zerolog.Logger) taskOutcome {
 	// carried is everything the run had exported before this frame plus
 	// everything the frame exports, which is what the scripts read; produced is
 	// this frame's own, which is what travels back.
 	carried := &plan.Release{Outputs: formatOutputs(assignment.Exports)}
 	produced := &plan.Release{}
 	stage := resolveFrameStage(assignment.Kind)
+	expectedTip := ""
 	for _, part := range []struct {
 		name     string
 		stage    string
@@ -156,6 +204,14 @@ func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string
 		{release.PartCommands, stage, assignment.Frame.Commands},
 		{release.PartAfter, "post" + formatStageTitle(stage), assignment.Frame.After},
 	} {
+		if part.name == release.PartCommands && permit != nil {
+			permitted := permit(ctx, produced.Outputs)
+			expectedTip = permitted.expectedTip
+			if permitted.status != "" {
+				permitted.exports = produced.Outputs
+				return permitted
+			}
+		}
 		if len(part.commands) == 0 {
 			continue
 		}
@@ -176,9 +232,10 @@ func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string
 			continue
 		}
 		log.Warn().Err(err).Str("stage", part.stage).Str("part", part.name).Msg("stage failed")
-		return taskOutcome{status: StatusFailed, failedPart: part.name, exports: produced.Outputs}
+		return taskOutcome{status: StatusFailed, failedPart: part.name,
+			exports: produced.Outputs, expectedTip: expectedTip}
 	}
-	return taskOutcome{status: StatusSucceeded, exports: produced.Outputs}
+	return taskOutcome{status: StatusSucceeded, exports: produced.Outputs, expectedTip: expectedTip}
 }
 
 // resolveFrameStage is the stage the scripts of one assignment believe they

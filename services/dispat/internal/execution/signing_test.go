@@ -98,7 +98,7 @@ func TestProtocolDocumentsRoundTrip(t *testing.T) {
 		},
 		Repositories: []AssignmentRepository{{Name: "api", Path: ".links/api", Snapshot: "cafe"}},
 		Package:      &AssignmentPackage{Name: "core", Repository: "api", Dir: "packages/core"},
-		Frame:        &AssignmentFrame{Login: []string{"login"}, Commands: []string{"build"}},
+		Frame:        &AssignmentFrame{Before: []string{"prepare"}, Commands: []string{"build"}},
 		Env:          []string{"DISPAT_PACKAGE=core"},
 		StaticEnv:    []string{"REGISTRY=$DISPAT_REGISTRY"},
 		Shell:        []string{"/bin/sh", "-c"},

@@ -131,9 +131,22 @@ func NewPool(links []Link, reports []*NodeReport, local LocalNode, log zerolog.L
 // will wait for ever, so it is failed at once with the platform it needed and
 // the nodes that could have run it named.
 func (p *Pool) Acquire(ctx context.Context, platforms []string, placement Placement) (*Lease, error) {
+	return p.AcquireNear(ctx, platforms, placement, "")
+}
+
+// AcquireNear is Acquire with a node this task would rather run on.
+//
+// The preference is a preference and never a requirement, which is why it is
+// a separate entry point rather than a fourth placement: a publication would
+// rather run where the package was built, because that machine's checkout and
+// object store already hold the bytes it is about to install, but waiting for
+// that machine when another is free would be trading a certain delay for a
+// possible copy. An empty name matches no node and is the plain Acquire.
+func (p *Pool) AcquireNear(ctx context.Context, platforms []string, placement Placement,
+	preferred string) (*Lease, error) {
 	for {
 		p.mu.Lock()
-		lease, isPlacementPossible := p.takeSlot(platforms, placement)
+		lease, isPlacementPossible := p.takeSlot(platforms, placement, preferred)
 		changed := p.changed
 		p.mu.Unlock()
 		if lease != nil {
@@ -165,7 +178,7 @@ func (p *Pool) Acquire(ctx context.Context, platforms []string, placement Placem
 // publications and the records, so a run that spent it on a build that some
 // worker could have taken would be a run that queued its own work behind
 // somebody else's.
-func (p *Pool) takeSlot(platforms []string, placement Placement) (*Lease, bool) {
+func (p *Pool) takeSlot(platforms []string, placement Placement, preferred string) (*Lease, bool) {
 	var chosen *poolNode
 	isPlacementPossible := false
 	for _, node := range p.nodes {
@@ -177,7 +190,7 @@ func (p *Pool) takeSlot(platforms []string, placement Placement) (*Lease, bool) 
 		if node.inFlight >= node.capacity {
 			continue
 		}
-		if isNodePreferred(chosen, node) {
+		if isNodePreferred(chosen, node, preferred) {
 			chosen = node
 		}
 	}
@@ -202,9 +215,16 @@ func isNodeAllowed(node *poolNode, placement Placement) bool {
 
 // isNodePreferred reports whether offered is a better home for this frame
 // than whatever was chosen before it.
-func isNodePreferred(chosen, offered *poolNode) bool {
+//
+// The caller's own preference comes first: a node named by the task already
+// holds what the task is about, and an empty name matches nothing, so the
+// order below it is exactly the order every other placement uses.
+func isNodePreferred(chosen, offered *poolNode, preferred string) bool {
 	if chosen == nil {
 		return true
+	}
+	if (chosen.name == preferred) != (offered.name == preferred) {
+		return offered.name == preferred
 	}
 	if chosen.isLocal != offered.isLocal {
 		return chosen.isLocal

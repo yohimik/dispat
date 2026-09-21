@@ -59,6 +59,12 @@ type Source struct {
 type snapshots struct {
 	mu       sync.Mutex
 	captured map[string]capturedState
+	// consumed is the state one package's build was actually dispatched from,
+	// by package name. It is remembered because a later step has to compare
+	// against it: what a publication may be authorized against is what the
+	// artefact was built from, and "the working tree as it was then" has no
+	// other name once the tree has moved on.
+	consumed map[string]string
 }
 
 // capturedState is one repository's last capture: what its working state
@@ -70,7 +76,43 @@ type capturedState struct {
 
 // newSnapshots opens an empty memory of captures.
 func newSnapshots() *snapshots {
-	return &snapshots{captured: map[string]capturedState{}}
+	return &snapshots{captured: map[string]capturedState{}, consumed: map[string]string{}}
+}
+
+// rememberConsumedSnapshot records the prepared state one package's build was
+// dispatched from, which is the state of its own repository and of no other:
+// a comparison against a state of some third repository would be a comparison
+// nobody could act on.
+func (c *Coordinator) rememberConsumedSnapshot(packageName, repository string,
+	sources []Source, commits []string) {
+	for index, source := range sources {
+		if source.Name != repository {
+			continue
+		}
+		c.snapshots.mu.Lock()
+		defer c.snapshots.mu.Unlock()
+		c.snapshots.consumed[packageName] = commits[index]
+		return
+	}
+}
+
+// PreparedSnapshot is the input state one package's build consumed, and the
+// empty string for a package this run built nowhere: a build the run placed on
+// this machine read the working tree itself, and a package with no build task
+// at all consumed nothing.
+//
+// It is exported because the comparison it is for is not this package's to
+// make. What counts as a relevant change to a package's inputs is the
+// workspace's question (which folders, which providers, which records are
+// excluded), and answering it here would put a second description of the
+// release graph inside the transport.
+func (c *Coordinator) PreparedSnapshot(packageName string) string {
+	if c.snapshots == nil {
+		return ""
+	}
+	c.snapshots.mu.Lock()
+	defer c.snapshots.mu.Unlock()
+	return c.snapshots.consumed[packageName]
 }
 
 // capture prepares one repository's current working state as a commit whose

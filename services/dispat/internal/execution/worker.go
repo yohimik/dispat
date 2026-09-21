@@ -50,6 +50,7 @@ type mailboxx interface {
 	Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error)
 	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte,
 		carried []gitx.TreeEntry) (string, error)
+	Reread(ctx context.Context, branch string) (gitx.RemoteHead, error)
 	Fetch(ctx context.Context, branches []string) error
 	Reconsider(branch string)
 	Forget()
@@ -279,8 +280,10 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		return true, w.answerProbe(ctx, tip, assignment)
 	}
 	// A preparation is a build frame and is executed as one: the kind says why
-	// the run asked for it, not what the node does with it.
-	if assignment.Kind == KindBuild || assignment.Kind == KindPrepare {
+	// the run asked for it, not what the node does with it. A publication is
+	// the same frame machinery with one step inserted in the middle, which is
+	// where its own file picks it up.
+	if assignment.Kind == KindBuild || assignment.Kind == KindPrepare || assignment.Kind == KindPublish {
 		return w.takeTask(ctx, tip, assignment)
 	}
 	// The kinds that are not executed by this build belong to the gate that
@@ -345,7 +348,16 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 	log := w.Log.With().Str("run", assignment.Run).
 		Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("branch", tip.Branch).Logger()
-	outcome := w.runTask(ctx, assignment, log)
+	bounded, done := resolveTaskDeadline(ctx, assignment.DeadlineSeconds)
+	defer done()
+	outcome := w.runTask(bounded, tip, claimed, assignment, log)
+	if outcome.isAnswered {
+		// The attempt is already terminal on the branch: a withdrawal this node
+		// acknowledged is the answer, and a result written on top of it would be
+		// a second answer to a question both parties have settled.
+		log.Info().Str("status", outcome.status).Msg("task finished")
+		return
+	}
 	if ctx.Err() != nil && outcome.status != StatusSucceeded {
 		// The commands died of the stop rather than of anything about the
 		// package, which is a different thing for the run to hear.
@@ -364,7 +376,8 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 	}
 	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
 	defer done()
-	reported, err := w.advance(reportCtx, tip, claimed, MessageResult, report, carriedOutputs(outcome.outputs))
+	reported, err := w.advance(reportCtx, tip, resolveResultLease(claimed, outcome),
+		MessageResult, report, carriedOutputs(outcome.outputs))
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the task result could not be reported")
@@ -372,6 +385,18 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 	}
 	log.Info().Str("commit", reported).Str("status", outcome.status).
 		Int("strayWrites", outcome.strayWrites).Msg("task finished")
+}
+
+// resolveResultLease is the object a result is written on top of: the claim
+// for a task that moved its branch no further, and whatever the publication
+// handshake left there for one that did. A lease over the wrong object is a
+// push the remote refuses, which would turn a finished task into one that
+// never reported.
+func resolveResultLease(claimed string, outcome taskOutcome) string {
+	if outcome.expectedTip == "" {
+		return claimed
+	}
+	return outcome.expectedTip
 }
 
 // checkAssignment applies the acceptance rules to one assignment: the ones
@@ -383,6 +408,9 @@ func (w *Worker) checkAssignment(assignment Assignment, tip ChainTip) RejectReas
 	}
 	if w.Seen.IsSeen(assignment.Run, assignment.Task, assignment.Attempt) {
 		return ReasonReplay
+	}
+	if assignment.Kind == KindPublish && !assignment.Permits.Publish {
+		return ReasonPermit
 	}
 	return ""
 }

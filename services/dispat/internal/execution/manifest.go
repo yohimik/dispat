@@ -122,6 +122,12 @@ const (
 	// tree nothing fetched, a blob the store does not hold. References alone
 	// are not a transfer (§28.5).
 	ReasonBytesMissing OutputReason = "bytes-missing"
+	// ReasonAuthorization is a publication whose command never started because
+	// the run never authorized it, or stopped authorizing it before it began.
+	// It is in this vocabulary rather than beside it because it answers the
+	// same question every word here answers: what stopped this task that was
+	// not a command exiting non-zero.
+	ReasonAuthorization OutputReason = "authorization"
 )
 
 // OutputFault is one refused output set, carrying the rule it broke and

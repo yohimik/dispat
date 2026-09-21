@@ -87,6 +87,12 @@ type ChainTip struct {
 	OID      string
 	Kind     MessageKind
 	Previous MessageKind
+	// PreviousOID is the first parent's object id, empty for a root commit.
+	// A message names the exact object it answers, and this is what that name
+	// is compared against: an authorization whose parent is not the ready
+	// commit it claims to answer is an authorization for a different state of
+	// the branch, whoever wrote it.
+	PreviousOID string
 
 	// isProtocol reports whether the commit's tree holds anything this
 	// protocol wrote at all. A commit with no message and nothing under the
@@ -172,6 +178,12 @@ const (
 	// ReasonUnreadable is a tip carrying no message this protocol knows, or a
 	// document that is not the JSON it claims to be.
 	ReasonUnreadable RejectReason = "unreadable"
+	// ReasonPermit is work an assignment describes without authorizing: a
+	// publish task whose permits do not include publication. The permits are
+	// the assignment's own statement of what the node may do beyond running
+	// commands (§28.4), so a task that would have to exceed them is refused
+	// before it is claimed rather than halfway through.
+	ReasonPermit RejectReason = "permit"
 )
 
 // Rejection is one message a node will not act on.

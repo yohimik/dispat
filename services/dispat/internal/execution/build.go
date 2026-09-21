@@ -133,16 +133,6 @@ func (c *Coordinator) Guard(ctx context.Context, stage string) (func(), error) {
 	}, nil
 }
 
-// Publish runs one package's publish frame on a node under an explicit
-// authorization. Publication stays on the orchestrator in this build, so
-// nothing calls it: the method is here because Remotex is the whole seam and a
-// half-declared seam is one a later gate would have to reshape.
-func (c *Coordinator) Publish(context.Context, release.StageRequest, func(context.Context) error) (release.StageOutcome, error) {
-	return release.StageOutcome{}, NewIdentifiedDiagnostic(Identity{Run: c.Run},
-		CodeConfiguration, CategoryConfiguration,
-		"this build does not delegate publication: the publish stage runs on the orchestrator")
-}
-
 // Build places one package's build frame and runs it where it was placed.
 //
 // The providers this run does not release come first, before a node slot is
@@ -195,6 +185,7 @@ func (c *Coordinator) dispatchBuild(ctx context.Context, lease *Lease, kind, tas
 		lease.Release()
 		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
 	}
+	c.rememberConsumedSnapshot(request.Release.Pkg.Name, request.Release.Pkg.Repository, sources, commits)
 	repositories, err := c.offerInputs(ctx, lease.Node, sources, commits)
 	if err != nil {
 		lease.Release()
@@ -214,6 +205,36 @@ func (c *Coordinator) runTask(ctx context.Context, lease *Lease, kind, task, dir
 	repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) (release.StageOutcome, error) {
 	outcome := release.StageOutcome{Node: lease.Node}
+	offer, err := c.offerTask(ctx, lease, kind, task, dir, repositories, inputs, request)
+	if err != nil {
+		return outcome, err
+	}
+	defer offer.observer.forget(offer.branch)
+	return c.awaitResult(ctx, lease, task, outcome, offer.replies, offer.branch, request)
+}
+
+// taskOffer is one assignment already on its node's mailbox: the branch it
+// went out on, and the channel the messages that answer it arrive through.
+//
+// It is a value rather than three results because both waits use all three and
+// neither may hold a different combination of them: a task registered for
+// replies on one branch and waiting on another would be a task that never
+// hears anything.
+type taskOffer struct {
+	observer *watcher
+	replies  <-chan taskReply
+	branch   string
+}
+
+// offerTask writes one assignment onto its node's mailbox and registers the
+// attempt with the poller before the push, so that a node quick enough to
+// answer between the two is still heard.
+//
+// A failed offer settles the lease here: nothing was placed anywhere, so the
+// slot is free rather than held by an attempt that never existed.
+func (c *Coordinator) offerTask(ctx context.Context, lease *Lease, kind, task, dir string,
+	repositories []AssignmentRepository, inputs []AssignmentInput,
+	request release.StageRequest) (taskOffer, error) {
 	assignment := c.formatAssignment(lease.Node, kind, task, dir, repositories, inputs, request)
 	observer := c.watchers[lease.Node]
 	replies := observer.watch(assignment.Branch)
@@ -221,15 +242,14 @@ func (c *Coordinator) runTask(ctx context.Context, lease *Lease, kind, task, dir
 	if err != nil {
 		observer.forget(assignment.Branch)
 		lease.Release()
-		return outcome, c.refuseTask(task, lease.Node, err)
+		return taskOffer{}, c.refuseTask(task, lease.Node, err)
 	}
 	c.recordOwnedRef(lease.Node, assignment.Branch, offered)
 	observer.bind(assignment.Branch, offered, assignment)
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
-		Msg("task assigned")
-	defer observer.forget(assignment.Branch)
-	return c.awaitResult(ctx, lease, task, outcome, replies, assignment.Branch, request)
+		Str("kind", kind).Msg("task assigned")
+	return taskOffer{observer: observer, replies: replies, branch: assignment.Branch}, nil
 }
 
 // awaitResult waits for the node to report, for the task deadline, or for the
@@ -243,7 +263,7 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 	select {
 	case reply := <-replies:
 		lease.Release()
-		return c.readTaskOutcome(ctx, task, outcome, reply, branch, request)
+		return c.readTaskOutcome(ctx, task, outcome, reply.result, reply.commit, branch, request)
 	case <-deadline.C:
 		// The work may still be running on that machine, so the slot stays
 		// where it is and the node leaves the pool.
@@ -261,8 +281,7 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 // it: the exports to merge, the stray writes to report, and the failure to
 // fail the package with.
 func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome release.StageOutcome,
-	reply taskReply, branch string, request release.StageRequest) (release.StageOutcome, error) {
-	result := reply.result
+	result Result, commit, branch string, request release.StageRequest) (release.StageOutcome, error) {
 	node := result.Node
 	outcome.Exports = formatOutputs(result.Exports)
 	outcome.FailedPart = result.FailedPart
@@ -279,7 +298,7 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome 
 	}
 	if err := c.admitOutputs(ctx, task, producedOutputs{
 		node: node, store: c.dispatch.Store, endpoint: c.endpointOf(node),
-		branch: branch, commit: reply.commit, manifest: result.Outputs,
+		branch: branch, commit: commit, manifest: result.Outputs,
 	}, request); err != nil {
 		// A build whose outputs cannot be used is a build that did not
 		// satisfy its consumers, so the package fails here rather than
@@ -430,15 +449,43 @@ func (c *Coordinator) formatAssignment(node, kind, task, dir string,
 			Commands: request.Frame.Commands,
 			After:    request.Frame.After,
 		},
-		Env:       request.Env,
-		StaticEnv: request.StaticEnv,
-		Exports:   formatExports(request.Release.Outputs),
-		Shell:     c.dispatch.Shell(request.Dir),
-		Platforms: request.Release.Pkg.Space.BuildPlatforms,
-		Inputs:    inputs,
-		Outputs:   request.Release.Pkg.Space.BuildOutputs,
-		Limits:    c.Limits,
+		Env:             request.Env,
+		StaticEnv:       request.StaticEnv,
+		Exports:         formatExports(request.Release.Outputs),
+		Shell:           c.dispatch.Shell(request.Dir),
+		Platforms:       request.Release.Pkg.Space.BuildPlatforms,
+		Inputs:          inputs,
+		Outputs:         resolveDeclaredOutputs(kind, request),
+		Permits:         AssignmentPermits{Publish: kind == KindPublish},
+		DeadlineSeconds: resolveTaskDeadlineSeconds(kind, c.Timeouts.Task),
+		Limits:          c.Limits,
 	}
+}
+
+// resolveDeclaredOutputs is what a task is expected to produce: a build's
+// declared roots, and nothing at all for a publication, which consumes the
+// bytes a build already produced and captures none of its own. A publisher
+// asked for them would be describing a second, later version of an output set
+// this run has already admitted.
+func resolveDeclaredOutputs(kind string, request release.StageRequest) []string {
+	if kind == KindPublish {
+		return nil
+	}
+	return request.Release.Pkg.Space.BuildOutputs
+}
+
+// resolveTaskDeadlineSeconds is the bound a node holds one attempt to.
+//
+// Only a publication carries one in this build. A build that outlives the
+// run's own wait is abandoned and costs a machine some work; a publisher that
+// outlived it would be a publisher acting on an authorization the run has
+// already written off, which is the one thing §28.6 asks a node to prevent by
+// itself. Gate 12 extends this to every kind.
+func resolveTaskDeadlineSeconds(kind string, wait time.Duration) int {
+	if kind != KindPublish {
+		return 0
+	}
+	return int(wait / time.Second)
 }
 
 // watcher polls one endpoint for every attempt this run has in flight there,
@@ -462,26 +509,45 @@ type attempt struct {
 	offered    string
 	assignment *Assignment
 	replies    chan taskReply
+	// isAuthorized marks a publication this run has already answered, and is
+	// what makes the authorization single use: it is set before the message is
+	// written, so a second ready on the same attempt is refused whatever
+	// became of the first push. Written and read by the task that owns the
+	// attempt, which is the only party that authorizes anything.
+	isAuthorized bool
 }
 
-// taskReply is one accepted result together with the object it was read at.
+// taskReply is one accepted message of an attempt together with the object it
+// was read at.
 //
 // The object id travels beside the document rather than inside it because it
 // is not the node's to state: what a result is read at is what the
 // orchestrator fetched and proved to be on the branch, and a set of outputs
 // admitted at an object a node named would be a set admitted at whatever that
 // node pointed to.
+//
+// The kind is carried because two messages answer a publication and they mean
+// opposite things: a ready is the node asking to be let through, and a result
+// is the node saying it is over.
 type taskReply struct {
+	kind   MessageKind
 	result Result
+	ready  Ready
+	tip    ChainTip
 	commit string
 }
 
 // watch registers one branch before it is created, so that a node quick
 // enough to answer between the push and the registration is still heard.
+//
+// Two slots, because a publication answers twice: the ready that waits for an
+// authorization and the result that ends the attempt. The poller must never
+// block on handing one over, since the goroutine that would be blocked is the
+// one every other attempt on that endpoint is waiting for.
 func (w *watcher) watch(branch string) <-chan taskReply {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	waiting := &attempt{replies: make(chan taskReply, 1)}
+	waiting := &attempt{replies: make(chan taskReply, 2)}
 	w.attempts[branch] = waiting
 	return waiting.replies
 }
@@ -582,6 +648,9 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 		}
 		return false
 	}
+	if tip.Kind == MessageReady {
+		return w.offerReady(ctx, tip, waiting)
+	}
 	if tip.Kind != MessageResult {
 		w.coordinator.Log.Debug().Str("worker", w.link.Name).Str("branch", tip.Branch).
 			Str("message", string(tip.Kind)).Msg("the attempt moved on")
@@ -592,14 +661,33 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 		// A reply nobody signed, one bound to another attempt and a node that
 		// has not answered yet are one situation from here, and the task
 		// deadline is what decides how long that is tolerated.
-		w.coordinator.Log.Warn().Str("worker", w.link.Name).Str("branch", tip.Branch).
-			Str("commit", tip.OID).Str("reason", string(reason)).Str("code", CodeAuthority).
-			Str("category", CategoryAuthority).Msg("result rejected")
+		w.reportRejectedReply(tip, reason)
 		return false
 	}
-	waiting.replies <- taskReply{result: result, commit: tip.OID}
+	waiting.replies <- taskReply{kind: MessageResult, result: result, tip: tip, commit: tip.OID}
 	w.forget(head.Name)
 	return true
+}
+
+// offerReady hands one publisher's ready message to the task waiting to
+// authorize it, and leaves the attempt registered: the branch has one more
+// message to come, and the result of it is what ends the attempt.
+func (w *watcher) offerReady(ctx context.Context, tip ChainTip, waiting *attempt) bool {
+	ready, reason := w.readReady(ctx, tip, waiting)
+	if reason != "" {
+		w.reportRejectedReply(tip, reason)
+		return false
+	}
+	waiting.replies <- taskReply{kind: MessageReady, ready: ready, tip: tip, commit: tip.OID}
+	return true
+}
+
+// reportRejectedReply writes the one line a refused reply produces: the branch,
+// the object and the reason, and never what the message said.
+func (w *watcher) reportRejectedReply(tip ChainTip, reason RejectReason) {
+	w.coordinator.Log.Warn().Str("worker", w.link.Name).Str("branch", tip.Branch).
+		Str("commit", tip.OID).Str("reason", string(reason)).Str("code", CodeAuthority).
+		Str("category", CategoryAuthority).Msg("result rejected")
 }
 
 // readResult verifies one reply and answers the result it carries or the
@@ -620,6 +708,41 @@ func (w *watcher) readResult(ctx context.Context, tip ChainTip, waiting *attempt
 		return Result{}, reason
 	}
 	return result, ""
+}
+
+// readReady verifies one publisher's ready message and answers it, or the
+// reason it is not this attempt's.
+//
+// It is held to the rules a result is held to plus the chain's own: a ready
+// may only follow the claim of this very attempt, so the object it names as
+// its claim has to be the object it was written on top of. That is what keeps
+// an authentic ready of one attempt from being replayed onto another.
+func (w *watcher) readReady(ctx context.Context, tip ChainTip, waiting *attempt) (Ready, RejectReason) {
+	document, err := w.mailbox.Read(ctx, tip, w.coordinator.Limits.MaxManifestBytes)
+	if err != nil {
+		if reason := RejectionReason(err); reason != "" {
+			return Ready{}, reason
+		}
+		return Ready{}, ReasonUnreadable
+	}
+	var ready Ready
+	if err := json.Unmarshal(document, &ready); err != nil {
+		return Ready{}, ReasonUnreadable
+	}
+	if reason := CheckHeader(ready.Header, Binding{Node: w.link.Name, Branch: tip.Branch}, time.Now()); reason != "" {
+		return Ready{}, reason
+	}
+	if !IsTransitionLegal(tip.Previous, MessageReady, PartyWorker) {
+		return Ready{}, ReasonChain
+	}
+	offered := waiting.assignment.Header
+	if ready.Assignment != waiting.offered || ready.Claim != tip.PreviousOID ||
+		ready.Run != offered.Run || ready.Task != offered.Task ||
+		ready.Attempt != offered.Attempt || ready.Generation != offered.Generation ||
+		ready.PlanDigest != offered.PlanDigest {
+		return Ready{}, ReasonReplay
+	}
+	return ready, ""
 }
 
 // checkTaskResult holds a node's reply to the rules every message is held to,

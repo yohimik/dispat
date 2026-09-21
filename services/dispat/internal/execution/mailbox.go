@@ -307,8 +307,43 @@ func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTi
 	if err != nil {
 		return ChainTip{}, err
 	}
-	tip.Previous = previous.kind
+	tip.Previous, tip.PreviousOID = previous.kind, parent
 	return tip, nil
+}
+
+// Reread answers where one branch sits on the remote right now, with its
+// objects fetched, whatever the memo remembers.
+//
+// It is the poll's opposite and both are needed. Observe answers "what has
+// moved since I last looked", which is the right question for a loop watching
+// a whole namespace and the wrong one for a party waiting on a branch of its
+// own: whichever goroutine polled first would have consumed the movement, and
+// the waiter would wait for a push that already happened. This asks the remote
+// about one branch and believes the answer, which is also what makes it the
+// fence a publisher re-reads its own tip with immediately before the
+// irreversible command (§28.6).
+func (m *GitMailbox) Reread(ctx context.Context, branch string) (gitx.RemoteHead, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, "refs/heads/"+branch)
+	if err != nil {
+		return gitx.RemoteHead{}, fmt.Errorf("execution: re-reading %s: %w", branch, err)
+	}
+	for _, head := range heads {
+		if head.Name != branch {
+			continue
+		}
+		if err := m.remote.FetchRefs(ctx, m.endpoint, []string{branch}); err != nil {
+			return gitx.RemoteHead{}, fmt.Errorf("execution: fetching %s: %w", branch, err)
+		}
+		// Remembered at what was just read, so the loop watching the whole
+		// namespace does not report a movement this reader has already taken.
+		m.observed[branch] = head.OID
+		return head, nil
+	}
+	// A branch the remote no longer advertises: deleted under this party,
+	// which is a state the caller decides about rather than a failure here.
+	return gitx.RemoteHead{}, nil
 }
 
 // transportTree is what one transport commit's tree holds: which message it

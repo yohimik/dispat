@@ -49,6 +49,26 @@ type fakeRemote struct {
 	// ranHere are the packages whose frame was run through the local
 	// sequence, in order.
 	ranHere []string
+
+	// publishAway is the package whose publish this pool delegates. Every
+	// other publish takes the local path, which is what the placement does for
+	// everything but an explicit `runOnly: worker`.
+	publishAway string
+	// publishes are the requests Publish was called with, in order, and
+	// publishedHere are the packages whose publish took the local path.
+	publishes     []StageRequest
+	publishedHere []string
+	// steps is what a delegated publication did, in order, so that a test can
+	// say where the authorization happened rather than only that it did.
+	steps []string
+	// authorizations counts the authorization callbacks made.
+	authorizations int
+	// authorizeErr fails the authorization of publishAway.
+	authorizeErr error
+	// publishExports is what a delegated publication reports as its exports.
+	publishExports []plan.Output
+	// failPublishPart fails the delegated publication at this part.
+	failPublishPart string
 }
 
 // buildHere is the placement that keeps the frame: it runs the executor's own
@@ -110,8 +130,56 @@ func (f *fakeRemote) Build(ctx context.Context, request StageRequest, here Local
 	return outcome, nil
 }
 
-func (f *fakeRemote) Publish(context.Context, StageRequest, func(context.Context) error) (StageOutcome, error) {
-	return StageOutcome{}, errors.New("publication is not delegated in this build")
+// Publish is the placement decision of a publish frame: the local path unless
+// the scenario delegated this package, which is exactly how the real one
+// behaves for everything but an explicit worker placement.
+func (f *fakeRemote) Publish(ctx context.Context, request StageRequest, here LocalFrame,
+	authorize func(context.Context) error) (StageOutcome, error) {
+	f.mu.Lock()
+	isDelegated := f.publishAway == request.Release.Pkg.Name
+	f.mu.Unlock()
+	if !isDelegated {
+		what, err := here(ctx)
+		f.mu.Lock()
+		f.publishedHere = append(f.publishedHere, request.Release.Pkg.Name)
+		f.mu.Unlock()
+		if err != nil {
+			return StageOutcome{LocalFailure: what}, err
+		}
+		return StageOutcome{}, nil
+	}
+	return f.publishAwayFrom(ctx, request, authorize)
+}
+
+// publishAwayFrom is the handshake as the executor sees it: the node reports
+// the hook done, the orchestrator authorizes, and only then does the command
+// start. Every step is recorded so a test can assert the order rather than the
+// count.
+func (f *fakeRemote) publishAwayFrom(ctx context.Context, request StageRequest,
+	authorize func(context.Context) error) (StageOutcome, error) {
+	f.mu.Lock()
+	f.publishes = append(f.publishes, request)
+	f.steps = append(f.steps, "hook done")
+	f.mu.Unlock()
+	if authorize != nil {
+		err := authorize(ctx)
+		f.mu.Lock()
+		f.authorizations++
+		f.mu.Unlock()
+		if err != nil {
+			return StageOutcome{Node: "build-a", FailedPart: PartAuthorization}, err
+		}
+	}
+	f.mu.Lock()
+	f.steps = append(f.steps, "command started")
+	outcome := StageOutcome{Node: "build-a", Exports: f.publishExports}
+	if f.failPublishPart != "" {
+		outcome.FailedPart = f.failPublishPart
+		f.mu.Unlock()
+		return outcome, errors.New("the node reported a failure")
+	}
+	f.mu.Unlock()
+	return outcome, nil
 }
 
 // requests answers the recorded builds under the lock.
@@ -416,4 +484,134 @@ func TestABuildPlacedHereFailsLikeALocalBuild(t *testing.T) {
 	assert.Empty(t, results["a"].Worker, "a failure here is nobody else's")
 	assert.Equal(t, StatusSkipped, results["b"].Status, "the consumer is blocked")
 	assert.Equal(t, 1, runner.countPrefix("onfail"), "the outcome script ran")
+}
+
+// TestRemotePublicationAuthorizesBetweenTheHookAndTheCommand: the whole point
+// of the seam. The node reports its hook done, the run makes the check only it
+// can make, and the command starts after that and never before. What the
+// frame exported still reaches the stages that follow, and the tail of the
+// publication still runs here.
+func TestRemotePublicationAuthorizesBetweenTheHookAndTheCommand(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	space := p.Releases["a"].Pkg.Space
+	space.BeforePublishScript = []string{"prepub"}
+	remote := &fakeRemote{publishAway: "a",
+		publishExports: []plan.Output{{Name: "URL", Value: "acme/a", Source: "a:publish"}}}
+	runner := &fakeRunner{}
+	tagger := &fakeTagger{}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: tagger, Build: 2, Publish: 2})
+	executor.Remote = remote
+	checked := 0
+	executor.BeforePublish = func(context.Context, *plan.Release) error {
+		checked++
+		return nil
+	}
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, results["a"].Status, "%v", results["a"].Err)
+	assert.Equal(t, 1, checked, "the authorization was asked exactly once")
+	assert.Equal(t, []string{"hook done", "command started"}, remote.steps,
+		"and it happened between the hook and the command")
+	assert.Equal(t, 1, remote.authorizations)
+	require.Len(t, remote.publishes, 1)
+	assert.Equal(t, []string{"prepub"}, remote.publishes[0].Frame.Before,
+		"the hook travels with the frame it brackets")
+	assert.Equal(t, []string{"publish"}, remote.publishes[0].Frame.Commands)
+	assert.Equal(t, 0, runner.countPrefix("prepub"), "no part of the frame ran here")
+	assert.Equal(t, 0, runner.countPrefix("publish"))
+	assert.Equal(t, []string{"a@1.0.1"}, tagger.tags, "and the tail of the publication ran here")
+	assert.Equal(t, []plan.Output{{Name: "URL", Value: "acme/a", Source: "a:publish"}},
+		p.Releases["a"].Outputs, "what the node exported reached the release")
+	assert.Equal(t, "build-a", results["a"].Worker)
+}
+
+// TestRefusedAuthorizationNeverStartsTheCommand: a check that refuses fails the
+// package with the sentence the local path prints for the same refusal, and
+// the node is never told to start anything.
+func TestRefusedAuthorizationNeverStartsTheCommand(t *testing.T) {
+	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	remote := &fakeRemote{publishAway: "a"}
+	tagger := &fakeTagger{}
+	executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: tagger, Build: 2, Publish: 2})
+	executor.Remote = remote
+	executor.BeforePublish = func(_ context.Context, rel *plan.Release) error {
+		if rel.Pkg.Name != "a" {
+			return nil
+		}
+		return errors.New("the relevant inputs changed after the build")
+	}
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusFailed, results["a"].Status)
+	assert.Equal(t, "publish", results["a"].FailedStage)
+	assert.Equal(t, []string{"hook done"}, remote.steps, "the command never started")
+	assert.Empty(t, tagger.tags, "and nothing was tagged")
+	assert.Equal(t, "pre-publish repository validation failed",
+		formatRemoteFailure(taskPublish, PartAuthorization),
+		"a withheld publication reads as the local path's own refusal")
+	assert.Equal(t, StatusSkipped, results["b"].Status, "the consumer is blocked")
+}
+
+// TestPublishPlacedHereIsTheLocalPublish: a publication this run keeps runs the
+// executor's own sequence, revalidation included, in this checkout. It is the
+// default placement, so it is also what every package of a distributed run
+// does unless the operator asked otherwise.
+func TestPublishPlacedHereIsTheLocalPublish(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.BeforePublishScript = []string{"prepub"}
+	remote := &fakeRemote{placeHere: "a"}
+	runner := &fakeRunner{}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 2, Publish: 2})
+	executor.Remote = remote
+	checked := 0
+	executor.BeforePublish = func(context.Context, *plan.Release) error {
+		checked++
+		return nil
+	}
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, results["a"].Status, "%v", results["a"].Err)
+	assert.Equal(t, []string{"a"}, remote.publishedHere)
+	assert.Equal(t, 1, runner.countPrefix("prepub"), "the hook ran here")
+	assert.Equal(t, 1, runner.countPrefix("publish"), "and so did the command")
+	assert.Equal(t, 1, checked, "the revalidation still ran between the two")
+	assert.Empty(t, remote.steps, "nothing was delegated")
+	assert.Empty(t, results["a"].Worker, "a publication that ran here names no worker")
+}
+
+// TestRemotePublishFailureIsALocalFailure: a node whose publish command failed
+// fails the package at its publish stage with the label the failing part
+// deserves, nothing is tagged, and the lane the publication held is given back
+// so the packages behind it still run.
+func TestRemotePublishFailureIsALocalFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		part string
+		what string
+	}{
+		"the hook before the stage": {part: PartBefore, what: "beforePublish hook failed"},
+		"the publish command":       {part: PartCommands, what: "publish script failed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := mkPlan(planSpec{Names: []string{"a", "c"}})
+			tagger := &fakeTagger{}
+			lanes := 0
+			executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: tagger, Build: 2, Publish: 2})
+			executor.Remote = &fakeRemote{publishAway: "a", failPublishPart: tc.part}
+			executor.AcquirePublish = func(context.Context, *plan.Release) (func(), error) {
+				lanes++
+				return func() { lanes-- }, nil
+			}
+
+			results := executor.Run(context.Background(), p)
+
+			require.Equal(t, StatusFailed, results["a"].Status)
+			assert.Equal(t, "publish", results["a"].FailedStage)
+			assert.Equal(t, []string{"c@1.0.1"}, tagger.tags, "the other package still published")
+			assert.Equal(t, 0, lanes, "the publication lane was given back on every path")
+			assert.Equal(t, tc.what, formatRemoteFailure(taskPublish, tc.part))
+		})
+	}
 }

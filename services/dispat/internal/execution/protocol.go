@@ -237,6 +237,12 @@ type Assignment struct {
 	Outputs []string `json:"outputs,omitempty"`
 	// Permits is what this assignment authorizes beyond running its commands.
 	Permits AssignmentPermits `json:"permits"`
+	// DeadlineSeconds is how long the run will wait for this attempt, so that
+	// the node bounds the work itself rather than being abandoned while it is
+	// still running: the orchestrator's wait and the node's own are then the
+	// same number instead of two machines disagreeing about when an attempt is
+	// over. Zero is no bound of the node's own.
+	DeadlineSeconds int `json:"deadlineSeconds,omitempty"`
 	// Limits are the transfer ceilings the orchestrator holds this task to,
 	// which a node compares against its own before it accepts any work.
 	Limits TransferLimits `json:"limits"`
@@ -276,8 +282,13 @@ type AssignmentPackage struct {
 // AssignmentFrame is the script frame of one stage, in execution order. It is
 // the frame the orchestrator resolved, so that a node runs exactly the
 // commands the run's configuration produced and resolves nothing of its own.
+//
+// There is no login here and there never will be. A space that authenticates
+// publishes on the orchestrator, in the checkout its own credentials are on,
+// so no login command, no login export and no login state ever enters a
+// mailbox: giving a space a `flow.login` is what pins its publishes to the
+// machine the release was started on.
 type AssignmentFrame struct {
-	Login    []string `json:"login,omitempty"`
 	Before   []string `json:"before,omitempty"`
 	Commands []string `json:"commands,omitempty"`
 	After    []string `json:"after,omitempty"`
@@ -350,20 +361,34 @@ type Claim struct {
 // command is done. It names both the assignment it belongs to and the claim
 // commit it follows, so that the orchestrator authorizing it knows exactly
 // which state of the branch it is authorizing.
+//
+// The hook's exports travel with it rather than waiting for the result,
+// because they are what a beforePublish hook is for: the orchestrator merges
+// them onto the release at the moment the local path would have, so the values
+// a hook exported are on the release whether or not the publication that
+// follows succeeds.
 type Ready struct {
 	Header
-	Assignment string `json:"assignment"`
-	Claim      string `json:"claim"`
+	Assignment string          `json:"assignment"`
+	Claim      string          `json:"claim"`
+	Exports    []ExportedValue `json:"hookExports,omitempty"`
 }
 
 // Go is the orchestrator's single-use publication authorization. It names the
 // exact ready commit it answers, which is what makes it single use: an
 // authorization for one state of one branch is not an authorization for the
 // next one, so it cannot be replayed onto a later attempt or a later ready.
+//
+// NotAfter is the instant the authorization stops meaning anything. It is
+// stated rather than implied because the publisher is the party that acts on
+// it: an authorization that reached a node minutes late is an authorization
+// taken under checks that are no longer current, and a node that started
+// publishing on it would be publishing under ownership nobody re-verified.
 type Go struct {
 	Header
 	Assignment string `json:"assignment"`
 	Ready      string `json:"ready"`
+	NotAfter   string `json:"notAfter,omitempty"`
 }
 
 // Withdrawal is the orchestrator's cancel message: it withdraws an attempt. It
