@@ -228,8 +228,14 @@ func TestPublishOrderCountsOnlyDeclaredProvidersAsAReleaseReason(t *testing.T) {
 	assert.True(t, skip, "a publication behind the gap is no substitute for the failed provider")
 	assert.Equal(t, "lib", blocker)
 
-	// A declared provider that published is the reason it always was.
+	// A declared provider that published is the reason it always was. What
+	// makes it a reason is the version the release picks up from it, which is
+	// what a computed plan states in Updates for every releasing provider a
+	// package declares (see plan.Release.Updates); the declaration alone is
+	// only the edge.
 	p.Providers["app"] = []string{"ui", "lib", "core"}
+	app.Updates = []plan.ProviderUpdate{{Name: "core",
+		From: ccme.Version{Major: 1}, To: ccme.Version{Major: 1, Minor: 1}}}
 	skip, _ = shouldSkip("app", p, results, nil)
 	assert.False(t, skip, "a version the package does pick up is a reason to release it")
 }

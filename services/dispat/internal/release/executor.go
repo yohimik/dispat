@@ -448,7 +448,9 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins,
 		reachedProviders: reachedProviders,
 		results:          results, started: make(map[string]time.Time), scan: e.Scanner,
-		avChanged: make(map[string]bool)}
+		avChanged:           make(map[string]bool),
+		reconciledProviders: make(map[string][]string, len(changed)),
+		builtPackages:       make(map[string]bool, len(changed))}
 
 	// The native rewriting inputs — the manifest-name and folder indexes of
 	// the whole workspace — are built once, and only when a releasing package
@@ -557,6 +559,12 @@ type run struct {
 	// script — so a syncLock task with nothing to regenerate can skip its
 	// subprocess instead of serialising an empty `npm install` per package.
 	avChanged map[string]bool
+	// reconciledProviders and builtPackages (guarded by mu) are what §19.5
+	// needs to know before a consumer publishes: which providers' planned
+	// versions its version stage wrote into its manifests, and whether a build
+	// command has since run over them. See recordReconciliation.
+	reconciledProviders map[string][]string
+	builtPackages       map[string]bool
 }
 
 // hasVersionTask reports whether the package's release runs a version task:
@@ -602,9 +610,14 @@ func syncLockBudget(p *plan.Plan, changed map[string]bool) int {
 // environment of the task shares.
 type taskCtx struct {
 	*run
-	t              task
-	rel            *plan.Release
-	updates        []providerUpdate
+	t       task
+	rel     *plan.Release
+	updates []providerUpdate
+	// deadPickups names the providers whose planned version this package's
+	// version stage wrote and which have since died. Non-empty only on a
+	// publish task admit decided may still proceed, and the whole of what that
+	// task's re-reconciliation has to act on (§19.5).
+	deadPickups    []string
 	log            zerolog.Logger
 	publishRelease func()
 	// worker is the node this task's frame was executed on, empty for a frame
@@ -681,7 +694,7 @@ func (tc *taskCtx) hook(ctx context.Context, name string, commands []string, fai
 // It reports whether the caller should proceed. Every path that answers false
 // has already recorded the outcome and told the observers about it.
 func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
-	t, rel, log := tc.t, tc.rel, tc.log
+	t, rel := tc.t, tc.rel
 	r.mu.Lock()
 	if res.Status != StatusPending { // failed or skipped at an earlier stage
 		r.mu.Unlock()
@@ -697,29 +710,22 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 		return false
 	}
 	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results, r.reachedProviders[t.pkg]); skip {
-		res.Status = StatusSkipped
-		res.Blocked, res.BlockedBy = true, blocker
-		res.RecordBlocked = r.results[blocker].RecordBlocked
 		reason := formatSkipReason(blocker,
-			r.plan.Releases[blocker].Pkg.Space.ProviderRelation, res.RecordBlocked)
-		_, ran := r.started[t.pkg] // earlier stages already modified the folder?
-		tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
-		r.mu.Unlock()
-		// Planned, but not attempted because a dependency failed to publish.
-		// Non-suppressible (§16) — a package that was in the plan and produced
-		// nothing must be accounted for.
-		log.Warn().Str("code", plan.CodeBlocked).Str("reason", reason).Msg("skipped")
-		ev := packageEvent(t.pkg, rel, EventPackageSkipped)
-		ev.Status, ev.Code, ev.BlockedBy = StatusSkipped.String(), plan.CodeBlocked, blocker
-		r.notify(ev)
-		if ran && rel.Pkg.Space.RevertOnFail {
-			r.revert(ctx, rel, log)
+			r.plan.Releases[blocker].Pkg.Space.ProviderRelation,
+			r.results[blocker].RecordBlocked)
+		return r.blockOn(ctx, tc, res, blocker, reason)
+	}
+	// A consumer proceeding past a provider that died after its version stage
+	// publishes what that provider actually published, never the planned
+	// version the stage wrote up front (§19.5). Whether that is achievable is
+	// decided here, before anything of the publish runs.
+	if t.kind == taskPublish {
+		if dead := r.deadPickups(t.pkg); len(dead) > 0 {
+			if r.builtPackages[t.pkg] {
+				return r.blockOn(ctx, tc, res, dead[0], formatEmbeddedSkipReason(dead[0]))
+			}
+			tc.deadPickups = dead
 		}
-		// onSkip observes a skip that has already settled, so it only warns;
-		// DISPAT_BLOCKED_BY names the provider responsible.
-		_ = tc.hook(ctx, "onSkip", rel.Pkg.Space.OnSkipScript, false,
-			"DISPAT_BLOCKED_BY="+blocker)
-		return false
 	}
 	if _, ok := r.started[t.pkg]; !ok {
 		r.started[t.pkg] = time.Now()
@@ -735,6 +741,134 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 	r.mu.Unlock()
 
 	return true
+}
+
+// blockOn records — with mu held, which it releases — a package the run
+// planned and will not attempt, and tells every observer of it. It always
+// answers false, because it is the answer admit gives for the one thing it is
+// asked.
+//
+// One function for both reasons a publish is blocked: the ordinary §19.3
+// cascade and the build that already embedded a version nobody published. They
+// differ in the sentence they carry and in nothing else, and a second copy of
+// the event, the hook and the revert is how the two would drift apart.
+func (r *run) blockOn(ctx context.Context, tc *taskCtx, res *Result, blocker, reason string) bool {
+	t, rel, log := tc.t, tc.rel, tc.log
+	res.Status = StatusSkipped
+	res.Blocked, res.BlockedBy = true, blocker
+	res.RecordBlocked = r.results[blocker].RecordBlocked
+	_, ran := r.started[t.pkg] // earlier stages already modified the folder?
+	tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
+	r.mu.Unlock()
+	// Planned, but not attempted because a dependency failed to publish.
+	// Non-suppressible (§16) — a package that was in the plan and produced
+	// nothing must be accounted for.
+	log.Warn().Str("code", plan.CodeBlocked).Str("reason", reason).Msg("skipped")
+	ev := packageEvent(t.pkg, rel, EventPackageSkipped)
+	ev.Status, ev.Code, ev.BlockedBy = StatusSkipped.String(), plan.CodeBlocked, blocker
+	r.notify(ev)
+	if ran && rel.Pkg.Space.RevertOnFail {
+		r.revert(ctx, rel, log)
+	}
+	// onSkip observes a skip that has already settled, so it only warns;
+	// DISPAT_BLOCKED_BY names the provider responsible.
+	_ = tc.hook(ctx, "onSkip", rel.Pkg.Space.OnSkipScript, false,
+		"DISPAT_BLOCKED_BY="+blocker)
+	return false
+}
+
+// deadPickups lists — with mu held — the providers this package's version
+// stage reconciled it to and that have since failed, been skipped or had their
+// records blocked, in name order.
+//
+// It is the question §19.5 asks before a consumer publishes: the version stage
+// wrote each provider's PLANNED version because at that moment the provider
+// was still going to publish it, and a provider that died afterwards leaves
+// the manifests naming a version that will never exist. Empty for a package
+// whose version stage reconciled nothing, and empty on the ordinary run where
+// every provider it picked up published.
+func (r *run) deadPickups(pkg string) []string {
+	var dead []string
+	for _, picked := range r.reconciledProviders[pkg] {
+		res, ok := r.results[picked]
+		if !ok {
+			continue // a provider this run does not release cannot have died in it
+		}
+		if res.Status == StatusFailed || res.Status == StatusSkipped || res.RecordBlocked {
+			dead = append(dead, picked)
+		}
+	}
+	slices.Sort(dead)
+	return dead
+}
+
+// recordReconciliation remembers — under mu — which providers one package's
+// version stage actually reconciled it to, and whether its build ran a command
+// of its own.
+//
+// Both are recorded from the stage that did the work rather than derived from
+// the plan afterwards, because both questions are about a moment: which
+// providers were still alive when the manifests were written, and whether
+// anything has since been built out of them. A stage with neither a native
+// reconciliation nor a script wrote nothing and is not recorded.
+func (tc *taskCtx) recordReconciliation(frame stage) {
+	hasWork := frame.native != nil || len(frame.commands) > 0
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	switch tc.t.kind {
+	case taskVersion:
+		if !hasWork {
+			return
+		}
+		picked := make([]string, 0, len(tc.updates))
+		for _, u := range tc.updates {
+			picked = append(picked, u.Package)
+		}
+		tc.reconciledProviders[tc.t.pkg] = picked
+	case taskBuild:
+		if len(frame.commands) > 0 {
+			tc.builtPackages[tc.t.pkg] = true
+		}
+	}
+}
+
+// reconcileToPublished re-runs the package's version reconciliation against
+// the providers that are still alive, so that what it publishes names each
+// provider's version as PUBLISHED rather than as planned (§19.5).
+//
+// The native reconciliation needs nothing else said to it: it compares every
+// declared range against the provider's end-of-run version, and for a provider
+// that died that version is its baseline, so the planned version it wrote
+// earlier is written back down. A space reconciling through scripts gets the
+// same chance, with the dead providers already out of DISPAT_UPDATED_*; what
+// its script then does is the script's own business, which is why a package
+// whose build has already run is blocked instead of re-reconciled.
+//
+// The stage's hooks are deliberately not re-run: beforeVersion and postVersion
+// bracket the version stage, and firing them again inside a publish would run
+// a lock-file regeneration or a commit step a second time. The same reason
+// leaves syncLock alone.
+func (tc *taskCtx) reconcileToPublished(ctx context.Context) error {
+	space := tc.rel.Pkg.Space
+	tc.log.Info().Strs("providers", tc.deadPickups).
+		Msg("publish: reconciling to the providers that published")
+	if space.AutoVersion != nil {
+		if err := tc.autoVersion(ctx, space.AutoVersion); err != nil {
+			return fmt.Errorf("re-reconciling %s to its published providers: %w", tc.t.pkg, err)
+		}
+	}
+	if len(space.VersionScript) == 0 {
+		return nil
+	}
+	// The live update set, not the null-out stageFor applies to a version
+	// stage with nothing left to sync: there a script that would write nothing
+	// is not worth a subprocess, while here it is the only thing that can
+	// unwrite what the first pass wrote.
+	if err := tc.sequence(taskVersion.String(), space.VersionScript, true).
+		RunMergingOutputs(ctx, tc.rel); err != nil {
+		return fmt.Errorf("re-running %s version scripts against its published providers: %w", tc.t.pkg, err)
+	}
+	return nil
 }
 
 // stageFor is the frame this task runs: the stage's own commands and the
@@ -873,6 +1007,7 @@ func (r *run) execute(ctx context.Context, t task) {
 	}
 
 	frame := tc.stageFor()
+	tc.recordReconciliation(frame)
 
 	// The event reports the task starting, not a script: a stage with no
 	// configured command still runs and still transitions, so it is still
@@ -882,6 +1017,16 @@ func (r *run) execute(ctx context.Context, t task) {
 	stageEv := packageEvent(t.pkg, rel, EventStageStarted)
 	stageEv.Stage = t.kind.String()
 	r.notify(stageEv)
+
+	if len(tc.deadPickups) > 0 {
+		// Before anything of the publication, and on this machine whatever the
+		// run delegates: the reconciliation writes the checkout a placed frame
+		// is snapshotted from, exactly as the version stage does.
+		if err := tc.reconcileToPublished(ctx); err != nil {
+			fail(err, "reconciling to the providers that published failed")
+			return
+		}
+	}
 
 	if t.kind == taskPublish {
 		if err := tc.loginGate(ctx); err != nil {
@@ -1317,15 +1462,13 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 // blocks is read from the provider that failed, since a relation is a
 // statement about that provider's own consumers wherever they sit.
 //
-// A "reason of its own" is a *fresh* direct bump or a channel change: a
-// package moving between channels is being released for something a failed
-// provider cannot invalidate, so it proceeds. Fresh, not train-wide — own
-// work an earlier prerelease already shipped does not explain releasing
-// again, and without the failed provider's propagation such a package would
-// not be in the plan at all; releasing it would record a provider movement
-// that never published. Providers whose outcome is still pending count as
-// neither; the check runs again before publish, when all provider publishes
-// are final thanks to the task-graph edges.
+// "No release reason of its own" is the whole of §19.3's rule read exactly:
+// EVERY admitted cause of the release comes from a package that failed or was
+// blocked. One cause that does not is enough to proceed, and there are three
+// kinds — a fresh direct bump, a channel change, and a version this package
+// picks up from a provider that is not among the dead. Providers whose outcome
+// is still pending count as neither; the check runs again before publish, when
+// all provider publishes are final thanks to the task-graph edges.
 //
 // A provider under a blocking relation outranks every reason of the package's
 // own. Under `publish` that is because consumers' builds take the provider's
@@ -1343,6 +1486,7 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 	rel := p.Releases[pkg]
 	badProvider := ""
 	blockingProvider := ""
+	bad := make(map[string]bool, len(reached))
 	for _, prov := range slices.Concat(p.Providers[pkg], reached) {
 		r, ok := results[prov]
 		if !ok { // unchanged provider
@@ -1354,6 +1498,7 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 		if r.Status != StatusFailed && r.Status != StatusSkipped {
 			continue
 		}
+		bad[prov] = true
 		badProvider = prov
 		if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
 			blockingProvider = prov
@@ -1365,25 +1510,38 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 	if blockingProvider != "" {
 		return true, blockingProvider
 	}
-	if rel.IsFreshOwnBump() || rel.IsChannelChanged() ||
-		isAnyProviderPublished(p.Providers[pkg], results) {
+	if hasCauseOfItsOwn(rel, bad) {
 		return false, ""
 	}
 	return true, badProvider
 }
 
-// isAnyProviderPublished reports whether one of the package's own providers
-// published, which is a release reason exactly as fresh own work is: the
-// package is picking that version up.
+// hasCauseOfItsOwn reports whether any admitted cause of the release comes
+// from somewhere other than the packages that failed or were blocked.
 //
-// The declared providers, not the reached ones. A provider reached through a
-// package this run does not release hands the consumer no version to pick up
-// (§9.4 syncs manifests, and the consumer's manifest does not name it), so a
-// publication behind the gap is a reason to order the two, never a reason to
-// release the consumer past a provider of its own that failed.
-func isAnyProviderPublished(providers []string, results map[string]*Result) bool {
-	for _, prov := range providers {
-		if r, ok := results[prov]; ok && r.Status == StatusPublished {
+// The causes are the plan's own: a fresh direct bump, a channel change, and
+// every provider version the release picks up. Fresh, not train-wide — own
+// work an earlier prerelease already shipped does not explain releasing again,
+// and without the failed provider's propagation such a package would not be in
+// the plan at all; releasing it would record a provider movement that never
+// published.
+//
+// Updates is the right cause set, and it is wider than "a provider that
+// published in this run" in the case that matters: a provider this run does
+// not release at all is in Updates when an earlier run published it and this
+// one is the catch-up (§13.7a), and picking that version up is as real a
+// reason as a publication happening beside it. It is also narrower than the
+// declared provider list, deliberately. A provider reached only through a
+// package this run does not release hands the consumer no version (§9.4 syncs
+// manifests, and the consumer's manifest does not name it), so its publication
+// orders the two and never excuses a provider of the consumer's own that
+// failed; Updates holds direct providers only, which is exactly that rule.
+func hasCauseOfItsOwn(rel *plan.Release, bad map[string]bool) bool {
+	if rel.IsFreshOwnBump() || rel.IsChannelChanged() {
+		return true
+	}
+	for _, u := range rel.Updates {
+		if !bad[u.Name] {
 			return true
 		}
 	}

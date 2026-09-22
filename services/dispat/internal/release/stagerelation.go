@@ -200,3 +200,21 @@ func formatSkipReason(blocker string, relation model.StageRelation, isRecordBloc
 	}
 	return "provider " + blocker + " failed or was skipped, and the package has no changes of its own"
 }
+
+// formatEmbeddedSkipReason renders the other way a publish is blocked: the
+// package had a release reason of its own and proceeded, its version stage
+// wrote the provider's planned version into its manifests, its build then ran
+// over them, and only afterwards did the provider die.
+//
+// Reconciling the manifests back to what the provider published would not
+// reach the artefact the build already produced, so the conservative half of
+// §19.2a applies: dispat will not silently rebuild, and a manifest naming a
+// version that was never published must not be published (§19.5). The sentence
+// says which of the two happened, because "provider failed" alone would send
+// an operator looking at a package that has changes of its own and a relation
+// that does not block.
+func formatEmbeddedSkipReason(blocker string) string {
+	return "provider " + blocker +
+		" failed or was skipped after this package's build had already embedded its planned version; " +
+		"rerun the release to rebuild against what the provider actually published"
+}
