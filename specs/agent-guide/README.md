@@ -31,6 +31,7 @@ Keep the configuration and API references from the installed binary's help pinne
 9. Serialize normal releases, but interrupt a release immediately when an urgent correction invalidates its contents. The lock must not delay cancellation or local repairs. Verify remote outcomes before retrying.
 10. Report what ran, what published, what failed or was skipped, and what remains uncertain.
 11. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
+12. When a release delegates work to worker nodes, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
 
 ## Release through CI/CD
 
@@ -602,6 +603,29 @@ publication, or any bypass of the reviewed CI workflow.
 
 After `publish` succeeds, failure to write a tag, changelog, GitHub record, release commit, or push does not make the package unpublished. Treat the result as published with incomplete recording. See [release steps](../../packages/docs/docs/reference/releasing/steps.md) and [recovery](../../packages/docs/docs/reference/releasing/recovery.md).
 
+## Run a distributed release
+
+A repository whose root configuration carries an `execution` object with a non-empty `workers` list runs its build stages, and sometimes its publish stages, on other machines. The machine the release is started on keeps the release locks, the plan, every publication authorization and every release record. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before working on such a repository, and its security section before touching the signing secret or the mailbox repository.
+
+Before a release:
+
+1. Read the `execution` object of the entry configuration. It is a node-startup setting, so a space, a package, an imported configuration or a linked repository never contributes one, and a peer's own object is ignored.
+2. Confirm the pipeline starts the worker nodes. `dispat worker` belongs in a CI job or a cluster workload beside the release job, not in your shell: a node you start locally executes the commands of any authentic assignment with your machine's credentials.
+3. Confirm the signing secret reaches every node from the secret store, and never read, print or copy its value. Report a secret written literally in a configuration file rather than fixing it silently.
+4. Run `dispat status`. With workers configured it names the plan it fixed in one `plan fixed` line, which is the plan every assignment of the run states.
+5. Expect the run to refuse rather than proceed when a node cannot be reached, when a package's `buildPlatforms` no node satisfies, or when any release-lock bypass is configured. These are `E225` and they happen before any lock, plan or command.
+
+After a release, read the per-task summary rather than the last line of the log. One line per task states where it ran, and keeps four outcomes apart: computation, outputs, publication and recording. A completed task is not a released package. The `execution metrics` line beside it is measurement only and is not a claim about speed.
+
+An unknown publication outcome is the one result that needs a person:
+
+1. `E228` with the category `publication-unknown` means the run authorized a publication on a node and cannot establish what became of it. The package failed at its publish stage, its dependents are blocked, and no second attempt is made in that run.
+2. Report it as unknown. Never describe it as published or as failed, and never retry the publish by hand.
+3. The run may also retain that repository's release lock. Do not delete a retained lock. Clearing it is an operator's decision and needs the documented order: list the run's `dispat-worker-*` refs in the mailbox, find the authorization with no result beside it, confirm on that node that the publisher has stopped, check the registry for the version, delete the run's refs, and only then delete the lock tag.
+4. A run may end with a lock retained and no release record at all, so check the registry rather than the tags.
+
+Leftover `dispat-worker-*` branches in a mailbox repository are coordination state, not release records, and a completed run deletes its own. They carry full source and command text, so report them for deletion rather than leaving them. Never push a branch of your own into a mailbox repository, and never run a release from a node whose `execution.role` is `worker`: both are refused, the second with `E226`.
+
 ## Respect the release lock
 
 `dispat release` and bare `dispat` use a remote `dispat-release-lock` tag to serialize releases for the repository. During normal work, do not start a second release, push unrelated commits to the release branch, move release tags, delete the lock, or disable locking while a run may be active. Urgent corrections follow the interruption procedure below; the lock is not a reason to let a known-invalid release finish.
@@ -687,6 +711,8 @@ Do not describe a repository-wide release as rolled back merely because one pack
 - [Environment and script outputs](../../packages/docs/docs/reference/environment.md)
 - [Partial releases](../../packages/docs/docs/reference/releasing/partial-releases.md)
 - [Release lock](../../packages/docs/docs/reference/releasing/release-lock.md)
+- [Distributed execution](../../packages/docs/docs/distributed-execution.md) and the [`execution` object](../../packages/docs/docs/configuration/execution.md)
+- [The worker command](../../packages/docs/docs/cli/worker.md)
 - [Recovery](../../packages/docs/docs/reference/releasing/recovery.md)
 - [Diagnostic codes](../../packages/docs/docs/reference/plan-errors.md)
 - [CCME specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
