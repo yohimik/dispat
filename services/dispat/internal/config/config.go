@@ -986,6 +986,9 @@ func validate(c *File, allowEmpty bool) error {
 	if err := validateExecution(c); err != nil {
 		return err
 	}
+	if err := validateRunOutputs(c); err != nil {
+		return err
+	}
 	if err := validateLinkedConfiguration(c); err != nil {
 		return err
 	}
@@ -1913,7 +1916,17 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 // every space, validated here because the override layers need the folders
 // to exist.
 func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	return discoverPackagesMode(c, root, allowAllFolderInputs)
+	pkgs, declared, excluded, err := discoverPackagesMode(c, root, allowAllFolderInputs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// The sweep roots are asked here rather than with the other whole-set
+	// checks, because in a composed workspace they are the entry's alone and
+	// are asked once every repository's packages are known.
+	if err := checkRunOutputRoots(c.RunOutputs, pkgs, root); err != nil {
+		return nil, nil, nil, err
+	}
+	return pkgs, declared, excluded, nil
 }
 
 func discoverPackagesMode(c *File, root string, folderInputs folderInputPolicy) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {

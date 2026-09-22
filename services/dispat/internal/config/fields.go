@@ -82,6 +82,7 @@ func fileFields(dst *File) fields {
 		"run":                   obj(&dst.Run, runFields),
 		"parser":                obj(&dst.Parser, parserFields),
 		"execution":             obj(&dst.Execution, executionFields),
+		"runoutputs":            runOutputMap(&dst.RunOutputs),
 	}
 }
 

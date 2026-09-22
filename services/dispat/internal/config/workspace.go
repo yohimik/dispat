@@ -802,6 +802,11 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 	if err := validatePackageOwnershipMode(pkgs, workspace.IsLinked()); err != nil {
 		return nil, nil, nil, err
 	}
+	// The entry's sweep roots, and only the entry's: an imported repository's
+	// own are validated where its file is read and never consulted (§28.10).
+	if err := checkRunOutputRoots(c.RunOutputs, pkgs, controlRoot); err != nil {
+		return nil, nil, nil, err
+	}
 	return pkgs, declared, excluded, nil
 }
 

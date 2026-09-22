@@ -94,43 +94,91 @@ func validateBuildOutputs(label string, outputs []string) error {
 // with its trailing slash and its redundant separators taken off, so that
 // `dist` and `dist/` are recognised as the one root they are.
 func cleanBuildOutput(label, declared string) (string, error) {
-	if declared == "" {
+	clean, fault := findRootShapeFault(declared)
+	switch fault {
+	case rootShapeSound:
+		return clean, nil
+	case rootShapeEmpty:
 		return "", fmt.Errorf("%s: an empty path names no build output", label)
-	}
-	if strings.ContainsRune(declared, 0) {
+	case rootShapeNul:
 		return "", fmt.Errorf("%s: a build output path holds no NUL byte", label)
-	}
-	if strings.Contains(declared, `\`) {
+	case rootShapeBackslash:
 		return "", fmt.Errorf(
 			"%s: %q is written with backslashes; build outputs are slash-separated on every platform", label, declared)
-	}
-	if strings.Contains(declared, ":") {
+	case rootShapeColon:
 		return "", fmt.Errorf(
 			"%s: %q holds a colon; a build output names a path inside the package folder, never a drive or a remote",
 			label, declared)
-	}
-	if strings.HasPrefix(declared, "/") || filepath.IsAbs(declared) {
+	case rootShapeAbsolute:
 		return "", fmt.Errorf("%s: %q is absolute; build outputs are relative to the package folder", label, declared)
-	}
-	for _, component := range strings.Split(declared, "/") {
-		if component == ".." {
-			return "", fmt.Errorf(
-				"%s: %q leaves the package folder; a package declares its own outputs and no one else's", label, declared)
-		}
-		if strings.EqualFold(component, gitFolderName) {
-			return "", fmt.Errorf("%s: %q reaches into %s; a build output is a build product, not repository metadata",
-				label, declared, gitFolderName)
-		}
-	}
-	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(declared)))
-	if clean == "." {
+	case rootShapeParent:
+		return "", fmt.Errorf(
+			"%s: %q leaves the package folder; a package declares its own outputs and no one else's", label, declared)
+	case rootShapeGitFolder:
+		return "", fmt.Errorf("%s: %q reaches into %s; a build output is a build product, not repository metadata",
+			label, declared, gitFolderName)
+	default:
 		// A root is installed by replacing the folder it names, so the package
 		// folder as a root would replace the consumer's whole checkout of the
 		// package, sources and nested packages included.
 		return "", fmt.Errorf(
 			"%s: %q names the package folder itself; declare the folders the build writes inside it", label, declared)
 	}
-	return clean, nil
+}
+
+// rootShapeFault is the one rule a declared output root breaks, whichever key
+// declared it. The rules are the same for a build output, relative to a
+// package folder, and for a sweep's output, relative to a repository root:
+// both name a place every machine a run reaches can write, and only the
+// sentence a refusal is worded in differs between the two keys.
+type rootShapeFault int
+
+// The rules, in the order they are asked.
+const (
+	rootShapeSound rootShapeFault = iota
+	rootShapeEmpty
+	rootShapeNul
+	rootShapeBackslash
+	rootShapeColon
+	rootShapeAbsolute
+	rootShapeParent
+	rootShapeGitFolder
+	// rootShapeAnchor is a path that names the folder it is relative to.
+	rootShapeAnchor
+)
+
+// findRootShapeFault answers the first rule one declared root breaks, and the
+// root as the overlap rules compare it when it breaks none: slash-separated,
+// with its trailing slash and its redundant separators taken off.
+func findRootShapeFault(declared string) (string, rootShapeFault) {
+	if declared == "" {
+		return "", rootShapeEmpty
+	}
+	if strings.ContainsRune(declared, 0) {
+		return "", rootShapeNul
+	}
+	if strings.Contains(declared, `\`) {
+		return "", rootShapeBackslash
+	}
+	if strings.Contains(declared, ":") {
+		return "", rootShapeColon
+	}
+	if strings.HasPrefix(declared, "/") || filepath.IsAbs(declared) {
+		return "", rootShapeAbsolute
+	}
+	for _, component := range strings.Split(declared, "/") {
+		if component == ".." {
+			return "", rootShapeParent
+		}
+		if strings.EqualFold(component, gitFolderName) {
+			return "", rootShapeGitFolder
+		}
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(declared)))
+	if clean == "." {
+		return "", rootShapeAnchor
+	}
+	return clean, rootShapeSound
 }
 
 // validateBuildPlatforms checks one level's platform list: each entry is a
