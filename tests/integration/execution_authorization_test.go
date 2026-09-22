@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
 
@@ -290,7 +291,7 @@ func TestExecutionCraftedPublicationAuthorizations(t *testing.T) {
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) {
 			settings.Concurrency = models.Int(len(rows) + 1)
-		}), 0)
+		}), executionRefusalIdleSeconds)
 
 	for name, row := range rows {
 		branch := branches[name]
@@ -302,7 +303,7 @@ func TestExecutionCraftedPublicationAuthorizations(t *testing.T) {
 		}
 		orchestrator.answer(branch, "go", ready, document, row.options...)
 	}
-	reply := executionAwaitRefusals(t, worker, rig, len(rows))
+	reply := executionServeUntilIdle(t, worker)
 
 	assert.Empty(t, executionRecordedTasks(rig, "published"),
 		"no refused authorization started a publish command anywhere: %v", rig.runs())
@@ -319,27 +320,29 @@ func TestExecutionCraftedPublicationAuthorizations(t *testing.T) {
 	assert.NotContains(t, reply.Stdout, executionSecret, "and never echoed the secret")
 }
 
-// executionAwaitRefusals stops the node once it has refused as many
-// authorizations as the scenario offered, and answers what it reported.
+// executionRefusalIdleSeconds is how long a node of these scenarios serves
+// with nothing to do before it ends itself.
 //
-// The node is signalled rather than waited out because there is nothing left
-// for it to do: a publication whose authorization was refused has already
-// reported, and a scenario that waited for an idle timeout would be waiting
-// for a clock rather than for the claim it is making.
-func executionAwaitRefusals(t *testing.T, worker *executionWorker, rig *executionRig,
-	expected int) harness.RunResult {
+// Ending itself is what the scenarios wait on, because a refused
+// authorization leaves nothing on the mailbox to watch for: the node answers
+// nothing on a branch somebody else has moved. A node that has gone idle has
+// finished every attempt it took on, which is exactly the condition the
+// assertions need, and it is a statement the node makes rather than a
+// duration a test guessed at.
+const executionRefusalIdleSeconds = 10
+
+// executionServeUntilIdle waits for a node to end itself once every attempt it
+// took on has finished, and answers what it reported on the way.
+func executionServeUntilIdle(t *testing.T, worker *executionWorker) harness.RunResult {
 	t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(executionRecordedTasks(rig, "hook")) >= expected {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	// The hook of every attempt has run, so every attempt is at or past the
-	// gate; the refusals follow within one poll of the node's own.
-	time.Sleep(2 * time.Second)
-	return worker.stop(t)
+	res := worker.proc.Wait()
+	require.Equal(t, 0, res.Code, "a node that ran out of work ends by itself\nstdout:\n%s\nstderr:\n%s",
+		res.Stdout, res.Stderr)
+	stopped, isStopped := executionLine(res, "worker stopped")
+	require.True(t, isStopped, "stdout:\n%s", res.Stdout)
+	require.Equal(t, "idle", stopped.Str("reason"),
+		"every attempt of the scenario had finished before the node stopped")
+	return res
 }
 
 // executionRefusedAuthorizations are the rules a node reported an
@@ -426,14 +429,14 @@ func TestExecutionCraftedPublicationWithdrawals(t *testing.T) {
 		state := orchestrator.prepareInputState("unsigned")
 		branch := executionCraftedBranchName("publish", "unsigned")
 		assignment := orchestrator.offer(branch, orchestrator.publication(branch, "unsigned", state))
-		worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+		worker := rig.startWorker(executionWorkerConfig(rig.mailbox), executionRefusalIdleSeconds)
 
 		executionAwaitMessage(t, rig.mailbox, branch, "ready")
 		ready := executionTipOID(t, rig.mailbox, branch)
 		orchestrator.answer(branch, "cancel", ready,
 			orchestrator.withdrawal(branch, "unsigned", assignment, ready),
 			func(o *executionMessageOptions) { o.secret = "forged-" + strings.Repeat("y", 16) })
-		reply := executionAwaitRefusals(t, worker, rig, 1)
+		reply := executionServeUntilIdle(t, worker)
 
 		assert.Contains(t, executionRefusedAuthorizations(reply), "signature",
 			"the node said which rule the withdrawal broke\nstdout:\n%s", reply.Stdout)
@@ -449,7 +452,7 @@ func TestExecutionCraftedPublicationWithdrawals(t *testing.T) {
 		state := orchestrator.prepareInputState("stale")
 		branch := executionCraftedBranchName("publish", "stale")
 		assignment := orchestrator.offer(branch, orchestrator.publication(branch, "stale", state))
-		worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+		worker := rig.startWorker(executionWorkerConfig(rig.mailbox), executionRefusalIdleSeconds)
 
 		executionAwaitMessage(t, rig.mailbox, branch, "ready")
 		ready := executionTipOID(t, rig.mailbox, branch)
@@ -457,7 +460,7 @@ func TestExecutionCraftedPublicationWithdrawals(t *testing.T) {
 		// commit rather than about the state the node is waiting at.
 		orchestrator.answer(branch, "cancel", ready,
 			orchestrator.withdrawal(branch, "stale", assignment, assignment))
-		reply := executionAwaitRefusals(t, worker, rig, 1)
+		reply := executionServeUntilIdle(t, worker)
 
 		assert.Contains(t, executionRefusedAuthorizations(reply), "replay",
 			"a cancellation of an earlier tip is not this attempt's\nstdout:\n%s", reply.Stdout)
@@ -471,7 +474,7 @@ func TestExecutionCraftedPublicationWithdrawals(t *testing.T) {
 		state := orchestrator.prepareInputState("notgo")
 		branch := executionCraftedBranchName("publish", "notgo")
 		assignment := orchestrator.offer(branch, orchestrator.publication(branch, "notgo", state))
-		worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+		worker := rig.startWorker(executionWorkerConfig(rig.mailbox), executionRefusalIdleSeconds)
 
 		executionAwaitMessage(t, rig.mailbox, branch, "ready")
 		ready := executionTipOID(t, rig.mailbox, branch)
@@ -479,7 +482,7 @@ func TestExecutionCraftedPublicationWithdrawals(t *testing.T) {
 		// moved to is not the one message that may start the command.
 		orchestrator.answer(branch, "ready", ready,
 			orchestrator.authorization(branch, "notgo", assignment, ready))
-		reply := executionAwaitRefusals(t, worker, rig, 1)
+		reply := executionServeUntilIdle(t, worker)
 
 		_, isWithheld := executionLine(reply,
 			"the publication branch moved to something that is not an authorization")
