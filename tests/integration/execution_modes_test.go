@@ -848,6 +848,43 @@ func executionEntriesEntry(t *testing.T, fleet *choreographyFleet, name, gate st
 	}
 }
 
+// TestExecutionControlCheckpointFailureKeepsSourceSuccess is conformance
+// vector 15 in the mode it is about: a source tag written by a run that
+// delegated every build stays true when the control repository's checkpoint
+// of that source then fails.
+//
+// The distinction the vector draws is between the effect and the record of
+// where it landed. The provider really was published, so its tag is not taken
+// back and nothing is published a second time; the checkpoint that could not
+// be written is reported for what it is, and the consumers of that provider
+// are left for the next run.
+func TestExecutionControlCheckpointFailureKeepsSourceSuccess(t *testing.T) {
+	fleet := newExecutionModeFleet(t, "control repository", true)
+	workers := fleet.startWorkers([]string{executionNode, executionSecondNode}, 1)
+	// The control repository's own commit is what a checkpoint is, and this is
+	// how a commit is made to fail without failing the sources' own.
+	require.NoError(t, os.WriteFile(fleet.entry.Path(".git", "hooks", "pre-commit"),
+		[]byte("#!/bin/sh\nexit 37\n"), 0o755))
+
+	res := fleet.release()
+	stopAll(t, workers)
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, executionCheckpointCode),
+		"the run names the step that failed\nstdout:\n%s", res.Stdout)
+	assert.Contains(t, fleet.tags()["alpha"], executionModeProvider+"@0.1.0",
+		"the provider's publication remains truthful")
+	assert.Equal(t, []string{executionModeProvider},
+		executionReleasedPackages(res), "and nothing else was published")
+	assert.Empty(t, fleet.tags()["beta"], "the consumers of an unrecorded source are left for the next run")
+	assert.Empty(t, executionMailboxBranches(t, fleet.mailbox),
+		"the run still closed the branches it created")
+}
+
+// executionCheckpointCode is the diagnostic a control repository reports for
+// a checkpoint of a source it could not write.
+const executionCheckpointCode = "E335"
+
 // TestExecutionSecretNeverReachesMailboxOrLogs: the signing secret is named by
 // an environment variable rather than written in a file so that it stays on
 // the machines that need it. This is that claim, read from the two places a
