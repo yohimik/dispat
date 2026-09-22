@@ -84,6 +84,19 @@ optional `repositories` roster names neighbours. Each peer keeps its own configu
 started in any of them composes the whole fleet. What a release incorporated is recorded in the links themselves rather
 than in a checkpoint. [A choreographed fleet](./choreographed-repositories.md) explains it.
 
+## Can the builds of one release run on several machines?
+
+Yes. Configure [`execution`](./configuration/execution.md) with one or more worker nodes, run `dispat worker` on each
+of them, and the release delegates its build frames to them while the machine you started it on keeps the locks, the
+plan, the authorizations and the records. Verified build outputs travel from the node that produced them to the nodes
+that consume them, so a consumer reads its provider's `dist` without that folder ever being committed. The transport
+is Git alone: an orchestrator pushes to a mailbox repository and a node polls it, so no worker needs an inbound
+network address.
+
+It is one release either way. There is one plan, one lock set and one set of records, and a run with no worker links
+behaves exactly as it always did. Read [Distributed execution](./distributed-execution.md), and its security section
+before sharing one signing secret across machines.
+
 ## Why use Git submodules to link repositories?
 
 dispat needs a link to another repository's configuration and a reproducible revision of its source. Git already

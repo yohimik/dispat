@@ -251,6 +251,10 @@ release.
 Every script option accepts a single script name or an array of names run in sequence. A failing command in a
 release-gating sequence stops it and fails the package, while warn-only sequences keep running and only log.
 
+The build and publish frames are also the two a release can place on another machine. With
+[worker nodes](./distributed-execution.md) configured, they run where the run placed them and everything else stays on
+the machine the release was started on; with none, every stage runs where it always did.
+
 You can bracket the stages with per-space hooks. `flow.beforeAll`, `flow.beforeVersion`, `flow.postVersion`,
 `flow.beforeBuild`, `flow.postBuild` and `flow.beforePublish` all *gate* the release, so their failure fails the
 package. `flow.postPublish` only warns since the release is already out.

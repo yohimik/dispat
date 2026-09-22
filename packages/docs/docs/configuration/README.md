@@ -61,6 +61,7 @@ The larger objects have their own pages:
 | [Script sequences](./scripts.md)      | `scripts`. This covers binding a name to one command or to several, and what a failure inside a sequence does to the rest of it.                        |
 | [Run-level hooks](./run-hooks.md)     | The top-level `run` object. This includes the hooks that observe the run as a whole, the branch guard, and the stale-checkout guard.                          |
 | [Webhooks](./webhooks.md)             | `webhooks`. These are the HTTP endpoints a release run notifies of its progress, asynchronously and without ever gating the run.                                |
+| [`execution`](./execution.md)         | `execution`. This is the node's role, its capacity and the worker nodes a release may delegate build and publish tasks to. See [Distributed execution](../distributed-execution.md). |
 | [Static env](./env.md)                | `env`. These are fixed environment variables added to every script the run executes.                                                                  |
 | [The `.env` file](./dotenv.md)        | The environment file read from the current directory into the run. This covers `--env-file` and what wins over what.                                    |
 | [custom](./custom.md)                 | `custom`. This is free-form data dispat never reads.                                                                                                |
@@ -70,7 +71,12 @@ See the [CLI](../cli/README.md), the [commit message format](../reference/commit
 [script environment variables](../reference/environment.md) for related references. Read
 [`dispat.example.json`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.json) or
 [`dispat.example.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.yaml) for annotated
-full examples.
+full examples. Four smaller files annotate one arrangement each:
+[`dispat.example.control.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.control.yaml),
+[`dispat.example.peer.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.peer.yaml),
+[`dispat.example.orchestrator.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.orchestrator.yaml)
+and
+[`dispat.example.worker.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.worker.yaml).
 
 ## Top-level options
 
@@ -112,6 +118,10 @@ full examples.
 | `versioning`       | string                                     | no       | Default versioning mode, applied under each space's **own** group. Writing `fixed` here means every space versions its packages as one, not that all spaces share a version. Joining spaces into one group is what `versionGroups` is for. The default is `independent`.  |
 | `parser`           | object                                     | no       | Commit-message parser options. See [`parser`](./parser.md#parser). Everything unset keeps the specification default.                                                   |
 | `updateCheck`      | bool                                       | no       | Whether dispat looks for a newer release of itself and mentions one on a command's way out. The default is `true`. This never runs under `logFormat: json`, and it delays a command only when `DISPAT_UPDATE_CHECK=1` explicitly asks it to wait. See [Updating dispat](../reference/self-update.md#being-told-there-is-an-update).  |
+| `execution`        | object                                     | no       | This node's role, its capacity and the worker nodes a release may delegate build and publish tasks to. It exists at the root only and is read from the configuration the run was started with. With the key absent, or `workers` empty, a release runs on one machine as it always did. See [`execution`](./execution.md) and [Distributed execution](../distributed-execution.md). |
+| `buildOutputs`     | array of strings                           | no       | The folders a package's build leaves behind, relative to the package folder, which is what travels to the nodes that consume them. You can override this per space and per package. See [Space options](./spaces.md#space-options). |
+| `buildPlatforms`   | array of strings                           | no       | The `os/arch` values a package's build may run on, in Go's spelling. Empty or absent means any node. You can override this per space and per package. See [Space options](./spaces.md#space-options). |
+| `runOnly`          | string or `[string, string]`               | no       | Where a package's build and publish may run: `both` (the default), `worker` or `orchestrator`, as one value or a `[build, publish]` pair. You can override this per space and per package. See [Where a stage runs](../distributed-execution.md#where-a-stage-runs). |
 | `unsafeDisableLock`| bool                                       | no       | Release without the [release lock](../reference/releasing/release-lock.md). The lock is the tag a release pushes to the remote so that two runs at once are refused rather than raced. The default is `false`. Use this for repositories with no remote to coordinate through. Set `DISPAT_UNSAFE_DISABLE_LOCK=true` to say the same for one invocation.  |
 
 ### Log levels
@@ -160,6 +170,9 @@ is not the same as leaving it out, and only writing `false` overrides a `true` a
 | `dependencies` | yes | yes | yes |
 | `changelog`, `github` | yes | yes | yes |
 | `src`, `ignore` | yes | yes | yes |
+| `buildOutputs` | yes | yes | yes |
+| `buildPlatforms` | yes | yes | yes |
+| `runOnly` | yes | yes | yes |
 | `concurrency` | yes, as the budget | yes, as a weight | yes, as a weight |
 | `manifestNames` | no | no | yes |
 | `path` | no | yes, the space's own folder or list of folders | yes, one folder, for a standalone package |
@@ -172,7 +185,7 @@ How a level combines with the one below it depends on the setting:
   `flow` clears an inherited entry. An empty array in `scripts` is an error because a name bound to no command resolves
   to nothing. dispat replaces an entry whole however many commands it binds. Restating a multi-command script creates a
   new sequence rather than adding to the inherited one.
-- **Replaced whole.** `autoVersion`, `aliasTags`, `webhooks`, and `manifestNames`. Their empty fields carry meaning against their
+- **Replaced whole.** `autoVersion`, `aliasTags`, `webhooks`, `buildOutputs`, `buildPlatforms`, `runOnly`, and `manifestNames`. Their empty fields carry meaning against their
   siblings, so a partial overlay cannot express what they mean. Write an empty `aliasTags: []` to make a package opt
   out.
 - **Overlaid field by field.** `changelog` and `github`. A level can flip `enabled` and keep the titles it inherited.
@@ -189,10 +202,16 @@ The value `0` means the number of CPUs.
 On a space or a package it is a **weight**, which is the number of slots that package's task occupies. The value `0` or
 an absent key means 1. They are the two sides of the same number and they are not interchangeable.
 
+There is a third number with a similar name and a different job. [`execution.concurrency`](./execution.md#concurrency)
+is one node's **capacity**: how many assigned tasks that machine runs at once, across runs. The root budget still
+bounds the whole run and is never multiplied by the number of worker nodes, so a task waiting for a node is holding
+its stage slot while it waits.
+
 Everything else is repository-wide and only exists at the root. This includes `spaces`, `versionGroups`,
 `initials`, `commit`, `shell`, `run`, `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`,
 `updateCheck`, `unsafeDisableLock`, `polyrepo`, `repository`, `repositories`, `configs`,
-`repositoryOverrides`, and `repositoryBaselines`.
+`repositoryOverrides`, `repositoryBaselines`, and `execution`. `execution` is narrower still: it is read from the
+configuration the run was started with, so an imported or linked repository's own object is ignored.
 
 Read [the override ladder](./packages.md#the-override-ladder) to see the full order for one package from weakest to
 strongest.

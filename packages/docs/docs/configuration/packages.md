@@ -66,6 +66,9 @@ these package-only keys:
 | `versionGroup` | string          | Joins this one package to a [versioning group](./spaces.md#versioning-groups).                                                                                                                                                                                                                        |
 | `dependencies` | string or array | Provider names this package [depends on](#package-dependencies). The consumer is the package itself.                                                                                                                                                                                                  |
 | `manifestNames` | array of strings | The manifest names this package answers to, stated here rather than read from its files. See [`manifestNames`](#manifestnames) below.                                                                                                                                                                     |
+| `buildOutputs` | array of strings | The folders this package's build leaves behind, relative to its own folder. They are what [distributed execution](../distributed-execution.md#build-outputs-as-inputs) moves to the nodes that consume them. The list replaces an inherited one whole, and an explicit empty list opts the package out. No two packages may claim one folder, and a root may not hold another package's folder. |
+| `buildPlatforms` | array of strings | The node platforms this package's build may run on, as `os/arch` in Go's spelling. Empty or absent means any node. |
+| `runOnly`      | string or `[b, p]` | Where this package's build and publish may be placed: `both` (the default), `worker` or `orchestrator`. See [Where a stage runs](../distributed-execution.md#where-a-stage-runs). |
 | `src`          | string          | A folder-relative path narrowing which of the package's files count as changes to it. You can also set this on a space or at the root. See [`src`](#src) below.                                                                                                                                                                                        |
 | `ignore`       | array of strings | Patterns keeping some of the package's own files from counting as changes to it. You can also set this on a space or at the root, and the levels add up. See [What counts as a change](./change-scope.md).                                                                                                                                                                                        |
 | `env`          | map name → value | Fixed environment variables for this package's scripts. dispat merges these key by key over the space's map and the top-level one. See [Static env](./env.md).                                                                                                                                      |
@@ -102,6 +105,10 @@ The per-field rules follow from what each object means:
   `{"enabled": false}` to switch the space's block off for the package.
 - `manifestNames` replaces **wholesale**, like every other list. The layer nearest the package states what the package
   is called. Adding to an inherited list could never take a name away again.
+- `buildOutputs`, `buildPlatforms` and `runOnly` replace **wholesale** for the same reason. The nearest level that
+  states one is what the package's build produces, where it may run, and where it may be placed. `runOnly` replaces
+  the pair rather than one half of it: a level saying where a package publishes has said something about its build as
+  well.
 - `tagFormat` overrides like everywhere else: package over space over repository.
 
 dispat refuses two keys on an entry wherever you write it: `packages` and `spaces`. An entry configures one package, so

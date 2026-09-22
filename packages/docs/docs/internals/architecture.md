@@ -275,6 +275,7 @@ the sections below.
 | `internal/plan`      | The planner: windows, scopes, directives, propagation, channels, versioning groups; a pure function of history, graph and configuration. Plus `Narrow`, which restricts a computed plan to part of the graph for a filtered release (publish order withholds, versioning-group splits reported).                                                                     |
 | `internal/graph`     | Deterministic topological sort and the generic `Scheduler`/`Drain` pump described below.                                                                                                                     |
 | `internal/release`   | The executor: the task graph, stage frames, hooks, login gates, native auto-versioning, `DISPAT_*` environment rendering, script outputs. Plus the release lock, the one-tag mutex a release takes on the remote before it plans.                                                                    |
+| `internal/execution` | [Distributed execution](../distributed-execution.md): the coordination protocol and its signing, the Git mailbox, the node pool and placement, output manifests with their capture, verification and installation, the worker's serving loop, and the run summary. It knows nothing about releases: the release path hands it stage frames and asks it where they ran. |
 | `internal/changelog` | Changelog rendering and the per-package record dispatcher.                                                                                                                                                   |
 | `internal/github`    | The GitHub release recorder: REST calls, asset uploads, up-front verification, and the already-published probe that makes recording repeatable.                                                              |
 | `internal/gitx`      | Git behind an interface: tags, baselines, commits, ancestry, tag formats; the CLI implementation shells out to `git`.                                                                                        |
@@ -391,6 +392,23 @@ under which budget, and what a failure does to the dependents. A command supplie
 package's release, it hands back the work to do or nothing when there is none. The `commit` and `github` commands
 declare themselves serial because a repository has one index and one HEAD. The rest ride the build budget. Adding a
 command that covers packages requires only one small file rather than a copy of the scheduling.
+
+### The stage seam: where a frame may leave this machine
+
+The task graph is the same graph whether a release runs on one machine or several. [Distributed
+execution](../distributed-execution.md) adds no barrier nodes and no edges, because a second scheduler would be a
+second answer to the order a release already has. What it adds is one seam inside the executor: the call that runs a
+stage frame asks a coordinator first, and the coordinator either runs the frame here or places it on a node.
+
+Three properties follow from putting the seam there. A run-wide stage budget is never multiplied by the number of
+nodes, because a task holds its budget slot from the moment it is ready and asks for a node afterwards. The
+orchestrator is a node of the same pool, so a frame pinned to it or placed on it for want of room takes the same path
+as a delegated one, outputs included. And the login gate is the seam's one exception: a space that authenticates
+publishes on the orchestrator, so nothing about a login ever travels.
+
+Publication is serialized per repository whenever nodes are configured, by setting the publish group a single history
+would otherwise not need. The lock, the plan, the tags and the records stay where they were, on the machine the
+release was started on.
 
 ### Propagation: bounded BFS, three phases
 
@@ -573,6 +591,11 @@ registry half is delegated to the version and publish scripts. This keeps dispat
 | Per-run safety limits (max packages, majors, channel moves) | (nothing; the exact-pin major-jump guard *is* enforced, with a default of 1)                                                                                                          |
 | Post-run convergence verification                           | (nothing; re-run `status`)                                                                                                                                                            |
 | `requireCodeownerFor`, the CODEOWNER gate on directives     | (nothing; the specification's own configuration for it is unmodelled, so no directive can be gated on approval)                                                                       |
+| Rolling a published release back (§26)                      | (nothing; a release is corrected by releasing again, and a record is restated with [`Edits` or `Deletes`](../reference/corrections.md))                                                |
+| Reusing a build output across runs                          | (nothing; every [distributed](../distributed-execution.md) run builds what it needs, and an output set is bound to the run, the plan and the attempt that produced it)                 |
+| Registry reconciliation after an unknown publication (§19.4) | the next ordinary run, which plans what is still owed. A publication whose outcome is unknown is reported as `E228` and never re-authorized inside the run that lost it               |
+| A bundle service beside the Git transport                   | (nothing; a coordination branch in a Git repository is the whole transport)                                                                                                          |
+| Distributing `dispat run` and the other package sweeps       | (nothing; only a release's build and publish frames are delegated)                                                                                                                   |
 
 This has a consequence for the diagnostics registry. dispat never emits the specification codes that belong to these
 registry-aware and audit-aware features. Errors like `E197` (publish-order violation), `E198` (registry identity
@@ -598,10 +621,11 @@ An absent provider explicitly declared with `external: true` emits `W330` and le
 snapshot. The [diagnostic reference](../reference/plan-errors.md#polyrepository-snapshot-and-recording-diagnostics)
 gives the recovery for each code.
 
-In the other direction, thirty-one codes are dispat's own. They sit outside the specification's registry, attached to
+In the other direction, forty codes are dispat's own. They sit outside the specification's registry, attached to
 features the specification predates or does not have. They are numbered from `W220` and `E215` upward. This clears the
 registry, which ends at `W215` and `E213`. It also clears `W195` and `W196`, which the specification reserves for the
-audit features above.
+audit features above. The six codes of the distributed execution profile carry a second name beside the number, the
+outcome category the specification's §28.9 requires, so a reader can switch on the class without knowing the numbers.
 
 | Codes | Feature |
 |------------------------|--------------------------------------------------|
@@ -623,6 +647,7 @@ audit features above.
 | `W243`                 | The release push was refused because commits landed on the branch while the run was working, and those commits changed the same content the release did. The release still completes: this release's side of every conflicting file is what the branch keeps, the other side is pushed to a `release-conflicts/...` branch of its own, and the changelog and the GitHub release both name the files and that branch. Somebody has to reconcile the two sides |
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
+| `E225`-`E229`, `W244`  | [Distributed execution](../distributed-execution.md#diagnostics): a configuration no distributed run could be executed under (`E225`), work refused for who asked for it (`E226`), input or output data that cannot be used as it stands (`E227`), a publication whose outcome the run cannot establish (`E228`), transport state the run could not leave in a safe place (`E229`), and the harmless half of that subject, leftover refs and writes outside the declared outputs (`W244`) |
 
 All of these codes follow the registry's numbering conventions and blast-radius rules. dispat documents them where
 their features are. The auto-versioning narrations `W192`, `W197`, and `W203` are the specification's own §9.4/§12.4

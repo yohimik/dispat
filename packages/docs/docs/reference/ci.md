@@ -92,6 +92,67 @@ without them is refused with `E196`: the remote holds release records the checko
 would publish a released version again. The run reads the remote's records under its lock and says which tag is
 missing; the remedy is `git fetch --tags` in the job, because dispat refuses rather than refreshing what it plans from.
 
+## Worker nodes in a pipeline
+
+A release that spreads its builds over [worker nodes](../distributed-execution.md) needs those nodes running while
+it runs. On a hosted CI service that is a second job: the workers start, the release job dispatches to them, and the
+workers end themselves when the work dries up.
+
+```yaml
+name: Release
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  workers:
+    strategy:
+      matrix:
+        node: [build-a, build-b]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: yohimik/dispat@v1
+      - run: dispat worker --config .dispat/${{ matrix.node }}.yaml --idle-timeout 900
+        env:
+          DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: yohimik/dispat@v1
+      - run: dispat --log-format json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
+```
+
+Four details make this work:
+
+- **Both jobs read the same mailbox repository and hold the same signing secret.** The release job's `execution`
+  object lists `build-a` and `build-b` with that mailbox as their endpoint; each worker's file names itself and the
+  same endpoint.
+- **A hosted runner needs no inbound network.** The transport is Git only: a worker polls the mailbox and pushes its
+  answers back, so it serves from behind NAT with no port open and no address to reach it at.
+- **The jobs start in parallel.** The release job plans, then probes every configured worker within
+  `execution.timeouts.preflight`, so raise that timeout to cover a runner starting up and pulling its image. A node
+  that has not answered by then fails the release with `E225`, before anything is dispatched.
+- **`--idle-timeout` ends the worker jobs.** They exit `0` once the release is over, so the workflow finishes without
+  a step that cancels them.
+
+The workers need whatever their build commands call, and the secrets those commands read from the environment: a
+value written as `$NPM_TOKEN` in `env` travels as that reference and is expanded on the node. Keep publishing
+credentials off them unless a publish is deliberately delegated, and read
+[the security section](../distributed-execution.md#security-what-distributed-execution-exposes-and-how-to-contain-it)
+before one secret spans machines of different trust levels.
+
+[Worker nodes on Kubernetes](../examples/kubernetes-workers.md) is the same arrangement as an Indexed Job, for a
+cluster that adds and removes machines for the pool.
+
 ## Gating a pipeline on the plan
 
 A repository with nothing pending releases nothing and exits `0`. This keeps your pipeline green when a merge only

@@ -208,7 +208,12 @@ Everything else is optional and layered on top.
 
 Open [`dispat.example.json`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.json) and
 [`dispat.example.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.yaml) to see every
-option in one annotated file.
+option in one annotated file. Four smaller files annotate one arrangement each: a
+[control repository](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.control.yaml), a
+[peer of a choreographed fleet](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.peer.yaml),
+and the [orchestrator](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.orchestrator.yaml)
+and [worker](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.worker.yaml) of a release
+whose builds run on several machines.
 
 ## Commit convention
 

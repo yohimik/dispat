@@ -144,3 +144,46 @@ in by accident.
 A run with the lock off says so. One `W331` warning names every repository releasing without a lock and which setting
 asked for it, so a fleet that meant to bypass one repository can see that it bypassed all of them. See
 [diagnostic codes](../plan-errors.md#polyrepository-snapshot-and-recording-diagnostics).
+
+**[Distributed execution](../../distributed-execution.md) refuses both switches.** A run that configures
+`execution.workers` and would release without the remote lock stops with `E225`, naming the repositories and the
+setting that asked for it. The bypass exists for a repository with no remote to coordinate through; a run that
+dispatches work to other machines is the opposite situation, because every node it reaches writes through a remote
+and the lock is the only thing that stops a second run authorizing the same publication from somewhere else.
+
+## A lock a distributed run retained
+
+A distributed run leaves one thing behind on purpose. When it authorized a publication on a worker node and the node
+never reported back, the outcome of that publication cannot be established from here: the registry may hold the
+version or it may not, and the publisher may still be running. The run reports `E228`, fails that package, blocks its
+dependents and exits non-zero. If the node never acknowledged the withdrawal either, the release lock of the
+repository it was publishing into is **retained** rather than given back, because handing that repository to the next
+run would be handing over an exclusion that does not exclude.
+
+The log line says so, names the run and points here:
+
+```
+ERR release lock retained code=E228 category=publication-unknown run=6f1a9f0d2b90c8f9 tag=dispat-release-lock
+```
+
+The evidence is in the run's own coordination refs, and the order of the steps matters:
+
+```sh
+git ls-remote --heads <mailbox> 'dispat-worker-*'   # the run's coordination refs
+```
+
+1. Find the branch of the publication: it carries an authorization (`go`) with no result beside it.
+2. Confirm on that node that the publisher has stopped. A machine that is gone is confirmation; a machine still
+   running the publish command is not.
+3. Check the registry for the version the package was publishing. That, and not the tags, is what says whether the
+   publication happened.
+4. Delete the run's coordination refs from the mailbox.
+5. Only then delete the lock tag, exactly as for an abandoned lock:
+
+```sh
+git push origin --delete dispat-release-lock
+```
+
+Then run the release again. A run may end with a lock retained and no release record at all, so the next run plans
+whatever is still owed and publishes it, which is the supported recovery. dispat never clears this lock for you and
+never retries the publication inside the run that lost it.

@@ -27,6 +27,7 @@ From dispat 1.8.2, `dispat --help` links to the agent guide, configuration refer
 | `github`                  | Create the per-package GitHub release immediately; see [The github command](./github.md).                           |
 | `trigger <event>`         | Deliver one script-raised `script.<event>` webhook event, from inside a stage script; see [The trigger command](./trigger.md). |
 | `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
+| `worker`                  | Serve the build and publish tasks another machine's release assigns to this one. It plans nothing, starts no release and writes no release record; see [The worker command](./worker.md) and [Distributed execution](../distributed-execution.md). |
 | `if [cond]`               | Run one of several shell scripts. dispat chooses the script based on a condition matching the environment, the filesystem, or the changed packages; see [The if command](./if.md). |
 | `for [item]...`           | Run one shell command per item of a list: the words you type, the packages, spaces or versioning groups you select, or the changed packages; see [The for command](./for.md). |
 | `exec <script>`           | Run one declared script here exactly once. You can run it for a named subject or the folder you are in; see [The exec command](./exec.md). |

@@ -71,6 +71,46 @@ an empty list is valid for a one-member fleet. `RepositoryLinkConfig.Path` is wh
 defaults to `.links/<name>`; `Branch` is the peer's release branch, which a created link follows and a recorded pin is
 verified against. See [A choreographed fleet](../choreographed-repositories.md) for the runtime rules.
 
+## A node that serves tasks, and where a stage runs
+
+`File.Execution` is the [`execution`](../configuration/execution.md) object of a node taking part in
+[distributed execution](../distributed-execution.md). It stays `nil` when the key is absent, which is what keeps a
+configuration that never mentions it exactly as it was:
+
+```go
+cfg := models.File{
+	Execution: &models.ExecutionConfig{
+		Role:      models.ExecutionRoleOrchestrator,
+		SecretEnv: "DISPAT_EXECUTION_SECRET",
+		Workers: []models.ExecutionWorkerConfig{
+			{Name: "build-a", Endpoint: "git@github.com:acme/release-mailbox.git"},
+		},
+		Timeouts: &models.ExecutionTimeoutsConfig{Preflight: 600},
+	},
+	BuildOutputs: []string{"dist"},
+	Packages: map[string]models.PackageConfig{
+		"signer": {RunOnly: &models.RunOnly{Build: models.RunOnlyOrchestrator, Publish: models.RunOnlyOrchestrator}},
+	},
+}
+```
+
+`ExecutionConfig`, `ExecutionWorkerConfig`, `ExecutionTimeoutsConfig` and `ExecutionTransferConfig` all read through
+nil-safe resolvers, so a caller asks one question whether or not the object or the key is there: `ResolveRole`,
+`IsWorker`, `IsDistributed`, `ResolveConcurrency`, `ResolveTimeouts` and `ResolveTransfer`. Every unstated bound comes
+back as the documented default (`DefaultExecutionConcurrency`, `DefaultExecutionTaskTimeout` and the rest), and a
+stated value comes back as written, including one the loader will refuse, so a refusal names what the file said.
+
+`RunOnly` is a pair with a `Build` and a `Publish` placement, and it marshals as the shortest spelling that carries the
+same meaning: one word when the stages agree, a `[build, publish]` list when they differ. `NormalizeRunOnly` expands
+either spelling and is the single reader behind both the model and the CLI. `BuildOutputs` and `BuildPlatforms` are
+plain string lists on `File`, `SpaceConfig`, `SpaceFile`, `PackageConfig` and a package folder's own file, and each
+replaces the inherited list whole.
+
+`IsBuildWaitingPublish` is a `*StageRelation` rather than a `*bool`: the relation carries what a consumer's build waits
+for (`StageWaitNone`, `StageWaitBuild`, `StageWaitPublish`) and whether a failed provider blocks its consumers.
+`StageRelationOf(true)` and `StageRelationOf(false)` build the two boolean spellings, which marshal back as booleans.
+See [The provider relation](../configuration/spaces.md#the-provider-relation).
+
 ## The contract
 
 Every field carries one `json` tag, and that tag is both halves of the contract: the key the CLI decodes the file by,

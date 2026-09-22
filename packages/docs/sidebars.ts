@@ -28,6 +28,7 @@ const sidebars: SidebarsConfig = {
     {type: 'doc', id: 'monorepo', label: 'One repository or many'},
     {type: 'doc', id: 'control-repository', label: 'A control repository'},
     {type: 'doc', id: 'choreographed-repositories', label: 'A choreographed fleet'},
+    {type: 'doc', id: 'distributed-execution', label: 'Distributed execution'},
     {
       type: 'category',
       label: 'Examples',
@@ -183,6 +184,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'cli/github', label: 'github'},
         {type: 'doc', id: 'cli/trigger', label: 'trigger'},
         {type: 'doc', id: 'cli/compute', label: 'compute'},
+        {type: 'doc', id: 'cli/worker', label: 'worker'},
         {type: 'doc', id: 'cli/if', label: 'if'},
         {type: 'doc', id: 'cli/for', label: 'for'},
         {type: 'doc', id: 'cli/exec', label: 'exec'},
@@ -212,6 +214,7 @@ const sidebars: SidebarsConfig = {
         {type: 'doc', id: 'configuration/scripts', label: 'Script sequences'},
         {type: 'doc', id: 'configuration/run-hooks', label: 'Run-level hooks'},
         {type: 'doc', id: 'configuration/webhooks', label: 'Webhooks'},
+        {type: 'doc', id: 'configuration/execution', label: 'execution'},
         {type: 'doc', id: 'configuration/env', label: 'Static env'},
         {type: 'doc', id: 'configuration/dotenv', label: 'The .env file'},
         {type: 'doc', id: 'configuration/custom', label: 'custom'},

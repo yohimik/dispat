@@ -102,6 +102,24 @@ actually reach in this run: the commit must still be in that package's pending w
 and neither cancelled nor held. Differing control and source revisions are ordinary and are not an error by
 themselves.
 
+## Distributed execution diagnostics
+
+These codes apply only when [distributed execution](../distributed-execution.md) is configured, which means an
+`execution` object with at least one worker link, or a node running `dispat worker`. Each one carries an outcome
+category beside the code, in the `category` field of the log line, because the class is what decides how a reader has
+to react: `execution-configuration`, `execution-authority`, `io-integrity`, `publication-unknown` and
+`transport-cleanup`. Three conditions dispat already reported keep their codes and join the sixth class,
+`native-recording-or-lock`: `E220`, `E221` and `E222` for a tag or a record, `E335` and `E336` for a lock.
+
+| Code | Means | What to do |
+|------|-------|------------|
+| `E225` | A configuration no distributed run could be executed under: an unknown `execution.role`, a capacity below 1, a malformed or credential-carrying `endpoint`, two worker links whose names fold together, a missing or empty signing secret, a release-lock bypass beside `execution.workers`, a `runOnly` that pins a stage to `worker` with no worker links, a package whose `buildPlatforms` no configured node satisfies, two packages whose `buildOutputs` claim one folder, or a node that failed preflight. | Fix what the message names. Every one of these is decided before a lock, a plan or a command, so nothing has been published and nothing has to be cleaned up. A node that failed preflight is named with the reason it gave: a protocol version, a capacity, or transfer ceilings below this run's. |
+| `E226` | Work refused because of who asked for it: a release started on a node whose role is `worker`, a release or a native record command started by a task script under worker authority, or an assignment a node refused as not authentically this run's (signature, node name, branch, protocol, issue time, or an attempt it has already answered). | Start releases from the orchestrator. In a build script, use the commands a task may run: `exec`, `if`, `for`, `install`, `scanner`, `writer`, `replacer`, `autowriter` and `trigger`. A rejected assignment names the reason as one word; a signature rejection means the nodes do not share one secret. |
+| `E227` | Input or output data that cannot be used as it stands: a declared root that is absent, a manifest that disagrees with its tree, a path or a symlink escaping its declared root, a forbidden entry type or mode, a set over `transfer.maxFiles`, `maxBytes` or `maxManifestBytes`, an incompatible platform, or a package with nowhere left to run. | Read the reason word in the log. It fails one prerequisite and blocks that prerequisite's consumers, leaving unrelated work alone, so the run's other packages are unaffected. Declare what the build actually writes, keep outputs inside their roots, and raise the ceiling the set exceeded if it is legitimately that large. |
+| `E228` | A publication this run authorized and cannot establish the outcome of: the node never reported back, and either acknowledged after its publish command had started or did not acknowledge at all. No second attempt is made in this run, the package's dependents are blocked, and the release lock of the repository it was publishing into is retained when the publisher never acknowledged. | Follow the order the message gives: list the run's `dispat-worker-*` refs in the mailbox, find the authorization with no result beside it, confirm on that node that the publisher has stopped, check the registry for the version, delete the run's refs, and only then delete the lock tag. See [the release lock](./releasing/release-lock.md#a-lock-a-distributed-run-retained). Then run the release again: the next run plans what is still owed. |
+| `E229` | Transport state the run could not leave in a safe place: an attempt that had to be fenced, or owned refs whose survival leaves an effect unresolved. | Inspect the named refs in the mailbox before deleting them, then delete them. Nothing about a release record depends on them; what they can leave open is whether an attempt was stopped. |
+| `W244` | The harmless half of the same subject: coordination refs a completed run could not delete, and tracked files a task wrote outside its declared `buildOutputs`. Neither erases a release record, so an otherwise clean run still exits `0`. | Delete leftover refs from the mailbox. For stray writes, declare the paths in `buildOutputs` if a consumer needs them, or stop the build writing them: they are carried nowhere. |
+
 ## Repository-scoped errors: no correct plan exists
 
 Six diagnostics say the repository is in a state where **any** plan would be wrong. They abort the run regardless of

@@ -12,8 +12,9 @@ so a worker pod needs no Service, no Ingress and no inbound port. It runs behind
 
 A worker is also a well-behaved batch process:
 
-- `--idle-timeout` makes it exit with code `0` after that many seconds without work, so a pod started for one release
-  ends by itself.
+- `--idle-timeout` makes it exit with code `0` after that many seconds with nothing claimed and nothing in flight,
+  counted from its last activity, so a pod started for one release ends by itself and a long build never ends its own
+  pod.
 - A `SIGTERM` stops it as soon as the tasks it has claimed are finished, and that exit is also code `0`.
 - Everything under `--state-dir` can be lost. The object cache is rebuilt, and an assignment is bound to the branch it
   arrived on, so an `emptyDir` volume is a correct state folder.
@@ -41,8 +42,10 @@ A HorizontalPodAutoscaler that watches worker CPU during a release adds nothing,
 - **The reaction is slower than the work.** A metric window, a pod start, an image pull and often a new machine take
   minutes. Most releases are over by then.
 - **Scaling down is destructive.** An autoscaler removes whichever pod it chooses. A build lost that way fails its
-  package for this run. A publish lost that way has an unknown outcome, and the run keeps the release lock until a
-  person has looked.
+  package for this run, and the run waits out `execution.timeouts.task` before saying so, because a task is never
+  retried on another node. A publish lost that way has an unknown outcome (`E228`), and the run
+  [retains that repository's release lock](../reference/releasing/release-lock.md#a-lock-a-distributed-run-retained)
+  until a person has looked.
 
 A demand signal exists for anyone who wants to start workers from zero without a pipeline step: the number of
 branches under `refs/heads/dispat-worker-*` in the mailbox repository. It is never CPU.
@@ -54,7 +57,7 @@ More workers help only while more builds are ready than there are slots. Three f
 - No run is shorter than its longest chain of tasks, whatever the number of machines.
 - The widest set of builds that can be ready at the same moment is the most slots a run can use. What a consumer's
   build waits for in its provider decides that width; see
-  [`isBuildWaitingPublish`](../configuration/spaces.md#space-options).
+  [the provider relation](../configuration/spaces.md#the-provider-relation).
 - Publications of one repository run one after another. Workers shorten the build part of a release, and the sum of
   the publish durations stays.
 
@@ -172,16 +175,22 @@ zero after one. Use `--idle-timeout 0` there, because a StatefulSet restarts a c
 ## Secrets and isolation
 
 A worker pod runs the commands an assignment carries, and an assignment is accepted when it verifies under the signing
-secret. Whoever holds that secret, or can write to the mailbox repository with it, runs commands in these pods. Treat
-the pool accordingly:
+secret. Whoever holds that secret, or can write to the mailbox repository with it, runs commands in these pods. Read
+[what distributed execution exposes](../distributed-execution.md#security-what-distributed-execution-exposes-and-how-to-contain-it)
+for the exposures that are not specific to a cluster, the trust-zone rule for the secret, and the operator checklist.
+What a cluster adds to that:
 
 - Give the workers a namespace of their own, no service account token, a non-root user, and a NetworkPolicy that
   allows egress to the Git host and the registries the builds read, and nothing else.
-- Keep the signing secret and the mailbox deploy key in Secrets that only this namespace mounts.
+- Keep the signing secret and the mailbox deploy key in Secrets that only this namespace mounts, and do not mount the
+  release job's credentials anywhere in it.
+- A pool sharing one secret is one trust zone. Two namespaces that should not be able to run each other's commands
+  need two mailbox repositories and two secrets.
 - Keep publishing credentials off the workers. A space with a `login` script always publishes on the orchestrator, and
-  `runOnly: orchestrator` pins any other stage there.
+  `runOnly: orchestrator` keeps a package's build and publish there.
 - Do not run a worker that publishes on preemptible machines. A publish that was authorized and never reported back
-  leaves the release lock held on purpose.
+  leaves that repository's release lock held on purpose, and a preempted pod's task stays assigned until the task
+  deadline rather than moving to another pod.
 
 ## What dispat does not do
 
