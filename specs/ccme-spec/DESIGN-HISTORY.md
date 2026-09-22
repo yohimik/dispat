@@ -125,3 +125,6 @@ release the guarantees of section 13.7c promised. The rule was completed the sam
 per consumer over what its provider released after the consumer last saw it keeps the debt visible once the provider has
 released (section 13.3), and a provider is released at the baseline commit of a consumer it still owes only in a run
 that releases the consumer after it, `E201` otherwise (section 19.3), because two releases on one commit have no order.
+The dispat engine implements the delivery admission and the reconciliation of a proceeding consumer; the owed windows
+and `E201` are not yet implemented, and a consumer that sits out the run in which its provider releases the owed commit
+is therefore still stranded in that engine, which its release notes list as a departure.
