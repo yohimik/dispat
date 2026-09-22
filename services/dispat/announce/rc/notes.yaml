@@ -36,6 +36,10 @@
 
   If a library releases but an app using it fails, the successful release stays recorded. The next run finishes what remains rather than releasing the library again.
 
+  The other direction works too. If an app has changes of its own it releases even when the library it uses failed, and its manifests name the version the library actually published. When the library publishes later, the app is released again to pick it up.
+
+  Known departure in this candidate: that catch-up happens only when the app is in the run where the library publishes. A library published in a run the app sat out leaves the app on the old version until the app changes; the specification's owed windows and E201 close this in the next candidate.
+
   Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
 
   Check the plan with `dispat status`. It publishes nothing and takes no release locks.{{ end }}
