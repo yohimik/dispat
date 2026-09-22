@@ -208,7 +208,7 @@ func TestAdmissionBlocksAProceedingConsumerWhoseBuildEmbeddedThePlannedVersion(t
 		"the reason says which of the two blocking rules applied")
 }
 
-// TestAdmissionCatchesUpAConsumerThatOvertookAHeldProvider is vector 82c: the
+// TestAdmissionCatchesUpAConsumerThatOvertookAHeldProvider is vector 82b1: the
 // same debt arrived at by a hold rather than by a failure. A held provider
 // propagates nothing, so the consumer releases for its own fix and tags past
 // the provider's pending commit; the run that lifts the hold must release the
