@@ -66,14 +66,16 @@ type StageRelation struct {
 	// skipped skips its consumers unconditionally, outranking a release reason
 	// of their own.
 	//
-	// It is a pointer because an unstated value is not false: it is false
-	// under `build`, which is what `isBuildWaitingPublish: false` has always
-	// meant and what an existing configuration must keep; and true under
-	// `none` and `publish`, where the consumer's publish is the thing that
-	// follows the provider and a provider that never published leaves it
-	// nothing to follow. Under `publish` it is true and may not be written
-	// otherwise. Under `none` it may be relaxed to false, which is dispat's
-	// own relaxation rather than a rule of the specification.
+	// It is a pointer because an unstated value is not the same under every
+	// relation: it is false under `build`, which is what
+	// `isBuildWaitingPublish: false` has always meant and what an existing
+	// configuration must keep, and false under `none` as well, where a
+	// consumer with work of its own publishes that work whatever became of the
+	// provider. Under `publish` it is true and may not be written otherwise,
+	// because the consumer's build takes the provider's publish as its input
+	// and a publish that never happened leaves it nothing to build from.
+	// Stating it true under `none` or `build` is the stricter opt-in, for a
+	// space whose consumers are never meaningful on their own.
 	IsBlocking *bool `json:"isBlocking,omitempty"`
 }
 
