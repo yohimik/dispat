@@ -260,33 +260,47 @@ func TestExecutionBothPrefersAFreeWorker(t *testing.T) {
 	stopAll(t, workers)
 }
 
-// TestExecutionRunOnlyPerStagePair: a pair states the two stages apart. The
-// build side is asserted end to end; the publish side is asserted as the
-// value the ladder resolved to, because delegating a publish is the gate
-// after this one and until then every publish runs on the orchestrator
-// anyway, which is what the pair asks for here.
+// TestExecutionRunOnlyPerStagePair: a pair states the two stages apart, and
+// both halves are obeyed end to end. One package's build goes to the node
+// while its publish stays here; the other's does the opposite; and what the
+// ladder resolved is what `dispat status` prints for each of them.
 func TestExecutionRunOnlyPerStagePair(t *testing.T) {
-	pinned := map[string]*models.RunOnly{}
-	for _, name := range executionPlacementPackages {
-		pinned[name] = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
-	}
 	rig := newExecutionPlacementRig(t, executionPlacementPackages,
-		executionTimedBuild(time.Second), pinPackages(pinned))
+		func(repo *harness.Repo) string {
+			return executionRecordingScript + " && " +
+				repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", time.Second)
+		},
+		func(cfg *models.File) {
+			cfg.Scripts["publish"] = models.Script{executionPublishProbe}
+		},
+		pinPackages(map[string]*models.RunOnly{
+			"alpha": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+			"beta":  placedOn(models.RunOnlyOrchestrator, models.RunOnlyWorker),
+		}))
 	workers := rig.startWorkers([]string{executionNode}, 2)
 
 	status := rig.repo.StatusOK("--log-level", "debug")
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	for _, name := range executionPlacementPackages {
-		assert.Equal(t, []string{models.RunOnlyWorker, models.RunOnlyOrchestrator},
+	for name, want := range map[string][]string{
+		"alpha": {models.RunOnlyWorker, models.RunOnlyOrchestrator},
+		"beta":  {models.RunOnlyOrchestrator, models.RunOnlyWorker},
+	} {
+		assert.Equal(t, want,
 			executionResolvedList(t, executionResolvedPackage(t, status, name), "runOnly"),
 			"the ladder resolved %s's two stages apart", name)
-		assert.Equal(t, executionNode, rig.nodesByPackage()[name],
-			"%s built on the worker the pair names: %v", name, rig.runs())
 	}
+	placed := rig.nodesByPackage()
+	published := executionProbeValues(rig, "publish")
+	assert.Equal(t, executionNode, placed["alpha"], "alpha built on the node: %v", rig.runs())
+	assert.Equal(t, executionOrchestratorLabel, published["alpha"],
+		"and published here: %v", rig.runs())
+	assert.Equal(t, executionOrchestratorLabel, placed["beta"],
+		"beta built here: %v", rig.runs())
+	assert.Equal(t, executionNode, published["beta"], "and published on the node: %v", rig.runs())
 	assert.Len(t, rig.repo.TagList(), len(executionPlacementPackages),
-		"and every package still published from here")
+		"and every package was recorded by the orchestrator")
 	stopAll(t, workers)
 }
 

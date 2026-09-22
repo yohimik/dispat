@@ -234,14 +234,13 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 // publication produces an effect on a registry rather than an output set: the
 // bytes it uploaded are the ones this run already admitted from the build, and
 // what comes back is what its scripts exported and whether they succeeded.
+// The exports on the outcome so far are the beforePublish hook's, carried by
+// the ready message for the one case in which no result ever follows it. A
+// result accumulates the whole frame's exports, hook included, so it replaces
+// them rather than being added to them.
 func (c *Coordinator) readPublicationOutcome(task string, outcome release.StageOutcome,
 	result Result) (release.StageOutcome, error) {
-	// The exports of the beforePublish hook arrived with the ready message and
-	// are already on the outcome; the result carries what the publish command
-	// exported, and both belong to the release.
-	hookExports := outcome.Exports
 	outcome, err := c.readReportedOutcome(task, outcome, result)
-	outcome.Exports = append(hookExports, outcome.Exports...)
 	if err != nil {
 		return outcome, err
 	}

@@ -139,7 +139,17 @@ integration suite itself.
     worker while it is free; a frame it keeps produces the same verified output set a delegated one does and reaches
     the nodes that consume it over the same relay; a stage that may only run on a worker, in a configuration with no
     worker link, refuses the release before anything runs; and a space that logs in publishes on the orchestrator,
-    so pinning its publish to a worker is refused as the configuration is read.
+    so pinning its publish to a worker is refused as the configuration is read. The seventh is publishing from a node,
+    which is the one delegation where being somewhere else changes what has to be true: a publication cannot be taken
+    back, so the node installs the package's own verified build outputs, runs the `beforePublish` hook and then stops,
+    and the run authorizes the command once, after it has asked again whether it still holds the owning repository's
+    lock and whether anything the artefact was built from has moved. An authorization is for one state of one branch
+    and expires, the node re-reads its own tip immediately before the command so that a withdrawal still stops it, and
+    a withdrawn attempt is acknowledged rather than answered twice. Because delegating a publication buys a run no
+    parallelism — publications of one repository are one lane whatever happens — it is delegated only where the
+    operator asked for it in so many words; what such a publish reads from the environment is read on the node, from
+    the node's own environment, so a registry credential never leaves the machine it is configured on and a value the
+    orchestrator alone holds reaches no mailbox and no log.
 60. **The provider relation** (`stage_relation_test.go`): `isBuildWaitingPublish` answers two questions rather than
     one, so it accepts an object beside the boolean it has always been. The first question is what a consumer's
     version and build stage waits for on a changed provider: nothing under `none`, the provider's build under `build`,
@@ -471,6 +481,7 @@ tests/integration/
   execution_outputs_test.go goal 57 (declared build outputs travelling from the node that made them to the node that needs them)
   execution_placement_test.go  goal 57 (where a stage is allowed to run, and what the run does with the machine it was started on)
   execution_prepare_test.go goal 57 (providers a run builds without releasing them, build-only edges, and the registry edge)
+  execution_publish_test.go goal 57 (publishing from a node, and the single-use authorization that lets its command start)
   stage_relation_test.go    goal 60 (what a consumer waits for, and what a failed provider does to it)
 
   configuration
@@ -806,6 +817,18 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionPreparedProviderObeysItsOwnPlacement` | A preparation is that package's build frame, so it is placed by that package's own `runOnly`: a provider pinned to the machine the release was started on is built there although the run releases nothing of it, its consumers are still delegated, and the bytes it produced reach them over a relay branch. |
 | `TestExecutionPreparedProviderObeysItsOwnPlatforms` | A preparation is held to the provider's own `buildPlatforms` as well: a provider no node of the pool could build is never built, its consumers fail at their build stage with E227, the run reports the preparation as failed with no node named, and an unrelated package is untouched. |
 | `TestExecutionAPreparationThatFailedHereIsTheConsumersFailure` | A preparation placed on the machine the release was started on fails its consumers exactly as a delegated one does: both consumers fail with E227, the run reports the preparation as failed, and a package that reads nothing of it still releases. |
+| `tests/integration/execution_publish_test.go::TestExecutionPublishRunsOnWorkersUnderAuthorization` | The handshake end to end: every package's `beforePublish` hook and publish command run on the node that was authorized for them and never here, the node proves its own verified build outputs are in the folder before it records itself, exactly one authorization is issued per publication and each names the node it was issued to, no node's publish stage ever starts before it was authorized, and the tags, the changelog entries and the `postPublish` hook are still written here at the head the plan was computed against, with every coordination branch closed. |
+| `TestExecutionPublishStaysOnTheOrchestratorByDefault` | `both` is not `worker` for a publication: publications of one repository are one lane whatever happens, so the default keeps every publish on the machine the release was started on while the builds still go to the nodes. No publish assignment is written into the mailbox at all and nothing has to be authorized. |
+| `TestExecutionPublishWithALoginStaysOnTheOrchestrator` | Giving a space a login script is what pins its publishes here: the login runs once, on this machine, the publish frame runs here in the checkout the verified build outputs were installed into, the builds are still delegated, and no publish branch is ever created, so no login command, export or state can reach a mailbox. |
+| `TestExecutionBuildsOverlapWhilePublicationSerializesPerOwner` | The two halves of the scheduling promise in one run: the builds of two independent packages overlap on two machines, and the four delegated publications of the one repository never overlap at all. |
+| `TestExecutionRelevantNativeChangeWithholdsPublication` | A commit made during the run inside a folder the package's build read withholds its publication: the package fails at its publish stage with E227, its publish command runs on no node, nothing of it is tagged, and the package that published before the commit keeps its release. |
+| `TestExecutionUnrelatedNativeChangeKeepsResult` | The same commit outside every folder the package was built from changes nothing: a release moves its own repository constantly, so every package still publishes on its node and every tag is written. |
+| `TestExecutionUnauthorizedPublisherNeverStarts` | A run whose release lock was deleted under it authorizes nothing more: the waiting node is withdrawn with the lock code before any command starts, only the package that published before the loss ran a publish command anywhere, no node ever started a publish stage, and the run exits non-zero with the branches it created closed. |
+| `TestExecutionPublishCredentialsResolveOnTheWorker` | A declared pair naming a variable travels unresolved and expands on the node: a token present only in the nodes' environment reaches every delegated publish command, so a registry credential never leaves the machine it is configured on. |
+| `TestExecutionSecretNeverReachesMailboxOrLogs` | The negative half of the same claim, at trace level: a value present only in the orchestrator's environment appears in no object the run ever wrote into the mailbox, in neither of the orchestrator's streams and in neither of the nodes'. |
+| `TestExecutionRemotePublishFailureKeepsLocalSemantics` | A publication that failed on a node fails its package exactly as one that failed here always did, whether the publish command exited non-zero or the `beforePublish` hook failed before the gate: the package fails at its publish stage, nothing of it is tagged, its `onFail` script runs here, an unrelated package still releases, and a node that never reached the gate was never authorized. |
+| `TestExecutionPublishExportsReachTheRecorders` | What a delegated publication exports reaches the run as a local one's does: the GitHub opt-in a node wrote is what makes the orchestrator's own recorder create one release per package, and the value exported beside it is in the environment of the `postPublish` hook that runs here afterwards. |
+| `TestExecutionPublishHandshakeGitFaults` | Each message of the handshake failed on its own, on a single package so the ordinals mean what they say: the authorization that could not be written, the ready the node could not push, and the tip the node could not re-read each fail the release with nothing recorded and no publish command run on any node. |
 
 ### Goal 60: the provider relation (`stage_relation_test.go`)
 
