@@ -666,9 +666,9 @@ func (cp *computation) propagateBumps() {
 				// the commit pending, so it is still admitted whatever the
 				// source has since released (§13.7a, G2), and a target that
 				// has released nothing past the commit has been delivered
-				// nothing either. A target that got AHEAD of the commit — it
-				// released on a reason of its own while this source's publish
-				// failed or was held — is asked the finer question, and is
+				// nothing either. A target that got AHEAD of the commit, by
+				// releasing on a reason of its own while this source's publish
+				// failed or was held, is asked the finer question, and is
 				// admitted for the sources that still owe it a version.
 				isPending := cp.inWindow(t.name, rec.key)
 				owed := srcNames

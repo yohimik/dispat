@@ -14,7 +14,7 @@ import (
 // The window alone cannot say that. A window answers "has this package
 // released past this commit", which is the right question for the package's
 // own work and the wrong one for somebody else's: a consumer that released on
-// a reason of its own — a fresh bump, a channel change — while its provider's
+// a reason of its own (a fresh bump, a channel change) while its provider's
 // publish failed carries the commit behind its own baseline and is owed the
 // provider's version all the same. Asked only about its window it is never
 // planned again, keeps the provider's previous version for ever and reports
@@ -91,7 +91,7 @@ func (cp *computation) baselineBoundary(pkg, commitKey string) string {
 
 // isDelivered is delivered(P, C, D) from §13.4a: some release tag of P sits on
 // a commit that carries C and that the target's baseline reaches. Both
-// conditions are needed and neither implies the other — a release of P
+// conditions are needed and neither implies the other. A release of P
 // carrying C that the target's own release did not reach has delivered nothing
 // to it, and a release of P the target reached that does not carry C delivered
 // something older.
@@ -114,7 +114,7 @@ func (cp *computation) isDelivered(provider, commitKey, baseline string) bool {
 // Tags outside the union are left out rather than asked about, for the reason
 // owedSources leaves out a baseline outside it: a commit the union does not
 // hold is behind every window, so it cannot carry a commit of the union and
-// cannot have delivered one. That is what keeps the delivery test off Git —
+// cannot have delivered one. That is what keeps the delivery test off Git:
 // every question it does ask is a marker-pass bitset lookup (§13.11) rather
 // than an `is-ancestor` fork per pair.
 func (cp *computation) releaseCommits(provider string) []string {

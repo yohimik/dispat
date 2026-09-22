@@ -266,9 +266,9 @@ func TestAdmissionReportsTheCatchUpItPlans(t *testing.T) {
 // nothing that released before stops releasing.
 //
 // The histories are generated rather than written out because the interaction
-// is between three things at once — where each package's tags sit, which
-// commits carry propagating units, and which dependents the graph reaches —
-// and a hand-written fixture pins one triple per test. Seeded, so a failure is
+// is between three things at once, namely where each package's tags sit, which
+// commits carry propagating units, and which dependents the graph reaches, and
+// a hand-written fixture pins one triple per test. Seeded, so a failure is
 // reproducible from the case index alone.
 func TestAdmissionLeavesHistoriesWithoutOvertakingUnchanged(t *testing.T) {
 	const cases = 400
@@ -276,8 +276,8 @@ func TestAdmissionLeavesHistoriesWithoutOvertakingUnchanged(t *testing.T) {
 	identical, monotone, fatal := 0, 0, 0
 
 	for round := 0; round < cases; round++ {
-		// Half the cases are settled by construction — every release point sits
-		// behind every record — and half are free, so both claims are made
+		// Half the cases are settled by construction, with every release point
+		// behind every record, and half are free, so both claims are made
 		// about a populated bucket rather than about whatever the dice gave.
 		git, pkgs, deps := randomAdmissionHistory(rng, round%2 == 0)
 

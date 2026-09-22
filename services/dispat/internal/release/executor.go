@@ -743,7 +743,7 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 	return true
 }
 
-// blockOn records — with mu held, which it releases — a package the run
+// blockOn records, with mu held and released on the way out, a package the run
 // planned and will not attempt, and tells every observer of it. It always
 // answers false, because it is the answer admit gives for the one thing it is
 // asked.
@@ -761,7 +761,7 @@ func (r *run) blockOn(ctx context.Context, tc *taskCtx, res *Result, blocker, re
 	tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
 	r.mu.Unlock()
 	// Planned, but not attempted because a dependency failed to publish.
-	// Non-suppressible (§16) — a package that was in the plan and produced
+	// Non-suppressible (§16): a package that was in the plan and produced
 	// nothing must be accounted for.
 	log.Warn().Str("code", plan.CodeBlocked).Str("reason", reason).Msg("skipped")
 	ev := packageEvent(t.pkg, rel, EventPackageSkipped)
@@ -777,7 +777,7 @@ func (r *run) blockOn(ctx context.Context, tc *taskCtx, res *Result, blocker, re
 	return false
 }
 
-// deadPickups lists — with mu held — the providers this package's version
+// deadPickups lists, with mu held, the providers this package's version
 // stage reconciled it to and that have since failed, been skipped or had their
 // records blocked, in name order.
 //
@@ -802,7 +802,7 @@ func (r *run) deadPickups(pkg string) []string {
 	return dead
 }
 
-// recordReconciliation remembers — under mu — which providers one package's
+// recordReconciliation remembers, under mu, which providers one package's
 // version stage actually reconciled it to, and whether its build ran a command
 // of its own.
 //
@@ -1465,7 +1465,7 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 // "No release reason of its own" is the whole of §19.3's rule read exactly:
 // EVERY admitted cause of the release comes from a package that failed or was
 // blocked. One cause that does not is enough to proceed, and there are three
-// kinds — a fresh direct bump, a channel change, and a version this package
+// kinds: a fresh direct bump, a channel change, and a version this package
 // picks up from a provider that is not among the dead. Providers whose outcome
 // is still pending count as neither; the check runs again before publish, when
 // all provider publishes are final thanks to the task-graph edges.
@@ -1520,7 +1520,7 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 // from somewhere other than the packages that failed or were blocked.
 //
 // The causes are the plan's own: a fresh direct bump, a channel change, and
-// every provider version the release picks up. Fresh, not train-wide — own
+// every provider version the release picks up. Fresh, not train-wide: own
 // work an earlier prerelease already shipped does not explain releasing again,
 // and without the failed provider's propagation such a package would not be in
 // the plan at all; releasing it would record a provider movement that never

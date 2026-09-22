@@ -1428,7 +1428,7 @@ type Options struct {
 	// no longer describes. It exists for the differential test in this package,
 	// which asserts that the two rules agree release for release and
 	// diagnostic for diagnostic on every history where nothing overtook a
-	// commit — the claim that makes the delivery test a strict addition rather
+	// commit, the claim that makes the delivery test a strict addition rather
 	// than a change to planning at large.
 	withoutDelivery bool
 }

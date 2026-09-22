@@ -25,7 +25,7 @@ import (
 
 // TestAdmissionBlocksOnlyWhenEveryCauseComesFromTheFailure is the cause table.
 // The package declares two providers, `core` fails, and each row states one
-// other cause the release has — or, in the last rows, states that it has none.
+// other cause the release has, or, in the last rows, states that it has none.
 func TestAdmissionBlocksOnlyWhenEveryCauseComesFromTheFailure(t *testing.T) {
 	for name, tc := range map[string]struct {
 		build     func(*plan.Release)
