@@ -117,13 +117,18 @@ func TestPoolLeakedSlotIsNeverReturned(t *testing.T) {
 // TestPoolWithoutAHealthyNodeFailsAtOnce: a task that could only have run on
 // nodes that are all gone is failed immediately rather than waiting for a
 // machine that will not come back, and the failure names what it needed.
+//
+// The task is placed on workers alone: this machine is in every pool with the
+// platform the test binary was built for, so a task any node may take would
+// find a home on a linux/amd64 host and none on a darwin/arm64 one, and the
+// test would say different things on the two.
 func TestPoolWithoutAHealthyNodeFailsAtOnce(t *testing.T) {
 	pool := newTestPool(linuxNode(1))
-	lease, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
+	lease, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 	require.NoError(t, err)
 	lease.Leak(LeakTaskDeadline)
 
-	_, err = pool.AcquireNear(t.Context(), []string{"linux/amd64"}, PlacementAnyNode, "")
+	_, err = pool.AcquireNear(t.Context(), []string{"linux/amd64"}, PlacementWorker, "")
 
 	require.Error(t, err)
 	assert.Equal(t, CodeIntegrity, diagnosticCodeOf(err))
