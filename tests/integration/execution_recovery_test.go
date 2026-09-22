@@ -12,6 +12,7 @@ package integration
 // their logs.
 
 import (
+	"os"
 	"strings"
 	"syscall"
 	"testing"
@@ -573,4 +574,161 @@ func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
 	assert.False(t, harness.IsCodePresent(events, executionUnknownCode),
 		"and no publication outcome is in doubt, because none was authorized")
 	_ = worker.proc.Wait()
+}
+
+// TestExecutionCleanupFailureKeepsPublishedOutcome (spec vector 15): the
+// batched deletion of this run's own coordination branches cannot be pushed.
+//
+// Retained transport data is untidy and nothing else: a coordination branch
+// carries messages between two machines and no part of a release, so its
+// survival erases no record. The packages are published and tagged, the refs
+// that remain are named in a warning under the retained code, and the run
+// still exits zero (§28.9, "harmless retained transport data MAY be a
+// warning").
+func TestExecutionCleanupFailureKeepsPublishedOutcome(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+	})
+	// A push whose source side is empty is a deletion, and the only deletions
+	// this run makes are of the branches it created itself.
+	fault := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*push* :refs/heads/dispat-worker-*", Nth: 1, Onward: true})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+
+	res := rig.release(fault.Env()...)
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Positive(t, fault.Matches(), "the fault reached the deletion it names")
+	assert.NotEmpty(t, executionReleaseTags(rig), "the package is published and tagged")
+	retained, isRetained := executionLine(res, "coordination branches were not closed")
+	require.True(t, isRetained, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, executionRetainedCode, retained.Str("code"))
+	assert.Equal(t, "transport-cleanup", retained.Str("category"))
+	assert.Contains(t, retained.Str("error"), "dispat-worker-",
+		"the refs that remain are named, so an operator can remove them")
+	assert.NotEmpty(t, rig.branches(), "and they really are still there")
+	stopAll(t, []*executionWorker{worker})
+}
+
+// TestExecutionTaskReceiptDischargesNothing (spec vector 26, the half that
+// applies here): a build succeeds on a node and the publication fails.
+//
+// The task receipt is not a release. Only the durable source record discharges
+// the obligation, so the next plan names the same package at the same version,
+// and no tag was derived from the fact that a node reported a successful
+// build.
+func TestExecutionTaskReceiptDischargesNothing(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+		cfg.Scripts["publish"] = models.Script{"exit 7"}
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+
+	res := rig.release()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Len(t, rig.runs(), 1, "the build did run, and on the node: %v", rig.runs())
+	assert.Empty(t, executionReleaseTags(rig),
+		"a receipt for a completed build is not a release record")
+	assert.Equal(t, "0.1.0", executionPlannedVersions(t, rig)["core"],
+		"so the next plan still owes the same version")
+	stopAll(t, []*executionWorker{worker})
+}
+
+// TestExecutionPrepublicationFailureRemainsRebuildable (spec vector 16b): a
+// run fails before publication, and then everything the transport left is
+// deleted.
+//
+// Nothing about the pending work lived there. The next run reads the same tags
+// and records, plans the same version, rebuilds it on a node whose cache was
+// thrown away, and completes: synchronization state is not a second recovery
+// ledger (§28.6).
+func TestExecutionPrepublicationFailureRemainsRebuildable(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript + " && " +
+			`test -z "$DISPAT_IT_EXECUTION_FAIL"`}
+	})
+	failing := rig.startWorker(executionWorkerConfig(rig.mailbox), 0,
+		"DISPAT_IT_EXECUTION_FAIL=1")
+	first := rig.release()
+	require.Equal(t, 1, first.Code, "the first run fails before publication")
+	require.Empty(t, executionReleaseTags(rig), "and records nothing")
+	stopAll(t, []*executionWorker{failing})
+
+	// Everything the transport left: the node's whole state folder, the
+	// orchestrator's private fetched refs, and whatever branches are still on
+	// the mailbox.
+	require.NoError(t, os.RemoveAll(failing.stateDir))
+	executionForgetTransport(t, rig)
+	assert.Equal(t, "0.1.0", executionPlannedVersions(t, rig)["core"],
+		"the same version is still owed")
+
+	healthy := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	second := rig.release()
+
+	require.Equal(t, 0, second.Code, "stdout:\n%s\nstderr:\n%s", second.Stdout, second.Stderr)
+	assert.Contains(t, rig.repo.TagList(), "core@0.1.0",
+		"the version the failed run planned is the version the next one released")
+	stopAll(t, []*executionWorker{healthy})
+}
+
+// TestExecutionDeletedTransportStateLeavesRecordsAuthoritative (spec vector
+// 16a): after a completed run, every trace of the transport is deleted and the
+// inputs are replanned unchanged.
+//
+// The debt is discharged by the source records and by nothing else, so the
+// next plan proposes no release at all although the mailbox, the node's cache
+// and the private refs are gone.
+func TestExecutionDeletedTransportStateLeavesRecordsAuthoritative(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	res := rig.release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.Contains(t, rig.repo.TagList(), "core@0.1.0")
+	stopAll(t, []*executionWorker{worker})
+
+	require.NoError(t, os.RemoveAll(worker.stateDir))
+	executionForgetTransport(t, rig)
+
+	assert.Empty(t, executionPlannedVersions(t, rig),
+		"the record discharges the debt, so nothing is planned once the transport is gone")
+}
+
+// executionForgetTransport deletes everything the transport left behind: the
+// coordination branches still on the mailbox and the orchestrator's own
+// fetched refs.
+func executionForgetTransport(t *testing.T, rig *executionRig) {
+	t.Helper()
+	for _, ref := range rig.branches() {
+		bareGit(t, rig.mailbox, "update-ref", "-d", ref)
+	}
+	for _, ref := range strings.Fields(rig.repo.Git("for-each-ref",
+		"--format=%(refname)", "refs/dispat-transport/")) {
+		rig.repo.Git("update-ref", "-d", ref)
+	}
+}
+
+// executionPlannedVersions is what the next plan proposes, by package, read
+// from `dispat status` rather than from anything this run remembers.
+func executionPlannedVersions(t *testing.T, rig *executionRig) map[string]string {
+	t.Helper()
+	status := rig.repo.CommandEnv(rig.env(), "status", "--log-format", "json")
+	require.Equal(t, 0, status.Code, "stdout:\n%s\nstderr:\n%s", status.Stdout, status.Stderr)
+	planned := map[string]string{}
+	for _, event := range executionEvents(status) {
+		if !strings.Contains(event.Str("message"), "changed") {
+			continue
+		}
+		_, next, isBump := strings.Cut(event.Str("version"), " -> ")
+		if isBump {
+			planned[event.Package()] = next
+		}
+	}
+	return planned
 }
