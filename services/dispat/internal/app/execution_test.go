@@ -125,7 +125,7 @@ func TestCheckExecutionEntryRefusals(t *testing.T) {
 			a, logs := executionEntry(t, &config.File{
 				Execution: tc.execution, UnsafeDisableLock: tc.bypass})
 
-			err := a.checkExecutionEntry()
+			err := a.checkExecutionEntry(runRelease)
 
 			if tc.code == "" {
 				require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestCheckExecutionEntryNamesTheBypassedRepositories(t *testing.T) {
 		{Name: "web", Config: &config.File{}},
 	}}
 
-	err := a.checkExecutionEntry()
+	err := a.checkExecutionEntry(runRelease)
 
 	require.Error(t, err)
 	assert.Equal(t, execution.CodeConfiguration, config.DiagnosticCode(err))
@@ -189,12 +189,55 @@ func TestCheckExecutionEntryReportsIgnoredPeerSettings(t *testing.T) {
 		{Name: "docs"},
 	}}
 
-	require.NoError(t, a.checkExecutionEntry())
+	require.NoError(t, a.checkExecutionEntry(runRelease))
 
 	assert.Contains(t, logs.String(),
 		`"repository":"sdk","message":"execution settings ignored outside the entry configuration"`)
 	for _, quiet := range []string{"control", "ui", "web", "docs"} {
 		assert.NotContains(t, logs.String(), `"repository":"`+quiet+`"`,
 			"%s states no execution settings of its own", quiet)
+	}
+}
+
+// TestCheckExecutionEntryRefusesASweepByTheSameRules: a sweep with worker
+// links is held to the rules a release is (§28.10), and each refusal says it
+// was a sweep that was refused. The bypass is refused although a sweep takes
+// no lock, because it states that the repository has no remote to coordinate
+// through, and a sweep that dispatches has one.
+func TestCheckExecutionEntryRefusesASweepByTheSameRules(t *testing.T) {
+	for name, tc := range map[string]struct {
+		execution *public.ExecutionConfig
+		bypass    bool
+		authority string
+		want      string
+		code      string
+	}{
+		"a task under worker authority": {
+			execution: executionWorkers(), authority: "worker",
+			want: "cannot start a sweep", code: execution.CodeAuthority},
+		"a worker node": {
+			execution: &public.ExecutionConfig{Role: public.ExecutionRoleWorker},
+			want:      "a worker cannot start a sweep", code: execution.CodeAuthority},
+		"workers and the configured bypass": {
+			execution: executionWorkers(), bypass: true,
+			want: "none to dispatch a sweep through", code: execution.CodeConfiguration},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(execution.AuthorityEnv, tc.authority)
+			if tc.authority == "" {
+				require.NoError(t, os.Unsetenv(execution.AuthorityEnv))
+			}
+			t.Setenv(executionSecretEnv, "hunter2")
+			t.Setenv(lockDisableEnv, "")
+			require.NoError(t, os.Unsetenv(lockDisableEnv))
+			a, logs := executionEntry(t, &config.File{Execution: tc.execution, UnsafeDisableLock: tc.bypass})
+
+			err := a.checkExecutionEntry(runSweep)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Equal(t, tc.code, config.DiagnosticCode(err))
+			assert.Contains(t, logs.String(), `"message":"cannot start sweep"`)
+		})
 	}
 }

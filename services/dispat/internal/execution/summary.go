@@ -112,6 +112,9 @@ type TaskRecord struct {
 	// zero for a task that declared none.
 	Files int
 	Bytes int64
+	// Exports is how many values the task's scripts exported, which is what a
+	// consumer of the package reads back in its own environment.
+	Exports int
 }
 
 // BlockedTask is one package this run did not attempt because something it
@@ -187,6 +190,9 @@ func (s RunSummary) Summarize(log zerolog.Logger) {
 		if line.Files > 0 {
 			event = event.Int("files", line.Files).Int64("bytes", line.Bytes)
 		}
+		if line.Exports > 0 {
+			event = event.Int("exports", line.Exports)
+		}
 		event.Bool("here", isHere).Msg("task outcome")
 	}
 	for _, blocked := range s.orderedBlocked() {
@@ -249,7 +255,7 @@ func resolveStageRank(stage string) int {
 	switch stage {
 	case KindPrepare:
 		return 0
-	case KindBuild:
+	case KindBuild, KindRun:
 		return 1
 	default:
 		return 2

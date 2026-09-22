@@ -54,11 +54,20 @@ type sweepOptions struct {
 // sweepReport is what one sweep did, in counts. Resolved is independent of the
 // other three: it records how many covered packages had something to do at all,
 // which is what tells a sweep that covered only packages with nothing to do
-// apart from one that genuinely did nothing.
-type sweepReport struct{ Ran, Failed, Skipped, Resolved int }
+// apart from one that genuinely did nothing. SkippedBy names, for every package
+// the cascade skipped, the provider that blocked it, which is what a sweep's
+// distributed summary lists beside the tasks that ran.
+type sweepReport struct {
+	Ran, Failed, Skipped, Resolved int
+	SkippedBy                      map[string]string
+}
 
-// outcome is one package's terminal state within a sweep.
-type outcome struct{ failed, skipped, ran, defined bool }
+// outcome is one package's terminal state within a sweep, and the provider
+// that blocked it when the cascade skipped it.
+type outcome struct {
+	failed, skipped, ran, defined bool
+	blockedBy                     string
+}
 
 // sweep is the state of one sweep: the plan, the covered packages, the
 // per-package outcomes (mu guards results; everything else is read-only once
@@ -176,7 +185,10 @@ func coveredReleases(pl *plan.Plan, covered []string) map[string]*plan.Release {
 // the mutex any more.
 func (s *sweep) report() sweepReport {
 	var rep sweepReport
-	for _, res := range s.results {
+	for pkg, res := range s.results {
+		if res.skipped {
+			rep.recordSkip(pkg, res.blockedBy)
+		}
 		if res.defined {
 			rep.Resolved++
 		}
@@ -190,6 +202,15 @@ func (s *sweep) report() sweepReport {
 		}
 	}
 	return rep
+}
+
+// recordSkip names the provider that blocked one skipped package. The map is
+// made on the first skip, so a sweep that skipped nothing reports nothing.
+func (r *sweepReport) recordSkip(pkg, blockedBy string) {
+	if r.SkippedBy == nil {
+		r.SkippedBy = map[string]string{}
+	}
+	r.SkippedBy[pkg] = blockedBy
 }
 
 // blocker returns — with mu held by the caller — the first provider whose work
@@ -238,7 +259,7 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 		blocker := s.blocker(pkg)
 		s.mu.Unlock()
 		if blocker != "" {
-			res.skipped = true
+			res.skipped, res.blockedBy = true, blocker
 			log.Warn().Str("blockedBy", blocker).
 				Msg("package skipped: a dependency failed or was skipped")
 			return
@@ -250,7 +271,10 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 	}
 	if err := t(ctx); err != nil {
 		res.failed = true
-		log.Error().Err(err).Msg("package failed")
+		// A failure that names itself says so on the line: a script that
+		// exited non-zero carries nothing and is logged as it always was, and
+		// a task a node could not run carries its code, its class and the node.
+		annotateError(log.Error().Err(err), err).Msg("package failed")
 		return
 	}
 	res.ran = true

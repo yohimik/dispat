@@ -119,6 +119,8 @@ func TestBranchKindHintTellsTransportBranchesApart(t *testing.T) {
 			branch: "dispat-worker-b-20260922-publish-0f1e", kind: KindPublish, isCarried: true},
 		"a probe": {
 			branch: "dispat-worker-b-20260922-probe-0f1e", kind: KindProbe, isCarried: true},
+		"a sweep task": {
+			branch: "dispat-worker-build-a-20260922-run-0f1e", kind: KindRun, isCarried: true},
 		"a prepared input state": {
 			branch: "dispat-worker-build-a-20260922-snapshot-0f1e", kind: KindSnapshot},
 		"a relayed result": {

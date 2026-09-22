@@ -36,7 +36,7 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 	if !a.cfg.Execution.IsDistributed() {
 		return nil, nil
 	}
-	coordinator, err := a.newCoordinator(fleet)
+	coordinator, err := a.newCoordinator(a.resolveOwnershipGeneration(fleet), a.resolveOwnershipCheck(fleet))
 	if err != nil {
 		return nil, a.reportPreflightFailure(err)
 	}
@@ -53,13 +53,19 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 }
 
 // newCoordinator assembles this run's coordinator: who it is, what plan it
-// executes, which ownership it holds, and one mailbox per configured link.
+// executes, which ownership it holds and how that ownership is verified again,
+// and one mailbox per configured link.
+//
+// The ownership is the caller's, because the two runs that dispatch hold
+// different things: a release holds the locks it acquired and asks the remote
+// about them before every new effect, and a sweep holds no lock and binds its
+// messages to a generation drawn from its own run identity (§28.10).
 //
 // The local object store of every mailbox is the repository being released.
 // Transport objects are unreachable there the moment their refs are deleted,
 // so they cost a `git gc` and nothing else, and using the checkout that is
 // already open is what keeps a release from needing a second store of its own.
-func (a *App) newCoordinator(fleet *workspaceRecorder) (*execution.Coordinator, error) {
+func (a *App) newCoordinator(generation string, ownership func(context.Context) error) (*execution.Coordinator, error) {
 	settings := a.cfg.Execution
 	signer, err := execution.NewSigner(os.Getenv(settings.SecretEnv))
 	if err != nil {
@@ -74,12 +80,11 @@ func (a *App) newCoordinator(fleet *workspaceRecorder) (*execution.Coordinator, 
 		mailboxes[worker.Name] = execution.NewGitMailbox(worker.Endpoint, a.git, signer, a.log)
 	}
 	timeouts := settings.ResolveTimeouts()
-	ownership := a.resolveOwnershipCheck(fleet)
 	// This machine joins its own pool: it is a node under the same rules
 	// (§28.1), and the name it joins under is the one it already writes on
 	// every line of this run.
 	local := execution.LocalNode{Name: a.sender.Node, Capacity: settings.ResolveConcurrency()}
-	coordinator := execution.NewCoordinator(a.runID, a.planDigest, a.resolveOwnershipGeneration(fleet),
+	coordinator := execution.NewCoordinator(a.runID, a.planDigest, generation,
 		local, links, mailboxes, signer, execution.Timeouts{
 			Preflight: time.Duration(timeouts.Preflight) * time.Second,
 			Task:      time.Duration(timeouts.Task) * time.Second,

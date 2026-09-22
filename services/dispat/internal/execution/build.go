@@ -198,7 +198,7 @@ func (c *Coordinator) placeTask(ctx context.Context, task string, placement Plac
 		}
 		outcome, err := attemptOnce(ctx, lease, attempt)
 		if !errors.Is(err, errQueueExpired) {
-			c.rememberPlacedTask(task, lease, attempt, err)
+			c.rememberPlacedTask(task, lease, attempt, placedOutcome{exports: len(outcome.Exports), err: err})
 			return outcome, err
 		}
 		if attempt >= maxPlacementAttempts {
@@ -212,15 +212,22 @@ func (c *Coordinator) placeTask(ctx context.Context, task string, placement Plac
 	}
 }
 
+// placedOutcome is what one placed attempt ended with, as the summary records
+// it: how many values its scripts exported, and the failure it reported.
+type placedOutcome struct {
+	exports int
+	err     error
+}
+
 // rememberPlacedTask records what one placed task came to, for the summary
 // §28.9 requires: the work, where it ran, and the four outcomes told apart.
-func (c *Coordinator) rememberPlacedTask(task string, lease *Lease, attempt int, err error) {
+func (c *Coordinator) rememberPlacedTask(task string, lease *Lease, attempt int, placed placedOutcome) {
 	packageName, stage := splitTaskName(task)
-	computation, publication := c.resolveTaskOutcome(task, stage, err)
+	computation, publication := c.resolveTaskOutcome(task, stage, placed.err)
 	c.rememberTaskOutcome(TaskRecord{
 		Package: packageName, Stage: stage, Task: task, Node: lease.Node, Attempt: attempt,
 		Computation: computation, Outputs: OutputsNone, Publication: publication,
-		Recording: RecordingNone,
+		Recording: RecordingNone, Exports: placed.exports,
 	})
 }
 
@@ -276,13 +283,25 @@ func (c *Coordinator) runTask(ctx context.Context, lease *Lease, kind, task stri
 	dir string, repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) (release.StageOutcome, error) {
 	outcome := release.StageOutcome{Node: lease.Node}
-	offer, err := c.offerTask(ctx, lease, kind, task, attempt, dir, repositories, inputs, request)
+	offer, err := c.offerAssignment(ctx, lease, task,
+		c.formatAssignment(lease.Node, kind, task, attempt, dir, repositories, inputs, request))
 	if err != nil {
 		return outcome, err
 	}
 	defer offer.observer.forget(offer.branch)
-	return c.awaitResult(ctx, lease, task, attempt, kind, outcome, offer, request)
+	return c.awaitResult(ctx, lease, task, attempt, kind, outcome, offer,
+		func(ctx context.Context, outcome release.StageOutcome, reply taskReply, branch string) (release.StageOutcome, error) {
+			return c.readTaskOutcome(ctx, task, attempt, outcome, reply.result, reply.commit, branch, request)
+		})
 }
+
+// resultReader turns one accepted terminal result into what the attempt
+// comes to. It is the one step a kind of task decides for itself: a build
+// admits its outputs as a package's build outputs and a sweep task merges
+// its own, while the wait for the result, the deadline and the withdrawal
+// are one protocol whatever the kind.
+type resultReader func(ctx context.Context, outcome release.StageOutcome, reply taskReply,
+	branch string) (release.StageOutcome, error)
 
 // taskOffer is one assignment already on its node's mailbox: the branch it
 // went out on, and the channel the messages that answer it arrive through.
@@ -301,15 +320,14 @@ type taskOffer struct {
 	offered string
 }
 
-// offerTask writes one assignment onto its node's mailbox and registers the
-// attempt with the poller before the push, so that a node quick enough to
+// offerAssignment writes one assignment onto its node's mailbox and registers
+// the attempt with the poller before the push, so that a node quick enough to
 // answer between the two is still heard.
 //
 // A failed offer settles the lease here: nothing was placed anywhere, so the
 // slot is free rather than held by an attempt that never existed.
-func (c *Coordinator) offerTask(ctx context.Context, lease *Lease, kind, task string, attempt int,
-	dir string, repositories []AssignmentRepository, inputs []AssignmentInput,
-	request release.StageRequest) (taskOffer, error) {
+func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task string,
+	assignment *Assignment) (taskOffer, error) {
 	// No new effect after lock loss (§28.6). An assignment is the first thing
 	// of an attempt that exists anywhere but in this process, so this is the
 	// moment the question has to be asked again.
@@ -317,7 +335,7 @@ func (c *Coordinator) offerTask(ctx context.Context, lease *Lease, kind, task st
 		lease.Release()
 		return taskOffer{}, err
 	}
-	assignment := c.formatAssignment(lease.Node, kind, task, attempt, dir, repositories, inputs, request)
+	attempt, kind := assignment.Attempt, assignment.Kind
 	observer := c.watchers[lease.Node]
 	replies := observer.watch(assignment.Branch)
 	offered, err := c.mailboxes[lease.Node].Assign(ctx, assignment)
@@ -340,7 +358,7 @@ func (c *Coordinator) offerTask(ctx context.Context, lease *Lease, kind, task st
 // happened.
 func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string, attempt int,
 	kind string, outcome release.StageOutcome, offer taskOffer,
-	request release.StageRequest) (release.StageOutcome, error) {
+	read resultReader) (release.StageOutcome, error) {
 	deadline := time.NewTimer(c.Timeouts.Task)
 	defer deadline.Stop()
 	tip := offer.offered
@@ -358,8 +376,7 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 			c.rememberTiming(task, resolveQueueTime(offeredAt, claimedAt),
 				resolveRunTime(offeredAt, claimedAt))
 			lease.Release()
-			return c.readTaskOutcome(ctx, task, attempt, outcome, reply.result, reply.commit,
-				offer.branch, request)
+			return read(ctx, outcome, reply, offer.branch)
 		case <-deadline.C:
 			if !isClaimed {
 				expired, err := c.settleQueuedAttempt(ctx, lease, task, attempt, offer)

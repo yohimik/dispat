@@ -104,7 +104,9 @@ func TestSweepSkipCascade(t *testing.T) {
 	rep, err := a.runSweep(context.Background(), pl, []string{"a", "b", "c", "d"}, w, sweepOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a", "d"}, w.order(), "b and c never ran")
-	assert.Equal(t, sweepReport{Ran: 1, Failed: 1, Skipped: 2, Resolved: 4}, rep)
+	assert.Equal(t, sweepReport{Ran: 1, Failed: 1, Skipped: 2, Resolved: 4,
+		SkippedBy: map[string]string{"b": "a", "c": "b"}}, rep,
+		"each skipped package names the provider that blocked it")
 }
 
 func TestSweepOnErrorContinueRunsTheDependents(t *testing.T) {
@@ -139,7 +141,8 @@ func TestSweepResolveFailureIsAPackageFailure(t *testing.T) {
 	assert.Equal(t, []string{"d"}, w.order())
 	// a never resolved, so it had nothing to do that anyone could see; b and d
 	// both did.
-	assert.Equal(t, sweepReport{Ran: 1, Failed: 1, Skipped: 1, Resolved: 2}, rep)
+	assert.Equal(t, sweepReport{Ran: 1, Failed: 1, Skipped: 1, Resolved: 2,
+		SkippedBy: map[string]string{"b": "a"}}, rep)
 }
 
 // TestSweepSkipIsDecidedAfterResolving: a package the cascade skips still

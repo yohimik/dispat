@@ -17,6 +17,7 @@ package execution
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"strings"
 	"time"
@@ -44,6 +45,10 @@ const (
 	// KindPrepare is a build of a provider that this run does not release,
 	// performed so that its outputs can reach a consumer.
 	KindPrepare = "prepare"
+	// KindRun is one package's task of a command sweep: the commands one
+	// declared script binds for that package, run as `dispat run` runs them
+	// and never as a stage of a release (§28.10).
+	KindRun = "run"
 	// KindSnapshot carries a prepared input state.
 	KindSnapshot = "snapshot"
 	// KindRelay is one node's result copied onto another node's endpoint,
@@ -182,6 +187,20 @@ func IsBranchCarryingWork(branch string) bool {
 // derived from a clock or a hostname.
 func FormatRunID() string { return formatRandomHex(16) }
 
+// FormatSweepGeneration names the ownership a command sweep's messages are
+// bound to: a digest of the sweep's own run identity, one value per sweep.
+//
+// A sweep holds no release lock, so there is no lock object to derive a
+// generation from, and it needs none: it authorizes no effect a generation
+// would have to fence (§28.10). What the generation still does is what it does
+// for a release, which is reject a duplicate or stale message, and a value
+// drawn from a fresh run identity does that exactly as well. The prefix keeps
+// it apart from anything else ever digested from the same run identity.
+func FormatSweepGeneration(run string) string {
+	sum := sha256.Sum256([]byte("dispat-sweep-generation\x00" + run))
+	return hex.EncodeToString(sum[:16])
+}
+
 // formatRandomHex is n cryptographically random bytes as lowercase hex.
 //
 // crypto/rand.Read is documented never to fail and always to fill its buffer
@@ -252,6 +271,11 @@ type Assignment struct {
 	// Frame is the stage's script frame: the login that precedes it, the
 	// hooks before and after, and the stage commands themselves.
 	Frame *AssignmentFrame `json:"frame,omitempty"`
+	// Script is the declared script a sweep task runs, and empty for every
+	// other kind. It is the stage the task's commands read as DISPAT_STAGE,
+	// `run:<script>`, which is how the same script names its stage when a
+	// sweep runs it on one machine.
+	Script string `json:"script,omitempty"`
 	// Env are the computed DISPAT_* pairs of the stage, which are public
 	// metadata of the run and carry no secret.
 	Env []string `json:"env,omitempty"`

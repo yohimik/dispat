@@ -204,15 +204,17 @@ func TestPreparedRecordsSayWhatWasBuiltAndThatNothingWasPublished(t *testing.T) 
 // TestAPreparedFrameRunsUnderTheBuildStagesOwnNames: the scripts of a prepared
 // provider read DISPAT_STAGE=build and are bracketed by beforeBuild and
 // postBuild, because the frame is the package's build frame however this run
-// came to ask for it.
+// came to ask for it. A sweep task reads `run:<script>`, the stage the same
+// script reads when a sweep runs it on one machine.
 func TestAPreparedFrameRunsUnderTheBuildStagesOwnNames(t *testing.T) {
 	for kind, want := range map[string]string{
 		KindPrepare: KindBuild,
 		KindBuild:   KindBuild,
 		KindPublish: KindPublish,
+		KindRun:     "run:tests",
 	} {
 		t.Run("a "+kind+" assignment", func(t *testing.T) {
-			assert.Equal(t, want, resolveFrameStage(kind))
+			assert.Equal(t, want, resolveFrameStage(Assignment{Header: Header{Kind: kind}, Script: "tests"}))
 		})
 	}
 }

@@ -127,7 +127,8 @@ func (c *Coordinator) dispatchPublish(ctx context.Context, lease *Lease, task st
 		lease.Release()
 		return outcome, c.refuseTask(task, lease.Node, attempt, err)
 	}
-	offer, err := c.offerTask(ctx, lease, KindPublish, task, attempt, dir, repositories, inputs, request)
+	offer, err := c.offerAssignment(ctx, lease, task,
+		c.formatAssignment(lease.Node, KindPublish, task, attempt, dir, repositories, inputs, request))
 	if err != nil {
 		return outcome, err
 	}

@@ -33,19 +33,31 @@ import (
 // configuration is examined any further, and the two rules a distributed run
 // is held to are checked only once it is established that this run delegates
 // work to anybody.
-func (a *App) checkExecutionEntry() error {
+func (a *App) checkExecutionEntry(started runKind) error {
 	a.logIgnoredExecutionSettings()
-	if err := a.refuseWorkerInitiation(); err != nil {
+	if err := a.refuseWorkerInitiation(started); err != nil {
 		return err
 	}
 	if !a.cfg.Execution.IsDistributed() {
 		return nil
 	}
-	if err := a.refuseDispatchWithoutLock(); err != nil {
+	if err := a.refuseDispatchWithoutLock(started); err != nil {
 		return err
 	}
-	return a.refuseDispatchWithoutSecret()
+	return a.refuseDispatchWithoutSecret(started)
 }
+
+// runKind is what a process is about to start and may be refused the
+// starting of: a release, which takes the release locks, or a command sweep,
+// which takes none (§28.10). The refusals are the same rules for both, and the
+// word is what each sentence says was refused.
+type runKind string
+
+// The two runs a process may start that reach other machines.
+const (
+	runRelease runKind = "release"
+	runSweep   runKind = "sweep"
+)
 
 // refuseWorkerInitiation refuses a release that a worker would be starting,
 // whether it says so in its configuration or is executing somebody else's
@@ -57,17 +69,18 @@ func (a *App) checkExecutionEntry() error {
 // hook it is running may do. Both refusals happen before any lock, which is
 // what makes an indirect initiation from a delegated hook harmless rather
 // than a second run competing with the one that authorized it.
-func (a *App) refuseWorkerInitiation() error {
+func (a *App) refuseWorkerInitiation(started runKind) error {
 	if execution.IsWorkerAuthority(os.Environ()) {
-		return a.reportExecutionRefusal(execution.NewDiagnostic(
+		return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 			execution.CodeAuthority, execution.CategoryAuthority,
-			"a task running under worker authority cannot start a release: it executes what its assignment authorized and owns no run of its own"), nil, nil)
+			"a task running under worker authority cannot start a %s: it executes what its assignment authorized and owns no run of its own",
+			started), nil, nil)
 	}
 	if a.cfg.Execution.IsWorker() {
-		return a.reportExecutionRefusal(execution.NewDiagnostic(
+		return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 			execution.CodeAuthority, execution.CategoryAuthority,
-			"execution.role is %q on this node, and a worker cannot start a release: it executes the tasks an orchestrator authorized",
-			a.cfg.Execution.ResolveRole()), nil, nil)
+			"execution.role is %q on this node, and a worker cannot start a %s: it executes the tasks an orchestrator authorized",
+			a.cfg.Execution.ResolveRole(), started), nil, nil)
 	}
 	return nil
 }
@@ -81,13 +94,23 @@ func (a *App) refuseWorkerInitiation() error {
 // through a remote, and the lock is the only thing that stops a second run
 // authorizing the same publication from somewhere else. So the two settings
 // that switch the lock off are a warning on their own and a refusal here.
-func (a *App) refuseDispatchWithoutLock() error {
+//
+// A sweep takes no lock at all, and the same two settings refuse it too
+// (§28.10): they state that a repository has no remote to coordinate through,
+// and a run that dispatches to other machines is a run with one.
+func (a *App) refuseDispatchWithoutLock(started runKind) error {
 	repositories, isByConfig := a.calculateLockBypass()
 	if len(repositories) == 0 {
 		return nil
 	}
 	settings := lockBypassSettings(isByConfig)
-	return a.reportExecutionRefusal(execution.NewDiagnostic(
+	if started == runSweep {
+		return a.reportExecutionRefusal(started, execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration,
+			"execution.workers dispatches work to other machines, and %s is configured to run without the remote release lock (%s): a repository with no remote to coordinate through has none to dispatch a sweep through either",
+			strings.Join(repositories, ", "), strings.Join(settings, ", ")), repositories, settings)
+	}
+	return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 		execution.CodeConfiguration, execution.CategoryConfiguration,
 		"execution.workers dispatches work to other machines, and %s would release without the remote release lock (%s): a release nothing coordinates cannot be delegated",
 		strings.Join(repositories, ", "), strings.Join(settings, ", ")), repositories, settings)
@@ -99,12 +122,12 @@ func (a *App) refuseDispatchWithoutLock() error {
 // requires it to hold something. The name is reported and the value never is,
 // which is the whole reason the secret is named by a variable rather than
 // written in the file.
-func (a *App) refuseDispatchWithoutSecret() error {
+func (a *App) refuseDispatchWithoutSecret(started runKind) error {
 	name := a.cfg.Execution.SecretEnv
 	if secret, isSet := os.LookupEnv(name); isSet && secret != "" {
 		return nil
 	}
-	return a.reportExecutionRefusal(execution.NewDiagnostic(
+	return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 		execution.CodeConfiguration, execution.CategoryConfiguration,
 		"execution.secretEnv names %s and it is unset or empty in this environment: every message a mailbox carries is signed with the secret it names",
 		name), nil, nil)
@@ -119,12 +142,12 @@ func (a *App) refuseDispatchWithoutSecret() error {
 // fields are the lock bypass's and are absent from the refusals that have no
 // scope: which repositories would have released unlocked, and which of the
 // two settings asked for it.
-func (a *App) reportExecutionRefusal(err error, repositories, settings []string) error {
+func (a *App) reportExecutionRefusal(started runKind, err error, repositories, settings []string) error {
 	event := a.logError(err)
 	if len(repositories) > 0 {
 		event.Strs("repositories", repositories).Strs("setting", settings)
 	}
-	event.Msg("cannot start release")
+	event.Msg("cannot start " + string(started))
 	return err
 }
 

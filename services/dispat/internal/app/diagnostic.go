@@ -13,7 +13,14 @@ import (
 // run, node, task and attempt when the failure happened to one of them. An
 // error carrying none of it is logged exactly as it always was.
 func (a *App) logError(err error) *zerolog.Event {
-	event := a.log.Error().Err(err)
+	return annotateError(a.log.Error().Err(err), err)
+}
+
+// annotateError attaches those names to an event a caller already started,
+// for the lines that carry fields of their own beside them: a sweep's
+// package failure names the package and the stage, and a failure of a task a
+// node ran names the node as well.
+func annotateError(event *zerolog.Event, err error) *zerolog.Event {
 	if code := config.DiagnosticCode(err); code != "" {
 		event.Str("code", code)
 	}

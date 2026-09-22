@@ -388,8 +388,9 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 	// A preparation is a build frame and is executed as one: the kind says why
 	// the run asked for it, not what the node does with it. A publication is
 	// the same frame machinery with one step inserted in the middle, which is
-	// where its own file picks it up.
-	if assignment.Kind == KindBuild || assignment.Kind == KindPrepare || assignment.Kind == KindPublish {
+	// where its own file picks it up, and a sweep task is the same machinery
+	// with nothing around its commands.
+	if isFrameKind(assignment.Kind) {
 		return w.takeTask(ctx, tip, assignment)
 	}
 	// The kinds that are not executed by this build belong to the gate that
@@ -399,6 +400,17 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Msg("assignment inspected")
 	return false, nil
+}
+
+// isFrameKind reports whether an assignment of this kind is a frame this node
+// runs: a build, a preparation, a publication or a sweep task.
+func isFrameKind(kind string) bool {
+	switch kind {
+	case KindBuild, KindPrepare, KindPublish, KindRun:
+		return true
+	default:
+		return false
+	}
 }
 
 // takeTask claims one assignment and starts it, and leaves it alone when this

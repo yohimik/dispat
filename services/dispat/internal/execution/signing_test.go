@@ -99,6 +99,7 @@ func TestProtocolDocumentsRoundTrip(t *testing.T) {
 		Repositories: []AssignmentRepository{{Name: "api", Path: ".links/api", Snapshot: "cafe"}},
 		Package:      &AssignmentPackage{Name: "core", Repository: "api", Dir: "packages/core"},
 		Frame:        &AssignmentFrame{Before: []string{"prepare"}, Commands: []string{"build"}},
+		Script:       "tests",
 		Env:          []string{"DISPAT_PACKAGE=core"},
 		StaticEnv:    []string{"REGISTRY=$DISPAT_REGISTRY"},
 		Shell:        []string{"/bin/sh", "-c"},
@@ -164,4 +165,21 @@ func TestBranchNamesRouteAndDoNotRepeat(t *testing.T) {
 	assert.Equal(t, "dispat-worker-build-", FormatBranchPrefix("build"))
 	assert.NotEqual(t, FormatRunID(), FormatRunID())
 	assert.Len(t, FormatRunID(), 32)
+	// A sweep's task branch carries its own kind, so a person reading the
+	// mailbox can tell a sweep's work from a release's.
+	assert.Contains(t, FormatBranch("build-a", KindRun, at), "dispat-worker-build-a-20260921-run-")
+}
+
+// TestSweepGenerationIsTheRunsOwn: a sweep holds no release lock, so its
+// messages are bound to a generation drawn from its own run identity. One
+// sweep has one generation, two sweeps have two, and neither can be mistaken
+// for the run identity itself.
+func TestSweepGenerationIsTheRunsOwn(t *testing.T) {
+	run := FormatRunID()
+	generation := FormatSweepGeneration(run)
+
+	assert.Len(t, generation, 32)
+	assert.Equal(t, generation, FormatSweepGeneration(run), "one sweep has one generation")
+	assert.NotEqual(t, generation, FormatSweepGeneration(FormatRunID()), "two sweeps have two")
+	assert.NotEqual(t, run, generation)
 }

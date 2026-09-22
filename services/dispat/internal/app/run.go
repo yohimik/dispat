@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	public "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -81,6 +83,16 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		return err
 	}
 
+	// Who may start a sweep that reaches other machines, and whether it could
+	// be coordinated at all: the refusals a release is held to, asked before
+	// anything is planned. A sweep with no worker links asks nothing and is
+	// named nothing, which keeps it the run it always was.
+	if a.cfg.Execution.IsDistributed() {
+		if err := a.checkExecutionEntry(runSweep); err != nil {
+			return err
+		}
+		a.startExecutionRun()
+	}
 	pl, err := a.computePlan(ctx)
 	if err != nil {
 		return err
@@ -103,7 +115,21 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		runner:  a.packageRunner(),
 		covered: coveredReleases(pl, covered),
 	}
+	if err := a.checkSweepPlacements(work, covered); err != nil {
+		return err
+	}
+	// With worker links the pool is opened here, and the coordinator owns
+	// every ref the sweep creates until the deferred close deletes them.
+	coordinator, err := a.openSweepDispatch(ctx, work, covered)
+	if coordinator != nil {
+		defer a.closeCoordinator(ctx, coordinator)
+	}
+	if err != nil {
+		return err
+	}
+	started := time.Now()
 	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: opts.OnError})
+	mergeErr := a.finishSweepDispatch(ctx, coordinator, pl, rep, started)
 
 	a.log.Info().Str("script", name).Int("ran", rep.Ran).Int("failed", rep.Failed).
 		Int("skipped", rep.Skipped).Msg("run finished")
@@ -121,7 +147,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	if rep.Failed > 0 {
 		return fmt.Errorf("%d run script(s) failed", rep.Failed)
 	}
-	return nil
+	return mergeErr
 }
 
 // reportNothingResolved decides what a sweep that resolved the script in no
@@ -231,6 +257,9 @@ type scriptWork struct {
 	wsVars  []string // the shared workspace listing, built once per run
 	runner  script.Runnerx
 	covered map[string]*plan.Release
+	// coordinator places every package's task on the pool when the sweep has
+	// worker links, and is nil for a sweep that runs everything here.
+	coordinator *execution.Coordinator
 }
 
 func (w *scriptWork) stage() string { return "run:" + w.name }
@@ -271,6 +300,38 @@ func (w *scriptWork) resolve(_ context.Context, rel *plan.Release) (task, error)
 			Commands: script.AppendArgsToLast(cmds, w.args),
 			Env:      release.CommandEnv(w.pl, pkg, w.stage(), w.wsVars),
 			Log:      log, FailFast: true}
-		return seq.RunMergingOutputs(ctx, rel)
+		if w.coordinator == nil {
+			return seq.RunMergingOutputs(ctx, rel)
+		}
+		return w.placeTask(ctx, rel, seq)
 	}, nil
+}
+
+// placeTask runs one package's task wherever the sweep's pool places it, and
+// merges what it exported onto the release exactly as the sequence run here
+// merges it, so a consumer reads its providers' exports whichever machine
+// produced them.
+//
+// The environment travels in its two halves, as a stage frame's does: the
+// DISPAT_* pairs computed from the plan as they are, and the configuration's
+// own pairs unresolved, so a value naming a secret is expanded on the node
+// that runs the commands and never enters a mailbox (§28.3).
+func (w *scriptWork) placeTask(ctx context.Context, rel *plan.Release, seq release.Sequence) error {
+	pkg := rel.Pkg.Name
+	outcome, err := w.coordinator.Sweep(ctx, execution.SweepTask{
+		Request: release.StageRequest{
+			Release:   rel,
+			Stage:     w.stage(),
+			Frame:     release.StageFrame{Commands: seq.Commands},
+			Env:       release.ComputedCommandEnv(w.pl, pkg, w.stage(), w.wsVars),
+			StaticEnv: rel.Pkg.Space.Env,
+			Dir:       rel.Pkg.Dir,
+		},
+		Script: w.name,
+		Here: func(ctx context.Context) ([]plan.Output, error) {
+			return seq.RunCollectingOutputs(ctx, pkg+":"+seq.Stage)
+		},
+	})
+	release.MergeOutputs(rel, outcome.Exports)
+	return err
 }

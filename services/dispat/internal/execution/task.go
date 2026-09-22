@@ -128,21 +128,25 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 	}
 	gate := w.resolvePublicationGate(task, log)
 	outcome := w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), gate, log)
-	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner,
-		formatDeclaredPaths(assignment.Package.Dir, assignment.Outputs))
+	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner, formatDeclaredPaths(assignment))
 	if outcome.status != StatusSucceeded {
 		return outcome
 	}
 	return w.captureTaskOutputs(ctx, assignment, checkout, installed, outcome, log)
 }
 
-// formatDeclaredPaths is where one package's declared output roots sit inside
-// the repository that owns it, which is the spelling a checkout's own status
-// reports them under.
-func formatDeclaredPaths(packageDir string, roots []string) []string {
-	declared := make([]string, 0, len(roots))
-	for _, root := range roots {
-		declared = append(declared, path.Join(packageDir, path.Clean(strings.TrimSuffix(root, "/"))))
+// formatDeclaredPaths is where one task's declared output roots sit inside
+// the repository that owns the package, which is the spelling a checkout's
+// own status reports them under. A build's roots are inside the package
+// folder, and a sweep task's are relative to the repository root already.
+func formatDeclaredPaths(assignment Assignment) []string {
+	declared := make([]string, 0, len(assignment.Outputs))
+	base := assignment.Package.Dir
+	if assignment.Kind == KindRun {
+		base = ""
+	}
+	for _, root := range assignment.Outputs {
+		declared = append(declared, path.Join(base, path.Clean(strings.TrimSuffix(root, "/"))))
 	}
 	return declared
 }
@@ -195,7 +199,7 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 	// this frame's own, which is what travels back.
 	carried := &plan.Release{Outputs: formatOutputs(assignment.Exports)}
 	produced := &plan.Release{}
-	stage := resolveFrameStage(assignment.Kind)
+	stage := resolveFrameStage(assignment)
 	expectedTip := ""
 	for _, part := range []struct {
 		name     string
@@ -253,12 +257,18 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 // the package's own and a script must not be able to tell whether the run that
 // asked for it is releasing the package. The kind is the run's word for why it
 // asked, and it stays on the assignment, the branch and the log, where it
-// describes the work rather than the environment.
-func resolveFrameStage(kind string) string {
-	if kind == KindPrepare {
+// describes the work rather than the environment. A sweep task reads
+// `run:<script>`, which is what the same script reads when a sweep runs it on
+// one machine.
+func resolveFrameStage(assignment Assignment) string {
+	switch assignment.Kind {
+	case KindPrepare:
 		return KindBuild
+	case KindRun:
+		return KindRun + ":" + assignment.Script
+	default:
+		return assignment.Kind
 	}
-	return kind
 }
 
 // formatStageTitle renders a stage name as it appears inside a hook name, so
