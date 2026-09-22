@@ -73,9 +73,14 @@ type GitMailbox struct {
 	// is the memo below and the ordering of the git invocations; both are the
 	// mailbox's own state, so the lock is the mailbox's own rather than every
 	// caller's problem.
-	mu        sync.Mutex
-	observed  map[string]string
-	fetchSize int
+	mu       sync.Mutex
+	observed map[string]string
+	// quarantined are the branches whose objects this party could not fetch,
+	// remembered so that the warning they produce is written once rather than
+	// on every tick. A quarantined branch is still polled: what is refused is
+	// the attempt to read it, and a branch that moves again is tried again.
+	quarantined map[string]bool
+	fetchSize   int
 }
 
 // maxChainDepth bounds how far below a fetched ref's tip an object may sit
@@ -93,14 +98,15 @@ const maxChainDepth = 8
 // contents nothing guarantees.
 func NewGitMailbox(endpoint string, git *gitx.LocalGitx, signer *Signer, log zerolog.Logger) *GitMailbox {
 	return &GitMailbox{
-		endpoint:  endpoint,
-		remote:    git,
-		plumbing:  git,
-		signer:    signer,
-		log:       log,
-		maxDepth:  maxChainDepth,
-		observed:  map[string]string{},
-		fetchSize: gitx.MaxTransportBatch,
+		endpoint:    endpoint,
+		remote:      git,
+		plumbing:    git,
+		signer:      signer,
+		log:         log,
+		maxDepth:    maxChainDepth,
+		observed:    map[string]string{},
+		quarantined: map[string]bool{},
+		fetchSize:   gitx.MaxTransportBatch,
 	}
 }
 
@@ -227,12 +233,68 @@ func (m *GitMailbox) Observe(ctx context.Context, pattern string) ([]gitx.Remote
 		names = append(names, head.Name)
 	}
 	if err := m.remote.FetchRefs(ctx, m.endpoint, names); err != nil {
-		return nil, fmt.Errorf("execution: fetching %d coordination branches: %w", len(names), err)
+		return m.fetchSeparately(ctx, moved, err)
 	}
 	for _, head := range moved {
 		m.observed[head.Name] = head.OID
+		delete(m.quarantined, head.Name)
 	}
 	return moved, nil
+}
+
+// fetchSeparately fetches one branch at a time after the batch failed, and
+// answers the ones whose objects are here.
+//
+// The batch is the whole reason this exists. A fetch names every moved branch
+// in one invocation, so a single ref nobody can fetch (a branch deleted
+// between the poll and the fetch, an object a sender never pushed, a relay
+// copied from an endpoint this party cannot read) fails the invocation and
+// with it every other branch of the same tick. A node whose namespace holds
+// one such ref would then never see any of its work again, which is a stall
+// rather than a refusal. So the second attempt asks per branch: the ones that
+// answer are handed on, and the ones that do not are left where they are, with
+// one warning each rather than one per tick.
+func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHead,
+	batch error) ([]gitx.RemoteHead, error) {
+	m.log.Debug().Err(batch).Int("branches", len(moved)).
+		Msg("the batched fetch failed, so the branches are fetched one at a time")
+	fetched := make([]gitx.RemoteHead, 0, len(moved))
+	for _, head := range moved {
+		if err := m.remote.FetchRefs(ctx, m.endpoint, []string{head.Name}); err != nil {
+			m.quarantineBranch(head, err)
+			continue
+		}
+		m.observed[head.Name] = head.OID
+		delete(m.quarantined, head.Name)
+		fetched = append(fetched, head)
+	}
+	if len(fetched) == 0 && ctx.Err() == nil && len(moved) == 1 {
+		// One branch moved and it is the one that cannot be read: the caller
+		// gets the failure rather than an empty poll, so a mailbox that is
+		// actually unreachable is still reported as such.
+		return nil, fmt.Errorf("execution: fetching %s: %w", moved[0].Name, batch)
+	}
+	return fetched, nil
+}
+
+// quarantineBranch remembers a branch whose objects could not be fetched, and
+// says so once.
+//
+// The tip is remembered as observed so that the poll stops offering the same
+// unreadable object every tick; the branch itself is not forgotten, so a
+// sender that pushes the missing objects, or moves the branch on, is noticed
+// the next time it does.
+func (m *GitMailbox) quarantineBranch(head gitx.RemoteHead, err error) {
+	m.observed[head.Name] = head.OID
+	if m.quarantined[head.Name] {
+		m.log.Trace().Err(err).Str("branch", head.Name).Str("commit", head.OID).
+			Msg("the coordination branch is still unreadable")
+		return
+	}
+	m.quarantined[head.Name] = true
+	m.log.Warn().Err(err).Str("branch", head.Name).Str("commit", head.OID).
+		Str("code", CodeTransportRetained).Str("category", CategoryTransportCleanup).
+		Msg("a coordination branch could not be fetched and is left alone for this run")
 }
 
 // Reconsider forgets what one branch was last seen at, so that the next poll
@@ -272,6 +334,9 @@ func (m *GitMailbox) Forget() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	clear(m.observed)
+	// A branch that could not be fetched into the store that has just been
+	// thrown away is a branch nobody has tried to fetch into this one.
+	clear(m.quarantined)
 }
 
 // Inspect resolves an observed tip to the message it carries and to the step

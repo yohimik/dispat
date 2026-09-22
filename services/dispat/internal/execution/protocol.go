@@ -18,6 +18,7 @@ package execution
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strings"
 	"time"
 )
 
@@ -134,6 +135,46 @@ func FormatBranchPattern(node string) string { return "refs/heads/" + FormatBran
 // guessing a name must not let anybody address a node.
 func FormatBranch(node, kind string, at time.Time) string {
 	return FormatBranchPrefix(node) + at.UTC().Format("20060102") + "-" + kind + "-" + formatRandomHex(16)
+}
+
+// ResolveBranchKindHint is the kind segment of a coordination branch name, and
+// the empty string for a name that is not shaped like one.
+//
+// It is a hint and says so: the name is written by whoever created the branch,
+// so nothing a node acts on may be decided by it. What it is good for is the
+// opposite decision, refusing to act: a branch whose name says it carries a
+// prepared input state or a relayed result is not an assignment addressed to
+// anybody, so a node skips it instead of reading a repository tree and
+// reporting that it holds no message. The signed message is still the whole
+// authority for every branch that is not skipped.
+//
+// The segments are read from the right because a node name may itself hold
+// hyphens: the last three fields of `dispat-worker-<id>-<date>-<kind>-<hex>`
+// are the date, the kind and the randomness, whatever the id spelled.
+func ResolveBranchKindHint(branch string) string {
+	fields := strings.Split(branch, "-")
+	if len(fields) < 5 || !strings.HasPrefix(branch, branchPrefix) {
+		return ""
+	}
+	return fields[len(fields)-2]
+}
+
+// IsBranchCarryingWork reports whether a branch name could name work a node is
+// asked to perform, which every name that is not a prepared input state or a
+// relayed result could.
+//
+// A name this function rejects is skipped without being read, and a name it
+// accepts is read and then believed only as far as its signature goes. It is
+// stated as a positive question about work rather than as a list of the two
+// transport kinds so that a kind added later is read rather than silently
+// skipped: the safe default for an unknown name is to authenticate it.
+func IsBranchCarryingWork(branch string) bool {
+	switch ResolveBranchKindHint(branch) {
+	case KindSnapshot, KindRelay:
+		return false
+	default:
+		return true
+	}
 }
 
 // FormatRunID names one run: 128 bits of randomness, which is what binds

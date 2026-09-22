@@ -125,6 +125,13 @@ type Worker struct {
 	// running is the tasks in flight, so that a node asked to stop stops when
 	// they have reported rather than while they are running.
 	running sync.WaitGroup
+	// activity guards the two fields below it: when this node last had
+	// something to do, and how much of it is still going on. Both are written
+	// by the poll goroutine and by every task goroutine as it ends, which is
+	// why they are behind a mutex rather than on the loop's own stack.
+	activity   sync.Mutex
+	lastActive time.Time
+	inFlight   int
 }
 
 // Serve polls until the process is signalled or goes idle, and answers the
@@ -158,14 +165,22 @@ func (w *Worker) Serve(ctx context.Context) string {
 // poll is the loop itself: one tick, then a wait whose length is what the
 // tick found.
 //
-// Both timers are created once and stopped on every exit path, and the idle
-// one is restarted whenever anything was answered, so "idle" means what it
-// says: nothing arrived for the whole timeout, rather than nothing arrived
-// since the process started.
+// Both timers are created once and stopped on every exit path. The idle one
+// fires on schedule and is then asked whether the node is actually idle, which
+// is what makes the word mean what it says. Three things are not idleness and
+// each of them used to look like it: a node that has just started, a node with
+// a task in flight, and a node whose task outlived the timeout and has only
+// just ended. The clock therefore runs from the last moment this node had
+// something to do (its own start, a claim, a task ending, a probe answered)
+// rather than from whenever a timer was last reset, and a node with work in
+// flight is never idle at all.
 func (w *Worker) poll(ctx context.Context) string {
 	interval := minimumPollInterval
 	next := time.NewTimer(interval)
 	defer next.Stop()
+	// The clock starts here: a node that has just started has had nothing to
+	// do for no time at all.
+	w.markActive()
 	idle := time.NewTimer(w.IdleTimeout)
 	defer idle.Stop()
 	idleC := idle.C
@@ -175,21 +190,70 @@ func (w *Worker) poll(ctx context.Context) string {
 		idleC = nil
 	}
 	for {
-		isProgress := w.tick(ctx)
-		interval = resolvePollInterval(interval, isProgress)
-		if isProgress && idleC != nil {
-			idle.Reset(w.IdleTimeout)
-		}
+		interval = resolvePollInterval(interval, w.tick(ctx))
 		next.Reset(interval)
-		select {
-		case <-ctx.Done():
-			return StopSignal
-		case <-idleC:
-			return StopIdle
-		case <-next.C:
-			w.Log.Trace().Dur("interval", interval).Msg("polling the mailbox")
+		for isWaiting := true; isWaiting; {
+			select {
+			case <-ctx.Done():
+				return StopSignal
+			case <-idleC:
+				remaining := w.resolveIdleRemainder()
+				if remaining <= 0 {
+					return StopIdle
+				}
+				// Something happened after the timer was armed, so the node is
+				// not idle yet and the wait continues for what is left of it.
+				idle.Reset(remaining)
+			case <-next.C:
+				w.Log.Trace().Dur("interval", interval).Msg("polling the mailbox")
+				isWaiting = false
+			}
 		}
 	}
+}
+
+// markActive records that this node had something to do just now, which is
+// what the idle clock counts from.
+func (w *Worker) markActive() {
+	w.activity.Lock()
+	defer w.activity.Unlock()
+	w.lastActive = time.Now()
+}
+
+// beginTask and endTask keep the count of the work in flight, and mark the
+// moments a task starts and stops as activity.
+//
+// The end is marked as well as the start because a task that outlived the idle
+// timeout leaves a node that has just finished something, not one that has
+// been doing nothing: a node that stopped five seconds after a long build
+// reported would be a node that cannot be given the next task of the same run.
+func (w *Worker) beginTask() {
+	w.activity.Lock()
+	defer w.activity.Unlock()
+	w.inFlight++
+	w.lastActive = time.Now()
+}
+
+func (w *Worker) endTask() {
+	w.activity.Lock()
+	defer w.activity.Unlock()
+	w.inFlight--
+	w.lastActive = time.Now()
+}
+
+// resolveIdleRemainder is how much longer this node has to have nothing to do
+// before it may stop, and zero or less for a node that may stop now.
+//
+// A node with a task in flight answers the whole timeout rather than zero: it
+// is not idle, and the next answer will be computed from the moment that task
+// ends.
+func (w *Worker) resolveIdleRemainder() time.Duration {
+	w.activity.Lock()
+	defer w.activity.Unlock()
+	if w.inFlight > 0 {
+		return w.IdleTimeout
+	}
+	return w.IdleTimeout - time.Since(w.lastActive)
 }
 
 // resolvePollInterval is the back-off: straight back to the shortest wait
@@ -209,6 +273,12 @@ func resolvePollInterval(current time.Duration, isProgress bool) time.Duration {
 // carries on serving instead of exiting.
 func (w *Worker) tick(ctx context.Context) bool {
 	isProgress, err := w.inspectMailbox(ctx)
+	if isProgress {
+		// Anything answered is this node having had something to do, which is
+		// what the idle clock counts from. A probe reaches this and nothing
+		// else, since a claimed task marks its own start and end.
+		w.markActive()
+	}
 	if err == nil {
 		return isProgress
 	}
@@ -260,6 +330,17 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error) {
 	w.Log.Trace().Str("branch", head.Name).Str("commit", head.OID).
 		Msg("coordination branch inspected")
+	if !IsBranchCarryingWork(head.Name) {
+		// A prepared input state and a relayed result both appear in the
+		// namespace addressed to this node, and neither is work: the first is a
+		// repository tree and the second is another attempt's report. Reading
+		// them would find no message of this protocol and report a branch this
+		// run created as an assignment nobody could read, which is a warning an
+		// operator cannot act on.
+		w.Log.Trace().Str("branch", head.Name).Str("commit", head.OID).
+			Str("kind", ResolveBranchKindHint(head.Name)).Msg("transport branch skipped")
+		return false, nil
+	}
 	tip, err := w.Mailbox.Inspect(ctx, head)
 	if err != nil {
 		// The branch's objects are here and this process could not make
@@ -342,8 +423,10 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 		return false, err
 	}
 	w.running.Add(1)
+	w.beginTask()
 	go func() {
 		defer w.running.Done()
+		defer w.endTask()
 		defer func() { <-w.slots }()
 		w.answerTask(ctx, tip, claimed, assignment)
 	}()
