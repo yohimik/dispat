@@ -77,6 +77,12 @@ type App struct {
 	// repository) and nil under a bypass. It is kept because ownership is a
 	// question a distributed run asks again later, not only once.
 	releaseLock *release.Lock
+	// retention is the distributed run's answer to the one question the unlock
+	// path has to ask it: which repositories' exclusion must survive this run
+	// because a publication it authorized cannot be accounted for. It is nil
+	// for every run that delegates nothing, and the question is then never
+	// asked.
+	retention lockRetentionx
 
 	// runID names this run when it spreads over several machines, and is
 	// empty for every run that does not: it is generated once, before the

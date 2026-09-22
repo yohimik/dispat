@@ -275,6 +275,9 @@ func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func
 	// how the lock is given back.
 	a.releaseLock = lock
 	return nil, func() error {
+		if a.isLockRetained("") {
+			return a.reportRetainedLock("", lockRemote)
+		}
 		return config.WithDiagnostic("E336", lock.Release(context.WithoutCancel(ctx)))
 	}, nil
 }

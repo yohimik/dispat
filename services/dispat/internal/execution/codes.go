@@ -51,6 +51,12 @@ const (
 	// place: an attempt that had to be fenced, or owned refs whose survival
 	// leaves an effect unresolved.
 	CodeTransport = "E229"
+	// CodeLockLost is the code dispat has always reported a lost or unusable
+	// release lock under. It is spelled here rather than added to this
+	// profile's own range because the condition is not new: §28.9 classes it
+	// as `native-recording-or-lock`, and the class is what a reader switches
+	// on.
+	CodeLockLost = "E336"
 	// CodeTransportRetained is the same subject as a warning, for the
 	// leftovers that are merely untidy: temporary refs a completed run could
 	// not delete, and writes a build made outside what it declared. Their

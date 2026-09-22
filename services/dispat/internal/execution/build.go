@@ -187,6 +187,10 @@ const maxPlacementAttempts = 3
 func (c *Coordinator) placeTask(ctx context.Context, task string, placement Placement,
 	platforms []string, preferred string,
 	attemptOnce func(context.Context, *Lease, int) (release.StageOutcome, error)) (release.StageOutcome, error) {
+	// Every attempt of this task runs under a context a lost lock can end, so
+	// that a loss noticed by any other task of the run reaches this one too.
+	ctx, settled := c.watchOwnership(ctx)
+	defer settled()
 	for attempt := 1; ; attempt++ {
 		lease, err := c.Pool.AcquireNear(ctx, platforms, placement, preferred)
 		if err != nil {
@@ -281,6 +285,13 @@ type taskOffer struct {
 func (c *Coordinator) offerTask(ctx context.Context, lease *Lease, kind, task string, attempt int,
 	dir string, repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) (taskOffer, error) {
+	// No new effect after lock loss (§28.6). An assignment is the first thing
+	// of an attempt that exists anywhere but in this process, so this is the
+	// moment the question has to be asked again.
+	if err := c.checkOwnership(ctx); err != nil {
+		lease.Release()
+		return taskOffer{}, err
+	}
 	assignment := c.formatAssignment(lease.Node, kind, task, attempt, dir, repositories, inputs, request)
 	observer := c.watchers[lease.Node]
 	replies := observer.watch(assignment.Branch)

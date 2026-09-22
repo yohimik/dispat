@@ -40,6 +40,9 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 	if err != nil {
 		return nil, a.reportPreflightFailure(err)
 	}
+	// From here the run has a party that can answer the unlock path's one
+	// question, which it can only answer after it has dispatched anything.
+	a.retention = coordinator
 	if err := coordinator.Preflight(ctx, planPlatforms(pl)); err != nil {
 		// The refs this run offered are closed by the caller's own deferred
 		// cleanup, so a refusal here leaves nothing behind even though it
@@ -71,16 +74,19 @@ func (a *App) newCoordinator(fleet *workspaceRecorder) (*execution.Coordinator, 
 		mailboxes[worker.Name] = execution.NewGitMailbox(worker.Endpoint, a.git, signer, a.log)
 	}
 	timeouts := settings.ResolveTimeouts()
+	ownership := a.resolveOwnershipCheck(fleet)
 	// This machine joins its own pool: it is a node under the same rules
 	// (§28.1), and the name it joins under is the one it already writes on
 	// every line of this run.
 	local := execution.LocalNode{Name: a.sender.Node, Capacity: settings.ResolveConcurrency()}
-	return execution.NewCoordinator(a.runID, a.planDigest, a.resolveOwnershipGeneration(fleet),
+	coordinator := execution.NewCoordinator(a.runID, a.planDigest, a.resolveOwnershipGeneration(fleet),
 		local, links, mailboxes, signer, execution.Timeouts{
 			Preflight: time.Duration(timeouts.Preflight) * time.Second,
 			Task:      time.Duration(timeouts.Task) * time.Second,
 			Cancel:    time.Duration(timeouts.Cancel) * time.Second,
-		}, formatTransferLimits(settings), a.log), nil
+		}, formatTransferLimits(settings), a.log)
+	coordinator.VerifyOwnershipWith(ownership)
+	return coordinator, nil
 }
 
 // resolveOwnershipGeneration names the exclusion this run holds (§28.3): the

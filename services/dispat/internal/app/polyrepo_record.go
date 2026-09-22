@@ -114,6 +114,16 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 		var cleanupErrs []error
 		for i := len(held) - 1; i >= 0; i-- {
 			owned := held[i]
+			if w.app.isLockRetained(owned.repository.repo.Name) {
+				// The one lock a run leaves on purpose: an exclusion covering a
+				// publication nobody here can account for is worth more held
+				// than tidy (§28.6). Every other repository's lock still goes
+				// back, in reverse order, because a fact about one repository
+				// says nothing about another.
+				cleanupErrs = append(cleanupErrs,
+					w.app.reportRetainedLock(owned.repository.repo.Name, owned.lock.Remote))
+				continue
+			}
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			releaseMutation, err := owned.repository.git.AcquireMutation(cleanupCtx)
 			if err != nil {

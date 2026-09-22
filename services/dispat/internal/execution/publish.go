@@ -434,7 +434,7 @@ func (c *Coordinator) resolveUnansweredPublication(ctx context.Context, lease *L
 	} else {
 		lease.Leak(LeakUnacknowledgedCancel)
 	}
-	if settled.isAcknowledged && !settled.isCommandStarted {
+	if isPublicationOutcomeKnown(settled) {
 		// A known outcome after all: the node was still before its own
 		// command, so the package failed at the publish stage exactly as a
 		// publisher that reported its own failure would have.
@@ -447,6 +447,20 @@ func (c *Coordinator) resolveUnansweredPublication(ctx context.Context, lease *L
 			settled.phase))
 	}
 	return c.reportUnknownPublication(task, attempt, lease.Node, repository, settled)
+}
+
+// isPublicationOutcomeKnown is the decision of §28.6, as one sentence.
+//
+// An authorized publisher leaves a knowable outcome under exactly one
+// condition: it answered, and it answered that its own command had not begun.
+// Everything else is unknown, and the two ways of being unknown are worth
+// naming because they look nothing alike and mean the same thing. A node that
+// acknowledged after its command started knows only that it was killed
+// somewhere inside a registry upload. A node that never answered says nothing
+// at all. Neither a missing reply nor a missing tag proves failure, so nothing
+// is inferred from either.
+func isPublicationOutcomeKnown(settled cancellation) bool {
+	return settled.isAcknowledged && !settled.isCommandStarted
 }
 
 // reportUnknownPublication records one publication whose outcome cannot be

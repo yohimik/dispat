@@ -46,10 +46,10 @@ import (
 )
 
 // codeLockLost is the code dispat already reports a lost or unusable release
-// lock under. It is spelled here rather than added to the execution profile's
-// own range because the condition is not new: §28.9 classes it as
-// `native-recording-or-lock`, and the class is what a reader switches on.
-const codeLockLost = "E336"
+// lock under. It is the execution profile's own spelling of it, so that the
+// code a publication is withheld with and the code a run refuses a new
+// assignment with cannot drift apart.
+const codeLockLost = execution.CodeLockLost
 
 // defaultChangelogFile is the changelog a package writes when it enables the
 // record without naming a file, which is the name the recorder itself falls

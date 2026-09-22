@@ -91,6 +91,9 @@ type Coordinator struct {
 	// forgotten because two later decisions read them: the summary, and which
 	// repositories may have their locks released.
 	unknownPublications []unknownPublication
+	// ownership is what this run asks before every new assignment, and the
+	// cancellations a lost lock has to reach.
+	ownership ownership
 
 	// What Start assembles and Close takes down. They are nil on a coordinator
 	// that only ever preflighted, which is what a refused run is.
