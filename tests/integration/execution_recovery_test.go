@@ -458,3 +458,119 @@ func executionAwaitProbe(t *testing.T, rig *executionRig, probe string) {
 	}
 	t.Fatalf("no %s marker appeared within the deadline: %v", probe, rig.runs())
 }
+
+// TestExecutionInterruptCancelsRemoteTasks: the release is interrupted while a
+// node is building.
+//
+// A signal is not a failure. The run withdraws the attempt it has in flight
+// and waits, bounded, to be told that nothing of it is running; the node kills
+// the process group its build started and answers with the phase the frame had
+// reached; the package is `cancelled` rather than failed, so no failure hook
+// runs and the next run owes it the same release. The node itself is still
+// serving afterwards, because an orchestrator going away is not a reason for a
+// machine to stop.
+func TestExecutionInterruptCancelsRemoteTasks(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript + " && sleep 600"}
+		cfg.Scripts["onfail"] = models.Script{
+			`printf '%s %s %s\n' probe-onfail "$DISPAT_PACKAGE" here >> "$DISPAT_IT_EXECUTION_LOG"`}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{
+			Preflight: 30, Task: 600, Cancel: 60}
+		// The settling of a withdrawal is a decision rather than an outcome,
+		// so the line that reports it is a debug one.
+		cfg.LogLevel = "debug"
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+
+	// The build is under way: an interrupt before the claim would be a
+	// scenario about an assignment nobody took.
+	executionAwaitProbe(t, rig, executionNode)
+	started.Signal(syscall.SIGINT)
+	res := started.Wait()
+
+	assert.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero")
+	withdrawn, isWithdrawn := executionLine(res, "attempt withdrawn")
+	require.True(t, isWithdrawn, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, "core:build", withdrawn.Str("task"))
+	assert.Equal(t, executionNode, withdrawn.Str("worker"))
+	settled, isSettled := executionLine(res, "the withdrawn attempt was acknowledged")
+	require.True(t, isSettled, "the node said that nothing of it is running\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, "commands", settled.Str("phase"),
+		"and said what the frame had reached when it was withdrawn")
+	assert.Equal(t, true, settled["commandStarted"],
+		"the stage's own command sequence had begun, which is the fact the flag states; "+
+			"only a publication reads it as a statement about an effect")
+	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
+	for _, run := range rig.runs() {
+		assert.NotEqual(t, "probe-onfail", run.Node,
+			"an interrupted package runs no failure hook: %v", rig.runs())
+	}
+
+	// The node outlived the run that dispatched to it and is still serving.
+	served := worker.stop(t)
+	assert.Contains(t, served.Stdout, `"message":"cancellation acknowledged"`)
+	assert.Contains(t, served.Stdout, `"message":"task withdrawn"`)
+}
+
+// TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity (spec vector 14):
+// the only node able to run this plan's builds disappears mid-build.
+//
+// Four things follow and none of them may be traded for another. The package
+// being built fails, because nothing of it can be admitted. Its dependents are
+// blocked rather than attempted, because a consumer of a provider that did not
+// publish has nothing to build against. The node's slot is not freed and the
+// node leaves the pool, since the work may still be running on that machine,
+// so the next task that needed a node fails at once with the placement error
+// rather than waiting for a machine that will not come back. And the locks are
+// still released, because a compute attempt holds no authorization and is
+// fenced by revoking its ref.
+func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
+	wait, cancel := 4, 2
+	if harness.IsTinyGo() {
+		wait, cancel = 20, 10
+	}
+	rig := newExecutionWorkspace(t, func(*harness.Repo) string {
+		return executionRecordingScript + " && sleep 600"
+	}, func(cfg *models.File) {
+		cfg.Concurrency = []int{1, 1}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{
+			Preflight: 30, Task: wait, Cancel: cancel}
+		executionOneWorker(cfg)
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+
+	executionAwaitProbe(t, rig, executionNode)
+	worker.proc.Signal(syscall.SIGKILL)
+	res := started.Wait()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	events := executionEvents(res)
+	assert.True(t, harness.IsCodePresent(events, executionIntegrityCode),
+		"the abandoned attempt is reported\nstdout:\n%s", res.Stdout)
+	unhealthy, isUnhealthy := executionLine(res, "worker marked unhealthy")
+	require.True(t, isUnhealthy, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, "task-deadline", unhealthy.Str("reason"))
+	// Nothing downstream of the package that failed was executed anywhere,
+	// which is the observable form of "its dependents are blocked": a
+	// consumer of a provider that produced nothing has nothing to build
+	// against, and a pool with no healthy node has nowhere to put it either.
+	summary, isSummarized := executionLine(res, "distributed execution summary")
+	require.True(t, isSummarized, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, float64(0), summary["computed"],
+		"no task of this run completed its computation")
+	built := map[string]bool{}
+	for _, run := range rig.runs() {
+		built[run.Package] = true
+	}
+	assert.Equal(t, map[string]bool{"assets": true}, built,
+		"and no build of a dependent was placed anywhere: %v", rig.runs())
+	assert.Empty(t, executionReleaseTags(rig), "nothing was published")
+	assert.False(t, remoteHoldsLock(t, rig.origin),
+		"a compute attempt is fenced by revoking its ref, so the exclusion goes back")
+	assert.False(t, harness.IsCodePresent(events, executionUnknownCode),
+		"and no publication outcome is in doubt, because none was authorized")
+	_ = worker.proc.Wait()
+}

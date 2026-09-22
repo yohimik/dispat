@@ -88,20 +88,60 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 	// question §28.6 says has to be answered before a lock goes back.
 	settling, done := context.WithTimeout(context.WithoutCancel(ctx), c.Timeouts.Cancel)
 	defer done()
-	withdrawn, err := c.advance(settling, node, offer.branch, tipOID, MessageCancel, Withdrawal{
-		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
-		Assignment: offer.offered, Tip: tipOID,
-	})
+	withdrawn, err := c.writeWithdrawal(settling, node, task, attempt, kind, offer, tipOID)
 	if err != nil {
 		c.Log.Warn().Err(err).Str("run", c.Run).Str("task", task).Str("worker", node).
 			Int("attempt", attempt).Str("code", CodeTransport).
 			Str("category", CategoryTransportCleanup).Msg("the attempt could not be withdrawn")
 		return cancellation{}
 	}
+	if withdrawn == "" {
+		// The attempt ended by itself while the withdrawal was being written.
+		// The node has provably stopped, since it wrote the terminal message
+		// itself, and nothing here may say what its command did or did not do.
+		c.Log.Debug().Str("run", c.Run).Str("task", task).Str("worker", node).
+			Int("attempt", attempt).Msg("the attempt ended before it could be withdrawn")
+		return cancellation{isAcknowledged: true, isCommandStarted: true}
+	}
 	c.recordOwnedRef(node, offer.branch, withdrawn)
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", node).Int("attempt", attempt).
 		Str("commit", withdrawn).Msg("attempt withdrawn")
 	return c.awaitAcknowledgement(settling, node, task, attempt, offer, withdrawn)
+}
+
+// writeWithdrawal pushes the withdrawal, re-reading the branch once when the
+// lease is refused.
+//
+// The re-read is the whole of the concurrency story here. Both parties advance
+// one branch under expected-old checks, so a withdrawal written against the
+// object this run last saw loses to a node that moved the branch in the
+// meantime, and that happens on the ordinary path: a build's claim reaches the
+// poller up to one poll interval after the node wrote it, and an interrupt
+// arriving inside that window is leased against the assignment. So the branch
+// is asked where it actually is, once, and the withdrawal is written against
+// that. A branch that has reached its terminal message needs no withdrawal at
+// all, and the empty string says so.
+func (c *Coordinator) writeWithdrawal(ctx context.Context, node, task string, attempt int,
+	kind string, offer taskOffer, tipOID string) (string, error) {
+	withdrawn, err := c.advance(ctx, node, offer.branch, tipOID, MessageCancel, Withdrawal{
+		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
+		Assignment: offer.offered, Tip: tipOID,
+	})
+	if err == nil {
+		return withdrawn, nil
+	}
+	head, rereadErr := c.mailboxes[node].Reread(ctx, offer.branch)
+	if rereadErr != nil || head.OID == "" || head.OID == tipOID {
+		return "", err
+	}
+	tip, inspectErr := c.mailboxes[node].Inspect(ctx, head)
+	if inspectErr == nil && (tip.Kind == MessageResult || tip.Kind == MessageAck) {
+		return "", nil
+	}
+	return c.advance(ctx, node, offer.branch, head.OID, MessageCancel, Withdrawal{
+		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
+		Assignment: offer.offered, Tip: head.OID,
+	})
 }
 
 // awaitAcknowledgement polls the attempt's branch until the node has answered
