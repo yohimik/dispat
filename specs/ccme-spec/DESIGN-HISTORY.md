@@ -153,7 +153,10 @@ reachable pair and is the whole history for a consumer older than its provider's
 targets that depend on it within the unit's depth, in section 9.2 and the audit of section 13.7b alike; a consumer whose
 every cause is owed by a provider that failed in the run is not republished, whatever the edge kind; an exact
 `Release-As` is a cause of its own; G6 counts one catch-up per proceeded consumer; and the stable branch of section 13.9
-takes a graduation's version from section 11.5. The dispat engine implements the delivery admission and the
-reconciliation of a proceeding consumer; the owed windows and `E201` are not yet implemented, and a consumer that sits
-out the run in which its provider releases the owed commit is therefore still stranded in that engine, which its release
-notes list as a departure.
+takes a graduation's version from section 11.5. The conformance row written for the second of these found that the
+reference engine had attributed a unit's whole source set to every dependent its walk reached, so a consumer of one of
+two packages a unit was written over was owed by the other and could be released again on its account; the engine was
+corrected in the same candidate, and the row stays as its fence. The dispat engine implements the delivery admission and
+the reconciliation of a proceeding consumer; the owed windows and `E201` are not yet implemented, and a consumer that
+sits out the run in which its provider releases the owed commit is therefore still stranded in that engine, which its
+release notes list as a departure.
