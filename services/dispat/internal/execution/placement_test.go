@@ -81,22 +81,22 @@ func TestPoolKeepsThisMachineForLast(t *testing.T) {
 	pool := NewPool([]Link{{Name: "a-node", Endpoint: "file:///dev/null"}},
 		[]*NodeReport{nativeNode(1)}, LocalNode{Name: "here", Capacity: 2}, zerolog.Nop())
 
-	first, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+	first, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 	require.NoError(t, err)
 	assert.Equal(t, "a-node", first.Node)
 	assert.False(t, first.IsLocal, "a free worker is preferred to this machine")
 
-	second, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+	second, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 	require.NoError(t, err)
 	assert.Equal(t, "here", second.Node)
 	assert.True(t, second.IsLocal, "with the worker full the frame is taken here rather than queued")
 
-	third, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+	third, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 	require.NoError(t, err)
 	assert.True(t, third.IsLocal, "this machine's own capacity is what bounds it")
 
 	first.Release()
-	fourth, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+	fourth, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 	require.NoError(t, err)
 	assert.Equal(t, "a-node", fourth.Node, "a returned worker slot is preferred again")
 }
@@ -107,11 +107,11 @@ func TestPoolHonoursAPinnedPlacement(t *testing.T) {
 	pool := NewPool([]Link{{Name: "a-node", Endpoint: "file:///dev/null"}},
 		[]*NodeReport{nativeNode(2)}, LocalNode{Name: "here", Capacity: 2}, zerolog.Nop())
 
-	pinnedHere, err := pool.Acquire(t.Context(), nil, PlacementOrchestrator)
+	pinnedHere, err := pool.AcquireNear(t.Context(), nil, PlacementOrchestrator, "")
 	require.NoError(t, err)
 	assert.True(t, pinnedHere.IsLocal, "a frame pinned here is placed here although a worker is free")
 
-	pinnedAway, err := pool.Acquire(t.Context(), nil, PlacementWorker)
+	pinnedAway, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 	require.NoError(t, err)
 	assert.Equal(t, "a-node", pinnedAway.Node)
 	assert.False(t, pinnedAway.IsLocal, "a frame pinned to a worker never falls back to this machine")
@@ -122,7 +122,7 @@ func TestPoolHonoursAPinnedPlacement(t *testing.T) {
 func TestPoolRefusesAPinnedPlacementNothingSatisfies(t *testing.T) {
 	pool := NewPool(nil, nil, LocalNode{Name: "here", Capacity: 1}, zerolog.Nop())
 
-	_, err := pool.Acquire(t.Context(), nil, PlacementWorker)
+	_, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 
 	require.Error(t, err)
 	assert.Equal(t, CodeIntegrity, diagnosticCodeOf(err))
@@ -137,11 +137,11 @@ func TestPoolFiltersThisMachineByPlatformToo(t *testing.T) {
 		[]*NodeReport{{Protocol: ProtocolVersion, OS: "plan9", Arch: "mips", Capacity: 1}},
 		LocalNode{Name: "here", Capacity: 1}, zerolog.Nop())
 
-	lease, err := pool.Acquire(t.Context(), []string{"plan9/mips"}, PlacementAnyNode)
+	lease, err := pool.AcquireNear(t.Context(), []string{"plan9/mips"}, PlacementAnyNode, "")
 	require.NoError(t, err)
 	assert.Equal(t, "a-node", lease.Node)
 
-	_, err = pool.Acquire(t.Context(), []string{"plan9/mips"}, PlacementOrchestrator)
+	_, err = pool.AcquireNear(t.Context(), []string{"plan9/mips"}, PlacementOrchestrator, "")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plan9/mips")

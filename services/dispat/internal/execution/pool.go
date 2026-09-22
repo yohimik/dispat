@@ -122,18 +122,6 @@ func NewPool(links []Link, reports []*NodeReport, local LocalNode, log zerolog.L
 	})}
 }
 
-// Acquire takes one slot on a node this task may run on, waiting for one when
-// every node the placement allows is busy.
-//
-// The wait is bounded by two things and never by hope. The caller's context
-// ends it, and so does the pool running out of healthy nodes the task could
-// run on: a task waiting for a machine that no longer exists is a task that
-// will wait for ever, so it is failed at once with the platform it needed and
-// the nodes that could have run it named.
-func (p *Pool) Acquire(ctx context.Context, platforms []string, placement Placement) (*Lease, error) {
-	return p.AcquireNear(ctx, platforms, placement, "")
-}
-
 // AcquireNear is Acquire with a node this task would rather run on.
 //
 // The preference is a preference and never a requirement, which is why it is

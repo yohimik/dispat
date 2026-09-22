@@ -56,12 +56,12 @@ func TestPoolPlacement(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pool := newTestPool(tc.nodes...)
 			for range tc.takeFirst {
-				taken, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+				taken, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 				require.NoError(t, err)
 				assert.Equal(t, "a-node", taken.Node)
 			}
 
-			lease, err := pool.Acquire(t.Context(), tc.platforms, PlacementAnyNode)
+			lease, err := pool.AcquireNear(t.Context(), tc.platforms, PlacementAnyNode, "")
 
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, lease.Node)
@@ -73,12 +73,12 @@ func TestPoolPlacement(t *testing.T) {
 // is full waits, and is given the slot the next attempt gives back.
 func TestPoolWaitsForACapacitySlot(t *testing.T) {
 	pool := newTestPool(linuxNode(1))
-	held, err := pool.Acquire(t.Context(), nil, PlacementWorker)
+	held, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 	require.NoError(t, err)
 
 	waited := make(chan *Lease, 1)
 	go func() {
-		lease, err := pool.Acquire(t.Context(), nil, PlacementWorker)
+		lease, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 		require.NoError(t, err)
 		waited <- lease
 	}()
@@ -102,14 +102,14 @@ func TestPoolWaitsForACapacitySlot(t *testing.T) {
 // placed beside a process nobody can account for.
 func TestPoolLeakedSlotIsNeverReturned(t *testing.T) {
 	pool := newTestPool(linuxNode(2), linuxNode(1))
-	lost, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+	lost, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 	require.NoError(t, err)
 	require.Equal(t, "a-node", lost.Node)
 
 	lost.Leak(LeakTaskDeadline)
 	lost.Release() // a lease settles once, whatever the caller does afterwards
 
-	next, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+	next, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 	require.NoError(t, err)
 	assert.Equal(t, "b-node", next.Node, "the unhealthy node is skipped although it had a free slot")
 }
@@ -119,11 +119,11 @@ func TestPoolLeakedSlotIsNeverReturned(t *testing.T) {
 // machine that will not come back, and the failure names what it needed.
 func TestPoolWithoutAHealthyNodeFailsAtOnce(t *testing.T) {
 	pool := newTestPool(linuxNode(1))
-	lease, err := pool.Acquire(t.Context(), nil, PlacementAnyNode)
+	lease, err := pool.AcquireNear(t.Context(), nil, PlacementAnyNode, "")
 	require.NoError(t, err)
 	lease.Leak(LeakTaskDeadline)
 
-	_, err = pool.Acquire(t.Context(), []string{"linux/amd64"}, PlacementAnyNode)
+	_, err = pool.AcquireNear(t.Context(), []string{"linux/amd64"}, PlacementAnyNode, "")
 
 	require.Error(t, err)
 	assert.Equal(t, CodeIntegrity, diagnosticCodeOf(err))
@@ -137,7 +137,7 @@ func TestPoolWithoutAHealthyNodeFailsAtOnce(t *testing.T) {
 func TestPoolWithoutACompatiblePlatformFailsAtOnce(t *testing.T) {
 	pool := newTestPool(linuxNode(1))
 
-	_, err := pool.Acquire(t.Context(), []string{"plan9/mips"}, PlacementAnyNode)
+	_, err := pool.AcquireNear(t.Context(), []string{"plan9/mips"}, PlacementAnyNode, "")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plan9/mips")
@@ -148,13 +148,13 @@ func TestPoolWithoutACompatiblePlatformFailsAtOnce(t *testing.T) {
 // is still busy.
 func TestPoolWaitEndsWithTheRun(t *testing.T) {
 	pool := newTestPool(linuxNode(1))
-	held, err := pool.Acquire(t.Context(), nil, PlacementWorker)
+	held, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 	require.NoError(t, err)
 	defer held.Release()
 	ctx, cancel := context.WithCancel(t.Context())
 
 	go cancel()
-	_, err = pool.Acquire(ctx, nil, PlacementWorker)
+	_, err = pool.AcquireNear(ctx, nil, PlacementWorker, "")
 
 	require.ErrorIs(t, err, context.Canceled)
 }
@@ -178,20 +178,20 @@ func diagnosticCodeOf(err error) string {
 func TestALocalFrameNeverLeaksItsSlot(t *testing.T) {
 	pool := newTestPool(linuxNode(1))
 
-	local, err := pool.Acquire(t.Context(), nil, PlacementOrchestrator)
+	local, err := pool.AcquireNear(t.Context(), nil, PlacementOrchestrator, "")
 	require.NoError(t, err)
 	require.True(t, local.IsLocal)
 	local.Leak(LeakTaskDeadline)
 
-	again, err := pool.Acquire(t.Context(), nil, PlacementOrchestrator)
+	again, err := pool.AcquireNear(t.Context(), nil, PlacementOrchestrator, "")
 	require.NoError(t, err, "the slot came back and the node is still in the pool")
 	assert.True(t, again.IsLocal)
 	again.Release()
 
 	// A worker's slot is the opposite statement and stays where it is.
-	worker, err := pool.Acquire(t.Context(), nil, PlacementWorker)
+	worker, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 	require.NoError(t, err)
 	worker.Leak(LeakTaskDeadline)
-	_, err = pool.Acquire(t.Context(), nil, PlacementWorker)
+	_, err = pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
 	require.Error(t, err, "the node that stopped answering is out of the pool")
 }
