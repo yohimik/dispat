@@ -4,10 +4,15 @@
 # and records the release: the release locks, the plan, the version edits and
 # lock-file regeneration, the tags, the changelog, the release commit and the
 # run-level hooks. Worker nodes run the build stages it assigns and hand their
-# declared build outputs to the packages that consume them. A publish is
-# delegated only for a space with no login script: a space that logs in
-# publishes here, so its credentials stay on this one machine.
+# declared build outputs to the packages that consume them. Publishing stays
+# here unless a package's `runOnly` names `worker` for its publish stage, and
+# a space with a login script publishes here whatever that key says, so its
+# credentials stay on this one machine.
 # The matching worker file is dispat.example.worker.yaml.
+#
+# Adding worker nodes widens the set of machines and repositories that can
+# affect what is published. Read the security section before deploying one:
+# https://dispat.dev/next/distributed-execution/#security-what-distributed-execution-exposes-and-how-to-contain-it
 #
 #   dispat --config dispat.yaml status    # the plan and its `plan fixed` line
 #   dispat --config dispat.yaml release   # locks, plans, probes every worker,
@@ -38,9 +43,9 @@ execution:
   # repository used as that node's mailbox: an https, ssh or file URL, an
   # absolute path, or host:path. It carries no credentials; Git's own
   # credentials reach it. Several workers may share one mailbox. A mailbox
-  # holds full source and command text, so give it the access control the
-  # source has, and protect release branches and tags from the credentials
-  # that can write to it.
+  # holds full source, command text and build outputs, so give it the access
+  # control the source has, prefer a repository of its own, and protect
+  # release branches and tags from the credentials that can write to it.
   workers:
     - name: build-a
       endpoint: git@github.com:acme/release-mailbox.git
@@ -52,7 +57,10 @@ execution:
   # answering, in seconds. 0 or absent keeps the default shown.
   timeouts:
     preflight: 60     # one worker's answer to the probe sent before dispatch
-    task: 3600        # one assigned build or publish
+    task: 3600        # one assigned task, the wait for a node included. An
+                      # assignment nobody claims is withdrawn and placed again
+                      # up to three times; a claimed attempt is measured from
+                      # the claim, and the node enforces the same deadline
     cancel: 60        # a cancelled task's acknowledgement; its capacity stays
                       # held until then
   # What one task's declared build outputs may weigh. An output set over a
@@ -60,8 +68,10 @@ execution:
   transfer:
     maxFiles: 20000
     maxBytes: 2147483648          # 2 GiB
-    maxManifestBytes: 8388608     # 8 MiB
-    timeout: 1800
+    maxManifestBytes: 8388608     # 8 MiB, and it bounds every document of the
+                                  # protocol, not only an output manifest
+    timeout: 1800                 # fetching and installing a task's inputs,
+                                  # and pushing a result that carries outputs
 
 scripts:
   install: "npm ci"
@@ -93,7 +103,8 @@ spaces:
       syncLock: [npm-lock]
       syncLockConcurrency: 1
     flow:
-      build: [install, build]     # runs on a worker
+      build: [install, build]     # delegated to a worker that has room, and
+                                  # run here when none has
       postBuild: smoke-test       # a hook travels with its stage
       # Publishing stays on this node unless a package asks otherwise: the
       # login, the beforePublish hook and the publish command run here, in
@@ -116,7 +127,8 @@ packages:
   docs:
     # Which nodes may run this package's tasks, as os/arch in Go's spelling.
     # Empty or absent means any node. A platform no configured worker reports
-    # refuses the run before anything is dispatched.
+    # refuses the run before anything is dispatched, unless the package is
+    # pinned to this node with `runOnly`.
     buildPlatforms: [linux/amd64, linux/arm64]
   app:
     buildOutputs: [dist, bin]

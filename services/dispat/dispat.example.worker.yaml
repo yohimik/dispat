@@ -13,10 +13,21 @@
 #   --state-dir <dir>      where the object cache, the task checkouts and the
 #                          record of answered work live (default: the user
 #                          cache folder). Everything in it can be deleted
-#                          between tasks; it is rebuilt.
-#   --idle-timeout <sec>   exit 0 after this long with no work, which is how a
-#                          CI job serves one release and ends. 0 serves until
-#                          it is signalled.
+#                          between tasks; it is rebuilt. Two processes may not
+#                          serve one node name from one folder: the second to
+#                          start refuses.
+#   --idle-timeout <sec>   exit 0 after this long with nothing claimed and
+#                          nothing in flight, counted from the last activity,
+#                          which is how a CI job serves one release and ends.
+#                          0 serves until it is signalled. SIGINT and SIGTERM
+#                          stop the node once what it claimed has finished,
+#                          also with exit 0.
+#
+# A worker runs the commands of any assignment that verifies under the signing
+# secret, with this machine's own environment and credentials. Run it on a
+# dedicated machine with least-privilege credentials, and read the security
+# section before deploying one:
+# https://dispat.dev/next/distributed-execution/#security-what-distributed-execution-exposes-and-how-to-contain-it
 
 execution:
   # A worker refuses to start a release, including one a task script tries to
@@ -41,7 +52,11 @@ execution:
   # that reaches it. Work it has no free slot for waits in the mailbox.
   concurrency: 2
   # What this node accepts as one task's build outputs. A run whose own
-  # ceilings are higher than a worker's is refused before dispatch.
+  # ceilings are higher than a worker's is refused before dispatch. `timeout`
+  # bounds this node's fetch and install of a task's inputs and its push of a
+  # result that carries outputs; how long a task itself may take is the
+  # orchestrator's `timeouts.task`, and it travels in the assignment for this
+  # node to enforce.
   transfer:
     maxFiles: 20000
     maxBytes: 2147483648

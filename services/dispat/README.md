@@ -109,6 +109,7 @@ needed:
 | [Concepts](https://dispat.dev/concepts/)                                                | The mental model: baselines, propagation, trains, catch-up, the pipeline.                                                                                                                  |
 | [One repository or many](https://dispat.dev/monorepo/)                                  | What a monorepo and a repository-per-project each cost, which of those costs dispat removes, and how to move between them.                                                                  |
 | [A control repository](https://dispat.dev/control-repository/)                          | Releasing several repositories from one control checkout: source-history mode, pointer-history mode, the layouts, and the recovery rules.                                                   |
+| [Distributed execution](https://dispat.dev/distributed-execution/)                      | Running one release's builds and publishes on worker nodes: the roles, the Git mailbox, build outputs as inputs, the locks a run may retain, and what the arrangement exposes.               |
 | [Beside other release tools](https://dispat.dev/comparison/)                            | lerna, nx, release-please and changesets on the same failure, and the experiments that observed it.                                                                                        |
 | [Examples](https://dispat.dev/examples/)                                                | A complete setup per package manager, each with real terminal output: npm, pnpm, Docker, Android, the mixed graph, adoption.                                                               |
 | [Manifest tools](https://dispat.dev/editing/manifests/)                        | `dispat scanner` and `dispat writer`: reading and editing manifests on their own.                                                                                                          |
@@ -120,6 +121,7 @@ needed:
 | [dispat if](https://dispat.dev/cli/if/)                                                 | Branching on a variable, a file or the changed packages inside a configured script.                                                                                                        |
 | [dispat for](https://dispat.dev/cli/for/)                                               | Running one shell command per item of a list, under whichever shell the repository configured.                                                                                             |
 | [dispat exec](https://dispat.dev/cli/exec/)                                             | Running one declared script on its own.                                                                                                                                                    |
+| [dispat worker](https://dispat.dev/cli/worker/)                                         | Serving the build and publish tasks another machine's release assigns to this one: the flags, the state folder, and the exit behaviour.                                                      |
 | [Naming a place](https://dispat.dev/cli/locations/)                                     | The `pkg:`, `space:`, `root` and `cwd` values `--for`, `--script-from` and `--in` share.                                                                                                    |
 | [Configuration file](https://dispat.dev/configuration/)                                 | Top-level options, script sequences, run-level hooks; links the pages below.                                                                                                               |
 | [Spaces](https://dispat.dev/configuration/spaces/)                                      | Space options, stages and hooks in execution order, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatexclude`. |
@@ -134,6 +136,7 @@ needed:
 | [Script sequences](https://dispat.dev/configuration/scripts/)                           | `scripts` as named commands, one or several per name, how a `flow` name resolves package first, and what runs when.                                                                        |
 | [Run-level hooks](https://dispat.dev/configuration/run-hooks/)                          | The seven hooks that observe the whole run rather than one package, where they execute, and why the step commands fire none of them.                                                       |
 | [Webhooks](https://dispat.dev/configuration/webhooks/)                                  | The HTTP endpoints a release run notifies of its progress: the events, the signed payloads, and why a dead endpoint can never fail a release.                                              |
+| [execution](https://dispat.dev/configuration/execution/)                                | The node's role, its capacity, the worker nodes a release may delegate to, the bounded waits and the transfer ceilings.                                                                      |
 | [Static env](https://dispat.dev/configuration/env/)                                     | The `env` objects that add fixed variables to every script, and how the levels layer.                                                                                                      |
 | [custom](https://dispat.dev/configuration/custom/)                                      | The free-form object dispat carries without ever reading it, for your own tooling.                                                                                                         |
 | [Go packages](https://dispat.dev/go/)                                                   | The five modules dispat is built from, each importable on its own.                                                                                                                         |
@@ -161,7 +164,11 @@ needed:
 | [Integration tests](../../tests/integration)                                                         | The black-box suite itself: setup, running, and the test plan.                                                                                                                             |
 
 See [`dispat.example.json`](./dispat.example.json) and [`dispat.example.yaml`](./dispat.example.yaml) to inspect every
-configuration option in a single annotated file.
+configuration option in a single annotated file. Four smaller files annotate one arrangement each:
+[`dispat.example.control.yaml`](./dispat.example.control.yaml) for a control repository,
+[`dispat.example.peer.yaml`](./dispat.example.peer.yaml) for a peer of a choreographed fleet, and
+[`dispat.example.orchestrator.yaml`](./dispat.example.orchestrator.yaml) with
+[`dispat.example.worker.yaml`](./dispat.example.worker.yaml) for a release whose builds run on several machines.
 
 ## Testing
 
