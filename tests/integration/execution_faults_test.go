@@ -151,6 +151,12 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 		"the answer cannot be retrieved once": {
 			pattern: "*fetch*[0-9]-build-*", nth: 1,
 		},
+		"a node's answer cannot be read once": {
+			// The probe of preflight read two blobs, its document and the
+			// signature beside it, so the third is the first blob of a node's
+			// answer to a build.
+			pattern: "*cat-file blob*", nth: 3,
+		},
 		"the chain cannot be walked once": {
 			pattern: "*rev-list*[0-9]-build-*", nth: 1,
 		},
@@ -230,6 +236,12 @@ func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 			// the one that would take a build.
 			pattern: "*commit-tree*dispat transport claim*", nth: 2, isOnward: true, code: 1,
 		},
+		"the chain cannot be resolved once": {
+			pattern: "*rev-list --first-parent*", nth: 1,
+		},
+		"a message cannot be read once": {
+			pattern: "*cat-file blob*", nth: 1,
+		},
 		"the checkout records cannot be pruned": {
 			pattern: "*worktree prune*", nth: 1, isOnward: true, isRetained: true,
 		},
@@ -248,6 +260,12 @@ func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 			require.Equal(t, row.code, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
 			assert.Equal(t, 0, reply.Code, "the node carried on serving after its git failed")
+			if row.code == 0 && !row.isRetained {
+				assert.NotEmpty(t, rig.repo.TagList(),
+					"a read the node makes again costs a tick and nothing else")
+				assert.Empty(t, rig.branches(), "and the run closed the branches it created")
+				return
+			}
 			if row.isRetained {
 				assert.True(t, harness.IsCodePresent(executionEvents(reply), executionRetainedCode),
 					"the node reported what it could not tidy away\nstdout:\n%s", reply.Stdout)
