@@ -130,8 +130,9 @@ to be interpreted as described in RFC 2119.
 | **Release engine**       | The tool implementing this specification.                                                                               |
 | **Inert**                | Syntactically valid but resolving to zero packages; produces a warning, never an error.                                 |
 | **Run**                  | One execution of the engine against a fixed `HEAD`: compute a plan (§13), then publish it (§19).                        |
-| **Admission**            | The test deciding whether a unit propagates to a dependent. Evaluated against the **dependent's** window.               |
-| **Stale**                | A package that would receive a non-`none` propagated bump: it has not released past a commit that propagates to it.    |
+| **Admission**            | The test deciding whether a unit propagates to a dependent. Evaluated against the **dependent's** releases: what its sources have delivered to it (§13.4a). |
+| **Stale**                | A package that would receive a non-`none` propagated bump: it has not released at or after its provider's release of a commit that propagates to it. |
+| **Delivered**            | A source's contribution to a dependent is delivered once the dependent has released at or after a release of that source carrying the commit (§13.4a). Releasing past the commit alone is not delivery. |
 | **Catch-up release**     | A release whose entire cause is a propagation from a dependency that has **already** been published (§13.7a).           |
 | **Publish graph**        | The graph used to order publication, and to decide what a failed publish blocks (§19.2).                                |
 | **Build readiness**      | What a consumer's build waits for in its provider: `none`, `build` or `publish` (§19.2a). Execution policy; it never changes the plan. |
@@ -1443,11 +1444,12 @@ propagate(units, graph, held, W):
         anyStable = 'stable' in srcChan
         for (d, level) in reach(edges, sources, u.depth):
             if d not in pscope:                           continue
-            if c not in Wfresh(d):                             continue
+            owed = { P in sources : not delivered(P, c, d) }    # admission, §13.4a
+            if owed is empty:                             continue
             if cancelledFor(c, d):                        continue
             if not (anyStable or channel[d] in srcChan):  continue # §9.3a, W208
             prop[d] = max(prop[d], b)
-            prov[d] = prov[d] | sources
+            prov[d] = prov[d] | owed
     return prop, prov, chan
 ```
 
@@ -1488,9 +1490,11 @@ Properties. Except where noted, each holds for **both** axes:
 * **Depth is measured from the originating source set, always.** It is never recomputed from an intermediate package,
   and never re-based on a package that happens to be republishing. A unit written `+1` reaches exactly the direct
   consumers of its own packages, in this run and in every later catch-up run, whatever released in between.
-* **Admission is the target's window.** A dependent is reached if and only if it has not itself released past the commit
-  carrying the unit. Every guarantee in §13.7c rests on this one test, and on it being the target's window rather than
-  the source's.
+* **Admission is the target's releases.** On the channel axis a dependent is reached if and only if it has not itself
+  released past the commit carrying the unit. On the bump axis it is reached if and only if some source of the unit has
+  not yet **delivered** that commit to it: it has not released at or after a release of that source which carries the
+  commit (§13.4a). The two coincide except for a dependent that released past the commit before its source did. Every
+  guarantee in §13.7c rests on this one test, and on it being the target's position rather than the source's.
 * **Propagation does not cascade its own propagation.** A propagated bump on `B` does not itself trigger a fresh
   propagation pass from `B`, and a propagated channel on `B` does not carry onward to `B`'s dependents; the depth
   parameters of the originating unit are the only controls. This keeps the result a pure function of the units and
@@ -2207,6 +2211,25 @@ sourcePackages(u) =
 `cancelledFor(C, X)` is true when `C` is an ancestor-or-self of some `cancel` commit whose resolved scope contains `X`
 (§10.3). `held(P)` is true when `P`'s effective `Release-As` directive is `none` (§13.6a).
 
+**Delivery.** On the bump axis a source's contribution is admitted for a target until the source has **delivered** it:
+
+```
+delivered(P, C, D) =  some release tag of P sits on a commit t
+                      with C in reach(t) and t in reach(baselineCommit(D))
+                      # D released at or after P's release carrying C; false for an unreleased D
+
+owed(u, D)         =  { P in sourcePackages(u) : not delivered(P, commitOf(u), D) }
+```
+
+A unit propagates a bump to `D` while `owed(u, D)` is non-empty (§9.2), and `D`'s provenance names exactly the owed
+sources. `delivered` implies `C ∉ Wfresh(D)`, so a target that has not released past `C` is owed by every source and
+the test reduces to the window; the finer question arises only for a target that released past `C` before its source
+did: a consumer that proceeded on a cause of its own while the source failed (§19.3), or one released while the
+source was held (§13.6a). Such a target is still owed the source's release, and receives it as a catch-up when it
+comes (§13.7a). Releasing past a commit is not delivery; only the source's release, followed by the target's, is. The
+channel axis keeps `C ∈ Wfresh(D)` as its admission, because a channel is carried by the units and needs no release of
+the source (G7).
+
 **Suppression applies only to undischarged work, and this is normative.** Once `P` has published the version that
 carries `u`, the artefact its consumers are owed is public. Nothing landing afterwards can retract that obligation:
 
@@ -2404,16 +2427,26 @@ is silent, and it is *more* likely the larger the workspace, because the chance 
 grows with the fan-out. Worse, the same shape arises without any failure at all: a package held by
 `Release-As: none` past its provider's release reaches exactly the same state when the hold lifts.
 
+The same orphan is reached from the other side by a consumer that gets **ahead** of its provider. Let one commit carry
+`feat(core)^` and `feat(cli)`; `core`'s publish fails and `cli`, which has a cause of its own, proceeds (§19.3) and is
+tagged past the commit. If admission were "the target has not released past the commit", `cli` would be owed nothing
+when `core` publishes on the next run, would keep the manifest range it reconciled against `core`'s old version, and
+would never be planned again: one patch behind a dependency it declares, silently. A consumer released on its own
+change while its provider is held reaches the same state when the hold lifts. Hence admission is delivery (§13.4a),
+not release position.
+
 The root cause is that 1.0.0 tested a *dependent's* eligibility against the *source's* release position. Those are
 different packages with different tags, and after a partial failure they are exactly the packages whose positions have
 diverged.
 
-**The rule.** Per §13.4a and §9.2, a unit propagates to a dependent `D` whenever `D`'s own window still contains the
-unit's commit. No separate catch-up pass exists, and none is needed: catch-up is not a repair mode bolted onto the
-algorithm, it is what the algorithm does when the ordinary rule is evaluated against the right window. A "catch-up
-release" is therefore only a *label*: a release whose entire cause is a propagation from a package that is not itself
-in this run's plan. Implementations MUST report it as such (`W193`), because a package appearing in a plan with no
-commits of its own and no releasing dependency is otherwise baffling to whoever reviews the plan.
+**The rule.** Per §13.4a and §9.2, a unit propagates a bump to a dependent `D` whenever some source of the unit has not
+yet delivered the unit's commit to `D`: `D` has not released at or after a release of that source carrying it. For a `D`
+that has not released past the commit at all, that is the window test; for a `D` that got ahead of its source, it is the
+source's release that decides. No separate catch-up pass exists, and none is needed: catch-up is not a repair mode
+bolted onto the algorithm, it is what the algorithm does when the ordinary rule is evaluated against the right position.
+A "catch-up release" is therefore only a *label*: a release whose entire cause is a propagation from a package that is
+not itself in this run's plan. Implementations MUST report it as such (`W193`), because a package appearing in a plan
+with no commits of its own and no releasing dependency is otherwise baffling to whoever reviews the plan.
 
 **What catch-up does not do.** It does not re-run, re-time, or re-scope anything:
 
@@ -2431,18 +2464,19 @@ question a human asks after a failed run:
 
 ```
 staleSources(D):
-    W     = freshWindow(D)                                # §13.3: the *target's* undelivered window
     edges = graph.restrictedTo(config.propagation.kinds)  # §8.4: the same edges as §9.2
     channel = resolveChannelsForAudit()                    # same phase-2 result as §9.2
     dist  = shortestPathsUp(D, edges)   # P -> edge count of the shortest path P → … → D
     out   = {}
-    for u in unitsIn(W):
+    for u in units:                                       # every retained tuple, §13.4
         if bumpOf(u) == none:                             continue
         b = (u.propagate == 'inherit') ? bumpOf(u) : u.propagate    # as §9.2
         if b == none or u.depth == 0:                     continue
         sources = sourcePackages(u)                       # §13.4a
         if sources is empty:                              continue
         if D in sources:                                  continue   # §9.2 seeds seen = sources
+        sources = owed(u, D)                              # §13.4a: what D is still owed
+        if sources is empty:                              continue   # every source delivered
         reaching = { P in sources : P in dist }
         if reaching is empty:                             continue
         if not resolvableBy(sources, D, channel):     continue   # §9.3a
@@ -2466,6 +2500,9 @@ Four details carry the duality, and all four are places an implementation drifts
   the minimum over `reaching` under-reports exactly the diamond cases.
 * **Resolvability is the same admission predicate as §9.3a.** Reachability alone is insufficient: a prerelease source
   on a different line is not installable by `D`, so the downward and upward formulations MUST both reject it.
+* **The units are not those of `D`'s window.** A commit `D` has released past can still be owed to it by a source that
+  released it later (§13.4a); iterating `freshWindow(D)` alone misses exactly the consumers that got ahead of a
+  provider, which are the ones this audit exists to find after a partial failure.
 * **`b` is the effective propagated bump**, computed the same way as in §9.2: `inherit` resolves to the unit's own
   bump, and a unit whose propagation resolves to `none`, or whose depth is `0`, is not a source at all (§8.3). Such a
   unit warns (`W152` where it asked for nothing, `W201` where it named a value the depth then discarded (§8.3b)) but
@@ -2486,11 +2523,13 @@ banner or a CI dashboard, compares release positions directly:
 > `D` is possibly behind `P` if `tagCommit(baseline(P))` is **not** an ancestor-or-self of `tagCommit(baseline(D))`.
 
 That is the "the provider's tag is newer than the consumer's tag" intuition, expressed as ancestry so that it stays
-deterministic under merges, rebases, and equal commit dates (§10.4). It MUST NOT be used as the authoritative test: it
-is *necessary but not sufficient*. A provider can legitimately be ahead of a consumer with nothing owed: the units
-between them may all be `^none`, or `+0`, or scoped away by `Propagate-Scope`, or reach `D` only beyond their declared
-depth, or be `devDependencies`-only edges. Using the screen to decide releases would manufacture bumps that no commit
-asked for. Use it to *find* candidates; use §9.2 to decide.
+deterministic under merges, rebases, and equal commit dates (§10.4). It is the shape of `delivered` (§13.4a) with the
+unit's commit left out, which is why it screens: a consumer owed something has a provider release its own release does
+not reach. It MUST NOT be used as the authoritative test: it is *necessary but not sufficient*. A provider can
+legitimately be ahead of a consumer with nothing owed: the units between them may all be `^none`, or `+0`, or scoped
+away by `Propagate-Scope`, or reach `D` only beyond their declared depth, or be `devDependencies`-only edges. Using the
+screen to decide releases would manufacture bumps that no commit asked for. Use it to *find* candidates; use §9.2 to
+decide.
 
 Note also the case the screen cannot see at all: `P` and `D` released at the **same commit**, in the same run, but with
 `D` published first. Ancestry cannot distinguish them, and no rule over tags can. That case is prevented rather than
@@ -2515,21 +2554,24 @@ These guarantees are normative and testable; Appendix B.7 exercises G1–G6 and 
 **G1, termination.** Propagation halts. Each unit traverses a BFS that marks every package `seen` at most once, so it
 performs at most `|V|` expansions regardless of depth, cycles, or `+*`; the outer loop is over a finite set of units.
 
-**G2, completeness (no orphans).** Under the retry invariant, if unit `u` in commit `C` admits dependent `D`, then `D` receives
-at least `u`'s propagated bump in every run until `D` releases at a commit containing `C`. Admission is
-`C ∈ Wfresh(D)`; only a baseline tag for `D` at such a commit discharges it. A release by the source alone cannot.
+**G2, completeness (no orphans).** Under the retry invariant, if unit `u` in commit `C` admits dependent `D`, then `D`
+receives at least `u`'s propagated bump in every run until `D` releases at or after a release of every owed source
+carrying `C`. Admission is `owed(u, D) ≠ ∅` (§13.4a); only a baseline tag for `D` at such a commit discharges it. A
+release by the source alone cannot, and neither can a release by `D` that precedes the source's.
 
 **G3, version stability.** Under the retry invariant, a package caught up in run *k* receives the same version it was
 planned at in run 1. `effective(D)` is the same `max()` and the failed run wrote no tag for `D`. A source
 graduation can change an `inherit` channel, and discharge of a suppressed source can add a tuple; either change requires
 a newly surfaced plan rather than a claim that the old number is preserved.
 
-**G4, no double ledger delivery.** Once `D` is tagged at commit `T` with `C ∈ reach(T)`, `C ∉ Wfresh(D)`, so the
-contribution is not re-admitted. Combined with G2 this is exactly-once **in CCME's tag ledger**. It does not promise an
-exactly-once registry operation: §19.4 explicitly reconciles interruption between external publication and tagging.
+**G4, no double ledger delivery.** Once `D` is tagged at a commit `T` that reaches a release of every source of `u`
+carrying `C`, `owed(u, D)` is empty, so the contribution is not re-admitted. A `D` that proceeded past `C` before a
+source released it is bumped once more when that release comes, and that is the delivery, not a second one. Combined
+with G2 this is exactly-once **in CCME's tag ledger**. It does not promise an exactly-once registry operation: §19.4
+explicitly reconciles interruption between external publication and tagging.
 
 **G5, no blast-radius widening under the retry invariant.** Each unit's later target set is a subset of its initial set:
-the source, traversal, and channel-admission predicates stay fixed while `Wfresh` only loses commits. Outside the
+the source, traversal, and channel-admission predicates stay fixed while `delivered` only grows. Outside the
 invariant, publishing a suppressed source (the failure of H2) or changing resolved channel admission may expose finite
 catch-up targets. Such widening MUST be surfaced for review (§18.1).
 
@@ -3123,12 +3165,15 @@ transcription that resolves the scope-set and re-scans the source set once per t
 an `O(D · (S + Σ))` one, and the unit where that bites is precisely the one an author reaches for when they mean it: a
 `^^` across a wide scope-set has a large `D`, and re-deriving a two-element channel set thousands of times to answer a
 question whose inputs never changed is pure waste. Hoisting is not an optimisation to be justified by profiling; it is
-what the predicate's own dependency structure already says (§9.3a). The inherited origin channel in phase 1 is
-likewise memoized once per unit when first needed. Deferring it until an admitted target needs it avoids emitting
-diagnostics from an otherwise unevaluated branch; required diagnostic attribution and order must be preserved.
-This bound covers the hoisted
-scope/channel predicates only. Cancellation intersections cost up to `bw(cancels)` per queried target; materialising
-`prov[d] |= sources` must also charge the source insertions in `Zv`, even when deduplication leaves `Z` unchanged.
+what the predicate's own dependency structure already says (§9.3a). The inherited origin channel in phase 1 is likewise
+memoized once per unit when first needed. Deferring it until an admitted target needs it avoids emitting diagnostics
+from an otherwise unevaluated branch; required diagnostic attribution and order must be preserved. This bound covers the
+hoisted scope/channel predicates only. The delivery test of §13.4a is one window bit for a target that has not released
+past the unit's commit, which is every target in the ordinary case; a target that has costs one ancestry question per
+release of each source past that commit, answered from the marker pass when those releases are markers, and such targets
+exist only after a consumer got ahead of a provider. Cancellation intersections cost up to `bw(cancels)` per queried
+target; materialising `prov[d] |= sources` must also charge the source insertions in `Zv`, even when deduplication
+leaves `Z` unchanged.
 
 The saving compounds with safe traversal caching: caching can reduce the number of graph walks, while hoisting reduces
 the work in each unit's target loop. Neither subsumes the other, and a wide `^^` unit is the case where both can help.
@@ -4150,10 +4195,12 @@ deployment order: infrastructure before the application that runs on it, a schem
   so the task graph stays acyclic for every choice of relations, and weakening a relation only removes constraints.
   `E197` cannot arise from a relation, because the publication order does not depend on it.
 * **Failure is §19.3's.** Under `build` and `none`, `C` may be prepared and built against `P`'s planned version
-  (§19.5) before the outcome of `P`'s publication is known. That is sound only because §19.3 then blocks `C`: a
-  manifest naming a version that was never published is never published itself. A build finished for a blocked consumer
-  confers nothing. It is not published, discharges no obligation, and the next run builds again or reuses it under the
-  identity rules of §28.5. Restoring the working tree of a blocked consumer is the implementation's business.
+  (§19.5) before the outcome of `P`'s publication is known. That is sound because §19.3 then either blocks `C` or, where
+  `C` has a cause of its own, reconciles its manifest to `P`'s published version before `C` publishes and leaves `P`'s
+  contribution owed (§13.4a): a manifest naming a version that was never published is never published itself. A build
+  that embedded the planned version is rebuilt, or `C` is blocked; a build finished for a blocked consumer confers
+  nothing. It is not published, discharges no obligation, and the next run builds again or reuses it under the identity
+  rules of §28.5. Restoring the working tree of a blocked consumer is the implementation's business.
 * **Under §28.** A `build` edge is the local-output dependency of §28.5 and a `publish` edge its registry-availability
   edge. A `none` edge carries no output into the consumer's build task; the requirement that task inputs include every
   build dependency is met because the declaration says there is none. `C`'s publication task runs after `P`'s
@@ -4167,23 +4214,28 @@ A run that publishes several packages MAY fail partway. Implementations MUST:
 
 * tag each package immediately after that package publishes, so a partial run leaves a consistent, resumable state;
 * on a failure, **block** every package in the plan that transitively depends on the failed one over
-  `publish.blockingKinds`, marking each `W194`, and not attempt it. The closure is computed over the **full** workspace
-  graph, so it traverses packages that are not in the plan: a package with no bump this run is still a path from a
-  dependent to a failed dependency;
+  `publish.blockingKinds` and has no cause of its own, marking each `W194`, and not attempt it. The closure is computed
+  over the **full** workspace graph, so it traverses packages that are not in the plan: a package with no bump this run
+  is still a path from a dependent to a failed dependency. A cause of its own is a fresh direct bump, a channel change,
+  or a contribution from a provider that is neither failed nor blocked, including one that published in an earlier run;
+  a dependent with one **proceeds**, its manifests reconciled to what its providers have published (§19.5), and what
+  the failed provider owed it stays owed (§13.4a) and arrives as a catch-up when that provider publishes;
 * continue publishing packages that are not blocked: an unrelated subtree has no reason to be punished for another's
   failure;
 * report a completion summary naming what published, what failed, and what was blocked, and exit non-zero;
 * on re-run, recompute from tags. Packages already tagged fall out of the plan by §13.6; packages that failed or were
-  blocked remain candidates by §13.4a. Their versions remain unchanged only under G3's stated hypotheses; channel or
+  blocked remain candidates by §13.4a, and a dependent that proceeded returns as a catch-up (`W193`) once the failed
+  provider publishes. Their versions remain unchanged only under G3's stated hypotheses; channel or
   source-set changes MUST appear in the recomputed plan.
 
 ```
 run(plan):
     published, failed, blocked = {}, {}, {}
     for P in publishOrder(plan, graph):            # a flat sequence, §19.2
-        if transitiveBlockingDeps(P, graph) & failed:   # full graph, §19.3
+        bad = transitiveBlockingDeps(P, graph) & (failed | blocked)   # full graph, §19.3
+        if bad and ownCauses(P, plan, bad) is empty:
             blocked[P] = W194; continue
-        reconcileRanges(P)                         # §9.4
+        reconcileRanges(P, published)              # §9.4, §19.5: providers as published by now
         try:
             if publishTarget(P) != none:           # §13.10a
                 publishTo(publishTarget(P), P, plan[P].version)   # or adopt, §19.4
@@ -4230,14 +4282,16 @@ whose registry cannot support such a check.
 ### 19.5 Manifest writes
 
 Per §9.4, each released package's manifest MUST be updated so that no released package declares a range excluding the
-version each workspace dependency will carry **at the end of this run**, that is, its **planned** version if it is in
-this run's plan, and its current baseline otherwise (`W197` for the latter when the baseline came from an earlier run).
+version each workspace dependency **has published** by the time the package is reconciled: its **planned** version when
+it is in this run's plan and published, and its current baseline otherwise (`W197` when that baseline came from an
+earlier run). A dependency that is in the plan but failed or was blocked has published nothing new: a dependent that
+proceeds past it (§19.3) is reconciled to the baseline, and `W193` follows when the dependency publishes.
 
 Because the graph is acyclic (§13.1) and §19.2 publishes every dependency before its dependents, the planned version and
-the currently-published one coincide at the moment each package is reconciled. Stating the rule in terms of the
-**planned** version is nonetheless the better formulation: it is order-independent, so reconciliation can be computed
-once up front and audited against the plan, and it does not silently become wrong if an implementation's publish order
-is ever perturbed.
+the published one coincide at the moment each package is reconciled whenever the dependency published. Reconciliation
+MAY therefore be computed once up front from the plan and corrected, before the dependent's publish, only for the
+providers that did not publish; a manifest naming a version that was never published MUST NOT be published, whatever
+was computed up front.
 
 These writes are part of the publish step, not the plan, and MUST NOT be committed back in a way that creates a release
 loop, that is, a bot commit that itself parses as a bump-producing unit. Bot commits SHOULD use a type mapped to `none`, and
@@ -5265,10 +5319,12 @@ engine that runs builds.
 | `build`                  | after `core`'s build has succeeded       | after `core` does    |
 | `none`                   | at once, beside `core`'s build           | after `core` does    |
 
-→ The plan, its versions and its publication order are identical in all three rows. If `core`'s publication fails,
-`api` is **blocked** (`W194`) in all three, including the `none` row where `api`'s build has already finished: that
-build is not published and discharges nothing. An engine that treats `none` as permission to publish `api` first, or
-that infers `none` for an edge nobody declared it on, fails conformance.
+→ The plan, its versions and its publication order are identical in all three rows. If `core`'s publication fails and
+`api` has no cause of its own, `api` is **blocked** (`W194`) in all three, including the `none` row where `api`'s
+build has already finished: that build is not published and discharges nothing. If `api` has a fresh bump of its own
+it **proceeds** in all three, its manifest naming `core`'s published baseline, and is owed `core`'s contribution until
+`core` publishes (vector 80d). An engine that treats `none` as permission to publish `api` first, or that infers
+`none` for an edge nobody declared it on, fails conformance.
 
 **Vector 80c**: build order through a package that does not build. `app → ui → core`; `app` and `core` build in this
 run and `ui` does not.
@@ -5281,6 +5337,16 @@ run and `ui` does not.
 
 → In every row `core` publishes before `app` (§19.2, vector 80a). Adding build edges only between a package and its
 direct providers in the plan loses the first row, exactly as inducing the publish graph on the plan loses vector 80a.
+
+**Vector 80d**: a consumer proceeds past its failed provider. One commit `C1` carries two units, `feat(core)^: x` and
+`feat(cli): y`; `cli` consumes `core`. Run 1: `core@1.5.0` fails to publish; `cli` has a cause of its own and
+**proceeds** at its planned `2.1.0`, its manifest naming `core`'s baseline `1.4.0`, and is tagged at `HEAD`.
+
+→ Run 2 plans `core@1.5.0` and, because `core` has not delivered `C1` to `cli` (§13.4a), `cli@2.1.1` as a **catch-up**
+(`W193`), ordered after `core` and blocked if `core` fails again. Once both are tagged, `cli`'s baseline reaches
+`core`'s release carrying `C1` and nothing is owed. Two implementations fail here: one that never plans `cli` again
+because it released past `C1`, leaving it on `core@1.4.0` for ever with no diagnostic; and one that let `cli` publish
+in run 1 naming `core@1.5.0`, a version that did not exist.
 
 **Vector 81**: suppressing a catch-up from the consumer. `C1`: `feat(core)^: x`; run 1 publishes `core@1.5.0` and fails
 on `cli`. Then a new commit `C2` lands.
@@ -5320,6 +5386,14 @@ vector 82 this pins the boundary exactly at `discharged(P, C)`.
 
 → `cli` receives `patch` (from `C1`, which `core` published) and **not** `minor` from `C3`, which it has not. One
 package, one hold, two opposite answers, decided per unit by whether `core` released it.
+
+**Vector 82c**: a consumer gets ahead of a held provider. `C1`: `feat(core)^: x`; `C2`: `release(core)` +
+`Release-As: none`; `C3`: `fix(cli): y`. Run 1 releases `cli@2.0.1` on its own cause, `core` held, `cli`'s manifest
+naming `core@1.4.0`. `C4`: `release(core)` + `Release-As: auto`.
+
+→ Run 2 releases `core@1.5.0` and `cli@2.0.2` as a catch-up: `core` never delivered `C1` to `cli`, so `cli`'s release
+past `C1` discharged nothing. Together with vector 82b this pins delivery on both sides of a hold: a held source
+propagates nothing (82b), and a target that moved on while it was held is still owed the release (82c).
 
 ### B.7a Optimisation equivalence
 
