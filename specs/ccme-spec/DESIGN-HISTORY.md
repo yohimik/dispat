@@ -84,11 +84,29 @@ the planned head carries that repository's whole history, 7.3 million objects fo
 a small orchestrator, and it is paid again on every run because cleanup removes every ref. That cost belongs to a
 mailbox that starts empty: a mailbox that already holds the repository's objects, the repository's own remote for one,
 receives no history, which is what the engine does where the remote is used as the mailbox. Section 28.4 now also
-permits a durable mailbox ref or a history-free snapshot, and neither is implemented. No comparison against local
-execution on a pinned fixture has been made, and no speedup is claimed. Sections 28.1, 28.2, 28.4, 28.5, 28.6, 28.8 and
-28.9 gained the rules this implementation showed to be missing: local execution captured like a worker's, unclaimed work
-outside capacity, an unreadable tip not counted as seen, outermost-first materialization, the phase a cancelled attempt
-stopped in, revocation limited to unadmitted branches, and the summary shape of a prepared provider.
+permits a durable mailbox ref or a history-free snapshot, and neither is implemented. Two same-hardware pairs were
+measured on 2026-09-22 on the Linux kernel v7.3-rc4 (commit 93f51579, fork branch codex/kernel-parity at c699bf3d,
+dispat f0c9e959), each once with one c3-standard-22 node alone (Xeon Platinum 8481C, 11 cores) and once with that node
+plus one t2d-standard-8 worker, under the same recipe and per-cell settings: the hexagon group (defconfig, tinyconfig,
+allnoconfig) took 122.62 s alone and 92.22 s with the worker building allnoconfig, 95.89 s on a second paired trial; the
+m68k_nommu group (five cells) took 138.01 s alone and 115.48 s with the worker building one cell, 115.61 s on a second
+paired trial. Kernel sources were warm and compiled outputs cold on every run; a paired release moved about 512 KB of
+exported source and no build outputs, and paid the 3 to 8 s of preflight a single node never pays; every run produced
+the same revision, toolchain identities and case lines under the recipe's own comparison. The single node ran once per
+group, so variability was not measured; the worker is a slower machine of another family, so each pair is one node
+against that node plus a second, slower one; and the single-node m68k_nommu figure includes 58 to 66 s of source-lease
+contention on two of its cells, the same five cells having measured 128.17 s outside the engine. What the pairs show is
+the placement of independent cells on a second node, which is all these groups have to distribute; they do not exercise
+the transfer of dependent outputs that section 28.7 names as the profile's required gain. That fixture is the LLVM pair
+(llvm, lld, polly and a bundle; two n2-custom-14 workers and one e2-standard-4 orchestrator; install trees compared with
+the prefix masked), whose two attempts of 2026-09-23 were discarded and are no measurement: the first failed lld and
+polly because the fork's recipe fingerprinted umask-dependent modes that the transport normalises to 0644 and 0755,
+since corrected in the fork to the executable bit and link targets; the second built and published llvm, lld and polly
+through the workers in 27 min 21 s and then failed the bundle on an orchestrator without the C++ compiler its identity
+record needs. No speedup of the profile or of the engine is claimed from any of this. Sections 28.1, 28.2, 28.4, 28.5,
+28.6, 28.8 and 28.9 gained the rules this implementation showed to be missing: local execution captured like a worker's,
+unclaimed work outside capacity, an unreadable tip not counted as seen, outermost-first materialization, the phase a
+cancelled attempt stopped in, revocation limited to unadmitted branches, and the summary shape of a prepared provider.
 
 
 ## 2026-09-22: Delivery discharges a propagated contribution
