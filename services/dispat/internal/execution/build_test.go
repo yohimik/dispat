@@ -21,13 +21,13 @@ import (
 
 // offeredAttempt is one dispatched task as the watcher holds it: the exact
 // assignment object this run created, and the document it was created from.
-func offeredAttempt(branch string) *attempt {
+func offeredAttempt(branch string) *attemptState {
 	header := Header{
 		Protocol: ProtocolVersion, Kind: KindBuild, Run: "run-1", PlanDigest: "digest-1",
 		Task: "core:build", Attempt: 1, Generation: "generation-1", Node: "build-a",
 		Branch: branch, IssuedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	return &attempt{offered: "assignment-oid", assignment: &Assignment{Header: header}}
+	return &attemptState{offered: "assignment-oid", assignment: &Assignment{Header: header}}
 }
 
 // authenticResult is the reply that node would write, which every row below

@@ -160,6 +160,12 @@ const (
 	// the effect (§27.2, §28.6). A frame reported against it ran no publish
 	// command at all, which is what an operator has to read first.
 	PartAuthorization = "authorization"
+	// PartDeadline is the frame the executing node ended itself, at the
+	// deadline its assignment stated. It is the node's answer rather than the
+	// orchestrator's: a run whose network went away cannot end anything, so
+	// the bound has to be enforced where the work is, and a frame reported
+	// against it stopped because of the clock and not because of the package.
+	PartDeadline = "deadline"
 )
 
 // runStage runs one task's gating frame wherever this run executes it.

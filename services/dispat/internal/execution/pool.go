@@ -271,7 +271,7 @@ func isPlatformCompatible(platform string, platforms []string) bool {
 // Release gives one slot back, which is what an attempt both parties saw end
 // does.
 func (l *Lease) Release() {
-	l.settle(false)
+	l.settle("")
 }
 
 // Leak keeps one slot and takes its node out of the pool.
@@ -288,13 +288,17 @@ func (l *Lease) Release() {
 // attempt ended, which is what keeps a run that helps its own pool from losing
 // the capacity it lent itself, and what keeps the orchestrator available for
 // the frames only it may run.
-func (l *Lease) Leak() {
-	l.settle(!l.IsLocal)
+func (l *Lease) Leak(reason string) {
+	if l.IsLocal {
+		l.settle("")
+		return
+	}
+	l.settle(reason)
 }
 
 // settle is the one place a lease ends, so that a lease returned twice cannot
 // hand out capacity nobody released.
-func (l *Lease) settle(isLeaked bool) {
+func (l *Lease) settle(reason string) {
 	if l.isSettled {
 		return
 	}
@@ -305,7 +309,7 @@ func (l *Lease) settle(isLeaked bool) {
 		if node.name != l.Node {
 			continue
 		}
-		if isLeaked {
+		if reason != "" {
 			node.isHealthy = false
 			break
 		}
@@ -317,9 +321,10 @@ func (l *Lease) settle(isLeaked bool) {
 	close(pool.changed)
 	pool.changed = make(chan struct{})
 	pool.mu.Unlock()
-	if isLeaked {
-		pool.log.Warn().Str("worker", l.Node).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
-			Msg("the node stopped answering and its capacity is held")
+	if reason != "" {
+		pool.log.Warn().Str("worker", l.Node).Str("reason", reason).
+			Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
+			Msg("worker marked unhealthy")
 		return
 	}
 	pool.log.Debug().Str("worker", l.Node).Msg("node slot returned")

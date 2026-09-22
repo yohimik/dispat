@@ -58,6 +58,11 @@ var transitions = []Transition{
 	{From: MessageAssignment, To: MessageCancel, By: PartyOrchestrator},
 	{From: MessageClaim, To: MessageCancel, By: PartyOrchestrator},
 	{From: MessageReady, To: MessageCancel, By: PartyOrchestrator},
+	// An authorized publisher may be withdrawn too. The withdrawal does not
+	// fence it, because the command may already have run; what it does is ask
+	// for the acknowledgement that says whether it had, which is the only
+	// evidence a run has about an effect it authorized (§28.6).
+	{From: MessageGo, To: MessageCancel, By: PartyOrchestrator},
 	{From: MessageCancel, To: MessageAck, By: PartyWorker},
 }
 

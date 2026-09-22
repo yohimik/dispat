@@ -19,6 +19,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -100,7 +101,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
 	c.watchers = make(map[string]*watcher, len(c.Links))
 	for _, link := range c.Links {
 		observer := &watcher{coordinator: c, link: link, mailbox: c.mailboxes[link.Name],
-			attempts: map[string]*attempt{}}
+			attempts: map[string]*attemptState{}}
 		c.watchers[link.Name] = observer
 		c.watching.Add(1)
 		go func() {
@@ -155,14 +156,55 @@ func (c *Coordinator) Build(ctx context.Context, request release.StageRequest,
 	space := request.Release.Pkg.Space
 	placement := ResolveStagePlacement(request.Stage,
 		space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)
-	lease, err := c.Pool.Acquire(ctx, space.BuildPlatforms, placement)
-	if err != nil {
-		return release.StageOutcome{}, c.refuseTask(task, "", err)
+	return c.placeTask(ctx, task, placement, space.BuildPlatforms, "",
+		func(ctx context.Context, lease *Lease, attempt int) (release.StageOutcome, error) {
+			if lease.IsLocal {
+				return c.buildHere(ctx, lease, task, request, here)
+			}
+			return c.dispatchBuild(ctx, lease, KindBuild, task, attempt, request)
+		})
+}
+
+// maxPlacementAttempts bounds how often one task is offered again after an
+// assignment nobody claimed was revoked.
+//
+// It is small and it exists so that a pool with no capacity fails a task
+// instead of offering it for ever: three attempts is enough for a node that
+// was busy with another run's work to become free, and a fourth would be this
+// run deciding that waiting is always better than saying so.
+const maxPlacementAttempts = 3
+
+// placeTask takes a node slot, runs one attempt on it and offers the task
+// again when the assignment was revoked before anybody claimed it.
+//
+// The loop is what separates queue time from run time. An assignment that sat
+// in a mailbox behind another run's work performed nothing and holds nothing,
+// so revoking it costs the run a branch and nothing else; placing the task
+// again is then an ordinary placement, on whichever compatible node is free by
+// then, including the one that was busy. A task that runs out of attempts
+// fails saying what was actually wrong, which is that the pool had no capacity
+// for it rather than that anything about the package is broken.
+func (c *Coordinator) placeTask(ctx context.Context, task string, placement Placement,
+	platforms []string, preferred string,
+	attemptOnce func(context.Context, *Lease, int) (release.StageOutcome, error)) (release.StageOutcome, error) {
+	for attempt := 1; ; attempt++ {
+		lease, err := c.Pool.AcquireNear(ctx, platforms, placement, preferred)
+		if err != nil {
+			return release.StageOutcome{}, c.refuseTask(task, "", attempt, err)
+		}
+		outcome, err := attemptOnce(ctx, lease, attempt)
+		if !errors.Is(err, errQueueExpired) {
+			return outcome, err
+		}
+		if attempt >= maxPlacementAttempts {
+			return outcome, c.refuseTask(task, "", attempt, fmt.Errorf(
+				"no node claimed this task within %s on any of %d attempts: the pool had no capacity for it",
+				c.Timeouts.Task, attempt))
+		}
+		c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
+			Int("attempt", attempt).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
+			Msg("the queued assignment was revoked and the task is placed again")
 	}
-	if lease.IsLocal {
-		return c.buildHere(ctx, lease, task, request, here)
-	}
-	return c.dispatchBuild(ctx, lease, KindBuild, task, request)
 }
 
 // dispatchBuild prepares one package's input state, offers its build frame to
@@ -173,44 +215,44 @@ func (c *Coordinator) Build(ctx context.Context, request release.StageRequest,
 // under the same rules, and the word is what tells a reader of the mailbox,
 // of the branch names and of the log which of the two it is looking at.
 func (c *Coordinator) dispatchBuild(ctx context.Context, lease *Lease, kind, task string,
-	request release.StageRequest) (release.StageOutcome, error) {
+	attempt int, request release.StageRequest) (release.StageOutcome, error) {
 	sources := c.dispatch.Sources(request.Release.Pkg.Name)
 	dir, err := resolvePackageDir(sources, request)
 	if err != nil {
 		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
 	}
 	commits, err := c.captureInputs(ctx, sources)
 	if err != nil {
 		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
 	}
 	c.rememberConsumedSnapshot(request.Release.Pkg.Name, request.Release.Pkg.Repository, sources, commits)
 	repositories, err := c.offerInputs(ctx, lease.Node, sources, commits)
 	if err != nil {
 		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
 	}
 	inputs, err := c.resolveTaskInputs(ctx, lease.Node, request.Release.Pkg.Name)
 	if err != nil {
 		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, err)
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
 	}
-	return c.runTask(ctx, lease, kind, task, dir, repositories, inputs, request)
+	return c.runTask(ctx, lease, kind, task, attempt, dir, repositories, inputs, request)
 }
 
 // runTask offers one assignment and waits for its terminal result, settling
 // the node slot exactly once whichever way the attempt ends.
-func (c *Coordinator) runTask(ctx context.Context, lease *Lease, kind, task, dir string,
-	repositories []AssignmentRepository, inputs []AssignmentInput,
+func (c *Coordinator) runTask(ctx context.Context, lease *Lease, kind, task string, attempt int,
+	dir string, repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) (release.StageOutcome, error) {
 	outcome := release.StageOutcome{Node: lease.Node}
-	offer, err := c.offerTask(ctx, lease, kind, task, dir, repositories, inputs, request)
+	offer, err := c.offerTask(ctx, lease, kind, task, attempt, dir, repositories, inputs, request)
 	if err != nil {
 		return outcome, err
 	}
 	defer offer.observer.forget(offer.branch)
-	return c.awaitResult(ctx, lease, task, outcome, offer.replies, offer.branch, request)
+	return c.awaitResult(ctx, lease, task, attempt, kind, outcome, offer, request)
 }
 
 // taskOffer is one assignment already on its node's mailbox: the branch it
@@ -224,6 +266,10 @@ type taskOffer struct {
 	observer *watcher
 	replies  <-chan taskReply
 	branch   string
+	// offered is the assignment's own object id, which every message of the
+	// attempt names and which every message this party writes afterwards has
+	// to echo back.
+	offered string
 }
 
 // offerTask writes one assignment onto its node's mailbox and registers the
@@ -232,57 +278,99 @@ type taskOffer struct {
 //
 // A failed offer settles the lease here: nothing was placed anywhere, so the
 // slot is free rather than held by an attempt that never existed.
-func (c *Coordinator) offerTask(ctx context.Context, lease *Lease, kind, task, dir string,
-	repositories []AssignmentRepository, inputs []AssignmentInput,
+func (c *Coordinator) offerTask(ctx context.Context, lease *Lease, kind, task string, attempt int,
+	dir string, repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) (taskOffer, error) {
-	assignment := c.formatAssignment(lease.Node, kind, task, dir, repositories, inputs, request)
+	assignment := c.formatAssignment(lease.Node, kind, task, attempt, dir, repositories, inputs, request)
 	observer := c.watchers[lease.Node]
 	replies := observer.watch(assignment.Branch)
 	offered, err := c.mailboxes[lease.Node].Assign(ctx, assignment)
 	if err != nil {
 		observer.forget(assignment.Branch)
 		lease.Release()
-		return taskOffer{}, c.refuseTask(task, lease.Node, err)
+		return taskOffer{}, c.refuseTask(task, lease.Node, attempt, err)
 	}
 	c.recordOwnedRef(lease.Node, assignment.Branch, offered)
 	observer.bind(assignment.Branch, offered, assignment)
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
 		Str("kind", kind).Msg("task assigned")
-	return taskOffer{observer: observer, replies: replies, branch: assignment.Branch}, nil
+	return taskOffer{observer: observer, replies: replies, branch: assignment.Branch,
+		offered: offered}, nil
 }
 
 // awaitResult waits for the node to report, for the task deadline, or for the
 // run to be interrupted, and settles the slot according to which of the three
 // happened.
-func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string,
-	outcome release.StageOutcome, replies <-chan taskReply, branch string,
+func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string, attempt int,
+	kind string, outcome release.StageOutcome, offer taskOffer,
 	request release.StageRequest) (release.StageOutcome, error) {
 	deadline := time.NewTimer(c.Timeouts.Task)
 	defer deadline.Stop()
-	select {
-	case reply := <-replies:
-		lease.Release()
-		return c.readTaskOutcome(ctx, task, outcome, reply.result, reply.commit, branch, request)
-	case <-deadline.C:
-		// The work may still be running on that machine, so the slot stays
-		// where it is and the node leaves the pool.
-		lease.Leak()
-		return outcome, c.refuseTask(task, lease.Node, fmt.Errorf(
-			"the node did not report within %s: the attempt is abandoned and the node is not used again by this run",
-			c.Timeouts.Task))
-	case <-ctx.Done():
-		lease.Leak()
-		return outcome, fmt.Errorf("waiting for %s on %s: %w", task, lease.Node, ctx.Err())
+	tip := offer.offered
+	isClaimed := false
+	for {
+		select {
+		case reply := <-offer.replies:
+			if reply.kind == MessageClaim {
+				// The work has started, so the run-time clock starts with it.
+				isClaimed, tip = true, reply.commit
+				deadline.Reset(c.Timeouts.Task)
+				continue
+			}
+			lease.Release()
+			return c.readTaskOutcome(ctx, task, attempt, outcome, reply.result, reply.commit,
+				offer.branch, request)
+		case <-deadline.C:
+			if !isClaimed {
+				expired, err := c.settleQueuedAttempt(ctx, lease, task, attempt, offer)
+				if err != nil {
+					return outcome, err
+				}
+				// The node claimed the work while the withdrawal was being
+				// written, so this is the run-time wait after all.
+				isClaimed, tip = true, expired
+				deadline.Reset(c.Timeouts.Task)
+				continue
+			}
+			return outcome, c.settleAbandonedAttempt(ctx, lease, task, attempt, offer, tip)
+		case <-ctx.Done():
+			return outcome, c.settleInterruptedAttempt(ctx, lease, task, attempt, kind, offer, tip)
+		}
 	}
+}
+
+// settleQueuedAttempt revokes an assignment nobody claimed, and answers the
+// object the branch now carries when the revocation lost the race.
+//
+// The error it answers is the sentinel that makes the caller place the task
+// again: nothing was executed anywhere, so this is not a failure of the task
+// and must not be reported as one.
+func (c *Coordinator) settleQueuedAttempt(ctx context.Context, lease *Lease, task string,
+	attempt int, offer taskOffer) (string, error) {
+	if c.revokeAttempt(ctx, lease.Node, task, attempt, offer.branch, offer.offered) {
+		// Provably nothing ran: the ref is gone at the object this run put
+		// there, so the node could not have claimed it, and the slot is free.
+		lease.Release()
+		return "", errQueueExpired
+	}
+	head, err := c.mailboxes[lease.Node].Reread(ctx, offer.branch)
+	if err != nil || head.OID == "" {
+		lease.Leak(LeakTransport)
+		return "", c.refuseTask(task, lease.Node, attempt, fmt.Errorf(
+			"no node claimed this task within %s and the assignment could not be revoked: %w",
+			c.Timeouts.Task, err))
+	}
+	return head.OID, nil
 }
 
 // readTaskOutcome turns one accepted result into what the executor does with
 // it: the exports to merge, the stray writes to report, and the failure to
 // fail the package with.
-func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome release.StageOutcome,
-	result Result, commit, branch string, request release.StageRequest) (release.StageOutcome, error) {
-	outcome, err := c.readReportedOutcome(task, outcome, result)
+func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt int,
+	outcome release.StageOutcome, result Result, commit, branch string,
+	request release.StageRequest) (release.StageOutcome, error) {
+	outcome, err := c.readReportedOutcome(task, attempt, outcome, result)
 	if err != nil {
 		return outcome, err
 	}
@@ -309,7 +397,7 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome 
 // describes none of its own, so running it through the admission would be
 // asking a publisher for a second, later version of a set this run has already
 // admitted, and refusing the publication for not having one.
-func (c *Coordinator) readReportedOutcome(task string, outcome release.StageOutcome,
+func (c *Coordinator) readReportedOutcome(task string, attempt int, outcome release.StageOutcome,
 	result Result) (release.StageOutcome, error) {
 	outcome.Exports = formatOutputs(result.Exports)
 	outcome.FailedPart = result.FailedPart
@@ -320,7 +408,7 @@ func (c *Coordinator) readReportedOutcome(task string, outcome release.StageOutc
 			Msg("the task wrote tracked files outside what it declared, and they are not admitted")
 	}
 	if result.Status != StatusSucceeded {
-		return outcome, c.refuseTask(task, result.Node, fmt.Errorf(
+		return outcome, c.refuseTask(task, result.Node, attempt, fmt.Errorf(
 			"the node reported the %s frame as %s%s (exit %d)",
 			result.Kind, result.Status, formatFailedPart(result), result.Exit))
 	}
@@ -346,8 +434,8 @@ func formatFailedPart(result Result) string {
 
 // refuseTask is the failure one dispatched task reports, with the work it is
 // about already named on it.
-func (c *Coordinator) refuseTask(task, node string, err error) error {
-	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: node, Task: task, Attempt: 1},
+func (c *Coordinator) refuseTask(task, node string, attempt int, err error) error {
+	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: node, Task: task, Attempt: attempt},
 		CodeIntegrity, CategoryIntegrity, "%s could not be executed: %w", task, err)
 }
 
@@ -449,17 +537,12 @@ func resolvePackageDir(sources []Source, request release.StageRequest) (string, 
 }
 
 // formatAssignment is the document one build task travels as.
-func (c *Coordinator) formatAssignment(node, kind, task, dir string,
+func (c *Coordinator) formatAssignment(node, kind, task string, attempt int, dir string,
 	repositories []AssignmentRepository, inputs []AssignmentInput,
 	request release.StageRequest) *Assignment {
 	branch := FormatBranch(node, kind, time.Now())
 	return &Assignment{
-		Header: Header{
-			Protocol: ProtocolVersion, Kind: kind, Run: c.Run,
-			PlanDigest: c.PlanDigest, Task: task, Attempt: 1,
-			Generation: c.Generation, Node: node, Branch: branch,
-			IssuedAt: time.Now().UTC().Format(time.RFC3339),
-		},
+		Header:       c.formatOrchestratorHeader(kind, task, attempt, node, branch),
 		Repositories: repositories,
 		Package: &AssignmentPackage{
 			Name:       request.Release.Pkg.Name,
@@ -480,7 +563,7 @@ func (c *Coordinator) formatAssignment(node, kind, task, dir string,
 		Inputs:          inputs,
 		Outputs:         resolveDeclaredOutputs(kind, request),
 		Permits:         AssignmentPermits{Publish: kind == KindPublish},
-		DeadlineSeconds: resolveTaskDeadlineSeconds(kind, c.Timeouts.Task),
+		DeadlineSeconds: resolveTaskDeadlineSeconds(c.Timeouts.Task),
 		Limits:          c.Limits,
 	}
 }
@@ -497,17 +580,17 @@ func resolveDeclaredOutputs(kind string, request release.StageRequest) []string 
 	return request.Release.Pkg.Space.BuildOutputs
 }
 
-// resolveTaskDeadlineSeconds is the bound a node holds one attempt to.
+// resolveTaskDeadlineSeconds is the bound every node holds one attempt to,
+// stated in the assignment so that the two parties hold the same number.
 //
-// Only a publication carries one in this build. A build that outlives the
-// run's own wait is abandoned and costs a machine some work; a publisher that
-// outlived it would be a publisher acting on an authorization the run has
-// already written off, which is the one thing §28.6 asks a node to prevent by
-// itself. Gate 12 extends this to every kind.
-func resolveTaskDeadlineSeconds(kind string, wait time.Duration) int {
-	if kind != KindPublish {
-		return 0
-	}
+// Every kind carries it, and that is the point. The orchestrator's wait
+// decides when it stops expecting an answer; this decides when the work
+// actually stops. A node that kept running past the run's own wait would be a
+// machine holding a folder, a registry session and a capacity slot for a run
+// that has already written the attempt off, and a run whose network went away
+// cannot end anything at all: the only party that can is the one the work is
+// on (§28.6).
+func resolveTaskDeadlineSeconds(wait time.Duration) int {
 	return int(wait / time.Second)
 }
 
@@ -524,11 +607,12 @@ type watcher struct {
 	// mu guards attempts alone: the loop reads it, and the tasks that come and
 	// go write it.
 	mu       sync.Mutex
-	attempts map[string]*attempt
+	attempts map[string]*attemptState
 }
 
-// attempt is one dispatched task waiting for its node to report.
-type attempt struct {
+// attemptState is one dispatched task waiting for its node to report, as the
+// poller holds it.
+type attemptState struct {
 	offered    string
 	assignment *Assignment
 	replies    chan taskReply
@@ -547,6 +631,13 @@ type attempt struct {
 	// isTipForeign marks an attempt whose branch tip was not written by either
 	// party, so the line saying so is written once rather than once per poll.
 	isTipForeign bool
+	// isClaimAccepted marks an attempt whose node has been seen to take the
+	// work on, so that reading the chain under a moved tip does not start the
+	// run-time clock a second time.
+	isClaimAccepted bool
+	// authorizedTip is the authorization commit this run wrote, which is what
+	// a withdrawal of a running publisher is leased against.
+	authorizedTip string
 }
 
 // taskReply is one accepted message of an attempt together with the object it
@@ -579,7 +670,10 @@ type taskReply struct {
 func (w *watcher) watch(branch string) <-chan taskReply {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	waiting := &attempt{replies: make(chan taskReply, 2)}
+	// Three messages can reach one attempt before it ends: the claim that
+	// starts its run-time clock, the ready of a publication, and the terminal
+	// result. The poller must never block on handing one over.
+	waiting := &attemptState{replies: make(chan taskReply, 3)}
 	w.attempts[branch] = waiting
 	return waiting.replies
 }
@@ -604,7 +698,7 @@ func (w *watcher) forget(branch string) {
 
 // find answers the attempt waiting on one branch, and nil for a branch this
 // run has nothing to do with.
-func (w *watcher) find(branch string) *attempt {
+func (w *watcher) find(branch string) *attemptState {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	waiting := w.attempts[branch]
@@ -612,6 +706,18 @@ func (w *watcher) find(branch string) *attempt {
 		return nil
 	}
 	return waiting
+}
+
+// readAuthorizedTip answers the authorization commit this run wrote on one
+// branch, and the empty string for an attempt it has not authorized.
+func (w *watcher) readAuthorizedTip(branch string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	waiting := w.attempts[branch]
+	if waiting == nil {
+		return ""
+	}
+	return waiting.authorizedTip
 }
 
 // isIdle reports whether this endpoint has nothing in flight, which is what
@@ -705,7 +811,13 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 // A step this party wrote, a step of another attempt and a step nobody signed
 // are one situation from here, which is "no answer yet", and the task deadline
 // is what decides how long that is tolerated.
-func (w *watcher) acceptReply(ctx context.Context, tip ChainTip, waiting *attempt) bool {
+func (w *watcher) acceptReply(ctx context.Context, tip ChainTip, waiting *attemptState) bool {
+	if tip.Kind == MessageClaim {
+		if waiting.isClaimAccepted {
+			return false
+		}
+		return w.offerClaim(ctx, tip, waiting)
+	}
 	if tip.Kind == MessageReady {
 		if waiting.isReadyAccepted {
 			return false
@@ -734,7 +846,7 @@ func (w *watcher) acceptReply(ctx context.Context, tip ChainTip, waiting *attemp
 // one line: an operator reading it learns that somebody with write access to
 // the mailbox put a commit on an attempt's branch, which is worth knowing and
 // is not worth repeating every poll.
-func (w *watcher) searchChainForReply(ctx context.Context, head gitx.RemoteHead, waiting *attempt) bool {
+func (w *watcher) searchChainForReply(ctx context.Context, head gitx.RemoteHead, waiting *attemptState) bool {
 	ancestors, err := w.mailbox.InspectChain(ctx, head)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -762,7 +874,7 @@ func (w *watcher) searchChainForReply(ctx context.Context, head gitx.RemoteHead,
 // offerReady hands one publisher's ready message to the task waiting to
 // authorize it, and leaves the attempt registered: the branch has one more
 // message to come, and the result of it is what ends the attempt.
-func (w *watcher) offerReady(ctx context.Context, tip ChainTip, waiting *attempt) bool {
+func (w *watcher) offerReady(ctx context.Context, tip ChainTip, waiting *attemptState) bool {
 	ready, reason := w.readReady(ctx, tip, waiting)
 	if reason != "" {
 		w.reportRejectedReply(tip, reason)
@@ -771,6 +883,58 @@ func (w *watcher) offerReady(ctx context.Context, tip ChainTip, waiting *attempt
 	waiting.isReadyAccepted = true
 	waiting.replies <- taskReply{kind: MessageReady, ready: ready, tip: tip, commit: tip.OID}
 	return true
+}
+
+// offerClaim tells the task waiting on a branch that its node has taken the
+// work on, and leaves the attempt registered: the claim is the beginning of
+// the attempt rather than the end of it.
+//
+// It matters for one reason, and it is the reason §28.2 states separately from
+// everything else about capacity: the run's wait for an attempt has to measure
+// the work rather than the queue. An assignment sitting in a mailbox behind
+// another run's task has not started, so a wait that began when this run
+// started waiting would abandon a task that never ran, hold a slot nobody was
+// using and take a perfectly healthy node out of the pool.
+func (w *watcher) offerClaim(ctx context.Context, tip ChainTip, waiting *attemptState) bool {
+	if reason := w.readClaim(ctx, tip, waiting); reason != "" {
+		w.reportRejectedReply(tip, reason)
+		return false
+	}
+	waiting.isClaimAccepted = true
+	waiting.replies <- taskReply{kind: MessageClaim, tip: tip, commit: tip.OID}
+	w.coordinator.Log.Debug().Str("worker", w.link.Name).Str("branch", tip.Branch).
+		Str("commit", tip.OID).Msg("the node claimed the work")
+	return true
+}
+
+// readClaim verifies one claim and answers the reason it is not this
+// attempt's. Nothing of its contents is used: what the claim says is that the
+// work has started, and the object it was read at is what the run remembers.
+func (w *watcher) readClaim(ctx context.Context, tip ChainTip, waiting *attemptState) RejectReason {
+	document, err := w.mailbox.Read(ctx, tip, w.coordinator.Limits.MaxManifestBytes)
+	if err != nil {
+		if reason := RejectionReason(err); reason != "" {
+			return reason
+		}
+		return ReasonUnreadable
+	}
+	var claim Claim
+	if err := json.Unmarshal(document, &claim); err != nil {
+		return ReasonUnreadable
+	}
+	if reason := CheckHeader(claim.Header,
+		Binding{Node: w.link.Name, Branch: tip.Branch}, time.Now()); reason != "" {
+		return reason
+	}
+	offered := waiting.assignment.Header
+	if !IsTransitionLegal(tip.Previous, MessageClaim, PartyWorker) ||
+		claim.Assignment != waiting.offered || tip.PreviousOID != waiting.offered ||
+		claim.Run != offered.Run || claim.Task != offered.Task ||
+		claim.Attempt != offered.Attempt || claim.Generation != offered.Generation ||
+		claim.PlanDigest != offered.PlanDigest {
+		return ReasonReplay
+	}
+	return ""
 }
 
 // reportRejectedReply writes the one line a refused reply produces: the branch,
@@ -783,7 +947,7 @@ func (w *watcher) reportRejectedReply(tip ChainTip, reason RejectReason) {
 
 // readResult verifies one reply and answers the result it carries or the
 // reason it is not this attempt's.
-func (w *watcher) readResult(ctx context.Context, tip ChainTip, waiting *attempt) (Result, RejectReason) {
+func (w *watcher) readResult(ctx context.Context, tip ChainTip, waiting *attemptState) (Result, RejectReason) {
 	document, err := w.mailbox.Read(ctx, tip, w.coordinator.Limits.MaxManifestBytes)
 	if err != nil {
 		if reason := RejectionReason(err); reason != "" {
@@ -812,7 +976,7 @@ func (w *watcher) readResult(ctx context.Context, tip ChainTip, waiting *attempt
 // may only follow the claim of this very attempt, so the object it names as
 // its claim has to be the object it was written on top of. That is what keeps
 // an authentic ready of one attempt from being replayed onto another.
-func (w *watcher) readReady(ctx context.Context, tip ChainTip, waiting *attempt) (Ready, RejectReason) {
+func (w *watcher) readReady(ctx context.Context, tip ChainTip, waiting *attemptState) (Ready, RejectReason) {
 	document, err := w.mailbox.Read(ctx, tip, w.coordinator.Limits.MaxManifestBytes)
 	if err != nil {
 		if reason := RejectionReason(err); reason != "" {
@@ -844,7 +1008,7 @@ func (w *watcher) readReady(ctx context.Context, tip ChainTip, waiting *attempt)
 // plus the ones only the orchestrator can ask: that the reply answers the
 // assignment this run offered, on the chain a worker could have written it on,
 // and under the ownership this run holds.
-func checkTaskResult(result Result, node string, tip ChainTip, waiting *attempt) RejectReason {
+func checkTaskResult(result Result, node string, tip ChainTip, waiting *attemptState) RejectReason {
 	if reason := CheckHeader(result.Header, Binding{Node: node, Branch: tip.Branch}, time.Now()); reason != "" {
 		return reason
 	}

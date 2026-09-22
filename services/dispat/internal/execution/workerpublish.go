@@ -46,13 +46,12 @@ const defaultAuthorizationWait = 30 * time.Minute
 // so that a build's frame carries no publication machinery it would have to
 // skip: what makes a publication different is one call, and the difference is
 // visible in one place.
-func (w *Worker) resolvePublicationGate(tip ChainTip, claimed string, assignment Assignment,
-	log zerolog.Logger) framePermitx {
-	if assignment.Kind != KindPublish {
+func (w *Worker) resolvePublicationGate(task *claimedTask, log zerolog.Logger) framePermitx {
+	if task.assignment.Kind != KindPublish {
 		return nil
 	}
 	return func(ctx context.Context, exports []plan.Output) taskOutcome {
-		return w.awaitAuthorization(ctx, tip, claimed, assignment, exports, log)
+		return w.awaitAuthorization(ctx, task, exports, log)
 	}
 }
 
@@ -64,20 +63,26 @@ func (w *Worker) resolvePublicationGate(tip ChainTip, claimed string, assignment
 // result: they are what a beforePublish hook is for, and the orchestrator
 // merges them onto the release at the same point the local path does, so a
 // publication that is refused afterwards still carried them home.
-func (w *Worker) awaitAuthorization(ctx context.Context, tip ChainTip, claimed string,
-	assignment Assignment, exports []plan.Output, log zerolog.Logger) taskOutcome {
-	ready, err := w.advance(ctx, tip, claimed, MessageReady, Ready{
+func (w *Worker) awaitAuthorization(ctx context.Context, task *claimedTask,
+	exports []plan.Output, log zerolog.Logger) taskOutcome {
+	assignment, tip := task.assignment, task.tip
+	task.reportPhase(PhaseAuthorizationWait, false)
+	ready, err := w.advance(ctx, tip, task.claimed, MessageReady, Ready{
 		Header: w.formatReplyHeader(assignment.Header), Assignment: tip.OID,
-		Claim: claimed, Exports: formatExports(exports),
+		Claim: task.claimed, Exports: formatExports(exports),
 	}, nil)
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("this node could not report itself ready to publish")
-		return withheldPublication(claimed)
+		return withheldPublication(task.claimed)
 	}
+	// The branch has moved, so the object this attempt's next message follows
+	// has moved with it: a withdrawal arriving on the poll is leased against
+	// what is there now.
+	task.advanceTip(ready)
 	log.Info().Str("commit", ready).Str("package", assignment.Package.Name).
 		Msg("ready to publish, awaiting authorization")
-	return w.watchAuthorization(ctx, tip, ready, assignment, log)
+	return w.watchAuthorization(ctx, task, ready, log)
 }
 
 // watchAuthorization polls the attempt's own branch until it carries the
@@ -87,8 +92,9 @@ func (w *Worker) awaitAuthorization(ctx context.Context, tip ChainTip, claimed s
 // loop that watches the whole namespace would consume the movement this wait
 // is about, and a publisher that missed its authorization would wait for a
 // push that had already happened.
-func (w *Worker) watchAuthorization(ctx context.Context, tip ChainTip, ready string,
-	assignment Assignment, log zerolog.Logger) taskOutcome {
+func (w *Worker) watchAuthorization(ctx context.Context, task *claimedTask, ready string,
+	log zerolog.Logger) taskOutcome {
+	assignment, tip := task.assignment, task.tip
 	deadline := time.NewTimer(resolveAuthorizationWait(assignment.DeadlineSeconds))
 	defer deadline.Stop()
 	interval := minimumPollInterval
@@ -111,14 +117,15 @@ func (w *Worker) watchAuthorization(ctx context.Context, tip ChainTip, ready str
 		if !isMoved {
 			continue
 		}
-		return w.resolveAuthorization(ctx, answer, tip, ready, assignment, log)
+		return w.resolveAuthorization(ctx, answer, task, ready, log)
 	}
 }
 
 // resolveAuthorization decides what one moved tip means for a publication that
 // is waiting at the gate.
-func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, tip ChainTip,
-	ready string, assignment Assignment, log zerolog.Logger) taskOutcome {
+func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, task *claimedTask,
+	ready string, log zerolog.Logger) taskOutcome {
+	assignment, tip := task.assignment, task.tip
 	if answer.Kind == MessageCancel {
 		if reason := w.checkWithdrawal(ctx, answer, tip, ready, assignment); reason != "" {
 			// A withdrawal nobody signed is not a withdrawal. It cannot make
@@ -131,7 +138,7 @@ func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, tip 
 				Msg("the publication withdrawal was refused")
 			return withheldPublication(ready)
 		}
-		return w.acknowledgeWithdrawal(ctx, answer, tip, assignment, log)
+		return w.acknowledgeWithdrawal(ctx, answer, task, log)
 	}
 	if answer.Kind != MessageGo {
 		log.Warn().Str("message", string(answer.Kind)).Str("code", CodeAuthority).
@@ -148,6 +155,9 @@ func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, tip 
 	if !w.isAuthorizationCurrent(ctx, tip.Branch, answer.OID, log) {
 		return withheldPublication(answer.OID)
 	}
+	// The authorization is now what the attempt's next message follows, so a
+	// withdrawal of a running publisher is leased against it.
+	task.advanceTip(answer.OID)
 	log.Info().Str("commit", answer.OID).Str("package", assignment.Package.Name).
 		Msg("publication authorized, starting the publish command")
 	return taskOutcome{expectedTip: answer.OID}
@@ -161,8 +171,9 @@ func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, tip 
 // that nothing happened, so a result pushed afterwards would be a second
 // answer on a chain that carries one, and the branch would have to be read
 // twice to find out which of them is true.
-func (w *Worker) acknowledgeWithdrawal(ctx context.Context, answer ChainTip, tip ChainTip,
-	assignment Assignment, log zerolog.Logger) taskOutcome {
+func (w *Worker) acknowledgeWithdrawal(ctx context.Context, answer ChainTip, task *claimedTask,
+	log zerolog.Logger) taskOutcome {
+	assignment, tip := task.assignment, task.tip
 	// Nothing of the publication has started, so there is no process group to
 	// wait for: the acknowledgement is owed immediately and is written on a
 	// context of its own, because the withdrawal may have come with a stop.
@@ -170,6 +181,7 @@ func (w *Worker) acknowledgeWithdrawal(ctx context.Context, answer ChainTip, tip
 	defer done()
 	acked, err := w.advance(ackCtx, tip, answer.OID, MessageAck, Ack{
 		Header: w.formatReplyHeader(assignment.Header), Assignment: tip.OID, Cancel: answer.OID,
+		Phase: PhaseAuthorizationWait,
 	}, nil)
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).

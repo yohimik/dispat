@@ -36,6 +36,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // mailboxx is what a serving node needs of its mailbox: see what has moved,
@@ -132,6 +133,12 @@ type Worker struct {
 	activity   sync.Mutex
 	lastActive time.Time
 	inFlight   int
+	// claims are the tasks in flight by coordination branch, so that a
+	// withdrawal arriving on the poll can reach the work it is about. One
+	// owner for the map, and one mutex for the small amount of progress each
+	// entry carries across that boundary.
+	claims  sync.Mutex
+	claimed map[string]*claimedTask
 }
 
 // Serve polls until the process is signalled or goes idle, and answers the
@@ -351,6 +358,13 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		w.Mailbox.Reconsider(head.Name)
 		return false, err
 	}
+	if tip.Kind == MessageCancel {
+		// A withdrawal is the one message of another party this node acts on
+		// outside a task's own wait: the work it names is running in a
+		// goroutine of this process, and the poll is where the sentence
+		// arrives.
+		return w.observeWithdrawal(ctx, tip), nil
+	}
 	if ResolveWorkerAction(tip) != ActionClaim {
 		w.reportIgnoredTip(tip)
 		return false, nil
@@ -422,13 +436,22 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 		<-w.slots
 		return false, err
 	}
+	// The task's own context is created here rather than inside the goroutine
+	// because the party that cancels it is this one: a withdrawal arrives on
+	// the poll, and the cancellation has to be reachable from it.
+	bounded, stop := resolveTaskDeadline(ctx, assignment.DeadlineSeconds)
+	task := &claimedTask{assignment: assignment, tip: tip, claimed: claimed,
+		stop: stop, expectedTip: claimed}
+	forget := w.registerClaim(task)
 	w.running.Add(1)
 	w.beginTask()
 	go func() {
 		defer w.running.Done()
 		defer w.endTask()
 		defer func() { <-w.slots }()
-		w.answerTask(ctx, tip, claimed, assignment)
+		defer forget()
+		defer stop()
+		w.answerTask(ctx, bounded, task)
 	}()
 	return true, nil
 }
@@ -438,13 +461,22 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 // The report goes out on a context detached from the run's, bounded by its own
 // deadline: a node asked to stop has already had its commands killed by that
 // same cancellation, and the one thing it still owes is the sentence saying so.
-func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, assignment Assignment) {
+func (w *Worker) answerTask(ctx context.Context, bounded context.Context, task *claimedTask) {
+	assignment, tip := task.assignment, task.tip
 	log := w.Log.With().Str("run", assignment.Run).
 		Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("branch", tip.Branch).Logger()
-	bounded, done := resolveTaskDeadline(ctx, assignment.DeadlineSeconds)
-	defer done()
-	outcome := w.runTask(bounded, tip, claimed, assignment, log)
+	outcome := w.runTask(bounded, task, log)
+	if cancel, _, _ := task.readProgress(); cancel != "" {
+		// The run withdrew the attempt and is waiting to hear that nothing of
+		// it is running any more. The commands are gone by now, because the
+		// runner kills the process group and waits for it, so the
+		// acknowledgement is a statement about this machine rather than a
+		// promise: it is the attempt's terminal message, and no result follows
+		// it.
+		w.acknowledgeCancellation(ctx, task, log)
+		return
+	}
 	if outcome.isAnswered {
 		// The attempt is already terminal on the branch: a withdrawal this node
 		// acknowledged is the answer, and a result written on top of it would be
@@ -456,6 +488,13 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 		// The commands died of the stop rather than of anything about the
 		// package, which is a different thing for the run to hear.
 		outcome.status, outcome.failedPart = StatusCancelled, ""
+	} else if bounded.Err() != nil && outcome.status != StatusSucceeded {
+		// The assignment's own deadline, enforced by this node on its own
+		// clock: the work stopped because of the bound the run stated and not
+		// because of anything about the package (§28.6).
+		outcome.failedPart = release.PartDeadline
+		log.Warn().Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
+			Msg("the task reached the deadline its assignment stated and was ended here")
 	}
 	report := Result{
 		Header:      w.formatReplyHeader(assignment.Header),
@@ -472,7 +511,7 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx),
 		w.resolveReportTimeout(len(carried) > 0))
 	defer done()
-	reported, err := w.advance(reportCtx, tip, resolveResultLease(claimed, outcome),
+	reported, err := w.advance(reportCtx, tip, resolveResultLease(task.claimed, outcome),
 		MessageResult, report, carried)
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).

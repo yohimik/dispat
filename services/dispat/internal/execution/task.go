@@ -90,8 +90,9 @@ func resolveTaskDeadline(ctx context.Context, seconds int) (context.Context, con
 // whose script exited non-zero are the same thing to the run that dispatched
 // it: a task that did not succeed, reported as one, on a node that carries on
 // serving.
-func (w *Worker) runTask(ctx context.Context, tip ChainTip, claimed string,
-	assignment Assignment, log zerolog.Logger) taskOutcome {
+func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Logger) taskOutcome {
+	assignment := task.assignment
+	task.reportPhase(release.PartInputs, false)
 	if assignment.Package == nil || assignment.Frame == nil || len(assignment.Repositories) == 0 {
 		log.Warn().Str("code", CodeAuthority).Str("category", CategoryAuthority).
 			Msg("the assignment describes no frame to run")
@@ -125,8 +126,8 @@ func (w *Worker) runTask(ctx context.Context, tip ChainTip, claimed string,
 			Str("category", CategoryIntegrity).Msg("the task's inputs could not be installed")
 		return taskOutcome{status: StatusFailed, failedPart: release.PartInputs, reason: reason}
 	}
-	gate := w.resolvePublicationGate(tip, claimed, assignment, log)
-	outcome := w.runFrame(ctx, assignment, checkout.Dir(owner, assignment.Package.Dir), gate, log)
+	gate := w.resolvePublicationGate(task, log)
+	outcome := w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), gate, log)
 	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner,
 		formatDeclaredPaths(assignment.Package.Dir, assignment.Outputs))
 	if outcome.status != StatusSucceeded {
@@ -186,8 +187,9 @@ type framePermitx func(ctx context.Context, exports []plan.Output) taskOutcome
 // for free, immediately before the thing that may not. It is asked even when
 // the stage configured no command, because the question it asks is whether the
 // package may be published at all and not whether a script exists.
-func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string,
+func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 	permit framePermitx, log zerolog.Logger) taskOutcome {
+	assignment := task.assignment
 	// carried is everything the run had exported before this frame plus
 	// everything the frame exports, which is what the scripts read; produced is
 	// this frame's own, which is what travels back.
@@ -204,6 +206,7 @@ func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string
 		{release.PartCommands, stage, assignment.Frame.Commands},
 		{release.PartAfter, "post" + formatStageTitle(stage), assignment.Frame.After},
 	} {
+		task.reportPhase(part.name, false)
 		if part.name == release.PartCommands && permit != nil {
 			permitted := permit(ctx, produced.Outputs)
 			expectedTip = permitted.expectedTip
@@ -215,6 +218,10 @@ func (w *Worker) runFrame(ctx context.Context, assignment Assignment, dir string
 		if len(part.commands) == 0 {
 			continue
 		}
+		// The stage's own command sequence is what makes a publication's
+		// outcome unknown once it has begun, so the fact is recorded before the
+		// first process starts rather than after it ends.
+		task.reportPhase(part.name, part.name == release.PartCommands)
 		sequence := release.Sequence{
 			Runner:   &script.ShellRunner{Shell: assignment.Shell, Log: log},
 			Dir:      dir,

@@ -35,13 +35,15 @@ func TestPublicationCarriesNoDeclaredOutputs(t *testing.T) {
 		"a publisher describes no output set of its own")
 }
 
-// TestOnlyAPublicationBoundsItself: the node enforces the run's own wait for
-// the one kind of work that must not outlive it. Gate 12 extends this to every
-// kind; until then a build is bounded by the orchestrator alone.
-func TestOnlyAPublicationBoundsItself(t *testing.T) {
-	assert.Equal(t, 900, resolveTaskDeadlineSeconds(KindPublish, 15*time.Minute))
-	assert.Equal(t, 0, resolveTaskDeadlineSeconds(KindBuild, 15*time.Minute))
-	assert.Equal(t, 0, resolveTaskDeadlineSeconds(KindPrepare, 15*time.Minute))
+// TestEveryAssignmentBoundsItself: the node enforces the run's own wait,
+// whatever the work is. A publication that outlived it would be acting on an
+// authorization the run has written off, and a build that outlived it would be
+// holding a machine for a run that is no longer listening: an orchestrator
+// whose network went away can end neither, so the bound travels and the node
+// applies it to every kind (§28.6).
+func TestEveryAssignmentBoundsItself(t *testing.T) {
+	assert.Equal(t, 900, resolveTaskDeadlineSeconds(15*time.Minute))
+	assert.Equal(t, 0, resolveTaskDeadlineSeconds(0))
 }
 
 // TestAnAuthorizationExpires: an authorization is a statement about an

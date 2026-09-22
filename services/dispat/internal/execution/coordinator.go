@@ -86,6 +86,11 @@ type Coordinator struct {
 	// nothing else in the process knows what this run put on a mailbox.
 	mu    sync.Mutex
 	owned map[string][]gitx.BranchLease
+	// unknownPublications are the authorized publications this run could not
+	// establish the outcome of. They are kept here rather than reported and
+	// forgotten because two later decisions read them: the summary, and which
+	// repositories may have their locks released.
+	unknownPublications []unknownPublication
 
 	// What Start assembles and Close takes down. They are nil on a coordinator
 	// that only ever preflighted, which is what a refused run is.

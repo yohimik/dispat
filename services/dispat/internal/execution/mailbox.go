@@ -572,6 +572,39 @@ func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gi
 	return outcomes, nil
 }
 
+// Withdraw deletes one coordination branch under a lease over the object this
+// party believes it holds, and reports whether the branch is gone.
+//
+// It is the fence of §28.6 rather than a tidy-up, which is why it is a lease
+// and not a force: a branch still at the object this run last wrote is a
+// branch nobody has claimed or answered, so deleting it provably ends the
+// attempt; a branch that has moved is one somebody is working on, and the
+// delete must fail rather than take the work away from under them.
+func (m *GitMailbox) Withdraw(ctx context.Context, branch, expectedOld string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	outcomes, err := m.remote.DeleteRemoteBranchesLease(ctx, m.endpoint,
+		[]gitx.BranchLease{{Branch: branch, ExpectedOld: expectedOld}})
+	if err != nil {
+		return false, fmt.Errorf("execution: revoking %s: %w", branch, err)
+	}
+	for _, outcome := range outcomes {
+		if outcome.Branch != branch || !outcome.IsDeleted {
+			continue
+		}
+		delete(m.observed, branch)
+		delete(m.quarantined, branch)
+		if err := m.remote.DeleteLocalTransportRefs(ctx, []string{branch}); err != nil {
+			// The remote ref is gone, which is the whole of the fence; a
+			// fetched ref left in this store is unreachable garbage.
+			m.log.Debug().Err(err).Str("branch", branch).
+				Msg("the fetched ref of a revoked branch was not removed")
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // commitMessage writes one message as a transport commit: the document, its
 // signature, the `dispat` folder holding both, whatever else the message
 // carries beside them, and the commit over all of it. The tree is built

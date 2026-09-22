@@ -444,11 +444,36 @@ type Withdrawal struct {
 // Ack is the worker confirming that a cancelled attempt has stopped. It names
 // the cancel commit it answers, which is what lets the orchestrator tell an
 // acknowledgement of this withdrawal from one of an earlier attempt's.
+//
+// It is also the only evidence a run has about what the attempt had got to,
+// and for a publication that is the whole question: a node that stopped before
+// its publish command started leaves an outcome the run knows, and one that
+// stopped in the middle of it leaves an outcome nobody can establish from
+// here. So the acknowledgement states both, and the run reads them rather than
+// inferring anything from the silence it would otherwise have had.
 type Ack struct {
 	Header
 	Assignment string `json:"assignment"`
 	Cancel     string `json:"cancel"`
+	// Phase is the part of the frame the attempt was in when it was
+	// withdrawn, in the vocabulary of the parts a node reports a failure
+	// against, plus PhaseAuthorizationWait for a publication that had not been
+	// authorized yet.
+	Phase string `json:"phase,omitempty"`
+	// CommandStarted says the stage's own command sequence had begun. For a
+	// publication that is the difference between a known outcome and an
+	// unknown one (§28.6), so it is stated rather than derived from the phase:
+	// a node that was killed between the authorization and the first process
+	// is in the commands phase and has published nothing.
+	CommandStarted bool `json:"commandStarted,omitempty"`
 }
+
+// PhaseAuthorizationWait is the phase a publication is in between its
+// beforePublish hook and the authorization it waits for. It is not a part of a
+// frame, because nothing of the frame is running: the node has reported itself
+// ready and is holding a checkout and an installed output set while the run
+// decides.
+const PhaseAuthorizationWait = "authorization-wait"
 
 // Result is the terminal report of one attempt: what the node did, what came
 // of it, and what it produced.

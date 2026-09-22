@@ -222,26 +222,28 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 	task := formatPrepareTask(packageName)
 	prepared, err := c.dispatch.Prepare(packageName)
 	if err != nil {
-		return "", c.refuseTask(task, "", err)
+		return "", c.refuseTask(task, "", 1, err)
 	}
 	if err := c.prepareProviderOutputs(ctx, task, prepared.Request); err != nil {
 		return "", err
 	}
 	space := prepared.Request.Release.Pkg.Space
-	lease, err := c.Pool.Acquire(ctx, space.BuildPlatforms,
-		ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0))
-	if err != nil {
-		return "", c.refuseTask(task, "", err)
-	}
-	c.Log.Info().Str("run", c.Run).Str("task", task).Str("package", packageName).
-		Str("version", prepared.Request.Release.Next.String()).
-		Msg("building a provider this run does not release")
-	if lease.IsLocal {
-		_, err := c.buildHere(ctx, lease, task, prepared.Request, prepared.Here)
-		return c.Local.Name, err
-	}
-	_, err = c.dispatchBuild(ctx, lease, KindPrepare, task, prepared.Request)
-	return lease.Node, err
+	node := ""
+	_, err = c.placeTask(ctx, task,
+		ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0),
+		space.BuildPlatforms, "",
+		func(ctx context.Context, lease *Lease, attempt int) (release.StageOutcome, error) {
+			c.Log.Info().Str("run", c.Run).Str("task", task).Str("package", packageName).
+				Str("version", prepared.Request.Release.Next.String()).Int("attempt", attempt).
+				Msg("building a provider this run does not release")
+			if lease.IsLocal {
+				node = c.Local.Name
+				return c.buildHere(ctx, lease, task, prepared.Request, prepared.Here)
+			}
+			node = lease.Node
+			return c.dispatchBuild(ctx, lease, KindPrepare, task, attempt, prepared.Request)
+		})
+	return node, err
 }
 
 // formatPrepareTask names one preparation. It is the package's name under the
