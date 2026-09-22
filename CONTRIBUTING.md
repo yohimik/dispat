@@ -162,9 +162,10 @@ interchangeable.
 
 The repository-wide keys exist only at the root: `spaces`, `versionGroups`, `initials`, `commit`, `shell`, `run`,
 `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`, `updateCheck`, `unsafeDisableLock`, `polyrepo`,
-`repository`, `repositories`, `configs`, `repositoryOverrides`, `repositoryBaselines` and `execution`. `execution` is
-narrower still: it is a node-startup setting, so it is read from the entry configuration alone and an imported or
-linked repository's own object is validated and ignored. The full reference is
+`repository`, `repositories`, `configs`, `repositoryOverrides`, `repositoryBaselines`, `execution` and `runOutputs`.
+`execution` is narrower still: it is a node-startup setting, so it is read from the entry configuration alone and an
+imported or linked repository's own object is validated and ignored. `runOutputs` is read the same way, because it
+describes one invocation's sweep rather than any repository's policy. The full reference is
 the [configuration documentation](packages/docs/docs/configuration/README.md).
 
 ### Repository participation
