@@ -609,7 +609,7 @@ A repository whose root configuration carries an `execution` object with a non-e
 
 Before a release:
 
-1. Read the `execution` object of the entry configuration. It is a node-startup setting, so a space, a package, an imported configuration or a linked repository never contributes one, and a peer's own object is ignored.
+1. Read the `execution` object of the entry configuration, and the pipeline's `--worker name=endpoint` flags, which add links for one invocation. It is a node-startup setting, so a space, a package, an imported configuration or a linked repository never contributes one, and a peer's own object is ignored.
 2. Confirm the pipeline starts the worker nodes. `dispat worker` belongs in a CI job or a cluster workload beside the release job, not in your shell: a node you start locally executes the commands of any authentic assignment with your machine's credentials.
 3. Confirm the signing secret reaches every node from the secret store, and never read, print or copy its value. Report a secret written literally in a configuration file rather than fixing it silently.
 4. Run `dispat status`. With workers configured it names the plan it fixed in one `plan fixed` line, which is the plan every assignment of the run states.
@@ -623,6 +623,8 @@ An unknown publication outcome is the one result that needs a person:
 2. Report it as unknown. Never describe it as published or as failed, and never retry the publish by hand.
 3. The run may also retain that repository's release lock. Do not delete a retained lock. Clearing it is an operator's decision and needs the documented order: list the run's `dispat-worker-*` refs in the mailbox, find the authorization with no result beside it, confirm on that node that the publisher has stopped, check the registry for the version, delete the run's refs, and only then delete the lock tag.
 4. A run may end with a lock retained and no release record at all, so check the registry rather than the tags.
+
+`dispat run` uses the same pool when the invocation has links: each package's task runs where its `runOnly` places a build, and the folders the entry configuration's `runOutputs` names for the script are carried back and merged into the orchestrator's checkout. A sweep takes no release lock and records nothing, so it neither waits for a release nor stops one; a sweep with no link runs every task locally, as it always has.
 
 Leftover `dispat-worker-*` branches in a mailbox repository are coordination state, not release records, and a completed run deletes its own. They carry full source and command text, so report them for deletion rather than leaving them. Never push a branch of your own into a mailbox repository, and never run a release from a node whose `execution.role` is `worker`: both are refused, the second with `E226`.
 
