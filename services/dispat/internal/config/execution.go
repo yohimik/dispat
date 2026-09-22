@@ -232,28 +232,123 @@ func validateExecutionNode(x *ExecutionConfig) error {
 // node, the names are distinct, and each mailbox is a remote git could be
 // pointed at.
 func validateExecutionWorkers(workers []ExecutionWorkerConfig) error {
-	namedBy := map[string]int{}
+	namedBy := map[string]string{}
 	for i, worker := range workers {
-		label := fmt.Sprintf("execution.workers[%d]", i)
-		if worker.Name == "" {
-			return fmt.Errorf("%s: name is required: it is how a node recognises the work addressed to it", label)
-		}
-		if !isExecutionNodeName(worker.Name) {
-			return fmt.Errorf("%s: name %q is not a node name (letters, digits, dot, underscore and hyphen, with no two dots in a row)", label, worker.Name)
-		}
-		// Folded, because two spellings of one name would be two links to one
-		// node, and the second would silently take the first one's work.
-		folded := lib.Fold(worker.Name)
-		if previous, isDuplicate := namedBy[folded]; isDuplicate {
-			return fmt.Errorf("%s: name %q is already used by execution.workers[%d]", label, worker.Name, previous)
-		}
-		namedBy[folded] = i
-		if worker.Endpoint == "" {
-			return fmt.Errorf("%s: endpoint is required: it is the mailbox this node's work is left in", label)
-		}
-		if err := gitx.RequireTransportEndpoint(worker.Endpoint); err != nil {
-			return fmt.Errorf("%s: endpoint: %w", label, err)
+		if err := validateExecutionWorker(fmt.Sprintf("execution.workers[%d]", i), worker, namedBy); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// validateExecutionWorker checks one link, under the label that tells the
+// reader where it was stated, against the names the links before it took.
+func validateExecutionWorker(label string, worker ExecutionWorkerConfig, namedBy map[string]string) error {
+	if worker.Name == "" {
+		return fmt.Errorf("%s: name is required: it is how a node recognises the work addressed to it", label)
+	}
+	if !isExecutionNodeName(worker.Name) {
+		return fmt.Errorf("%s: name %q is not a node name (letters, digits, dot, underscore and hyphen, with no two dots in a row)", label, worker.Name)
+	}
+	// Folded, because two spellings of one name would be two links to one
+	// node, and the second would silently take the first one's work.
+	folded := lib.Fold(worker.Name)
+	if previous, isDuplicate := namedBy[folded]; isDuplicate {
+		return fmt.Errorf("%s: name %q is already used by %s", label, worker.Name, previous)
+	}
+	namedBy[folded] = label
+	if worker.Endpoint == "" {
+		return fmt.Errorf("%s: endpoint is required: it is the mailbox this node's work is left in", label)
+	}
+	if err := gitx.RequireTransportEndpoint(worker.Endpoint); err != nil {
+		return fmt.Errorf("%s: endpoint: %w", label, err)
+	}
+	return nil
+}
+
+// WorkerFlag is the command-line flag that names a worker node for one
+// invocation, `--worker name=endpoint`, repeatable. It exists for the machine
+// a pipeline created a minute before the run: a link the committed file
+// cannot know about, stated where the pipeline knows it.
+const WorkerFlag = "worker"
+
+// DiagnosticExecutionAuthority reports execution refused because of who asked
+// for it. Its one use in this package is a `--worker` given to a node whose
+// file calls it a worker: a worker never dispatches to a pool, whether the
+// link it would dispatch to is written in a file or on a command line.
+const DiagnosticExecutionAuthority = "E226"
+
+// ParseWorkerLink reads one `--worker` value as the link it names. The value
+// is never echoed, because the half after the separator is an endpoint and a
+// malformed one is exactly the value that may be carrying a credential.
+func ParseWorkerLink(value string) (ExecutionWorkerConfig, error) {
+	name, endpoint, isPaired := strings.Cut(value, "=")
+	if !isPaired || name == "" || endpoint == "" {
+		return ExecutionWorkerConfig{}, fmt.Errorf(
+			"--%s takes name=endpoint with both halves stated: the node's name, and the mailbox it is reached at",
+			WorkerFlag)
+	}
+	return ExecutionWorkerConfig{Name: name, Endpoint: endpoint}, nil
+}
+
+// appendCommandLineWorkers adds the links the invocation named to the entry
+// configuration's own, before anything is validated.
+//
+// Before, so that a link stated on a command line is held to every rule a
+// link written in the file is: the name, the endpoint, the folded uniqueness
+// against the file's own links and the signing secret the file has to name.
+// Each is checked here under the flag's own label first, so that a refusal
+// names the value the operator typed rather than an index into a list they
+// never wrote, and the whole list is validated again with everything else.
+//
+// A node whose file calls it a worker is refused outright, with the authority
+// code: a worker never dispatches to a pool, which is the rule a `workers`
+// list in its file is refused by.
+func appendCommandLineWorkers(c *File, flags *pflag.FlagSet) error {
+	values := readWorkerFlag(flags)
+	if len(values) == 0 {
+		return nil
+	}
+	if c.Execution.IsWorker() {
+		return WithDiagnostic(DiagnosticExecutionAuthority, fmt.Errorf(
+			"--%s names a node this invocation would dispatch to, and execution.role is %q on this node: "+
+				"a worker executes the tasks it is given and dispatches nothing",
+			WorkerFlag, c.Execution.ResolveRole()))
+	}
+	if c.Execution == nil {
+		c.Execution = &ExecutionConfig{}
+	}
+	namedBy := map[string]string{}
+	for i, worker := range c.Execution.Workers {
+		namedBy[lib.Fold(worker.Name)] = fmt.Sprintf("execution.workers[%d]", i)
+	}
+	for _, value := range values {
+		link, err := ParseWorkerLink(value)
+		if err != nil {
+			return WithDiagnostic(DiagnosticExecution, err)
+		}
+		label := fmt.Sprintf("--%s %s", WorkerFlag, link.Name)
+		if err := validateExecutionWorker(label, link, namedBy); err != nil {
+			return WithDiagnostic(DiagnosticExecution, err)
+		}
+		c.Execution.Workers = append(c.Execution.Workers, link)
+	}
+	return nil
+}
+
+// readWorkerFlag is every `--worker` value the invocation passed, in order,
+// and nothing for a flag set that does not declare the flag or never set it.
+func readWorkerFlag(flags *pflag.FlagSet) []string {
+	if flags == nil {
+		return nil
+	}
+	flag := flags.Lookup(WorkerFlag)
+	if flag == nil || !flag.Changed {
+		return nil
+	}
+	values, isList := flag.Value.(pflag.SliceValue)
+	if !isList {
+		return nil
+	}
+	return values.GetSlice()
 }

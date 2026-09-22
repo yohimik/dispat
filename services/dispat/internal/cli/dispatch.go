@@ -242,6 +242,9 @@ var foreignFlagHints = map[foreignFlag]string{
 // fills in write and reps for the commands whose flags carry a request.
 func (r *runner) validateFlags() (int, bool) {
 	cmd := r.inv.cmd
+	if code, done := r.validateWorkerLinks(); done {
+		return code, true
+	}
 	if cmd == cmdCompute && *r.o.computeTopology != "minimal" && *r.o.computeTopology != "star" {
 		r.boot.Error().Str("topology", *r.o.computeTopology).Msg("unknown --topology value (want minimal or star)")
 		return 2, true
@@ -1347,6 +1350,39 @@ func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath s
 		}
 	}
 	return 0
+}
+
+// validateWorkerLinks is what the `--worker` values decide before any file is
+// read: each is name=endpoint, and a process holding worker authority names
+// none at all.
+//
+// The shape is a usage mistake, like every other malformed flag value, and
+// the value is never echoed because its second half is an endpoint. The
+// authority is a refusal with its own code rather than a usage mistake: a
+// task executes what its assignment authorized, and a build script that
+// named a pool of its own would be a node dispatching work, which is exactly
+// what a `workers` list in a worker's file is refused for. Everything else a
+// link is held to (the name, the endpoint, the uniqueness, the secret) is
+// the configuration's, and is asked where the entry file is read.
+func (r *runner) validateWorkerLinks() (int, bool) {
+	if len(*r.o.workers) == 0 {
+		return 0, false
+	}
+	for _, value := range *r.o.workers {
+		if _, err := config.ParseWorkerLink(value); err != nil {
+			r.boot.Error().Err(err).Msg("invalid --worker")
+			r.usage(r.inv.cmd)
+			return 2, true
+		}
+	}
+	if !execution.IsWorkerAuthority(os.Environ()) {
+		return 0, false
+	}
+	logConfigError(r.boot, execution.NewDiagnostic(execution.CodeAuthority, execution.CategoryAuthority,
+		"--%s names a node this invocation would dispatch to, and this process runs under worker authority: "+
+			"a task executes what its assignment authorized and dispatches nothing", config.WorkerFlag)).
+		Str("command", r.inv.cmd).Msg("refusing the command")
+	return 1, true
 }
 
 // refuseWorkerAuthority refuses the commands a process holding worker

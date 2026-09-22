@@ -456,6 +456,9 @@ func load(path string, flags *pflag.FlagSet, cliImports bool) (*File, error) {
 		return nil, fmt.Errorf("config: invalid format in %s: %w", path, withSchemaHint(err))
 	}
 	cfg.SourceFiles = t.Files
+	if err := appendCommandLineWorkers(&cfg, flags); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
 	if err := validate(&cfg, cliImports); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}

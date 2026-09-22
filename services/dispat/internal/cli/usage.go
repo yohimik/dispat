@@ -123,8 +123,12 @@ repositories with no remote to coordinate through.
 release lock and planning. The refusal exits 3, apart from exit 1's failures.
 Use "dispat status --require-release" for a lock-free CI plan gate.
 
+--worker name=endpoint adds a worker node for this run beside the ones
+execution.workers lists, which is how a pipeline names a machine it has
+just created. It is held to every rule a configured link is.
+
 This is what a bare "dispat" does.`,
-		flags: append([]string{"strict", "require-release"}, selectionFlags...),
+		flags: append([]string{"strict", "require-release", "worker"}, selectionFlags...),
 	},
 	{
 		name:  cmdStatus,
@@ -141,8 +145,12 @@ Exits 0 even when a release would refuse, because showing the plan is the
 job. A repository that cannot produce a correct plan at all, or a --strict
 selection the plan cannot release, exits 1; --require-release with a correct
 plan that releases nothing exits 3, so a pipeline gating on it can tell
-"nothing to do" from "something is wrong".`,
-		flags: append([]string{"strict", "require-release"}, selectionFlags...),
+"nothing to do" from "something is wrong".
+
+With worker links, from execution.workers or from --worker name=endpoint,
+it fixes and prints the plan digest a distributed run would carry, and
+still dispatches nothing and takes no lock.`,
+		flags: append([]string{"strict", "require-release", "worker"}, selectionFlags...),
 	},
 	{
 		name:     cmdRun,
@@ -163,7 +171,7 @@ package the run covers. A bare word without the "--" is still a usage error:
 packages are selected with flags.
 
 "dispat <script>" is a shorthand when <script> is not a command name.`,
-		flags: windowFlags,
+		flags: append(append([]string{}, windowFlags...), "worker"),
 	},
 	{
 		name:  cmdInit,

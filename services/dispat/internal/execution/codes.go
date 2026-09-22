@@ -35,8 +35,10 @@ const (
 	// CodeAuthority reports work refused because of who asked for it: a
 	// release initiated under worker authority or on a worker node, an
 	// assignment that is not authentically this run's, or a write a task's
-	// authority does not extend to.
-	CodeAuthority = "E226"
+	// authority does not extend to. It is the configuration package's own
+	// constant for the reason CodeConfiguration is: a `--worker` link refused
+	// as the file loads and a run refused under worker authority are one code.
+	CodeAuthority = config.DiagnosticExecutionAuthority
 	// CodeIntegrity reports input or output data that is missing, changed,
 	// incomplete, incompatible or escaping its declared roots. It fails the
 	// prerequisite it belongs to and blocks that prerequisite's consumers,

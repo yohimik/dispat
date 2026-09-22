@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -283,4 +284,102 @@ func TestExecutionIsARootKeyOnly(t *testing.T) {
 		var dst PackageConfig
 		require.Error(t, decodePackageConfig(stated, &dst))
 	})
+}
+
+// loadWithWorkerFlags loads a configuration the way the command line does,
+// with every `--worker` value the invocation passed.
+func loadWithWorkerFlags(t *testing.T, cfg File, values ...string) (*File, error) {
+	t.Helper()
+	flags := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+	flags.StringArray(WorkerFlag, nil, "")
+	for _, value := range values {
+		require.NoError(t, flags.Set(WorkerFlag, value))
+	}
+	root := writeModelRepo(t, cfg, "pkgs/core")
+	return Load(filepath.Join(root, "dispat.json"), flags)
+}
+
+// TestWorkerFlagAddsLinksBesideTheFilesOwn: a pipeline that created a machine
+// a minute ago names it on the command line, and the link lands after the
+// file's own, held to every rule they are.
+func TestWorkerFlagAddsLinksBesideTheFilesOwn(t *testing.T) {
+	loaded, err := loadWithWorkerFlags(t, executionConfig(orchestratorWithWorkers()),
+		"build-c=file:///srv/mailbox", "build-d=git@git.example.test:mailbox-d.git")
+	require.NoError(t, err)
+	require.Len(t, loaded.Execution.Workers, 4)
+	assert.Equal(t, ExecutionWorkerConfig{Name: "build-c", Endpoint: "file:///srv/mailbox"},
+		loaded.Execution.Workers[2])
+	assert.Equal(t, "build-d", loaded.Execution.Workers[3].Name)
+
+	secretOnly := executionConfig(&ExecutionConfig{SecretEnv: "DISPAT_EXECUTION_SECRET",
+		Timeouts: &ExecutionTimeoutsConfig{Preflight: 120}})
+	loaded, err = loadWithWorkerFlags(t, secretOnly, "w1=file:///srv/mailbox")
+	require.NoError(t, err)
+	assert.True(t, loaded.Execution.IsDistributed(),
+		"a file that states only the secret and the waits delegates once the invocation names a node")
+
+	loaded, err = loadWithWorkerFlags(t, minimalConfig())
+	require.NoError(t, err)
+	assert.Nil(t, loaded.Execution, "an invocation that names no node changes nothing")
+}
+
+// TestWorkerFlagRefusals: every rule a configured link is held to, applied to
+// a link the invocation named, with the flag's own label so the refusal names
+// what the operator typed.
+func TestWorkerFlagRefusals(t *testing.T) {
+	for name, row := range map[string]struct {
+		cfg    File
+		values []string
+		want   string
+		code   string
+	}{
+		"a malformed value": {
+			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"build-c"},
+			want: "name=endpoint", code: DiagnosticExecution},
+		"a name that is not a node name": {
+			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"build..c=file:///m"},
+			want: "--worker build..c: name", code: DiagnosticExecution},
+		"a configured link spelled again": {
+			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"BUILD-A=file:///m"},
+			want: "--worker BUILD-A: name \"BUILD-A\" is already used by execution.workers[0]",
+			code: DiagnosticExecution},
+		"two flags naming one node": {
+			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"w=file:///m", "W=file:///n"},
+			want: "is already used by --worker w", code: DiagnosticExecution},
+		"a credential in the endpoint": {
+			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"w=https://user:hunter2@example.test/m.git"},
+			want: "--worker w: endpoint", code: DiagnosticExecution},
+		"no signing secret named": {
+			cfg: minimalConfig(), values: []string{"w=file:///m"},
+			want: "execution.secretEnv is required", code: DiagnosticExecution},
+		"a worker's own file": {
+			cfg: executionConfig(&ExecutionConfig{Role: models.ExecutionRoleWorker, Name: "w",
+				Endpoint: "file:///m", SecretEnv: "DISPAT_EXECUTION_SECRET"}),
+			values: []string{"other=file:///m"},
+			want:   "a worker executes the tasks it is given and dispatches nothing",
+			code:   DiagnosticExecutionAuthority},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadWithWorkerFlags(t, row.cfg, row.values...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), row.want)
+			assert.NotContains(t, err.Error(), "hunter2", "a refused endpoint is never echoed")
+			assert.Equal(t, row.code, DiagnosticCode(err))
+		})
+	}
+}
+
+// TestReadWorkerFlagAsksOnlyASetFlag: a flag set that does not declare the
+// flag, and one that declares it and never set it, both name no node.
+func TestReadWorkerFlagAsksOnlyASetFlag(t *testing.T) {
+	assert.Nil(t, readWorkerFlag(nil))
+	undeclared := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+	assert.Nil(t, readWorkerFlag(undeclared))
+	unset := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+	unset.StringArray(WorkerFlag, nil, "")
+	assert.Nil(t, readWorkerFlag(unset))
+	scalar := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
+	scalar.String(WorkerFlag, "", "")
+	require.NoError(t, scalar.Set(WorkerFlag, "w=file:///m"))
+	assert.Nil(t, readWorkerFlag(scalar), "a flag of another shape is not a list of links")
 }

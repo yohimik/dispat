@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/yohimik/dispat/services/dispat/internal/app"
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 )
 
 // options holds a pointer to every declared flag's value. Grouping them
@@ -111,6 +112,10 @@ type options struct {
 
 	// release and status: the CI gate that turns an empty plan into a failure.
 	requireRelease *bool
+
+	// release, run and status: the worker links this invocation adds to the
+	// entry configuration's own, for a machine a pipeline has just created.
+	workers *[]string
 
 	// worker: where the node keeps what it may not lose, and how long it
 	// serves with nothing to do.
@@ -311,6 +316,8 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a replacement that matched nothing; for autowriter, an edit that matched no manifest anywhere")
 	o.requireRelease = fs.Bool("require-release", false,
 		"release and status: exit 1 when the plan releases nothing, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
+	o.workers = fs.StringArray(config.WorkerFlag, nil,
+		"release, run and status: add a worker node for this invocation, name=endpoint (repeatable); held to every rule a link in execution.workers is, and never part of the plan digest")
 	o.workerStateDir = fs.String("state-dir", "",
 		"worker: the folder this node keeps its object cache and its record of answered work in; without it, dispat/worker under the user cache directory")
 	o.workerIdleTimeout = fs.Int("idle-timeout", 0,

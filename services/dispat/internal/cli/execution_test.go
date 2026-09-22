@@ -95,3 +95,80 @@ func TestWorkerAuthorityGuardReportsTheRefusal(t *testing.T) {
 		assert.Contains(t, logs, `"command":"release"`)
 	})
 }
+
+// TestWorkerFlagShapeIsAUsageError: a `--worker` value is name=endpoint with
+// both halves stated, and anything else is refused before any file is read,
+// without echoing the value, whose second half may be carrying a credential.
+func TestWorkerFlagShapeIsAUsageError(t *testing.T) {
+	root := t.TempDir()
+	for name, value := range map[string]string{
+		"no separator":     "build-a",
+		"an empty name":    "=file:///srv/mailbox",
+		"an empty mailbox": "build-a=",
+		"nothing at all":   "",
+		"a bare separator": "=",
+	} {
+		for _, command := range []string{cmdRelease, cmdRun, cmdStatus} {
+			t.Run(name+" on "+command, func(t *testing.T) {
+				args := []string{command, "--root", root, "--worker", value}
+				if command == cmdRun {
+					args = append(args, "tests")
+				}
+				var stdout, stderr bytes.Buffer
+				code := Run(args, &stdout, &stderr)
+				assert.Equal(t, 2, code, "stderr:\n%s", stderr.String())
+				assert.Contains(t, stderr.String(), "name=endpoint")
+			})
+		}
+	}
+}
+
+// TestWorkerFlagEchoesNoEndpoint: a malformed value is refused by its shape
+// alone, so a mistyped endpoint carrying a credential never reaches a log.
+func TestWorkerFlagEchoesNoEndpoint(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"status", "--root", t.TempDir(), "--worker", "https://user:hunter2@example.com/m.git"},
+		&stdout, &stderr)
+	assert.Equal(t, 2, code)
+	assert.NotContains(t, stderr.String(), "hunter2")
+}
+
+// TestWorkerFlagBelongsToTheDispatchingCommands: the flag names a node an
+// invocation may dispatch to, so it is a flag of release, run and status and
+// of nothing else. A command that dispatches nothing refuses it as another
+// command's flag.
+func TestWorkerFlagBelongsToTheDispatchingCommands(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"preview", "--worker", "a=file:///m"},
+		{"worker", "--worker", "a=file:///m"},
+		{"exec", "build", "--worker", "a=file:///m"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := Run(append(args, "--root", root), &stdout, &stderr)
+		assert.Equal(t, 2, code, "args: %v\nstderr:\n%s", args, stderr.String())
+		assert.Contains(t, stderr.String(), "--worker", "args: %v", args)
+	}
+}
+
+// TestWorkerFlagIsRefusedUnderWorkerAuthority: a task executes what its
+// assignment authorized, so a build script that named a pool of its own is
+// refused with the authority code before any file is read, whichever of the
+// three commands it tried.
+func TestWorkerFlagIsRefusedUnderWorkerAuthority(t *testing.T) {
+	t.Setenv(execution.AuthorityEnv, execution.WorkerAuthority)
+	root := t.TempDir()
+	for _, command := range []string{cmdRun, cmdStatus} {
+		t.Run(command, func(t *testing.T) {
+			args := []string{command, "--root", root, "--worker", "a=file:///srv/mailbox", "--log-format", "json"}
+			if command == cmdRun {
+				args = append(args, "tests")
+			}
+			var stdout, stderr bytes.Buffer
+			code := Run(args, &stdout, &stderr)
+			assert.Equal(t, 1, code, "stderr:\n%s", stderr.String())
+			assert.Contains(t, stderr.String(), `"code":"`+execution.CodeAuthority+`"`)
+			assert.Contains(t, stderr.String(), `"category":"`+execution.CategoryAuthority+`"`)
+		})
+	}
+}
