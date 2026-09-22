@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -63,8 +64,6 @@ type fakeRemote struct {
 	steps []string
 	// authorizations counts the authorization callbacks made.
 	authorizations int
-	// authorizeErr fails the authorization of publishAway.
-	authorizeErr error
 	// publishExports is what a delegated publication reports as its exports.
 	publishExports []plan.Output
 	// failPublishPart fails the delegated publication at this part.
@@ -597,12 +596,14 @@ func TestRemotePublishFailureIsALocalFailure(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			p := mkPlan(planSpec{Names: []string{"a", "c"}})
 			tagger := &fakeTagger{}
-			lanes := 0
+			// Two packages publish concurrently, so the lane counter is written
+			// by two goroutines and read by the test.
+			var lanes atomic.Int32
 			executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: tagger, Build: 2, Publish: 2})
 			executor.Remote = &fakeRemote{publishAway: "a", failPublishPart: tc.part}
 			executor.AcquirePublish = func(context.Context, *plan.Release) (func(), error) {
-				lanes++
-				return func() { lanes-- }, nil
+				lanes.Add(1)
+				return func() { lanes.Add(-1) }, nil
 			}
 
 			results := executor.Run(context.Background(), p)
@@ -610,7 +611,7 @@ func TestRemotePublishFailureIsALocalFailure(t *testing.T) {
 			require.Equal(t, StatusFailed, results["a"].Status)
 			assert.Equal(t, "publish", results["a"].FailedStage)
 			assert.Equal(t, []string{"c@1.0.1"}, tagger.tags, "the other package still published")
-			assert.Equal(t, 0, lanes, "the publication lane was given back on every path")
+			assert.Equal(t, int32(0), lanes.Load(), "the publication lane was given back on every path")
 			assert.Equal(t, tc.what, formatRemoteFailure(taskPublish, tc.part))
 		})
 	}
