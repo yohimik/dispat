@@ -50,6 +50,11 @@ resource "google_service_account_iam_member" "wif" {
 resource "google_project_iam_member" "releaser" {
   for_each = toset(compact([
     "roles/compute.loadBalancerAdmin",
+    # The full-suite job adds one Compute Engine worker to itself per run
+    # (scripts/ci-worker.sh) and deletes it after; creating, reading and
+    # deleting instances is all that takes, since the instance carries no
+    # service account of its own.
+    "roles/compute.instanceAdmin.v1",
     var.manage_dns ? "roles/dns.admin" : "",
     "roles/storage.admin",
     "roles/iam.workloadIdentityPoolAdmin",
