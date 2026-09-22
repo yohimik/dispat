@@ -659,12 +659,23 @@ func (cp *computation) propagateBumps() {
 					continue
 				}
 				reached++
-				// Admission is against the TARGET's window. This one test is
-				// the whole of catch-up: a consumer that missed a run still
-				// has the commit pending, so it is still admitted, whatever
-				// the source has since released (§13.7a, G2).
-				if !cp.inWindow(t.name, rec.key) {
-					continue
+				// Admission follows DELIVERY, not position (§13.4a).
+				//
+				// The target's own window is the cheap half of that, and the
+				// whole of catch-up: a consumer that missed a run still has
+				// the commit pending, so it is still admitted whatever the
+				// source has since released (§13.7a, G2), and a target that
+				// has released nothing past the commit has been delivered
+				// nothing either. A target that got AHEAD of the commit — it
+				// released on a reason of its own while this source's publish
+				// failed or was held — is asked the finer question, and is
+				// admitted for the sources that still owe it a version.
+				isPending := cp.inWindow(t.name, rec.key)
+				owed := srcNames
+				if !isPending {
+					if owed = cp.owedSources(t.name, rec.key, sources); len(owed) == 0 {
+						continue
+					}
 				}
 				if cp.cancelledFor(rec.key, t.name) { // §13.5a
 					continue
@@ -674,7 +685,12 @@ func (cp *computation) propagateBumps() {
 				// question was settled when it shipped, its bump must keep
 				// counting toward the train's target, and re-warning W208
 				// about it would report a done deal as a suppression.
-				published := cp.containedInBaseline(t.name, rec.key)
+				//
+				// Only ever for a commit the window still holds. A target that
+				// overtook the commit is behind it by definition, and reading
+				// that as "the train already shipped this" would discharge the
+				// obligation the delivery test has just found outstanding.
+				published := isPending && cp.containedInBaseline(t.name, rec.key)
 				if !published && !(anyStable || srcChan[cp.channel[t.name]]) {
 					// §9.3a: a bump is a claim that the dependent has
 					// something new to pick up, and across a channel boundary
@@ -697,12 +713,16 @@ func (cp *computation) propagateBumps() {
 					continue
 				}
 				rel.NewWork = true
-				// One contribution per source package of the unit, not per
-				// arrival: all of them forced this bump, and a catch-up
+				// One contribution per OWED source package of the unit, not
+				// per arrival: all of them forced this bump, and a catch-up
 				// record reaches a provider that is not releasing only
 				// through this attribution. The level is the target's, which
-				// §9.2 measures from the source set as a whole.
-				for _, src := range srcNames {
+				// §9.2 measures from the source set as a whole. Owed rather
+				// than the whole source set, because §9.2's prov[d] |= owed
+				// is what makes DueTo and the records name the providers this
+				// release actually picks a version up from: a source whose
+				// version the target already carries did not put it here.
+				for _, src := range owed {
 					rel.Sources = append(rel.Sources, StaleSource{
 						Provider:  src,
 						Commit:    rawHistoryKey(rec.key),
@@ -712,7 +732,7 @@ func (cp *computation) propagateBumps() {
 					})
 				}
 				if tracing {
-					cp.log.Trace().Str("package", t.name).Str("from", joinSorted(sources)).
+					cp.log.Trace().Str("package", t.name).Str("from", strings.Join(owed, ",")).
 						Int("level", t.level).Str("bump", prop.Bump.String()).
 						Str("commit", rec.key).Msg("plan: bump propagated")
 				}

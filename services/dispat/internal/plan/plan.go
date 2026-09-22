@@ -1420,6 +1420,17 @@ type Options struct {
 	LinkEvidence bool
 	// HistoryStats optionally receives operation counts for scale tests.
 	HistoryStats *HistoryStats
+	// withoutDelivery computes the plan under the bump-axis admission that
+	// preceded §13.4a's delivery test: a unit is admitted for a dependent only
+	// while the dependent's own pending window holds its commit.
+	//
+	// It is unexported because no caller may ask for a plan the specification
+	// no longer describes. It exists for the differential test in this package,
+	// which asserts that the two rules agree release for release and
+	// diagnostic for diagnostic on every history where nothing overtook a
+	// commit — the claim that makes the delivery test a strict addition rather
+	// than a change to planning at large.
+	withoutDelivery bool
 }
 
 type computation struct {
@@ -1478,10 +1489,18 @@ type computation struct {
 	anc         *ancestryIndex
 	ancTrusted  map[string]bool // folded repository name -> Parents are ancestry
 	behindUnion map[string]bool
-	closures    map[string]func(string) bool // cancel commit -> its closure, built once
-	walks       *walkCache                   // §9.2 traversals, shared between units
-	globs       *globIndex                   // §6.1 glob terms, resolved once each
-	windowRefs  map[string][]map[string]bool // composed package -> shared repository windows
+	// releasedCommits memoises, per package, the commits of its release tags
+	// that the union holds: the candidate deliveries §13.4a's delivery test
+	// walks. Built on first use and marked in one ancestry pass, because the
+	// test is asked only about a target that got ahead of a commit and a plan
+	// where nothing did must not pay for the markers (see admission.go).
+	releasedCommits map[string][]string
+	// withoutDelivery is Options.withoutDelivery; see that field.
+	withoutDelivery bool
+	closures        map[string]func(string) bool // cancel commit -> its closure, built once
+	walks           *walkCache                   // §9.2 traversals, shared between units
+	globs           *globIndex                   // §6.1 glob terms, resolved once each
+	windowRefs      map[string][]map[string]bool // composed package -> shared repository windows
 	// windowKeys names the history views a composed package's window was
 	// assembled from, in the order they were attached; windowKey is the
 	// single-history equivalent. Both are the cache keys the loaders already
@@ -1640,6 +1659,7 @@ func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 		stats:               opts.HistoryStats,
 		parsers:             make(map[string]*ccme.Parser),
 		repositoryHeads:     make(map[string]string),
+		withoutDelivery:     opts.withoutDelivery,
 	}
 	for key, history := range opts.Repositories {
 		if history.Name == "" {
@@ -1861,6 +1881,8 @@ func (cp *computation) releaseWorkspaceScratch() {
 	cp.byFold = nil
 	cp.proposedAll = nil
 	cp.ignoredTagsByRepository = nil
+	// The delivery candidates are propagation's, and propagation is over.
+	cp.releasedCommits = nil
 }
 
 // PackagesChangedSince resolves which packages the commits in rev..HEAD
