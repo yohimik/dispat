@@ -11,12 +11,15 @@ constitutes a patch, minor, and major revision of the document.
 
 **Implementation boundary.** The published CCME 3 line specifies VCS adapters and explicit rollback; the current
 source also defines the optional polyrepository Git profile of §27 and distributed execution profile of §28.
-The distributed profile is an unimplemented specification contract with no measured performance result. Implementing
-one profile does not implement the others or the adapter and rollback protocols. Neither changes the message parser
-grammar. The version markers are stamped by the specification release process. Publishing a specification does not implement its behavior. The immutable
+The dispat release engine implements the distributed profile over a Git mailbox transport; what it implements, where it
+departs from §28 and what it has measured are stated by date in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md), and no
+speedup is claimed. Implementing one profile does not implement the others or the adapter and rollback protocols.
+Neither changes the message parser grammar. The version markers are stamped by the specification release process.
+Publishing a specification does not implement its behavior. The immutable
 [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
 remains the reference for existing CCME 2 consumers. New protocol examples MUST NOT be presented as runnable dispat
-configuration for external adapters, rollback or distributed execution. The dated design history is in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
+configuration for external adapters or rollback. The dated design history is in
+[DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
 
 ---
 
@@ -69,7 +72,7 @@ planning, publication and recovery. Optional execution profiles preserve the mes
 | 7 | **VCS adapters**: use trusted shell commands behind a fixed snapshot and immutable-record contract | `vcs` configuration; Git remains the default (§25) |
 | 8 | **Explicit rollback**: withdraw an identified published artifact while retaining its release history | `rollback(api)` + `Rollback-Version: 1.4.2` (§26) |
 | 9 | **Polyrepository planning**: combine explicitly linked Git histories into one release graph without copying their commits | optional polyrepository profile (§27) |
-| 10 | **Distributed execution**: assign tasks across nodes and reuse verified build outputs while preserving the release plan and native records | optional execution profile (§28); implementation pending |
+| 10 | **Distributed execution**: assign tasks across nodes and reuse verified build outputs while preserving the release plan and native records | optional execution profile (§28); `execution` node settings |
 
 Capabilities 2 and 5 are two **independent axes** of the same idea. A commit says separately how far a *version bump*
 travels (`^`, `^^`, `+N`) and how far a *channel* travels (`%%`, `++N`), because the answers differ: a change usually
@@ -3257,11 +3260,11 @@ name is still the implementer's to justify.
 ## 14. Configuration
 
 CCME 3 additionally defines `vcs` (§25), explicit rollback activation plus package/space handler declarations (§26),
-the optional polyrepository Git profile (§27), and optional distributed execution (§28). External VCS adapters,
-rollback and distributed execution remain future engine contracts; implementing one profile does not implement the
-others. Omitting `vcs` selects Git. Omitting rollback execution enablement never authorizes withdrawal. Omitting all
-§27 activation inputs preserves the single-history model. Section 28.2 defines prospective `execution` settings,
-not current dispat CLI options: the default role is orchestrator, and an empty worker list preserves local execution.
+the optional polyrepository Git profile (§27), and optional distributed execution (§28). External VCS adapters and
+rollback remain future engine contracts; implementing one profile does not implement the others. Omitting `vcs`
+selects Git. Omitting rollback execution enablement never authorizes withdrawal. Omitting all §27 activation inputs
+preserves the single-history model. Section 28.2 defines the `execution` node settings: the default role is
+orchestrator, and an empty worker list preserves local execution.
 
 Defaults are chosen so that an unconfigured repository behaves conservatively and predictably.
 
@@ -3859,8 +3862,9 @@ conformance.
 
 Distributed execution (§28) is a separate **optional conformance profile**. An implementation advertising it MUST
 satisfy every §28 rule and vector across all three history modes, including transfer and reuse of actual dependent
-build outputs. Remote command dispatch alone is insufficient. This profile is unimplemented; its vectors specify
-required behavior and are not executed test results or measured speedups.
+build outputs. Remote command dispatch alone is insufficient. The vectors specify required behavior, not measured
+speedups; an implementation that meets some of them and not others MUST say which (§17.3), as
+[DESIGN-HISTORY.md](./DESIGN-HISTORY.md) does for the dispat engine.
 
 A CCME 2 parser or an engine implementing only the ordinary forward-release projection MUST identify that narrower
 support and MUST NOT claim full CCME 3 conformance. Specification publication, prose examples, and static protocol
@@ -3920,7 +3924,7 @@ protocols. These semantic and conformance changes require a major revision. A ne
 The activation boundary prevents an engine upgrade from silently executing old rollback-shaped messages.
 An optional execution profile that preserves the previous plan exactly when omitted is a minor addition; §27 is such a
 profile. Section 28 is also optional: its task transport and execution obligations apply only to implementations
-advertising that profile and preserve the semantic plan. Adding this draft does not itself stamp a new version;
+advertising that profile and preserve the semantic plan. Adding the profile does not itself stamp a new version;
 the specification release process owns the version declarations.
 
 The escape hatches that make minor versions safe are `W140` and `W150`. Implementations MUST NOT convert either into an
@@ -6910,9 +6914,9 @@ computation repairs.
 
 ## 28. Distributed task and release execution
 
-This is an **optional execution profile**, independent of the history-selection modes in §27. It is a
-specification contract, not a claim that dispat implements distributed execution. No message syntax changes,
-implemented speedup, or executed distributed conformance results are asserted here. Git is REQUIRED for the
+This is an **optional execution profile**, independent of the history-selection modes in §27. It changes no message
+syntax and asserts no speedup; what the dispat engine implements of it, and where that engine departs from it, is
+stated by date in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md), not here. Git is REQUIRED for the
 source/result transport defined by this profile; external VCS adapter support does not imply support for it.
 Omitting worker links preserves local execution. Implementations advertising this profile MUST satisfy all
 of its safety, output-transfer and conformance requirements, not only remote command dispatch.
@@ -6937,8 +6941,10 @@ has only worker authority. Role changes MUST NOT transfer a live run's ownership
 The orchestrator-role node on which CI starts the release is the run's orchestrator. A CI release
 invoked on an explicit worker MUST fail before acquiring release locks or forwarding an initiation request.
 The orchestrator owns repository lock acquisition, the fixed planning input, task allocation, result admission, and
-release finalization. It MAY execute tasks locally under the same rules.
-There is one orchestrator per run, not a permanent leader of the repositories.
+release finalization. It MAY execute tasks locally under the same rules: a build it keeps is captured, described,
+signed and admitted exactly as a worker's is, and its consumers receive the same identity for the result, so nothing
+about an output says where it was built. There is one orchestrator per run, not a permanent leader of the
+repositories.
 
 Workers MAY be added to **every history mode**: single history (including a
 large monorepo), specified histories, or discovered histories. They MUST NOT
@@ -6948,8 +6954,7 @@ MUST NOT alter source discovery, repository identity or release scope.
 
 ### 28.2 Configuration and concurrency
 
-The same configuration format and schema MUST serve both roles. The following keys belong to this proposed
-profile; they are **not current dispat CLI configuration**:
+The same configuration format and schema MUST serve both roles. The following keys belong to this profile:
 
 | Key | Default | Contract |
 | --- | --- | --- |
@@ -6963,23 +6968,27 @@ have an empty worker list. An orchestrator receiving a delegated task MUST NOT u
 Endpoint schemes, protocol framing and credential references are implementation-defined and MUST be documented
 in this same schema; secrets MUST NOT appear in endpoint URLs, receipts or logs. Node names identify authenticated
 execution endpoints, not repository peers. A node may serve both capabilities, but each assignment has exactly
-one authority scope.
+one authority scope. A transport the worker polls, as the Git mailbox of §28.4 is, additionally gives the worker its
+own name and the endpoint it polls; those keys belong to the transport and are documented with it.
 
-Prospective example, not runnable configuration for a published dispat version:
+Example, with the Git mailbox transport of §28.4, where an endpoint is a Git repository the nodes share and
+`secretEnv` names the variable holding the secret the mailbox's messages are authenticated with:
 
 ```yaml
 execution:
   role: orchestrator
   concurrency: 2
+  secretEnv: CCME_EXECUTION_SECRET
   workers:
     - name: build-a
-      endpoint: https://build-a.example.invalid/ccme-execution
+      endpoint: https://git.example.invalid/acme/release-mailbox.git
     - name: build-b
-      endpoint: https://build-b.example.invalid/ccme-execution
+      endpoint: https://git.example.invalid/acme/release-mailbox.git
 ```
 
-The corresponding worker uses the same schema with `execution.role: worker`, its own concurrency limit and
-no worker links. Package configuration, commands and release policy remain the orchestrator's resolved input.
+The corresponding worker uses the same schema with `execution.role: worker`, its own name, the endpoint it polls, its
+own concurrency limit and no worker links. Package configuration, commands and release policy remain the
+orchestrator's resolved input.
 Node settings select the role, execution concurrency and worker-node links. A worker needs no worker-specific release graph, package
 policy, version rules or workflow; it receives the run's resolved configuration.
 Transport credentials and node authentication are deployment prerequisites,
@@ -6993,8 +7002,9 @@ Preparation, test, build and publish command tasks MUST consume node capacity, p
 run-wide stage budgets. Transfer, recording and control work MUST have separately documented bounded capacity;
 recording still takes its owner's publication lane. An in-flight attempt retains its capacity reservation until
 completion or acknowledged cancellation, or until execution has been safely fenced. A timeout alone cannot free
-capacity for a possibly overlapping attempt. Shared
-workspace writes MUST serialize or use separate task worktrees.
+capacity for a possibly overlapping attempt. Capacity is reserved from the claim: an assignment no node has claimed
+is queued work and not an attempt, holds no capacity, and MAY be withdrawn and offered again without any of the
+above. Shared workspace writes MUST serialize or use separate task worktrees.
 
 The orchestrator MUST validate the effective configuration, protocol/toolchain
 compatibility and output-transfer capability before dispatch. Worker-local
@@ -7041,7 +7051,9 @@ tests, builds, transfers, publications and recording gates. A task can be placed
 only on a compatible node and only when its exact prerequisites are available.
 Independent ready tasks MAY run concurrently. The assignment schedule need not
 be deterministic; selected packages, versions, commands and dependency semantics
-MUST remain those of the same fixed plan.
+MUST remain those of the same fixed plan. Where a package's stages may be placed, on the orchestrator, on a worker
+or on either, is execution policy of the package or its space, declared beside the relation of §19.2a and, like it,
+no part of `plan`.
 
 Every reconciliation that writes a shared manifest or lockfile MUST be an explicit task executed under the
 orchestrator's authority, never implicitly by a worker. Such tasks MUST serialize per shared file, and each
@@ -7089,7 +7101,9 @@ branches. Each acknowledged checkpoint MUST identify an exact full object ID;
 consumers fetch that object and validate its manifest rather than following a
 moving branch tip. A consumer MAY obtain the object by fetching a ref that advertises it and then resolving
 the exact object ID locally; it MUST then read only from that object ID and never from a ref whose tip can
-still move. Both the orchestrator and the assigned worker MAY advance an attempt's branch. Ref updates and
+still move. A tip a node fetched but could not read or verify has not been seen: the node MUST NOT record it as
+observed, or one transient read failure silently costs the attempt its only reading of that message and, with it,
+the rest of its deadline. Both the orchestrator and the assigned worker MAY advance an attempt's branch. Ref updates and
 deletions MUST check the expected previous object ID and attempt ownership, so that an update racing the
 other party's update fails instead of overwriting it. Transport-only credentials MUST NOT authorize a worker
 to update native release branches, tags or fleet settlement refs.
@@ -7097,6 +7111,15 @@ Acknowledged checkpoints MUST remain fetchable until all required consumers have
 Where concurrency permits several tasks at once, use separate branches/worktrees
 and admit their results independently as their dependencies become ready.
 Concurrency one still supports the same protocol in sequence.
+
+A source snapshot MAY travel without the history behind it. The assignment names the repository-qualified planned
+head the snapshot was taken from, provenance binds to that revision (below), and a task's commands may not read
+history from a transport checkout (§28.3), so a parentless commit or a bare tree carrying the same bytes serves every
+purpose the snapshot has. A snapshot that descends from the planned head carries, on its first transport to a
+mailbox, every object reachable from that head, which for a large history is the dominant cost of the run and is paid
+again whenever cleanup removed the objects with the refs. A mailbox that already holds the repository's objects, the
+repository's own remote for one, a durable ref the mailbox keeps, or a history-free snapshot each avoid it. An
+implementation states which it does.
 
 Transport commits MUST NOT be treated as release intent, a pending-window
 boundary, a successful release, or a §27 native-head admission. They MUST NOT
@@ -7159,7 +7182,11 @@ NOT exclude it from the output manifest.
 
 On the receiving node the engine materializes the consumer's pinned source,
 applies its admitted release-file state, restores the provider outputs, and
-links/installs them according to the declared workspace integration. The
+links/installs them according to the declared workspace integration. An input closure is materialized outermost
+first: where one repository's checkout lies inside another's, as a fleet link's does (§27.11), the enclosing
+repository is placed before the one inside it, so that the inner checkout lands in its place and is not overwritten by
+the outer one. The run's root on a node is a path prefix under which the assigned repositories are placed at their
+run-relative paths; it need not itself be a repository the task received. The
 integration MUST prevent an install lifecycle from rebuilding already supplied
 providers implicitly. A raw `node_modules` copy is neither required nor a
 portable default; native outputs require compatible platforms/toolchains.
@@ -7177,7 +7204,8 @@ readiness is the following **task precedence**, whose arrows denote happens-befo
 For a registry-availability edge, readiness still requires the provider's
 publication and all applicable recording gates; transferring local bytes MUST
 NOT replace that condition. These are the `build` and `publish` relations of §19.2a. Under its third relation, `none`,
-the edge carries no output and the two builds are independent tasks; only the publications keep their order.
+the edge carries no output and the two builds are independent tasks; only the publications keep their order. A
+provider a consumer reaches only across `none` edges is no input of that consumer and is not prepared for it.
 Transfers to different ready consumers MAY overlap
 and identical immutable blobs SHOULD be reused. Implementations SHOULD retain
 incremental Git objects and verified outputs between assignments, but any cache MUST be dispensable and validated against the complete semantic input identity. Cross-run
@@ -7224,7 +7252,10 @@ create-only record of §19.1, because a publication left unrecorded is a wedge t
 §19.4, and a create-only record cannot overwrite what a successor wrote. A timed-out worker is not proof its
 publisher stopped: cancellation must be acknowledged, a fencing mechanism must
 be enforced where the effect occurs, or the outcome must be reconciled before
-ownership is safely handed over. A generation field alone does not fence an
+ownership is safely handed over. A cancellation and its acknowledgement MUST state where the attempt was when it
+stopped, and in particular whether the command that performs the effect had started: without that, an attempt
+withdrawn before its command is indistinguishable from one whose outcome is unknown, and the run can never report
+the former as not published. A generation field alone does not fence an
 arbitrary registry command. No automatic takeover may simply expire ownership
 and republish while the previous process can still act.
 
@@ -7249,9 +7280,14 @@ receipts retain diagnostic provenance. Cleanup failure is reported without
 rewriting successful package outcomes; borrowed nodes' unrelated data is never
 deleted. Repository locks are released only after authorized operations have quiesced or been safely fenced, then
 in reverse acquisition order. If that cannot be proved, the run MUST fail and retain or restore exclusion
-rather than report successful cleanup and permit overlapping effects. An attempt that was never authorized to
+rather than report successful cleanup and permit overlapping effects. Such a run ends holding its exclusion and
+holding no record of the package whose outcome it could not establish: the retained lock is a ref and never a
+release record, and the next run treats that package as pending until §19.4 says otherwise. An attempt that was
+never authorized to
 perform an external effect, holding neither publication authorization nor permission to write native refs, is
 safely fenced by revoking its coordination ref: its expected-previous-object-ID updates can no longer succeed.
+Revocation fences an attempt nothing has been admitted from; a branch a result was admitted from is a checkpoint
+its consumers may still need (§28.4) and is removed by cleanup, not by revocation.
 Releasing repository locks need not await such an attempt's acknowledgement. An authorized publisher is not
 fenced this way and still requires acknowledged cancellation, an effective fence where the effect occurs, or
 reconciliation. A changed ownership generation rejects stale receipts but is not, by itself, an external
@@ -7292,11 +7328,12 @@ identified with the measurements; skipped or failed trials MUST NOT be described
 declared representative parallel fixture; do not call source-only dispatch or
 duplicate prerequisite compilation a distributed-build success.
 
-### 28.8 Conformance vectors (specification cases, not executed results)
+### 28.8 Conformance vectors
 
-Some vectors state a condition on the implementation. A vector whose condition does not hold for an
-implementation is not applicable to it: it is neither satisfied nor violated, and every remaining vector
-still applies in full.
+These are required cases. Whether an implementation has executed them is that implementation's claim, made where its
+status is stated, and none of them is evidence of speedup. Some vectors state a condition on the implementation. A
+vector whose condition does not hold for an implementation is not applicable to it: it is neither satisfied nor
+violated, and every remaining vector still applies in full.
 
 1. No role or worker list: local orchestrator behavior remains unchanged.
 2. A worker receives direct or nested release initiation: refuse before locks
@@ -7348,7 +7385,8 @@ still applies in full.
     an earlier run: verify its original provenance and issue a current admission receipt before reuse. An old
     run's receipt alone authorizes no task or effect.
 21. A worker pool accepts two runs: its total active command tasks remain within each node's local capacity,
-    and each run's stage budgets remain global. An unacknowledged timed-out attempt still consumes capacity.
+    and each run's stage budgets remain global. An unacknowledged timed-out attempt still consumes capacity; an
+    assignment no node has claimed consumes none and is offered again.
 22. A build-only dependency outside propagation kinds supplies ignored output: transfer it before the consumer
     builds. Where the implementation admits execution-only edges that the release graph does not already
     reject, an execution-only cycle fails preflight without changing the semantic release plan.
@@ -7395,4 +7433,6 @@ parser leniency.
 
 The task/run summary MUST distinguish completed computation, admitted outputs, successful publication, durable
 native recording, blocked dependents and unknown external outcomes. A completed task is not synonymous with a
-released package. Diagnostic output order follows the semantic order of §17.2, independently of arrival order.
+released package. A prepared provider (vector 9) has the shape completed computation, admitted outputs, no
+publication and no record; the summary states it so, and neither omits the provider nor lists it as released.
+Diagnostic output order follows the semantic order of §17.2, independently of arrival order.

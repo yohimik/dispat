@@ -49,3 +49,40 @@ whose publication was authorized before a lock was lost, the evidence an operato
 lock, and an optional time bound on publication authorizations. Section 13.11 gains informative cost rows for the
 execution profile, and section 27.11 states which of the equally small link proposals a minimal topology should
 prefer. No message grammar changes.
+
+
+## 2026-09-22: Distributed execution implemented
+
+The dispat release engine implements the execution profile of [section
+28](./SPEC.md#28-distributed-task-and-release-execution) in every history mode. Its transport is the Git mailbox of
+section 28.4: an orchestrator and its workers share a Git repository, every message is a signed tree on a branch named
+`dispat-worker-<node>-<date>-<kind>-<random>`, every transition is one compare-and-swap ref update, and a worker polls;
+nothing connects to a worker. The node settings are `execution.role`, `execution.concurrency`, `execution.workers`
+(orchestrator), `execution.name` and `execution.endpoint` (worker), `execution.secretEnv`, `execution.timeouts` and
+`execution.transfer`. A package or space declares what its build leaves behind (`buildOutputs`), where its outputs run
+(`buildPlatforms`) and where its stages may be placed (`runOnly: both`, `worker` or `orchestrator`, one value or a build
+and publish pair). The orchestrator is one more node of the pool, chosen last. Builds and publications run on workers; a
+publication is delegated only by an explicit `runOnly`, and a space that logs in to its registry publishes on the
+orchestrator whatever the key says. A provider the run does not release is prepared once per run under the non-release
+environment when a consumer reads its outputs. Outputs travel as result trees on the branches (section 28.5); there is
+no bundle service, and vector 17 is the mode in use. Every log line and webhook event names its sending node. Failures
+carry the six categories of section 28.9 beside the engine's own codes `E225` to `E229` and `W244`; the existing `E220`
+to `E222`, `E335` and `E336` carry `native-recording-or-lock` as their class, but the lines those five codes are logged
+on do not yet carry the category field section 28.9 requires; that is a departure, to be closed by attaching the
+category at those sites.
+
+Not implemented, so the conditional vectors do not apply: reuse of verified outputs across runs (vector 20) and the
+rollback profile of section 26 (vector 26). Departures from the profile as written: the platform check of section 28.2
+runs before dispatch for the packages a run releases and, for a prepared provider, at its placement, where an
+unsatisfiable platform fails the provider's consumers. Coordination and recording were measured on Linux nodes against
+the LLVM monorepo: a probe answers in about 4 seconds, an assignment is claimed 3 seconds after it is written on a warm
+node and 37 seconds on a cold one, and a result is noticed within 5 seconds. The first transport of a snapshot that
+descends from the planned head carries that repository's whole history, 7.3 million objects for LLVM, and takes 17 to 20
+minutes from a small orchestrator, and it is paid again on every run because cleanup removes every ref. That cost
+belongs to a mailbox that starts empty: a mailbox that already holds the repository's objects, the repository's own
+remote for one, receives no history, which is what the engine does where the remote is used as the mailbox. Section 28.4
+now also permits a durable mailbox ref or a history-free snapshot, and neither is implemented. No comparison against
+local execution on a pinned fixture has been made, and no speedup is claimed. Sections 28.1, 28.2, 28.4, 28.5, 28.6,
+28.8 and 28.9 gained the rules this implementation showed to be missing: local execution captured like a worker's,
+unclaimed work outside capacity, an unreadable tip not counted as seen, outermost-first materialization, the phase a
+cancelled attempt stopped in, revocation limited to unadmitted branches, and the summary shape of a prepared provider.
