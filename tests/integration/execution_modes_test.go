@@ -876,7 +876,7 @@ func TestExecutionControlCheckpointFailureKeepsSourceSuccess(t *testing.T) {
 // a checkpoint of a source it could not write.
 const executionCheckpointCode = "E335"
 
-// TestExecutionSecretNeverReachesMailboxOrLogs: the signing secret is named by
+// TestExecutionSecretNeverReachesAnyMailboxObject: the signing secret is named by
 // an environment variable rather than written in a file so that it stays on
 // the machines that need it. This is that claim, read from the two places a
 // leak would end up in every mode: the mailbox, which anybody who can reach a
@@ -885,7 +885,7 @@ const executionCheckpointCode = "E335"
 // Every object the mailbox holds is inspected rather than every branch,
 // because a run deletes its branches at the end and a secret in an object
 // nothing points at is a secret in the mailbox all the same.
-func TestExecutionSecretNeverReachesMailboxOrLogs(t *testing.T) {
+func TestExecutionSecretNeverReachesAnyMailboxObject(t *testing.T) {
 	for _, mode := range executionModeNames {
 		t.Run(mode, func(t *testing.T) {
 			fleet := newExecutionModeFleet(t, mode, true)
