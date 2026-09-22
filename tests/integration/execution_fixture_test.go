@@ -241,8 +241,28 @@ func startWorker(t *testing.T, repo *harness.Repo, cfg models.File, idleSeconds 
 	env := append([]string{executionSecretEnv + "=" + executionSecret}, extraEnv...)
 	proc := repo.StartCommandEnv(env, "worker",
 		"--root", root, "--state-dir", state,
-		"--idle-timeout", fmt.Sprint(idleSeconds))
+		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(idleSeconds)))
 	return &executionWorker{t: t, proc: proc, stateDir: state, root: root}
+}
+
+// workerIdleBackstopSeconds is how long a fixture node serves with nothing to
+// do before it ends itself, whatever the scenario asked for.
+//
+// Nothing a test starts may outlive the test binary, and an interrupted
+// `go test` runs no cleanup at all: two nodes started with no idle timeout
+// were found still polling three and a half hours after the binary that
+// started them had been killed. Every scenario here finishes its work in
+// seconds, so a backstop this long changes no assertion and bounds the damage
+// an interrupted run can do to a machine.
+func resolveWorkerIdleBackstop(stated int) int {
+	backstop := 600
+	if harness.IsTinyGo() {
+		backstop *= 5
+	}
+	if stated <= 0 || stated > backstop {
+		return backstop
+	}
+	return stated
 }
 
 // runWorker runs one serving invocation to completion.
@@ -263,7 +283,7 @@ func (w *executionWorker) restart(t *testing.T, repo *harness.Repo, idleSeconds 
 	env := append([]string{executionSecretEnv + "=" + executionSecret}, extraEnv...)
 	proc := repo.StartCommandEnv(env, "worker",
 		"--root", w.root, "--state-dir", w.stateDir,
-		"--idle-timeout", fmt.Sprint(idleSeconds))
+		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(idleSeconds)))
 	return &executionWorker{t: t, proc: proc, stateDir: w.stateDir, root: w.root}
 }
 

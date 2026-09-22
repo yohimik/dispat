@@ -115,10 +115,26 @@ func lockNodeState(path string) (func() error, error) {
 // claimNodeLock writes this process id into an unheld lock and answers the
 // process id of a live holder instead.
 //
-// A stale lock is removed and the claim is retried exactly once. Once,
-// because the only thing a second round could win against is another process
-// taking over the same stale lock at the same instant, and that process is
-// then a live owner this one has to report rather than race.
+// Taking over a stale lock is the part worth reading. Removing the file and
+// creating a new one is two operations, and two processes that both read the
+// same stale content can interleave them: the second one removes the lock the
+// first has just written and claims the folder, so both believe they own it
+// and each holds half the record of what has been answered. That is the one
+// thing this lock exists to prevent.
+//
+// So the stale lock is taken over by renaming it aside and then looking at
+// what was actually renamed. A process that finds its own stale content took
+// over the lock it meant to; one that finds a live process's content has taken
+// a fresh claim away from its owner, puts it straight back and reports that
+// owner. Renaming is the primitive rather than removing because it is what
+// makes the second half possible at all: a removed file cannot be examined and
+// cannot be put back.
+//
+// The window this leaves is the instant the path is absent between the rename
+// aside and a restore, in which a third process could create a lock of its
+// own. That is why the restore looks before it writes: a path somebody else
+// has claimed in the meantime belongs to them, and this process reports it
+// rather than replacing it.
 func claimNodeLock(path string) (int, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err == nil {
@@ -138,10 +154,63 @@ func claimNodeLock(path string) (int, error) {
 	if owner != 0 && IsProcessRunning(owner) {
 		return owner, nil
 	}
-	if err := os.Remove(path); err != nil {
+	return takeOverNodeLock(path, owner)
+}
+
+// takeOverNodeLock renames a stale lock aside, verifies what it renamed, and
+// claims the folder only if the lock it took away really was the stale one.
+func takeOverNodeLock(path string, stale int) (int, error) {
+	aside := path + ".taken." + strconv.Itoa(os.Getpid())
+	if err := os.Rename(path, aside); err != nil {
+		if os.IsNotExist(err) {
+			// Somebody else took the same stale lock over first; the folder is
+			// theirs unless they have not written their claim yet, which the
+			// second attempt below finds out.
+			return claimNodeLockAfterTakeover(path)
+		}
 		return 0, fmt.Errorf("execution: taking over the worker state lock %s: %w", path, err)
 	}
+	if taken := readTakenNodeLockOwner(aside); taken != 0 && taken != stale && IsProcessRunning(taken) {
+		// A fresh claim, written between the read above and the rename: it is
+		// put back and its owner is reported, which is what the doc comment of
+		// the refusal has always promised and what a plain remove could not
+		// deliver.
+		return restoreNodeLock(path, aside, taken)
+	}
+	if err := os.Remove(aside); err != nil && !os.IsNotExist(err) {
+		return 0, fmt.Errorf("execution: removing the stale worker state lock %s: %w", aside, err)
+	}
 	return claimNodeLockAfterTakeover(path)
+}
+
+// readTakenNodeLockOwner is the process id a renamed lock names, and zero for
+// one that names nobody. It never waits: the file is no longer where a writer
+// would be writing it, so there is nothing to wait for.
+func readTakenNodeLockOwner(path string) int {
+	held, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return parseNodeLockOwner(strings.TrimSpace(string(held)))
+}
+
+// restoreNodeLock puts a live owner's lock back and answers that owner.
+//
+// It looks before it writes: a path a third process has claimed in the
+// meantime belongs to that process, so the renamed file is simply dropped and
+// the owner this process took away is still the one it reports, since both
+// answers refuse this process the folder.
+func restoreNodeLock(path, aside string, owner int) (int, error) {
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Remove(aside); err != nil && !os.IsNotExist(err) {
+			return 0, fmt.Errorf("execution: removing the worker state lock copy %s: %w", aside, err)
+		}
+		return owner, nil
+	}
+	if err := os.Rename(aside, path); err != nil {
+		return 0, fmt.Errorf("execution: restoring the worker state lock %s: %w", path, err)
+	}
+	return owner, nil
 }
 
 // readNodeLockOwner answers the process id a lock names, and zero when it

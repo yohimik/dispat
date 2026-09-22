@@ -169,6 +169,13 @@ func validateExecutionBounds(x *ExecutionConfig) error {
 		return fmt.Errorf("execution.concurrency must be >= 1, got %d: a node that accepts no task is a node to remove rather than to configure", capacity)
 	}
 	timeouts := x.ResolveTimeouts()
+	// Known hazard, left as it stands on purpose: `maxManifestBytes` bounds
+	// every document of the coordination protocol and not only an output
+	// manifest, so a value below the size of an ordinary assignment makes the
+	// profile unusable rather than merely strict. Refusing such a value at
+	// load, and bounding protocol documents by a ceiling of their own, are both
+	// behaviour changes that existing fences pin the current meaning of, so the
+	// choice belongs to the owner rather than to a passing validation change.
 	transfer := x.ResolveTransfer()
 	for _, bound := range []struct {
 		key   string
