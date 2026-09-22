@@ -7083,14 +7083,16 @@ The same configuration format and schema MUST serve both roles. The following ke
 | `execution.concurrency` | `1` | Positive integer bounding simultaneous assigned command tasks on this node, including tasks from different runs. |
 | `execution.workers` | `[]` | Orchestrator's execution links, each with a unique nonempty node `name` and authenticated transport `endpoint`. |
 
-These are node-startup settings. A package, space, linked repository, or delegated policy snapshot MUST NOT
-change the local role, local capacity, or worker list when execution enters another checkout. A worker MUST
-have an empty worker list. An orchestrator receiving a delegated task MUST NOT use its own list for that task.
-Endpoint schemes, protocol framing and credential references are implementation-defined and MUST be documented
-in this same schema; secrets MUST NOT appear in endpoint URLs, receipts or logs. Node names identify authenticated
-execution endpoints, not repository peers. A node may serve both capabilities, but each assignment has exactly
-one authority scope. A transport the worker polls, as the Git mailbox of §28.4 is, additionally gives the worker its
-own name and the endpoint it polls; those keys belong to the transport and are documented with it.
+These are node-startup settings. A package, space, linked repository, or delegated policy snapshot MUST NOT change the
+local role, local capacity, or worker list when execution enters another checkout. A worker MUST have an empty worker
+list. An orchestrator receiving a delegated task MUST NOT use its own list for that task. Endpoint schemes, protocol
+framing and credential references are implementation-defined and MUST be documented in this same schema; secrets MUST
+NOT appear in endpoint URLs, receipts or logs. Node names identify authenticated execution endpoints, not repository
+peers. A node may serve both capabilities, but each assignment has exactly one authority scope. A transport the worker
+polls, as the Git mailbox of §28.4 is, additionally gives the worker its own name and the endpoint it polls; those keys
+belong to the transport and are documented with it. Execution links MAY also be stated by the invocation itself, as when
+a pipeline names a machine it created a moment earlier: such links are validated as the configuration's are, refused
+under worker authority as the configuration's are, and are no part of `plan` or its digest.
 
 Example, with the Git mailbox transport of §28.4, where an endpoint is a Git repository the nodes share and
 `secretEnv` names the variable holding the secret the mailbox's messages are authenticated with:
@@ -7138,20 +7140,18 @@ not worker-specific copies of release policy.
 
 ### 28.3 Lock, snapshot, plan, assign
 
-Before creating a write-capable run, the orchestrator MUST identify every
-participating repository, including any control repository, and acquire all
-release locks in one stable total order. It MUST verify ownership before
-planning or dispatch; failure releases acquired locks in reverse order and
-dispatches no write-capable task. Repository lock resource identities MUST be stable across CI entry points
-and endpoint aliases, so runs addressing the same repository compete for the same exclusion. Under the Git
-release-lock convention, every participant's lock is its own `dispat-release-lock`; one entry lock does not
-cover unlocked sources. It MUST revalidate discovery under those
-locks; a changed participant set requires releasing the partial acquisition and acquiring the complete set again
-in the stable order, not silent expansion. Discovery and compatibility inspection before locking MUST be
-read-only; hooks or task setup that can write run only after the complete locked snapshot is validated.
-Distributed release execution MUST refuse a configured or environment-based unsafe lock bypass, including
-the bypass described for local peer execution in §27.11. Read-only
-planning remains lock-free and does not dispatch side effects.
+Before creating a write-capable run, the orchestrator MUST identify every participating repository, including any
+control repository, and acquire all release locks in one stable total order. It MUST verify ownership before planning or
+dispatch; failure releases acquired locks in reverse order and dispatches no write-capable task. Repository lock
+resource identities MUST be stable across CI entry points and endpoint aliases, so runs addressing the same repository
+compete for the same exclusion. Under the Git release-lock convention, every participant's lock is its own
+`dispat-release-lock`; one entry lock does not cover unlocked sources. It MUST revalidate discovery under those locks; a
+changed participant set requires releasing the partial acquisition and acquiring the complete set again in the stable
+order, not silent expansion. Discovery and compatibility inspection before locking MUST be read-only; hooks or task
+setup that can write run only after the complete locked snapshot is validated. Distributed release execution MUST refuse
+a configured or environment-based unsafe lock bypass, including the bypass described for local peer execution in §27.11.
+Read-only planning remains lock-free and does not dispatch side effects, execution links or not: with links it MAY fix
+and report the plan digest and probe the links, and MUST NOT assign a task.
 
 Let `input` contain the fixed repository-qualified heads and complete relevant history, release records, graph,
 resolved semantic configuration and explicit release options, plus the verified withdrawal inventory and
@@ -7207,15 +7207,14 @@ package release record.
 ### 28.4 Git synchronization branches
 
 The orchestrator MUST provision isolated task worktrees and temporary coordination branches named
-`dispat-worker-<id>-<workinfo>`, created atomically under `refs/heads/`. `<id>` is the node name of the
-execution link the branch is addressed to. `<workinfo>` is `<date>-<kind>-<random>`: the date SHOULD use UTC
-`YYYYMMDD`, `<kind>` is a short lowercase label of the work (for example `probe`, `build`, `publish`,
-`prepare`, `snapshot` or `relay`), and the random suffix MUST provide at least 128 bits of cryptographic
-randomness. The date and the kind are diagnostic labels only. The name is an untrusted routing hint that lets
-a node list only the branches addressed to it; the authenticated manifest, not the branch name, identifies
-node, run, task and attempt, and a node MUST reject a manifest whose node or branch binding disagrees with
-where it was found. A branch is bound to one run, repository and task attempt; parallel attempts MUST NOT
-share a mutable branch.
+`dispat-worker-<id>-<workinfo>`, created atomically under `refs/heads/`. `<id>` is the node name of the execution link
+the branch is addressed to. `<workinfo>` is `<date>-<kind>-<random>`: the date SHOULD use UTC `YYYYMMDD`, `<kind>` is a
+short lowercase label of the work (for example `probe`, `build`, `publish`, `prepare`, `run` for a sweep task of §28.10,
+`snapshot` or `relay`), and the random suffix MUST provide at least 128 bits of cryptographic randomness. The date and
+the kind are diagnostic labels only. The name is an untrusted routing hint that lets a node list only the branches
+addressed to it; the authenticated manifest, not the branch name, identifies node, run, task and attempt, and a node
+MUST reject a manifest whose node or branch binding disagrees with where it was found. A branch is bound to one run,
+repository and task attempt; parallel attempts MUST NOT share a mutable branch.
 
 Workers synchronize declared source changes and result manifests through these
 branches. Each acknowledged checkpoint MUST identify an exact full object ID;
@@ -7533,6 +7532,17 @@ violated, and every remaining vector still applies in full.
 30. Where the implementation bounds authorizations in time, a publisher that observes its authorization after the
     stated instant does not start its command, and a command still running at its assignment's deadline is ended
     by the executing node without a request from the orchestrator. The release lock does not lapse in either case.
+31. Where the implementation delegates command sweeps (§28.10), a sweep and a release of the same repositories run
+    at once: the sweep takes no release lock, its messages carry a generation of their own, and neither run reads
+    the other's coordination branches as its own. A sweep that acquired a release lock, or a release refused because
+    a sweep was running, is non-conforming.
+32. Two tasks of one sweep write the same path under a declared sweep output root with different bytes: the sweep
+    fails under `io-integrity`, naming the path and both tasks, and the root on the orchestrator holds neither
+    task's file at that path. Identical bytes from two tasks are admitted once.
+33. A sweep task's script writes nothing under a declared root: the task's set for that root is admitted as empty
+    and the sweep continues. The same absence under a build output root fails the build's prerequisite (§28.5).
+34. A read-only invocation is given execution links: it reports the plan digest and MAY probe the links, and no
+    node receives an assignment.
 
 ### 28.9 Operational diagnostics
 
@@ -7557,3 +7567,31 @@ native recording, blocked dependents and unknown external outcomes. A completed 
 released package. A prepared provider (vector 9) has the shape completed computation, admitted outputs, no
 publication and no record; the summary states it so, and neither omits the provider nor lists it as released.
 Diagnostic output order follows the semantic order of §17.2, independently of arrival order.
+
+### 28.10 Command sweeps
+
+An engine that runs one declared command across the packages a plan selects, without releasing them, MAY delegate
+that sweep to workers under this profile. A sweep is not a release: it records nothing, discharges nothing, and its
+receipts are execution evidence only (§28.3). It takes no release lock. Its messages are bound to an ownership
+generation drawn from a fresh run identity, one value per sweep, which rejects duplicate and stale messages exactly as
+a lock-derived generation does; a sweep authorizes no effect a generation would have to fence, so it needs no
+exclusion, and a release of the same repositories MAY run beside it. The plan digest is fixed and reported as for a
+release, so that every assignment names the plan the sweep ran over, and the refusals of §28.1 and §28.3 apply
+unchanged: a worker MUST NOT initiate a sweep, and a configured or environment-based lock bypass refuses a sweep with
+execution links as it refuses a release with them.
+
+A sweep task carries the package's commands for the swept script alone, with the sweep's computed environment and the
+unresolved static environment of §28.3, and runs them in the snapshot of the package's input closure; the hooks that
+bracket a release stage do not bracket it. It consumes no output of another task, because a sweep installs nothing,
+and it returns its exports as a build returns its manifest. Its coordination branch carries the kind `run` (§28.4).
+
+A sweep MAY declare, per script and in the entry configuration only, repository-relative roots its tasks write. They
+are captured on the node after the task succeeds under the manifest and validation of §28.5 and installed on the
+orchestrator by merging: an admitted file replaces the file of its path and every other file of the root stays,
+because several tasks of one sweep contribute to one root. Two tasks of one sweep MUST NOT write the same path with
+different bytes; such a pair fails the sweep under `io-integrity`, naming the path and both tasks, because the merged
+root would otherwise depend on which task finished last (§17.2). Each task's admitted set is installed all or nothing.
+A root the script did not write is admitted as empty, a deliberate difference from a build output root, whose absence
+fails a prerequisite (§28.5): a sweep's script may legitimately have nothing to say for a package. The roots may
+neither be nor contain a package folder and are disjoint from every build output root; an implementation states these
+as load-time rules of its schema (§28.2).
