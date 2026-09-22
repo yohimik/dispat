@@ -363,3 +363,16 @@ func TestPollIntervalBacksOff(t *testing.T) {
 	assert.Equal(t, maximumPollInterval, interval)
 	assert.Equal(t, minimumPollInterval, resolvePollInterval(interval, true))
 }
+
+// TestAResultCarryingOutputsReportsUnderTheTransferWindow: a build's outputs
+// travel inside the result push, so that push is bounded by the transfer
+// timeout the operator set for outputs and never by the short report bound
+// that a plain result gets; a 1.7 GB install tree once died of the latter.
+func TestAResultCarryingOutputsReportsUnderTheTransferWindow(t *testing.T) {
+	worker := &Worker{TransferTimeout: 3600 * time.Second}
+	assert.Equal(t, 3600*time.Second, worker.resolveReportTimeout(true))
+	assert.Equal(t, taskReportTimeout, worker.resolveReportTimeout(false),
+		"a result carrying nothing keeps the short bound")
+	assert.Equal(t, taskReportTimeout, (&Worker{TransferTimeout: time.Second}).resolveReportTimeout(true),
+		"a transfer window shorter than the report bound never shortens a report")
+}

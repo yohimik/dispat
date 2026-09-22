@@ -88,10 +88,13 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 		Endpoint:    settings.Endpoint,
 		StateDir:    state.Dir,
 		IdleTimeout: opts.IdleTimeout,
-		Mailbox:     execution.NewGitMailbox(settings.Endpoint, git, signer, a.log),
-		Cache:       git,
-		Seen:        seen,
-		Log:         a.log,
+		// The transfer window bounds the push of a task's outputs, which is
+		// the one report a node makes whose size the node does not choose.
+		TransferTimeout: time.Duration(settings.ResolveTransfer().Timeout) * time.Second,
+		Mailbox:         execution.NewGitMailbox(settings.Endpoint, git, signer, a.log),
+		Cache:           git,
+		Seen:            seen,
+		Log:             a.log,
 		Report: execution.FormatNodeReport(opts.Version, git.GitVersion(ctx),
 			settings.ResolveConcurrency(), formatTransferLimits(settings)),
 		// The cache is dispensable by design, so opening it is the same

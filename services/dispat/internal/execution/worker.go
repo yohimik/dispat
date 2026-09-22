@@ -94,6 +94,11 @@ type Worker struct {
 	// serves until the process is signalled, which is what a long-running
 	// node does.
 	IdleTimeout time.Duration
+	// TransferTimeout bounds the one push that carries a task's build outputs
+	// to the mailbox, the configured `transfer.timeout`. A result that carries
+	// nothing is bounded by taskReportTimeout instead, because writing one
+	// small document should never take that long.
+	TransferTimeout time.Duration
 	// Mailbox is the endpoint this node serves.
 	Mailbox mailboxx
 	// Cache is the object store the task checkouts are materialized from: the
@@ -380,10 +385,12 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 		Outputs:     outcome.outputs,
 		StrayWrites: outcome.strayWrites,
 	}
-	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+	carried := carriedOutputs(outcome.outputs)
+	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx),
+		w.resolveReportTimeout(len(carried) > 0))
 	defer done()
 	reported, err := w.advance(reportCtx, tip, resolveResultLease(claimed, outcome),
-		MessageResult, report, carriedOutputs(outcome.outputs))
+		MessageResult, report, carried)
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the task result could not be reported")
@@ -391,6 +398,19 @@ func (w *Worker) answerTask(ctx context.Context, tip ChainTip, claimed string, a
 	}
 	log.Info().Str("commit", reported).Str("status", outcome.status).
 		Int("strayWrites", outcome.strayWrites).Msg("task finished")
+}
+
+// resolveReportTimeout is how long a finished task may take to report. A
+// result that carries build outputs is a push of those outputs, which is as
+// large as the build made it and travels under the transfer timeout the
+// operator configured for exactly that; a result carrying nothing is one
+// document and gets the short bound, so a node asked to stop is not held for
+// the transfer window by a report that has nothing to transfer.
+func (w *Worker) resolveReportTimeout(isCarryingOutputs bool) time.Duration {
+	if isCarryingOutputs && w.TransferTimeout > taskReportTimeout {
+		return w.TransferTimeout
+	}
+	return taskReportTimeout
 }
 
 // resolveResultLease is the object a result is written on top of: the claim
