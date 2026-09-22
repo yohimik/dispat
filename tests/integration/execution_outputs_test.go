@@ -538,7 +538,8 @@ func TestExecutionOutputGitFaults(t *testing.T) {
 		pattern  string
 		onWorker bool
 	}{
-		"the outputs cannot be staged":         {pattern: "*--literal-pathspecs add -f*", onWorker: true},
+		"the outputs cannot be hashed":         {pattern: "*hash-object -w --no-filters --stdin-paths*", onWorker: true},
+		"the outputs cannot be staged":         {pattern: "*update-index -z --add --index-info*", onWorker: true},
 		"the output tree cannot be written":    {pattern: "*write-tree*", onWorker: true},
 		"the outputs cannot be read to digest": {pattern: "*cat-file --batch*", onWorker: true},
 		"the outputs cannot be installed here": {pattern: "*cat-file --batch*", onWorker: false},
@@ -1405,4 +1406,36 @@ func TestExecutionOversizedManifestIsRefusedWhereItIsWritten(t *testing.T) {
 	reply := stopAll(t, []*executionWorker{worker})[0]
 	assert.Contains(t, reply.Stdout, "manifest-oversize",
 		"the node names the rule it broke\nstdout:\n%s", reply.Stdout)
+}
+
+// TestExecutionOutputBytesIgnoreTheCheckoutAttributes: a checkout's
+// attributes describe its sources and must not touch a build output. A
+// package whose tree is marked `text` builds a library holding CRLF pairs;
+// the consumer reads exactly the bytes the build wrote, on another machine and
+// in the orchestrator's own checkout, and the capture records an executable
+// as executable.
+func TestExecutionOutputBytesIgnoreTheCheckoutAttributes(t *testing.T) {
+	rig := newExecutionOutputWorkspaceWith(t, func(repo *harness.Repo) string {
+		return executionRecordingScript + ` && mkdir -p dist && case "$DISPAT_PACKAGE" in
+  assets) printf 'ELF\000head\r\nbody\r\n' > dist/lib.bin && printf '#!/bin/sh\r\n' > dist/tool && chmod 755 dist/tool ;;
+  ui|docs) od -An -c ../assets/dist/lib.bin | tr -d ' \n' > dist/from-assets.txt && test -x ../assets/dist/tool ;;
+  app) cat ../ui/dist/from-assets.txt ../docs/dist/from-assets.txt > dist/combined.txt ;;
+esac`
+	})
+	rig.repo.WriteFile("packages/assets/.gitattributes", "* text eol=lf\n")
+	rig.repo.Commit("chore(assets): store the sources as text")
+	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 1)
+
+	res := rig.release()
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	// The publish probe prints what each package's dist holds, in the
+	// orchestrator's own checkout: ui and docs wrote the character dump of the
+	// library they read on their node, and app the two dumps.
+	published := executionProbeValues(rig, "publish")
+	for _, name := range []string{"ui", "docs", "app"} {
+		assert.Contains(t, published[name], `\r\n`,
+			"%s read the CRLF pairs the build wrote, on its node and in the orchestrator's copy: %q", name, published[name])
+	}
+	stopAll(t, workers)
 }
