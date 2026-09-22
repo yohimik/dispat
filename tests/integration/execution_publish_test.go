@@ -385,9 +385,11 @@ git -c user.name=fixture -c user.email=fixture@example.com commit -q -m "chore: 
 }
 
 // TestExecutionUnauthorizedPublisherNeverStarts: a run that has lost the lock
-// it took authorizes nothing more. The node is waiting at the gate, so the
-// withdrawal reaches it before any command starts; it acknowledges, and the
-// run exits non-zero having published nothing further.
+// it took authorizes nothing more. The loss is noticed at whichever check runs
+// first after it: the ownership check before the next assignment, or the
+// revalidation behind the authorization a node waiting at the gate asked
+// for. Either way no command starts, the node is withdrawn and acknowledges,
+// and the run exits non-zero having published nothing further.
 func TestExecutionUnauthorizedPublisherNeverStarts(t *testing.T) {
 	rig := newExecutionPublishRig(t, func(cfg *models.File) {
 		cfg.Scripts["postpublish"] = models.Script{
@@ -402,8 +404,12 @@ func TestExecutionUnauthorizedPublisherNeverStarts(t *testing.T) {
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	withheld, isWithheld := executionLine(res, "publication withheld")
-	require.True(t, isWithheld, "the run withdrew the attempt it would not authorize\nstdout:\n%s", res.Stdout)
-	assert.Contains(t, []string{executionNode, executionSecondNode}, withheld.Str("worker"))
+	_, isHalted := executionLine(res, "the release lock was lost, so no new effect may start")
+	require.True(t, isWithheld || isHalted,
+		"the run withdrew or refused the attempt it would not authorize\nstdout:\n%s", res.Stdout)
+	if isWithheld {
+		assert.Contains(t, []string{executionNode, executionSecondNode}, withheld.Str("worker"))
+	}
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionLockCode),
 		"and said so with the lock code\nstdout:\n%s", res.Stdout)
 
