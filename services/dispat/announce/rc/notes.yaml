@@ -13,31 +13,31 @@
 --- |-
   {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is ready for testing.
   This release candidate: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
+  Worker nodes guide: https://dispat.dev/next/distributed-execution/
   Linked repositories guide: https://dispat.dev/next/choreographed-repositories/
-  dispat compute reference: https://dispat.dev/next/cli/compute/
   Report a problem: https://github.com/yohimik/dispat/issues
 
-  Orchestration and choreography. No separate control repository.
+  Worker nodes. One release, builds on several machines.
   {{ if eq .Platform "discord" }}
   The full notes are on the pictures.{{ else }}
-  Monorepo: release packages that live in one repository.
+  A release can run its build commands on other machines. The machine it started on keeps the release locks, the plan, every authorization and every record.
 
-  Orchestration: start from one chosen repository to coordinate releases across linked repositories.
+  The transport is Git alone. An orchestrator pushes an assignment to a mailbox repository and a worker polls it, so no worker needs an inbound network address. Run `dispat worker` on each machine.
 
-  Choreography: start a release from any linked repository.
+  Declared build outputs travel between dependent packages, verified before they are installed, so a consumer reads the folder its provider built without committing it.
 
-  Both approaches to linked repositories work without a separate control repository. Each repository keeps its own configuration and release history.
+  Publishing stays on the orchestrator unless a package asks otherwise, and a space with a login script always publishes there, so credentials stay on one machine.
 
-  Connect repositories with a star, a minimal tree, or your own tree of links. `dispat compute --topology star` proposes direct links from the current repository to every other one. `dispat compute --topology minimal` keeps existing links and adds only what is needed. Custom links must connect the repositories without loops.
+  Adding machines widens what can affect a release. Read the security section: a mailbox holds source and command text, and machines sharing one signing secret are one trust zone.
 
-  Both commands preview changes. Add `--write` to apply them. Existing links are kept.
+  With no `execution` object, a release runs exactly as it always did.
 
-  Before planning, dispat locks every participating repository. If any lock fails, the release stops. It then calculates versions and releases dependencies before the packages that need them.
+  Linked repositories are unchanged: orchestrate from one repository, or release from any of them, with no control repository.
 
-  If a library releases but an app using it fails, the successful release stays recorded. The next run plans the unfinished work without releasing the library again. This is saga recovery: keep what succeeded and finish what remains.
+  If a library releases but an app using it fails, the successful release stays recorded. The next run finishes what remains rather than releasing the library again.
 
   Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
 
   Check the plan with `dispat status`. It publishes nothing and takes no release locks.{{ end }}
 
-  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #softwaredevelopment #releasemanagement #buildtools #developerexperience #platformengineering #polyglot #orchestration #choreography #sagapattern
+  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #distributedbuilds #releasemanagement #buildtools #orchestration #choreography #sagapattern

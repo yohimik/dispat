@@ -214,13 +214,13 @@
     <div class="prompt">$ dispat release</div>
     <div class="badge">v{{ .new_version }}</div>
 
-    <div class="lede">Orchestration and choreography. No separate control repository.</div>
+    <div class="lede">Worker nodes. One release, builds on several machines.</div>
 
     <div class="install">
       <h2>LINKS</h2>
       <div class="cmd link"><span>This release candidate</span> https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}</div>
+      <div class="cmd link"><span>Worker nodes guide</span> https://dispat.dev/next/distributed-execution/</div>
       <div class="cmd link"><span>Linked repositories guide</span> https://dispat.dev/next/choreographed-repositories/</div>
-      <div class="cmd link"><span>dispat compute reference</span> https://dispat.dev/next/cli/compute/</div>
       <div class="cmd link"><span>Report a problem</span> https://github.com/yohimik/dispat/issues</div>
       <h2>INSTALL</h2>
       <div class="cmd"><span>$</span> curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v{{ .new_version }}/install.sh | DISPAT_VERSION={{ .new_version }} sh</div>
@@ -230,14 +230,14 @@
 
   <div class="notes">
     <h2>NOTES</h2>
-    <p>Monorepo: release packages that live in one repository.</p>
-    <p>Orchestration: start from one chosen repository to coordinate releases across linked repositories.</p>
-    <p>Choreography: start a release from any linked repository.</p>
-    <p>Both approaches to linked repositories work without a separate control repository. Each repository keeps its own configuration and release history.</p>
-    <p>Connect repositories with a star, a minimal tree, or your own tree of links. `dispat compute --topology star` proposes direct links from the current repository to every other one. `dispat compute --topology minimal` keeps existing links and adds only what is needed. Custom links must connect the repositories without loops.</p>
-    <p>Both commands preview changes. Add `--write` to apply them. Existing links are kept.</p>
-    <p>Before planning, dispat locks every participating repository. If any lock fails, the release stops. It then calculates versions and releases dependencies before the packages that need them.</p>
-    <p>If a library releases but an app using it fails, the successful release stays recorded. The next run plans the unfinished work without releasing the library again. This is saga recovery: keep what succeeded and finish what remains.</p>
+    <p>A release can run its build commands on other machines. The machine it started on keeps the release locks, the plan, every authorization and every record.</p>
+    <p>The transport is Git alone. An orchestrator pushes an assignment to a mailbox repository and a worker polls it, so no worker needs an inbound network address. Run `dispat worker` on each machine.</p>
+    <p>Declared build outputs travel between dependent packages, verified before they are installed, so a consumer reads the folder its provider built without committing it.</p>
+    <p>Publishing stays on the orchestrator unless a package asks otherwise, and a space with a login script always publishes there, so credentials stay on one machine.</p>
+    <p>Adding machines widens what can affect a release. Read the security section: a mailbox holds source and command text, and machines sharing one signing secret are one trust zone.</p>
+    <p>With no `execution` object, a release runs exactly as it always did.</p>
+    <p>Linked repositories are unchanged: orchestrate from one repository, or release from any of them, with no control repository.</p>
+    <p>If a library releases but an app using it fails, the successful release stays recorded. The next run finishes what remains rather than releasing the library again.</p>
     <p>Autistic stability for ADHD projects. Mathematical planning. Saga recovery.</p>
     <p>Check the plan with `dispat status`. It publishes nothing and takes no release locks.</p>
   </div>
