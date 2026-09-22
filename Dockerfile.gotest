@@ -416,6 +416,9 @@ COPY --from=tidy /src/${MODULE}/go.mod /src/${MODULE}/go.su[m] /
 # profile line back to its source file: the whole workspace has to be here
 # for the totals to be about anything.
 FROM src-all AS badge
+# The integration coverage minimum the gate below requires; a release may state
+# another figure at dispatch (DISPAT_COVERAGE_MINIMUM_INTEGRATION).
+ARG COVERAGE_MINIMUM_INTEGRATION=95
 ARG TEST_COMMIT
 ENV TESTREPORT_COMMIT=${TEST_COMMIT}
 COPY --chown=gopher:gopher coverage ./coverage
@@ -466,7 +469,7 @@ UNIT=$(pct coverage-unit.out)
 INTEGRATION=$(pct integration.out)
 TOTAL=$(pct coverage.out)
 go run github.com/yohimik/dispat/tools/testreport coverage -coverage . \
-  -commit "$TESTREPORT_COMMIT" -minimum-total 95 -minimum-integration 95
+  -commit "$TESTREPORT_COMMIT" -minimum-total 95 -minimum-integration "${COVERAGE_MINIMUM_INTEGRATION:-95}"
 echo "unit ${UNIT} / integration ${INTEGRATION} / total ${TOTAL}"
 
 {
@@ -533,6 +536,9 @@ COPY --from=report /src/packages/docs/data/report.json /
 # coverage/ itself is absent, which is every context Docker built from a tree
 # nobody has run a suite in.
 FROM runner AS measured
+# The integration coverage minimum the gate below requires; a release may state
+# another figure at dispatch (DISPAT_COVERAGE_MINIMUM_INTEGRATION).
+ARG COVERAGE_MINIMUM_INTEGRATION=95
 ARG COMMIT
 COPY --from=test-ccme /src/coverage ./coverage
 COPY --from=test-config /src/coverage ./coverage
@@ -552,7 +558,7 @@ COPY --chown=gopher:gopher coverag[e]/experiment[s] ./coverage/experiments
 RUN <<'EOF'
 set -eu
 go run github.com/yohimik/dispat/tools/testreport coverage -coverage coverage \
-  -commit "$COMMIT" -minimum-total 95 -minimum-integration 95
+  -commit "$COMMIT" -minimum-total 95 -minimum-integration "${COVERAGE_MINIMUM_INTEGRATION:-95}"
 go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" \
   -require-fresh -modules packages/docs/data/benchmarked.txt
 EOF

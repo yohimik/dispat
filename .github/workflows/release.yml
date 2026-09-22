@@ -36,6 +36,10 @@ on:
         description: Export the tiny binaries without running the integration suite against them
         type: boolean
         default: false
+      coverage_minimum_integration:
+        description: The integration coverage percentage the badge and report gates require
+        type: string
+        default: "95"
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -62,6 +66,9 @@ env:
   # The TinyGo acceptance gate of the dispat build (services/dispat/Dockerfile,
   # stage tiny-test) runs unless the dispatch asked to skip it.
   DISPAT_TINY_GATE: ${{ inputs.skip_tinygo_gate && 'skip' || 'test' }}
+  # The integration coverage minimum of the badge and report gates
+  # (Dockerfile.gotest); 95 unless the dispatch states another figure.
+  DISPAT_COVERAGE_MINIMUM_INTEGRATION: ${{ inputs.coverage_minimum_integration || '95' }}
 
 # A release pushes tags, a branch, gh-pages and four images. dispat's own
 # release lock would refuse the second run, but it would refuse it partway in;
