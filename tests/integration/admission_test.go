@@ -14,7 +14,7 @@ package integration
 // two non-conforming outcomes absent.
 //
 // Ordering is gated rather than slept. The provider's publish waits for a file
-// the consumer's version stage writes, so "the provider died after the
+// the consumer's postVersion hook writes, so "the provider died after the
 // consumer's manifests were written" is something the run either did or could
 // not do, rather than something a timer happened to catch.
 
@@ -35,33 +35,49 @@ import (
 // because those are the only variables the harness lets through to a run.
 const admissionProviderOK = "DISPAT_IT_ADMISSION_CORE_OK"
 
+// admissionShape is what one fixture of this file differs in.
+//
+// hasBuild decides which half of SPEC 19.2a's failure bullet the fixture
+// exercises: with no build command the consumer has produced nothing that
+// could embed the provider's planned version and is re-reconciled, and with
+// one it has and is blocked instead. hasVersionScript decides which
+// reconciling strategy the re-reconciliation has to redo: the native one
+// alone, or the native one and the space's own `flow.version` scripts.
+type admissionShape struct {
+	hasBuild         bool
+	hasVersionScript bool
+}
+
 // admissionRepo is the two-package workspace of vector 80d: `core` in a space
 // whose publish fails unless this run says otherwise, and `cli` in a space
-// that reconciles its manifest natively and records, from its version stage,
-// that the stage ran.
+// that reconciles its manifest natively.
 //
-// hasConsumerBuild decides which half of SPEC 19.2a's failure bullet the
-// fixture exercises: with no build command the consumer has produced nothing
-// that could embed the provider's planned version and is re-reconciled, and
-// with one it has and is blocked instead.
-func admissionRepo(t *testing.T, hasConsumerBuild bool) *harness.Repo {
+// The provider's publish waits on a gate the consumer's postVersion hook
+// opens, which is after the native reconciliation has written the provider's
+// planned version. That is what makes "the provider died after the consumer's
+// manifests were written" the thing the run either did or could not do: opened
+// from the version script instead, the gate would be a race against dispat's
+// own reconciliation.
+func admissionRepo(t *testing.T, shape admissionShape) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
 	gate := r.Path("cli-versioned.gate")
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
 		"build": {"echo building $DISPAT_PACKAGE"},
-		// The provider's publish waits until the consumer's version stage has
-		// reconciled its manifests, and only then decides this run's outcome.
 		"core-publish": {stageRelationGateWait(gate),
 			`if [ -n "$` + admissionProviderOK + `" ]; then echo published; else exit 1; fi`},
-		"cli-version": {"touch '" + gate + "'"},
-		"cli-publish": {"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
+		"cli-version":      {"echo versioning $DISPAT_PACKAGE against ${DISPAT_UPDATED_PACKAGES:-nothing}"},
+		"cli-post-version": {"touch '" + gate + "'"},
+		"cli-publish":      {"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
 	}
 	consumerFlow := &models.SpaceFlowConfig{
-		Version: []string{"cli-version"}, Publish: []string{"cli-publish"}}
-	if hasConsumerBuild {
+		PostVersion: []string{"cli-post-version"}, Publish: []string{"cli-publish"}}
+	if shape.hasBuild {
 		consumerFlow.Build = []string{"build"}
+	}
+	if shape.hasVersionScript {
+		consumerFlow.Version = []string{"cli-version"}
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages/libs"},
@@ -108,7 +124,9 @@ func admissionManifest(t *testing.T, r *harness.Repo) string {
 // BASELINE, and the next run that publishes the provider catches it up.
 func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 	t.Run("the consumer proceeds naming the provider's baseline", func(t *testing.T) {
-		r := admissionRepo(t, false)
+		// With version scripts as well, so the re-reconciliation has both
+		// strategies to redo.
+		r := admissionRepo(t, admissionShape{hasVersionScript: true})
 		r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 
 		res := r.Release()
@@ -125,10 +143,12 @@ func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 			"the published manifest names what the provider published (SPEC 19.5)")
 		assert.NotContains(t, manifest, `"@acme/core": "^0.2.0"`,
 			"a manifest naming a version that was never published must not be published")
+		assert.Contains(t, res.Stdout, "versioning cli against nothing",
+			"the version scripts are re-run with the dead provider out of DISPAT_UPDATED_*")
 	})
 
 	t.Run("the run that publishes the provider catches the consumer up", func(t *testing.T) {
-		r := admissionRepo(t, false)
+		r := admissionRepo(t, admissionShape{})
 		r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 		require.NotEqual(t, 0, r.Release().Code)
 
@@ -153,7 +173,7 @@ func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 	})
 
 	t.Run("a provider that fails again blocks the catch-up", func(t *testing.T) {
-		r := admissionRepo(t, false)
+		r := admissionRepo(t, admissionShape{})
 		r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 		require.NotEqual(t, 0, r.Release().Code)
 
@@ -175,7 +195,7 @@ func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 // build produced may name a version nobody published, and dispat will neither
 // publish it nor silently rebuild.
 func TestAdmissionBlocksAProceedingConsumerWhoseBuildEmbeddedThePlannedVersion(t *testing.T) {
-	r := admissionRepo(t, true)
+	r := admissionRepo(t, admissionShape{hasBuild: true})
 	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 
 	res := r.Release()
@@ -194,7 +214,7 @@ func TestAdmissionBlocksAProceedingConsumerWhoseBuildEmbeddedThePlannedVersion(t
 // the provider's pending commit; the run that lifts the hold must release the
 // provider and catch the consumer up.
 func TestAdmissionCatchesUpAConsumerThatOvertookAHeldProvider(t *testing.T) {
-	r := admissionRepo(t, false)
+	r := admissionRepo(t, admissionShape{})
 	r.WriteFile("packages/libs/core/stream.txt", "streaming\n")
 	r.Commit("feat(core)^: streaming")
 	r.WriteFile("packages/libs/core/hold.txt", "not yet\n")
@@ -231,7 +251,7 @@ func TestAdmissionCatchesUpAConsumerThatOvertookAHeldProvider(t *testing.T) {
 // release carried the commit and the consumer's release reached it. A delivery
 // test that mistook that for a debt would plan the consumer for ever.
 func TestAdmissionLeavesPlansWithoutOvertakingUnchanged(t *testing.T) {
-	r := admissionRepo(t, false)
+	r := admissionRepo(t, admissionShape{})
 	env := []string{admissionProviderOK + "=1"}
 
 	r.WriteFile("packages/libs/core/stream.txt", "streaming\n")

@@ -40,12 +40,13 @@ import (
 // owed sources to the dependent and only those: a source whose version the
 // target already carries is not a reason it releases again.
 func (cp *computation) owedSources(target, commitKey string, sources map[string]bool) []string {
-	if cp.withoutDelivery {
-		return nil // the window-only rule, for the differential test alone
-	}
 	baseline := cp.baselineBoundary(target, commitKey)
-	if baseline == "" {
-		return nil // an unreleased target's window holds every commit
+	if baseline == "" || cp.withoutDelivery {
+		// Two ways there is nothing to ask: a target that has released nothing
+		// has overtaken nothing, its window holding every commit; and the
+		// window-only rule the differential test compares against never asks
+		// the delivery question at all.
+		return nil
 	}
 	if cp.byKey[baseline] == nil {
 		// The target's baseline is not one of the union's commits, so no commit
