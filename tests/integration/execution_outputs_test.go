@@ -587,6 +587,16 @@ type executionFakeWorker struct {
 	// isSigned is false for the one scenario whose point is a result nobody
 	// signed.
 	isSigned bool
+	// mangle rebinds the identities of an otherwise correct result, which is
+	// how a receipt bound to another run, another attempt or another node is
+	// offered. Nil leaves the result bound to the attempt it answers.
+	mangle func(executionOrderedJSON) executionOrderedJSON
+	// resultSecret signs the result of a build, and nothing else. It is
+	// separate from the secret every other message is signed with because a
+	// scenario about a receipt nobody could have written still needs this node
+	// to pass preflight: a probe answered with the wrong secret is a run that
+	// never dispatches anything, which is a scenario about preflight instead.
+	resultSecret string
 	// answered is closed once a build has been answered, so a scenario can
 	// wait for the thing it is about.
 	answered chan struct{}
@@ -626,7 +636,8 @@ type executionTreeFile struct {
 func newExecutionFakeWorker(t *testing.T, mailbox, node string, craft func(*executionCraftedOutputs)) *executionFakeWorker {
 	t.Helper()
 	worker := &executionFakeWorker{t: t, mailbox: mailbox, node: node, craft: craft,
-		isSigned: true, answered: make(chan struct{}), stop: make(chan struct{})}
+		isSigned: true, resultSecret: executionSecret,
+		answered: make(chan struct{}), stop: make(chan struct{})}
 	return worker
 }
 
@@ -699,7 +710,10 @@ func (w *executionFakeWorker) answer(branch string) {
 	if !crafted.isOmitted {
 		report = report.with(executionField{"outputs", crafted.manifest})
 	}
-	w.push(branch, claim, "result", report, crafted.tree, w.isSigned)
+	if w.mangle != nil {
+		report = w.mangle(report)
+	}
+	w.pushSigned(branch, claim, "result", report, crafted.tree, w.isSigned, w.resultSecret)
 	w.once.Do(func() { close(w.answered) })
 }
 
@@ -737,7 +751,9 @@ func (w *executionFakeWorker) buildOutputs(assignment map[string]any) struct {
 		executionField{"outputTree", ""},
 		executionField{"manifestDigest", ""},
 	)
-	w.craft(crafted)
+	if w.craft != nil {
+		w.craft(crafted)
+	}
 	tree := executionWriteTree(w.t, w.mailbox, crafted.entries)
 	crafted.manifest = crafted.manifest.set("outputTree", tree)
 	if !crafted.isDigestStale {
@@ -756,12 +772,20 @@ func (w *executionFakeWorker) buildOutputs(assignment map[string]any) struct {
 func (w *executionFakeWorker) push(branch, parent, kind string, document executionOrderedJSON,
 	outputs string, isSigned bool) string {
 	w.t.Helper()
+	return w.pushSigned(branch, parent, kind, document, outputs, isSigned, executionSecret)
+}
+
+// pushSigned is push with the secret stated, for the one scenario whose point
+// is a signature that does not verify.
+func (w *executionFakeWorker) pushSigned(branch, parent, kind string, document executionOrderedJSON,
+	outputs string, isSigned bool, secret string) string {
+	w.t.Helper()
 	body := executionMustMarshal(w.t, document)
 	entries := fmt.Sprintf("100644 blob %s\t%s.json\x00",
 		gitIn(w.t, w.mailbox, string(body), "hash-object", "-w", "--stdin"), kind)
 	if isSigned {
 		entries += fmt.Sprintf("100644 blob %s\t%s.sig\x00",
-			gitIn(w.t, w.mailbox, executionSign(kind, executionSecret, body), "hash-object", "-w", "--stdin"), kind)
+			gitIn(w.t, w.mailbox, executionSign(kind, secret, body), "hash-object", "-w", "--stdin"), kind)
 	}
 	inner := gitIn(w.t, w.mailbox, entries, "mktree", "-z")
 	listing := fmt.Sprintf("040000 tree %s\tdispat\x00", inner)
