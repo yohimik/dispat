@@ -39,10 +39,13 @@ func releaseLocked(r *harness.Repo, flags ...string) harness.RunResult {
 }
 
 // bareGit runs one git command inside a bare repository, which is how these
-// tests see the remote as another machine would.
+// tests see the remote as another machine would. It names an identity of its
+// own: a crafted `commit-tree` needs an author, and the gate's container has
+// no global configuration to lend one, unlike a developer's machine.
 func bareGit(t *testing.T, bare string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", bare}, args...)...).CombinedOutput()
+	out, err := exec.Command("git", append([]string{"-C", bare,
+		"-c", "user.name=dispat integration", "-c", "user.email=integration@dispat.test"}, args...)...).CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, out)
 	return string(out)
 }
