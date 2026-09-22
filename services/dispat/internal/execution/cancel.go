@@ -79,7 +79,16 @@ type cancellation struct {
 // never happened.
 func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, attempt int,
 	kind string, offer taskOffer, tipOID string) cancellation {
-	withdrawn, err := c.advance(ctx, node, offer.branch, tipOID, MessageCancel, Withdrawal{
+	// Both the withdrawal and the wait for its answer are detached from the
+	// caller's context and bounded by the run's own cancel wait. The commonest
+	// reason to withdraw an attempt is that the run was interrupted, and a
+	// withdrawal written on the context that interrupt cancelled would never
+	// be written at all: the node would keep building, its slot would be held
+	// for nothing, and a publisher would be left with no answer to the one
+	// question §28.6 says has to be answered before a lock goes back.
+	settling, done := context.WithTimeout(context.WithoutCancel(ctx), c.Timeouts.Cancel)
+	defer done()
+	withdrawn, err := c.advance(settling, node, offer.branch, tipOID, MessageCancel, Withdrawal{
 		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
 		Assignment: offer.offered, Tip: tipOID,
 	})
@@ -92,9 +101,7 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 	c.recordOwnedRef(node, offer.branch, withdrawn)
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", node).Int("attempt", attempt).
 		Str("commit", withdrawn).Msg("attempt withdrawn")
-	acked, done := context.WithTimeout(context.WithoutCancel(ctx), c.Timeouts.Cancel)
-	defer done()
-	return c.awaitAcknowledgement(acked, node, task, attempt, offer, withdrawn)
+	return c.awaitAcknowledgement(settling, node, task, attempt, offer, withdrawn)
 }
 
 // awaitAcknowledgement polls the attempt's branch until the node has answered

@@ -484,6 +484,7 @@ tests/integration/
   execution_publish_test.go goal 57 (publishing from a node, and the single-use authorization that lets its command start)
   execution_modes_test.go   goal 57 (the same distributed release in a single history, a control repository and a linked fleet)
   execution_faults_test.go  goal 57 (the git invocations a dispatch and a report are made of, failed one at a time)
+  execution_recovery_test.go goal 57 (the two clocks a delegated task lives under, and the branches a node is asked to ignore)
   stage_relation_test.go    goal 60 (what a consumer waits for, and what a failed provider does to it)
 
   configuration
@@ -729,7 +730,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`, `execution_placement_test.go`, `execution_prepare_test.go`, `execution_modes_test.go`, `execution_faults_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`, `execution_placement_test.go`, `execution_prepare_test.go`, `execution_modes_test.go`, `execution_faults_test.go`, `execution_recovery_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -853,6 +854,8 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestStageRelationLadder` | The key folds through the ordinary ladder and a level that states it replaces the whole relation: the repository default reaches a space that says nothing, a space entry replaces it, a package entry replaces the space's and a package folder's own file replaces that again, read out of the resolved debug lines of `dispat status`. |
 | `TestStageRelationConfigRefusals` | An object with no `build`, an unknown or wrongly cased wait, an unknown key, a blocking rule that is not a boolean and `{build: publish, isBlocking: false}` each exit 1 naming `isBuildWaitingPublish` and tag nothing, at the root file, a space entry, a package entry, a space folder's own file and a package folder's own file alike. |
 | `tests/integration/execution_prepare_test.go::TestStageRelationNoneCarriesNoBuildOutputs` | A relation saying a consumer's build reads nothing the provider builds is a declaration the distributed transport obeys: on two nodes the two builds run at once, proven with a gate file the provider's build waits on rather than with a sleep, the consumer's task checkout never holds the provider's declared output folder, the run succeeds and the consumer still publishes only after the provider published. |
+| `tests/integration/execution_recovery_test.go::TestExecutionQueuedWorkIsNotATimeout` | Queue time is not run time: two runs sharing one node of capacity one make the second run's assignment wait in the mailbox, and a task deadline longer than one build and shorter than two still completes both runs, keeps the node's concurrency at one and marks no node unhealthy. |
+| `tests/integration/execution_recovery_test.go::TestExecutionTransportBranchesAreNotRejectedAssignments` | A prepared input state the run itself pushed into a node's own namespace is skipped before it is read rather than reported as an assignment nobody could read: the delegated build still runs on the node and the node's log carries no rejected assignment and no authority warning. |
 | `tests/integration/execution_prepare_test.go::TestStageRelationNoneNeedsNoPreparation` | A provider reached only across a `none` relation is a provider nothing has to build: a run whose only pending work sits behind one prepares nothing at all, reports no prepared provider, never runs the provider's build anywhere and still releases the consumer. |
 
 ### Goal 10: config loading, resolution and options (`config_test.go`)
