@@ -74,8 +74,6 @@ type executionModeFleet struct {
 	// checkouts is where each repository sits relative to the entry, "." for
 	// the entry itself, keyed by the name the fixture calls the repository.
 	checkouts map[string]string
-	// owners names the repository each package belongs to.
-	owners map[string]string
 	// remotes is each repository's own bare remote, which is where its
 	// release lock lives, keyed as the checkouts are.
 	remotes map[string]string
@@ -198,8 +196,6 @@ func newExecutionSingleFleet(t *testing.T, isDistributed bool) *executionModeFle
 		builds:    filepath.Join(t.TempDir(), "builds.log"),
 		gate:      filepath.Join(t.TempDir(), "consumers.gate"),
 		checkouts: map[string]string{"entry": "."},
-		owners: map[string]string{executionModeProvider: "entry",
-			executionModeConsumerA: "entry", executionModeConsumerB: "entry"},
 	}
 }
 
@@ -259,9 +255,7 @@ func newExecutionControlFleet(t *testing.T, isDistributed bool) *executionModeFl
 		builds:    filepath.Join(t.TempDir(), "builds.log"),
 		gate:      filepath.Join(t.TempDir(), "consumers.gate"),
 		checkouts: map[string]string{"control": ".", "alpha": "sources/alpha", "beta": "sources/beta"},
-		owners: map[string]string{executionModeProvider: "alpha",
-			executionModeConsumerA: "beta", executionModeConsumerB: "beta"},
-		extra: fileProtocolEnv(),
+		extra:     fileProtocolEnv(),
 	}
 }
 
@@ -271,9 +265,9 @@ func newExecutionControlFleet(t *testing.T, isDistributed bool) *executionModeFl
 // The fleet is assembled by the choreography fixture's own helpers, so that
 // what a distributed release is driven through here is exactly the fleet every
 // other choreographed scenario is driven through. Its seeded packages are
-// replaced by this fixture's own, under a subject that releases nothing, so
-// the two peers hold the provider and the consumers rather than a package
-// named after themselves.
+// replaced by this fixture's own, so the two peers hold the provider and the
+// consumers rather than a package named after themselves, and the commit that
+// does it is the one every mode's first release is planned from.
 func newExecutionLinkedFleet(t *testing.T, isDistributed bool) *executionModeFleet {
 	t.Helper()
 	mailbox := executionMailbox(t)
@@ -300,9 +294,7 @@ func newExecutionLinkedFleet(t *testing.T, isDistributed bool) *executionModeFle
 		builds:    filepath.Join(t.TempDir(), "builds.log"),
 		gate:      filepath.Join(t.TempDir(), "consumers.gate"),
 		checkouts: map[string]string{"alpha": ".", "beta": ".links/beta"},
-		owners: map[string]string{executionModeProvider: "alpha",
-			executionModeConsumerA: "beta", executionModeConsumerB: "beta"},
-		extra: fileProtocolEnv(),
+		extra:     fileProtocolEnv(),
 	}
 }
 
@@ -550,7 +542,7 @@ func TestExecutionModesPlanIsIndependentOfWorkers(t *testing.T) {
 //
 // What is compared is what a later run reads: the tags each repository holds,
 // the files every commit the release added touches, and the evidence the mode
-// itself owns — the control repository's checkpoint of each source, and the
+// itself owns: the control repository's checkpoint of each source, and the
 // settlement of a fleet link. None of it may mention a machine.
 func TestExecutionModesReleaseAsTheirTwinWithoutWorkers(t *testing.T) {
 	for _, mode := range executionModeNames {
@@ -583,7 +575,7 @@ func TestExecutionModesReleaseAsTheirTwinWithoutWorkers(t *testing.T) {
 				assert.Empty(t, distributed.transportSubjects(repository, before[repository]),
 					"no transport commit entered %s's history", repository)
 			}
-			executionModeEvidence(t, mode, local, localRes, distributed, res)
+			executionModeEvidence(t, mode, localRes, distributed, res)
 			assert.Empty(t, executionMailboxBranches(t, distributed.mailbox),
 				"the run closed every coordination branch it created")
 		})
@@ -597,8 +589,8 @@ func TestExecutionModesReleaseAsTheirTwinWithoutWorkers(t *testing.T) {
 // settles the revision of every peer it incorporated. Both are written by the
 // orchestrator in the owning repository (§27.7), so a run that delegated every
 // build has to leave exactly what a run that delegated none leaves.
-func executionModeEvidence(t *testing.T, mode string, local *executionModeFleet,
-	localRes harness.RunResult, distributed *executionModeFleet, res harness.RunResult) {
+func executionModeEvidence(t *testing.T, mode string, localRes harness.RunResult,
+	distributed *executionModeFleet, res harness.RunResult) {
 	t.Helper()
 	switch mode {
 	case "control repository":
@@ -617,7 +609,6 @@ func executionModeEvidence(t *testing.T, mode string, local *executionModeFleet,
 			"and what it recorded is a revision of that peer rather than anything a task wrote")
 	default:
 		assert.Empty(t, settledPins(res), "a single history settles no fleet link")
-		_ = local
 	}
 }
 

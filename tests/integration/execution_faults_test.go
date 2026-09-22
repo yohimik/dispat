@@ -102,14 +102,14 @@ type executionGitFault struct {
 }
 
 // TestExecutionOrchestratorGitFaults: the orchestrator's own git failing
-// around the mailbox, once the run is past preflight and is dispatching real
-// work.
+// around the mailbox, in the three ways that matter.
 //
-// The two halves are the two obligations. An input state that could not be
-// prepared or offered, and an assignment that could not be described or
-// offered, are work that was never authorized, so the package fails with the
-// integrity code and nothing of the run is published. A poll, a fetch, a walk
-// of the branch or a read of one of its objects is a report about work that
+// A read that can never succeed is a pool this machine cannot talk to at all,
+// so the release refuses before a stage runs anywhere. An input state that
+// could not be prepared or offered, and an assignment or a preparation that
+// could not be described or offered, are work that was never authorized, so
+// the package fails with the integrity code and nothing is published. A fetch
+// or a chain walk of what a node already answered is a report about work that
 // has already happened, so failing one of them costs a tick and the release
 // still ends as a release.
 func TestExecutionOrchestratorGitFaults(t *testing.T) {
