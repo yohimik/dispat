@@ -96,8 +96,8 @@ type executionGitFault struct {
 	diagnostic string
 	// isRetained expects the transport-cleanup warning rather than a failure.
 	isRetained bool
-	// newRig is the fixture this row needs, for the rows about a branch only
-	// a preparation puts in a mailbox.
+	// newRig is the fixture this row needs, for the calls a workspace only
+	// makes when it prepares a provider or captures a declared output.
 	newRig func(*testing.T) *executionRig
 }
 
