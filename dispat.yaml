@@ -224,6 +224,22 @@ packages:
     path: infra
 
 concurrency: [0, 1]
+# The release's full-suite job adds one worker machine to itself per run and
+# names it on the command line (`--worker`, scripts/ci-worker.sh), so no link
+# is written here and a developer's run stays local. What is written here is
+# everything a link needs when one is given: the secret's name, this machine's
+# own slot count, and waits sized for a machine that has to boot first and
+# for the integration gate. The sweep's test profiles come back through
+# runOutputs, so the coverage gate reads them where a local run leaves them.
+execution:
+  secretEnv: DISPAT_EXECUTION_SECRET
+  concurrency: 1
+  timeouts:
+    preflight: 600
+    task: 7200
+    cancel: 120
+runOutputs:
+  tests: [coverage]
 
 # What every record says beside the notes themselves, stated once for each
 # destination because the two are separate policies rather than one with two

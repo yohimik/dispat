@@ -239,6 +239,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write     # the badge branch
+      id-token: write     # Workload Identity Federation, for the worker machine
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -263,6 +264,32 @@ jobs:
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
+      # The suite runs distributed: this job is the orchestrator and one
+      # Compute Engine worker, created here and deleted at the end of the job
+      # whatever the suite did, takes tasks beside it. dispat dog-foods its own
+      # worker nodes on every release. auth is the same Workload Identity
+      # exchange the release job performs; the worker script runs gcloud
+      # inside the release tools image, so the runner installs nothing. The
+      # signing secret is this run's alone: generated here, masked, handed to
+      # the machine over ssh, and the orchestrator reaches the mailbox with
+      # the ephemeral key the script made.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_RELEASER_SA }}
+
+      - name: Add a worker machine to this job
+        run: |
+          secret=$(openssl rand -hex 32)
+          echo "::add-mask::$secret"
+          echo "DISPAT_EXECUTION_SECRET=$secret" >> "$GITHUB_ENV"
+          export DISPAT_EXECUTION_SECRET="$secret"
+          sh scripts/ci-worker.sh create
+          sh scripts/ci-worker.sh start "$RUNNER_TEMP/dispat-fresh/dispat"
+          echo "DISPAT_CI_WORKER_ENDPOINT=$(sh scripts/ci-worker.sh endpoint)" >> "$GITHUB_ENV"
+          echo "GIT_SSH_COMMAND=$(sh scripts/ci-worker.sh git-ssh)" >> "$GITHUB_ENV"
+
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
       # services/dispat/go.mod, so the tests run in the same module state a
@@ -281,7 +308,7 @@ jobs:
       # that produces a complete set of coverage profiles, which is why the
       # badge is computed here and nowhere else.
       - name: Run every package's tests
-        run: dispat run tests --since all
+        run: dispat run tests --since all --worker "ci-worker=$DISPAT_CI_WORKER_ENDPOINT"
 
       # always(): the redirects must not outlive the job whatever the suite
       # did, and unlink is idempotent, so closing an already-closed bracket is
@@ -293,6 +320,27 @@ jobs:
         run: |
           dispat run unlink --since all -p dispat
           dispat run verify-unlinked --since all -p dispat
+
+      # always(): the machine costs money for as long as it exists, and its
+      # log is the only account of what the worker did. The instance also
+      # deletes itself after its lifetime, so a job that never reaches this
+      # step leaves nothing behind for long.
+      - name: Collect the worker's log
+        if: always()
+        run: sh scripts/ci-worker.sh collect "$RUNNER_TEMP/dispat-ci-worker-logs"
+
+      - name: Upload the worker's log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: worker-log
+          path: ${{ runner.temp }}/dispat-ci-worker-logs
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Delete the worker machine
+        if: always()
+        run: sh scripts/ci-worker.sh delete
 
       # Every release runs the full suite. Coverage thresholds and the badge
       # gate only runs that publish at least one stable package.
