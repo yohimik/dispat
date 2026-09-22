@@ -11,6 +11,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -29,6 +30,10 @@ type fakeMailbox struct {
 	tips      map[string]ChainTip
 	documents map[string][]byte
 	rejection map[string]RejectReason
+	// unreadable makes one branch fail the way a local git failure does: not
+	// a message this protocol refuses, but objects this process could not
+	// read at all.
+	unreadable map[string]error
 
 	written      []MessageKind
 	carried      []gitx.TreeEntry
@@ -48,10 +53,16 @@ func (m *fakeMailbox) Observe(context.Context, string) ([]gitx.RemoteHead, error
 }
 
 func (m *fakeMailbox) Inspect(_ context.Context, head gitx.RemoteHead) (ChainTip, error) {
+	if err, isBroken := m.unreadable["inspect:"+head.Name]; isBroken {
+		return ChainTip{}, err
+	}
 	return m.tips[head.Name], nil
 }
 
 func (m *fakeMailbox) Read(_ context.Context, tip ChainTip, _ int64) ([]byte, error) {
+	if err, isBroken := m.unreadable["read:"+tip.Branch]; isBroken {
+		return nil, err
+	}
 	if reason, isRejected := m.rejection[tip.Branch]; isRejected {
 		return nil, &Rejection{Reason: reason}
 	}
@@ -94,10 +105,11 @@ func newWorkerFixture(t *testing.T, branch string, tip ChainTip, message any) (*
 	document, err := json.Marshal(message)
 	require.NoError(t, err)
 	mailbox := &fakeMailbox{
-		heads:     []gitx.RemoteHead{{Name: branch, OID: tip.OID}},
-		tips:      map[string]ChainTip{branch: tip},
-		documents: map[string][]byte{branch: document},
-		rejection: map[string]RejectReason{},
+		heads:      []gitx.RemoteHead{{Name: branch, OID: tip.OID}},
+		tips:       map[string]ChainTip{branch: tip},
+		documents:  map[string][]byte{branch: document},
+		rejection:  map[string]RejectReason{},
+		unreadable: map[string]error{},
 	}
 	seen, err := LoadSeenSet(filepath.Join(t.TempDir(), "seen.json"), time.Now())
 	require.NoError(t, err)
@@ -225,6 +237,46 @@ func TestWorkerRefusesEveryUnacceptableAssignment(t *testing.T) {
 		assert.False(t, worker.Seen.IsSeen("run-1", PreflightTask, 1),
 			"and is not remembered, so a node that learns to run it still can")
 	})
+}
+
+// TestWorkerReadsABranchAgainWhenReadingItFailed: the poll memo is what keeps
+// an unchanged branch from being read twice, and it is recorded as soon as a
+// branch's objects are fetched. A read that then failed has consumed nothing,
+// so a tip that never moves again would never be offered to this node a second
+// time: the assignment would sit in the mailbox until the run gave up on it.
+//
+// A message this protocol refuses is the opposite case and is not forgotten:
+// reading it again would reach the same decision every tick.
+func TestWorkerReadsABranchAgainWhenReadingItFailed(t *testing.T) {
+	branch := "dispat-worker-build-a-20260921-probe-abc"
+	tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
+	for name, breakage := range map[string]struct {
+		key            string
+		err            error
+		isReconsidered bool
+	}{
+		"the chain cannot be resolved": {key: "inspect:" + branch,
+			err: errors.New("git failed"), isReconsidered: true},
+		"the message cannot be read": {key: "read:" + branch,
+			err: errors.New("git failed"), isReconsidered: true},
+		"the message is refused": {key: "read:" + branch,
+			err: &Rejection{Reason: ReasonOversize}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			worker, mailbox := newWorkerFixture(t, branch, tip, validProbe(branch))
+			mailbox.unreadable[breakage.key] = breakage.err
+
+			worker.tick(t.Context())
+
+			assert.Empty(t, mailbox.written, "nothing was answered")
+			if !breakage.isReconsidered {
+				assert.Empty(t, mailbox.reconsidered)
+				return
+			}
+			assert.Equal(t, []string{branch}, mailbox.reconsidered,
+				"the next poll has to offer this branch again")
+		})
+	}
 }
 
 // TestWorkerLeavesQueuedWorkVisible: a node with no free slot leaves the

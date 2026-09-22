@@ -665,6 +665,12 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 	w.coordinator.recordOwnedRef(w.link.Name, head.Name, head.OID)
 	tip, err := w.mailbox.Inspect(ctx, head)
 	if err != nil {
+		// The objects are here and this process could not make anything of
+		// them, so the branch has not been consumed. The poll's memo is what
+		// keeps an unchanged branch from being read twice, and a tip that
+		// never moves again would never be offered a second time: one local
+		// failure would cost the whole task deadline instead of one tick.
+		w.mailbox.Reconsider(head.Name)
 		if ctx.Err() == nil {
 			w.coordinator.Log.Warn().Err(err).Str("worker", w.link.Name).Str("branch", head.Name).
 				Msg("a coordination branch could not be read")
@@ -719,8 +725,12 @@ func (w *watcher) readResult(ctx context.Context, tip ChainTip, waiting *attempt
 	document, err := w.mailbox.Read(ctx, tip, w.coordinator.Limits.MaxManifestBytes)
 	if err != nil {
 		if reason := RejectionReason(err); reason != "" {
+			// A message this node really wrote and this protocol refuses is a
+			// decision rather than a mishap: reading it again would reach the
+			// same one every tick until the deadline.
 			return Result{}, reason
 		}
+		w.mailbox.Reconsider(tip.Branch)
 		return Result{}, ReasonUnreadable
 	}
 	var result Result

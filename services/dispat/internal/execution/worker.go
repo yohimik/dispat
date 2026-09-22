@@ -257,6 +257,12 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		Msg("coordination branch inspected")
 	tip, err := w.Mailbox.Inspect(ctx, head)
 	if err != nil {
+		// The branch's objects are here and this process could not make
+		// anything of them, so the work on it is still work: the memo would
+		// otherwise make one local failure mean "already dealt with" for a
+		// tip that never moves again, and the run would wait out the task
+		// deadline for an assignment sitting in the mailbox.
+		w.Mailbox.Reconsider(head.Name)
 		return false, err
 	}
 	if ResolveWorkerAction(tip) != ActionClaim {
@@ -499,6 +505,9 @@ func (w *Worker) formatReplyHeader(assignment Header) Header {
 func (w *Worker) reportUnusable(tip ChainTip, err error) error {
 	reason := RejectionReason(err)
 	if reason == "" {
+		// Not a message this protocol refuses but a read that failed, so the
+		// branch is still unread and the next poll has to offer it again.
+		w.Mailbox.Reconsider(tip.Branch)
 		return err
 	}
 	w.reportRejection(tip, reason)
