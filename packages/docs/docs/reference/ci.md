@@ -154,6 +154,31 @@ before one secret spans machines of different trust levels.
 [Worker nodes on Kubernetes](../examples/kubernetes-workers.md) is the same arrangement as an Indexed Job, for a
 cluster that adds and removes machines for the pool.
 
+### A machine the job creates for itself
+
+A job can also be its own pool: create a machine, start a worker on it, run, and delete the machine before the job
+ends. dispat's own release does this for its full suite. The job that runs `dispat run tests --since all` before a
+release creates one Compute Engine instance, starts `dispat worker` on it with a signing secret generated for that run
+alone, and names the machine on the command line:
+
+```sh
+dispat run tests --since all --worker "ci-worker=ssh://dispat@203.0.113.7/home/dispat/mailbox.git"
+```
+
+`--worker name=endpoint` states an execution link exactly as an entry in `execution.workers` would, with the same
+validation, so a committed file never carries the address of a machine that exists for one run. The script that does
+the rest is [`scripts/ci-worker.sh`](https://github.com/yohimik/dispat/blob/main/scripts/ci-worker.sh): it keeps an
+ephemeral ssh key pair, learns the instance's host keys from the cloud API rather than from the network, seeds the
+mailbox with the repository's public history so the run's first push carries only its working tree, sends the secret
+over ssh rather than through instance metadata, and deletes the instance in an `always()` step, with a lifetime on
+the instance itself as the backstop for a job that never reaches that step. The sweep's test profiles come back to the
+job through `runOutputs`, so the coverage gate that follows reads them where a local run would have left them.
+
+What that release measures on every run, and what it asks of the account it runs as, is in
+[the release workflow](https://github.com/yohimik/dispat/blob/main/.github/workflows/release.yml) and
+[`infra/ci.tf`](https://github.com/yohimik/dispat/blob/main/infra/ci.tf): the identity needs to create, read and
+delete instances, and nothing else, because the instance carries no service account of its own.
+
 ## Gating a pipeline on the plan
 
 A repository with nothing pending releases nothing and exits `0`. This keeps your pipeline green when a merge only
