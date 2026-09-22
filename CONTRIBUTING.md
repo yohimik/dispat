@@ -230,7 +230,9 @@ Two gates are measured separately and neither substitutes for the other:
 
 - **Combined** statement coverage, the unit and integration profiles merged, is at least 95%.
 - **Integration-only** statement coverage is at least 95% across the CLI and the six public Go modules: `pkg/ccme`,
-  `pkg/config`, `pkg/manifest`, `pkg/models`, `pkg/scanner`, `pkg/writer` and `services/dispat`.
+  `pkg/config`, `pkg/manifest`, `pkg/models`, `pkg/scanner`, `pkg/writer` and `services/dispat`. A release may state
+  another figure at dispatch (`coverage_minimum_integration`, read by the badge and report gates as
+  `COVERAGE_MINIMUM_INTEGRATION`); that is a recorded decision for one release, not a change of the bar.
 
 The integration denominator is a frozen inventory. Every one of those seven modules must appear in it, and a production
 package or block missing from the instrumented build is a failure rather than a smaller denominator. Unit coverage is
