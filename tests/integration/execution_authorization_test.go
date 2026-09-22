@@ -313,8 +313,16 @@ func TestExecutionCraftedPublicationAuthorizations(t *testing.T) {
 	for name, row := range rows {
 		t.Run(name, func(t *testing.T) {
 			assert.Contains(t, refused, row.reason, "the node named the rule the message broke")
-			assert.NotContains(t, executionChain(t, rig.mailbox, branches[name]), "result",
-				"and answered nothing on a branch somebody else had moved")
+			// The refusal is a known outcome and the node says so where the
+			// run can read it: a failed result on top of the refused message,
+			// so the run is not left to wait out a deadline and to call an
+			// authorization it may have written an outcome it cannot establish.
+			result := executionAwaitMessage(t, rig.mailbox, branches[name], "result")
+			assert.Equal(t, "failed", result["status"], "the refusal is reported as a failure")
+			assert.Equal(t, "authorization", result["reason"], "naming the gate the attempt stopped at")
+			assert.Equal(t, []string{"assignment", "claim", "ready", "go", "result"},
+				executionChain(t, rig.mailbox, branches[name]),
+				"written on top of the message it refused")
 		})
 	}
 	assert.NotContains(t, reply.Stdout, executionSecret, "and never echoed the secret")
@@ -421,6 +429,39 @@ func TestExecutionCraftedPublicationWithdrawals(t *testing.T) {
 			"and that the publish command had not begun")
 		assert.Empty(t, executionRecordedTasks(rig, "published"),
 			"which is what the missing line proves: %v", rig.runs())
+	})
+
+	t.Run("a withdrawal written on top of an authorization the node has not read is acknowledged", func(t *testing.T) {
+		// The ordinary shape of an interrupted run: the run authorizes and,
+		// within the same poll interval, withdraws what it authorized, leased
+		// over the authorization. The node finds a cancellation whose previous
+		// object it never read; reading it as a replay would leave the attempt
+		// unanswered and the run with an outcome it cannot establish for a
+		// command that never started.
+		rig := newExecutionRig(t)
+		orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+		state := orchestrator.prepareInputState("unread")
+		branch := executionCraftedBranchName("publish", "unread")
+		assignment := orchestrator.offer(branch, orchestrator.publication(branch, "unread", state))
+		worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+
+		executionAwaitMessage(t, rig.mailbox, branch, "ready")
+		ready := executionTipOID(t, rig.mailbox, branch)
+		authorized := orchestrator.answer(branch, "go", ready,
+			orchestrator.authorization(branch, "unread", assignment, ready))
+		orchestrator.answer(branch, "cancel", authorized,
+			orchestrator.withdrawal(branch, "unread", assignment, authorized))
+		ack := executionAwaitMessage(t, rig.mailbox, branch, "ack")
+		worker.stop(t)
+
+		assert.Equal(t, []string{"assignment", "claim", "ready", "go", "cancel", "ack"},
+			executionChain(t, rig.mailbox, branch),
+			"the acknowledgement answers the withdrawal of the authorization")
+		assert.Equal(t, "authorization-wait", ack["phase"],
+			"the attempt never got past the gate")
+		assert.NotEqual(t, true, ack["commandStarted"],
+			"and the publish command had not begun")
+		assert.Empty(t, executionRecordedTasks(rig, "published"), "nothing was published: %v", rig.runs())
 	})
 
 	t.Run("a withdrawal nobody signed stops nothing", func(t *testing.T) {
