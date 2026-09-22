@@ -22,6 +22,13 @@ The integration suite appears twice: once instrumented for coverage, once under 
 too, rather than with `-count`. The totals above count it once, because the race pass is the same tests again and
 adding it in would claim several hundred tests this repository does not have.
 
+Each of those two passes runs in six `go test` processes, each running an exact round-robin share of the suite's
+tests. The suite spends most of its time waiting on the processes it drives, so a single process inside the release
+container needs about twice the hour a pass is allowed, while six wait side by side.
+[`testreport test --shards`](https://github.com/yohimik/dispat/blob/main/tools/testreport) keeps the six streams as one
+log and merges their coverage profiles into one, so a pass is still one row here. For each package, the time that row
+reports is the longest shard's rather than the sum of all six.
+
 ## The two layers
 
 The failure semantics are the tool's main promise, so they are tested at two independent layers.
