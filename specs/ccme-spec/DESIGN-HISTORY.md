@@ -111,14 +111,17 @@ cancelled attempt stopped in, revocation limited to unadmitted branches, and the
 
 ## 2026-09-22: Delivery discharges a propagated contribution
 
-A consumer with a change of its own proceeds past a provider whose publication failed (section 19.3). Under the
-former admission rule, "the target has not released past the unit's commit", such a consumer was never planned again
-once the provider published, and stayed on the provider's old version without a diagnostic: the orphan of section
-13.7a, reached from the consumer's side. The bump axis now admits a contribution until the source has delivered it
-(section 13.4a): the target has released at or after a release of that source carrying the commit. Every contribution
-admitted before remains admitted; the only new admissions are targets that released past a commit before their
-source did, on a cause of their own or while the source was held, and those now receive the release as an ordinary
-catch-up. The channel axis keeps the window test. Section 19.5 reconciles a proceeding consumer to what its providers
-have published, never to a planned version that did not publish. Vectors 80b, 80d and 82c pin the rule; sections 9.2,
-13.7a, 13.7b and 13.7c are restated in its terms. Plans change only in histories where a consumer got ahead of a
-provider, where the former rule lost a release the guarantees of section 13.7c promised.
+A consumer with a change of its own proceeds past a provider whose publication failed (section 19.3). Under the former
+admission rule, "the target has not released past the unit's commit", such a consumer was never planned again once the
+provider published, and stayed on the provider's old version without a diagnostic: the orphan of section 13.7a, reached
+from the consumer's side. The bump axis now admits a contribution until the source has delivered it (section 13.4a): the
+target has released at or after a release of that source carrying the commit. Every contribution admitted before remains
+admitted; the only new admissions are targets that released past a commit before their source did, on a cause of their
+own or while the source was held, and those now receive the release as an ordinary catch-up. The channel axis keeps the
+window test. Section 19.5 reconciles a proceeding consumer to what its providers have published, never to a planned
+version that did not publish. Vectors 80b, 80d and 82c pin the rule; sections 9.2, 13.7a, 13.7b and 13.7c are restated
+in its terms. Plans change only in histories where a consumer got ahead of a provider, where the former rule lost a
+release the guarantees of section 13.7c promised. The rule was completed the same day from the implementation: a window
+per consumer over what its provider released after the consumer last saw it keeps the debt visible once the provider has
+released (section 13.3), and a provider is released at the baseline commit of a consumer it still owes only in a run
+that releases the consumer after it, `E201` otherwise (section 19.3), because two releases on one commit have no order.

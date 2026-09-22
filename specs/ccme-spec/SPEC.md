@@ -2158,8 +2158,17 @@ pendingWindow(P) = { c : c reachable from HEAD } - { c : c reachable from stable
 freshWindow(P)   = pendingWindow(P) - { c : c reachable from tagCommit(baseline(P)) }
 ```
 
-If `P` has no stable baseline, `pendingWindow(P)` is every commit reachable from `HEAD`. If `P` has no baseline tag
-at all, the subtracted reach in `freshWindow(P)` is empty, so `Wfresh(P) = W(P)`.
+If `P` has no stable baseline, `pendingWindow(P)` is every commit reachable from `HEAD`. If `P` has no baseline tag at
+all, the subtracted reach in `freshWindow(P)` is empty, so `Wfresh(P) = W(P)`.
+
+**Owed windows.** For every dependency edge `D → P` over `propagation.kinds` where `D` has a baseline, the union of
+pending windows parsed in §13.4 also contains `owedWindow(P, D)`: the commits reachable from `HEAD` and from no release
+commit of `P` that `baselineCommit(D)` reaches. These are the commits `D` released past before `P` released them; once
+`P` has, no window of `P` or of `D` holds them, and the debt `D` is owed (§13.4a) would be invisible. Where
+`baselineCommit(D)` reaches no release of `P`, `D` released before `P`'s first release and `W(D)` already holds
+everything since, so nothing is added; where the newest release of `P` it reaches is `P`'s own boundary, which is so for
+every consumer that never got ahead of its provider, nothing is added either. The added window makes a debt visible;
+whether it is owed is §13.4a's question, and it admits nothing by itself.
 
 The window is measured from the last **stable** tag, not the last tag of any kind. This single definition serves both
 cases:
@@ -2185,8 +2194,8 @@ Reading the dependent-admission row against the source's window silently loses r
 
 ### 13.4 Parse and resolve
 
-For every commit in the union of all pending windows: parse into units (§20), resolve scopes (§6), yielding a set of
-`(package, commit, unitIndex, unit)` tuples.
+For every commit in the union of all pending windows, the owed windows of §13.3 included: parse into units (§20),
+resolve scopes (§6), yielding a set of `(package, commit, unitIndex, unit)` tuples.
 
 Retention is **purpose-dependent**. A single retention rule serving both purposes cannot be correct, for the reason
 given in §13.7a. A tuple `(P, C, i, u)` is retained:
@@ -2222,13 +2231,19 @@ owed(u, D)         =  { P in sourcePackages(u) : not delivered(P, commitOf(u), D
 ```
 
 A unit propagates a bump to `D` while `owed(u, D)` is non-empty (§9.2), and `D`'s provenance names exactly the owed
-sources. `delivered` implies `C ∉ Wfresh(D)`, so a target that has not released past `C` is owed by every source and
-the test reduces to the window; the finer question arises only for a target that released past `C` before its source
-did: a consumer that proceeded on a cause of its own while the source failed (§19.3), or one released while the
-source was held (§13.6a). Such a target is still owed the source's release, and receives it as a catch-up when it
-comes (§13.7a). Releasing past a commit is not delivery; only the source's release, followed by the target's, is. The
-channel axis keeps `C ∈ Wfresh(D)` as its admission, because a channel is carried by the units and needs no release of
-the source (G7).
+sources. `delivered` implies `C ∉ Wfresh(D)`, so a target that has not released past `C` is owed by every source and the
+test reduces to the window; the finer question arises only for a target that released past `C` before its source did: a
+consumer that proceeded on a cause of its own while the source failed (§19.3), or one released while the source was held
+(§13.6a). Such a target is still owed the source's release, and receives it as a catch-up when it comes (§13.7a).
+Releasing past a commit is not delivery; only the source's release, followed by the target's, is. The channel axis keeps
+`C ∈ Wfresh(D)` as its admission, because a channel is carried by the units and needs no release of the source (G7).
+
+Two releases on one commit have no order (§13.7b), so `delivered` cannot tell a target that released at commit `t` after
+its source from one that released there in an earlier run whose source then released at `t` too. §19.3 keeps the second
+state from arising unseen: a source is released at the baseline commit of a target it still owes only in a run that
+releases the target after it (`E201`). Under §27, `baselineCommit(D)` and the release commits of `P` are compared in
+`P`'s repository, `D`'s position there being its consumer boundary (§§27.6, 27.11), and the owed window of §13.3 is a
+window over that repository.
 
 **Suppression applies only to undischarged work, and this is normative.** Once `P` has published the version that
 carries `u`, the artefact its consumers are owed is public. Nothing landing afterwards can retract that obligation:
@@ -2932,21 +2947,21 @@ representation is not automatically optimal in either time or memory, and this s
 Notation: `P` packages, `E` workspace dependency edges, `H` commits and `A` parent edges in the history reachable from
 the fixed `HEAD`, `C` commits in the union of all pending windows, `U` units in those commits, `N` total bytes of their
 messages and changed paths, `T` reachable tags, and `M` tag-record/package-format matches examined while partitioning
-the inventory (at worst `P · T`). `k` is the number of **distinct** commits carrying a boundary: a stable baseline, or
-a package's newest baseline of any channel where that is another commit. `m` is the number of distinct **marker**
-commits, the commits some ancestry question of §13 is asked about: the `k` boundaries, every `cancel` commit, and every
-commit carrying an `Edits`, `Deletes` or `Reverts` footer. `R` is the
-actual work of resolving scopes and changed paths against the workspace, including candidates examined when the result
-is empty. `I` is the number of resulting unit-to-package incidences (and can be `P · U`). `Z` is the number of
-unit/source/target contribution or provenance incidences retained or emitted. `Zv` counts incidences examined while
-constructing them, including duplicate insertions; `Zv` may exceed `Z`. Let `Fc` count correction footer selectors,
-`Jcorr` the package/target incidences examined for correction scope containment, live scopes and application, including
-unsuccessful probes, and `wildcards` the wildcard selectors. Let `Ic` count cancel-scope incidences, `Pc` the number of
-packages named by a cancel, and `Jc` the number of cancellation queries across direct admission and **both** propagation
-axes, including candidates rejected by cancellation. `Jc` is not bounded by direct incidence count `I` or retained
+the inventory (at worst `P · T`). `k` is the number of **distinct** commits carrying a boundary: a stable baseline, a
+package's newest baseline of any channel where that is another commit, or the release of a provider that bounds a
+consumer's owed window (§13.3), of which there are none while no consumer has got ahead of a provider. `m` is the number
+of distinct **marker** commits, the commits some ancestry question of §13 is asked about: the `k` boundaries, every
+`cancel` commit, and every commit carrying an `Edits`, `Deletes` or `Reverts` footer. `R` is the actual work of
+resolving scopes and changed paths against the workspace, including candidates examined when the result is empty. `I` is
+the number of resulting unit-to-package incidences (and can be `P · U`). `Z` is the number of unit/source/target
+contribution or provenance incidences retained or emitted. `Zv` counts incidences examined while constructing them,
+including duplicate insertions; `Zv` may exceed `Z`. Let `Fc` count correction footer selectors, `Jcorr` the
+package/target incidences examined for correction scope containment, live scopes and application, including unsuccessful
+probes, and `wildcards` the wildcard selectors. Let `Ic` count cancel-scope incidences, `Pc` the number of packages
+named by a cancel, and `Jc` the number of cancellation queries across direct admission and **both** propagation axes,
+including candidates rejected by cancellation. `Jc` is not bounded by direct incidence count `I` or retained
 contribution count `Z`. Write `bw(x) = max(1, ceil(x / wordSize))`, so a zero-marker phase still pays for traversal or
-query dispatch. `F` is the number of publish failures,
-and `Oout` is the size of diagnostics and other emitted output.
+query dispatch. `F` is the number of publish failures, and `Oout` is the size of diagnostics and other emitted output.
 In the per-target row, and there only, `D` is the number of targets one unit reaches, `S` its source-set size, and `Σ`
 its resolved scope-set size.
 
@@ -3796,6 +3811,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `E198` | The registry already holds this version and its identity could not be verified as this run's artefact (§19.4). Run-scoped.                                                                                |
 | `E199` | Fixed-point exhaustion failed: a non-held plan repeated without discharge or has no permitted state-change explanation (§19.6). Run-scoped.                                                                                                       |
 | `E200` | The dependency graph contains a cycle over runtime edge kinds (§13.1). Repository-scoped; names the members.                                                                                              |
+| `E201` | A package was released, or would be released, at the baseline commit of a consumer it still owes without that consumer releasing after it in the same run (§19.3). Run-scoped; names the pair. |
 | `E210` | A correction targets a commit that is unknown, unreachable, or not a proper ancestor of the correction's own commit (§7.4.2).                                                                             |
 | `E211` | A correction's unit selector is out of range, or a bare sha names a multi-unit commit (§7.4.1).                                                                                                           |
 | `E212` | A correction targets a control unit (§7.4.2).                                                                                                                                                             |
@@ -4218,10 +4234,16 @@ A run that publishes several packages MAY fail partway. Implementations MUST:
   over the **full** workspace graph, so it traverses packages that are not in the plan: a package with no bump this run
   is still a path from a dependent to a failed dependency. A cause of its own is a fresh direct bump, a channel change,
   or a contribution from a provider that is neither failed nor blocked, including one that published in an earlier run;
-  a dependent with one **proceeds**, its manifests reconciled to what its providers have published (§19.5), and what
-  the failed provider owed it stays owed (§13.4a) and arrives as a catch-up when that provider publishes;
-* continue publishing packages that are not blocked: an unrelated subtree has no reason to be punished for another's
-  failure;
+  a dependent with one **proceeds**, its manifests reconciled to what its providers have published (§19.5), and what the
+  failed provider owed it stays owed (§13.4a) and arrives as a catch-up when that provider publishes; * continue
+  publishing packages that are not blocked: an unrelated subtree has no reason to be punished for another's failure; *
+  not release a package at the baseline commit of a consumer it still owes (§13.4a) unless that consumer is in the plan
+  and is published after it in this run. Two releases on one commit cannot be ordered afterwards, so a consumer that sat
+  the run out, held, deselected or excluded by any other means, would read as served and stay on the old version with
+  nothing left to detect it. Such a run is refused with `E201` before any publication, naming the pair; the remedy is to
+  release the consumer in the same run, or the provider at a later commit, where the debt stays visible (§13.3). If the
+  consumer is published after the provider and fails, the same state arises, and `E201` reports it with its remedy: an
+  explicit `Release-As: <version>` on the consumer (§8.6), because no later plan can compute the debt;
 * report a completion summary naming what published, what failed, and what was blocked, and exit non-zero;
 * on re-run, recompute from tags. Packages already tagged fall out of the plan by §13.6; packages that failed or were
   blocked remain candidates by §13.4a, and a dependent that proceeded returns as a catch-up (`W193`) once the failed
@@ -5342,11 +5364,15 @@ direct providers in the plan loses the first row, exactly as inducing the publis
 `feat(cli): y`; `cli` consumes `core`. Run 1: `core@1.5.0` fails to publish; `cli` has a cause of its own and
 **proceeds** at its planned `2.1.0`, its manifest naming `core`'s baseline `1.4.0`, and is tagged at `HEAD`.
 
-→ Run 2 plans `core@1.5.0` and, because `core` has not delivered `C1` to `cli` (§13.4a), `cli@2.1.1` as a **catch-up**
-(`W193`), ordered after `core` and blocked if `core` fails again. Once both are tagged, `cli`'s baseline reaches
-`core`'s release carrying `C1` and nothing is owed. Two implementations fail here: one that never plans `cli` again
-because it released past `C1`, leaving it on `core@1.4.0` for ever with no diagnostic; and one that let `cli` publish
-in run 1 naming `core@1.5.0`, a version that did not exist.
+→ Run 2 plans `core@1.5.0` and, because `core` has not delivered `C1` to `cli` (§13.4a), `cli@2.1.1` as a propagated
+release ordered after `core` and blocked if `core` fails again; it is a catch-up (`W193`) only when `core` published in
+a run `cli` sat out. Once both are tagged, `cli`'s baseline reaches `core`'s release carrying `C1` and nothing is owed.
+Two implementations fail here: one that never plans `cli` again because it released past `C1`, leaving it on
+`core@1.4.0` for ever with no diagnostic; and one that let `cli` publish in run 1 naming `core@1.5.0`, a version that
+did not exist. Two more cases: run 2 at `cli`'s own release commit with `cli` held or left out of the run is refused
+with `E201` before `core` publishes, because after both tags sat on one commit nothing could tell that `cli` came first;
+and `core` published at a later commit in a run `cli` sat out leaves `C1` in `cli`'s owed window (§13.3), so the next
+run plans `cli`'s catch-up.
 
 **Vector 81**: suppressing a catch-up from the consumer. `C1`: `feat(core)^: x`; run 1 publishes `core@1.5.0` and fails
 on `cli`. Then a new commit `C2` lands.
