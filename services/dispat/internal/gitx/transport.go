@@ -695,14 +695,17 @@ func (p *Plumbing) WriteTreeFromPaths(ctx context.Context, dir, indexFile string
 		return ""
 	}
 	env := []string{"GIT_INDEX_FILE=" + indexFile}
-	add := []string{"-C", dir, "--literal-pathspecs", "add"}
 	if isForced {
-		add = append(add, "-f")
-	}
-	add = append(add, "--")
-	if _, err := p.git.runStream(ctx, gitStream{env: env}, append(add, paths...)...); err != nil {
-		p.fail(fmt.Errorf("gitx: staging %d transport paths: %w", len(paths), err))
-		return ""
+		if err := p.stageWithoutConversion(ctx, dir, env, paths); err != nil {
+			p.fail(fmt.Errorf("gitx: staging %d transport paths: %w", len(paths), err))
+			return ""
+		}
+	} else {
+		add := []string{"-C", dir, "--literal-pathspecs", "add", "--"}
+		if _, err := p.git.runStream(ctx, gitStream{env: env}, append(add, paths...)...); err != nil {
+			p.fail(fmt.Errorf("gitx: staging %d transport paths: %w", len(paths), err))
+			return ""
+		}
 	}
 	out, err := p.git.runStream(ctx, gitStream{env: env}, "write-tree")
 	if err != nil {
@@ -710,6 +713,186 @@ func (p *Plumbing) WriteTreeFromPaths(ctx context.Context, dir, indexFile string
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// stagedPath is one entry of a forced capture: the mode git records for it,
+// its path from the repository root, and where its bytes are.
+type stagedPath struct {
+	mode string
+	path string
+	oid  string
+	file string
+}
+
+// stageWithoutConversion fills the index with the paths exactly as the working
+// folder holds them.
+//
+// A build output is not source. A checkout's `.gitattributes` describe how its
+// sources are stored, and `git add` applies them to whatever it stages: a
+// `text` attribute rewrites every CRLF pair inside a file, a clean filter
+// replaces its content, `ident` expands a keyword. Applied to a library a
+// build wrote, that is corruption, and it happened: a project that marks its
+// whole tree as text shipped three libraries whose bytes the consumer could not
+// verify. `git add` has no way to leave attributes out, so the entries are
+// hashed with `--no-filters` and written into the index by hand, with the modes
+// git itself would record: 100755 for an executable, 120000 for a link, 160000
+// for a nested repository, which the manifest rules refuse afterwards exactly
+// as they refused what `add` produced.
+func (p *Plumbing) stageWithoutConversion(ctx context.Context, dir string, env []string, paths []string) error {
+	// The folder's place in the repository is asked of git rather than computed
+	// from the repository root, which git answers with symlinks resolved while
+	// the caller's path may carry them.
+	prefix, err := p.git.runStream(ctx, gitStream{}, "-C", dir, "rev-parse", "--show-prefix")
+	if err != nil {
+		return fmt.Errorf("locating %s in its repository: %w", dir, err)
+	}
+	prefix = strings.TrimSpace(prefix)
+	var staged []stagedPath
+	for _, root := range paths {
+		if err := p.collectStagedPaths(ctx, dir, prefix, filepath.Join(dir, root), &staged); err != nil {
+			return err
+		}
+	}
+	if err := p.hashStagedFiles(ctx, dir, staged); err != nil {
+		return err
+	}
+	var records bytes.Buffer
+	for _, entry := range staged {
+		fmt.Fprintf(&records, "%s %s\t%s\x00", entry.mode, entry.oid, entry.path)
+	}
+	if _, err := p.git.runStream(ctx, gitStream{stdin: &records, env: env},
+		"-C", dir, "update-index", "-z", "--add", "--index-info"); err != nil {
+		return fmt.Errorf("writing %d entries into the transport index: %w", len(staged), err)
+	}
+	return nil
+}
+
+// collectStagedPaths walks one declared root lexically, in name order, and
+// records what git would have recorded for each entry, named from the
+// repository root.
+func (p *Plumbing) collectStagedPaths(ctx context.Context, dir, prefix, abs string, staged *[]stagedPath) error {
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(dir, abs)
+	if err != nil {
+		return fmt.Errorf("placing %s under %s: %w", abs, dir, err)
+	}
+	path := prefix + filepath.ToSlash(rel)
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(abs)
+		if err != nil {
+			return err
+		}
+		oid, err := p.hashBytes(ctx, dir, []byte(target))
+		if err != nil {
+			return err
+		}
+		*staged = append(*staged, stagedPath{mode: "120000", path: path, oid: oid})
+	case info.Mode().IsRegular():
+		mode := "100644"
+		if info.Mode()&0o111 != 0 {
+			mode = "100755"
+		}
+		*staged = append(*staged, stagedPath{mode: mode, path: path, file: abs})
+	case info.IsDir():
+		if _, err := os.Lstat(filepath.Join(abs, ".git")); err == nil {
+			*staged = append(*staged, stagedPath{mode: "160000", path: path,
+				oid: p.resolveNestedHead(ctx, abs)})
+			return nil
+		}
+		entries, err := os.ReadDir(abs)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := p.collectStagedPaths(ctx, dir, prefix, filepath.Join(abs, entry.Name()), staged); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("%s is neither a file, a link nor a folder", path)
+	}
+	return nil
+}
+
+// resolveNestedHead is the object a nested repository is recorded as, or the
+// null object when it has no commit: either way the manifest rules refuse it.
+func (p *Plumbing) resolveNestedHead(ctx context.Context, dir string) string {
+	head, err := p.git.runStream(ctx, gitStream{}, "-C", dir, "rev-parse", "HEAD")
+	if err != nil {
+		return strings.Repeat("0", 40)
+	}
+	return strings.TrimSpace(head)
+}
+
+// hashStagedFiles writes every regular file into the object store with no
+// filter or conversion, and fills in their object ids: one git invocation for
+// every path git can read from a list, and one of its own for a path holding
+// a newline, which no list can carry.
+func (p *Plumbing) hashStagedFiles(ctx context.Context, dir string, staged []stagedPath) error {
+	var listed []int
+	var names bytes.Buffer
+	for index, entry := range staged {
+		if entry.file == "" {
+			continue
+		}
+		if strings.Contains(entry.file, "\n") {
+			oid, err := p.hashFile(ctx, dir, entry.file)
+			if err != nil {
+				return err
+			}
+			staged[index].oid = oid
+			continue
+		}
+		listed = append(listed, index)
+		names.WriteString(entry.file)
+		names.WriteByte('\n')
+	}
+	if len(listed) == 0 {
+		return nil
+	}
+	out, err := p.git.runStream(ctx, gitStream{stdin: &names},
+		"-C", dir, "hash-object", "-w", "--no-filters", "--stdin-paths")
+	if err != nil {
+		return fmt.Errorf("hashing %d transport files: %w", len(listed), err)
+	}
+	oids := strings.Fields(out)
+	if len(oids) != len(listed) {
+		return fmt.Errorf("hashing %d transport files answered %d objects", len(listed), len(oids))
+	}
+	for position, index := range listed {
+		staged[index].oid = oids[position]
+	}
+	return nil
+}
+
+// hashFile writes one file's bytes as a blob through standard input, which no
+// attribute applies to, and answers its id.
+func (p *Plumbing) hashFile(ctx context.Context, dir, file string) (string, error) {
+	handle, err := os.Open(file)
+	if err != nil {
+		return "", err
+	}
+	defer handle.Close()
+	out, err := p.git.runStream(ctx, gitStream{stdin: handle},
+		"-C", dir, "hash-object", "-w", "--no-filters", "--stdin")
+	if err != nil {
+		return "", fmt.Errorf("hashing %s: %w", file, err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// hashBytes writes one blob of the given bytes and answers its id.
+func (p *Plumbing) hashBytes(ctx context.Context, dir string, content []byte) (string, error) {
+	out, err := p.git.runStream(ctx, gitStream{stdin: bytes.NewReader(content)},
+		"-C", dir, "hash-object", "-w", "--no-filters", "--stdin")
+	if err != nil {
+		return "", fmt.Errorf("hashing a link target: %w", err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // ReadBlob streams one blob into the caller's writer, refusing anything larger

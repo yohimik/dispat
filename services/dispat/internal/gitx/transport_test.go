@@ -507,3 +507,43 @@ func TestCountChangedPathsIgnoresTheFoldersACallerDeclared(t *testing.T) {
 	assert.Equal(t, 2, declared,
 		"the declared folder is not a stray write, and a folder whose name only begins like it still is")
 }
+
+// TestTransportPlumbingCapturesBytesUntouchedByAttributes: a checkout's
+// attributes describe its sources and must not touch a build output. A tree
+// marked `text` would have every CRLF pair inside a library rewritten by
+// `git add`; the forced capture records the bytes as the build wrote them,
+// with the modes git records for an executable and a link.
+func TestTransportPlumbingCapturesBytesUntouchedByAttributes(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	core := filepath.Join(f.root, "packages", "core")
+	dist := filepath.Join(core, "dist", "lib")
+	require.NoError(t, os.MkdirAll(dist, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(core, ".gitattributes"), []byte("* text eol=lf\n"), 0o644))
+	library := []byte("ELF\x00header\r\nbody\r\n\x00tail\r\n")
+	require.NoError(t, os.WriteFile(filepath.Join(dist, "libcore.a"), library, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dist, "tool"), []byte("#!/bin/sh\r\necho\r\n"), 0o755))
+	require.NoError(t, os.Symlink("tool", filepath.Join(dist, "alias")))
+	require.NoError(t, os.WriteFile(filepath.Join(f.root, ".gitignore"), []byte("dist/\n"), 0o644))
+
+	plumbing := NewPlumbing(f.git)
+	index := filepath.Join(t.TempDir(), "index")
+	tree := plumbing.WriteTreeFromPaths(ctx, core, index, []string{"dist"}, true)
+	require.NoError(t, plumbing.Err())
+
+	modes := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(runGit(t, f.root, "ls-tree", "-r", tree)), "\n") {
+		fields := strings.Fields(line)
+		modes[fields[3]] = fields[0]
+	}
+	assert.Equal(t, "100644", modes["packages/core/dist/lib/libcore.a"])
+	assert.Equal(t, "100755", modes["packages/core/dist/lib/tool"], "the executable bit is recorded")
+	assert.Equal(t, "120000", modes["packages/core/dist/lib/alias"], "a link is recorded as a link")
+
+	var captured bytes.Buffer
+	plumbing.ReadBlob(ctx, strings.TrimSpace(runGit(t, f.root, "rev-parse", tree+":packages/core/dist/lib/libcore.a")),
+		&captured, 1024)
+	require.NoError(t, plumbing.Err())
+	assert.Equal(t, library, captured.Bytes(), "every byte the build wrote, CRLF pairs included")
+	assert.Equal(t, "tool", strings.TrimSpace(runGit(t, f.root, "cat-file", "blob", tree+":packages/core/dist/lib/alias")))
+}
