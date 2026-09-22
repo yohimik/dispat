@@ -160,3 +160,25 @@ corrected in the same candidate, and the row stays as its fence. The dispat engi
 the reconciliation of a proceeding consumer; the owed windows and `E201` are not yet implemented, and a consumer that
 sits out the run in which its provider releases the owed commit is therefore still stranded in that engine, which its
 release notes list as a departure.
+
+
+## 2026-09-23: Command sweeps on workers
+
+The dispat engine now delegates a command sweep, its `run` command, to worker nodes under
+[section 28.10](./SPEC.md#2810-command-sweeps), so that its own release workflow can run the full test suite on a
+machine the pipeline creates for the run. A sweep takes no release lock: its messages carry a generation derived
+from the run identity alone, the plan digest is the whole plan with an empty release selection, equal to the one a
+read-only invocation reports, and the refusals of a release with links (worker authority, a worker-role file, a lock
+bypass, a missing secret) apply to it unchanged. The task carries the script's commands, the computed and the
+unresolved environment and no hooks, on a coordination branch of kind `run`. Execution links may be given on the
+invocation and are validated as the file's are; a read-only invocation with links reports the digest and neither
+probes nor assigns. Sweep output roots are declared at the root of the entry configuration only and resolve against
+each package's own repository; nothing merges until every task has answered, conflicts are found by comparing the
+manifests before any install, every set that names a disputed path is withheld, each set installs all or nothing, an
+interrupted sweep merges nothing, and an absent root is admitted as an empty set. Two departures remain: a sweep task
+placed on the orchestrator itself writes the checkout directly and is not captured, so a conflict between it and a
+delegated task is not detected, which vector 32 requires; and a node that predates the `run` kind is not refused at
+preflight, as section 28.2 requires, but leaves the assignment unclaimed until its deadline. A package restricted to
+workers now refuses a local sweep as it refuses a local release. The same work found and corrected a defect in the
+build transport: a build placed again after a failed attempt had its outputs checked against the first attempt's
+identity and refused.
