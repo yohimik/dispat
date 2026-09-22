@@ -94,7 +94,7 @@ How a level combines with the one below it is a property of the setting, and eac
 
 - **Replaced.** Single values such as `tagFormat`, `versioning` and `src`.
 - **Merged entry by entry.** `flow`, `scripts` and `env`. A level replaces the entries it names and keeps the rest.
-- **Replaced whole.** `autoVersion`, `aliasTags`, `webhooks` and `manifestNames`. Their empty fields carry meaning
+- **Replaced whole.** `autoVersion`, `aliasTags`, `webhooks`, `buildOutputs`, `buildPlatforms`, `runOnly` and `manifestNames`. Their empty fields carry meaning
   against their siblings, so a partial overlay cannot express what they mean. An empty list is how a level opts out.
 - **Overlaid field by field.** `changelog` and `github`, including their nested `authors` object. Their `include` and
   `exclude` lists still replace whole, because adding to an inherited list could never take a pattern away again.
@@ -107,7 +107,9 @@ interchangeable.
 
 The repository-wide keys exist only at the root: `spaces`, `versionGroups`, `initials`, `commit`, `shell`, `run`,
 `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`, `updateCheck`, `unsafeDisableLock`, `polyrepo`,
-`repository`, `repositories`, `configs`, `repositoryOverrides` and `repositoryBaselines`. The full reference is
+`repository`, `repositories`, `configs`, `repositoryOverrides`, `repositoryBaselines` and `execution`. `execution` is
+narrower still: it is a node-startup setting, so it is read from the entry configuration alone and an imported or
+linked repository's own object is validated and ignored. The full reference is
 the [configuration documentation](packages/docs/docs/configuration/README.md).
 
 ### Repository participation
@@ -174,6 +176,25 @@ operator's explicit act and is never something a run does on its own.
 The lock is on by default. `unsafeDisableLock` in the configuration and `DISPAT_UNSAFE_DISABLE_LOCK=true` in the
 environment are the only ways to switch it off, they warn when they do, and they exist for a repository with no remote
 to coordinate through. Neither may become an implicit default.
+
+### Releasing across machines
+
+A run that delegates work to worker nodes holds itself to four further rules, and a change that relaxes any of them is
+a release-safety regression:
+
+1. **The complete lock set precedes dispatch.** Every participating repository's lock is acquired before the plan is
+   fixed, and ownership is re-verified against the remote before every new assignment and every publication
+   authorization. A lock that is gone halts every attempt in flight and starts no new effect.
+2. **A lock bypass and worker links are refused together.** `unsafeDisableLock`, a per-repository bypass and
+   `DISPAT_UNSAFE_DISABLE_LOCK` each refuse a run that configures workers. The bypass exists for a repository with no
+   remote to coordinate through, which is not a run that reaches other machines.
+3. **A publication is authorized once.** The node reports itself ready, the run revalidates ownership and inputs, and
+   the single-use authorization names the exact state of the branch it authorizes and the instant it expires. The node
+   re-reads that branch immediately before the irreversible command. No second authorization is written for an attempt
+   in the same run.
+4. **An unknown outcome retains its lock.** An authorized publication that never reported back is reported as such,
+   never as a failure or a success, and the release lock of the repository it was publishing into is retained when the
+   publisher never acknowledged. The run fails, names the order of recovery, and never reports clean cleanup.
 
 Publication happens in CI. The release workflow is the only place that pushes tags, publishes packages or creates
 releases. Use `dispat status` to inspect the plan locally. Bare `dispat` and `dispat release` execute release stages;
