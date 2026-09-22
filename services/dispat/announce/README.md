@@ -36,10 +36,10 @@ Crier posts a caption whole, and the platforms refuse a long one: Discord at 200
 
 Nothing checks those two by machine. After a rewrite, read the card's preview against the caption, and print each platform's resolved caption with `crier publish --dry-run --json` to see its length.
 
-The [cover preview](rc/preview-1.jpg) and [notes preview](rc/preview-2.jpg) show the draft for the planned `1.11.0-rc.1` release:
+The [cover preview](rc/preview-1.jpg) and [notes preview](rc/preview-2.jpg) show the draft for the planned `1.11.0-rc.4` release:
 
 ```sh
-DISPAT_NEW_VERSION=1.11.0-rc.1 crier render --config services/dispat/announce/rc/crier.yaml
+DISPAT_NEW_VERSION=1.11.0-rc.4 crier render --config services/dispat/announce/rc/crier.yaml
 ```
 
 ## Stable releases
