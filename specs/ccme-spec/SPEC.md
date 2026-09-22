@@ -1,8 +1,8 @@
 # Conventional Commits: Monorepo Extension (CCME)
 
-**Version:** 3.1.0-rc.2 **Status:** Normative specification; new protocol implementation pending **Extends:** Conventional
-Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** immutable VCS release records;
-Git tags of the form `<package>@<version>` by default
+**Version:** 3.1.0-rc.2 **Status:** Normative specification; adapter and rollback protocols pending implementation
+**Extends:** Conventional Commits 1.0.0 **Versioning model:** Semantic Versioning 2.0.0 **Version store:** immutable
+VCS release records; Git tags of the form `<package>@<version>` by default
 **Conformance:** §17 · **Security considerations:** §18 · **Test vectors:** Appendix B
 **License:** GPL-3.0-or-later. See [LICENSE](./LICENSE).
 

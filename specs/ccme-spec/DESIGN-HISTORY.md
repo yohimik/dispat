@@ -30,10 +30,11 @@ authority. Shared manifest and lockfile preparation precedes parallel builds. Ve
 ignored JS build products, move between dependent tasks through temporary Git branches or referenced immutable
 bundles. Transport commits remain outside native release ancestry; ordinary source records preserve recovery.
 
-The profile specifies capacity limits, publication fencing and reconciliation, output admission and conformance
-cases. It is unimplemented and unmeasured: this draft does not establish a performance improvement, execute its
-conformance vectors, change the message grammar or lift the parser hold. Implementation and experimental
-validation require separate evidence. Version markers remain owned by the specification release process.
+The profile specifies capacity limits, publication fencing and reconciliation, output admission and conformance cases.
+It is unimplemented and unmeasured: this draft does not establish a performance improvement, execute its conformance
+vectors, change the message grammar or lift the parser hold. Implementation and experimental validation require separate
+evidence. Version markers remain owned by the specification release process. The entry of 2026-09-22 records the
+implementation.
 
 
 ## 2026-09-21: Record authority under the lock
@@ -62,30 +63,32 @@ nothing connects to a worker. The node settings are `execution.role`, `execution
 `execution.transfer`. A package or space declares what its build leaves behind (`buildOutputs`), where its outputs run
 (`buildPlatforms`) and where its stages may be placed (`runOnly: both`, `worker` or `orchestrator`, one value or a build
 and publish pair). The orchestrator is one more node of the pool, chosen last. Builds and publications run on workers; a
-publication is delegated only by an explicit `runOnly`, and a space that logs in to its registry publishes on the
-orchestrator whatever the key says. A provider the run does not release is prepared once per run under the non-release
-environment when a consumer reads its outputs. Outputs travel as result trees on the branches (section 28.5); there is
-no bundle service, and vector 17 is the mode in use. Every log line and webhook event names its sending node. Failures
-carry the six categories of section 28.9 beside the engine's own codes `E225` to `E229` and `W244`; the existing `E220`
-to `E222`, `E335` and `E336` carry `native-recording-or-lock` as their class, but the lines those five codes are logged
-on do not yet carry the category field section 28.9 requires; that is a departure, to be closed by attaching the
-category at those sites.
+publication is delegated only by an explicit `runOnly`; a space that logs in to its registry publishes on the
+orchestrator, and a file asking otherwise is refused at load. A package placed on the orchestrator is exempt from the
+workers' platform check. A provider the run does not release is prepared once per run under the non-release environment
+when a consumer reads its outputs. Outputs travel as result trees on the branches (section 28.5); there is no bundle
+service, and vector 17 is the mode in use. Every log line and webhook event names its sending node. Failures carry the
+six categories of section 28.9 beside the engine's own codes `E225` to `E229` and `W244`; the existing `E220` to `E222`,
+`E335` and `E336` carry `native-recording-or-lock` as their class; the field is attached where a distributed run loses
+its lock, and not yet at the older recording and lock sites, which is a departure to be closed by attaching it there.
 
 Not implemented, so the conditional vectors do not apply: reuse of verified outputs across runs (vector 20) and the
 rollback profile of section 26 (vector 26). Departures from the profile as written: the platform check of section 28.2
 runs before dispatch for the packages a run releases and, for a prepared provider, at its placement, where an
 unsatisfiable platform fails the provider's consumers. Coordination and recording were measured on Linux nodes against
 the LLVM monorepo: a probe answers in about 4 seconds, an assignment is claimed 3 seconds after it is written on a warm
-node and 37 seconds on a cold one, and a result is noticed within 5 seconds. The first transport of a snapshot that
-descends from the planned head carries that repository's whole history, 7.3 million objects for LLVM, and takes 17 to 20
-minutes from a small orchestrator, and it is paid again on every run because cleanup removes every ref. That cost
-belongs to a mailbox that starts empty: a mailbox that already holds the repository's objects, the repository's own
-remote for one, receives no history, which is what the engine does where the remote is used as the mailbox. Section 28.4
-now also permits a durable mailbox ref or a history-free snapshot, and neither is implemented. No comparison against
-local execution on a pinned fixture has been made, and no speedup is claimed. Sections 28.1, 28.2, 28.4, 28.5, 28.6,
-28.8 and 28.9 gained the rules this implementation showed to be missing: local execution captured like a worker's,
-unclaimed work outside capacity, an unreadable tip not counted as seen, outermost-first materialization, the phase a
-cancelled attempt stopped in, revocation limited to unadmitted branches, and the summary shape of a prepared provider.
+node and 37 seconds on a cold one, and a result is noticed within 5 seconds. A cold worker fetches the snapshot branch
+before it can read its first assignment, so its first claim comes minutes after a warm worker's; placement takes the
+first free slot, so a pool of unequal nodes waits for its slowest. The first transport of a snapshot that descends from
+the planned head carries that repository's whole history, 7.3 million objects for LLVM, and takes 17 to 20 minutes from
+a small orchestrator, and it is paid again on every run because cleanup removes every ref. That cost belongs to a
+mailbox that starts empty: a mailbox that already holds the repository's objects, the repository's own remote for one,
+receives no history, which is what the engine does where the remote is used as the mailbox. Section 28.4 now also
+permits a durable mailbox ref or a history-free snapshot, and neither is implemented. No comparison against local
+execution on a pinned fixture has been made, and no speedup is claimed. Sections 28.1, 28.2, 28.4, 28.5, 28.6, 28.8 and
+28.9 gained the rules this implementation showed to be missing: local execution captured like a worker's, unclaimed work
+outside capacity, an unreadable tip not counted as seen, outermost-first materialization, the phase a cancelled attempt
+stopped in, revocation limited to unadmitted branches, and the summary shape of a prepared provider.
 
 
 ## 2026-09-22: Delivery discharges a propagated contribution
