@@ -205,9 +205,13 @@ func executionLabel(name string) string {
 func TestExecutionWorkerLeavesWorkItCannotRun(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	build := executionBranchName("publishwork")
+	// A relay carries one node's result onto another node's endpoint: it is a
+	// kind of the protocol that no node ever executes, which is what this is
+	// about. The kinds a node does execute grow gate by gate, and the claim is
+	// about the ones it does not.
+	build := executionBranchName("relaywork")
 	orchestrator.offer(build, orchestrator.probe(build, "core",
-		func(m map[string]any) { m["kind"] = "publish" }))
+		func(m map[string]any) { m["kind"] = "relay" }))
 	valid := executionBranchName("probework")
 	orchestrator.offer(valid, orchestrator.probe(valid, "preflight"))
 
