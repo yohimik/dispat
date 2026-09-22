@@ -157,9 +157,11 @@ reaches an already-published tag.
 
 Failures never abort the run. Once a package publishes, nothing can fail it at all.
 
-A provider that failed at any stage (version, build, or publish) or was skipped taints its consumers. dispat skips them
-unless they have a release reason of their own. This means they need either their own conventional commits or another
-changed provider that published successfully.
+A provider that failed at any stage (version, build, or publish) or was skipped taints its consumers. dispat skips a
+consumer only when *every* reason it is in the plan comes from a package that failed or was blocked. One reason that
+does not is enough to release it: its own conventional commits, a channel change, or a version it picks up from another
+provider. That other provider may have published in this run or in an earlier one, because a consumer discharging an
+earlier run's publication is releasing for something the failure cannot invalidate.
 
 A provider under a blocking [provider relation](./configuration/spaces.md#the-provider-relation) outranks every reason
 of the consumer's own. Under `publish` the relation declares that consumers' builds take the provider's published
@@ -184,9 +186,22 @@ Such a provider orders and blocks, and that is all. The release reason a consume
 a provider it declares that published, because those are the versions it picks up: a publication on the far side of a
 package with nothing to release is no substitute for a declared provider that failed.
 
-A consumer that proceeds on its own reason runs its pipeline normally, with two adjustments. First, failed and skipped
-providers are filtered out of the `DISPAT_UPDATED_*` variables. Second, if it had providers to pick up and none
+A consumer that proceeds on its own reason runs its pipeline normally, with three adjustments. First, failed and
+skipped providers are filtered out of the `DISPAT_UPDATED_*` variables. Second, if it had providers to pick up and none
 survive, the version script does not execute at all.
+
+Third, what it publishes names each provider's version **as published**. A version stage writes a provider's planned
+version because at that moment the provider is still going to publish it, so a provider that dies afterwards leaves the
+manifests naming a version that will never exist. dispat therefore redoes the reconciliation before the consumer's
+publish, against the providers that are still alive: native auto-versioning writes the provider's baseline back, and a
+space that reconciles through scripts runs its `flow.version` scripts again with the dead providers already out of
+`DISPAT_UPDATED_*`. A manifest naming a version nobody published is never published, whatever was computed up front.
+
+One case cannot be repaired that way. If the consumer's build has already run over the reconciled manifests, whatever
+it produced may have the provider's planned version baked into it, and rewriting a manifest does not reach a built
+artefact. dispat blocks such a consumer with `W194` naming the provider instead of rebuilding behind your back; the
+reason says that the build had already embedded the planned version, and the next run builds it against what the
+provider actually published.
 
 Spaces with `revertOnFail: true` additionally roll back every local change inside a failing package's folder. This
 restores tracked files and removes untracked ones, so a half-finished release leaves no residue in the worktree.
@@ -196,14 +211,23 @@ restores tracked files and removes untracked ones, so a half-finished release le
 Publishing is not atomic, so a run can end with some packages published and others not. Catch-up is not a repair pass
 bolted on for this case. It is exactly what the ordinary rule does when asked against the right window.
 
-A commit propagates to a dependant exactly while *the dependant's own* fresh window still contains it, and that does not
-change when the provider releases. A consumer that missed a run is still owed its release on the next one. This happens
-with no state file, no timestamp comparison, and no second traversal.
+A commit propagates to a dependant until a release of the provider **delivered** it, and nothing about the provider's
+own progress changes that on its own. A consumer that missed a run is still owed its release on the next one. This
+happens with no state file, no timestamp comparison, and no second traversal.
+
+Delivered has a precise meaning: some release of the provider sits on a commit that carries the propagating commit, and
+the dependant's own last release reached that release. Almost always the dependant's pending window answers this by
+itself, because a dependant that has released nothing past the commit has been delivered nothing. The finer question is
+asked only about a dependant that got *ahead* of the commit, which is what a consumer does when it releases on a reason
+of its own while its provider's publish fails or is held. Such a consumer used to be lost: its own window no longer held
+the commit, so it was never planned again and kept the provider's previous version for ever. It is now released again
+when the provider publishes, and bumped for the delivery.
 
 Four properties explain safe [failure recovery](#failure-and-recovery):
 
-- **No orphans.** A contribution remains owed until the dependant releases it, while its corrected source set and
-  channel eligibility remain unchanged.
+- **No orphans.** A contribution remains owed until a release of the provider delivered it to the dependant, while its
+  corrected source set and channel eligibility remain unchanged. A dependant that released past the commit for its own
+  reasons is owed it still.
 - **Once in the release ledger.** The successful baseline tag removes the contribution from the dependant's fresh
   window. Publication and tagging are separate external operations, so recovery may reconcile an artefact that already
   exists rather than promise exactly-once network delivery.

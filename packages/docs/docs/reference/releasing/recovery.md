@@ -97,8 +97,37 @@ $ dispat
 
 The second run recomputes the plan from history and configuration, sees `core@0.1.0` is already recorded, and executes
 only the missing half. The `W193` marker confirms `app` is releasing at the exact version it was owed from the earlier
-run, while `core` is never re-released. If a *provider* fails instead, dispat skips its consumers and reports them with
-`W194`, so you can catch them up with a re-run once you fix the provider.
+run, while `core` is never re-released.
+
+## Continue after a provider fails
+
+If the *provider* fails instead, a consumer whose only reason to release was that provider is skipped and reported with
+`W194`, so you can catch it up with a re-run once you fix the provider.
+
+A consumer that has changes of its own is a different case, and by default it releases anyway: its own work is not
+invalidated by somebody else's failure. What it publishes names the provider's *previous* version, because that is the
+version the provider actually has. dispat reconciles its manifests back to that version before it publishes, whatever
+the version stage wrote earlier while the provider's publish was still pending.
+
+That consumer is not finished with the provider, though. The provider still owes it the release its caret asked for, so
+the run that finally publishes the provider releases the consumer a second time to pick it up:
+
+```console
+$ dispat
+12:04:05 INF ● changed bump=minor dueToProviders=[] ownCommits=1 package=core reason=direct version="0.1.0 -> 0.2.0"
+12:04:05 INF ● changed bump=patch dependsOn=["core"] dueToProviders=["core"] ownCommits=0 package=app reason="propagated from core" version="0.2.0 -> 0.2.1"
+12:04:05 INF done cancelled=0 failed=0 held=0 published=2 skipped=0 unchanged=0
+```
+
+The `app` package has no commits of its own this time. It is in the plan because the contribution `core` propagated to
+it has still not been delivered by any release of `core`, and its `0.2.1` release is what delivers it: the range in its
+manifest moves to `^0.2.0` and the two packages are in step again. If `core` fails a second time, `app` is skipped with
+`W194` instead, because by then the failure is the only reason it is in the plan at all.
+
+One shape cannot be repaired in place. If the consumer's build had already run over the manifests naming the provider's
+planned version, whatever it produced may carry that version inside it, and rewriting a manifest does not reach a built
+artefact. dispat blocks that consumer with `W194` naming the provider rather than rebuilding it silently, and the next
+run builds it against what the provider published.
 
 An interrupted run follows the same rule. If you press Ctrl-C or a CI job dies, packages with a completed publish keep
 their record. dispat reports everything else as `cancelled`, and your next run recomputes the remaining plan.

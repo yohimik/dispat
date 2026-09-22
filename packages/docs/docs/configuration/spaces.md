@@ -174,8 +174,8 @@ was skipped does to a consumer that has a release reason of its own.
 
 | `build`   | The consumer's build waits for | The consumer's publish waits for | A failed provider          |
 |-----------|--------------------------------|----------------------------------|----------------------------|
-| `none`    | nothing of the provider        | the provider's publish           | skips it (default)         |
-| `build`   | the provider's build           | the provider's publish           | skips it only if it has no release reason of its own (default) |
+| `none`    | nothing of the provider        | the provider's publish           | skips it only if every reason it is in the plan is that failure (default) |
+| `build`   | the provider's build           | the provider's publish           | skips it only if every reason it is in the plan is that failure (default) |
 | `publish` | the provider's publish         | the provider's publish           | skips it (always)          |
 
 The two booleans are the two relations most repositories want, written short. `false` is `{build: build}` and `true` is
@@ -204,10 +204,14 @@ a node never states one of its own. A provider whose relation is `none` contribu
 build task there, which is the same statement as the local one: the declaration is that the consumer's build reads
 nothing of it.
 
-A non-blocking relation has one sharp edge, and `build` has carried it since before the key had any other value. A
-consumer's version stage may write the provider's *planned* version into its manifests while that provider's publish
-is still pending. If the publish then fails and the consumer proceeds on its own bump, it publishes a manifest naming
-a version nobody published. That is why blocking is the default everywhere except `build`.
+A consumer's version stage may write the provider's *planned* version into its manifests while that provider's publish
+is still pending, which is what a non-blocking relation allows. dispat does not let that reach a publication. When the
+provider dies after the consumer's version stage ran, the consumer's reconciliation is redone against the providers
+that are still alive before it publishes, so its manifests name the version the provider actually published. If the
+consumer's build has already run over those manifests, rewriting them cannot reach what the build produced, so that
+consumer is blocked with `W194` naming the provider instead. Either way the consumer is released again, against the
+real version, once the provider publishes. See
+[when a provider fails or is skipped](../concepts.md#when-a-provider-fails-or-is-skipped).
 
 ## `versioning`
 

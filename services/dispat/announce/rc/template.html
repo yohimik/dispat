@@ -238,6 +238,7 @@
     <p>With no `execution` object, a release runs exactly as it always did.</p>
     <p>Linked repositories are unchanged: orchestrate from one repository, or release from any of them, with no control repository.</p>
     <p>If a library releases but an app using it fails, the successful release stays recorded. The next run finishes what remains rather than releasing the library again.</p>
+    <p>The other direction works too. If an app has changes of its own it releases even when the library it uses failed, and its manifests name the version the library actually published. When the library publishes later, the app is released again to pick it up.</p>
     <p>Autistic stability for ADHD projects. Mathematical planning. Saga recovery.</p>
     <p>Check the plan with `dispat status`. It publishes nothing and takes no release locks.</p>
   </div>
