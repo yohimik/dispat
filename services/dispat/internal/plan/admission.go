@@ -24,10 +24,10 @@ import (
 // detail but what keeps the rule affordable. A target whose pending window
 // still holds the commit has been delivered nothing by anybody (delivery
 // happens in a release, and a release leaves the commit behind), so the owed
-// set is the whole source set and one bitset lookup answers the whole
-// question. Only a target that got ahead of the commit is asked the finer
-// one, and getting ahead is rare: it takes a failed or held provider and a
-// consumer with work of its own.
+// set is every source within the unit's depth of it and one bitset lookup
+// answers the whole question. Only a target that got ahead of the commit is
+// asked the finer one, and getting ahead is rare: it takes a failed or held
+// provider and a consumer with work of its own.
 
 // owedSources is owed(u, d) for a target whose pending window no longer holds
 // the unit's commit: the unit's source packages that no release of theirs has
@@ -35,11 +35,13 @@ import (
 // give this target and admission stands exactly where it stood before the
 // delivery test existed.
 //
-// sources is the unit's source set after §13.4a suppression, and the result is
-// a subset of it in name order, because §9.2's prov[d] |= owed attributes the
-// owed sources to the dependent and only those: a source whose version the
-// target already carries is not a reason it releases again.
-func (cp *computation) owedSources(target, commitKey string, sources map[string]bool) []string {
+// sources is the unit's source set after §13.4a suppression, restricted to the
+// sources within the unit's depth of the target (§9.2's from(d)) and in name
+// order, and the result is a subset of it in that order, because §9.2's
+// prov[d] |= owed attributes the owed sources to the dependent and only those:
+// a source whose version the target already carries is not a reason it
+// releases again.
+func (cp *computation) owedSources(target, commitKey string, sources []string) []string {
 	baseline := cp.baselineBoundary(target, commitKey)
 	if baseline == "" || cp.withoutDelivery {
 		// Two ways there is nothing to ask: a target that has released nothing
@@ -60,7 +62,7 @@ func (cp *computation) owedSources(target, commitKey string, sources map[string]
 		return nil // the target has not released past the commit
 	}
 	owed := make([]string, 0, len(sources))
-	for _, name := range sortedKeys(sources) {
+	for _, name := range sources {
 		if cp.isDelivered(name, commitKey, baseline) {
 			continue
 		}

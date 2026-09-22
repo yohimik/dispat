@@ -645,11 +645,12 @@ func TestSinglePatchForMultipleProviders(t *testing.T) {
 }
 
 func TestMultiScopeUnitAttributesEveryProvider(t *testing.T) {
-	// One unit, several source packages: §9.2 attributes the whole source set
-	// to every dependent it reaches (prov[d] |= sources), not the package the
-	// traversal happened to arrive from. The walk visits app once, and before
-	// the fix the arrival's origin was the only provider recorded, so a
-	// consumer of both packages was told it releases because of one of them.
+	// One unit, several source packages: §9.2 attributes to a dependent every
+	// source of the unit within the unit's depth of it (prov[d] |= owed, owed
+	// drawn from that reaching set), not the package the traversal happened
+	// to arrive from. The walk visits app once, and before the fix the
+	// arrival's origin was the only provider recorded, so a consumer of both
+	// packages was told it releases because of one of them.
 	git := newFakeGit(
 		commit{sha: "c1", message: "fix(core, utils)^: one change across both"},
 	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
@@ -672,11 +673,15 @@ func TestMultiScopeUnitAttributesEveryProvider(t *testing.T) {
 }
 
 func TestMultiScopeSourceOutsideTheManifestsStaysOutOfUpdates(t *testing.T) {
-	// §9.2 attributes the unit's whole source set, whether or not the target
-	// consumes each member: DueTo answers why the package releases, and one
-	// change written across two packages is one cause with two names. The
-	// dependencies record keeps speaking the target's own manifest language,
-	// so the source it never consumes stays out of Updates.
+	// §9.2 attributes to a target the sources of the unit within the unit's
+	// depth of it, from(d) = {P in sources : dist(P, d) <= depth}, and §13.4a
+	// says the rest in words: a source the target does not depend on within
+	// that depth owes it nothing. One change written across core and side is
+	// one cause, but app consumes core alone, so app releases because of core
+	// and its provenance says so; side is neither in DueTo nor in Updates.
+	// Before the fix the whole source set was attributed to every target the
+	// unit reached, and app was told it releases because of a package it
+	// never consumes.
 	libs := &model.Space{Name: "libs"}
 	pkgs := []*model.Package{
 		{Name: "core", Dir: "/r/core", Space: libs},
@@ -692,7 +697,8 @@ func TestMultiScopeSourceOutsideTheManifestsStaysOutOfUpdates(t *testing.T) {
 	require.NoError(t, err)
 
 	app := p.Releases["app"]
-	assert.ElementsMatch(t, []string{"core", "side"}, app.DueTo)
+	assert.Equal(t, []string{"core"}, app.DueTo, "side reaches app through no edge")
+	assert.Equal(t, "propagated from core", app.Reason())
 	names := make([]string, 0, len(app.Updates))
 	for _, u := range app.Updates {
 		names = append(names, u.Name)

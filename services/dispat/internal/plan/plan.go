@@ -583,9 +583,9 @@ type StaleSource struct {
 	Commit    string // the commit carrying the unit
 	commitKey string // repository-qualified identity used only inside planning
 	// Level is the number of hops to this package, measured from the unit's
-	// whole source set the way §9.2 measures depth. A unit written over
-	// several packages records one contribution per source, all at the
-	// target's own level.
+	// source set as a whole the way §9.2 measures depth. A unit written over
+	// several packages records one contribution per source within the unit's
+	// depth of this package, all at the package's own level.
 	Level int
 	Bump  ccme.Bump // the bump the unit propagates
 }

@@ -132,11 +132,7 @@ func TestAdmissionDeliveredPredicate(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			cp := admissionFixture(t, tc.tags(newFakeGit(history...)), pkgs)
-			sources := make(map[string]bool, len(tc.sources))
-			for _, s := range tc.sources {
-				sources[s] = true
-			}
-			assert.Equal(t, tc.want, cp.owedSources("app", tc.commit, sources), tc.why)
+			assert.Equal(t, tc.want, cp.owedSources("app", tc.commit, tc.sources), tc.why)
 		})
 	}
 }
@@ -155,7 +151,7 @@ func TestAdmissionAsksNothingUnderTheWindowOnlyRule(t *testing.T) {
 	}
 	cp := admissionFixture(t, git, pkgs)
 	cp.withoutDelivery = true
-	assert.Nil(t, cp.owedSources("app", "c2", map[string]bool{"core": true}))
+	assert.Nil(t, cp.owedSources("app", "c2", []string{"core"}))
 }
 
 // TestAdmissionCatchesUpAConsumerThatOvertookItsProvider is the defect, end to
@@ -494,4 +490,50 @@ func assertAdmissionMonotone(t *testing.T, round int, before, after *Plan) {
 				"round %d: %s: tuple %s@%s was dropped", round, name, s.Provider, s.Commit)
 		}
 	}
+}
+
+// TestAdmissionAsksOnlyTheSourcesWithinReach fences the agreement of §9.2 and
+// §13.7b on one reaching set: a unit written over two providers at different
+// distances from an overtaking consumer is owed only by the provider within
+// the unit's depth. `theme` sits one edge from `ui` and two from `core`; a
+// caret unit over both reaches `theme` through `ui` alone, so once `ui` has
+// delivered the commit nothing is owed, however far behind `core` still is.
+func TestAdmissionAsksOnlyTheSourcesWithinReach(t *testing.T) {
+	libs := &model.Space{Name: "libs"}
+	pkgs := []*model.Package{
+		{Name: "core", Dir: "/r/core", Space: libs},
+		{Name: "ui", Dir: "/r/ui", Space: libs},
+		{Name: "theme", Dir: "/r/theme", Space: libs},
+	}
+	deps := []model.Dependency{{Consumer: "ui", Provider: "core"}, {Consumer: "theme", Provider: "ui"}}
+	history := []commit{
+		{sha: "c1", message: "chore: base"},
+		{sha: "c2", message: "feat(core,ui)^: shared work"},
+		{sha: "c3", message: "feat(theme): own work"},
+	}
+	plan := func(git *fakeGit) *Plan {
+		p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+		require.NoError(t, err)
+		return p
+	}
+
+	// ui released the commit before theme's own release reached past it;
+	// core never released it, and core is out of the unit's reach of theme.
+	delivered := plan(newFakeGit(history...).
+		tag("core", "1.0.0", "c1").tag("ui", "1.0.0", "c1").tag("ui", "1.1.0", "c2").tag("theme", "1.1.0", "c3"))
+	assert.False(t, delivered.Releases["theme"].IsReleasing(),
+		"ui delivered the commit and core, two edges away, is not a source that reaches theme")
+	assert.True(t, delivered.Releases["core"].IsReleasing(), "core's own window still holds the commit")
+
+	// The control: with ui's release of the commit absent, ui alone owes it.
+	owed := plan(newFakeGit(history...).
+		tag("core", "1.0.0", "c1").tag("ui", "1.0.0", "c1").tag("theme", "1.1.0", "c3"))
+	theme := owed.Releases["theme"]
+	require.True(t, theme.IsReleasing(), "ui has not delivered the commit to theme")
+	// DueTo is the explanation chain (theme through ui through core); the
+	// admitted unit's own attribution is the owed set, and it names ui alone.
+	assert.Contains(t, theme.DueTo, "ui")
+	require.Len(t, theme.Sources, 1, "one admitted contribution: %v", theme.Sources)
+	assert.Equal(t, "ui", theme.Sources[0].Provider, "owed by ui alone, never by core two edges away")
+	assert.Equal(t, "c2", theme.Sources[0].Commit)
 }

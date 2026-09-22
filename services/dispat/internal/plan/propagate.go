@@ -147,6 +147,30 @@ func withinDepth(walked []target, depth int) []target {
 	return walked[:n:n]
 }
 
+// reachingSources is, for every target of a unit's walk, the sources of the
+// unit within the unit's depth of it, in name order: §9.2's from(d) and
+// §13.4a's reaching(u, D). A unit over one package, which is nearly every
+// unit, reaches every target from that package. A unit over several is read
+// off one walk per source, the cached walks its composed walk is built from,
+// because the composed walk visits a target once and knows only the package
+// it arrived from.
+func (cp *computation) reachingSources(sources map[string]bool, walked []target, depth int, kinds map[model.DepKind]bool) map[string][]string {
+	reaching := make(map[string][]string, len(walked))
+	if len(sources) == 1 {
+		names := sortedKeys(sources)
+		for _, t := range walked {
+			reaching[t.name] = names
+		}
+		return reaching
+	}
+	for _, s := range sortedKeys(sources) {
+		for _, t := range cp.walk(map[string]bool{s: true}, depth, kinds) {
+			reaching[t.name] = append(reaching[t.name], s)
+		}
+	}
+	return reaching
+}
+
 // compose is the multi-source walk read off its sources' walks.
 //
 // A multi-source breadth-first walk with its sources queued in name order
@@ -642,23 +666,25 @@ func (cp *computation) propagateBumps() {
 					anyStable = true
 				}
 			}
-			// §9.2 attributes the whole source set to every dependent the
-			// unit reaches: prov[d] |= sources. The traversal visits a target
-			// once and knows only the package it arrived from, so attribution
-			// cannot be read off the walk — a unit written over several
-			// packages would credit whichever one the queue served first, and
-			// a consumer of all of them would be told it releases because of
-			// one. Hoisted here because the set is the unit's, not the
-			// target's.
-			srcNames := sortedKeys(sources)
+			// §9.2 attributes to a dependent the sources of the unit within
+			// the unit's depth of it, from(d) = {P in sources : dist(P, d)
+			// <= depth}, which is §13.4a's reaching(u, D), and never the
+			// package the traversal happened to arrive from: a unit written
+			// over several packages would credit whichever one the queue
+			// served first. Read off the walks, a consumer two edges from one
+			// source and one from another is owed by the second alone, and a
+			// source that reaches it through no path at all is never a cause
+			// of its release.
+			walked := cp.walk(sources, prop.Depth, prop.kinds)
+			reaching := cp.reachingSources(sources, walked, prop.Depth, prop.kinds)
 
 			reached := 0
-			walked := cp.walk(sources, prop.Depth, prop.kinds)
 			for _, t := range walked {
 				if !prop.allowsTarget(t.name) { // Propagate-Scope (§8.5)
 					continue
 				}
 				reached++
+				from := reaching[t.name]
 				// Admission follows DELIVERY, not position (§13.4a).
 				//
 				// The target's own window is the cheap half of that, and the
@@ -671,9 +697,9 @@ func (cp *computation) propagateBumps() {
 				// failed or was held, is asked the finer question, and is
 				// admitted for the sources that still owe it a version.
 				isPending := cp.inWindow(t.name, rec.key)
-				owed := srcNames
+				owed := from
 				if !isPending {
-					if owed = cp.owedSources(t.name, rec.key, sources); len(owed) == 0 {
+					if owed = cp.owedSources(t.name, rec.key, from); len(owed) == 0 {
 						continue
 					}
 				}
@@ -718,10 +744,12 @@ func (cp *computation) propagateBumps() {
 				// record reaches a provider that is not releasing only
 				// through this attribution. The level is the target's, which
 				// §9.2 measures from the source set as a whole. Owed rather
-				// than the whole source set, because §9.2's prov[d] |= owed
-				// is what makes DueTo and the records name the providers this
-				// release actually picks a version up from: a source whose
-				// version the target already carries did not put it here.
+				// than every source within reach, because §9.2's prov[d] |=
+				// owed is what makes DueTo and the records name the providers
+				// this release actually picks a version up from: a source
+				// whose version the target already carries did not put it
+				// here, and one the target does not depend on within the
+				// unit's depth never could.
 				for _, src := range owed {
 					rel.Sources = append(rel.Sources, StaleSource{
 						Provider:  src,
