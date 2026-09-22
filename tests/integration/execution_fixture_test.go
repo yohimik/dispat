@@ -345,6 +345,12 @@ func (o *executionFakeOrchestrator) offer(branch string, message map[string]any,
 	}
 	document, err := json.Marshal(message)
 	require.NoError(o.t, err)
+	if len(options.document) > 0 {
+		// A document this suite wrote itself, signed as what it is called: the
+		// one way to offer a node bytes that are authentically the run's and
+		// are not the JSON the message is supposed to be.
+		document = options.document
+	}
 	commit := o.commit(options, document, options.parents...)
 	bareGit(o.t, o.mailbox, "update-ref", "refs/heads/"+branch, commit)
 
@@ -363,6 +369,10 @@ type executionMessageOptions struct {
 	signedAs string
 	isSigned bool
 	parents  []string
+	// document replaces the marshalled message with exact bytes, for the
+	// scenarios whose claim is about what a reader does with a document it
+	// cannot parse.
+	document []byte
 }
 
 // commit builds one transport commit in the mailbox itself: the document,
