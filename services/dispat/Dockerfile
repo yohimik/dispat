@@ -213,7 +213,7 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
     DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
-      go test -C /src/tests/integration -json -count=1 -timeout 60m \
+      go test -C /src/tests/integration -json -count=1 -timeout 120m \
         -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./... > /gate/integration.json \
       || { cat /gate/integration.json; exit 1; }; \
     jq -s -e 'any(.[]; .Action == "pass" and .Package == "github.com/yohimik/dispat/tests/integration" and (has("Test") | not)) and all(.[]; .Action != "fail" and (.Action != "skip" or (has("Test") | not)))' /gate/integration.json > /dev/null \

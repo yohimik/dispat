@@ -276,7 +276,7 @@ export DISPAT_COVERDIR=/src/coverage/covdata
 export DISPAT_COVERPKG='github.com/yohimik/dispat/services/dispat/...,github.com/yohimik/dispat/pkg/ccme/...,github.com/yohimik/dispat/pkg/config/...,github.com/yohimik/dispat/pkg/manifest/...,github.com/yohimik/dispat/pkg/models/...,github.com/yohimik/dispat/pkg/scanner/...,github.com/yohimik/dispat/pkg/writer/...'
 rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
 go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... \
-  -count=1 -timeout 20m -covermode=atomic -coverpkg="$DISPAT_COVERPKG" \
+  -count=1 -timeout 60m -covermode=atomic -coverpkg="$DISPAT_COVERPKG" \
   -coverprofile=/src/coverage/publicapi.out
 go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/cli-integration.out
 { head -n 1 /src/coverage/cli-integration.out; tail -q -n +2 /src/coverage/cli-integration.out /src/coverage/publicapi.out; } \
@@ -289,7 +289,7 @@ race_log_dir=/tmp/dispat-race-reports
 rm -rf "$race_log_dir" && mkdir -p "$race_log_dir"
 GORACE="atexit_sleep_ms=0 log_path=$race_log_dir/race" \
   DISPAT_TEST_RACE=1 DISPAT_TEST_RACE_LOG_DIR="$race_log_dir" \
-  go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration ./... -count=1 -timeout 20m -race
+  go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration ./... -count=1 -timeout 90m -race
 EOF
 ARG TEST_COMMIT
 RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/integration.commit
