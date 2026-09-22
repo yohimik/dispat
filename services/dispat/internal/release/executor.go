@@ -720,7 +720,7 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 	// version the stage wrote up front (§19.5). Whether that is achievable is
 	// decided here, before anything of the publish runs.
 	if t.kind == taskPublish {
-		if dead := r.deadPickups(t.pkg); len(dead) > 0 {
+		if dead := r.resolveDeadPickups(t.pkg); len(dead) > 0 {
 			if r.builtPackages[t.pkg] {
 				return r.blockOn(ctx, tc, res, dead[0], formatEmbeddedSkipReason(dead[0]))
 			}
@@ -777,7 +777,7 @@ func (r *run) blockOn(ctx context.Context, tc *taskCtx, res *Result, blocker, re
 	return false
 }
 
-// deadPickups lists, with mu held, the providers this package's version
+// resolveDeadPickups lists, with mu held, the providers this package's version
 // stage reconciled it to and that have since failed, been skipped or had their
 // records blocked, in name order.
 //
@@ -787,7 +787,7 @@ func (r *run) blockOn(ctx context.Context, tc *taskCtx, res *Result, blocker, re
 // the manifests naming a version that will never exist. Empty for a package
 // whose version stage reconciled nothing, and empty on the ordinary run where
 // every provider it picked up published.
-func (r *run) deadPickups(pkg string) []string {
+func (r *run) resolveDeadPickups(pkg string) []string {
 	var dead []string
 	for _, picked := range r.reconciledProviders[pkg] {
 		res, ok := r.results[picked]

@@ -130,16 +130,16 @@ func TestAdmissionFindsTheProvidersThatDiedAfterTheVersionStage(t *testing.T) {
 		builtPackages:       map[string]bool{},
 	}
 
-	assert.Empty(t, r.deadPickups("app"), "a stage that reconciled nothing leaves nothing to undo")
+	assert.Empty(t, r.resolveDeadPickups("app"), "a stage that reconciled nothing leaves nothing to undo")
 
 	r.reconciledProviders["app"] = []string{"utils"}
-	assert.Empty(t, r.deadPickups("app"), "the provider it reconciled to published")
+	assert.Empty(t, r.resolveDeadPickups("app"), "the provider it reconciled to published")
 
 	r.reconciledProviders["app"] = []string{"utils", "core"}
-	assert.Equal(t, []string{"core"}, r.deadPickups("app"))
+	assert.Equal(t, []string{"core"}, r.resolveDeadPickups("app"))
 
 	r.results["core"] = &Result{Status: StatusPublished, RecordBlocked: true}
-	assert.Equal(t, []string{"core"}, r.deadPickups("app"),
+	assert.Equal(t, []string{"core"}, r.resolveDeadPickups("app"),
 		"a publication whose records are blocked is no version to name either")
 }
 
