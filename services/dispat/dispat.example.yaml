@@ -31,6 +31,17 @@ scripts:
     - "go build ./..."
   publish-go: "./scripts/release.sh"
   notify: "./scripts/notify.sh"
+  # Run by `dispat run test`; each package writes its report under the
+  # repository's coverage/ folder, named after itself.
+  test: 'npm test -- --coverage --coverageDirectory "$(git rev-parse --show-toplevel)/coverage/$DISPAT_PACKAGE"'
+
+# The folders a `dispat run <script>` sweep writes, per script, relative to the
+# repository root. On one machine every task writes here already; when a sweep
+# runs on worker nodes, what each delegated task wrote there is carried back
+# and merged into this checkout, file by file, once every task has answered.
+# Root-only, and read from the configuration the run was started with.
+runOutputs:
+  test: [coverage]
 
 # A space's `flow` object says what runs at which stage, referencing scripts by
 # name. Every entry is optional (a stage without a script still runs, keeping

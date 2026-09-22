@@ -10,7 +10,11 @@
     "announce": "./scripts/announce.sh",
     "build-go": ["go vet ./...", "go build ./..."],
     "publish-go": "./scripts/release.sh",
-    "notify": "./scripts/notify.sh"
+    "notify": "./scripts/notify.sh",
+    "test": "npm test -- --coverage --coverageDirectory \"$(git rev-parse --show-toplevel)/coverage/$DISPAT_PACKAGE\""
+  },
+  "runOutputs": {
+    "test": ["coverage"]
   },
   "spaces": {
     "libs": {

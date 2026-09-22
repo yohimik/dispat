@@ -46,6 +46,8 @@ execution:
   # holds full source, command text and build outputs, so give it the access
   # control the source has, prefer a repository of its own, and protect
   # release branches and tags from the credentials that can write to it.
+  # A pipeline that creates a worker for the run names it on the command
+  # line instead, `--worker name=endpoint`, held to the same rules.
   workers:
     - name: build-a
       endpoint: git@github.com:acme/release-mailbox.git
