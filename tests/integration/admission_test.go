@@ -278,3 +278,83 @@ func TestAdmissionLeavesPlansWithoutOvertakingUnchanged(t *testing.T) {
 		"the provider's release delivered its commit, so nothing is owed")
 	assert.Contains(t, status.Stdout, `"package":"cli","space":"apps","dependsOn":["core"],"version":"0.1.2"`)
 }
+
+// TestAdmissionOwesEveryConsumerThatOvertookOnePendingCommit is the same debt
+// owed to two consumers at once, in a workspace where a never-released package
+// keeps the union of pending windows spanning the provider's earlier release.
+//
+// That shape is what makes the delivery test do its whole job rather than its
+// cheap half: the provider has a release the planner can see and that release
+// does not carry the pending commit, so each consumer is asked about a real
+// candidate and told no. Two consumers ask about the same provider, which is
+// also the only way the candidate list is read twice.
+func TestAdmissionOwesEveryConsumerThatOvertookOnePendingCommit(t *testing.T) {
+	r := harness.New(t)
+	gate := r.Path("consumers-versioned.gate")
+	cfg := harness.BaseFile(3)
+	cfg.Scripts = map[string]models.Script{
+		// One command, because every entry of a script list runs in its own
+		// shell: an `exit 0` in the first would end that shell, not the stage.
+		"core-publish": {`if [ -n "$` + admissionProviderOK + `" ]; then echo published; else ` +
+			stageRelationGateWait(gate) + `; exit 1; fi`},
+		// The gate opens once both consumers have reconciled, which is what
+		// puts the provider's failure after both version stages.
+		"app-post-version": {"printf x >> '" + gate + ".marks'",
+			`if [ "$(wc -c < '` + gate + `.marks' | tr -d ' ')" -ge 2 ]; then touch '` + gate + `'; fi`},
+		"app-publish": {"echo publishing $DISPAT_PACKAGE"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages/libs"},
+			Flow: &models.SpaceFlowConfig{Publish: []string{"core-publish"}}},
+		"apps": {Path: models.PathList{"packages/apps"},
+			Flow: &models.SpaceFlowConfig{
+				PostVersion: []string{"app-post-version"}, Publish: []string{"app-publish"}},
+			AutoVersion: &models.AutoVersionConfig{Match: []string{"workspace:*", "^*"}}},
+		// Never released and never committed to, so its window is the whole
+		// history and the union keeps holding the provider's own release.
+		"docs": {Path: models.PathList{"packages/docs"},
+			Flow: &models.SpaceFlowConfig{Publish: []string{"app-publish"}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "cli", Provider: "core"},
+		{Consumer: "web", Provider: "core"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages/libs", "core")
+	r.SeedPackage("packages/docs", "guide")
+	r.WriteFile("packages/libs/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	for _, name := range []string{"cli", "web"} {
+		r.SeedPackage("packages/apps", name)
+		r.WriteFile("packages/apps/"+name+"/package.json", `{
+  "name": "@acme/`+name+`",
+  "version": "0.0.0",
+  "dependencies": {"@acme/core": "workspace:*"}
+}`)
+	}
+	r.Commit("feat(core,cli,web): bootstrap")
+	bootstrap := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+	require.Equal(t, 0, bootstrap.Code,
+		"the bootstrap release is the one the provider survives; stdout:\n%s\nstderr:\n%s",
+		bootstrap.Stdout, bootstrap.Stderr)
+	require.Contains(t, r.TagList(), "core@0.1.0")
+	require.Zero(t, r.TagCount("guide@"), "the third package never releases: %v", r.TagList())
+
+	r.WriteFile("packages/libs/core/stream.txt", "streaming\n")
+	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli,web): own flag")
+	require.NotEqual(t, 0, r.Release().Code, "the provider's publish fails")
+	for _, name := range []string{"cli", "web"} {
+		require.Equal(t, 1, r.TagCount(name+"@0.2.0"),
+			"%s proceeds on its own bump; tags: %v", name, r.TagList())
+	}
+	require.Zero(t, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+
+	// Both consumers overtook the same pending commit, and the provider's one
+	// visible release does not carry it, so both are still owed it.
+	res := r.Status()
+	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	for _, name := range []string{"cli", "web"} {
+		assert.Equal(t, "0.2.0 -> 0.2.1", harness.GraphLine(res.Events, name).Str("version"),
+			"%s is planned again; stdout:\n%s", name, res.Stdout)
+		assert.Equal(t, "propagated from core", harness.GraphLine(res.Events, name).Str("reason"))
+	}
+}

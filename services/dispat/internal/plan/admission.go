@@ -151,10 +151,13 @@ func (cp *computation) releaseCommits(provider string) []string {
 }
 
 // tagCommitKey qualifies a tag's raw commit with the repository that owns the
-// package, which is the history the tag was read from.
+// package, which is the history the tag was read from. A name the workspace
+// holds no package for owns no tags either, and the unqualified key it would
+// produce is the one a single history uses anyway.
 func (cp *computation) tagCommitKey(pkg, commit string) string {
+	repository := ""
 	if p := cp.byName[pkg]; p != nil {
-		return historyKey(p.Repository, commit)
+		repository = p.Repository
 	}
-	return commit
+	return historyKey(repository, commit)
 }
