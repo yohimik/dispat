@@ -168,3 +168,30 @@ func diagnosticCodeOf(err error) string {
 	}
 	return carrier.DiagnosticCode()
 }
+
+// TestALocalFrameNeverLeaksItsSlot: this machine is the one node whose
+// capacity cannot be lost. A frame placed here runs in this process, so a
+// frame that ended is a frame whose goroutine returned and there is no unknown
+// process left holding anything. A run that helped its own pool used to lose
+// the slot it lent itself and take the orchestrator out of the pool with it,
+// which also fails every frame only the orchestrator may run.
+func TestALocalFrameNeverLeaksItsSlot(t *testing.T) {
+	pool := newTestPool(linuxNode(1))
+
+	local, err := pool.Acquire(t.Context(), nil, PlacementOrchestrator)
+	require.NoError(t, err)
+	require.True(t, local.IsLocal)
+	local.Leak()
+
+	again, err := pool.Acquire(t.Context(), nil, PlacementOrchestrator)
+	require.NoError(t, err, "the slot came back and the node is still in the pool")
+	assert.True(t, again.IsLocal)
+	again.Release()
+
+	// A worker's slot is the opposite statement and stays where it is.
+	worker, err := pool.Acquire(t.Context(), nil, PlacementWorker)
+	require.NoError(t, err)
+	worker.Leak()
+	_, err = pool.Acquire(t.Context(), nil, PlacementWorker)
+	require.Error(t, err, "the node that stopped answering is out of the pool")
+}

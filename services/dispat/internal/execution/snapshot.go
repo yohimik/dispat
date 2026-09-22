@@ -128,16 +128,11 @@ func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Sou
 		return "", err
 	}
 	defer done()
-	plumbing := gitx.NewPlumbing(git)
-	// The whole repository, from its root: tracked modifications, untracked
-	// files git does not ignore, and the removals of files that are gone. The
-	// pathspec is literal so a folder whose name holds a glob character is the
-	// folder it is named, and nothing is forced, because what a build output
-	// is has not been declared yet at this point in the run.
-	tree := plumbing.WriteTreeFromPaths(ctx, git.Dir, index, []string{"."}, false)
-	if err := plumbing.Err(); err != nil {
-		return "", fmt.Errorf("execution: capturing the input state of %s: %w", source.Dir, err)
+	tree, err := writeStateTree(ctx, git, index, source, log)
+	if err != nil {
+		return "", err
 	}
+	plumbing := gitx.NewPlumbing(git)
 	if commit, isUnchanged := s.reuse(source.Dir, tree); isUnchanged {
 		log.Debug().Str("repository", source.Name).Str("tree", tree).Str("commit", commit).
 			Msg("the prepared input state is unchanged and is reused")
@@ -151,6 +146,46 @@ func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Sou
 	log.Debug().Str("repository", source.Name).Str("tree", tree).Str("commit", commit).
 		Str("head", source.Head).Msg("input state prepared")
 	return commit, nil
+}
+
+// writeStateTree hashes one repository's whole working state into a tree, and
+// tries a second time when the first attempt raced somebody writing a file.
+//
+// The staging walks the repository and then hashes what it found, so a file
+// that exists when it is listed and is gone when it is read fails the whole
+// capture: git reports the path it could not stat and exits. That is not a
+// condition of the repository but of the instant, and a release produces such
+// instants by itself, since the recorder writes a changelog through a
+// temporary file and renames it while another package is being dispatched. The
+// exclusive side of the snapshot guard keeps this run's own version and
+// lockfile frames out of the way; it cannot keep out a build command writing
+// into its own folder, and nothing should, because a build is exactly what a
+// node was asked to do.
+//
+// One retry, because the second attempt walks a tree from which the file is
+// either present or absent rather than becoming one or the other. A capture
+// that fails twice is reported: two instants in a row is a repository being
+// written to continuously, which is a condition a person has to look at.
+func writeStateTree(ctx context.Context, git *gitx.LocalGitx, index string,
+	source Source, log zerolog.Logger) (string, error) {
+	for attempt := 1; ; attempt++ {
+		// The whole repository, from its root: tracked modifications, untracked
+		// files git does not ignore, and the removals of files that are gone.
+		// The pathspec is literal so a folder whose name holds a glob character
+		// is the folder it is named, and nothing is forced, because what a
+		// build output is has not been declared yet at this point in the run.
+		plumbing := gitx.NewPlumbing(git)
+		tree := plumbing.WriteTreeFromPaths(ctx, git.Dir, index, []string{"."}, false)
+		err := plumbing.Err()
+		if err == nil {
+			return tree, nil
+		}
+		if attempt > 1 || ctx.Err() != nil {
+			return "", fmt.Errorf("execution: capturing the input state of %s: %w", source.Dir, err)
+		}
+		log.Debug().Err(err).Str("repository", source.Name).
+			Msg("the input state could not be hashed and is captured again")
+	}
 }
 
 // parentsOf is the commit list a snapshot descends from: the planned head, or

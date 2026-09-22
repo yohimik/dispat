@@ -280,8 +280,16 @@ func (l *Lease) Release() {
 // running on that machine, so the slot is not free, and a node that lost one
 // attempt is a node this run will not place anything else on: both halves are
 // the same statement, which is why they are one call.
+//
+// This machine is the one node it can never be said of. A frame placed here
+// runs in this process, so a frame that ended is a frame whose goroutine
+// returned: there is no unknown process left holding the slot and nothing to
+// take out of the pool. A local lease therefore returns its slot however the
+// attempt ended, which is what keeps a run that helps its own pool from losing
+// the capacity it lent itself, and what keeps the orchestrator available for
+// the frames only it may run.
 func (l *Lease) Leak() {
-	l.settle(true)
+	l.settle(!l.IsLocal)
 }
 
 // settle is the one place a lease ends, so that a lease returned twice cannot

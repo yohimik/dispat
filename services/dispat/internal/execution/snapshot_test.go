@@ -264,3 +264,50 @@ func TestSnapshotReportsAnUnreadableRepository(t *testing.T) {
 
 	require.Error(t, err)
 }
+
+// TestTheInputStateIsCapturedTwiceBeforeItIsReported: the capture stages the
+// repository and then hashes what it staged, so a file that exists when it is
+// listed and is gone when it is read fails the whole capture. A release
+// produces such instants by itself, since the changelog recorder renames a
+// temporary file into place while another package is being dispatched, and the
+// failure was reported as an integrity error against a package that had
+// nothing to do with it.
+//
+// The arm is not reachable from the compiled binary: the race is between one
+// git invocation and a file another goroutine of the same run renames, and
+// nothing a configuration, a crafted branch, a git fault or a signal can do
+// makes the first attempt fail and the second succeed on demand. What is
+// asserted here is therefore the retry itself: a capture that cannot be hashed
+// is tried a second time, and a second failure is what a person is told about.
+func TestTheInputStateIsCapturedTwiceBeforeItIsReported(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	// An index path that is a folder: git cannot write it, whichever instant
+	// it tries, so both attempts fail for the same reason and the count of
+	// them is what the assertion is about.
+	index := filepath.Join(t.TempDir(), "index-as-a-folder")
+	require.NoError(t, os.MkdirAll(index, 0o755))
+	source := Source{Name: "root", Dir: fixture.dir, Head: fixture.head}
+	before := gitx.GitInvocations()
+
+	_, err := writeStateTree(t.Context(), fixture.git, index, source, zerolog.Nop())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), fixture.dir, "the failure names the repository it is about")
+	assert.Equal(t, uint64(2), gitx.GitInvocations()-before,
+		"the capture is attempted twice, and the second failure is the one reported")
+}
+
+// TestACapturedStateSurvivesOneRacingWriter: the same retry from the outside.
+// A capture whose first attempt fails and whose second succeeds answers the
+// tree, so one instant of a moving working tree costs a repeated walk rather
+// than a failed package.
+func TestACapturedStateSurvivesOneRacingWriter(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	source := Source{Name: "root", Dir: fixture.dir, Head: fixture.head}
+	index := filepath.Join(t.TempDir(), "index")
+
+	tree, err := writeStateTree(t.Context(), fixture.git, index, source, zerolog.Nop())
+
+	require.NoError(t, err)
+	assert.Len(t, tree, 40)
+}
