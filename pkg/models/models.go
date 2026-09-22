@@ -245,6 +245,21 @@ type File struct {
 	// that has never heard of worker nodes on exactly the path it was on.
 	Execution *ExecutionConfig `json:"execution,omitempty"`
 
+	// RunOutputs names, per script, the folders a `dispat run` sweep of that
+	// script writes and a sweep executed on worker nodes carries back to the
+	// machine it was started on: a map from script name to a list of paths
+	// relative to the root of the repository that owns each swept package,
+	// written with forward slashes. `runOutputs: {tests: [coverage]}` says that
+	// the `tests` task of every package may write under `coverage/`, and what
+	// the delegated tasks wrote there is merged into this checkout's `coverage/`
+	// file by file, so the tasks of one sweep contribute to one folder.
+	//
+	// Like Execution it is a root-only key read from the entry configuration
+	// alone, and a sweep that delegates nothing never reads it: every task of
+	// such a sweep writes into this checkout already. Script names match
+	// case-insensitively, as they do everywhere else.
+	RunOutputs map[string][]string `json:"runOutputs,omitempty"`
+
 	// SourceFiles are the files this configuration was read from: the config
 	// file itself, followed by every file a `$ref` in it named, in the order
 	// they were read. Populated by the loader, so that a configuration split
@@ -1487,6 +1502,17 @@ func FoldLookup[T any](m map[string]T, name string) (string, T, bool) {
 func (c *File) Script(ref string) (Script, bool) {
 	_, s, ok := FoldLookup(c.Scripts, ref)
 	return s, ok
+}
+
+// FindRunOutputs resolves the roots a sweep of one script declares, with the
+// script name matched case-insensitively for the same reason as Script. It is
+// nil-safe, so a configuration nobody loaded declares nothing.
+func (c *File) FindRunOutputs(script string) ([]string, bool) {
+	if c == nil {
+		return nil, false
+	}
+	_, roots, ok := FoldLookup(c.RunOutputs, script)
+	return roots, ok
 }
 
 // Script resolves one of the space's own scripts case-insensitively, for the
