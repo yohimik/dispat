@@ -32,6 +32,10 @@ on:
         description: Publish packages without social announcements
         type: boolean
         default: false
+      skip_tinygo_gate:
+        description: Export the tiny binaries without running the integration suite against them
+        type: boolean
+        default: false
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -55,6 +59,9 @@ env:
   # so a tag ever recreated at different content (a rolled-back run) leaves
   # the proxy's first copy pinned for good and every checksum check failing.
   GOPRIVATE: github.com/yohimik/dispat
+  # The TinyGo acceptance gate of the dispat build (services/dispat/Dockerfile,
+  # stage tiny-test) runs unless the dispatch asked to skip it.
+  DISPAT_TINY_GATE: ${{ inputs.skip_tinygo_gate && 'skip' || 'test' }}
 
 # A release pushes tags, a branch, gh-pages and four images. dispat's own
 # release lock would refuse the second run, but it would refuse it partway in;

@@ -117,7 +117,9 @@ draft tag. The darwin spike checks the recorded version on every run and reuses 
 
 The release export gate runs the complete integration suite against the exact native TinyGo binary it will export.
 Version-stamped self-update fixtures use the same compiler, including trusted TLS update and offline rollback checks.
-Any failed or skipped test blocks export. CI exercises this gate on native Linux AMD64 and ARM64 builders.
+Any failed or skipped test blocks export. A release can leave the gate out on request (`DISPAT_TINY_GATE=skip`, the
+workflow input `skip_tinygo_gate`): the tiny binaries are still built and exported, only their acceptance run
+is omitted, and the build log says so. CI exercises this gate on native Linux AMD64 and ARM64 builders.
 
 The base image is upstream 0.42.0 and every stage up to `tinygo-spike-net` measures it, so the verdict above keeps
 its evidence. The two fork stages are the re-asking.
