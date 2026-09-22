@@ -47,6 +47,13 @@ summary to your terminal. It displays full failure output so you do not lose det
 the exit status of the underlying test run. Pass a `<log-name>` that matches the target coverage profile (`ccme`,
 `dispat`, `integration`), and append `-race` to mark race-detector passes.
 
+Add `--shards N` before the `--` to split a slow suite over N concurrent `go test` processes. The command lists the
+tests with the same arguments, runs an exact round-robin share of them in each process, and still writes one log, one
+summary and one exit status. A `-coverprofile` is written per shard and merged into the file it names. The
+`test-integration` target of [`Dockerfile.gotest`](../Dockerfile.gotest) runs both integration passes in six shards:
+the suite spends most of its time waiting on the processes it drives, so a single process inside a container needs
+about twice the hour a pass is allowed.
+
 Run `dispat exec coverage-badge` to merge the generated profiles in `coverage/` and produce the badge JSON; the merge
 logic lives in the `badge` target of [`Dockerfile.gotest`](../Dockerfile.gotest), and the summary table it writes to
 `coverage/summary.md` is what the script appends to the job summary. The `test-report` root script (the `report`

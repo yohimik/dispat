@@ -268,6 +268,15 @@ COPY --from=test-dispat /src/coverage /
 # folder becomes integration.out. The race pass keeps its own log, as it
 # always has. The export takes the profile and the logs and leaves the binary
 # covdata behind.
+#
+# Both passes run in six go test processes over an exact round-robin split of
+# the suite's tests (`testreport test --shards`), and each still leaves one
+# log. The suite waits far more than it computes (polls, preflights, sleeps),
+# so one process runs two to three times slower here than on a laptop, about
+# twice the hour a pass is allowed; six wait side by side. Each -timeout
+# bounds one shard, a sixth of the suite. Every shard's dispat writes its
+# counters into the one DISPAT_COVERDIR, and every shard builds its binaries
+# in a temp folder of its own.
 FROM src-integration AS test-integration
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 <<'EOF'
 set -eu
@@ -275,7 +284,7 @@ cd services/dispat
 export DISPAT_COVERDIR=/src/coverage/covdata
 export DISPAT_COVERPKG='github.com/yohimik/dispat/services/dispat/...,github.com/yohimik/dispat/pkg/ccme/...,github.com/yohimik/dispat/pkg/config/...,github.com/yohimik/dispat/pkg/manifest/...,github.com/yohimik/dispat/pkg/models/...,github.com/yohimik/dispat/pkg/scanner/...,github.com/yohimik/dispat/pkg/writer/...'
 rm -rf "$DISPAT_COVERDIR" && mkdir -p "$DISPAT_COVERDIR"
-go run github.com/yohimik/dispat/tools/testreport test integration -- -C ../../tests/integration ./... \
+go run github.com/yohimik/dispat/tools/testreport test integration --shards 6 -- -C ../../tests/integration ./... \
   -count=1 -timeout 60m -covermode=atomic -coverpkg="$DISPAT_COVERPKG" \
   -coverprofile=/src/coverage/publicapi.out
 go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/cli-integration.out
@@ -284,12 +293,14 @@ go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/cli-integration.o
 # Every black-box CLI is race-instrumented. Go's default one-second race
 # runtime exit sleep would therefore be paid hundreds of times. Reports go
 # to a shared directory so TestMain can fail even when a scenario expects the
-# child's non-zero (normally exit 66) status.
+# child's non-zero (normally exit 66) status. The six shards share it too, so
+# a report fails every shard that checks the directory after it was written.
 race_log_dir=/tmp/dispat-race-reports
 rm -rf "$race_log_dir" && mkdir -p "$race_log_dir"
 GORACE="atexit_sleep_ms=0 log_path=$race_log_dir/race" \
   DISPAT_TEST_RACE=1 DISPAT_TEST_RACE_LOG_DIR="$race_log_dir" \
-  go run github.com/yohimik/dispat/tools/testreport test integration-race -- -C ../../tests/integration ./... -count=1 -timeout 90m -race
+  go run github.com/yohimik/dispat/tools/testreport test integration-race --shards 6 -- \
+  -C ../../tests/integration ./... -count=1 -timeout 90m -race
 EOF
 ARG TEST_COMMIT
 RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/integration.commit
