@@ -297,8 +297,9 @@ type Assignment struct {
 	// Inputs are the results of other tasks this one consumes, each named by
 	// the exact object its outputs were captured into.
 	Inputs []AssignmentInput `json:"inputs,omitempty"`
-	// Outputs are the declared build output roots the task is expected to
-	// produce, relative to the package folder.
+	// Outputs are the declared output roots the task is expected to produce:
+	// a build's relative to the package folder, and a sweep task's relative to
+	// the root of the package's repository.
 	Outputs []string `json:"outputs,omitempty"`
 	// Permits is what this assignment authorizes beyond running its commands.
 	Permits AssignmentPermits `json:"permits"`

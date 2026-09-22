@@ -260,6 +260,9 @@ type scriptWork struct {
 	// coordinator places every package's task on the pool when the sweep has
 	// worker links, and is nil for a sweep that runs everything here.
 	coordinator *execution.Coordinator
+	// roots are the folders the entry configuration declares the script
+	// writes, which a task placed on another machine carries back.
+	roots []string
 }
 
 func (w *scriptWork) stage() string { return "run:" + w.name }
@@ -328,6 +331,7 @@ func (w *scriptWork) placeTask(ctx context.Context, rel *plan.Release, seq relea
 			Dir:       rel.Pkg.Dir,
 		},
 		Script: w.name,
+		Roots:  w.roots,
 		Here: func(ctx context.Context) ([]plan.Output, error) {
 			return seq.RunCollectingOutputs(ctx, pkg+":"+seq.Stage)
 		},

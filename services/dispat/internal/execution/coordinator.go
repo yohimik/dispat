@@ -118,6 +118,9 @@ type Coordinator struct {
 	// outputs is what every package of this run produced, as it was admitted,
 	// and what has already been relayed to which endpoint.
 	outputs *outputRegistry
+	// sweepOutputs is what the tasks of a command sweep reported under the
+	// sweep's own roots, held until every task has answered (§28.10).
+	sweepOutputs *sweepOutputs
 	// preparing guards both fields below it: the providers this run builds
 	// without releasing them, and what became of each. One owner, because
 	// "has anybody started this provider" and "start it" have to be one

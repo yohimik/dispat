@@ -197,7 +197,26 @@ type CaptureRequest struct {
 	// task, the package, the states consumed and the platform. Everything but
 	// the entries, the totals, the tree and the digest is the caller's.
 	Manifest OutputManifest
+	// IsAbsentRootEmpty admits a declared root the task did not write as an
+	// empty one instead of refusing it. It is a sweep's rule and never a
+	// build's (§28.10): a build that did not produce what its consumers were
+	// promised has failed them, while a sweep's script may have nothing to
+	// write for a package, and a package with nothing to say is legitimate.
+	IsAbsentRootEmpty bool
 }
+
+// ReasonPathConflict is two tasks of one sweep writing one path under a
+// declared sweep root with different bytes. Neither file is installed,
+// because the root would otherwise hold whichever task finished last
+// (§28.10).
+const ReasonPathConflict OutputReason = "path-conflict"
+
+// ReasonDestinationComponent is a file of a merged set whose destination
+// cannot be written as a file: a folder already sits at its path, or a folder
+// on the way to it is a link or a file. A merge writes into a checkout it
+// does not replace, so a path that would write through a link is refused
+// rather than followed.
+const ReasonDestinationComponent OutputReason = "destination-component"
 
 // CaptureOutputs turns one package's declared output roots into a tree and the
 // manifest that describes it.
@@ -209,15 +228,15 @@ type CaptureRequest struct {
 // manifest at all, so nothing is ever committed describing a set that was
 // already refused.
 func CaptureOutputs(ctx context.Context, request CaptureRequest) (*OutputManifest, error) {
-	roots, err := resolveDeclaredRoots(request.Dir, request.Roots)
+	roots, err := resolveDeclaredRoots(request)
 	if err != nil {
 		return nil, err
 	}
-	tree, err := writeOutputTree(ctx, request)
+	tree, err := writeOutputTree(ctx, request, roots.present)
 	if err != nil {
 		return nil, err
 	}
-	captured, totals, err := readOutputTree(ctx, request.Git, tree, roots, request.Limits)
+	captured, totals, err := readOutputTree(ctx, request.Git, tree, roots.declared, request.Limits)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +246,7 @@ func CaptureOutputs(ctx context.Context, request CaptureRequest) (*OutputManifes
 	}
 	manifest := request.Manifest
 	manifest.Protocol = ProtocolVersion
-	manifest.Roots = roots
+	manifest.Roots = roots.declared
 	manifest.Entries = entries
 	manifest.Files, manifest.Bytes = totals.Files, totals.Bytes
 	manifest.OutputTree = tree
@@ -235,21 +254,33 @@ func CaptureOutputs(ctx context.Context, request CaptureRequest) (*OutputManifes
 	return &manifest, nil
 }
 
+// declaredRoots are one capture's roots: every declared root in the shape a
+// manifest path is compared against, and the ones the task actually wrote.
+type declaredRoots struct {
+	declared []string
+	present  []string
+}
+
 // resolveDeclaredRoots holds every declared root to the shape a manifest path
-// is compared against, and refuses one the build did not produce.
+// is compared against, and refuses one the build did not produce unless the
+// capture admits an absent root as empty.
 //
 // The declaration is the configuration's, so `dist/` and `dist` are one root
 // and both are written as one here. The existence check is Lstat rather than
 // Stat because a root that is a dangling symlink is still a root somebody
 // created, and what it is is decided by the tree that comes out, not here.
-func resolveDeclaredRoots(dir string, declared []string) ([]string, error) {
-	roots := make([]string, 0, len(declared))
-	for _, root := range declared {
+func resolveDeclaredRoots(request CaptureRequest) (declaredRoots, error) {
+	roots := declaredRoots{declared: make([]string, 0, len(request.Roots))}
+	for _, root := range request.Roots {
 		clean := path.Clean(strings.TrimSuffix(filepath.ToSlash(root), "/"))
-		if _, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(clean))); err != nil {
-			return nil, refuseOutputs(ReasonRootAbsent)
+		roots.declared = append(roots.declared, clean)
+		if _, err := os.Lstat(filepath.Join(request.Dir, filepath.FromSlash(clean))); err != nil {
+			if request.IsAbsentRootEmpty {
+				continue
+			}
+			return declaredRoots{}, refuseOutputs(ReasonRootAbsent)
 		}
-		roots = append(roots, clean)
+		roots.present = append(roots.present, clean)
 	}
 	return roots, nil
 }
@@ -261,7 +292,18 @@ func resolveDeclaredRoots(dir string, declared []string) ([]string, error) {
 // add would stage nothing at all; literal, because a folder whose name holds a
 // glob character is the folder it is named; and narrowed to the package
 // folder, because an index is rooted at the repository and a manifest is not.
-func writeOutputTree(ctx context.Context, request CaptureRequest) (string, error) {
+func writeOutputTree(ctx context.Context, request CaptureRequest, present []string) (string, error) {
+	if len(present) == 0 {
+		// Nothing was written under any declared root, which only a capture
+		// that admits absent roots reaches: the set is the empty tree, and
+		// staging no path at all is not something git is asked to do.
+		plumbing := gitx.NewPlumbing(request.Git)
+		empty := plumbing.MakeTree(ctx, nil)
+		if err := plumbing.Err(); err != nil {
+			return "", fmt.Errorf("execution: capturing the outputs of %s: %w", request.Dir, err)
+		}
+		return empty, nil
+	}
 	// A folder rather than a file: git reads an index that is not there as an
 	// empty one and refuses an empty file as a truncated index, so the only
 	// way to start from nothing is to name a path that does not exist yet.
@@ -277,7 +319,7 @@ func writeOutputTree(ctx context.Context, request CaptureRequest) (string, error
 	}()
 	plumbing := gitx.NewPlumbing(request.Git)
 	repositoryTree := plumbing.WriteTreeFromPaths(ctx, request.Dir,
-		filepath.Join(folder, "index"), request.Roots, true)
+		filepath.Join(folder, "index"), present, true)
 	// A build whose declared roots are all empty folders stages nothing, and
 	// git has no path to resolve inside a tree with no entries. That is a real
 	// output set, so the empty tree is what describes it, and it is asked for

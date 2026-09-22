@@ -376,10 +376,26 @@ func (c *Coordinator) rememberTaskOutcome(record TaskRecord) {
 
 // TaskRecords are what every task this run placed came to, in the order the
 // run decided them. The summary sorts them; this answers them.
+//
+// A sweep task's outputs are read at this moment rather than when the task
+// ended, because a sweep settles them only once every task has answered: a
+// set admitted when its task finished is left out of the merge if a task that
+// finished later wrote one of its paths with other bytes.
 func (c *Coordinator) TaskRecords() []TaskRecord {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]TaskRecord(nil), c.taskRecords...)
+	records := append([]TaskRecord(nil), c.taskRecords...)
+	c.mu.Unlock()
+	for index := range records {
+		if records[index].Stage != KindRun || c.sweepOutputs == nil {
+			continue
+		}
+		outcome, manifest := c.sweepOutputs.resolveOutcome(records[index].Task)
+		records[index].Outputs = outcome
+		if manifest != nil && outcome == OutputsAdmitted {
+			records[index].Files, records[index].Bytes = manifest.Files, manifest.Bytes
+		}
+	}
+	return records
 }
 
 // resolveTaskOutcome is what one attempt's failure, or the absence of one,

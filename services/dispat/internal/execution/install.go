@@ -352,3 +352,138 @@ func restoreRootAside(request InstallRequest, destination, aside string) {
 			Msg("the previous build output root was not put back")
 	}
 }
+
+// MergeInstallOutputs materializes one verified output set and merges it into
+// the destination file by file (CCME §28.10).
+//
+// It is a sweep's installation, beside the replacing one a build output
+// travels through, and the difference is the whole point: every task of one
+// sweep writes into the same root, ten packages' profiles into one
+// `coverage/`, so a set replaces the files of its own paths and leaves every
+// other file of the root as it was. The set is still installed all or
+// nothing. Every file is staged and verified first, exactly as InstallOutputs
+// stages them, so a set that fails verification has written nothing anybody
+// can see; then each file is moved into place with the file it replaces set
+// aside, and a move that fails puts every file already moved back.
+func MergeInstallOutputs(ctx context.Context, request InstallRequest) error {
+	if err := os.RemoveAll(request.Staging); err != nil {
+		return fmt.Errorf("execution: clearing the staging folder %s: %w", request.Staging, err)
+	}
+	defer func() {
+		if err := os.RemoveAll(request.Staging); err != nil {
+			request.Log.Warn().Err(err).Str("code", CodeTransportRetained).
+				Str("category", CategoryTransportCleanup).Msg("a staging folder was not removed")
+		}
+	}()
+	if err := stageOutputs(ctx, request); err != nil {
+		return err
+	}
+	return mergeStagedEntries(request)
+}
+
+// mergedFile is one file a merge has put in place: where it went, and where
+// the file it replaced was set aside, empty when the path held nothing.
+type mergedFile struct {
+	destination string
+	aside       string
+}
+
+// mergeStagedEntries moves every staged entry to its destination, and puts
+// everything back when one of them cannot be moved.
+func mergeStagedEntries(request InstallRequest) error {
+	merged := make([]mergedFile, 0, len(request.Manifest.Entries))
+	for _, entry := range request.Manifest.Entries {
+		moved, err := mergeOneEntry(request, entry)
+		if err != nil {
+			restoreMergedFiles(request, merged)
+			return err
+		}
+		merged = append(merged, moved)
+	}
+	for _, moved := range merged {
+		if moved.aside == "" {
+			continue
+		}
+		if err := os.RemoveAll(moved.aside); err != nil {
+			request.Log.Warn().Err(err).Str("code", CodeTransportRetained).
+				Str("category", CategoryTransportCleanup).Msg("a replaced output file was not removed")
+		}
+	}
+	request.Log.Debug().Str("package", request.Manifest.Package).
+		Int("files", request.Manifest.Files).Int64("bytes", request.Manifest.Bytes).
+		Msg("outputs merged")
+	return nil
+}
+
+// mergeOneEntry puts one staged file where the manifest says it belongs,
+// setting aside the file it replaces.
+func mergeOneEntry(request InstallRequest, entry ManifestEntry) (mergedFile, error) {
+	destination, err := resolveMergeDestination(request.Dir, entry.Path)
+	if err != nil {
+		return mergedFile{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return mergedFile{}, fmt.Errorf("execution: preparing the folder of a merged output: %w", err)
+	}
+	aside, err := moveRootAside(destination)
+	if err != nil {
+		return mergedFile{}, err
+	}
+	staged := filepath.Join(request.Staging, filepath.FromSlash(entry.Path))
+	if err := os.Rename(staged, destination); err != nil {
+		restoreRootAside(request, destination, aside)
+		return mergedFile{}, fmt.Errorf("execution: moving a merged output into place: %w", err)
+	}
+	return mergedFile{destination: destination, aside: aside}, nil
+}
+
+// resolveMergeDestination is where one manifest path lands in the checkout a
+// set is merged into, proving on the way that writing it there writes that
+// path and nothing else.
+//
+// A merge writes into folders somebody else owns, which the replacing install
+// never does: it renames a whole root and never looks inside the one it
+// replaces. So every folder on the way that already exists has to be a real
+// folder, because writing through a link would write wherever the link
+// points; and the path itself must not be a folder, because a file cannot
+// replace one without deleting what it holds.
+func resolveMergeDestination(dir, carried string) (string, error) {
+	walked := dir
+	components := strings.Split(carried, "/")
+	for _, component := range components[:len(components)-1] {
+		walked = filepath.Join(walked, component)
+		info, err := os.Lstat(walked)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("execution: inspecting the folder of a merged output: %w", err)
+		}
+		if !info.IsDir() {
+			return "", refuseOutputs(ReasonDestinationComponent)
+		}
+	}
+	destination := filepath.Join(walked, components[len(components)-1])
+	info, err := os.Lstat(destination)
+	if err == nil && info.IsDir() {
+		return "", refuseOutputs(ReasonDestinationComponent)
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("execution: inspecting a merged output: %w", err)
+	}
+	return destination, nil
+}
+
+// restoreMergedFiles undoes a merge that could not finish, newest first: each
+// file this merge moved in is removed and the file it replaced is put back.
+func restoreMergedFiles(request InstallRequest, merged []mergedFile) {
+	for index := len(merged) - 1; index >= 0; index-- {
+		moved := merged[index]
+		if err := os.Remove(moved.destination); err != nil {
+			request.Log.Warn().Err(err).Str("code", CodeTransportRetained).
+				Str("category", CategoryTransportCleanup).Msg("a merged output file was not taken back")
+			continue
+		}
+		restoreRootAside(request, moved.destination, moved.aside)
+	}
+}

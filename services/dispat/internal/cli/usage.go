@@ -170,6 +170,11 @@ Anything after "--" is appended to each package's command, so
 package the run covers. A bare word without the "--" is still a usage error:
 packages are selected with flags.
 
+With worker links, from execution.workers or from --worker name=endpoint,
+each package's task is placed on a worker node, or on this machine when
+none has room, and the folders runOutputs declares for the script are
+carried back and merged into this checkout once every task has answered.
+
 "dispat <script>" is a shorthand when <script> is not a command name.`,
 		flags: append(append([]string{}, windowFlags...), "worker"),
 	},

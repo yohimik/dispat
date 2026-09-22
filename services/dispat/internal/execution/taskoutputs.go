@@ -143,12 +143,14 @@ func (w *Worker) captureTaskOutputs(ctx context.Context, assignment Assignment, 
 		return outcome
 	}
 	owner := ownerPathOf(assignment)
+	packagePath := resolveCapturePath(assignment)
 	manifest, err := CaptureOutputs(ctx, CaptureRequest{
-		Git:         &gitx.LocalGitx{Dir: checkout.Dir(owner), Log: log},
-		Dir:         checkout.Dir(owner, assignment.Package.Dir),
-		PackagePath: assignment.Package.Dir,
-		Roots:       assignment.Outputs,
-		Limits:      assignment.Limits,
+		Git:               &gitx.LocalGitx{Dir: checkout.Dir(owner), Log: log},
+		Dir:               checkout.Dir(owner, packagePath),
+		PackagePath:       packagePath,
+		Roots:             assignment.Outputs,
+		Limits:            assignment.Limits,
+		IsAbsentRootEmpty: assignment.Kind == KindRun,
 		Manifest: OutputManifest{
 			Run: assignment.Run, PlanDigest: assignment.PlanDigest, Task: assignment.Task,
 			Attempt: assignment.Attempt, Generation: assignment.Generation, Node: w.Node,
@@ -178,6 +180,17 @@ func (w *Worker) captureTaskOutputs(ctx context.Context, assignment Assignment, 
 		Str("outputTree", manifest.OutputTree).Msg("outputs captured")
 	outcome.outputs = manifest
 	return outcome
+}
+
+// resolveCapturePath is the folder one task's declared roots are relative to,
+// inside the repository that owns the package: the package folder for a build,
+// and the repository root for a sweep task, whose roots are shared by every
+// package of the sweep (§28.10).
+func resolveCapturePath(assignment Assignment) string {
+	if assignment.Kind == KindRun {
+		return ""
+	}
+	return assignment.Package.Dir
 }
 
 // checkManifestSize refuses a description too large for the ceiling the run

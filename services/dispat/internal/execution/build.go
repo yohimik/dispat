@@ -95,6 +95,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
 	c.dispatch = dispatch
 	c.snapshots = newSnapshots()
 	c.outputs = newOutputRegistry()
+	c.sweepOutputs = newSweepOutputs()
 	c.preparations = map[string]*preparation{}
 	c.offered = map[string]offeredState{}
 	c.local = make(chan struct{}, max(dispatch.Concurrency, 1))

@@ -99,6 +99,10 @@ func (a *App) openSweepDispatch(ctx context.Context, work *scriptWork, covered [
 	}
 	a.openDispatch(ctx, coordinator, work.pl, work.runner)
 	work.coordinator = coordinator
+	// Read from the entry configuration alone, as §28.10 requires: an imported
+	// or linked repository's own declaration is validated where its file is
+	// read and never consulted.
+	work.roots, _ = a.cfg.FindRunOutputs(work.name)
 	return coordinator, nil
 }
 
@@ -127,12 +131,23 @@ func (a *App) reportSweepRefusal(err error) error {
 	return err
 }
 
-// finishSweepDispatch prints the distributed summary of a sweep that delegated
-// its tasks, and does nothing for one that delegated nothing.
-func (a *App) finishSweepDispatch(_ context.Context, coordinator *execution.Coordinator,
+// finishSweepDispatch merges what the delegated tasks carried back, once every
+// task has answered, and prints the distributed summary. It does nothing for a
+// sweep that delegated nothing.
+//
+// An interrupted sweep merges nothing: the operator asked it to stop, and a
+// root assembled from whichever tasks happened to answer before the interrupt
+// is a root nobody asked for.
+func (a *App) finishSweepDispatch(ctx context.Context, coordinator *execution.Coordinator,
 	pl *plan.Plan, rep sweepReport, started time.Time) error {
 	if coordinator == nil {
 		return nil
+	}
+	var mergeErr error
+	if ctx.Err() == nil {
+		mergeErr = coordinator.MergeSweepOutputs(ctx)
+	} else {
+		a.log.Warn().Str("run", a.runID).Msg("run outputs not merged: the sweep was interrupted")
 	}
 	execution.RunSummary{
 		Run:         a.runID,
@@ -143,7 +158,7 @@ func (a *App) finishSweepDispatch(_ context.Context, coordinator *execution.Coor
 		Wall:        time.Since(started),
 		Invocations: coordinator.GitInvocations(),
 	}.Summarize(a.log)
-	return nil
+	return mergeErr
 }
 
 // formatSkippedTasks are the packages the sweep's cascade skipped, each with
