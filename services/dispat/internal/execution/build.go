@@ -538,6 +538,15 @@ type attempt struct {
 	// became of the first push. Written and read by the task that owns the
 	// attempt, which is the only party that authorizes anything.
 	isAuthorized bool
+	// isReadyAccepted marks a ready this run has already handed on, so that
+	// reading the chain under a moved tip cannot offer the same ready twice:
+	// the second offer would be refused as a request to authorize an attempt
+	// this run has already answered, and the publication would fail for a
+	// reason that has nothing to do with the package.
+	isReadyAccepted bool
+	// isTipForeign marks an attempt whose branch tip was not written by either
+	// party, so the line saying so is written once rather than once per poll.
+	isTipForeign bool
 }
 
 // taskReply is one accepted message of an attempt together with the object it
@@ -657,6 +666,13 @@ func (w *watcher) tick(ctx context.Context) bool {
 }
 
 // inspect reads one moved branch and reports whether it answered an attempt.
+//
+// The tip is tried first because that is where an attempt's answer is in every
+// ordinary run. When the tip carries nothing this attempt can act on, the
+// chain below it is read: a mailbox is writable by whoever can push to it, so
+// an authentic result can be sitting under a commit somebody else put on top,
+// and waiting the deadline out over that would turn one push into a lost
+// attempt and a node taken out of the pool.
 func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 	waiting := w.find(head.Name)
 	if waiting == nil {
@@ -677,7 +693,23 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 		}
 		return false
 	}
+	if w.acceptReply(ctx, tip, waiting) {
+		return true
+	}
+	return w.searchChainForReply(ctx, head, waiting)
+}
+
+// acceptReply hands one step of a chain to the task waiting for it, and
+// reports whether it did.
+//
+// A step this party wrote, a step of another attempt and a step nobody signed
+// are one situation from here, which is "no answer yet", and the task deadline
+// is what decides how long that is tolerated.
+func (w *watcher) acceptReply(ctx context.Context, tip ChainTip, waiting *attempt) bool {
 	if tip.Kind == MessageReady {
+		if waiting.isReadyAccepted {
+			return false
+		}
 		return w.offerReady(ctx, tip, waiting)
 	}
 	if tip.Kind != MessageResult {
@@ -687,15 +719,44 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 	}
 	result, reason := w.readResult(ctx, tip, waiting)
 	if reason != "" {
-		// A reply nobody signed, one bound to another attempt and a node that
-		// has not answered yet are one situation from here, and the task
-		// deadline is what decides how long that is tolerated.
 		w.reportRejectedReply(tip, reason)
 		return false
 	}
 	waiting.replies <- taskReply{kind: MessageResult, result: result, tip: tip, commit: tip.OID}
-	w.forget(head.Name)
+	w.forget(tip.Branch)
 	return true
+}
+
+// searchChainForReply looks under a tip that answered nothing for the step
+// that does, and says once per branch that it had to.
+//
+// The warning is once because the condition is one push and the consequence is
+// one line: an operator reading it learns that somebody with write access to
+// the mailbox put a commit on an attempt's branch, which is worth knowing and
+// is not worth repeating every poll.
+func (w *watcher) searchChainForReply(ctx context.Context, head gitx.RemoteHead, waiting *attempt) bool {
+	ancestors, err := w.mailbox.InspectChain(ctx, head)
+	if err != nil {
+		if ctx.Err() == nil {
+			w.coordinator.Log.Debug().Err(err).Str("worker", w.link.Name).Str("branch", head.Name).
+				Msg("the chain under the branch tip could not be read")
+		}
+		return false
+	}
+	for _, ancestor := range ancestors {
+		if !w.acceptReply(ctx, ancestor, waiting) {
+			continue
+		}
+		if !waiting.isTipForeign {
+			waiting.isTipForeign = true
+			w.coordinator.Log.Warn().Str("worker", w.link.Name).Str("branch", head.Name).
+				Str("commit", head.OID).Str("reason", string(ReasonChain)).
+				Str("code", CodeAuthority).Str("category", CategoryAuthority).
+				Msg("the attempt was answered below a branch tip this run did not write")
+		}
+		return true
+	}
+	return false
 }
 
 // offerReady hands one publisher's ready message to the task waiting to
@@ -707,6 +768,7 @@ func (w *watcher) offerReady(ctx context.Context, tip ChainTip, waiting *attempt
 		w.reportRejectedReply(tip, reason)
 		return false
 	}
+	waiting.isReadyAccepted = true
 	waiting.replies <- taskReply{kind: MessageReady, ready: ready, tip: tip, commit: tip.OID}
 	return true
 }

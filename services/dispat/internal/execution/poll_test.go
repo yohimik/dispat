@@ -13,6 +13,7 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -173,4 +174,121 @@ func TestWorkerIdleClockCountsFromTheLastThingItDid(t *testing.T) {
 	worker.endTask()
 	assert.Positive(t, worker.resolveIdleRemainder(),
 		"the clock restarts when the task ends, so a long build is not followed by an immediate stop")
+}
+
+// TestMailboxInspectsTheChainUnderAForeignTip: an attempt's answer used to be
+// findable only at the branch tip, so anybody with write access to the mailbox
+// could bury a finished result under one commit and make the run wait out the
+// whole task deadline. The chain under the tip is read instead, oldest first,
+// and every step of it carries what it carried.
+func TestMailboxInspectsTheChainUnderAForeignTip(t *testing.T) {
+	fixture := newMailboxFixture(t)
+	branch := FormatBranch("build-a", KindBuild, time.Now())
+	offered, err := fixture.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+	require.NoError(t, err)
+	claimed, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+		[]byte(`{"assignment":"`+offered+`"}`), nil)
+	require.NoError(t, err)
+	reported, err := fixture.mailbox.Advance(t.Context(), branch, claimed, MessageResult,
+		[]byte(`{"status":"succeeded"}`), nil)
+	require.NoError(t, err)
+	// One commit of this protocol's shape, of a kind no party acts on, pushed
+	// on top of the finished attempt by whoever can write to the mailbox.
+	foreign, err := formatMessageCommit(t.Context(), fixture.git, fixture.signer,
+		"noise", []byte(`{}`), []string{reported}, nil)
+	require.NoError(t, err)
+	require.NoError(t, fixture.git.PushAdvance(t.Context(), fixture.endpoint, foreign, branch, reported))
+
+	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	require.NoError(t, err)
+	require.Len(t, heads, 1)
+	tip, err := fixture.mailbox.Inspect(t.Context(), heads[0])
+	require.NoError(t, err)
+	assert.Equal(t, MessageKind("noise"), tip.Kind, "the tip answers nothing an attempt waits for")
+
+	ancestors, err := fixture.mailbox.InspectChain(t.Context(), heads[0])
+
+	require.NoError(t, err)
+	require.Len(t, ancestors, 3)
+	assert.Equal(t, MessageAssignment, ancestors[0].Kind)
+	assert.Equal(t, MessageClaim, ancestors[1].Kind)
+	assert.Equal(t, MessageResult, ancestors[2].Kind, "the result is where the writer left it")
+	assert.Equal(t, MessageClaim, ancestors[2].Previous)
+	assert.Equal(t, claimed, ancestors[2].PreviousOID)
+	document, err := fixture.mailbox.Read(t.Context(), ancestors[2], 1<<20)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status":"succeeded"}`, string(document))
+}
+
+// TestAWithdrawalNobodySignedStopsNothing: the worker used to acknowledge a
+// `cancel` tip for carrying the word, so anybody who could write into a
+// mailbox could refuse every publication of every run. The message is held to
+// the rules an authorization is held to, and a withdrawal of an earlier state
+// of the branch is not a withdrawal of the one the node waits at.
+func TestAWithdrawalNobodySignedStopsNothing(t *testing.T) {
+	branch := "dispat-worker-build-a-20260922-publish-abc"
+	assignment := Assignment{Header: Header{
+		Protocol: ProtocolVersion, Kind: KindPublish, Run: "run-1", PlanDigest: "digest",
+		Task: "app:publish", Attempt: 1, Generation: "generation", Node: "build-a",
+		Branch: branch, IssuedAt: time.Now().UTC().Format(time.RFC3339),
+	}, Limits: TransferLimits{MaxManifestBytes: 1 << 20}}
+	tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
+	answer := ChainTip{Branch: branch, OID: "cancel-oid", Kind: MessageCancel,
+		Previous: MessageReady, PreviousOID: "ready-oid"}
+	valid := Withdrawal{Header: assignment.Header, Assignment: "assignment-oid", Tip: "ready-oid"}
+
+	for name, tc := range map[string]struct {
+		message   Withdrawal
+		rejection RejectReason
+		answer    ChainTip
+		reason    RejectReason
+	}{
+		"the run's own withdrawal": {message: valid},
+		"one nobody signed": {
+			message: valid, rejection: ReasonSignature, reason: ReasonSignature},
+		"one addressed to another node": {
+			message: func() Withdrawal { m := valid; m.Node = "build-b"; return m }(),
+			reason:  ReasonNode},
+		"one of another run": {
+			message: func() Withdrawal { m := valid; m.Run = "run-2"; return m }(),
+			reason:  ReasonReplay},
+		"one of another attempt": {
+			message: func() Withdrawal { m := valid; m.Attempt = 2; return m }(),
+			reason:  ReasonReplay},
+		"one under another ownership": {
+			message: func() Withdrawal { m := valid; m.Generation = "older"; return m }(),
+			reason:  ReasonReplay},
+		"one withdrawing an earlier state of the branch": {
+			message: func() Withdrawal { m := valid; m.Tip = "claim-oid"; return m }(),
+			reason:  ReasonReplay},
+		// The chain step and the echoes are one refusal rather than one each,
+		// exactly as they are for an authorization: which of them a forged
+		// message failed tells an attacker more than it tells an operator.
+		"one written on a step no party could have written it on": {
+			message: valid,
+			answer: ChainTip{Branch: branch, OID: "cancel-oid", Kind: MessageCancel,
+				Previous: MessageResult, PreviousOID: "ready-oid"},
+			reason: ReasonReplay},
+	} {
+		t.Run(name, func(t *testing.T) {
+			document, err := json.Marshal(tc.message)
+			require.NoError(t, err)
+			mailbox := &fakeMailbox{
+				documents: map[string][]byte{branch: document},
+				rejection: map[string]RejectReason{},
+			}
+			if tc.rejection != "" {
+				mailbox.rejection[branch] = tc.rejection
+			}
+			worker := &Worker{Node: "build-a", Mailbox: mailbox, Log: zerolog.Nop()}
+			observed := answer
+			if tc.answer.OID != "" {
+				observed = tc.answer
+			}
+
+			reason := worker.checkWithdrawal(t.Context(), observed, tip, "ready-oid", assignment)
+
+			assert.Equal(t, tc.reason, reason)
+		})
+	}
 }

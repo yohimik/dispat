@@ -354,14 +354,21 @@ func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTi
 	if err := m.remote.ResolveFetchedCommit(ctx, localRef, head.OID, m.maxDepth); err != nil {
 		return ChainTip{}, fmt.Errorf("execution: resolving %s on %s: %w", head.OID, head.Name, err)
 	}
-	tip := ChainTip{Branch: head.Name, OID: head.OID}
-	carried, err := m.readTree(ctx, head.OID)
+	return m.readChainTip(ctx, head.Name, head.OID)
+}
+
+// readChainTip is one commit read as a step of a chain: what it carries, and
+// what its first parent carried. It runs under the mailbox's own lock, taken
+// by the caller.
+func (m *GitMailbox) readChainTip(ctx context.Context, branch, oid string) (ChainTip, error) {
+	tip := ChainTip{Branch: branch, OID: oid}
+	carried, err := m.readTree(ctx, oid)
 	if err != nil {
 		return ChainTip{}, err
 	}
 	tip.Kind, tip.document, tip.signature = carried.kind, carried.document, carried.signature
 	tip.isProtocol = carried.isProtocol
-	parent, err := m.remote.ResolveCommit(ctx, head.OID+"^")
+	parent, err := m.remote.ResolveCommit(ctx, oid+"^")
 	if err != nil {
 		// No first parent: the commit is a root, which is what a probe
 		// assignment is. A parent that cannot be read for any other reason
@@ -374,6 +381,47 @@ func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTi
 	}
 	tip.Previous, tip.PreviousOID = previous.kind, parent
 	return tip, nil
+}
+
+// InspectChain answers the first-parent ancestors of an observed tip, oldest
+// first, as far below it as one attempt's chain can reach.
+//
+// It exists because the tip of a coordination branch is not the only place an
+// attempt's answer can be. A mailbox is writable by whoever can push to it, so
+// anybody may put a commit of their own on top of an authentic result: the
+// party waiting for that result would see a tip carrying nothing it can act on
+// and wait out the whole task deadline, which turns one push into a lost
+// attempt and a node taken out of the pool. Reading the chain instead makes
+// the answer findable wherever on it the writer left it, while changing
+// nothing about what is believed: every ancestor is held to the same
+// signature, header and chain rules as a tip.
+//
+// The tip itself is not in the answer, because the caller has already tried
+// it, and the walk is bounded by the same depth a fetched object is resolved
+// within: an attempt is at most assignment, claim, ready, go and result.
+func (m *GitMailbox) InspectChain(ctx context.Context, head gitx.RemoteHead) ([]ChainTip, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	oids := make([]string, 0, m.maxDepth)
+	for oid := head.OID; len(oids) < m.maxDepth; {
+		parent, err := m.remote.ResolveCommit(ctx, oid+"^")
+		if err != nil {
+			// A root commit, or a history that ends before the bound: either
+			// way there is nothing further down to read.
+			break
+		}
+		oids = append(oids, parent)
+		oid = parent
+	}
+	ancestors := make([]ChainTip, 0, len(oids))
+	for index := len(oids) - 1; index >= 0; index-- {
+		tip, err := m.readChainTip(ctx, head.Name, oids[index])
+		if err != nil {
+			return nil, err
+		}
+		ancestors = append(ancestors, tip)
+	}
+	return ancestors, nil
 }
 
 // Reread answers where one branch sits on the remote right now, with its

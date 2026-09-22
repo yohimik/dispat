@@ -120,6 +120,17 @@ func (w *Worker) watchAuthorization(ctx context.Context, tip ChainTip, ready str
 func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, tip ChainTip,
 	ready string, assignment Assignment, log zerolog.Logger) taskOutcome {
 	if answer.Kind == MessageCancel {
+		if reason := w.checkWithdrawal(ctx, answer, tip, ready, assignment); reason != "" {
+			// A withdrawal nobody signed is not a withdrawal. It cannot make
+			// this node publish anything, so the risk it carries is the
+			// opposite one: whoever can push to the mailbox could otherwise
+			// stop every publication of every run by writing the word. The
+			// attempt stays at the gate and the run's own wait decides.
+			log.Warn().Str("reason", string(reason)).Str("commit", answer.OID).
+				Str("code", CodeAuthority).Str("category", CategoryAuthority).
+				Msg("the publication withdrawal was refused")
+			return withheldPublication(ready)
+		}
 		return w.acknowledgeWithdrawal(ctx, answer, tip, assignment, log)
 	}
 	if answer.Kind != MessageGo {
@@ -226,6 +237,44 @@ func (w *Worker) checkAuthorization(ctx context.Context, answer ChainTip, tip Ch
 	}
 	if !isAuthorizationUnexpired(message.NotAfter, time.Now()) {
 		return ReasonIssuedAt
+	}
+	return ""
+}
+
+// checkWithdrawal holds one cancellation to everything that makes it this
+// attempt's, exactly as an authorization is held to it.
+//
+// Both messages come from the same party and neither may be believed for the
+// word in its commit tree. They fail in opposite directions, which is why the
+// check exists rather than being skipped as harmless: an authorization nobody
+// signed would publish a package, and a withdrawal nobody signed would refuse
+// to, and a node that can be stopped by anybody who can write into its mailbox
+// is a node whose run can be failed by anybody.
+//
+// A withdrawal states the tip it withdraws, so a cancellation of an earlier
+// state of this branch is not a cancellation of what the node is waiting at.
+func (w *Worker) checkWithdrawal(ctx context.Context, answer ChainTip, tip ChainTip,
+	ready string, assignment Assignment) RejectReason {
+	document, err := w.Mailbox.Read(ctx, answer, assignment.Limits.MaxManifestBytes)
+	if err != nil {
+		if reason := RejectionReason(err); reason != "" {
+			return reason
+		}
+		return ReasonUnreadable
+	}
+	var message Withdrawal
+	if err := json.Unmarshal(document, &message); err != nil {
+		return ReasonUnreadable
+	}
+	if reason := CheckHeader(message.Header, Binding{Node: w.Node, Branch: tip.Branch}, time.Now()); reason != "" {
+		return reason
+	}
+	if !IsTransitionLegal(answer.Previous, MessageCancel, PartyOrchestrator) ||
+		answer.PreviousOID != ready || message.Tip != ready || message.Assignment != tip.OID ||
+		message.Run != assignment.Run || message.Task != assignment.Task ||
+		message.Attempt != assignment.Attempt || message.Generation != assignment.Generation ||
+		message.PlanDigest != assignment.PlanDigest {
+		return ReasonReplay
 	}
 	return ""
 }
