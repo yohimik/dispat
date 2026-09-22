@@ -198,6 +198,7 @@ func (c *Coordinator) placeTask(ctx context.Context, task string, placement Plac
 		}
 		outcome, err := attemptOnce(ctx, lease, attempt)
 		if !errors.Is(err, errQueueExpired) {
+			c.rememberPlacedTask(task, lease, attempt, err)
 			return outcome, err
 		}
 		if attempt >= maxPlacementAttempts {
@@ -209,6 +210,30 @@ func (c *Coordinator) placeTask(ctx context.Context, task string, placement Plac
 			Int("attempt", attempt).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
 			Msg("the queued assignment was revoked and the task is placed again")
 	}
+}
+
+// rememberPlacedTask records what one placed task came to, for the summary
+// §28.9 requires: the work, where it ran, and the four outcomes told apart.
+func (c *Coordinator) rememberPlacedTask(task string, lease *Lease, attempt int, err error) {
+	packageName, stage := splitTaskName(task)
+	computation, publication := c.resolveTaskOutcome(task, stage, err)
+	c.rememberTaskOutcome(TaskRecord{
+		Package: packageName, Stage: stage, Task: task, Node: lease.Node, Attempt: attempt,
+		Computation: computation, Outputs: OutputsNone, Publication: publication,
+		Recording: RecordingNone,
+	})
+}
+
+// splitTaskName is the package and the stage a task name is made of. A name
+// with no separator is its own package and no stage, which nothing this run
+// dispatches produces and which is still not worth a panic.
+func splitTaskName(task string) (packageName, stage string) {
+	for index := len(task) - 1; index >= 0; index-- {
+		if task[index] == ':' {
+			return task[:index], task[index+1:]
+		}
+	}
+	return task, ""
 }
 
 // dispatchBuild prepares one package's input state, offers its build frame to
@@ -320,15 +345,18 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 	defer deadline.Stop()
 	tip := offer.offered
 	isClaimed := false
+	offeredAt, claimedAt := time.Now(), time.Time{}
 	for {
 		select {
 		case reply := <-offer.replies:
 			if reply.kind == MessageClaim {
 				// The work has started, so the run-time clock starts with it.
-				isClaimed, tip = true, reply.commit
+				isClaimed, tip, claimedAt = true, reply.commit, time.Now()
 				deadline.Reset(c.Timeouts.Task)
 				continue
 			}
+			c.rememberTiming(task, resolveQueueTime(offeredAt, claimedAt),
+				resolveRunTime(offeredAt, claimedAt))
 			lease.Release()
 			return c.readTaskOutcome(ctx, task, attempt, outcome, reply.result, reply.commit,
 				offer.branch, request)
@@ -589,6 +617,25 @@ func resolveDeclaredOutputs(kind string, request release.StageRequest) []string 
 		return nil
 	}
 	return request.Release.Pkg.Space.BuildOutputs
+}
+
+// resolveQueueTime is how long an assignment waited for a node to claim it,
+// and zero for one whose claim this run never observed.
+func resolveQueueTime(offeredAt, claimedAt time.Time) time.Duration {
+	if claimedAt.IsZero() {
+		return 0
+	}
+	return claimedAt.Sub(offeredAt)
+}
+
+// resolveRunTime is how long the work took once a node had claimed it, and the
+// whole wait for an attempt whose claim was never observed: a duration nobody
+// measured is worse than one that is charged to the wrong half.
+func resolveRunTime(offeredAt, claimedAt time.Time) time.Duration {
+	if claimedAt.IsZero() {
+		return time.Since(offeredAt)
+	}
+	return time.Since(claimedAt)
 }
 
 // resolveTaskDeadlineSeconds is the bound every node holds one attempt to,

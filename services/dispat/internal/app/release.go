@@ -583,6 +583,10 @@ func (a *App) completeRelease(ctx context.Context, pl *plan.Plan, results map[st
 	// release is itself the final critical step: perform it before the summary
 	// and closing webhook so neither can call a stranded lock a success.
 	crit.keep(finishCleanup())
+	// What only a distributed run has to say, before the line every release
+	// prints: which machine did what, and whether anything it authorized is
+	// still in doubt (CCME §28.9).
+	a.summarizeExecution(a.coordinator, pl, results, time.Since(start))
 	failed, _ := a.summarize(pl, results, time.Since(start))
 	// Everything the run owed has now been attempted. What is left to decide
 	// is only what to report, in order of what the operator has to do about

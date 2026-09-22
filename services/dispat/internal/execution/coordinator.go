@@ -94,6 +94,12 @@ type Coordinator struct {
 	// ownership is what this run asks before every new assignment, and the
 	// cancellations a lost lock has to reach.
 	ownership ownership
+	// taskRecords and timings are what the run summary is printed from: what
+	// every placed task came to, and what each of them spent queueing and
+	// working. They are accumulated here because the coordinator is the one
+	// party that sees every task of the run.
+	taskRecords []TaskRecord
+	timings     map[string]taskTiming
 
 	// What Start assembles and Close takes down. They are nil on a coordinator
 	// that only ever preflighted, which is what a refused run is.

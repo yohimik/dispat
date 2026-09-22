@@ -197,10 +197,12 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 	deadline := time.NewTimer(c.Timeouts.Task)
 	defer deadline.Stop()
 	state := publicationState{tip: offer.offered}
+	offeredAt, claimedAt := time.Now(), time.Time{}
 	for {
 		select {
 		case reply := <-offer.replies:
 			if reply.kind == MessageClaim {
+				claimedAt = time.Now()
 				// The publication has started being prepared, so the run-time
 				// clock starts with it: the queue this assignment waited in is
 				// not this attempt's own time.
@@ -209,6 +211,8 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 				continue
 			}
 			if reply.kind == MessageResult {
+				c.rememberTiming(task, resolveQueueTime(offeredAt, claimedAt),
+					resolveRunTime(offeredAt, claimedAt))
 				lease.Release()
 				return c.readPublicationOutcome(task, attempt, outcome, reply.result)
 			}

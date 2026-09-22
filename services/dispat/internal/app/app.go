@@ -83,6 +83,10 @@ type App struct {
 	// for every run that delegates nothing, and the question is then never
 	// asked.
 	retention lockRetentionx
+	// coordinator is this run's distributed execution, kept so that the
+	// closing summary can ask it what every task came to. It is nil for every
+	// run that delegates nothing, and the summary then prints nothing.
+	coordinator *execution.Coordinator
 
 	// runID names this run when it spreads over several machines, and is
 	// empty for every run that does not: it is generated once, before the

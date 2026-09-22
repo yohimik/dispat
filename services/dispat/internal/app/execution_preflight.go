@@ -42,7 +42,7 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 	}
 	// From here the run has a party that can answer the unlock path's one
 	// question, which it can only answer after it has dispatched anything.
-	a.retention = coordinator
+	a.retention, a.coordinator = coordinator, coordinator
 	if err := coordinator.Preflight(ctx, planPlatforms(pl)); err != nil {
 		// The refs this run offered are closed by the caller's own deferred
 		// cleanup, so a refusal here leaves nothing behind even though it
