@@ -545,10 +545,12 @@ func TestExecutionTaskTimeoutLeaksTheSlot(t *testing.T) {
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
 		"the abandoned attempt is reported\nstdout:\n%s", res.Stdout)
-	unhealthy, isUnhealthy := executionLine(res, "the node stopped answering and its capacity is held")
+	unhealthy, isUnhealthy := executionLine(res, "worker marked unhealthy")
 	require.True(t, isUnhealthy, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, executionNode, unhealthy.Str("worker"),
 		"the orchestrator names the node it is reporting on in worker, never in node")
+	assert.Equal(t, "task-deadline", unhealthy.Str("reason"),
+		"and says which of the ways of stopping to answer this was")
 	assert.Empty(t, rig.repo.TagList(), "nothing was published")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock was given back")
 
