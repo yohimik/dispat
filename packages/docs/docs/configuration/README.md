@@ -122,6 +122,7 @@ and
 | `buildOutputs`     | array of strings                           | no       | The folders a package's build leaves behind, relative to the package folder, which is what travels to the nodes that consume them. You can override this per space and per package. See [Space options](./spaces.md#space-options). |
 | `buildPlatforms`   | array of strings                           | no       | The `os/arch` values a package's build may run on, in Go's spelling. Empty or absent means any node. You can override this per space and per package. See [Space options](./spaces.md#space-options). |
 | `runOnly`          | string or `[string, string]`               | no       | Where a package's build and publish may run: `both` (the default), `worker` or `orchestrator`, as one value or a `[build, publish]` pair. You can override this per space and per package. See [Where a stage runs](../distributed-execution.md#where-a-stage-runs). |
+| `runOutputs`       | object of arrays of strings                | no       | The folders a `dispat run` sweep of a script writes, keyed by script name, relative to the root of each package's repository. A sweep executed on worker nodes carries them back and merges them into this checkout. It exists at the root only and is read from the configuration the run was started with. See [Running scripts on workers](../distributed-execution.md#running-scripts-on-workers). |
 | `unsafeDisableLock`| bool                                       | no       | Release without the [release lock](../reference/releasing/release-lock.md). The lock is the tag a release pushes to the remote so that two runs at once are refused rather than raced. The default is `false`. Use this for repositories with no remote to coordinate through. Set `DISPAT_UNSAFE_DISABLE_LOCK=true` to say the same for one invocation.  |
 
 ### Log levels
@@ -173,6 +174,7 @@ is not the same as leaving it out, and only writing `false` overrides a `true` a
 | `buildOutputs` | yes | yes | yes |
 | `buildPlatforms` | yes | yes | yes |
 | `runOnly` | yes | yes | yes |
+| `runOutputs` | yes | no | no |
 | `concurrency` | yes, as the budget | yes, as a weight | yes, as a weight |
 | `manifestNames` | no | no | yes |
 | `path` | no | yes, the space's own folder or list of folders | yes, one folder, for a standalone package |
@@ -210,8 +212,9 @@ its stage slot while it waits.
 Everything else is repository-wide and only exists at the root. This includes `spaces`, `versionGroups`,
 `initials`, `commit`, `shell`, `run`, `parser`, `commitErrors`, `nonPackageScopes`, `logLevel`, `logFormat`,
 `updateCheck`, `unsafeDisableLock`, `polyrepo`, `repository`, `repositories`, `configs`,
-`repositoryOverrides`, `repositoryBaselines`, and `execution`. `execution` is narrower still: it is read from the
-configuration the run was started with, so an imported or linked repository's own object is ignored.
+`repositoryOverrides`, `repositoryBaselines`, `execution`, and `runOutputs`. `execution` and `runOutputs` are narrower
+still: they are read from the configuration the run was started with, so an imported or linked repository's own
+object is ignored.
 
 Read [the override ladder](./packages.md#the-override-ladder) to see the full order for one package from weakest to
 strongest.

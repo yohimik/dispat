@@ -117,6 +117,23 @@ different mailboxes, the orchestrator relays the provider's result onto the cons
 
 An empty or absent list preserves local execution, and a present but empty list means what an absent one means.
 
+#### Links named on the command line
+
+`--worker name=endpoint`, repeatable on `dispat release`, `dispat run` and `dispat status`, adds one link to this list
+for one invocation, after the ones the file states. It exists for the machine a pipeline creates a minute before the
+run, which a committed file cannot know about:
+
+```sh
+dispat release --worker ci-worker-1=git@github.com:acme/release-mailbox.git
+```
+
+A file that states only `secretEnv` and the waits is enough for it. The link is added before the file is validated, so
+it is held to every rule of this page: the name, the endpoint, a name no configured link folds to, and the `secretEnv`
+the file has to name, each refused with `E225` and a message naming the flag and the node name it was given, with any
+credential in the endpoint redacted. A value that is not `name=endpoint` is a usage error. A process running under a
+task's authority, and a node whose file says `role: worker`, refuse the flag with `E226`, because a worker dispatches
+nothing. The links are no part of the plan digest, and `dispat status --worker` prints that digest and reaches no node.
+
 ### `timeouts`
 
 Every value is in seconds, and `0` or an absent key keeps the default.
@@ -161,6 +178,7 @@ a lock, a plan or a command:
 - a `name` or a worker `name` that is not a node name, or two links whose names fold together;
 - an `endpoint` git could not safely be pointed at;
 - `workers` on a node whose role is `worker`;
+- a link named with `--worker` that breaks any rule a configured link is held to;
 - `workers` with no `secretEnv`, or a `secretEnv` naming a variable that is unset or empty in the environment of a
   run that would dispatch;
 - `workers` beside any release-lock bypass: `unsafeDisableLock`, a per-repository bypass, or
@@ -168,6 +186,8 @@ a lock, a plan or a command:
 - a package whose `runOnly` pins a stage to `worker` while the run has no worker links;
 - a package whose `buildPlatforms` no configured worker satisfies;
 - two packages whose `buildOutputs` claim one folder, or a declared root holding another package's folder, which
+  `dispat status` reports as well;
+- a `runOutputs` root that is or holds a package folder, or overlaps a package's `buildOutputs` root, which
   `dispat status` reports as well.
 
 ## The ladder keys beside it
@@ -181,6 +201,10 @@ folder file, package, package folder file), replacing whole:
 | `buildOutputs`   | [Space options](./spaces.md#space-options) and [package options](./packages.md#package-options)                  |
 | `buildPlatforms` | [Space options](./spaces.md#space-options) and [package options](./packages.md#package-options)                  |
 | `runOnly`        | [Space options](./spaces.md#space-options), [package options](./packages.md#package-options) and [where a stage runs](../distributed-execution.md#where-a-stage-runs) |
+
+One key is neither: `runOutputs`, the folders a `dispat run` sweep of a script writes, which a sweep executed on the
+pool carries back and merges into this checkout. It is root-only and read from the entry configuration alone, as this
+object is. See [running scripts on workers](../distributed-execution.md#running-scripts-on-workers).
 
 ## See also
 

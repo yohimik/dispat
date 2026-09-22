@@ -50,7 +50,7 @@ that page, because they exist only inside that one command.
 | `DISPAT_OUTPUT_<NAME>`        | *(exported value)*   | One variable per accumulated [script output](#script-outputs). `DISPAT_OUTPUTS` lists the exported names and is set even when empty.                                                    |
 | `DISPAT_OUTPUT_SOURCE_<NAME>` | `core:build`         | The script that exported or last re-exported `<NAME>`. It holds `<package>:<stage>`, or `<space>:login` for a login export.                                                             |
 | `DISPAT_EXPORT_GITHUB`        | `/pkg/dist/app.tgz`  | Set once a script [exported it](#script-outputs). This is the opt-in for the package's GitHub release, and its value is the asset list. It travels under its full name and stays out of `DISPAT_OUTPUTS`. |
-| `DISPAT_EXECUTION_NODE`       | `build-a`            | The name of the worker node this script is running on. It is set only on a [delegated stage](../distributed-execution.md) and is absent everywhere else, so `${DISPAT_EXECUTION_NODE+x}` asks whether the work left the orchestrator. |
+| `DISPAT_EXECUTION_NODE`       | `build-a`            | The name of the worker node this script is running on. It is set only on a [delegated stage](../distributed-execution.md) or a delegated [`dispat run` task](../distributed-execution.md#running-scripts-on-workers) and is absent everywhere else, so `${DISPAT_EXECUTION_NODE+x}` asks whether the work left the orchestrator. |
 
 `DISPAT_STAGE` carries `version`, `build`, `publish`, or `announce` for a stage script. It holds the hook's name
 (`beforeBuild`, `postPublish`, `postAll`, ...) for a hook. It holds `login` for the login, `syncLock` for an

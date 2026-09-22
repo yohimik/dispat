@@ -135,7 +135,8 @@ Four details make this work:
 
 - **Both jobs read the same mailbox repository and hold the same signing secret.** The release job's `execution`
   object lists `build-a` and `build-b` with that mailbox as their endpoint; each worker's file names itself and the
-  same endpoint.
+  same endpoint. A job that creates its workers with names the committed file cannot know passes them as
+  `--worker name=endpoint` instead.
 - **A hosted runner needs no inbound network.** The transport is Git only: a worker polls the mailbox and pushes its
   answers back, so it serves from behind NAT with no port open and no address to reach it at.
 - **The jobs start in parallel.** The release job plans, then probes every configured worker within

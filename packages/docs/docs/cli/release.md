@@ -96,3 +96,11 @@ whether there is work to do is not known until after planning; `dispat status --
 question without touching the remote and is what a CI gate should call. Only packages this run actually publishes
 count, so held, withheld, or unselected packages do not; see
 [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan).
+
+### `--worker`
+
+Adds a worker node for this run, written `name=endpoint`, beside the ones
+[`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists, which is how a pipeline
+names a machine it created a minute before the release. You can repeat it. The link is held to every rule a configured
+one is, the file has to name `execution.secretEnv`, and a process running under a task's authority or a node whose
+file says `role: worker` refuses the flag with `E226`. See [Distributed execution](../distributed-execution.md).

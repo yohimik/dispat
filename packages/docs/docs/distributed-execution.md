@@ -7,7 +7,8 @@ repository, the worker answers on the same branch, and verified build outputs mo
 way.
 
 With no `execution` object, or with an empty `workers` list, a release plans and executes exactly as it does on one
-machine. Distributed execution is an addition to a configuration rather than a different release engine.
+machine. Distributed execution is an addition to a configuration rather than a different release engine. The same
+pool also runs [`dispat run` sweeps](#running-scripts-on-workers), which release nothing.
 
 ## When to choose it
 
@@ -266,6 +267,86 @@ it exports name a checkout on the worker that is deleted when the task ends. Exp
 runs on the orchestrator. A publish script that writes tracked files on the node is a stray write, reported as
 `W244` and carried nowhere.
 
+## Running scripts on workers
+
+`dispat run` sweeps a script across the pool the way a release executes its builds. With worker links, from
+`execution.workers` or from [`--worker`](#naming-a-worker-on-the-command-line), each package's task of the sweep is
+placed on a node: the commands the swept script binds for that package, run in the package folder with
+`DISPAT_STAGE=run:<script>`, the computed `DISPAT_*` pairs, the configuration's own `env` pairs unresolved, and the
+values the package's providers exported earlier in the same sweep. The node materializes the package's input closure
+as it does for a build and returns what the commands exported, which reaches the package's consumers wherever they
+run. No hook brackets a sweep task, and nothing another task produced is installed before it: a script that needs a
+provider's `dist` is a build rather than a sweep.
+
+```sh
+dispat run tests --since all
+```
+
+**Placement follows `runOnly`.** A sweep task is placed where the package's build would be: under `both` on the least
+loaded worker with room, and on this machine only when no worker has any; under `orchestrator` here; and under
+`worker` on a worker only, so a sweep with no worker link refuses such a package with `E225` before any script runs.
+A sweep with no worker link at all runs every task here, as it always did: it fixes no plan, takes no lock, prints no
+summary and reaches no mailbox.
+
+**A sweep takes no release lock.** It records nothing and authorizes no effect a lock would have to fence, so its
+messages are bound to a generation drawn from its own run identity instead of from lock objects, and a release of the
+same repositories may run beside it: a sweep neither waits for a release nor excludes one. The refusals a release is
+held to still come first. A worker, or a process running under a task's authority, may not start a distributed sweep
+(`E226`), and a lock bypass beside worker links is refused with `E225`, because the bypass states that the repository
+has no remote to coordinate through. The plan is fixed and logged as `plan fixed`, every link is probed, and the sweep
+ends with the summary a distributed release prints: one `task outcome` line per task naming its node, its
+computation, its outputs and how many values it exported, then the run's `run finished` line.
+
+**What a script writes can come back.** A delegated task's files stay on the node that ran it unless the script
+declares where it writes. `runOutputs` in the root file names, per script, folders relative to the root of each
+package's repository:
+
+```yaml
+runOutputs:
+  tests: [coverage]
+```
+
+After a delegated task succeeds, its node captures those folders under the manifest, the validation and the transfer
+ceilings every build output is held to, and the orchestrator verifies each set and merges it into its own checkout once
+every task of the sweep has answered:
+
+- **The merge keeps what it does not replace.** A file replaces the file of its own path and every other file of the
+  folder stays, because every task of the sweep writes into the same folder: ten packages' `tests` tasks write ten
+  profiles into one `coverage/`.
+- **A set is merged whole or not at all.** Every file of one task's set is staged and verified before the first one is
+  moved, and a move that fails puts back the files already moved.
+- **Two tasks may not disagree about a path.** Two tasks writing one path with different bytes fail the sweep with
+  `E227`, naming the path and both tasks, and neither task's set is merged, so the folder holds neither file at that
+  path. Identical bytes are merged once.
+- **A folder the script did not write is an empty set.** This is a deliberate difference from a build output root,
+  whose absence fails the build: a script may have nothing to write for a package.
+- **A task this machine ran itself captures nothing.** Under `both` the orchestrator takes a task when no worker has
+  room, and that task writes into this checkout directly, as every task of a sweep without workers does. The rule
+  about disagreeing paths is checked between the sets that travelled.
+- **An interrupted sweep merges nothing.** A folder assembled from whichever tasks answered before the interrupt is a
+  folder nobody asked for, so the sets already admitted are left where they are and the run says so.
+
+A root may be neither a package folder nor a folder holding one, and may not overlap any package's `buildOutputs`
+root, because the two keys install differently: a build output root is replaced whole and a sweep's root is merged
+file by file. `dispat status` reports each of these with `E225`. The key is read from the configuration the sweep is
+started with alone, as `execution` is. Declare folders Git ignores: a folder Git tracks, or does not ignore, also
+travels to every task inside the prepared input state.
+
+### Naming a worker on the command line
+
+A pipeline that creates a worker machine a minute before the run cannot write it into the committed file.
+`--worker name=endpoint`, repeatable on `release`, `run` and `status`, adds a link beside the ones `execution.workers`
+lists:
+
+```sh
+dispat run tests --since all --worker ci-worker-1=git@github.com:acme/release-mailbox.git
+```
+
+The link is held to every rule a configured one is: a node name, a credential-free endpoint, a name no other link
+folds to, and a `secretEnv` the file names. It is refused with `E226` under a task's authority and on a node whose
+file says `role: worker`, because a worker dispatches nothing. It is no part of the plan digest, and
+`dispat status --worker` prints the digest a distributed run would carry and reaches no node.
+
 ## Locks, failure and recovery
 
 **The lock is not optional here.** `unsafeDisableLock`, a per-repository bypass and `DISPAT_UNSAFE_DISABLE_LOCK` are
@@ -443,11 +524,11 @@ One branch carries one attempt of one task, as a first-parent chain of commits w
 captured outputs in the same commit.
 
 Branches are named `dispat-worker-<node>-<YYYYMMDD>-<kind>-<32 hex characters>`, with the kind one of `probe`,
-`build`, `publish`, `prepare`, `snapshot` or `relay`. The name is a routing hint and never an authority: it lets a
-node list only `refs/heads/dispat-worker-<its name>-*`, and nothing ever parses the date or the kind back out of it.
-The signed message inside decides what a node may act on. A worker named `build` also matches the branches of
-`build-a`, which is harmless for the same reason, but a glob written by hand for a single node should anchor on the
-date segment.
+`build`, `publish`, `prepare`, `run` for a sweep task, `snapshot` or `relay`. The name is a routing hint and never an
+authority: it lets a node list only `refs/heads/dispat-worker-<its name>-*`, and nothing ever parses the date or the
+kind back out of it. The signed message inside decides what a node may act on. A worker named `build` also matches the
+branches of `build-a`, which is harmless for the same reason, but a glob written by hand for a single node should
+anchor on the date segment.
 
 Every transition is one compare-and-swap push by one party:
 
@@ -488,9 +569,9 @@ switches on.
 
 | Code   | Category                    | Means                                                                            |
 |--------|-----------------------------|----------------------------------------------------------------------------------|
-| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, an unsatisfiable `buildPlatforms`, `runOnly: worker` with no worker links, a node that failed preflight, or overlapping `buildOutputs` |
-| `E226` | `execution-authority`       | work refused because of who asked: a release initiated on a worker or under a task's authority, an assignment that is not authentically this run's, or a write the task's authority does not extend to |
-| `E227` | `io-integrity`              | input or output data that is missing, changed, incomplete, incompatible or escaping its declared roots; it fails one prerequisite and blocks that prerequisite's consumers |
+| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, an unsatisfiable `buildPlatforms`, `runOnly: worker` with no worker links, a node that failed preflight, overlapping `buildOutputs`, or a `runOutputs` root that is or holds a package folder or overlaps a build output root |
+| `E226` | `execution-authority`       | work refused because of who asked: a release or a distributed sweep initiated on a worker or under a task's authority, a `--worker` link stated there, an assignment that is not authentically this run's, or a write the task's authority does not extend to |
+| `E227` | `io-integrity`              | input or output data that is missing, changed, incomplete, incompatible or escaping its declared roots, or two tasks of one sweep writing one path with different bytes; it fails one prerequisite and blocks that prerequisite's consumers |
 | `E228` | `publication-unknown`       | an authorized publication that never reported back; the run is incomplete, makes no second attempt, and retains the lock of an unfenced publisher |
 | `E229` | `transport-cleanup`         | transport state the run could not leave in a safe place: an attempt that had to be fenced, or owned refs whose survival leaves an effect unresolved |
 | `W244` | `transport-cleanup`         | the harmless half of the same subject: refs a completed run could not delete, and writes a build made outside what it declared. A run that is otherwise clean still exits `0` |
@@ -534,6 +615,7 @@ Three conditions dispat already had a code for keep it and join the specificatio
 
 - [The `execution` object](./configuration/execution.md) for every key, default and refusal.
 - [The worker command](./cli/worker.md) for the flags, the state folder and the exit behaviour.
+- [The run command](./cli/run.md#running-on-worker-nodes) for a sweep executed on the pool.
 - [Worker nodes on Kubernetes](./examples/kubernetes-workers.md) for a pool that exists for the length of one
   release.
 - [dispat in CI](./reference/ci.md#worker-nodes-in-a-pipeline) for a pipeline that starts workers beside the release

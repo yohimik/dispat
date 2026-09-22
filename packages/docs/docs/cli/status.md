@@ -47,3 +47,12 @@ Forces `release` and `status` to exit `3` if the plan releases nothing, distinct
 for a CI stage that must publish something. dispat prints the graph first so you see the plan that explains the
 refusal. Only packages this run will actually publish count, while held, withheld, or unselected packages do not. See
 [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan).
+
+### `--worker`
+
+Adds a worker node for this invocation, written `name=endpoint`, beside the ones
+[`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists. You can repeat it. With
+worker links, from the file or from the flag, `status` fixes and prints the plan digest a distributed run would carry,
+in its `plan fixed` line, and it still takes no lock, probes no node and assigns nothing. The links are no part of the
+digest. A value that is not `name=endpoint` exits `2`, and a link breaking a rule a configured link is held to exits
+`1` with `E225`.

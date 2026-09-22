@@ -86,6 +86,9 @@ execution:
     - {name: w-3, endpoint: git@github.com:acme/release-mailbox.git}
 ```
 
+A pipeline that creates its workers for the run can name them on the command line instead, with
+`--worker name=endpoint` on the release, beside a file that states only the secret and the waits.
+
 A worker's name is read from its configuration file, so each pod writes its own file from its index before it starts
 serving:
 

@@ -410,6 +410,14 @@ Publication is serialized per repository whenever nodes are configured, by setti
 would otherwise not need. The lock, the plan, the tags and the records stay where they were, on the machine the
 release was started on.
 
+`dispat run` reaches the same coordinator from the package sweep rather than from the executor. With worker links the
+task a sweep's `packageWork` hands back asks the coordinator to place it, as a frame of the kind `run` with the script's
+commands and nothing around them, so the sweep keeps its own order, budget and skip cascade and only the place a task
+runs changes. A sweep takes no release lock: its messages are bound to a generation derived from its own run identity.
+What its tasks declare they write under `runOutputs` is admitted through the same validator as a build output set and
+merged into the orchestrator's checkout once the drain is over, because a merge that ran as each task answered would
+let arrival order decide a path two tasks disagree about.
+
 ### Propagation: bounded BFS, three phases
 
 Propagation (§9.2) walks the dependency graph outward from each unit's source packages. It moves along kind-filtered
@@ -595,7 +603,7 @@ registry half is delegated to the version and publish scripts. This keeps dispat
 | Reusing a build output across runs                          | (nothing; every [distributed](../distributed-execution.md) run builds what it needs, and an output set is bound to the run, the plan and the attempt that produced it)                 |
 | Registry reconciliation after an unknown publication (§19.4) | the next ordinary run, which plans what is still owed. A publication whose outcome is unknown is reported as `E228` and never re-authorized inside the run that lost it               |
 | A bundle service beside the Git transport                   | (nothing; a coordination branch in a Git repository is the whole transport)                                                                                                          |
-| Distributing `dispat run` and the other package sweeps       | (nothing; only a release's build and publish frames are delegated)                                                                                                                   |
+| Distributing the package sweeps other than `dispat run`       | (nothing; only a release's build and publish frames and a `dispat run` sweep's tasks are delegated)                                                                                                                   |
 
 This has a consequence for the diagnostics registry. dispat never emits the specification codes that belong to these
 registry-aware and audit-aware features. Errors like `E197` (publish-order violation), `E198` (registry identity

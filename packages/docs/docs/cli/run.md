@@ -58,6 +58,27 @@ shell text you typed rather than a script each package declares, one item at a t
 from, with the item described by `DISPAT_*` variables. Use `dispat run` when each package says what the work is; use
 `dispat for` when the command line does, or when the list is not packages at all.
 
+## Running on worker nodes
+
+With worker links, from [`execution.workers`](../configuration/execution.md#workers) or from `--worker`, a sweep runs
+on the pool the way a release runs its builds: each package's task is placed by the package's own `runOnly`, workers
+first and this machine last under the default, and runs the script's commands in the package folder with
+`DISPAT_STAGE=run:<script>`. A provider's exports still reach its consumers, whichever machines they ran on. The sweep
+takes no release lock, so it neither waits for nor excludes a release of the same repositories, and it ends with one
+`task outcome` line per task naming the node it ran on, its computation, its outputs and how many values it exported,
+before the usual `run finished` line.
+
+```sh
+dispat run tests --since all --worker ci-worker-1=git@github.com:acme/release-mailbox.git
+```
+
+What a delegated task writes stays on its node unless the script declares it.
+[`runOutputs`](../distributed-execution.md#running-scripts-on-workers) in the root file names the folders a script
+writes, relative to each package's repository root; after every task has answered, dispat merges the files the
+delegated tasks wrote there into this checkout, keeping every file no task wrote. Two tasks writing one path with
+different bytes fail the run with `E227` and neither file is merged. Without worker links nothing here applies: every
+task runs in this checkout, as it always has.
+
 ## Choosing the packages
 
 Three flags name the same thing three ways. Use `--package` (`-p`) to name packages, `--space` (`-s`) to name spaces
@@ -194,3 +215,10 @@ on a selected one. For `if`, the expansion runs before the selection narrows. Se
 The default is `skip`. Use with every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`,
 `autoversion`, `commit`, `github`) to control what a failed package does to its dependents. Choose `skip` (transitive)
 or `continue`. Either way, the command exits `1` on any failure.
+
+### `--worker`
+
+Adds a worker node for this sweep, written `name=endpoint`, beside the ones
+[`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists. You can repeat it. The link
+is held to every rule a configured one is, and the file has to name `execution.secretEnv`. See
+[Running on worker nodes](#running-on-worker-nodes).
