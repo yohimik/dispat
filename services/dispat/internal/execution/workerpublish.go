@@ -28,6 +28,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
@@ -126,17 +127,24 @@ func (w *Worker) watchAuthorization(ctx context.Context, task *claimedTask, read
 func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, task *claimedTask,
 	ready string, log zerolog.Logger) taskOutcome {
 	assignment, tip := task.assignment, task.tip
+	// Every refusal below reports itself on top of the object it refused: the
+	// branch has moved past the ready commit, so a result leased over that
+	// commit could never be written, and a node that answers nothing leaves the
+	// run to wait out its deadline and to call an authorization it may have
+	// written an outcome nobody can establish. A refused message is a known
+	// outcome, and the node says so where the run can read it.
 	if answer.Kind == MessageCancel {
-		if reason := w.checkWithdrawal(ctx, answer, tip, ready, assignment); reason != "" {
+		withdrawn := w.resolveWithdrawnTip(ctx, answer, tip, ready, assignment)
+		if reason := w.checkWithdrawal(ctx, answer, tip, withdrawn, assignment); reason != "" {
 			// A withdrawal nobody signed is not a withdrawal. It cannot make
 			// this node publish anything, so the risk it carries is the
 			// opposite one: whoever can push to the mailbox could otherwise
 			// stop every publication of every run by writing the word. The
-			// attempt stays at the gate and the run's own wait decides.
+			// attempt ends without a command and the run reads why.
 			log.Warn().Str("reason", string(reason)).Str("commit", answer.OID).
 				Str("code", CodeAuthority).Str("category", CategoryAuthority).
 				Msg("the publication withdrawal was refused")
-			return withheldPublication(ready)
+			return withheldPublication(answer.OID)
 		}
 		return w.acknowledgeWithdrawal(ctx, answer, task, log)
 	}
@@ -144,16 +152,22 @@ func (w *Worker) resolveAuthorization(ctx context.Context, answer ChainTip, task
 		log.Warn().Str("message", string(answer.Kind)).Str("code", CodeAuthority).
 			Str("category", CategoryAuthority).
 			Msg("the publication branch moved to something that is not an authorization")
-		return withheldPublication(ready)
+		return withheldPublication(answer.OID)
 	}
 	if reason := w.checkAuthorization(ctx, answer, tip, ready, assignment); reason != "" {
 		log.Warn().Str("reason", string(reason)).Str("commit", answer.OID).
 			Str("code", CodeAuthority).Str("category", CategoryAuthority).
 			Msg("the publication authorization was refused")
-		return withheldPublication(ready)
-	}
-	if !w.isAuthorizationCurrent(ctx, tip.Branch, answer.OID, log) {
 		return withheldPublication(answer.OID)
+	}
+	if moved, isMoved := w.readMovedAuthorization(ctx, tip.Branch, answer.OID, log); isMoved {
+		// The fence found the branch past the authorization. What it found
+		// is read like any other answer: a withdrawal of the authorization is
+		// acknowledged, anything else ends the attempt on top of it.
+		if moved.Kind == MessageCancel && moved.PreviousOID == answer.OID {
+			return w.resolveAuthorization(ctx, moved, task, ready, log)
+		}
+		return withheldPublication(moved.OID)
 	}
 	// The authorization is now what the attempt's next message follows, so a
 	// withdrawal of a running publisher is leased against it.
@@ -253,6 +267,35 @@ func (w *Worker) checkAuthorization(ctx context.Context, answer ChainTip, tip Ch
 	return ""
 }
 
+// resolveWithdrawnTip is the object a withdrawal found at the gate must name:
+// the ready commit this node is waiting at, or the authorization the run wrote
+// on top of it and withdrew before this node had read it.
+//
+// The second case is the ordinary shape of an interrupted run: the run
+// authorizes, and within the same poll interval it is interrupted or loses
+// its lock and withdraws what it authorized, leased over the authorization.
+// The node then finds a cancellation whose previous object it has never seen.
+// Reading the withdrawal as a replay would refuse it, leave the attempt
+// without an answer, and make the run report an outcome it cannot establish
+// for a command that never started. So the previous object is read: an
+// authentic authorization answering this ready commit, expired or not, is the
+// tip the withdrawal legitimately names.
+func (w *Worker) resolveWithdrawnTip(ctx context.Context, answer ChainTip, tip ChainTip,
+	ready string, assignment Assignment) string {
+	if answer.Previous != MessageGo || answer.PreviousOID == ready {
+		return ready
+	}
+	authorized, err := w.Mailbox.Inspect(ctx, gitx.RemoteHead{Name: tip.Branch, OID: answer.PreviousOID})
+	if err != nil {
+		return ready
+	}
+	switch w.checkAuthorization(ctx, authorized, tip, ready, assignment) {
+	case "", ReasonIssuedAt:
+		return authorized.OID
+	}
+	return ready
+}
+
 // checkWithdrawal holds one cancellation to everything that makes it this
 // attempt's, exactly as an authorization is held to it.
 //
@@ -264,9 +307,10 @@ func (w *Worker) checkAuthorization(ctx context.Context, answer ChainTip, tip Ch
 // is a node whose run can be failed by anybody.
 //
 // A withdrawal states the tip it withdraws, so a cancellation of an earlier
-// state of this branch is not a cancellation of what the node is waiting at.
+// state of this branch is not a cancellation of what the node is waiting at;
+// withdrawn is that tip, the ready commit or the authorization written on it.
 func (w *Worker) checkWithdrawal(ctx context.Context, answer ChainTip, tip ChainTip,
-	ready string, assignment Assignment) RejectReason {
+	withdrawn string, assignment Assignment) RejectReason {
 	document, err := w.Mailbox.Read(ctx, answer, assignment.Limits.MaxManifestBytes)
 	if err != nil {
 		if reason := RejectionReason(err); reason != "" {
@@ -282,7 +326,7 @@ func (w *Worker) checkWithdrawal(ctx context.Context, answer ChainTip, tip Chain
 		return reason
 	}
 	if !IsTransitionLegal(answer.Previous, MessageCancel, PartyOrchestrator) ||
-		answer.PreviousOID != ready || message.Tip != ready || message.Assignment != tip.OID ||
+		answer.PreviousOID != withdrawn || message.Tip != withdrawn || message.Assignment != tip.OID ||
 		message.Run != assignment.Run || message.Task != assignment.Task ||
 		message.Attempt != assignment.Attempt || message.Generation != assignment.Generation ||
 		message.PlanDigest != assignment.PlanDigest {
@@ -309,16 +353,26 @@ func isAuthorizationUnexpired(notAfter string, now time.Time) bool {
 // withdrawal pushed after the authorization and before the command would pass
 // every one of those checks and still mean the publication must not happen, so
 // the last thing the node does is ask the remote where the branch is now.
-func (w *Worker) isAuthorizationCurrent(ctx context.Context, branch, authorized string,
-	log zerolog.Logger) bool {
+func (w *Worker) readMovedAuthorization(ctx context.Context, branch, authorized string,
+	log zerolog.Logger) (ChainTip, bool) {
 	head, err := w.Mailbox.Reread(ctx, branch)
 	if err == nil && head.OID == authorized {
-		return true
+		return ChainTip{}, false
 	}
 	log.Warn().Err(err).Str("commit", head.OID).Str("code", CodeAuthority).
 		Str("category", CategoryAuthority).
 		Msg("the publication branch no longer carries the authorization, so the command is not started")
-	return false
+	if err != nil || head.OID == "" {
+		// Nothing can be read or written there; the attempt ends on the
+		// authorization and the push, if it fails too, leaves the run's own
+		// wait to decide.
+		return ChainTip{OID: authorized}, true
+	}
+	moved, err := w.Mailbox.Inspect(ctx, head)
+	if err != nil {
+		return ChainTip{OID: head.OID}, true
+	}
+	return moved, true
 }
 
 // withheldPublication is the outcome of an attempt whose command never
