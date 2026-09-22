@@ -1444,7 +1444,8 @@ propagate(units, graph, held, W):
         anyStable = 'stable' in srcChan
         for (d, level) in reach(edges, sources, u.depth):
             if d not in pscope:                           continue
-            owed = { P in sources : not delivered(P, c, d) }    # admission, §13.4a
+            from = { P in sources : dist(P, d) <= u.depth }      # the sources d depends on, §13.4a;
+            owed = { P in from : not delivered(P, c, d) }        #   admission: what they still owe d
             if owed is empty:                             continue
             if cancelledFor(c, d):                        continue
             if not (anyStable or channel[d] in srcChan):  continue # §9.3a, W208
@@ -2121,22 +2122,22 @@ units scoping them resolve to `E130`/
 Enumerate tags reachable from `HEAD`, parse per §12.1, and compute `baseline`, `stableBaseline`, `stableCommit` per
 §12.3.
 
-**Records under the lock.** A run that can write plans from the authoritative store's release records, not from
+**Records under the lock.** A run that can write takes its release records from the authoritative store, not from
 whatever its checkout happened to fetch. After it holds every release lock it needs and before it fixes the input of
 this section, the engine MUST compare, for each participating repository, the release records of the store that run
-records to with the records it is about to plan from. A stored release record whose commit is reachable from the
-planned head and which the planning input lacks is incomplete history and is `E196`. A stored release record that names
-another commit than the planning input's record of the same package and version is `E191`. The engine MUST NOT repair
-either difference by planning the package as unreleased, and MUST NOT refresh its records silently after the
-comparison: a run that fetches does so before the comparison and plans from what it then holds. Complete history makes
-reachability decidable locally, because a commit the checkout does not hold cannot be reachable from its head. The lock
-is what makes one comparison sufficient: no other coordinated run can add a record between the comparison and this
-run's own records. Without the comparison the lock serializes runs and isolates nothing, because two runs that never
-overlap still plan the same version when the second one's checkout predates the first one's records. A run that records
-nowhere but its own repository has that repository as its store and nothing to compare, and neither has a repository
-that owns no package. Read-only planning takes no lock and makes no comparison; its result describes the checkout. The
-comparison reads one record inventory per repository, `O(T)` each, and asks one ancestry question per record the input
-lacks, which is none in the ordinary case.
+records to with the records it is about to plan from. A stored release record whose commit is reachable from the planned
+head and which the planning input lacks is incomplete history and is `E196`. A stored release record that names another
+commit than the planning input's record of the same package and version is `E191`. The engine MUST NOT repair either
+difference by planning the package as unreleased, and MUST NOT refresh its records silently after the comparison: a run
+that fetches does so before the comparison and plans from what it then holds. Complete history makes reachability
+decidable locally, because a commit the checkout does not hold cannot be reachable from its head. The lock is what makes
+one comparison sufficient: no other coordinated run can add a record between the comparison and this run's own records.
+Without the comparison the lock serializes runs and isolates nothing, because two runs that never overlap still plan the
+same version when the second one's checkout predates the first one's records. A run that records nowhere but its own
+repository has that repository as its store and nothing to compare, and neither has a repository that owns no package.
+Read-only planning takes no lock and makes no comparison; its result describes the checkout. The comparison reads one
+record inventory per repository, `O(T)` each, and asks one ancestry question per record the input lacks, which is none
+in the ordinary case.
 
 Only what §12.1 parses as a release tag of a workspace package is a release record here; a ref the implementation
 moves by design, its lock, and a name that merely resembles a tag format are not. A store whose records cannot be read
@@ -2161,14 +2162,17 @@ freshWindow(P)   = pendingWindow(P) - { c : c reachable from tagCommit(baseline(
 If `P` has no stable baseline, `pendingWindow(P)` is every commit reachable from `HEAD`. If `P` has no baseline tag at
 all, the subtracted reach in `freshWindow(P)` is empty, so `Wfresh(P) = W(P)`.
 
-**Owed windows.** For every dependency edge `D → P` over `propagation.kinds` where `D` has a baseline, the union of
-pending windows parsed in §13.4 also contains `owedWindow(P, D)`: the commits reachable from `HEAD` and from no release
-commit of `P` that `baselineCommit(D)` reaches. These are the commits `D` released past before `P` released them; once
-`P` has, no window of `P` or of `D` holds them, and the debt `D` is owed (§13.4a) would be invisible. Where
-`baselineCommit(D)` reaches no release of `P`, `D` released before `P`'s first release and `W(D)` already holds
-everything since, so nothing is added; where the newest release of `P` it reaches is `P`'s own boundary, which is so for
-every consumer that never got ahead of its provider, nothing is added either. The added window makes a debt visible;
-whether it is owed is §13.4a's question, and it admits nothing by itself.
+**Owed windows.** For every pair of packages `(P, D)` where `D` is reachable from `P` over `propagation.kinds` and `D`
+has a baseline, the union of pending windows parsed in §13.4 also contains `owedWindow(P, D)`: the commits reachable
+from `HEAD` and from no release commit of `P` that `baselineCommit(D)` reaches. These are the commits `D` released past
+before `P` released them; once `P` has, no window of `P` or of `D` holds them, and the debt `D` is owed (§13.4a) would
+be invisible. Where the newest release of `P` that `baselineCommit(D)` reaches is `P`'s own boundary, which is so for
+every consumer that never got ahead of its provider, the window adds nothing. Where `baselineCommit(D)` reaches no
+release of `P` at all, `D` released before `P` ever did, every commit `P` has since released is one `D` released past
+first, and the window is the whole reachable history, exactly as for an unreleased package. The pairs are not only the
+edges: with `D → M → P`, `P` owes `D` directly, since §9.2 propagates from `P` to every target within a unit's depth,
+and `M` being served says nothing about `D`, so the window is taken per reachable pair. It makes a debt visible; whether
+it is owed is §13.4a's question, and it admits nothing by itself.
 
 The window is measured from the last **stable** tag, not the last tag of any kind. This single definition serves both
 cases:
@@ -2186,7 +2190,7 @@ baseline the two windows coincide. These roles MUST NOT be conflated:
 
 | Purpose                                   | Window consulted                 | Section     |
 |-------------------------------------------|----------------------------------|-------------|
-| Compute `P`'s aggregate train bump/target | `W(P)`, the unit's own package   | §11.4, §13.6 |
+| Compute `P`'s aggregate train bump/target | `W(P)`, the unit's own package   | §11.4, §11.5, §13.9 |
 | Admit a fresh direct bump or channel      | `Wfresh(P)`                      | §13.6, §13.8 |
 | Admit a bump or channel for dependent `D` | `Wfresh(D)`, the **dependent's** | §13.7       |
 
@@ -2227,16 +2231,22 @@ delivered(P, C, D) =  some release tag of P sits on a commit t
                       with C in reach(t) and t in reach(baselineCommit(D))
                       # D released at or after P's release carrying C; false for an unreleased D
 
-owed(u, D)         =  { P in sourcePackages(u) : not delivered(P, commitOf(u), D) }
+reaching(u, D)     =  { P in sourcePackages(u) : dist(P, D) <= u.depth }   # the sources D depends on
+                                                                            # within the unit's depth
+owed(u, D)         =  { P in reaching(u, D) : not delivered(P, commitOf(u), D) }
 ```
 
 A unit propagates a bump to `D` while `owed(u, D)` is non-empty (§9.2), and `D`'s provenance names exactly the owed
-sources. `delivered` implies `C ∉ Wfresh(D)`, so a target that has not released past `C` is owed by every source and the
-test reduces to the window; the finer question arises only for a target that released past `C` before its source did: a
-consumer that proceeded on a cause of its own while the source failed (§19.3), or one released while the source was held
-(§13.6a). Such a target is still owed the source's release, and receives it as a catch-up when it comes (§13.7a).
-Releasing past a commit is not delivery; only the source's release, followed by the target's, is. The channel axis keeps
-`C ∈ Wfresh(D)` as its admission, because a channel is carried by the units and needs no release of the source (G7).
+sources. A source `D` does not depend on within the unit's depth owes it nothing, whatever `delivered` says of the pair:
+`feat(core,api)^` owes `cli`, which consumes `core` alone, nothing on `api`'s account. `P` **owes** `D` when a
+contribution from `P` is admitted for `D` by §9.2 in every respect, reach, scope, cancellation and resolvability, except
+that `P` has not delivered it; that is the sense of §19.3 and of `E201`. `delivered` implies `C ∉ Wfresh(D)`, so a
+target that has not released past `C` is owed by every source and the test reduces to the window; the finer question
+arises only for a target that released past `C` before its source did: a consumer that proceeded on a cause of its own
+while the source failed (§19.3), or one released while the source was held (§13.6a). Such a target is still owed the
+source's release, and receives it as a catch-up when it comes (§13.7a). Releasing past a commit is not delivery; only
+the source's release, followed by the target's, is. The channel axis keeps `C ∈ Wfresh(D)` as its admission, because a
+channel is carried by the units and needs no release of the source (G7).
 
 Two releases on one commit have no order (§13.7b), so `delivered` cannot tell a target that released at commit `t` after
 its source from one that released there in an earlier run whose source then released at `t` too. §19.3 keeps the second
@@ -2490,16 +2500,14 @@ staleSources(D):
         sources = sourcePackages(u)                       # §13.4a
         if sources is empty:                              continue
         if D in sources:                                  continue   # §9.2 seeds seen = sources
-        sources = owed(u, D)                              # §13.4a: what D is still owed
-        if sources is empty:                              continue   # every source delivered
-        reaching = { P in sources : P in dist }
-        if reaching is empty:                             continue
-        if not resolvableBy(sources, D, channel):     continue   # §9.3a
+        reaching = { P in sources : P in dist and dist[P] <= u.depth }  # what D depends on, §13.4a
+        owed = { P in reaching : not delivered(P, commitOf(u), D) }     # what they still owe D
+        if owed is empty:                                 continue   # nothing owed, or nothing reaches
+        if not resolvableBy(sources, D, channel):     continue   # §9.3a, over the whole source set as §9.2
         level = min({ dist[P] for P in reaching })        # measured from the whole source set
-        if level > u.depth:                               continue
         if D not in resolve(u.propagateScope):            continue
         if cancelledFor(commitOf(u), D):                  continue
-        for P in reaching:
+        for P in owed:
             out |= { (P, u, level, b) }
     return out
 ```
@@ -2590,12 +2598,12 @@ the source, traversal, and channel-admission predicates stay fixed while `delive
 invariant, publishing a suppressed source (the failure of H2) or changing resolved channel admission may expose finite
 catch-up targets. Such widening MUST be surfaced for review (§18.1).
 
-**G6, restricted convergence.** Under the retry invariant, repeated running at
-a fixed `HEAD` reaches an empty non-held plan in at most `n` successful-progress runs, where `n` is the number of
-publishable packages in the first plan: G4 removes a published package and G5 admits no new one. Without H2, a source
+**G6, restricted convergence.** Under the retry invariant, repeated running at a fixed `HEAD` reaches an empty non-held
+plan in at most `n + m` successful-progress runs, where `n` is the number of publishable packages in the first plan and
+`m` the number of those that proceeded past a failed provider (§19.3): G4 removes a published package, G5 admits no new
+one, and a proceeded consumer returns once, for the catch-up its provider's later release owes it. Without H2, a source
 release may expose a finite follow-up obligation; other failures of the invariant may also change admission. §19.6
-therefore classifies the post-run replan; it does not claim
-global convergence outside the retry invariant.
+therefore classifies the post-run replan; it does not claim global convergence outside the retry invariant.
 
 **Why tagging is universal.** It is tempting to version a private or artefact-less package in the plan but not tag it;
 there is, after all, nothing in a registry for the tag to correspond to. Such a package can never converge: its window
@@ -2724,7 +2732,9 @@ For each `P` with `effective(P) != none`, or with `channel(P)` differing from it
 ```
 if exact Release-As present:              next = that version           # must exceed baseline
 else if channel(P) == 'stable':
-        next = applyBump(stableBaseline(P), effective(P))               # §12.5, §12.6
+        if channelOf(baseline(P)) != 'stable':                          # graduation, §11.5:
+                next = applyBump(S, E)                                  #   E over the train window W(P)
+        else:   next = applyBump(stableBaseline(P), effective(P))       # §12.5, §12.6
 else:   next = prerelease per §11.4                                     # incl. channel-entry patch
 ```
 
@@ -2997,7 +3007,7 @@ repository.
 | Channel resolution (§13.8) | **`O(P · U)`**        | `O(U + I + P)`        | Invert unit-to-package incidences           |
 | Versions/plan (§13.9–10)   | repeated member/record scans | `O(P + I + Z + Oout)` | Consume already-built aggregates/provenance; scan each disjoint version group once |
 | Publish order (§19.2)      | `O(P² + E)`           | `O(E + P log P)`      | Scanning the ready set for the least name; a comparison heap instead |
-| Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead |
+| Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead. The cause test of §19.3 reads each planned package's admitted causes once, `O(P + I)` |
 | Build readiness (§19.2a)   | `O(P · (P + E))`      | `O(P + E)`            | A search per building pair through the packages between them; a pass-through node per package that does not build, or one memoised visit per package, instead. At most two task edges per dependency edge survive transitive reduction |
 | Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
 | Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum((Hq + Aq) · bw(mq)) + Iw)` | One marker pass per repository; `O(sum(Kq · (Hq + Aq)) + Iw)` with a walk per boundary |
@@ -3039,20 +3049,18 @@ Q)` name references in the worst case; implementations SHOULD keep the compact f
 least intern equal lists. Treating each group as a clique would add quadratic work in the group size; index each group
 once and visit its members as one adjacency list instead.
 
-**Windows: group by distinct baseline commit.** For a fixed `HEAD`, `W(P)` is determined by
-`stableCommit(P)`. Different package tags that resolve to the same commit therefore share a window. A release MAY
-record packages at different commits; `k` counts distinct boundary commits, not release runs, and can be as large as
-`2P`. Computing reachability once per distinct boundary commit, plus once for packages with no baseline, and testing
+**Windows: group by distinct baseline commit.** For a fixed `HEAD`, `W(P)` is determined by `stableCommit(P)`. Different
+package tags that resolve to the same commit therefore share a window. A release MAY record packages at different
+commits; `k` counts distinct boundary commits, not release runs, and can be as large as `2P` plus one per owed window
+(§13.3). Computing reachability once per distinct boundary commit, plus once for packages with no baseline, and testing
 membership by lookup replaces `P` traversals with at most `k + 1`, and the marker pass below replaces those with one.
-The fresh window needs no class of its own. By
-§13.3, `Wfresh(P) = W(P) - reach(baselineCommit(P))`, so with `after(b) = reach(HEAD) - reach(b)` a commit is in
-`Wfresh(P)` exactly when it is in both `after(stableCommit(P))` and `after(baselineCommit(P))`. Every window is
-therefore a function of one boundary commit, a fresh membership test is the conjunction of two lookups, and no
-reachability set is keyed by a `(stable, fresh)` pair. The identity holds whether or not the newest baseline descends
-from the stable one.
-The traversals range over the reachable history, so their safe bound is in `H + A`, not `C`: proving that a commit is
-outside a pending window may require walking commits that never enter the union. `Iw` is the number of stored or emitted
-package/window memberships and is `P · C` in the worst case.
+The fresh window needs no class of its own. By §13.3, `Wfresh(P) = W(P) - reach(baselineCommit(P))`, so with `after(b) =
+reach(HEAD) - reach(b)` a commit is in `Wfresh(P)` exactly when it is in both `after(stableCommit(P))` and
+`after(baselineCommit(P))`. Every window is therefore a function of one boundary commit, a fresh membership test is the
+conjunction of two lookups, and no reachability set is keyed by a `(stable, fresh)` pair. The identity holds whether or
+not the newest baseline descends from the stable one. The traversals range over the reachable history, so their safe
+bound is in `H + A`, not `C`: proving that a commit is outside a pending window may require walking commits that never
+enter the union. `Iw` is the number of stored or emitted package/window memberships and is `P · C` in the worst case.
 
 **Inventory once, partition explicitly.** An adapter may return one complete release-record inventory for the fixed
 snapshot and let the planner match package formats in memory. This reduces adapter queries from one per package to one;
@@ -3186,9 +3194,9 @@ from an otherwise unevaluated branch; required diagnostic attribution and order 
 hoisted scope/channel predicates only. The delivery test of §13.4a is one window bit for a target that has not released
 past the unit's commit, which is every target in the ordinary case; a target that has costs one ancestry question per
 release of each source past that commit, answered from the marker pass when those releases are markers, and such targets
-exist only after a consumer got ahead of a provider. Cancellation intersections cost up to `bw(cancels)` per queried
-target; materialising `prov[d] |= sources` must also charge the source insertions in `Zv`, even when deduplication
-leaves `Z` unchanged.
+exist only after a consumer got ahead of a provider; the sources within depth of a target are read off the per-source
+walks composed above. Cancellation intersections cost up to `bw(cancels)` per queried target; materialising `prov[d] |=
+sources` must also charge the source insertions in `Zv`, even when deduplication leaves `Z` unchanged.
 
 The saving compounds with safe traversal caching: caching can reduce the number of graph walks, while hoisting reduces
 the work in each unit's target loop. Neither subsumes the other, and a wide `^^` unit is the case where both can help.
@@ -3281,27 +3289,29 @@ of one consumer `c` they are `max(b_i + p_i) + b_c + p_c`, `max(max(b_i) + b_c, 
 every relation gives the greatest over `k` of `e_k + p_k + … + p_n`, with `e_k` the instant the build of `k` ends: the
 floor is `sum(p_i)` whatever the relation, and a weaker relation only lowers the `e_k`.
 
-Under budgets of `m_b` build slots and `m_p` publication slots, write `Wb = sum(b_i)`, `Wp = sum(p_i)` and `L` for the
-longest path. No schedule beats `max(L, Wb / m_b, Wp / m_p)`. A placement that never idles a slot of a stage while a
-task of that stage is ready finishes within `L + Wb / m_b + Wp / m_p`, because at every instant either a task of one
+Under budgets of `m_b` build slots and `m_p` publication slots, write `Wb = sum(b_i)`, `Wp = sum(p_i)` and `Lk` for the
+longest path. No schedule beats `max(Lk, Wb / m_b, Wp / m_p)`. A placement that never idles a slot of a stage while a
+task of that stage is ready finishes within `Lk + Wb / m_b + Wp / m_p`, because at every instant either a task of one
 fixed chain is running or the stage that chain waits for has every slot busy; that is within three times the best
 possible, and it is not claimed tight for this shape of graph. The unlimited-slot result does not carry over: under
 budgets a weaker relation can lengthen such a schedule, although never the best one. With two build slots and one
-publication slot, packages `(b, p) = (2, 3)`, `(1, 2)` consuming the first, and an unrelated `(8, 3)` finish at 11
-under `build` and at 12 under `none`, because the consumer's early build takes the slot the long build would have had.
-This is Graham's scheduling anomaly, and it is why §19.2a promises a happens-before relation and no duration.
+publication slot, packages `(b, p) = (2, 3)`, `(1, 2)` consuming the first, and an unrelated `(8, 3)` finish at 11 under
+`build` and at 12 under `none` when ready tasks start in package order, the consumer's before the unrelated one, because
+the consumer's early build takes the slot the long build would have had. This is Graham's scheduling anomaly, and it is
+why §19.2a promises a happens-before relation and no duration.
 
-**Distributed execution: what placement can and cannot buy.** Let `Wk` be the summed duration of a run's command
-tasks, `Lk` the duration of its longest precedence chain, and `s` the task slots usable at once, the lesser of the
-summed node capacities and the applicable run-wide stage limits. No schedule finishes before `max(Lk, Wk / s)`. A
-placement that never leaves a usable slot idle while a compatible task is ready finishes within
-`Wk / s + (1 - 1/s) · Lk`, which is at most `(2 - 1/s)` times the best possible, when slots are interchangeable and
-transfers cost nothing; this is Graham's bound for list scheduling under precedence constraints. Neither premise holds
-in general: nodes differ in platform and speed, and an output transfer delays the consumer it feeds. This section
-therefore states no bound once transfers count, and the measurement §28.7 requires stands in its place. The inequality
-still says what to expect. On a chain `Lk = Wk` and no number of nodes helps. Beyond `s = Wk / Lk` the chain and not
-the pool is the limit: the best possible time is `Lk`, and more nodes can only close the gap between a greedy schedule
-and `Lk`, which is below a factor of two.
+**Distributed execution: what placement can and cannot buy.** Let `Wk` be the summed duration of a run's command tasks,
+`Lk` the duration of its longest precedence chain, and `s` the task slots usable at once, the lesser of the summed node
+capacities and the applicable run-wide stage limits. No schedule finishes before `max(Lk, Wk / s)`. A placement that
+never leaves a usable slot idle while a compatible task is ready finishes within `Wk / s + (1 - 1/s) · Lk`, which is at
+most `(2 - 1/s)` times the best possible, when slots are interchangeable and transfers cost nothing; this is Graham's
+bound for list scheduling under precedence constraints. Neither premise holds in general: nodes differ in platform and
+speed, and an output transfer delays the consumer it feeds. This section therefore states no bound once transfers count,
+and the measurement §28.7 requires stands in its place. The inequality still says what to expect. On a chain `Lk = Wk`
+and no number of nodes helps. Beyond `s = Wk / Lk` the chain and not the pool is the limit: the lower bound is `Lk`,
+which a schedule can still miss by the packing of tasks into slots (four independent tasks of 10, 7, 7 and 6 on three
+slots end at 13, not 10), and more nodes can only close the gap between a greedy schedule and that bound, which is below
+a factor of two.
 
 **What none of this may change.** These are all internal representations. The plan, the diagnostics, and their order
 MUST be identical to the literal reading (§17.2), and an implementation that trades a different plan for speed does not
@@ -3607,8 +3617,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | #   | Case                                                                     | Resolution                                                                                                                                                                                          |
 |-----|--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 87  | Provider published, consumer's publish failed                            | Consumer is released on the next run at the **same** version (§13.7c G3), marked `W193`. The case §13.7a exists for.                                                                                |
-| 88a | Scheduled staleness audit over a workspace that has never run the engine | Reports every package behind a dependency as `W195` (§13.7b). Reporting only; it never blocks and never releases.                                                                                  |
 | 88  | The same, five runs later, with no new commits                           | Still released at the same version while the §13.7c retry invariant holds. Admission depends on the consumer's unchanged `Wfresh` (G2).                                                                                   |
+| 88a | Scheduled staleness audit over a workspace that has never run the engine | Reports every package behind a dependency as `W195` (§13.7b). Reporting only; it never blocks and never releases.                                                                                  |
 | 89  | Provider published, consumer succeeded, run re-run                       | Empty plan. The contribution is discharged once in the tag ledger (G4).                                                                                                                                       |
 | 90  | Consumer released in the interim for its own `feat`                      | No catch-up: its window no longer contains the commit, and its own release already picked up the dependency. Its range for that dependency is reconciled at publish time and reports `W197` (§9.4). |
 | 91  | Mid-chain failure under `^^` (`core`→`ui`→`theme`, `ui` fails)           | `theme` is **blocked**, not published (`W194`). On resume, `ui` then `theme`, both at their originally planned versions.                                                                            |
@@ -3811,7 +3821,7 @@ non-suppressible set is therefore `W155`, `W156`, `W172`, `W193`, `W194`, `W202`
 | `E198` | The registry already holds this version and its identity could not be verified as this run's artefact (§19.4). Run-scoped.                                                                                |
 | `E199` | Fixed-point exhaustion failed: a non-held plan repeated without discharge or has no permitted state-change explanation (§19.6). Run-scoped.                                                                                                       |
 | `E200` | The dependency graph contains a cycle over runtime edge kinds (§13.1). Repository-scoped; names the members.                                                                                              |
-| `E201` | A package was released, or would be released, at the baseline commit of a consumer it still owes without that consumer releasing after it in the same run (§19.3). Run-scoped; names the pair. |
+| `E201` | A package was released, or would be released, at the baseline commit of a consumer it still owes, an admitted and undelivered contribution in §13.4a's sense, without that consumer releasing after it in the same run (§19.3). Run-scoped; names the pair. |
 | `E210` | A correction targets a commit that is unknown, unreachable, or not a proper ancestor of the correction's own commit (§7.4.2).                                                                             |
 | `E211` | A correction's unit selector is out of range, or a bare sha names a multi-unit commit (§7.4.1).                                                                                                           |
 | `E212` | A correction targets a control unit (§7.4.2).                                                                                                                                                             |
@@ -4205,8 +4215,13 @@ deployment order: infrastructure before the application that runs on it, a schem
   restricted to the packages that build. For two packages `C` and `P` that build in this run, a path from `C` to `P`
   with no `none` edge on it places `P`'s build before `C`'s, whether or not the packages between them are in the plan,
   because `C` can read `P` through them. A `none` edge ends the constraint of every path through it: beyond it nothing
-  is read. Either a pass-through node for each package that does not build, or a memoised index of the nearest building
-  packages each package reaches without a `none` edge, keeps this at `O(P + E)`; a search per pair does not.
+  is read. The value that governs is the one on the consumer's own edge: it is what the consumer's build waits for in
+  every building package reached through packages that do not build, over edges that are not `none`, and the values on
+  those further edges matter only in not being `none`. That can wait for a publication where a read of the build would
+  do, and never for less than the read needs. A pass-through node for each package that does not build keeps this at
+  `O(P + E)`; a memoised index of the nearest building packages each package reaches without a `none` edge costs its
+  visits plus the size of the sets it unions, the same bound only while those sets stay small; a search per pair is
+  neither.
 * **No new cycle.** Every build constraint runs along a dependency path and every package builds before it publishes,
   so the task graph stays acyclic for every choice of relations, and weakening a relation only removes constraints.
   `E197` cannot arise from a relation, because the publication order does not depend on it.
@@ -4233,11 +4248,16 @@ A run that publishes several packages MAY fail partway. Implementations MUST:
   `publish.blockingKinds` and has no cause of its own, marking each `W194`, and not attempt it. The closure is computed
   over the **full** workspace graph, so it traverses packages that are not in the plan: a package with no bump this run
   is still a path from a dependent to a failed dependency. A cause of its own is a fresh direct bump, a channel change,
-  or a contribution from a provider that is neither failed nor blocked, including one that published in an earlier run;
-  a dependent with one **proceeds**, its manifests reconciled to what its providers have published (§19.5), and what the
-  failed provider owed it stays owed (§13.4a) and arrives as a catch-up when that provider publishes; * continue
-  publishing packages that are not blocked: an unrelated subtree has no reason to be punished for another's failure; *
-  not release a package at the baseline commit of a consumer it still owes (§13.4a) unless that consumer is in the plan
+  an applicable exact `Release-As`, or a contribution from a provider that is neither failed nor blocked, including one
+  that published in an earlier run; a dependent with one **proceeds**, its manifests reconciled to what its providers
+  have published (§19.5), and what the failed provider owed it stays owed (§13.4a) and arrives as a catch-up when that
+  provider publishes. A package whose every cause is a contribution still owed by a package that failed or was blocked
+  in this run is not attempted either, whatever the kind of the edges between them, and is marked `W194` too: publishing
+  it would deliver nothing, and over an edge kind outside `publish.blockingKinds` it would otherwise be republished with
+  nothing new on every run its provider keeps failing;
+* continue publishing packages that are not blocked: an unrelated subtree has no reason to be punished for another's
+  failure;
+* not release a package at the baseline commit of a consumer it still owes (§13.4a) unless that consumer is in the plan
   and is published after it in this run. Two releases on one commit cannot be ordered afterwards, so a consumer that sat
   the run out, held, deselected or excluded by any other means, would read as served and stay on the old version with
   nothing left to detect it. Such a run is refused with `E201` before any publication, naming the pair; the remedy is to
@@ -5356,19 +5376,20 @@ run and `ui` does not.
 | `build`    | `build`     | `core`'s build before `app`'s                        |
 | `build`    | `none`      | none: `ui`'s build reads nothing of `core`           |
 | `none`     | `build`     | none: `app`'s build reads nothing of `ui`            |
+| `publish`  | `build`     | `core`'s publication before `app`'s build: the value on `app`'s own edge governs |
 
 → In every row `core` publishes before `app` (§19.2, vector 80a). Adding build edges only between a package and its
 direct providers in the plan loses the first row, exactly as inducing the publish graph on the plan loses vector 80a.
 
 **Vector 80d**: a consumer proceeds past its failed provider. One commit `C1` carries two units, `feat(core)^: x` and
 `feat(cli): y`; `cli` consumes `core`. Run 1: `core@1.5.0` fails to publish; `cli` has a cause of its own and
-**proceeds** at its planned `2.1.0`, its manifest naming `core`'s baseline `1.4.0`, and is tagged at `HEAD`.
+**proceeds** at its planned `2.1.0`, its manifest naming `core`'s baseline `1.4.2`, and is tagged at `HEAD`.
 
 → Run 2 plans `core@1.5.0` and, because `core` has not delivered `C1` to `cli` (§13.4a), `cli@2.1.1` as a propagated
 release ordered after `core` and blocked if `core` fails again; it is a catch-up (`W193`) only when `core` published in
 a run `cli` sat out. Once both are tagged, `cli`'s baseline reaches `core`'s release carrying `C1` and nothing is owed.
 Two implementations fail here: one that never plans `cli` again because it released past `C1`, leaving it on
-`core@1.4.0` for ever with no diagnostic; and one that let `cli` publish in run 1 naming `core@1.5.0`, a version that
+`core@1.4.2` for ever with no diagnostic; and one that let `cli` publish in run 1 naming `core@1.5.0`, a version that
 did not exist. Two more cases: run 2 at `cli`'s own release commit with `cli` held or left out of the run is refused
 with `E201` before `core` publishes, because after both tags sat on one commit nothing could tell that `cli` came first;
 and `core` published at a later commit in a run `cli` sat out leaves `C1` in `cli`'s owed window (§13.3), so the next
@@ -5413,9 +5434,9 @@ vector 82 this pins the boundary exactly at `discharged(P, C)`.
 → `cli` receives `patch` (from `C1`, which `core` published) and **not** `minor` from `C3`, which it has not. One
 package, one hold, two opposite answers, decided per unit by whether `core` released it.
 
-**Vector 82c**: a consumer gets ahead of a held provider. `C1`: `feat(core)^: x`; `C2`: `release(core)` +
-`Release-As: none`; `C3`: `fix(cli): y`. Run 1 releases `cli@2.0.1` on its own cause, `core` held, `cli`'s manifest
-naming `core@1.4.0`. `C4`: `release(core)` + `Release-As: auto`.
+**Vector 82b1**: a consumer gets ahead of a held provider. `C1`: `feat(core)^: x`; `C2`: `release(core)` + `Release-As:
+none`; `C3`: `fix(cli): y`. Run 1 releases `cli@2.0.1` on its own cause, `core` held, `cli`'s manifest naming
+`core@1.4.2`. `C4`: `release(core)` + `Release-As: auto`.
 
 → Run 2 releases `core@1.5.0` and `cli@2.0.2` as a catch-up: `core` never delivered `C1` to `cli`, so `cli`'s release
 past `C1` discharged nothing. Together with vector 82b this pins delivery on both sides of a hold: a held source

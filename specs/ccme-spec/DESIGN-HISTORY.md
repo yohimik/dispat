@@ -98,37 +98,38 @@ against that node plus a second, slower one; and the single-node m68k_nommu figu
 contention on two of its cells, the same five cells having measured 128.17 s outside the engine. What the pairs show is
 the placement of independent cells on a second node, which is all these groups have to distribute; they do not exercise
 the transfer of dependent outputs that section 28.7 names as the profile's required gain. That fixture is the LLVM pair,
-measured on 2026-09-23 on the fork yohimik/llvm-project, branch dispat-gce at 6c1a5fcd, recipe .ci/dispat/build.py with
-LLVM_FAST=1, LLVM_SKIP_CHECKS=1, 14 build jobs, 2 link jobs and an uncompressed bundle, five packages from 24.0.0 to
-24.1.0: llvm for X86 and llvm-aarch64 from the same sources, lld and polly consuming llvm's outputs, and a bundle of the
-three X86 trees built on the orchestrator with no declared outputs; Ubuntu 24.04.5, g++ 13.3.0, cmake 3.28.3, ninja
-1.11.1, dispat 1.11.0-rc.4+main.272772cb. One repetition each, by GNU time from invocation to exit: on one n2-custom-14
-node alone (7 cores, two build slots) 41 min 12 s, the two heavy builds sharing the node for about 39 min, lld and polly
-2 min 16 s, the bundle 18 s; on an e2-standard-4 orchestrator with two such workers, the mailbox being the
-orchestrator's bare origin, 27 min 49 s: llvm in 22 min 8 s on one worker and llvm-aarch64 in 23 min 22 s on the other,
-each including its result push, then lld in 1 min 47 s and polly in 2 min 13 s on the opposite workers once llvm's
-outputs had reached them, and the bundle in 32 s on the orchestrator. Sources were warm on every node and outputs cold
-on both sides. llvm's declared outputs, 1.4 GB in 2647 files, were pushed once and fetched by two consumers and the
-orchestrator, llvm-aarch64's about the same, lld's 420 MB and polly's 22 MB likewise; the bundle's 1.85 GB never
-travelled. The bundle step verified every provider's receipt against the installed tree, so the transported bytes are
-what the workers built, and the two sides' products differ only in what the recipe embeds about its checkout: the
-compiled-in revision and the build-id derived from it, the repository string, and RPATH and source paths; libLLVMCore.a,
-which embeds none of these, is byte-identical, and byte identity throughout needs LLVM_APPEND_VC_REV off, a file prefix
-map and a relative RPATH, which this recipe does not set. What the pair shows is the profile's required mechanism at
-work on a real dependent graph: lld and polly consumed llvm's outputs on nodes that never built llvm. It is one
-repetition per side, so variability is unmeasured; the distributed side had two build nodes against one; and the two
-heavy builds are one project for two targets, a fair matrix but not two projects. The seven other attempts were no
-measurement: two failed on the fork's fingerprint of umask-dependent modes, since corrected to the executable bit and
-link targets; one planned from the initial versions because the clone lacked its tags; one was interrupted by a fixture
-change; one failed its bundle on an orchestrator without a C++ compiler; one failed its bundle on a transport defect,
-captured outputs passing through Git's text conversion, which rewrote CRLF pairs inside three libraries, fixed on
-dispat's main at 9f649f88 by hashing and indexing captured outputs with no filter; and one is the negative case section
-28.7 predicts: a fixture of one heavy package with two small consumers took 26 min 47 s distributed against 20 min 16 s
-on one node, because moving a 1.4 GB install tree to consumers that build in two minutes cannot pay for itself. No
-speedup of the profile or of the engine is claimed beyond what these pairs measured. Sections 28.1, 28.2, 28.4, 28.5,
-28.6, 28.8 and 28.9 gained the rules this implementation showed to be missing: local execution captured like a worker's,
-unclaimed work outside capacity, an unreadable tip not counted as seen, outermost-first materialization, the phase a
-cancelled attempt stopped in, revocation limited to unadmitted branches, and the summary shape of a prepared provider.
+measured on 2026-09-22 on the fork yohimik/llvm-project, branch dispat-gce at d8fb8408 (the same tree as the
+orchestrator's 6c1a5fcd, whose revision the single-node products embed), recipe .ci/dispat/build.py with LLVM_FAST=1,
+LLVM_SKIP_CHECKS=1, 14 build jobs, 2 link jobs and an uncompressed bundle, five packages from 24.0.0 to 24.1.0: llvm for
+X86 and llvm-aarch64 from the same sources, lld and polly consuming llvm's outputs, and a bundle of the three X86 trees
+built on the orchestrator with no declared outputs; Ubuntu 24.04.5, g++ 13.3.0, cmake 3.28.3, ninja 1.11.1, dispat
+1.11.0-rc.4+main.272772cb. One repetition each, by GNU time from invocation to exit: on one n2-custom-14 node alone (7
+cores, two build slots) 41 min 12 s, the two heavy builds sharing the node for about 39 min, lld and polly 2 min 16 s,
+the bundle 18 s; on an e2-standard-4 orchestrator with two such workers, the mailbox being the orchestrator's bare
+origin, 27 min 49 s: llvm in 22 min 8 s on one worker and llvm-aarch64 in 23 min 22 s on the other, each including its
+result push, then lld in 1 min 47 s and polly in 2 min 13 s on the opposite workers once llvm's outputs had reached
+them, and the bundle in 32 s on the orchestrator. Sources were warm on every node and outputs cold on both sides. llvm's
+declared outputs, 1.4 GB in 2647 files, were pushed once and fetched by two consumers and the orchestrator,
+llvm-aarch64's about the same, lld's 420 MB and polly's 22 MB likewise; the bundle's 1.85 GB never travelled. The bundle
+step verified every provider's receipt against the installed tree, so the transported bytes are what the workers built,
+and the two sides' products differ only in what the recipe embeds about its checkout: the compiled-in revision and the
+build-id derived from it, the repository string, and RPATH and source paths; libLLVMCore.a, which embeds none of these,
+is byte-identical, and byte identity throughout needs LLVM_APPEND_VC_REV off, a file prefix map and a relative RPATH,
+which this recipe does not set. What the pair shows is the profile's required mechanism at work on a real dependent
+graph: lld and polly consumed llvm's outputs on nodes that never built llvm. It is one repetition per side, so
+variability is unmeasured; the distributed side had two build nodes against one; and the two heavy builds are one
+project for two targets, a fair matrix but not two projects. The seven other attempts were no measurement: two failed on
+the fork's fingerprint of umask-dependent modes, since corrected to the executable bit and link targets; one planned
+from the initial versions because the clone lacked its tags; one was interrupted by a fixture change; one failed its
+bundle on an orchestrator without a C++ compiler; one failed its bundle on a transport defect, captured outputs passing
+through Git's text conversion, which rewrote CRLF pairs inside three libraries, fixed on dispat's main at 9f649f88 by
+hashing and indexing captured outputs with no filter; and one is the negative case section 28.7 predicts: a fixture of
+one heavy package with two small consumers took 26 min 47 s distributed against 20 min 16 s on one node, because moving
+a 1.4 GB install tree to consumers that build in two minutes cannot pay for itself. No speedup of the profile or of the
+engine is claimed beyond what these pairs measured. Sections 28.1, 28.2, 28.4, 28.5, 28.6, 28.8 and 28.9 gained the
+rules this implementation showed to be missing: local execution captured like a worker's, unclaimed work outside
+capacity, an unreadable tip not counted as seen, outermost-first materialization, the phase a cancelled attempt stopped
+in, revocation limited to unadmitted branches, and the summary shape of a prepared provider.
 
 
 ## 2026-09-22: Delivery discharges a propagated contribution
@@ -141,12 +142,18 @@ target has released at or after a release of that source carrying the commit. Ev
 admitted; the only new admissions are targets that released past a commit before their source did, on a cause of their
 own or while the source was held, and those now receive the release as an ordinary catch-up. The channel axis keeps the
 window test. Section 19.5 reconciles a proceeding consumer to what its providers have published, never to a planned
-version that did not publish. Vectors 80b, 80d and 82c pin the rule; sections 9.2, 13.7a, 13.7b and 13.7c are restated
+version that did not publish. Vectors 80b, 80d and 82b1 pin the rule; sections 9.2, 13.7a, 13.7b and 13.7c are restated
 in its terms. Plans change only in histories where a consumer got ahead of a provider, where the former rule lost a
 release the guarantees of section 13.7c promised. The rule was completed the same day from the implementation: a window
 per consumer over what its provider released after the consumer last saw it keeps the debt visible once the provider has
 released (section 13.3), and a provider is released at the baseline commit of a consumer it still owes only in a run
 that releases the consumer after it, `E201` otherwise (section 19.3), because two releases on one commit have no order.
-The dispat engine implements the delivery admission and the reconciliation of a proceeding consumer; the owed windows
-and `E201` are not yet implemented, and a consumer that sits out the run in which its provider releases the owed commit
-is therefore still stranded in that engine, which its release notes list as a departure.
+A review of the text on 2026-09-23 against a technical report closed six more gaps: the owed window is taken per
+reachable pair and is the whole history for a consumer older than its provider's first release; a source owes only
+targets that depend on it within the unit's depth, in section 9.2 and the audit of section 13.7b alike; a consumer whose
+every cause is owed by a provider that failed in the run is not republished, whatever the edge kind; an exact
+`Release-As` is a cause of its own; G6 counts one catch-up per proceeded consumer; and the stable branch of section 13.9
+takes a graduation's version from section 11.5. The dispat engine implements the delivery admission and the
+reconciliation of a proceeding consumer; the owed windows and `E201` are not yet implemented, and a consumer that sits
+out the run in which its provider releases the owed commit is therefore still stranded in that engine, which its release
+notes list as a departure.
