@@ -1527,6 +1527,12 @@ func TestPolyrepoIdenticalObjectIDsAndTagNamesStayIsolated(t *testing.T) {
 // consumers the valid repository-local tag v1.0.0 at different control
 // checkpoints. Their provider snapshots differ, so checkpoint lookup must be
 // qualified by consumer ownership rather than collapsing the raw tag text.
+//
+// The provider *releases* its breaking change before the second consumer's
+// checkpoint, which is what makes that consumer square with it. A checkpoint
+// observing an unreleased provider commit would leave the consumer owed the
+// bump all the same (§13.4a): what discharges a propagated contribution is a
+// release of the provider carrying it, not a snapshot of its working history.
 func TestPolyrepoSameTagSpellingKeepsCheckpointOwnersSeparate(t *testing.T) {
 	provider := harness.New(t)
 	provider.SeedPackage("packages", "p")
@@ -1564,6 +1570,7 @@ func TestPolyrepoSameTagSpellingKeepsCheckpointOwnersSeparate(t *testing.T) {
 
 	control.WriteFile("sources/provider/packages/p/break.txt", "breaking\n")
 	commitPolyrepoSource(t, control, "sources/provider", "feat(p)^major!: breaking provider release")
+	control.Git("-C", "sources/provider", "tag", "-a", "p@2.0.0", "-m", "breaking provider release")
 	checkpointPolyrepoSource(t, control, "sources/provider")
 
 	control.WriteFile("sources/second/packages/b/release.txt", "second\n")
