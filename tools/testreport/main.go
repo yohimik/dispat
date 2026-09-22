@@ -15,7 +15,7 @@ import (
 )
 
 const usage = `usage:
-  testreport test  <log-name> -- <go test args...>              run go test -json, keep the log, print a summary
+  testreport test  <log-name> [--shards N] -- <go test args...> run go test -json, keep the log, print a summary
   testreport bench <log-name> -- <go test args...>              run go test -bench -json, keep the stream, summarise it
   testreport build  [-coverage dir] [-out file] [-commit sha] [-keep file] [-modules file]
                     [-experiments dir]                          build the report from a full test run

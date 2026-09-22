@@ -13,9 +13,13 @@ documentation site. That means every figure on the [coverage](https://dispat.dev
 
 Five verbs:
 
-- `testreport test <log-name> -- <go test args...>` runs `go test -json`, stores the raw log under `coverage/testlog/`,
-  prints a human-readable summary, and exits with the test run's own status. Every package's `tests` script in the
-  workspace calls it, sending each suite's run to the site's test results page.
+- `testreport test <log-name> [--shards N] -- <go test args...>` runs `go test -json`, stores the raw log under
+  `coverage/testlog/`, prints a human-readable summary, and exits with the test run's own status. Every package's
+  `tests` script in the workspace calls it, sending each suite's run to the site's test results page. `--shards N`
+  splits the run over N concurrent `go test` processes: it lists the tests with the same arguments, deals the names
+  round robin, gives each share its own `-run`, and keeps the one log, summary and exit status a single process would
+  have produced. A `-coverprofile` is written per shard and merged into the file it names; a flag that selects tests
+  or names another output file is refused. The integration gate runs both of its passes this way.
 - `testreport bench <log-name> -- <go test args...>` runs `go test -bench -json`, stores the stream under
   `coverage/benchlog/`, and summarises what it measured. Benchmarks run in a pass of their own so that a measurement is
   never taken on a machine busy running tests, and so that a benchmark is never tallied as one.
