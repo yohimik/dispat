@@ -24,12 +24,10 @@ package execution
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"time"
 
-	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
@@ -320,7 +318,7 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 	authorized, err := c.advance(ctx, lease.Node, offer.branch, reply.commit, MessageGo,
 		c.formatGo(reply, lease.Node, offer.branch))
 	if err != nil {
-		return c.reportLostAuthorization(lease, task, attempt, repository, err)
+		return c.reportLostAuthorization(ctx, lease, task, attempt, repository, offer, reply, err)
 	}
 	c.recordOwnedRef(lease.Node, offer.branch, authorized)
 	// The authorization is what a withdrawal of a running publisher is leased
@@ -336,24 +334,47 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 // write means, and it is the one place the mark set before the push earns its
 // keep.
 //
-// A lease the remote refused is unambiguous: the branch does not carry the
-// authorization, so no node can have acted on it, and the attempt is an
-// ordinary abandoned one. Anything else is a push whose answer never came
-// back, and a node may have read the authorization the response was lost for.
-// §28.6 allows nothing to be inferred from that silence, so it is the unknown
-// outcome with everything that follows from it.
-func (c *Coordinator) reportLostAuthorization(lease *Lease, task string, attempt int,
-	repository string, err error) error {
-	if errors.Is(err, gitx.ErrLeaseRejected) {
-		lease.Leak(LeakTransport)
+// The question is not whether the push returned an error. It is whether the
+// authorization could have reached the node, and the branch is what answers
+// that: a branch still carrying the ready commit carries no authorization, so
+// no publisher can have acted on one and the attempt is an ordinary abandoned
+// one. A branch that has moved to something else, or that cannot be read at
+// all, is the case the mark exists for: a push whose answer never came back
+// may well have applied, §28.6 allows nothing to be inferred from the
+// silence, and the outcome is unknown with everything that follows from it.
+func (c *Coordinator) reportLostAuthorization(ctx context.Context, lease *Lease, task string,
+	attempt int, repository string, offer taskOffer, reply taskReply, err error) error {
+	lease.Leak(LeakTransport)
+	if !c.isAuthorizationReachable(ctx, lease.Node, offer.branch, reply.commit) {
 		return c.refuseTask(task, lease.Node, attempt, err)
 	}
-	lease.Leak(LeakTransport)
 	c.Log.Error().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Int("attempt", attempt).Str("code", CodePublicationUnknown).
 		Str("category", CategoryPublicationUnknown).
 		Msg("the publication authorization could not be written and may still have reached the node")
 	return c.reportUnknownPublication(task, attempt, lease.Node, repository, cancellation{})
+}
+
+// isAuthorizationReachable reports whether an authorization this run failed to
+// write could nonetheless be on the branch.
+//
+// A lease the remote refused and a push that never left this machine both
+// leave the branch where it was, and the ready commit still being the tip is
+// the proof of that. Anything else, including a read that fails, is answered
+// yes: the safe answer to "might a node have been told to publish" is the one
+// that withholds a second attempt rather than the one that assumes nothing
+// happened.
+func (c *Coordinator) isAuthorizationReachable(ctx context.Context, node, branch, ready string) bool {
+	head, err := c.mailboxes[node].Reread(ctx, branch)
+	if err != nil {
+		return true
+	}
+	if head.OID == "" {
+		// The branch is gone, so nothing can be read from it and nothing can
+		// be pushed onto it: no publisher was authorized on this attempt.
+		return false
+	}
+	return head.OID != ready
 }
 
 // formatGo is the authorization document: the work it belongs to, the exact

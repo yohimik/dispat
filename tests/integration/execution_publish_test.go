@@ -677,6 +677,24 @@ func TestExecutionPublishExportsReachTheRecorders(t *testing.T) {
 	stopAll(t, workers)
 }
 
+// executionReleaseTags are the tags a run created as records of a release,
+// which is every tag except the exclusion itself.
+//
+// The release lock is a tag and is deliberately not a record: a run that
+// authorized a publication it cannot account for leaves that exclusion behind
+// for an operator (§28.6), so a scenario asserting that nothing was recorded
+// has to be asking about records rather than about refs.
+func executionReleaseTags(rig *executionRig) []string {
+	var records []string
+	for _, tag := range rig.repo.TagList() {
+		if strings.HasPrefix(tag, "dispat-release-lock") {
+			continue
+		}
+		records = append(records, tag)
+	}
+	return records
+}
+
 // executionGitHubTokenEnv is the variable the fixture's GitHub recorder reads
 // its token from, in the suite's own namespace.
 const executionGitHubTokenEnv = "DISPAT_IT_EXECUTION_GH_TOKEN"
@@ -720,7 +738,7 @@ func TestExecutionPublishHandshakeGitFaults(t *testing.T) {
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
-			assert.Empty(t, rig.repo.TagList(), "nothing was recorded")
+			assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
 			assert.Empty(t, executionProbeValues(rig, "publish"),
 				"and no publish command ran anywhere: %v", rig.runs())
 			stopAll(t, []*executionWorker{worker})
