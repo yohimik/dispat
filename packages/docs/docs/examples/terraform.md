@@ -80,7 +80,9 @@ packages:
     flow: {build: tf-plan, publish: tf-apply}
 ```
 
-The three builds may now run at once, and both deploys still wait for the apply. Nothing else about the run changes: the plan, the versions and the publication order are the same, and a failed apply still stops both deployments. Use `none` only for a relation that is genuinely a deploy order. A consumer whose lock file or build resolves the provider from a registry needs `publish`; one that reads the provider's local build output needs `build`. dispat cannot check the claim, so it never infers `none` and never makes it a default.
+The three builds may now run at once, and both deploys still wait for the apply. Nothing else about the run changes: the plan, the versions and the publication order are the same, and a failed apply still stops a deployment that
+has nothing of its own to release. An application with a change of its own still deploys after a failed apply, as
+it does under the default; write `isBlocking: true` on `infra` to stop every deployment behind a failed apply. Use `none` only for a relation that is genuinely a deploy order. A consumer whose lock file or build resolves the provider from a registry needs `publish`; one that reads the provider's local build output needs `build`. dispat cannot check the claim, so it never infers `none` and never makes it a default.
 
 The relation fixes what happens before what, not how long a run takes. Take the three packages with build and publish stages of 4 and 6 minutes for the infrastructure, 9 and 3 for the backend, and 12 and 2 for the frontend, with the frontend consuming both:
 

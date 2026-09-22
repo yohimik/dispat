@@ -168,20 +168,22 @@ func TestPublishOrderBlocksAConsumerBehindAReachedProvider(t *testing.T) {
 		result       *Result
 		hasOwnReason bool
 		isSkipped    bool
+		isBlocking   bool
 	}{
 		"a failed provider skips a consumer with nothing of its own": {
-			models.StageWaitBuild, &Result{Status: StatusFailed}, false, true},
+			models.StageWaitBuild, &Result{Status: StatusFailed}, false, true, false},
 		"a build relation leaves the consumer's own reason standing": {
-			models.StageWaitBuild, &Result{Status: StatusFailed}, true, false},
+			models.StageWaitBuild, &Result{Status: StatusFailed}, true, false, false},
 		"a blocking relation outranks that reason": {
-			models.StageWaitNone, &Result{Status: StatusFailed}, true, true},
+			models.StageWaitNone, &Result{Status: StatusFailed}, true, true, true},
 		"a skipped provider blocks as a failed one does": {
-			models.StageWaitBuild, &Result{Status: StatusSkipped}, false, true},
+			models.StageWaitBuild, &Result{Status: StatusSkipped}, false, true, false},
 		"incomplete records outrank every relation": {
-			models.StageWaitBuild, &Result{Status: StatusPublished, RecordBlocked: true}, true, true},
+			models.StageWaitBuild, &Result{Status: StatusPublished, RecordBlocked: true}, true, true, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := mkPublishOrderPlan(models.StageWaitBuild, c.relation)
+			p.Releases["core"].Pkg.Space.ProviderRelation.IsBlocking = c.isBlocking
 			app := p.Releases["app"]
 			if !c.hasOwnReason {
 				app.OwnBump, app.Units, app.FreshUnits = ccme.BumpNone, nil, nil

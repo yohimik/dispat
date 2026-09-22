@@ -63,9 +63,9 @@ func TestStageRelationNearestLevelWins(t *testing.T) {
 	for name, want := range map[string]model.StageRelation{
 		// The root's `true` reaches the space that states nothing.
 		"app": {Build: models.StageWaitPublish, IsBlocking: true},
-		// The space entry replaces it, and `none` blocks by default even
-		// though the relation it replaced stated nothing about blocking.
-		"core": {Build: models.StageWaitNone, IsBlocking: true},
+		// The space entry replaces it whole, blocking included: `none`
+		// does not block unless the entry says so.
+		"core": {Build: models.StageWaitNone, IsBlocking: false},
 		// A package entry replaces the space's.
 		"utils": {Build: models.StageWaitBuild, IsBlocking: false},
 		// And the package's own folder file replaces that again.

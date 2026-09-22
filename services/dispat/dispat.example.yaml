@@ -158,8 +158,8 @@ spaces:
     # consumer may build beside it; what must still follow is the deployment,
     # and a consumer's publish waits for the provider's publish under all
     # three. `isBlocking` says whether a package of this space that failed
-    # skips its consumers even when they have work of their own: true by
-    # default under `none` and `publish`, false under `build`.
+    # skips its consumers even when they have work of their own: false unless
+    # stated, and always true under `publish`.
     isBuildWaitingPublish:
       build: none
     flow:

@@ -159,9 +159,9 @@ type StageRelation struct {
 
 // NewStageRelation resolves a configured relation onto the two values every
 // reader asks about. It is the one place an unstated isBlocking is filled in
-// with what its wait implies, so no reader downstream has to know that `none`
-// and `publish` block where `build` does not. Nil-safe: a ladder nobody wrote
-// the key on resolves to the default relation.
+// with what its wait implies, so no reader downstream has to know that only
+// `publish` blocks unasked. Nil-safe: a ladder nobody wrote the key on
+// resolves to the default relation.
 func NewStageRelation(configured *public.StageRelation) StageRelation {
 	return StageRelation{
 		Build:      configured.ResolveBuildWait(),

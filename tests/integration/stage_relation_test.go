@@ -192,13 +192,15 @@ func stageRelationFailingRepo(t *testing.T, relation *models.StageRelation) *har
 	return r
 }
 
-// TestStageRelationBlockingSkipsAConsumerWithItsOwnChanges: a relation that
-// declares nothing is read during the build still declares that the
-// publications follow, so a provider that never published leaves its consumers
-// nothing to follow and skips them whatever work they carry. That is the
-// default for `none`, and the one thing a configuration may relax.
+// TestStageRelationBlockingSkipsAConsumerWithItsOwnChanges: a consumer with
+// work of its own proceeds past a provider that never published, under `none`
+// as under the key's `false`, because its own work is what it publishes. A
+// configuration that states `isBlocking: true` asks for the opposite: the
+// provider's failure skips every consumer whatever work it carries, its
+// finished build rolled back and its onSkip script run.
 func TestStageRelationBlockingSkipsAConsumerWithItsOwnChanges(t *testing.T) {
-	blocked := stageRelationFailingRepo(t, &models.StageRelation{Build: models.StageWaitNone})
+	blocked := stageRelationFailingRepo(t,
+		&models.StageRelation{Build: models.StageWaitNone, IsBlocking: models.Bool(true)})
 	res := blocked.Release()
 	require.Equal(t, 1, res.Code, "the infrastructure publish fails the run\nstdout:\n%s", res.Stdout)
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "frontend"),
@@ -209,11 +211,10 @@ func TestStageRelationBlockingSkipsAConsumerWithItsOwnChanges(t *testing.T) {
 	assert.NoFileExists(t, blocked.Path("packages", "apps", "frontend", "built.marker"),
 		"revertOnFail rolled the finished build back out of the folder")
 
-	// Relaxed, the consumer releases its own work exactly as it does under the
-	// key's `false`: nothing of the provider reached its build, and its own
-	// bump is a reason the failure cannot invalidate.
-	released := stageRelationFailingRepo(t,
-		&models.StageRelation{Build: models.StageWaitNone, IsBlocking: models.Bool(false)})
+	// Unstated, the consumer releases its own work exactly as it does under
+	// the key's `false`: nothing of the provider reached its build, and its
+	// own bump is a reason the failure cannot invalidate.
+	released := stageRelationFailingRepo(t, &models.StageRelation{Build: models.StageWaitNone})
 	res = released.Release()
 	require.Equal(t, 1, res.Code, "the infrastructure still fails the run\nstdout:\n%s", res.Stdout)
 	assert.False(t, harness.IsCodePresent(res.Events, "W194"),
@@ -326,7 +327,7 @@ func TestStageRelationLadder(t *testing.T) {
 		isBlocking bool
 	}{
 		"app":   {"publish", true},
-		"core":  {"none", true},
+		"core":  {"none", false},
 		"utils": {"", false},
 		"tool":  {"build", true},
 	} {

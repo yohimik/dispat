@@ -100,15 +100,17 @@ func (r *StageRelation) ResolveBuildWait() StageWait {
 }
 
 // IsProviderBlocking reports whether a provider under this relation skips its
-// consumers unconditionally when it failed or was skipped. Nil-safe, and an
-// unstated value follows the wait: only `build` leaves a consumer's own
-// release reason standing, because only there is the consumer's own publish
-// not the thing that was supposed to follow the provider's.
+// consumers unconditionally when it failed or was skipped. Nil-safe. Unstated,
+// it is false under `none` and `build`: a consumer with a release reason of its
+// own proceeds, because its own work is what it publishes. Under `publish` it
+// is true, because the consumer's build takes the provider's publish as its
+// input and no work of the consumer's own can substitute for an input that
+// never existed.
 func (r *StageRelation) IsProviderBlocking() bool {
 	if r != nil && r.IsBlocking != nil {
 		return *r.IsBlocking
 	}
-	return r.ResolveBuildWait() != StageWaitBuild
+	return r.ResolveBuildWait() == StageWaitPublish
 }
 
 // MarshalJSON writes the shortest shape that carries the whole relation: the
@@ -131,7 +133,7 @@ func (r StageRelation) canonical() any {
 		return true
 	}
 	out := map[string]any{"build": string(wait)}
-	if isBlocking != (wait != StageWaitBuild) {
+	if isBlocking != (wait == StageWaitPublish) {
 		out["isBlocking"] = isBlocking
 	}
 	return out

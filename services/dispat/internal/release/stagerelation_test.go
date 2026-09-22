@@ -219,8 +219,8 @@ func TestStageRelationBlockingOutranksOwnWork(t *testing.T) {
 		isBlocking *bool
 		isSkipped  bool
 	}{
-		"none blocks by default":            {models.StageWaitNone, nil, true},
-		"none may be relaxed":               {models.StageWaitNone, models.Bool(false), false},
+		"none leaves the reason standing":   {models.StageWaitNone, nil, false},
+		"none may be asked to block":        {models.StageWaitNone, models.Bool(true), true},
 		"build leaves the reason standing":  {models.StageWaitBuild, nil, false},
 		"build may be asked to block":       {models.StageWaitBuild, models.Bool(true), true},
 		"publish blocks":                    {models.StageWaitPublish, nil, true},
@@ -273,7 +273,7 @@ func TestStageRelationSkipReasonNamesWhatFailed(t *testing.T) {
 			model.NewStageRelation(models.StageRelationOf(true)), false,
 			"this package's build takes its publish as input"},
 		"a blocking relation names the publication order": {
-			model.NewStageRelation(&models.StageRelation{Build: models.StageWaitNone}), false,
+			model.NewStageRelation(&models.StageRelation{Build: models.StageWaitNone, IsBlocking: models.Bool(true)}), false,
 			"its consumers publish only after it published"},
 		"a build relation names the missing reason": {
 			model.NewStageRelation(models.StageRelationOf(false)), false,

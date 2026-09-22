@@ -25,8 +25,8 @@ func TestPublicAPIModelStageRelationShapes(t *testing.T) {
 			{*models.StageRelationOf(true), `true`},
 			{models.StageRelation{Build: models.StageWaitBuild, IsBlocking: models.Bool(false)}, `false`},
 			{models.StageRelation{Build: models.StageWaitNone}, `{"build":"none"}`},
-			{models.StageRelation{Build: models.StageWaitNone, IsBlocking: models.Bool(false)},
-				`{"build":"none","isBlocking":false}`},
+			{models.StageRelation{Build: models.StageWaitNone, IsBlocking: models.Bool(true)},
+				`{"build":"none","isBlocking":true}`},
 			{models.StageRelation{Build: models.StageWaitBuild, IsBlocking: models.Bool(true)},
 				`{"build":"build","isBlocking":true}`},
 		} {
@@ -55,7 +55,7 @@ func TestPublicAPIModelStageRelationShapes(t *testing.T) {
 			{`{"build": "build"}`, models.StageWaitBuild, false},
 			{`true`, models.StageWaitPublish, true},
 			{`{"build": "publish"}`, models.StageWaitPublish, true},
-			{`{"build": "none"}`, models.StageWaitNone, true},
+			{`{"build": "none"}`, models.StageWaitNone, false},
 			{`{"BUILD": "none", "ISBLOCKING": false}`, models.StageWaitNone, false},
 		} {
 			var relation models.StageRelation

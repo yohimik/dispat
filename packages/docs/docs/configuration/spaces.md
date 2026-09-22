@@ -162,7 +162,7 @@ spaces:
     path: infra
     isBuildWaitingPublish:
       build: none        # none | build | publish
-      isBlocking: true   # optional; see the defaults below
+      isBlocking: true   # optional; false unless stated, see below
 ```
 
 `build` says what a consumer's version and build stages wait for. It is required in the object form and matched
@@ -190,11 +190,11 @@ Choose the relation by what the consumer's build actually reads:
 `none` is a declaration dispat cannot check. It is never inferred and is never a default: a consumer whose build in
 fact reads the provider and says otherwise will build against whatever was there before.
 
-`isBlocking` defaults to `true` under `none` and `publish` and to `false` under `build`. Under `publish` it may not be
-written any other way, because the consumer's build takes the provider's publish as input and no work of the
-consumer's own can substitute for an input that never existed. Under `none` it may be relaxed with
-`isBlocking: false`, which lets a consumer release its own work beside a provider that failed. Relax it only where a
-release of the consumer alone is meaningful.
+A consumer with a release reason of its own proceeds past a provider that failed or was skipped: `isBlocking` is
+`false` unless stated, under `none` as under `build`. Write `isBlocking: true` where a release of the consumer alone is
+never meaningful, and the provider's failure skips every consumer whatever work it carries. Under `publish` it is
+`true` and may not be written any other way, because the consumer's build takes the provider's publish as input and
+no work of the consumer's own can substitute for an input that never existed.
 
 Where a release executes its builds on other machines, the relation travels with the run's resolved configuration and
 a node never states one of its own. A provider whose relation is `none` contributes no build outputs to a consumer's

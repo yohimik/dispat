@@ -49,8 +49,8 @@ func TestStageRelationAcceptsBothForms(t *testing.T) {
 		"the object spelling of false")
 	eqRelation(t, decodeRelation(t, `{"build": "publish"}`), StageWaitPublish, true,
 		"the object spelling of true")
-	eqRelation(t, decodeRelation(t, `{"build": "none"}`), StageWaitNone, true,
-		"none blocks by default: the consumer's publish is what follows the provider's")
+	eqRelation(t, decodeRelation(t, `{"build": "none"}`), StageWaitNone, false,
+		"none does not block by default: a consumer with work of its own proceeds")
 	eqRelation(t, decodeRelation(t, `{"build": "none", "isBlocking": false}`), StageWaitNone, false,
 		"and the block may be relaxed")
 	eqRelation(t, decodeRelation(t, `{"build": "build", "isBlocking": true}`), StageWaitBuild, true,
@@ -74,7 +74,7 @@ func TestStageRelationAcceptsBothForms(t *testing.T) {
 	if err := kept.UnmarshalJSON([]byte(`null`)); err != nil {
 		t.Fatalf("decoding null: %v", err)
 	}
-	eqRelation(t, kept, StageWaitNone, true, "null left the relation alone")
+	eqRelation(t, kept, StageWaitNone, false, "null left the relation alone")
 }
 
 func TestStageRelationWritesTheShortestForm(t *testing.T) {
@@ -88,9 +88,9 @@ func TestStageRelationWritesTheShortestForm(t *testing.T) {
 		{StageRelation{Build: StageWaitBuild, IsBlocking: Bool(false)}, `false`},
 		{StageRelation{Build: StageWaitPublish, IsBlocking: Bool(true)}, `true`},
 		{StageRelation{Build: StageWaitNone}, `{"build":"none"}`},
-		{StageRelation{Build: StageWaitNone, IsBlocking: Bool(true)}, `{"build":"none"}`},
-		{StageRelation{Build: StageWaitNone, IsBlocking: Bool(false)},
-			`{"build":"none","isBlocking":false}`},
+		{StageRelation{Build: StageWaitNone, IsBlocking: Bool(false)}, `{"build":"none"}`},
+		{StageRelation{Build: StageWaitNone, IsBlocking: Bool(true)},
+			`{"build":"none","isBlocking":true}`},
 		{StageRelation{Build: StageWaitBuild, IsBlocking: Bool(true)},
 			`{"build":"build","isBlocking":true}`},
 	} {
