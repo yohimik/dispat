@@ -11,6 +11,10 @@ There is one interval a tag cannot describe: a publish command may succeed and t
 writes its tag. If a run is killed during that interval, inspect that package's registry or destination before you
 retry. dispat does not claim exactly-once delivery across an arbitrary shell command.
 
+Removing a release page or Git tag does not recall artifacts already downloaded or cached by package proxies.
+After an authorized withdrawal, verify each publication destination separately and account for consumers that may
+still have the withdrawn bytes. A removed remote reference alone is not evidence that a publication was undone.
+
 ## Recover an npm publication without a release tag
 
 Treat npm's version and dispat's release tag as separate records. If npm accepts a tarball and the run stops before

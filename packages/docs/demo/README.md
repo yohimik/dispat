@@ -77,6 +77,12 @@ PLAYWRIGHT_RUNTIME=/path/to/node-runtime node packages/docs/demo/playwright-smok
 playback in both themes and capture each slide. They also verify transcript state, control placement, keyboard
 navigation, and reduced motion. `playwright-navigation.mjs` additionally checks delayed and failed scene loads, rapid selection, retries, and the shared sidebar category controls in both themes and current and historical docs. `playwright-anchors.mjs` verifies that page and version navigation clears stale heading anchors while preserving explicit links and browser history. Run both with the same arguments. `playwright-mobile.mjs` checks every portrait scene at three points in its timeline and its paused still. An optional fourth argument names one feature for a focused recheck. `playwright-menu.mjs` checks the mobile overlay height, on-screen clickable links in both menu panels, keyboard close/navigation, and reopening after browser back on landing, current docs, and 1.7 docs at 320, 390, 768, and 996px in both themes. `playwright-resources.mjs` checks silent autoplay, font requests, and audio allocation. `playwright-pages.mjs` checks shared page and code-block widths using `DISPAT_DOCS_URL` and `DISPAT_PAGES_OUTPUT`. `playwright-captions.mjs` checks stable text geometry across all scenes with the transcript open and closed, plus the landing section order. `playwright-stories.mjs` records every complete story at 1× and checks terminal text for horizontal overflow throughout playback.
 
+Browser assertions must check viewport intersection and hit testing for mobile menu links; a visibility-only
+assertion previously missed links clipped outside the viewport. Keep clipping on the outer drawer so translated
+secondary panels remain reachable. When upgrading Docusaurus, review the sidebar category and version-dropdown
+overrides against upstream, including explicit anchors, version-switch query parameters, and browser back/forward
+behavior.
+
 Validate command examples against a built CLI before changing their scenes:
 
 ```sh

@@ -17,6 +17,10 @@ Use small cohesive types, explicit dependencies, and abstractions at the boundar
 
 - Use explicit, descriptive names. The wider a name's scope, the more context its name must carry: package-level and exported names should be more descriptive than names used within a small local block. Avoid unexplained abbreviations and generic names such as `data` or `obj` when a domain name is available.
 - Name variables, parameters, fields, and data types primarily with nouns or noun phrases that describe what they hold or represent, such as `repository`, `packageName`, or `releasePlan`. Use plural nouns for collections, such as `packages`.
+- Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
+- Parameter and component props interfaces follow their specific naming rules below; the capability naming rule applies to behavioral interfaces.
+- Keep types, interfaces, enums, and related declarations in the same folder as the struct, component, context, or module that owns their business logic. For example, a React language context's types belong in that context's folder, even when consumers elsewhere import them. Importing a type from multiple places does not by itself make it global.
+- Put global types and models shared across independent parts of the application, with no specific owning component or module, in a dedicated `types/` or `models/` folder. Use the existing folder for that purpose within the relevant project or package.
 - Reserve `i`, `j`, and `k` for numeric loop counters or indexes, such as `0, 1, 2, 3, ...`. Name iterated values and map keys by their meaning, such as `packageName` or `repository`.
 - Name action functions and methods with verbs, such as `LoadConfig` in Go or `loadConfig` in JavaScript/TypeScript.
 - Name functions after the specific work they perform: `CalculateChecksum`/`calculateChecksum`, `FormatReleaseLabel`/`formatReleaseLabel`, or `ResolveConfig`/`resolveConfig`. Using `Get`/`get` for a calculation, transformation, or decision is an antipattern: `getReleaseLabel` hides that the function formats a label. Reserve `Get`/`get` for retrieving an existing value, such as `getPackageById` fetching a package record from a database.
@@ -34,7 +38,7 @@ Use small cohesive types, explicit dependencies, and abstractions at the boundar
 - Name structs with nouns that describe their responsibility. Use Go's exported and unexported casing conventions.
 - Start constructor names with `New` for exported functions or `new` for unexported functions, such as `NewUser` or `newUser`.
 - Name methods that convert a value to a specific type after the target type, such as `User.Int()` for an integer conversion.
-- Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
+- Keep positional parameter lists short: prefer at most two parameters, and require a separate, descriptively named parameter struct when there are more than three. An optional `context.Context` does not count toward this limit; keep it as the first parameter, outside the struct. Construct parameter structs with named fields so adding a field does not change argument order at call sites.
 - Return errors with the operation and safe context. Preserve wrapped errors with `%w` when callers need to inspect them. Never ignore cleanup errors that could leave a release lock or published state ambiguous.
 - Pass the caller's context through cancellable work. Use a bounded detached context only for documented finalization that must survive cancellation.
 - Format Go with `gofmt`.
@@ -54,6 +58,8 @@ declaration may instead carry `//namingcheck:exempt <reason>` in its own doc com
 ### JavaScript and TypeScript
 
 - Use `const` for every variable declaration, including destructuring and loop bindings. Do not use `let` or `var`.
+- Pass parameters in a single object with named properties, even when there is only one input. Define parameter shapes with named interfaces in TypeScript, rather than type aliases or inline object types. JavaScript uses the same object parameter convention without TypeScript syntax. Adding or reordering properties must not change the meaning of existing arguments. Functions without inputs need no parameter object. Preserve positional signatures required by external callback or library contracts and existing published APIs.
+- Accept the parameter object by name and destructure it with `const` as the first statement in the function body. Define default values for optional inputs in that destructuring declaration. Do not destructure parameters in the function signature. Apply this rule to function declarations, arrow functions, and methods; arrow functions with object parameters must use a block body.
 - When a value depends on branching, extract the decision into a function with early returns and bind its result with `const`. Do not replace reassignment with an object used only as a mutable box.
 - Use `for (const item of items)` or `for (const [index, item] of items.entries())` when iteration needs early `continue` or `break`. Use collection operations such as `map`, `filter`, or `reduce` when they express the transformation clearly.
 - A `const` binding does not make an object or array immutable. Keep any mutation explicit and within the owning component.
@@ -63,7 +69,15 @@ declaration may instead carry `//namingcheck:exempt <reason>` in its own doc com
 For example, calculate a retry delay in a focused function, return directly from each branch, and bind the result with `const`. Name this operation `calculateRetryDelay`, not `getRetryDelay`:
 
 ```ts
-function calculateRetryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+interface RetryDelayOptions {
+  attempt: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+}
+
+function calculateRetryDelay(options: RetryDelayOptions): number {
+  const { attempt, baseDelayMs = 1000, maxDelayMs = 30000 } = options;
+
   if (attempt <= 0) {
     return 0;
   }
@@ -71,7 +85,48 @@ function calculateRetryDelay(attempt: number, baseDelayMs: number, maxDelayMs: n
   return Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
 }
 
-const retryDelayMs = calculateRetryDelay(attempt, baseDelayMs, maxDelayMs);
+const retryDelayMs = calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs });
+```
+
+### TSX components
+
+- Every component must use its exact component name in both props interface names: `Base<ComponentName>Props` and `<ComponentName>Props`. Generic names such as `BaseComponentProps`, `ComponentProps`, or `Props` are not allowed. After imports, declare and export the base interface with every prop except `children`, then declare and export the full props interface extending it and declaring `children`. For `ReleaseSummary`, use `BaseReleaseSummaryProps` and `ReleaseSummaryProps extends BaseReleaseSummaryProps`.
+- Define components only as `const` arrow functions typed as `FC` of their own named props interface, such as `FC<ReleaseSummaryProps>` for `ReleaseSummary`. Import `FC` as a type from React.
+- Accept a `props` object and destructure it with `const` as the first statement in the component body, before reading context or rendering. Define default values for optional props in that destructuring declaration. Do not destructure component props in the function signature.
+- Keep UI components responsible only for rendering props and context values and wiring events to context actions. Do not put business logic, local state, or lifecycle hooks in rendering components: no `useState`, `useReducer`, `useEffect`, or `useLayoutEffect`, including through custom hooks that introduce state or effects.
+- Put all state, business logic, calculations, event handling, data fetching, subscriptions, and lifecycle management in the owning context and its provider. Rendering components may consume context through `useContext` or a context accessor hook; those accessors must only read the context. Context providers own the state and lifecycle hooks and expose the values and actions needed for rendering.
+- When a component accepts children, declare `children?: ReactNode` explicitly in `<ComponentName>Props` and import `ReactNode` as a type. For components that do not support children, declare `children?: never`. Keep `children` out of the base props interface.
+- Keep one component per file. Move additional components into their own files, each with its own exported `Base<ComponentName>Props` and `<ComponentName>Props` interfaces.
+- Use only named exports for components and their props; do not use default exports. Provide `index.ts` files with explicit ES module re-exports for components and `export type` re-exports for props. Keep index files free of side effects and initialization logic so bundlers can tree-shake unused exports. Keep the component-specific props names in index exports to avoid collisions.
+
+```tsx
+import type { FC, ReactNode } from 'react';
+
+export interface BaseReleaseSummaryProps {
+  title: string;
+}
+
+export interface ReleaseSummaryProps extends BaseReleaseSummaryProps {
+  children?: ReactNode;
+}
+
+export const ReleaseSummary: FC<ReleaseSummaryProps> = (props) => {
+  const { title, children = null } = props;
+
+  return (
+    <section>
+      <h2>{title}</h2>
+      {children}
+    </section>
+  );
+};
+```
+
+The component folder's `index.ts` exposes the component and its props:
+
+```ts
+export { ReleaseSummary } from './ReleaseSummary';
+export type { BaseReleaseSummaryProps, ReleaseSummaryProps } from './ReleaseSummary';
 ```
 
 ### Shell and documentation
