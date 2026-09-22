@@ -282,22 +282,12 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 // fail the package with.
 func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome release.StageOutcome,
 	result Result, commit, branch string, request release.StageRequest) (release.StageOutcome, error) {
-	node := result.Node
-	outcome.Exports = formatOutputs(result.Exports)
-	outcome.FailedPart = result.FailedPart
-	if result.StrayWrites > 0 {
-		c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", node).
-			Int("files", result.StrayWrites).Str("code", CodeTransportRetained).
-			Str("category", CategoryTransportCleanup).
-			Msg("the task wrote tracked files outside what it declared, and they are not admitted")
-	}
-	if result.Status != StatusSucceeded {
-		return outcome, c.refuseTask(task, node, fmt.Errorf(
-			"the node reported the %s frame as %s%s (exit %d)",
-			result.Kind, result.Status, formatFailedPart(result), result.Exit))
+	outcome, err := c.readReportedOutcome(task, outcome, result)
+	if err != nil {
+		return outcome, err
 	}
 	if err := c.admitOutputs(ctx, task, producedOutputs{
-		node: node, store: c.dispatch.Store, endpoint: c.endpointOf(node),
+		node: result.Node, store: c.dispatch.Store, endpoint: c.endpointOf(result.Node),
 		branch: branch, commit: commit, manifest: result.Outputs,
 	}, request); err != nil {
 		// A build whose outputs cannot be used is a build that did not
@@ -306,10 +296,43 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, outcome 
 		outcome.FailedPart = release.PartOutputs
 		return outcome, err
 	}
-	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", node).
+	c.reportTaskFinished(task, result, outcome)
+	return outcome, nil
+}
+
+// readReportedOutcome is what every accepted result says about itself,
+// whatever kind of work it answered: the exports it produced, the tracked
+// files it wrote where nobody expected them, and the failure it reports.
+//
+// It is separate from the admission because only one kind of task produces an
+// output set. A publication consumes the bytes a build already produced and
+// describes none of its own, so running it through the admission would be
+// asking a publisher for a second, later version of a set this run has already
+// admitted, and refusing the publication for not having one.
+func (c *Coordinator) readReportedOutcome(task string, outcome release.StageOutcome,
+	result Result) (release.StageOutcome, error) {
+	outcome.Exports = formatOutputs(result.Exports)
+	outcome.FailedPart = result.FailedPart
+	if result.StrayWrites > 0 {
+		c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", result.Node).
+			Int("files", result.StrayWrites).Str("code", CodeTransportRetained).
+			Str("category", CategoryTransportCleanup).
+			Msg("the task wrote tracked files outside what it declared, and they are not admitted")
+	}
+	if result.Status != StatusSucceeded {
+		return outcome, c.refuseTask(task, result.Node, fmt.Errorf(
+			"the node reported the %s frame as %s%s (exit %d)",
+			result.Kind, result.Status, formatFailedPart(result), result.Exit))
+	}
+	return outcome, nil
+}
+
+// reportTaskFinished is the one line a finished task produces: what it was,
+// where it ran and what it produced.
+func (c *Coordinator) reportTaskFinished(task string, result Result, outcome release.StageOutcome) {
+	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", result.Node).
 		Str("status", result.Status).Int("exports", len(outcome.Exports)).
 		Str("os", result.Platform.OS).Str("arch", result.Platform.Arch).Msg("task finished")
-	return outcome, nil
 }
 
 // formatFailedPart names the rule a task broke when it failed at something

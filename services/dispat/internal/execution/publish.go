@@ -200,8 +200,7 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 		case reply := <-offer.replies:
 			if reply.kind == MessageResult {
 				lease.Release()
-				return c.readTaskOutcome(ctx, task, outcome, reply.result, reply.commit,
-					offer.branch, request)
+				return c.readPublicationOutcome(task, outcome, reply.result)
 			}
 			outcome.Exports = formatOutputs(reply.ready.Exports)
 			if err := c.authorizePublication(ctx, lease, task, offer, reply, authorize); err != nil {
@@ -228,6 +227,28 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 	}
 }
 
+// readPublicationOutcome turns one publisher's terminal result into what the
+// executor does with it.
+//
+// It admits nothing, and that is the difference between this and a build. A
+// publication produces an effect on a registry rather than an output set: the
+// bytes it uploaded are the ones this run already admitted from the build, and
+// what comes back is what its scripts exported and whether they succeeded.
+func (c *Coordinator) readPublicationOutcome(task string, outcome release.StageOutcome,
+	result Result) (release.StageOutcome, error) {
+	// The exports of the beforePublish hook arrived with the ready message and
+	// are already on the outcome; the result carries what the publish command
+	// exported, and both belong to the release.
+	hookExports := outcome.Exports
+	outcome, err := c.readReportedOutcome(task, outcome, result)
+	outcome.Exports = append(hookExports, outcome.Exports...)
+	if err != nil {
+		return outcome, err
+	}
+	c.reportTaskFinished(task, result, outcome)
+	return outcome, nil
+}
+
 // authorizePublication revalidates everything the publication rests on and
 // writes the single-use authorization, or withdraws the attempt.
 //
@@ -241,11 +262,14 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 	offer taskOffer, reply taskReply, authorize func(context.Context) error) error {
 	waiting := offer.observer.find(offer.branch)
 	if waiting == nil || waiting.isAuthorized {
-		return c.withdrawPublication(ctx, lease, task, offer, reply,
-			NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: lease.Node, Task: task, Attempt: 1},
-				CodeAuthority, CategoryAuthority,
-				"%s asked to be authorized twice and an authorization is single use: no second effect may start under it",
-				task))
+		// No second withdrawal and no second authorization: an attempt this
+		// run has already answered is an attempt whose effect may already have
+		// happened, and the one thing that must not follow it is another
+		// message telling a node to start.
+		return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: lease.Node, Task: task, Attempt: 1},
+			CodeAuthority, CategoryAuthority,
+			"%s asked to be authorized twice and an authorization is single use: no second effect may start under it",
+			task)
 	}
 	if authorize != nil {
 		if err := authorize(ctx); err != nil {
