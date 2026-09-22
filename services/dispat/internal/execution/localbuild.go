@@ -100,7 +100,7 @@ func (c *Coordinator) admitLocalOutputs(ctx context.Context, task string,
 	}
 	return c.admitOutputs(ctx, task, producedOutputs{
 		node: c.Local.Name, store: owner, commit: commit,
-		manifest: manifest, isInstalledHere: true,
+		manifest: manifest, attempt: manifest.Attempt, isInstalledHere: true,
 	}, request)
 }
 

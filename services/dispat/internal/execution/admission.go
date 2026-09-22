@@ -125,6 +125,11 @@ type producedOutputs struct {
 	branch   string
 	commit   string
 	manifest *OutputManifest
+	// attempt is the attempt of the task that produced the set, which the
+	// manifest is bound to: a task placed again after its assignment queued
+	// unclaimed produces its outputs under its second or third attempt, and a
+	// set held to the first would be refused for being exactly what it is.
+	attempt int
 	// isInstalledHere says the bytes are already where this checkout needs
 	// them, which is true of exactly one producer: this machine.
 	isInstalledHere bool
@@ -147,7 +152,7 @@ func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced pr
 			fmt.Errorf("no build outputs were reported for a package that declares %d", len(roots)))
 	}
 	totals, err := ValidateOutputs(ctx, produced.store, produced.manifest, OutputExpectation{
-		Run: c.Run, PlanDigest: c.PlanDigest, Generation: c.Generation, Task: task, Attempt: 1,
+		Run: c.Run, PlanDigest: c.PlanDigest, Generation: c.Generation, Task: task, Attempt: produced.attempt,
 		Roots: roots, Platforms: request.Release.Pkg.Space.BuildPlatforms, Limits: c.Limits,
 	})
 	if err != nil {

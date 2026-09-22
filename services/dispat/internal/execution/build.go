@@ -433,7 +433,7 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt 
 	}
 	if err := c.admitOutputs(ctx, task, producedOutputs{
 		node: result.Node, store: c.dispatch.Store, endpoint: c.endpointOf(result.Node),
-		branch: branch, commit: commit, manifest: result.Outputs,
+		branch: branch, commit: commit, manifest: result.Outputs, attempt: attempt,
 	}, request); err != nil {
 		// A build whose outputs cannot be used is a build that did not
 		// satisfy its consumers, so the package fails here rather than

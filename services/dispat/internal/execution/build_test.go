@@ -147,3 +147,39 @@ func TestSingleHistoryPackageDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "packages/core", dir)
 }
+
+// TestOutputsOfAPlacedAgainTaskAreAdmittedUnderItsOwnAttempt: a task whose
+// first assignment queued unclaimed is placed again as its second attempt, and
+// the node binds the outputs it captures to that attempt. The orchestrator
+// used to hold every admitted set to attempt 1, so the build that finally ran
+// was refused for carrying its own attempt, and its package failed although
+// nothing about it was wrong.
+func TestOutputsOfAPlacedAgainTaskAreAdmittedUnderItsOwnAttempt(t *testing.T) {
+	fixture := newOutputFixture(t, "packages/core")
+	fixture.write(t, "dist/app.js", "built\n", 0o644)
+	manifest, err := CaptureOutputs(t.Context(), CaptureRequest{
+		Git: fixture.git, Dir: fixture.pkgDir, PackagePath: fixture.pkgPath, Roots: []string{"dist"},
+		Limits: testLimits,
+		Manifest: OutputManifest{Run: "run-1", PlanDigest: "digest", Task: "core:build", Attempt: 2,
+			Generation: "generation", Node: "build-a", Package: "core",
+			Platform: Platform{OS: "linux", Arch: "amd64", Dispat: "test"}},
+	})
+	require.NoError(t, err)
+	coordinator := &Coordinator{Run: "run-1", PlanDigest: "digest", Generation: "generation",
+		Limits: testLimits, outputs: newOutputRegistry()}
+	request := release.StageRequest{Release: &plan.Release{
+		Pkg: &model.Package{Name: "core", Dir: fixture.pkgDir, Space: &model.Space{BuildOutputs: []string{"dist"}}},
+	}}
+
+	err = coordinator.admitOutputs(t.Context(), "core:build", producedOutputs{
+		node: "build-a", store: fixture.git, manifest: manifest, attempt: 2, isInstalledHere: true,
+	}, request)
+
+	require.NoError(t, err, "the set of attempt 2 is admitted as attempt 2's")
+	require.NotNil(t, coordinator.outputs.find("core"))
+	err = coordinator.admitOutputs(t.Context(), "core:build", producedOutputs{
+		node: "build-a", store: fixture.git, manifest: manifest, attempt: 1, isInstalledHere: true,
+	}, request)
+	assert.Equal(t, ReasonOutputIdentity, OutputFaultReason(err),
+		"and a set bound to another attempt than the one that answered is still refused")
+}
