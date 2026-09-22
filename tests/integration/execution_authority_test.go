@@ -74,10 +74,19 @@ func requireExecutionRefusal(t *testing.T, res harness.RunResult, code, category
 
 // executionMailbox is a bare repository standing in for a worker's mailbox.
 // Nothing in this file ever reaches it: that it stays empty is the assertion.
+//
+// Housekeeping is switched off in it. A real mailbox wants repacking, but a
+// mailbox this suite created lives in a folder the test framework removes when
+// the scenario ends, and the repack `git receive-pack` starts after a push
+// detaches: it goes on writing objects into that folder while it is being
+// removed, which fails the scenario for a reason that has nothing to do with
+// what it was about.
 func executionMailbox(t *testing.T) string {
 	t.Helper()
 	bare := t.TempDir()
 	bareGit(t, bare, "init", "-q", "--bare", ".")
+	bareGit(t, bare, "config", "gc.auto", "0")
+	bareGit(t, bare, "config", "receive.autogc", "false")
 	return bare
 }
 
