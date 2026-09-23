@@ -133,6 +133,10 @@ func TestPublicAPIConfigFoldingAndKeyPaths(t *testing.T) {
 			{"straße", "straße"},
 			{"Σ", "σ"},
 			{"ς", "σ"},
+			{"μ", "μ"},
+			{"µ", "μ"},
+			{"ι", "ι"},
+			{"ͅ", "ι"},
 			{"İ", "İ"},
 			{"i", "i"},
 		} {

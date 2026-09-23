@@ -4,9 +4,161 @@ package config
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 )
+
+// everyRune yields every Unicode code point a string can carry.
+func everyRune(yield func(rune) bool) {
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if utf8.ValidRune(r) && !yield(r) {
+			return
+		}
+	}
+}
+
+// foldClass is r's Unicode SimpleFold class, the letters strings.EqualFold
+// takes for one letter, starting at r.
+func foldClass(r rune) []rune {
+	class := []rune{r}
+	for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+		class = append(class, next)
+	}
+	return class
+}
+
+// ordinaryLower is the one letter the letters of r's class lowercase to when
+// lowercasing changes them, provided it is in the class itself. Σ, σ and ς
+// answer σ, because Σ lowercases to it; İ answers nothing, because its lower
+// case i belongs to another class.
+func ordinaryLower(r rune) (rune, bool) {
+	class := foldClass(r)
+	var lower rune
+	found := false
+	for _, letter := range class {
+		mapped := unicode.ToLower(letter)
+		if mapped == letter {
+			continue
+		}
+		if found && mapped != lower {
+			return 0, false
+		}
+		lower, found = mapped, true
+	}
+	if !found || !slices.Contains(class, lower) {
+		return 0, false
+	}
+	return lower, true
+}
+
+// isLowercasingDisagreement reports whether strings.ToLower and
+// strings.EqualFold disagree about r: lowercasing leaves r apart from the
+// lower case the rest of its class agrees on (ς beside σ, µ beside μ), takes
+// it out of its class (İ to i), or keeps apart letters that are each their own
+// lower case.
+func isLowercasingDisagreement(r rune) bool {
+	lower := unicode.ToLower(r)
+	if ordinary, ok := ordinaryLower(r); ok {
+		return lower != ordinary
+	}
+	return lower != r || unicode.SimpleFold(r) != r
+}
+
+// sweepFailer reports what a sweep over every rune found wrong and stops the
+// test once the list is long enough to diagnose, rather than printing a line
+// for each of a million runes.
+func sweepFailer(t *testing.T) func(format string, args ...any) {
+	failures := 0
+	return func(format string, args ...any) {
+		t.Helper()
+		t.Errorf(format, args...)
+		if failures++; failures >= 20 {
+			t.FailNow()
+		}
+	}
+}
+
+// TestFoldKeepsOneSpellingPerFoldClass: every rune folds to a letter of its
+// own SimpleFold class, every letter of a class folds to the same one, and
+// that letter is lower case whenever the class holds a lower-case letter.
+func TestFoldKeepsOneSpellingPerFoldClass(t *testing.T) {
+	fail := sweepFailer(t)
+	for r := range everyRune {
+		folded := Fold(string(r))
+		if !strings.EqualFold(folded, string(r)) {
+			fail("Fold(%U) = %q, outside its fold class", r, folded)
+			continue
+		}
+		if next := unicode.SimpleFold(r); Fold(string(next)) != folded {
+			fail("Fold(%U) = %q but Fold(%U) = %q", r, folded, next, Fold(string(next)))
+		}
+		letter, _ := utf8.DecodeRuneInString(folded)
+		if slices.ContainsFunc(foldClass(r), unicode.IsLower) && !unicode.IsLower(letter) {
+			fail("Fold(%U) = %U, not lower case although its class holds a lower-case letter", r, letter)
+		}
+	}
+}
+
+// TestFoldIsStringsToLowerWhereLowercasingAgreesWithEqualFold: Fold writes
+// what strings.ToLower writes, except for the letters ToLower and EqualFold
+// disagree on. Those are derived from the Unicode tables rather than listed:
+// such a letter keys as the lower case the rest of its class agrees on (ς as
+// σ, µ as μ), or as itself when lowercasing would take it out of its class
+// (İ).
+func TestFoldIsStringsToLowerWhereLowercasingAgreesWithEqualFold(t *testing.T) {
+	fail := sweepFailer(t)
+	disagreements := map[rune]bool{}
+	for r := range everyRune {
+		folded, lower := Fold(string(r)), strings.ToLower(string(r))
+		if !isLowercasingDisagreement(r) {
+			if folded != lower {
+				fail("Fold(%U) = %q, strings.ToLower = %q", r, folded, lower)
+			}
+			continue
+		}
+		disagreements[r] = true
+		ordinary, ok := ordinaryLower(r)
+		switch {
+		case ok && folded != string(ordinary):
+			fail("Fold(%U) = %q, want its class's lower case %q", r, folded, string(ordinary))
+		case !ok && unicode.SimpleFold(r) == r && folded != string(r):
+			fail("Fold(%U) = %q, want the letter itself", r, folded)
+		}
+	}
+	// The derivation finds the letters lowercasing splits among the explicit
+	// rows below, and none of the others.
+	for r, want := range map[rune]bool{
+		'ς': true, 'ſ': true, 'µ': true, 'ͅ': true, 'ι': true, 'İ': true,
+		'σ': false, 's': false, 'μ': false, 'ι': false, 'K': false, 'ı': false,
+	} {
+		if disagreements[r] != want {
+			t.Errorf("%U: lowercasing disagreement = %v, want %v", r, disagreements[r], want)
+		}
+	}
+}
+
+// TestFoldKeysTheOrdinaryLowerCaseLetter: a table keyed by the documented
+// lower-case name finds a name however it is spelled. Each row is a letter
+// whose fold class holds more than one upper and one lower case, or a
+// letter that is a class of its own.
+func TestFoldKeysTheOrdinaryLowerCaseLetter(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"μ", "μ"}, {"Μ", "μ"}, {"µ", "μ"}, // Greek mu and the micro sign
+		{"ι", "ι"}, {"Ι", "ι"}, {"ͅ", "ι"}, {"ι", "ι"}, // iota, its subscript and prosgegrammeni
+		{"σ", "σ"}, {"Σ", "σ"}, {"ς", "σ"}, // final sigma
+		{"s", "s"}, {"S", "s"}, {"ſ", "s"}, // long s
+		{"k", "k"}, {"K", "k"}, {"K", "k"}, // Kelvin sign
+		{"İ", "İ"}, {"ı", "ı"}, {"I", "i"}, // dotted and dotless i are classes of their own
+		{"µService", "μservice"}, {"ΙΟΝ", "ιον"},
+	} {
+		if got := Fold(tc.in); got != tc.want {
+			t.Errorf("Fold(%q) = %q %U, want %q %U", tc.in, got, []rune(got), tc.want, []rune(tc.want))
+		}
+	}
+}
 
 // TestFoldAgreesWithUnicodeSimpleFold: the canonical key and LookupFold's
 // EqualFold lookup must agree even when lowercasing gives different results.

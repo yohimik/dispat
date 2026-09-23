@@ -46,11 +46,11 @@ func configFields(dst *Config) config.Fields {
 }
 ```
 
-The table is keyed in lower case. A file spells a key however it likes and the decode folds it to find the setter, so
-`logLevel` and `loglevel` both load, and the key itself is never renamed. A key with no entry in the table is a key
-your model has no field for, and that is the unknown-key refusal: **structural rather than a check somebody has to
-remember to switch on**. The error names the key by its full path from the root, because a typo the loader accepts is
-configuration that silently never applies.
+The table is keyed by each name's `Fold`, which is its ordinary lower case (ς keys as σ). A file spells a key however
+it likes and the decode folds it to find the setter, so `logLevel` and `loglevel` both load, and the key itself is
+never renamed. A key with no entry in the table is a key your model has no field for, and that is the unknown-key
+refusal: **structural rather than a check somebody has to remember to switch on**. The error names the key by its full
+path from the root, because a typo the loader accepts is configuration that silently never applies.
 
 The object rules live in `DecodeObject` and nowhere else. The value has to be an object; no two of its keys may fold
 together; its keys are visited in sorted order, so a file with several mistakes always reports the same one first; and
@@ -160,7 +160,8 @@ err = config.ApplyEdits(ctx, file, []config.Edit{{KeyPath: keyPath, Value: []str
 
 `ResolveEdit` follows the same references the loader did, so a configuration split across files is written where each
 key is written and the reference survives the write. The previous bytes are saved beside the file with `BackupSuffix`,
-and both writes are atomic.
+and both writes are atomic. A read follows a filesystem symlink, but an edit refuses a symlinked target before it saves
+the backup, rather than replacing the link with a regular file; pass the path of the file the link points to.
 
 ## Logging
 

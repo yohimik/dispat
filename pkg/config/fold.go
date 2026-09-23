@@ -17,9 +17,14 @@ import (
 
 // Fold renders a name in the one spelling the decode's tables are keyed by.
 //
-// It is the canonical representative of each Unicode SimpleFold cycle, the
-// equivalence LookupFold uses. A lower-case ASCII name takes the allocation-
-// free path. Lowercasing alone would split Σ and ς into different keys.
+// Two names fold to one spelling exactly when strings.EqualFold, the
+// equivalence LookupFold uses, calls them equal. The spelling is the ordinary
+// lower-case letter of each Unicode SimpleFold class, which is what
+// strings.ToLower writes for nearly every letter, so a table keyed by a
+// documented lower-case name finds it. Where lowercasing alone would split a
+// class, its letters still fold together: ς keys as σ, ſ as s and µ as μ. A
+// letter that lowercasing would take out of its class, such as İ, keys as
+// itself. A lower-case ASCII name takes the allocation-free path.
 func Fold(s string) string {
 	upper := false
 	for i := 0; i < len(s); i++ {
@@ -32,7 +37,10 @@ func Fold(s string) string {
 						smallest = next
 					}
 				}
-				lower := unicode.ToLower(smallest)
+				// The smallest rune of a class need not be its ordinary lower
+				// case: µ and the iota subscript lowercase to themselves. The
+				// class's upper case lowercases to the ordinary letter.
+				lower := unicode.ToLower(unicode.ToUpper(smallest))
 				if lower == smallest {
 					return smallest
 				}

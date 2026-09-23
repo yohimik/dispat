@@ -61,6 +61,10 @@ func TestValidateEnvRefusals(t *testing.T) {
 			`env: key "app_x" uses the reserved APP_ prefix`},
 		{"two spellings", map[string]string{"path": "a", "PATH": "b"},
 			`env: keys "PATH" and "path" collide case-insensitively`},
+		{"a capital and a final sigma", map[string]string{"Σ": "a", "ς": "b"},
+			`env: keys "Σ" and "ς" collide case-insensitively`},
+		{"an s and a long s", map[string]string{"s": "a", "ſ": "b"},
+			`env: keys "s" and "ſ" collide case-insensitively`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateEnv("env", tc.env, "APP_")
@@ -74,6 +78,9 @@ func TestValidateEnvRefusals(t *testing.T) {
 	}
 	if err := ValidateEnv("env", map[string]string{"A": "1", "b": "2"}, "APP_"); err != nil {
 		t.Errorf("a sound layer: %v", err)
+	}
+	if err := ValidateEnv("env", map[string]string{"İ": "dotted", "i": "plain"}); err != nil {
+		t.Errorf("the dotted capital I folds to no other letter: %v", err)
 	}
 }
 

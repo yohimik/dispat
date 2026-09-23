@@ -43,9 +43,10 @@ func configFields(dst *Config) config.Fields {
 }
 ```
 
-The table is keyed in lower case; a file spells a key however it likes and the decode folds it to find the setter, so
-`logLevel` and `loglevel` both load. A key with no entry in the table is a key the model has no field for, and that is
-the unknown-key refusal. This is structural rather than a check somebody has to remember to run.
+The table is keyed by each name's `Fold`, which is its ordinary lower case (ς keys as σ); a file spells a key however
+it likes and the decode folds it to find the setter, so `logLevel` and `loglevel` both load. A key with no entry in the
+table is a key the model has no field for, and that is the unknown-key refusal. This is structural rather than a check
+somebody has to remember to run.
 
 ## Resolving
 
@@ -111,8 +112,8 @@ setter to write a setter with: it carries the object rules and takes your reader
 something the library has no shape for still gets them.
 
 The comma shorthand lives in `Strings` and `Ints` and nowhere else, which is what keeps a comma inside a shell command
-the character the file wrote. This avoids the mistake a reflected decoder makes when the hook that lifts a scalar into a list
-fires on a Go type and cannot see the key that produced it.
+the character the file wrote. This avoids the mistake a reflected decoder makes when the hook that lifts a scalar into
+a list fires on a Go type and cannot see the key that produced it.
 
 ## Overrides
 
@@ -254,8 +255,8 @@ of this one.
 
 - No struct-tag table generator. A `go:generate` tool that writes a `Fields` table from tags would remove the one piece
   of duplication the design has; the tables are hand-written for now.
-- No remote providers such as etcd, Consul, or S3. `Options.ReadFile` is the seam a caller reaches through, and a provider
-  belongs in a module of its own rather than in this one's dependency list.
+- No remote providers such as etcd, Consul, or S3. `Options.ReadFile` is the seam a caller reaches through, and a
+  provider belongs in a module of its own rather than in this one's dependency list.
 - No pflag adapter. `Overrides` is the shape a flag overlay takes; building one from a `*pflag.FlagSet` is a dozen
   lines a caller writes, and is not worth a dependency here.
 - No dotenv, INI or HCL. `Options.Formats` takes a parser for any extension, so these are a caller's to register.

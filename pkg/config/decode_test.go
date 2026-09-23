@@ -144,6 +144,22 @@ func TestDecodeKeepsDistinctUnicodeSimpleFoldNames(t *testing.T) {
 	}
 }
 
+// TestDecodeFindsAKeyByItsLowerCaseName: a table is keyed by the ordinary
+// lower-case name, and a file may spell the key in any letter of the same
+// fold class, the micro sign and the iota subscript included.
+func TestDecodeFindsAKeyByItsLowerCaseName(t *testing.T) {
+	for _, tc := range []struct{ table, spelling string }{
+		{"μs", "μs"}, {"μs", "ΜS"}, {"μs", "µs"},
+		{"ιον", "ιον"}, {"ιον", "ΙΟΝ"}, {"ιον", "ͅον"},
+	} {
+		var got string
+		err := DecodeObject(map[string]any{tc.spelling: "v"}, "", Fields{tc.table: String(&got)})
+		if err != nil || got != "v" {
+			t.Errorf("table key %q, file key %q: got %q, err %v", tc.table, tc.spelling, got, err)
+		}
+	}
+}
+
 // TestDecodeRefusesTwoSpellingsInAWideObject: the fold check compares keys
 // against a slice for a small object and against a map for a large one, and
 // the two must report the same collision in the same words.
