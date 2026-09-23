@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -75,7 +76,7 @@ func TestComposeCentralWorkspaceAssignsSourceOwner(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, cfg)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -106,7 +107,7 @@ func TestComposeWorkspaceNormalizesGitlinkPathForTreeLookup(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	repo := workspace.RepositoryByName("sdk")
 	require.NotNil(t, repo)
@@ -127,7 +128,7 @@ func TestComposeWorkspaceAllowsControlOwnedPackageBesideImportedSource(t *testin
 	workspaceGit(t, root, "commit", "-m", "feat(tool): add control tool")
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -152,7 +153,7 @@ func TestComposeWorkspaceCentralSharedSpaceSpansSourceOwners(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk, "api": api}, cfg)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -181,7 +182,7 @@ func TestComposeWorkspaceImportedGroupsWithSameNameStayRepositoryLocal(t *testin
 	})
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -201,7 +202,7 @@ func TestComposeWorkspaceRejectsControlPackageWrappingSource(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, cfg)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.Error(t, err)
@@ -222,7 +223,7 @@ func TestComposeWorkspaceRejectsCentralPackageSrcSymlinkCrossingRepository(t *te
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.ErrorContains(t, err, "src path")
@@ -242,7 +243,7 @@ func TestComposeWorkspaceRejectsImportedPackageSrcSymlinkEscape(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.ErrorContains(t, err, "path or src escapes its owner root")
@@ -260,7 +261,7 @@ func TestComposeWorkspaceRejectsImportedPackagePathSymlinkEscape(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.ErrorContains(t, err, "path or src escapes its owner root")
@@ -278,7 +279,7 @@ func TestComposeWorkspaceRejectsCentralPackageInUnlistedNestedRepository(t *test
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.ErrorContains(t, err, "unlisted nested Git repository")
@@ -295,7 +296,7 @@ func TestComposeWorkspaceRejectsImportedPackageInUnlistedNestedRepository(t *tes
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.ErrorContains(t, err, "unlisted nested Git repository")
@@ -314,7 +315,7 @@ func TestComposeWorkspaceRejectsSrcInUnlistedNestedRepository(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.ErrorContains(t, err, "src path")
@@ -334,7 +335,7 @@ func TestComposeWorkspaceRejectsSymlinkedGitMarker(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.ErrorContains(t, err, "unsupported .git marker")
@@ -354,7 +355,7 @@ func TestComposeWorkspaceRequiresExactRepositoryOverrideIdentity(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, cfg)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.ErrorContains(t, err, `unknown source repository "SDK"`)
 	requireWorkspaceDiagnostic(t, err, DiagnosticComposition)
 }
@@ -389,7 +390,7 @@ func TestComposeWorkspaceResolvesImportsFromAliasedControlPath(t *testing.T) {
 
 	loaded, err := Load(aliasPath, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, aliasPath, alias, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, aliasPath, alias, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, _, err := DiscoverWorkspace(loaded, alias, workspace)
 	require.NoError(t, err)
@@ -407,7 +408,7 @@ func TestComposeWorkspaceRejectsResolvedSubmoduleRootOutsideControl(t *testing.T
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.ErrorContains(t, err, "resolves outside the control workspace")
 }
 
@@ -422,7 +423,7 @@ func TestComposeWorkspaceRejectsAliasedSubmoduleRoots(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.ErrorContains(t, err, "submodule roots overlap")
 }
 
@@ -438,7 +439,7 @@ func TestComposeImportedWorkspaceMergesGraph(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk, "app": app}, control)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, deps, _, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -462,7 +463,7 @@ func TestComposeWorkspaceResolvesConfigsFromWinningRefLayer(t *testing.T) {
 	workspaceGit(t, root, "commit", "-m", "chore: override imported config")
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -483,7 +484,7 @@ func TestComposeWorkspaceResolvesConfigsFromDeclaringRootRef(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -581,12 +582,12 @@ func TestComposeWorkspaceRejectsUnpinnedSource(t *testing.T) {
 	workspaceGit(t, checkout, "commit", "-m", "feat: later")
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "control HEAD pins")
 	requireWorkspaceDiagnostic(t, err, DiagnosticRepositoryInvalid)
 	advanced := strings.TrimSpace(workspaceGit(t, checkout, "rev-parse", "HEAD"))
-	workspace, err := ComposeWorkspaceWithPins(loaded, path, root, nil, map[string][]string{"sdk": {"older", advanced}})
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, map[string][]string{"sdk": {"older", advanced}}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, workspace)
 	assert.False(t, workspace.IsInheritedPinsEnabled())
@@ -601,7 +602,7 @@ func TestComposeWorkspaceRejectsUnpinnedSource(t *testing.T) {
 	assert.Equal(t, advanced, workspace.RepositoryByName("sdk").CompositionHead)
 	assert.Equal(t, strings.TrimSpace(workspaceGit(t, root, "rev-parse", "HEAD")),
 		workspace.RepositoryByName(ControlRepository).CompositionHead)
-	_, err = ComposeWorkspaceWithPins(loaded, path, root, nil, map[string][]string{"sdk": {"wrong"}})
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, map[string][]string{"sdk": {"wrong"}}, nil)
 	require.Error(t, err)
 }
 
@@ -617,7 +618,7 @@ func TestComposeWorkspaceRejectsConflictingConfigsForOneRepository(t *testing.T)
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, control)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "conflicting imported configs")
 	requireWorkspaceDiagnostic(t, err, DiagnosticComposition)
@@ -636,7 +637,7 @@ func TestComposeWorkspaceResolvesAndDeduplicatesBaseline(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, cfg)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicates baseline")
 	requireWorkspaceDiagnostic(t, err, DiagnosticBoundary)
@@ -659,7 +660,7 @@ func TestComposeWorkspaceAllowsBaselinePerRepository(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk, "api": api}, cfg)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	for _, baseline := range loaded.RepositoryBaselines {
 		assert.Len(t, baseline.Revision, 40)
@@ -678,7 +679,7 @@ func TestComposeWorkspaceRequiresExactBaselineRepositoryIdentity(t *testing.T) {
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, cfg)
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	_, err = ComposeWorkspace(loaded, path, root, nil)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.ErrorContains(t, err, `unknown repository "SDK"`)
 	requireWorkspaceDiagnostic(t, err, DiagnosticBoundary)
 }

@@ -59,6 +59,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  native-locks:
+    uses: ./.github/workflows/native-locks.yml
+
   plan:
     name: Is there anything to release
     runs-on: ubuntu-latest
@@ -367,7 +370,7 @@ jobs:
 
   release:
     name: Run dispat, publish binaries
-    needs: [plan, tests, ping]
+    needs: [plan, tests, ping, native-locks]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # commits, tags, GitHub releases

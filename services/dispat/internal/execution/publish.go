@@ -24,6 +24,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"time"
@@ -331,24 +332,17 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 	return nil
 }
 
-// reportLostAuthorization decides what an authorization this run could not
-// write means, and it is the one place the mark set before the push earns its
-// keep.
-//
-// The question is not whether the push returned an error. It is whether the
-// authorization could have reached the node, and the branch is what answers
-// that: a branch still carrying the ready commit carries no authorization, so
-// no publisher can have acted on one and the attempt is an ordinary abandoned
-// one. A branch that has moved to something else, or that cannot be read at
-// all, is the case the mark exists for: a push whose answer never came back
-// may well have applied, §28.6 allows nothing to be inferred from the
-// silence, and the outcome is unknown with everything that follows from it.
+// reportLostAuthorization distinguishes a local preparation failure from a
+// push whose outcome is unknown. Only the former proves no authorization was
+// sent. The current remote tip is not historical evidence: an authorization
+// may have been read before somebody deleted or rewound the branch.
 func (c *Coordinator) reportLostAuthorization(ctx context.Context, lease *Lease, task string,
 	attempt int, repository string, offer taskOffer, reply taskReply, err error) error {
-	lease.Leak(LeakTransport)
-	if !c.isAuthorizationReachable(ctx, lease.Node, offer.branch, reply.commit) {
-		return c.refuseTask(task, lease.Node, attempt, err)
+	var pushed *messagePushError
+	if !errors.As(err, &pushed) {
+		return c.withdrawPublication(ctx, lease, task, attempt, offer, reply, err)
 	}
+	lease.Leak(LeakTransport)
 	c.Log.Debug().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Int("attempt", attempt).Str("code", CodePublicationUnknown).
 		Str("category", CategoryPublicationUnknown).
@@ -357,28 +351,6 @@ func (c *Coordinator) reportLostAuthorization(ctx context.Context, lease *Lease,
 		Task: task, Attempt: attempt, Node: lease.Node, Repository: repository,
 		Branch: offer.branch,
 	}, cancellation{})
-}
-
-// isAuthorizationReachable reports whether an authorization this run failed to
-// write could nonetheless be on the branch.
-//
-// A lease the remote refused and a push that never left this machine both
-// leave the branch where it was, and the ready commit still being the tip is
-// the proof of that. Anything else, including a read that fails, is answered
-// yes: the safe answer to "might a node have been told to publish" is the one
-// that withholds a second attempt rather than the one that assumes nothing
-// happened.
-func (c *Coordinator) isAuthorizationReachable(ctx context.Context, node, branch, ready string) bool {
-	head, err := c.mailboxes[node].Reread(ctx, branch)
-	if err != nil {
-		return true
-	}
-	if head.OID == "" {
-		// The branch is gone, so nothing can be read from it and nothing can
-		// be pushed onto it: no publisher was authorized on this attempt.
-		return false
-	}
-	return head.OID != ready
 }
 
 // formatGo is the authorization document: the work it belongs to, the exact

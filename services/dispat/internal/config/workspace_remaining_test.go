@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func TestComposeWorkspaceRejectsCorruptSourceCheckouts(t *testing.T) {
 
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.Nil(t, workspace)
 		require.ErrorContains(t, err, `submodule "sdk" is not initialized`)
 		requireWorkspaceDiagnostic(t, err, DiagnosticRepositoryInvalid)
@@ -50,7 +51,7 @@ func TestComposeWorkspaceRejectsCorruptSourceCheckouts(t *testing.T) {
 
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.Nil(t, workspace)
 		require.ErrorContains(t, err, `source repository "sdk" is not pinned by control HEAD`)
 		requireWorkspaceDiagnostic(t, err, DiagnosticRepositoryInvalid)
@@ -69,7 +70,7 @@ func TestComposeWorkspaceRejectsCorruptSourceCheckouts(t *testing.T) {
 
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.Nil(t, workspace)
 		require.ErrorContains(t, err, `source repository "sdk" has no HEAD`)
 		requireWorkspaceDiagnostic(t, err, DiagnosticRepositoryInvalid)
@@ -94,7 +95,7 @@ func TestComposeWorkspaceRejectsCorruptSourceCheckouts(t *testing.T) {
 
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.Nil(t, workspace)
 		require.ErrorContains(t, err, `repository "sdk"`)
 		require.ErrorContains(t, err, "is shallow; complete history is required")
@@ -122,7 +123,7 @@ func TestDiscoverWorkspaceRejectsCanonicalOwnershipFailures(t *testing.T) {
 
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.NoError(t, err)
 		_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 		require.ErrorContains(t, err, `package "escaped" path`)
@@ -145,7 +146,7 @@ func TestDiscoverWorkspaceRejectsCanonicalOwnershipFailures(t *testing.T) {
 
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.NoError(t, err)
 		_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 		require.ErrorContains(t, err, `imported repository "sdk" package "sdk" path or src escapes its owner root`)
@@ -162,7 +163,7 @@ func TestDiscoverWorkspaceRejectsCanonicalOwnershipFailures(t *testing.T) {
 		})
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.NoError(t, err)
 		_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 		require.Error(t, err)
@@ -180,7 +181,7 @@ func TestDiscoverWorkspaceRejectsCanonicalOwnershipFailures(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, "tools", "control-tool"), 0o755))
 		loaded, err := Load(path, nil)
 		require.NoError(t, err)
-		workspace, err := ComposeWorkspace(loaded, path, root, nil)
+		workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 		require.NoError(t, err)
 		_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 		require.Error(t, err)

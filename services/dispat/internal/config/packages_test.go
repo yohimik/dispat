@@ -1535,7 +1535,7 @@ func TestPackageDependenciesCollected(t *testing.T) {
 	// Discover validates the merged list like the root list.
 	cfgLoaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, _, err := Discover(cfgLoaded, root)
+	_, deps, _, err := DiscoverWorkspace(cfgLoaded, root, nil)
 	require.NoError(t, err)
 	assert.Len(t, deps, 4)
 }
@@ -1561,7 +1561,7 @@ func TestPackageDependenciesInvalid(t *testing.T) {
 	root = writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, _, err = Discover(loaded, root)
+	_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `packages["utils"]: dependencies[0]: unknown provider package "ghost"`)
 }
@@ -1648,7 +1648,7 @@ func TestPackageDependenciesCarryKindAndKeep(t *testing.T) {
 		declared[2].DependencyConfig)
 
 	// And the kind reaches the graph, which is the whole point of carrying it.
-	_, deps, _, err := Discover(cfg, root)
+	_, deps, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	require.Len(t, deps, 3)
 	assert.Equal(t, model.KindDevDependencies, deps[2].Kind)
@@ -1673,7 +1673,7 @@ func TestPackageDependenciesScalarAndSelfReference(t *testing.T) {
 	root := writeRawRepo(t, base("core"), "pkgs/core", "pkgs/web")
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, _, err := Discover(cfg, root)
+	_, deps, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "core", deps[0].Provider)
@@ -1711,7 +1711,7 @@ func TestDependencyMapForm(t *testing.T) {
 	}, cfg.Dependencies, "consumers sorted, each consumer's providers in file order")
 
 	// And the whole graph is discoverable, which is what the form exists for.
-	_, deps, _, err := Discover(cfg, root)
+	_, deps, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	assert.Len(t, deps, 4)
 }
@@ -1732,7 +1732,7 @@ func TestDependencyMapFormMatchesPackageNamesCaseInsensitively(t *testing.T) {
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 
-	_, deps, _, err := Discover(cfg, root)
+	_, deps, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "Web", deps[0].Consumer, "the package's own spelling, not the folded key")
@@ -2690,7 +2690,7 @@ func TestSpaceDependencies(t *testing.T) {
 
 	cfgLoaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, _, err := Discover(cfgLoaded, root)
+	_, deps, _, err := DiscoverWorkspace(cfgLoaded, root, nil)
 	require.NoError(t, err)
 	assert.Len(t, deps, 2, "the edges reach the graph")
 }
@@ -2749,7 +2749,7 @@ func TestSpaceDependenciesMustTouchTheSpace(t *testing.T) {
 
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, _, err = Discover(loaded, root)
+		_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `unknown consumer package "ghost"`)
 	})

@@ -1831,28 +1831,6 @@ func sortedSpaceNames(c *File) []string {
 	return names
 }
 
-// Discover walks every space folder and returns the packages found inside
-// (standalone `packages` entries included), plus the validated dependency
-// edges merged from every declaration source. Every direct sub-folder of a
-// space is a package named after the folder; names must be unique across all
-// spaces.
-func Discover(c *File, root string) ([]*model.Package, []model.Dependency, []ExcludedDir, error) {
-	pkgs, declared, excluded, err := DiscoverPackages(c, root)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	deps, err := validateDependencies(pkgs, declared)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return pkgs, deps, excluded, nil
-}
-
-func validateDependencies(pkgs []*model.Package, declared []DeclaredDependency) ([]model.Dependency, error) {
-	active, _, err := validateDependenciesForPlan(pkgs, declared, nil)
-	return active, err
-}
-
 // validateDependenciesForPlan turns declared edges into the active graph.
 // excluded, when present, explains an endpoint a repository exclusion removed,
 // so a dependency on a package of a repository this run left out names that

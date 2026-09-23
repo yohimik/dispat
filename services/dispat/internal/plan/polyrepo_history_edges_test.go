@@ -33,6 +33,18 @@ func (g *failingRepositoryHistoryGit) Tags(ctx context.Context, pkg string, form
 	return g.fakeGit.Tags(ctx, pkg, format)
 }
 
+func (g *failingRepositoryHistoryGit) TagsForPackages(ctx context.Context, formats map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
+	out := make(map[string]gitx.Tags, len(formats))
+	for name, format := range formats {
+		var err error
+		out[name], err = g.Tags(ctx, name, format)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 func (g *failingRepositoryHistoryGit) Commits(ctx context.Context, boundary string) ([]gitx.Commit, error) {
 	if g.commitsErr != nil {
 		return nil, g.commitsErr
@@ -54,7 +66,7 @@ func (g *failingRepositoryHistoryGit) HeadSHA(context.Context) (string, error) {
 	return g.head, nil
 }
 
-func composedHistoryFailureOptions(source gitx.Gitx) Options {
+func composedHistoryFailureOptions(source TagInventoryGitx) Options {
 	return Options{
 		Packages: []*model.Package{{
 			Name: "app", Dir: "/w/source/app", RepoRoot: "/w/source", Repository: "source",
@@ -79,19 +91,20 @@ func TestComposedHistorySurfacesRepositoryReadFailures(t *testing.T) {
 	})
 
 	t.Run("bulk tag inventory", func(t *testing.T) {
-		source := &bulkCountingGit{countingGit: counted(newFakeGit()), bulkErr: errors.New("refs unavailable")}
+		source := counted(newFakeGit())
+		source.bulkErr = errors.New("refs unavailable")
 		pl, err := Compute(t.Context(), newFakeGit(), composedHistoryFailureOptions(source))
 		require.Nil(t, pl)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "repository source loading tags: refs unavailable")
 	})
 
-	t.Run("package tag inventory", func(t *testing.T) {
+	t.Run("repository tag inventory", func(t *testing.T) {
 		source := &failingRepositoryHistoryGit{fakeGit: newFakeGit(), tagErr: errors.New("tag read failed")}
 		pl, err := Compute(t.Context(), newFakeGit(), composedHistoryFailureOptions(source))
 		require.Nil(t, pl)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "app: tag read failed")
+		assert.ErrorContains(t, err, "repository source loading tags: tag read failed")
 	})
 
 	t.Run("commit window", func(t *testing.T) {

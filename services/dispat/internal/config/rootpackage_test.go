@@ -8,6 +8,7 @@ package config
 // rooted at the repository does is walk folders rather than merge layers.
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -216,7 +217,7 @@ func TestRootPackageInAnImportedSourceConfig(t *testing.T) {
 	})
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
@@ -241,7 +242,7 @@ func TestCentralWorkspacePackageAtASourceRoot(t *testing.T) {
 	})
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 
 	pkgs, _, _, err := DiscoverWorkspace(loaded, root, workspace)
@@ -263,7 +264,7 @@ func TestRootPackageMayNotSpanASourceRepository(t *testing.T) {
 	})
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)

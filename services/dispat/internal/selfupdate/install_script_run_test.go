@@ -164,7 +164,7 @@ func (f *scriptFixture) releaseJSON(base string) string {
   "author": {"login": "a", "id": 1, "url": "` + base + `/users/a", "html_url": "` + base + `/a"},
   "node_id": "RE_9",
   "tag_name": "` + DefaultTagPrefix + scriptVersion + `",
-  "name": "` + CurrentAssetName() + `",
+  "name": "` + AssetName(runtime.GOOS, runtime.GOARCH) + `",
   "draft": false,
   "prerelease": false,
   "assets": [
@@ -172,7 +172,7 @@ func (f *scriptFixture) releaseJSON(base string) string {
       "url": "` + base + `/assets/1",
       "id": 1,
       "node_id": "RA_1",
-      "name": "` + CurrentAssetName() + `",
+      "name": "` + AssetName(runtime.GOOS, runtime.GOARCH) + `",
       "label": null,
       "uploader": {"login": "u", "id": 2, "url": "` + base + `/users/u"},
       "content_type": "application/octet-stream",
@@ -183,7 +183,7 @@ func (f *scriptFixture) releaseJSON(base string) string {
       "created_at": "2026-01-01T00:00:00Z",
       "updated_at": "2026-01-01T00:00:00Z",
       "browser_download_url": "` + f.public.URL + `/yohimik/dispat/releases/download/` +
-		DefaultTagPrefix + scriptVersion + `/` + CurrentAssetName() + `"
+		DefaultTagPrefix + scriptVersion + `/` + AssetName(runtime.GOOS, runtime.GOARCH) + `"
     }
   ]
 }`

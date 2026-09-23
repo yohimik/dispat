@@ -19,36 +19,16 @@ import (
 // cross-repository baselines and diagnostics.
 const ControlRepository = "control"
 
-// ComposeWorkspace validates and loads the repositories participating in a
-// polyrepo run. Legacy configurations are returned untouched. Import paths
-// passed by the CLI have already been appended to cfg.Configs and, like paths
-// authored by the control file, start at the control root.
-func ComposeWorkspace(cfg *File, configPath, controlRoot string, cliConfigs []string) (*Workspace, error) {
-	return ComposeWorkspaceWithPins(cfg, configPath, controlRoot, cliConfigs, nil)
-}
-
 // SourcePinResolver reads the latest run-authorized revisions for one exact
 // .gitmodules repository identity. Composition invokes it while holding that
 // source's Git mutation lock, so a nested command compares a coherent pin and
 // HEAD even while another source is recording in the same release run.
 type SourcePinResolver func(repository string) ([]string, error)
 
-// ComposeWorkspaceWithPins is ComposeWorkspace with trusted, run-local source
-// revisions exported by an enclosing dispat release. It permits a nested
-// command after an earlier nested commit advanced a source, while still
-// requiring the checkout to equal either control HEAD or that exact exported
-// revision.
-//
-// It takes no context because it supplies no pin resolver: without one,
-// composition waits on nothing. The resolver path is the only one that
-// acquires a Git mutation lock, and it is the one that takes a context.
-func ComposeWorkspaceWithPins(cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string) (*Workspace, error) {
-	return composeWorkspace(context.Background(), cfg, configPath, controlRoot, cliConfigs, runPins, nil, false)
-}
-
-// ComposeWorkspaceWithPinResolver additionally admits fresh run-scoped pins.
-// Static callers keep using ComposeWorkspaceWithPins; only a CLI invocation
-// that accepted an inherited workspace context supplies this resolver.
+// ComposeWorkspaceWithPinResolver validates and loads the repositories in a
+// workspace and admits trusted run-scoped pins supplied by an enclosing run.
+// Legacy configurations return no workspace. Paths authored by the control
+// file and CLI imports start at their respective declaring roots.
 //
 // ctx is the invocation's own cancellable context. Validating a live pin takes
 // the source repository's Git mutation lock, which waits for whatever release
@@ -977,12 +957,8 @@ func (m *gitRootMemo) nearest(path string) (string, error) {
 	}
 }
 
-func validatePackageOwnership(pkgs []*model.Package) error {
-	return validatePackageOwnershipMode(pkgs, false)
-}
-
-// validatePackageOwnershipMode is validatePackageOwnership with the scope
-// comparison scoped to one repository at a time.
+// validatePackageOwnershipMode scopes containment to one repository at a time
+// in a linked fleet.
 //
 // Package names stay one graph either way: two repositories may not both
 // declare `api`, whichever topology composed them. What differs is containment. A

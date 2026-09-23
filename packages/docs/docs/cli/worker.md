@@ -68,6 +68,10 @@ The worker holds an operating-system lock on `worker.lock` while it serves. The 
 normal stop; its PID is diagnostic, and a crash releases the lock without a stale-file cleanup step. Leave the file
 in place when restarting a worker.
 
+When upgrading from a worker that used PID-file ownership, stop every old worker sharing that state folder before
+starting the new version. The older implementation can rename the lock file and does not honor the kernel lock;
+mixed-version concurrent startup against one folder is unsupported.
+
 ### `--idle-timeout`
 
 Stop the process after this many seconds with nothing claimed and nothing in flight, counted from the node's last

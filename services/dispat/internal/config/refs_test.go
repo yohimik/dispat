@@ -757,7 +757,7 @@ func TestRefKeepsPathsRepositoryRelative(t *testing.T) {
 
 	cfg, err := Load(path, nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(cfg, dir)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, dir, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, filepath.Join(dir, "pkgs", "core"), pkgs[0].Dir)
@@ -775,7 +775,7 @@ func TestRefInFolderConfigFiles(t *testing.T) {
 
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, []string{"SPACE_KEY=s"}, pkgs[0].Space.Env,
@@ -795,7 +795,7 @@ func TestRefRefusalsSurviveAReference(t *testing.T) {
 
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, _, err = Discover(loaded, root)
+	_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declares spaces")
 }

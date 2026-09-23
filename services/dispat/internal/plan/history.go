@@ -14,6 +14,15 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
+// TagInventoryGitx is the Git capability release planning needs in addition
+// to the general repository operations. A plan inventories all package tags
+// in one read so its baselines come from one consistent ref snapshot.
+type TagInventoryGitx interface {
+	gitx.Gitx
+	TagsForPackages(context.Context, map[string]gitx.TagFormat) (map[string]gitx.Tags, error)
+	ResolveCommit(context.Context, string) (string, error)
+}
+
 // RepositoryHistory is one immutable repository snapshot participating in a
 // composed plan. Path is the repository's gitlink path in the control
 // repository; it is empty for the control history and for legacy plans.
@@ -21,7 +30,7 @@ type RepositoryHistory struct {
 	Name             string
 	Root             string
 	Path             string
-	Git              gitx.Gitx
+	Git              TagInventoryGitx
 	ParserConfig     ccme.Config
 	NonPackageScopes []string
 	Control          bool
@@ -176,9 +185,9 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 // loadRepositoryTags is §13.2 phase one: every participating repository's tag
 // inventory, partitioned onto its own packages.
 //
-// A real CLI inventories one repository's refs in a single git process.
-// Lightweight Git implementations retain the bounded per-package fallback,
-// which is also the path an interrupt has to be able to stop.
+// Each repository inventories its refs in one read. The Git implementation
+// must offer that operation so a plan does not mix baselines observed at
+// different times.
 func (cp *computation) loadRepositoryTags() error {
 	packagesByRepo := make(map[string][]*model.Package)
 	for _, p := range cp.pkgs {
@@ -194,6 +203,9 @@ func (cp *computation) loadRepositoryTags() error {
 	slices.Sort(repositories)
 
 	for _, repository := range repositories {
+		if err := cp.ctx.Err(); err != nil {
+			return fmt.Errorf("plan: repository %s loading tags: %w", repository, err)
+		}
 		packages := packagesByRepo[repository]
 		history, ok := cp.histories[repository]
 		if !ok {
@@ -206,52 +218,21 @@ func (cp *computation) loadRepositoryTags() error {
 				formats[p.Name] = (&Release{Pkg: p}).TagFormat()
 			}
 		}
-		if bulk, ok := history.Git.(interface {
-			TagsForPackages(context.Context, map[string]gitx.TagFormat) (map[string]gitx.Tags, error)
-		}); ok {
-			all, err := bulk.TagsForPackages(cp.ctx, formats)
-			if err != nil {
-				return fmt.Errorf("plan: repository %s loading tags: %w", history.Name, err)
-			}
-			if cp.stats != nil {
-				cp.stats.TagInventories.Add(1)
-			}
-			for _, p := range packages {
-				cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases.Without(all[p.Name], p.Name, cp.log))
-			}
-		} else if err := cp.loadRepositoryTagsPerPackage(history, packages, aliases); err != nil {
-			return err
-		}
-		cp.log.Debug().Str("repository", history.Name).Int("packages", len(packages)).
-			Int("tags", repositoryTagCount(cp.tags, packages)).Msg("plan: repository tag inventory loaded")
-	}
-	return nil
-}
-
-// loadRepositoryTagsPerPackage is the fallback for a repository whose Git
-// implementation offers no bulk inventory: one query per releasable package,
-// in order, stopping where the caller's cancellation found it.
-func (cp *computation) loadRepositoryTagsPerPackage(
-	history RepositoryHistory, packages []*model.Package, aliases AliasFilter) error {
-
-	for _, p := range packages {
-		if !(&Release{Pkg: p}).IsReleasable() {
-			continue
-		}
-		// A Git implementation that ignores its context would otherwise keep
-		// querying one package after another past an interrupt. The bulk
-		// inventory is a single call and needs no such check.
-		if err := cp.ctx.Err(); err != nil {
+		all, err := history.Git.TagsForPackages(cp.ctx, formats)
+		if err != nil {
 			return fmt.Errorf("plan: repository %s loading tags: %w", history.Name, err)
 		}
-		tags, err := history.Git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
-		if err != nil {
-			return fmt.Errorf("plan: %s: %w", p.Name, err)
+		if err := cp.ctx.Err(); err != nil {
+			return fmt.Errorf("plan: repository %s loading tags: %w", history.Name, err)
 		}
 		if cp.stats != nil {
 			cp.stats.TagInventories.Add(1)
 		}
-		cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases.Without(tags, p.Name, cp.log))
+		for _, p := range packages {
+			cp.tags[p.Name] = cp.withoutIgnoredTags(history.Name, aliases.Without(all[p.Name], p.Name, cp.log))
+		}
+		cp.log.Debug().Str("repository", history.Name).Int("packages", len(packages)).
+			Int("tags", repositoryTagCount(cp.tags, packages)).Msg("plan: repository tag inventory loaded")
 	}
 	return nil
 }
@@ -371,8 +352,7 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 			}
 			delete(idx.unions, cacheKey)
 		} else {
-			// Stop reading one window after another once the caller has gone,
-			// for the same reason the tag fallback does.
+			// Stop reading one window after another once the caller has gone.
 			if err := cp.ctx.Err(); err != nil {
 				return nil, "", fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
 			}

@@ -20,14 +20,14 @@ type blockingTagGitx struct {
 	calls   atomic.Int32
 }
 
-func (g *blockingTagGitx) Tags(ctx context.Context, _ string, _ gitx.TagFormat) (gitx.Tags, error) {
+func (g *blockingTagGitx) TagsForPackages(ctx context.Context, _ map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
 	g.calls.Add(1)
 	g.started <- struct{}{}
 	<-ctx.Done()
-	return gitx.Tags{}, ctx.Err()
+	return nil, ctx.Err()
 }
 
-func TestCancellationStopsSchedulingPackageTagQueries(t *testing.T) {
+func TestCancellationUnblocksBulkTagInventory(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pkgs, history := groupWorkspace(1000, model.VersioningFixed)
@@ -39,12 +39,10 @@ func TestCancellationStopsSchedulingPackageTagQueries(t *testing.T) {
 	}()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
-	for range 16 {
-		select {
-		case <-git.started:
-		case <-deadline.C:
-			t.Fatal("tag reads did not start")
-		}
+	select {
+	case <-git.started:
+	case <-deadline.C:
+		t.Fatal("tag inventory did not start")
 	}
 	cancel()
 	select {
@@ -55,9 +53,7 @@ func TestCancellationStopsSchedulingPackageTagQueries(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cancelled planning did not finish")
 	}
-	// A slot can become ready at the same instant as cancellation. At most one
-	// additional query may enter before the scheduler observes that cancellation.
-	if calls := git.calls.Load(); calls > 17 {
-		t.Fatalf("scheduled %d tag queries after cancellation; want at most 17", calls)
+	if calls := git.calls.Load(); calls != 1 {
+		t.Fatalf("read %d tag inventories, want one", calls)
 	}
 }

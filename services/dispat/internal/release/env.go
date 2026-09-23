@@ -402,7 +402,7 @@ func dependencyLines(updates []providerUpdate) string {
 }
 
 // unitLines returns the descriptions of the release's notes units carrying
-// the given bump, newline-separated — the grouping changelog.RenderSections
+// the given bump, newline-separated — the grouping changelog.RenderBody
 // uses for its breaking/features/fixes sections. NotesUnits keeps the
 // variables aligned with the changelog entry: a prerelease reports only its
 // own changeset, a stable release the whole pending window.

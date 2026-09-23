@@ -219,7 +219,7 @@ func TestGithubReleaserMirrorsTheResolvedCoordinatesOntoTheRecord(t *testing.T) 
 			Tag: "utils@1.1.0",
 		}},
 	}
-	assert.NotContains(t, changelog.RenderSections(rel, ghe.Format), "https://github.com/",
+	assert.NotContains(t, changelog.RenderBody(rel, ghe.Format, nil), "https://github.com/",
 		"an enterprise endpoint declines the derivation rather than guessing a web host")
 }
 

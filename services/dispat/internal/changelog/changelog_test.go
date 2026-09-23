@@ -96,7 +96,7 @@ func TestRenderEntryCustomFormat(t *testing.T) {
 }
 
 func TestRenderSections(t *testing.T) {
-	out := RenderSections(testRelease("/tmp/x", ccme.Version{Major: 2}), Format{})
+	out := RenderBody(testRelease("/tmp/x", ccme.Version{Major: 2}), Format{}, nil)
 	assert.True(t, strings.HasPrefix(out, "### Breaking Changes"), "no entry header in sections: %q", out)
 	assert.NotContains(t, out, "## core@")
 }
@@ -109,7 +109,7 @@ func TestRenderSectionsEmpty(t *testing.T) {
 		Pkg:  &model.Package{Name: "core", Dir: "/tmp/x", Space: &model.Space{Name: "libs"}},
 		Next: ccme.Version{Major: 2},
 	}
-	assert.Equal(t, "No changes.\n", RenderSections(rel, Format{}))
+	assert.Equal(t, "No changes.\n", RenderBody(rel, Format{}, nil))
 	assert.Equal(t, "## core@2.0.0 (2026-07-26)\n\nNo changes.\n", RenderEntry(rel, testDate, Format{}))
 }
 
@@ -122,7 +122,7 @@ func TestRenderSectionsMarksARestatement(t *testing.T) {
 	restated := rel.Units[1]
 	rel.Corrects = map[*ccme.Unit][]string{restated: {"4f2a1c9abcde", "bd41f0e12345#2"}}
 
-	out := RenderSections(rel, Format{})
+	out := RenderBody(rel, Format{}, nil)
 
 	assert.Contains(t, out, "- close leak (corrects 4f2a1c9abcde, bd41f0e12345#2)")
 	assert.Contains(t, out, "- add streaming\n", "an ordinary entry carries no annotation")
@@ -135,7 +135,7 @@ func TestRenderSectionsOmitsSuppressedEntries(t *testing.T) {
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
 	rel.SuppressedNotes = map[*ccme.Unit]bool{rel.Units[0]: true}
 
-	out := RenderSections(rel, Format{})
+	out := RenderBody(rel, Format{}, nil)
 
 	assert.NotContains(t, out, "add streaming", "the suppressed entry is gone")
 	assert.NotContains(t, out, "### Features", "and so is the section it was alone in")
@@ -261,17 +261,17 @@ func TestRenderSectionsDependenciesFollowUpdates(t *testing.T) {
 	// there is no second source of provider names to fall back to, and a
 	// heading over an empty list would be worse than no heading.
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
-	assert.Contains(t, RenderSections(rel, Format{}), "### Dependencies")
+	assert.Contains(t, RenderBody(rel, Format{}, nil), "### Dependencies")
 
 	rel.Updates = nil
-	out := RenderSections(rel, Format{})
+	out := RenderBody(rel, Format{}, nil)
 	assert.NotContains(t, out, "### Dependencies")
 
 	// DueTo alone does not bring it back: DueTo says why the package is
 	// releasing, Updates says whose version it carries, and only the second
 	// question has an answer to print.
 	rel.DueTo = []string{"utils"}
-	assert.NotContains(t, RenderSections(rel, Format{}), "### Dependencies")
+	assert.NotContains(t, RenderBody(rel, Format{}, nil), "### Dependencies")
 }
 
 func TestRenderFixedRideNoChangesEntry(t *testing.T) {
@@ -298,7 +298,7 @@ func TestRenderFixedRideNoChangesEntry(t *testing.T) {
 				FixedRide: true,
 			}
 			line := "No changes: a version bump to keep the versioning group on " + c.want + ".\n"
-			assert.Equal(t, line, RenderSections(rel, Format{}))
+			assert.Equal(t, line, RenderBody(rel, Format{}, nil))
 			assert.Equal(t, "## core@1.1.0 (2026-07-26)\n\n"+line, RenderEntry(rel, testDate, Format{}))
 		})
 	}
@@ -320,12 +320,12 @@ func TestRenderSectionsNeverEmpty(t *testing.T) {
 	pinned := base()
 	pinned.Pinned = true
 	assert.Equal(t, "No changes: a version set by Release-As.\n",
-		RenderSections(pinned, Format{}))
+		RenderBody(pinned, Format{}, nil))
 
 	moved := base()
 	moved.Channel, moved.BaselineChannel = "stable", "beta"
 	assert.Equal(t, "No changes: a channel transition, beta -> stable.\n",
-		RenderSections(moved, Format{}))
+		RenderBody(moved, Format{}, nil))
 
 	reverted := base()
 	units := []*ccme.Unit{
@@ -334,7 +334,7 @@ func TestRenderSectionsNeverEmpty(t *testing.T) {
 	}
 	reverted.Units = units
 	reverted.SuppressedNotes = map[*ccme.Unit]bool{units[0]: true, units[1]: true}
-	sections := RenderSections(reverted, Format{})
+	sections := RenderBody(reverted, Format{}, nil)
 	assert.Equal(t, "No changes: the pending work and its reverts cancel out.\n", sections)
 
 	for _, rel := range []*plan.Release{pinned, moved, reverted} {
@@ -356,7 +356,7 @@ func TestRideWithProviderMovementIsNotNoChanges(t *testing.T) {
 		}},
 	}
 	assert.False(t, rel.IsWithoutChanges())
-	sections := RenderSections(rel, Format{})
+	sections := RenderBody(rel, Format{}, nil)
 	assert.Contains(t, sections, "### Dependencies")
 	assert.Contains(t, sections, "- utils: 1.1.0 -> 1.2.0")
 	assert.NotContains(t, sections, "No changes")
@@ -368,7 +368,7 @@ func TestRenderFixedMemberWithOwnUnitsIsOrdinary(t *testing.T) {
 	// units: content always beats the placeholder.
 	rel := testRelease("core", ccme.Version{Major: 1, Minor: 1})
 	rel.FixedRide = true
-	sections := RenderSections(rel, Format{})
+	sections := RenderBody(rel, Format{}, nil)
 	assert.Contains(t, sections, "### Features")
 	assert.NotContains(t, sections, "No changes")
 }
@@ -388,13 +388,13 @@ func TestRenderSectionsPrereleaseUsesOnlyItsChangeset(t *testing.T) {
 		Units:      units,
 		FreshUnits: units[1:],
 	}
-	sections := RenderSections(rel, Format{})
+	sections := RenderBody(rel, Format{}, nil)
 	assert.Contains(t, sections, "fix new in beta.1")
 	assert.NotContains(t, sections, "feature shipped in beta.0",
 		"a prerelease entry must not repeat what the train already published")
 
 	rel.Next = ccme.Version{Minor: 2} // the graduation of the same window
-	sections = RenderSections(rel, Format{})
+	sections = RenderBody(rel, Format{}, nil)
 	assert.Contains(t, sections, "feature shipped in beta.0",
 		"a graduation collects every prerelease's changes")
 	assert.Contains(t, sections, "fix new in beta.1")

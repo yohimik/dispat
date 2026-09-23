@@ -4,6 +4,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -439,7 +440,7 @@ func TestComposeWorkspaceDelegatesOnlyToAChoreographedFleet(t *testing.T) {
 	cfg, err := Load(path, nil)
 	require.NoError(t, err)
 
-	workspace, err := ComposeWorkspace(cfg, path, api, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), cfg, path, api, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, workspace)
 	assert.True(t, workspace.IsLinked())
@@ -450,17 +451,17 @@ func TestComposeWorkspaceDelegatesOnlyToAChoreographedFleet(t *testing.T) {
 	// `--polyrepo=false` is the standalone escape hatch: the flag is applied
 	// after loading, and composition then finds nothing to compose.
 	cfg.Polyrepo = false
-	workspace, err = ComposeWorkspace(cfg, path, api, nil)
+	workspace, err = ComposeWorkspaceWithPinResolver(context.Background(), cfg, path, api, nil, nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, workspace)
 
 	cfg.Polyrepo = true
-	_, err = ComposeWorkspace(cfg, path, api, []string{"../sdk/dispat.json"})
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), cfg, path, api, []string{"../sdk/dispat.json"}, nil, nil)
 	requireWorkspaceDiagnostic(t, err, DiagnosticComposition)
 	assert.ErrorContains(t, err, "--configs")
 
 	central := &File{Packages: map[string]PackageConfig{"api": {Path: "pkgs/api"}}}
-	workspace, err = ComposeWorkspace(central, path, api, nil)
+	workspace, err = ComposeWorkspaceWithPinResolver(context.Background(), central, path, api, nil, nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, workspace, "a file naming no identity and no imports composes nothing")
 	assert.False(t, workspace.IsLinked())
@@ -485,7 +486,7 @@ func TestPackageOwnershipScopesOverlapsPerRepository(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, DiagnosticOwnershipInvalid, DiagnosticCode(err))
 	assert.NoError(t, validatePackageOwnershipMode(pkgs, true))
-	assert.Error(t, validatePackageOwnership(pkgs), "the central call keeps its signature and its answer")
+	assert.Error(t, validatePackageOwnershipMode(pkgs, false), "the central mode keeps its answer")
 
 	// Names stay one graph whichever topology composed the fleet.
 	duplicate := []*model.Package{

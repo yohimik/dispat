@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -69,6 +70,22 @@ func (g *linkedGit) HeadSHA(context.Context) (string, error) { return g.head, ni
 
 func (g *linkedGit) IsCommitPresent(_ context.Context, rev string) (bool, error) {
 	return g.index(rev) >= 0, nil
+}
+
+func TestLinkEvidenceRefusesMissingGitReaders(t *testing.T) {
+	bare := newFakeGit(commit{sha: "a1", message: "chore(release): app@1.0.0"}).tag("app", "1.0.0", "a1")
+	cp := &computation{
+		ctx:  t.Context(),
+		pkgs: []*model.Package{{Name: "app", Repository: "source"}},
+		tags: map[string]gitx.Tags{"app": {{Name: "app@1.0.0", Commit: "a1"}}},
+		histories: map[string]RepositoryHistory{
+			"source": {Name: "source", Git: bare},
+		},
+	}
+	evidence := newLinkEvidence(cp)
+	assert.ErrorContains(t, evidence.index(), "repository source cannot read release commit subjects")
+	_, err := evidence.pins(cp.histories["source"], "a1")
+	assert.ErrorContains(t, err, "repository source cannot read fleet links at a1")
 }
 
 // fleetPackages is the two-package graph every test below plans: a provider

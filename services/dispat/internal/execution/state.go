@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -45,6 +46,9 @@ const (
 const (
 	stateLockWriteGrace = time.Second
 	stateLockWritePoll  = 10 * time.Millisecond
+	// A PID is only a few decimal digits. Refuse oversized legacy content
+	// instead of allocating unbounded memory before deciding who owns state.
+	stateLockOwnerMaxBytes = 64
 )
 
 // NodeState is one serving node's own folder: where its object cache lives,
@@ -110,11 +114,9 @@ func lockNodeState(path string) (func() error, error) {
 	}
 	if !locked {
 		_ = file.Close()
-		owner, readErr := readNodeLockOwner(path)
-		if readErr != nil {
-			return nil, fmt.Errorf("execution: reading the worker state lock %s: %w", path, readErr)
-		}
-		return nil, nodeLockOccupied(path, owner)
+		// Windows denies a second handle reads of a byte locked exclusively
+		// by another process. The kernel already proved occupancy here.
+		return nil, nodeLockOccupied(path, 0)
 	}
 	giveUp := func() {
 		_ = unlockNodeFile(file)
@@ -134,7 +136,7 @@ func lockNodeState(path string) (func() error, error) {
 		return nil, fmt.Errorf("execution: worker state lock %s was replaced or is a symbolic link", path)
 	}
 	if !created {
-		owner, readErr := readNodeLockOwner(path)
+		owner, readErr := readNodeLockOwner(file)
 		if readErr != nil {
 			giveUp()
 			return nil, fmt.Errorf("execution: reading the worker state lock %s: %w", path, readErr)
@@ -212,16 +214,23 @@ func writeNodeLockOwner(file *os.File, owner int) error {
 	return file.Sync()
 }
 
-// readNodeLockOwner answers the process id a lock names, and zero when it
+// readNodeLockOwner answers the process id a held lock names, and zero when it
 // names nobody: content that is no process id, or a file that stayed empty
 // past the grace. The grace preserves compatibility with older workers that
-// created the file and only then wrote their PID without a kernel lock.
-func readNodeLockOwner(path string) (int, error) {
+// created the file and only then wrote their PID without a kernel lock. An
+// oversized owner is refused rather than treated as an unowned stale file.
+func readNodeLockOwner(file *os.File) (int, error) {
 	deadline := time.Now().Add(stateLockWriteGrace)
 	for {
-		held, err := os.ReadFile(path)
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return 0, err
+		}
+		held, err := io.ReadAll(io.LimitReader(file, stateLockOwnerMaxBytes+1))
 		if err != nil {
 			return 0, err
+		}
+		if len(held) > stateLockOwnerMaxBytes {
+			return 0, fmt.Errorf("worker state lock owner exceeds %d bytes", stateLockOwnerMaxBytes)
 		}
 		content := strings.TrimSpace(string(held))
 		if content != "" {
@@ -298,7 +307,19 @@ func (s *SeenSet) IsSeen(run, task string, attempt int) bool {
 // rename, so a record that is being written is never a record that is half
 // there.
 func (s *SeenSet) Record(run, task string, attempt int, now time.Time) error {
-	s.entries[formatTriple(run, task, attempt)] = now
+	// A worker may serve for days without reloading this file. Prune at each
+	// write so both its memory and the durable record stay within the replay
+	// window, while retaining newer knowledge of a repeated tuple.
+	cutoff := now.Add(-replayWindow)
+	for triple, at := range s.entries {
+		if at.Before(cutoff) {
+			delete(s.entries, triple)
+		}
+	}
+	triple := formatTriple(run, task, attempt)
+	if at, ok := s.entries[triple]; !ok || now.After(at) {
+		s.entries[triple] = now
+	}
 	content, err := json.Marshal(s.entries)
 	if err != nil {
 		return fmt.Errorf("execution: writing the answered-work record: %w", err)

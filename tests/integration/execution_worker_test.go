@@ -12,6 +12,7 @@ package integration
 // dispat would produce.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -186,6 +187,61 @@ func TestExecutionWorkerRejectsAssignments(t *testing.T) {
 		assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, fresh),
 			"and other work of the same run is still answered")
 	})
+}
+
+// TestExecutionWorkerPrunesAnsweredWorkWhileServing: a node can stay up past
+// the replay window. An old answer still blocks a replay while live, then a
+// later answer removes it from the durable record without restarting the node.
+func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
+	state := t.TempDir()
+	nodeState := filepath.Join(state, executionNode)
+	require.NoError(t, os.MkdirAll(nodeState, 0o755))
+	seenPath := filepath.Join(nodeState, "seen.json")
+	oldKey := orchestrator.run + " preflight 1"
+	// The protocol's replay window is 24 hours. Seed just inside it so the
+	// boundary passes during this test without a private clock override.
+	expires := time.Now().Add(15 * time.Second)
+	oldAt := expires.Add(-24 * time.Hour)
+	seed, err := json.Marshal(map[string]time.Time{oldKey: oldAt})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(seenPath, seed, 0o644))
+
+	replay := executionBranchName("aaa-seen-prune-replay")
+	orchestrator.offer(replay, orchestrator.probe(replay, "preflight"))
+	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret},
+		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "30")
+	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
+	control := executionBranchName("zzz-seen-prune-control")
+	orchestrator.offer(control, orchestrator.probe(control, "control"))
+	executionAwaitMessage(t, rig.mailbox, control, "result")
+	require.Positive(t, time.Until(expires), "the seeded answer must still be in the replay window")
+	before, err := os.ReadFile(seenPath)
+	require.NoError(t, err)
+	stored := map[string]time.Time{}
+	require.NoError(t, json.Unmarshal(before, &stored))
+	heldAt, ok := stored[oldKey]
+	require.True(t, ok, "the live answer remains until its replay window ends")
+	assert.True(t, heldAt.Equal(oldAt), "the replay must not refresh the old answer")
+	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, replay))
+
+	if remaining := time.Until(expires); remaining > 0 {
+		time.Sleep(remaining + 100*time.Millisecond)
+	}
+	fresh := executionBranchName("seen-prune-fresh")
+	orchestrator.offer(fresh, orchestrator.probe(fresh, "fresh"))
+	executionAwaitMessage(t, rig.mailbox, fresh, "result")
+	res := worker.stop(t)
+	assert.Contains(t, executionRejections(res), "replay")
+	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, replay))
+	content, err := os.ReadFile(seenPath)
+	require.NoError(t, err)
+	stored = map[string]time.Time{}
+	require.NoError(t, json.Unmarshal(content, &stored))
+	assert.NotContains(t, stored, oldKey, "the fresh answer must prune the expired one from disk")
+	assert.Contains(t, stored, orchestrator.run+" fresh 1")
 }
 
 // executionLabel is a branch-safe label for one table row's name.

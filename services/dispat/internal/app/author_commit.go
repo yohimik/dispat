@@ -325,10 +325,6 @@ func copyHooksForPlatform(source, target string, windows bool) error {
 	return nil
 }
 
-func executable(path string) bool {
-	return hookExecutable(path, runtime.GOOS == "windows")
-}
-
 // hookExecutable mirrors the platform part of Git's hook discovery. Unix
 // requires an executable regular file. Git for Windows treats regular files
 // as executable because its access(X_OK) compatibility layer cannot rely on

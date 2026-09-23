@@ -157,16 +157,31 @@ func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, ki
 	}
 	err = m.remote.PushAdvance(ctx, m.endpoint, oid, branch, expectedOld)
 	if errors.Is(err, gitx.ErrLeaseRejected) {
-		return m.resolveLostPush(ctx, branch, oid, err)
+		resolved, resolveErr := m.resolveLostPush(ctx, branch, oid, err)
+		if resolveErr != nil {
+			return "", &messagePushError{cause: resolveErr}
+		}
+		return resolved, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("execution: advancing %s to %s: %w", branch, kind, err)
+		return "", &messagePushError{cause: fmt.Errorf("execution: advancing %s to %s: %w", branch, kind, err)}
 	}
 	m.observed[branch] = oid
 	m.log.Debug().Str("branch", branch).Str("commit", oid).Str("message", string(kind)).
 		Msg("coordination branch advanced")
 	return oid, nil
 }
+
+// messagePushError distinguishes an attempted remote write from a local
+// failure preparing a message. After a push starts, a missing response cannot
+// establish what another machine already received, even if the ref is later
+// removed or reset to its previous value.
+type messagePushError struct {
+	cause error
+}
+
+func (e *messagePushError) Error() string { return e.cause.Error() }
+func (e *messagePushError) Unwrap() error { return e.cause }
 
 // resolveLostPush asks the remote, once, whether the rejected push had in
 // fact already been applied. Finding the intended object on the branch is

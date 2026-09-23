@@ -125,9 +125,9 @@ func TestMissingExternalDependencyIsReportedButNotAddedToGraph(t *testing.T) {
 func TestComposedHistorySharesRepositoryInventoryAndWindows(t *testing.T) {
 	const consumers = 10
 	control := &composedControlGit{fakeGit: newFakeGit()}
-	source := &bulkCountingGit{countingGit: counted(newFakeGit(
+	source := counted(newFakeGit(
 		commit{sha: "a1", message: "feat(provider)^: shared change", files: []string{"provider/file"}},
-	))}
+	))
 	space := &model.Space{Name: "workspace"}
 	packages := []*model.Package{{Name: "provider", Dir: "/workspace/source/provider", RepoRoot: "/workspace/source", Repository: "source", Space: space}}
 	var dependencies []model.Dependency
@@ -628,7 +628,7 @@ func BenchmarkComputeComposedSharedHistory(b *testing.B) {
 	for i := 0; i < 500; i++ {
 		commits = append(commits, commit{sha: fmt.Sprintf("a%06d", i), message: "feat(provider)^: change"})
 	}
-	source := &bulkCountingGit{countingGit: counted(newFakeGit(commits...))}
+	source := counted(newFakeGit(commits...))
 	space := &model.Space{Name: "workspace"}
 	packages := []*model.Package{{Name: "provider", Dir: "/workspace/source/provider", RepoRoot: "/workspace/source", Repository: "source", Space: space}}
 	var dependencies []model.Dependency

@@ -14,7 +14,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -195,6 +194,3 @@ func commandOr(command string) string {
 	}
 	return command
 }
-
-// CurrentAssetName is AssetName for the platform this binary runs on.
-func CurrentAssetName() string { return AssetName(runtime.GOOS, runtime.GOARCH) }

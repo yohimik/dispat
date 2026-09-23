@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,7 +22,7 @@ func TestComposeWorkspaceExcludesDisabledRepositoryBeforeCheckoutInspection(t *t
 	require.NoError(t, os.RemoveAll(filepath.Join(root, "sources", "sdk")))
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, workspace.Repositories, 1)
 	assert.Equal(t, ControlRepository, workspace.Repositories[0].Name)
@@ -47,7 +48,7 @@ func TestComposeWorkspaceRefusesUnknownOverrideWhicheverWayItReads(t *testing.T)
 			})
 			loaded, err := Load(path, nil)
 			require.NoError(t, err)
-			_, err = ComposeWorkspace(loaded, path, root, nil)
+			_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "unknown source repository")
 			assert.Equal(t, DiagnosticComposition, DiagnosticCode(err))
@@ -73,7 +74,7 @@ func TestComposeWorkspaceExcludesDeclarationsOwnedByADisabledRepository(t *testi
 	})
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"app"}, workspace.DisabledRepositoryNames())

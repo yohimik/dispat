@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -101,8 +102,8 @@ func TestAuthorHookProxiesPreserveOriginalLocation(t *testing.T) {
 	require.NoError(t, copyHooks(filepath.Join(root, "absent"), filepath.Join(root, "empty")))
 	require.Error(t, copyHooks(source, hook))
 	require.Error(t, copyHooks(hook, filepath.Join(root, "bad-source")))
-	assert.False(t, executable(root))
-	assert.False(t, executable(filepath.Join(root, "absent")))
+	assert.False(t, hookExecutable(root, runtime.GOOS == "windows"))
+	assert.False(t, hookExecutable(filepath.Join(root, "absent"), runtime.GOOS == "windows"))
 	// A colliding directory must fail proxy creation instead of silently losing a hook.
 	collision := filepath.Join(root, "collision")
 	require.NoError(t, os.MkdirAll(filepath.Join(collision, "pre-commit"), 0700))

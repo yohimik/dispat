@@ -32,7 +32,7 @@ func TestValidatePackageOwnershipPathBoundaries(t *testing.T) {
 				pkgs[i] = &model.Package{Name: fmt.Sprint(i), Dir: dir}
 			}
 			before := append([]*model.Package(nil), pkgs...)
-			err := validatePackageOwnership(pkgs)
+			err := validatePackageOwnershipMode(pkgs, false)
 			if tc.overlap {
 				assert.ErrorContains(t, err, "ownership overlaps")
 			} else {
@@ -50,10 +50,10 @@ func TestValidatePackageOwnershipRejectsCanonicalPathAliases(t *testing.T) {
 	alias := filepath.Join(root, "alias")
 	require.NoError(t, os.Symlink(actual, alias))
 
-	err := validatePackageOwnership([]*model.Package{
+	err := validatePackageOwnershipMode([]*model.Package{
 		{Name: "first", Dir: actual},
 		{Name: "second", Dir: alias},
-	})
+	}, false)
 	require.ErrorContains(t, err, "ownership overlaps")
 }
 
@@ -73,7 +73,7 @@ func BenchmarkValidatePackageOwnership(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if err := validatePackageOwnership(pkgs); err != nil {
+				if err := validatePackageOwnershipMode(pkgs, false); err != nil {
 					b.Fatal(err)
 				}
 			}

@@ -557,8 +557,8 @@ type Gitx interface {
 	CreateTag(ctx context.Context, name, message, target string) error
 	// IsAncestor reports whether commit a is an ancestor-or-self of commit b
 	// (§10.4). An implementation without ancestry knowledge — a test double
-	// whose commits carry parent pointers instead — returns ErrNoAncestry
-	// (embed NoAncestry for exactly that) and the planner falls back to those
+	// whose commits carry parent pointers instead — returns ErrNoAncestry,
+	// and the planner falls back to those
 	// pointers. Any other error aborts planning: a silently wrong ancestry
 	// answer would change cancellation and prerelease-train containment.
 	IsAncestor(ctx context.Context, a, b string) (bool, error)
@@ -572,15 +572,6 @@ type Gitx interface {
 // answer ancestry questions at all. It is a capability statement, not a
 // failure: the caller uses its fallback for every ancestry question.
 var ErrNoAncestry = errors.New("gitx: ancestry not available")
-
-// NoAncestry is an embeddable IsAncestor stub for Git implementations that
-// have no ancestry knowledge of their own.
-type NoAncestry struct{}
-
-// IsAncestor always answers ErrNoAncestry.
-func (NoAncestry) IsAncestor(context.Context, string, string) (bool, error) {
-	return false, ErrNoAncestry
-}
 
 // CommitProbex is the optional Gitx capability that answers whether a
 // repository holds an object at all, which is a different question from where

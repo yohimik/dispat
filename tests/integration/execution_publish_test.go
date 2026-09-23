@@ -762,9 +762,12 @@ const executionGitHubTokenEnv = "DISPAT_IT_EXECUTION_GH_TOKEN"
 // and a node that could not read one are the same thing to a release.
 func TestExecutionPublishHandshakeGitFaults(t *testing.T) {
 	for name, row := range map[string]struct {
-		fault    harness.GitFault
-		onWorker bool
+		fault          harness.GitFault
+		onWorker       bool
+		isLocalFailure bool
 	}{
+		"the authorization cannot be prepared locally": {
+			fault: harness.GitFault{Pattern: "*commit-tree*dispat transport go*", Nth: 1, Onward: true}, isLocalFailure: true},
 		"the run cannot write the authorization": {
 			// The second push onto a publish branch: the first is the
 			// assignment that created it.
@@ -797,6 +800,12 @@ func TestExecutionPublishHandshakeGitFaults(t *testing.T) {
 			assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
 			assert.Empty(t, executionProbeValues(rig, "publish"),
 				"and no publish command ran anywhere: %v", rig.runs())
+			if row.isLocalFailure {
+				_, unknown := executionLine(res, executionUnknownPublicationMessage)
+				assert.False(t, unknown, "a local failure sent no authorization")
+				assert.False(t, remoteHoldsLock(t, rig.origin), "the waiting worker acknowledged the withdrawal")
+				assert.Empty(t, rig.branches(), "the known failure needs no recovery evidence")
+			}
 			stopAll(t, []*executionWorker{worker})
 		})
 	}

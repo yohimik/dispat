@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,7 +70,7 @@ func TestWorkspaceFolderInputsFollowTheirRepositoryOwner(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	pkgs, _, excluded, err := DiscoverWorkspace(loaded, root, workspace)
 	require.NoError(t, err)
@@ -138,7 +139,7 @@ func TestWorkspaceNestedOwnerFolderConfigCannotPreemptOwnership(t *testing.T) {
 
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
-	workspace, err := ComposeWorkspace(loaded, path, root, nil)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 	require.NoError(t, err)
 	_, _, _, err = DiscoverWorkspace(loaded, root, workspace)
 	require.Error(t, err)

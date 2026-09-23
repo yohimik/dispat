@@ -83,27 +83,6 @@ func TestReleaseReason(t *testing.T) {
 	}
 }
 
-func TestPossiblyBehind(t *testing.T) {
-	p := &Plan{
-		Releases: map[string]*Release{
-			"consumer":  {StableCommit: "c2"},
-			"provider":  {StableCommit: "c9"},
-			"untagged":  {},
-			"unrelated": {StableCommit: "c2"},
-		},
-		ancestor: func(a, b string) bool { return a == b || (a == "c2" && b == "c9") },
-	}
-
-	assert.False(t, p.IsPossiblyBehind("ghost", "provider"), "unknown consumer")
-	assert.False(t, p.IsPossiblyBehind("consumer", "untagged"), "a never-released provider owes nothing")
-	assert.True(t, p.IsPossiblyBehind("untagged", "provider"), "never released while the provider has been")
-	assert.True(t, p.IsPossiblyBehind("consumer", "provider"), "provider's tag is not an ancestor of the consumer's")
-	assert.False(t, p.IsPossiblyBehind("provider", "unrelated"), "the ancestor relation clears it")
-
-	p.ancestor = nil
-	assert.False(t, p.IsPossiblyBehind("consumer", "provider"), "no ancestry available: no claim")
-}
-
 func TestNewerCommitOrdering(t *testing.T) {
 	cp := &computation{byKey: map[string]*commitRec{
 		"new": {rank: 0},
@@ -128,17 +107,31 @@ func TestMatchesFrom(t *testing.T) {
 // ancestry fallbacks: parent-pointer BFS and history-rank order
 // ---------------------------------------------------------------------------
 
-// plainGit answers ancestry with gitx.ErrNoAncestry (via the embedded stub)
+// plainGit answers ancestry with gitx.ErrNoAncestry (via a test stub)
 // so the planner has to fall back to the commits' parent pointers
 // (stripParents=false) or to history order alone (stripParents=true).
+type noAncestry struct{}
+
+func (noAncestry) IsAncestor(context.Context, string, string) (bool, error) {
+	return false, gitx.ErrNoAncestry
+}
+
 type plainGit struct {
-	gitx.NoAncestry
+	noAncestry
 	inner        *fakeGit
 	stripParents bool
 }
 
 func (g *plainGit) Tags(ctx context.Context, pkg string, f gitx.TagFormat) (gitx.Tags, error) {
 	return g.inner.Tags(ctx, pkg, f)
+}
+
+func (g *plainGit) TagsForPackages(ctx context.Context, formats map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
+	return g.inner.TagsForPackages(ctx, formats)
+}
+
+func (g *plainGit) ResolveCommit(ctx context.Context, rev string) (string, error) {
+	return g.inner.ResolveCommit(ctx, rev)
 }
 
 func (g *plainGit) Commits(ctx context.Context, sinceTag string) ([]gitx.Commit, error) {
@@ -212,17 +205,14 @@ func TestReleaseTagFormatFallsBackToTheDefault(t *testing.T) {
 	assert.Equal(t, gitx.TagFormat("{name}@v{version}"), rel.TagFormat())
 }
 
-func TestPlanAccessorsOnUnknownPackages(t *testing.T) {
+func TestReleasingSkipsUnknownPackages(t *testing.T) {
 	p := &Plan{
 		Order: []string{"core", "ghost"},
 		Releases: map[string]*Release{
 			"core": {Pkg: &model.Package{Name: "core", Space: &model.Space{}},
-				OwnBump: ccme.BumpMinor, Bump: ccme.BumpMinor, NewWork: true,
-				Sources: []StaleSource{{Provider: "utils"}}},
+				OwnBump: ccme.BumpMinor, Bump: ccme.BumpMinor, NewWork: true},
 		},
 	}
-	assert.Nil(t, p.StaleSources("ghost"), "an unknown package has no sources")
-	assert.Equal(t, []StaleSource{{Provider: "utils"}}, p.StaleSources("core"))
 	assert.Len(t, p.Releasing(), 1, "a nil release entry is skipped")
 }
 

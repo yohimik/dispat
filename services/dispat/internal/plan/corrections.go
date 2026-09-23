@@ -4,7 +4,6 @@
 package plan
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -80,19 +79,6 @@ type correctionRec struct {
 	targets []resolvedTarget
 	scope   map[string]bool
 	label   string
-}
-
-// commitResolver resolves an abbreviated sha against the whole repository.
-//
-// It is a capability rather than a method on gitx.Gitx because only the real
-// implementation can answer it: an in-memory fake knows the commits it was
-// given and nothing else. Without it the pass matches prefixes against the
-// commits it examined, which is exact for a full sha and for any target still
-// pending somewhere (the only targets a correction can act on), and reports an
-// abbreviation of an already-released commit as unknown (E210) where the truth
-// is "discharged" (W209).
-type commitResolver interface {
-	ResolveCommit(ctx context.Context, rev string) (string, error)
 }
 
 // isCorrection reports a unit carrying either correction footer. The parser has
@@ -225,17 +211,15 @@ type taggedTarget struct {
 	target ccme.CorrectionTarget
 }
 
-// correctionError is a unit-scoped error carrying the code to report it under.
-type correctionError struct {
+// correctionIssue is a unit-scoped diagnostic carrying its report code.
+type correctionIssue struct {
 	code    string
 	message string
 }
 
-func (e *correctionError) Error() string { return e.code + ": " + e.message }
-
 // resolveTarget is one line of phase 1: a footer value turned into the record
 // it names, or the error that voids the whole unit.
-func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTarget, *correctionError) {
+func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTarget, *correctionIssue) {
 	out := resolvedTarget{kind: t.kind, raw: t.target.Raw}
 	if t.target.IsWildcard() {
 		out.wildcard = true
@@ -249,7 +233,7 @@ func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTa
 	// Proper ancestor, never self: this is what lets one commit discard old
 	// records and supply their restatement together (§7.4.2).
 	if full == rec.key || !cp.ancestorOrSelf(full, rec.key) {
-		return out, &correctionError{CodeCorrectionUnknownTarget, fmt.Sprintf(
+		return out, &correctionIssue{CodeCorrectionUnknownTarget, fmt.Sprintf(
 			"%s: %s is not a proper ancestor of this commit; a correction reaches only earlier commits (§7.4.2)",
 			t.kind, t.target.Raw)}
 	}
@@ -267,14 +251,14 @@ func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTa
 	n := t.target.UnitSelector
 	if n == 0 {
 		if target.unitCount > 1 {
-			return out, &correctionError{CodeCorrectionBadSelector, fmt.Sprintf(
+			return out, &correctionIssue{CodeCorrectionBadSelector, fmt.Sprintf(
 				"%s: %s names a commit carrying %d units; name the unit, as %s#1 (§7.4.1)",
 				t.kind, t.target.Raw, target.unitCount, t.target.SHA)}
 		}
 		n = 1
 	}
 	if n > target.unitCount {
-		return out, &correctionError{CodeCorrectionBadSelector, fmt.Sprintf(
+		return out, &correctionIssue{CodeCorrectionBadSelector, fmt.Sprintf(
 			"%s: unit selector %d is out of range; %s carries %d unit(s) (§7.4.1)",
 			t.kind, n, t.target.SHA, target.unitCount)}
 	}
@@ -283,7 +267,7 @@ func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTa
 			continue
 		}
 		if u.IsControl() {
-			return out, &correctionError{CodeCorrectionControlTarget, fmt.Sprintf(
+			return out, &correctionIssue{CodeCorrectionControlTarget, fmt.Sprintf(
 				"%s: %s names a %s unit, which carries no record to correct (§7.4.2)",
 				t.kind, t.target.Raw, u.Header.Type)}
 		}
@@ -300,7 +284,7 @@ func (cp *computation) resolveTarget(rec *commitRec, t taggedTarget) (resolvedTa
 //
 // Answers are memoised: the same target named twice, in one unit or across a
 // history, costs one lookup.
-func (cp *computation) resolveSHA(repository, sha string) (string, *correctionError) {
+func (cp *computation) resolveSHA(repository, sha string) (string, *correctionIssue) {
 	key := historyKey(repository, sha)
 	if _, ok := cp.byKey[key]; ok {
 		return key, nil
@@ -324,39 +308,23 @@ func (cp *computation) resolveSHA(repository, sha string) (string, *correctionEr
 	return full, nil
 }
 
-func unknownTarget(sha string) *correctionError {
-	return &correctionError{CodeCorrectionUnknownTarget, fmt.Sprintf(
+func unknownTarget(sha string) *correctionIssue {
+	return &correctionIssue{CodeCorrectionUnknownTarget, fmt.Sprintf(
 		"%s names no commit, or names more than one; a correction target is a full or unambiguous abbreviated sha (§7.4.1)", sha)}
 }
 
-// lookupSHA asks git, and falls back to matching the abbreviation against the
-// commits already examined. The fallback is exact for every target a correction
-// can still act on, which is what makes a Git implementation without the
-// capability usable rather than wrong.
+// lookupSHA resolves a correction target against its entire repository, even
+// when the target commit is behind every pending window.
 func (cp *computation) lookupSHA(repository, sha string) (string, bool) {
 	git := cp.git
 	if h, ok := cp.history(repository); ok && h.Git != nil {
 		git = h.Git
 	}
-	if r, ok := git.(commitResolver); ok {
-		full, err := r.ResolveCommit(cp.ctx, sha)
-		if err != nil || full == "" {
-			return "", false
-		}
-		return historyKey(repository, full), true
+	full, err := git.ResolveCommit(cp.ctx, sha)
+	if err != nil || full == "" {
+		return "", false
 	}
-	var found string
-	for key := range cp.byKey {
-		repo, raw := splitHistoryKey(key)
-		if !strings.EqualFold(repo, repository) || !strings.HasPrefix(raw, sha) {
-			continue
-		}
-		if found != "" {
-			return "", false // ambiguous
-		}
-		found = key
-	}
-	return found, found != ""
+	return historyKey(repository, full), true
 }
 
 // reconcileScope is phase 2 of §13.4b: containment, not equality.

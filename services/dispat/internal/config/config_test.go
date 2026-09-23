@@ -165,7 +165,7 @@ func TestLoadFormats(t *testing.T) {
 				loaded.Commands(loaded.Spaces["libs"].Flow.Publish),
 				"an array value survives every format the CLI reads")
 
-			pkgs, _, _, err := Discover(loaded, root)
+			pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 			require.NoError(t, err)
 			names := make([]string, 0, len(pkgs))
 			for _, p := range pkgs {
@@ -287,7 +287,7 @@ func TestLoadTagFormatPerSpace(t *testing.T) {
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 
 	byName := map[string]string{}
@@ -372,7 +372,7 @@ func TestLoadScriptRefsCaseInsensitive(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, []string{"echo b"}, pkgs[0].Space.BuildScript)
@@ -390,7 +390,7 @@ func TestLoadOptionalScripts(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Empty(t, pkgs[0].Space.BuildScript)
@@ -700,7 +700,7 @@ func TestDiscover(t *testing.T) {
 		"packages/libs/core", "packages/libs/utils", "packages/apps/app")
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, deps, _, err := Discover(cfg, root)
+	pkgs, deps, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 3)
 
@@ -723,7 +723,7 @@ func TestDiscoverDuplicatePackage(t *testing.T) {
 		"packages/libs/core", "packages/apps/core", "packages/apps/app")
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, _, err = Discover(cfg, root)
+	_, _, _, err = DiscoverWorkspace(cfg, root, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unique")
 }
@@ -732,7 +732,7 @@ func TestDiscoverUnknownDependency(t *testing.T) {
 	root := writeModelRepo(t, validConfig(), "packages/libs/core", "packages/apps/other")
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, _, err = Discover(cfg, root)
+	_, _, _, err = DiscoverWorkspace(cfg, root, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown consumer")
 }
@@ -753,7 +753,7 @@ func TestLoadScriptArraysAndScalars(t *testing.T) {
 	}, "pkgs/core")
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(cfg, root)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, []string{"echo clean", "echo compile"}, pkgs[0].Space.BuildScript,
@@ -787,7 +787,7 @@ func TestLoadLoginAndHookScripts(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	sp := pkgs[0].Space
@@ -899,7 +899,7 @@ func TestDiscoverScriptReferenceErrors(t *testing.T) {
 			root := writeModelRepo(t, cfg, "pkgs/core")
 			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 			require.NoError(t, err, "a reference is not a load-time error")
-			_, _, _, err = Discover(loaded, root)
+			_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.wantErr)
 			assert.Contains(t, err.Error(), `package "core"`,
@@ -1086,7 +1086,7 @@ func TestDiscoverCarriesVersioningAndScripts(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "fixed", string(pkgs[0].Space.Versioning))
@@ -1110,7 +1110,7 @@ func TestMultiCommandScripts(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 
@@ -1186,7 +1186,7 @@ func TestScriptValuesAreCheckedAtEveryLevel(t *testing.T) {
 			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 			if err == nil {
 				// A package's map only exists once its layers are merged.
-				_, _, _, err = Discover(loaded, root)
+				_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.wantErr)
@@ -1211,7 +1211,7 @@ func TestFlowResolvesThroughEveryLevel(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 
 	byName := map[string]*model.Package{}
@@ -1239,7 +1239,7 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core", "apps/web")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, _, err = Discover(loaded, root)
+		_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `package "core"`)
 		assert.Contains(t, err.Error(), `flow.publish references unknown script "ship"`)
@@ -1255,7 +1255,7 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, _, err = Discover(loaded, root)
+		_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `package "app"`, "core resolves it, app does not")
 	})
@@ -1273,7 +1273,7 @@ func TestFlowRefNeedsThePackageScope(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/app")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		pkgs, _, _, err := Discover(loaded, root)
+		pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 		require.NoError(t, err)
 		require.Len(t, pkgs, 2)
 		for _, p := range pkgs {
@@ -1294,7 +1294,7 @@ func TestSyncLockResolvesThroughThePackageScope(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	require.NotNil(t, pkgs[0].Space.AutoVersion)
@@ -1307,7 +1307,7 @@ func TestSyncLockResolvesThroughThePackageScope(t *testing.T) {
 	badRoot := writeModelRepo(t, bad, "pkgs/core")
 	loaded, err = Load(filepath.Join(badRoot, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, _, err = Discover(loaded, badRoot)
+	_, _, _, err = DiscoverWorkspace(loaded, badRoot, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `autoVersion.syncLock references unknown script "tidy"`)
 }
@@ -1320,7 +1320,7 @@ func TestDiscoverMissingSpaceFolder(t *testing.T) {
 	root := writeModelRepo(t, cfg)
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err, "the folder is a discovery concern, not a load one")
-	_, _, _, err = Discover(loaded, root)
+	_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `space "libs"`)
 }
@@ -1331,7 +1331,7 @@ func TestDiscoverSkipsHiddenFoldersAndFiles(t *testing.T) {
 
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(cfg, root)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1, "only real package folders count")
 	assert.Equal(t, "core", pkgs[0].Name)
@@ -1343,7 +1343,7 @@ func TestDiscoverUnknownProvider(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, _, err = Discover(loaded, root)
+	_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown provider package "ghost"`)
 }
@@ -1354,7 +1354,7 @@ func TestDiscoverMissingExternalProvider(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, _, err := Discover(loaded, root)
+	_, deps, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	assert.Empty(t, deps)
 	_, active, inactive, _, err := DiscoverWorkspacePlan(loaded, root, nil)
@@ -1370,7 +1370,7 @@ func TestDiscoverIncludedExternalProviderIsActive(t *testing.T) {
 	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/util")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, deps, _, err := Discover(loaded, root)
+	_, deps, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, deps, 1)
 	assert.Equal(t, "core", deps[0].Consumer)
@@ -1395,7 +1395,7 @@ func TestDiscoverMissingExternalProviderStillValidatesKind(t *testing.T) {
 			root := writeModelRepo(t, cfg, "pkgs/core")
 			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 			require.NoError(t, err)
-			_, _, _, err = Discover(loaded, root)
+			_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), `unknown dependency kind "dependecies"`)
 		})
@@ -1421,7 +1421,7 @@ func TestDiscoverNoneProviderRejected(t *testing.T) {
 		root := writeModelRepo(t, cfg, dirs...)
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		_, _, _, err = Discover(loaded, root)
+		_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 		return err
 	}
 
@@ -1637,7 +1637,7 @@ func TestAutoVersionResolution(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		pkgs, _, _, err := Discover(loaded, root)
+		pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 		require.NoError(t, err)
 		av := pkgs[0].Space.AutoVersion
 		require.NotNil(t, av)
@@ -1674,7 +1674,7 @@ func TestAutoVersionResolution(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		pkgs, _, _, err := Discover(loaded, root)
+		pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 		require.NoError(t, err)
 		av := pkgs[0].Space.AutoVersion
 		require.NotNil(t, av)
@@ -1705,7 +1705,7 @@ func TestAutoVersionResolution(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		pkgs, _, _, err := Discover(loaded, root)
+		pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 		require.NoError(t, err, "a name spelled another way is not an unknown package")
 		require.NotNil(t, pkgs[0].Space.AutoVersion)
 		assert.Equal(t, map[string]bool{"core": true}, pkgs[0].Space.AutoVersion.Only,
@@ -1725,7 +1725,7 @@ func TestAutoVersionResolution(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		pkgs, _, _, err := Discover(loaded, root)
+		pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 		require.NoError(t, err)
 		assert.Nil(t, pkgs[0].Space.AutoVersion)
 	})
@@ -1769,7 +1769,7 @@ func TestAutoVersionStrategies(t *testing.T) {
 		root := writeModelRepo(t, cfg, "pkgs/core")
 		loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 		require.NoError(t, err)
-		pkgs, _, _, err := Discover(loaded, root)
+		pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 		require.NoError(t, err)
 		return pkgs[0].Space.AutoVersion
 	}
@@ -2205,7 +2205,7 @@ func TestLoadRecordLineChannels(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []EntryLine{{Line: []string{"beta only"}, Channels: []string{"*"}}}, cfg.Changelog.Header)
 
-	pkgs, _, _, err := Discover(cfg, root)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	core := packagesByName(pkgs)["core"]
 	assert.Equal(t, []model.EntryLine{{Line: []string{"beta only"}, Channels: []string{"*"}}},
@@ -2226,7 +2226,7 @@ func TestLoadRecordChannelsGateTheRecords(t *testing.T) {
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 
-	pkgs, _, _, err := Discover(cfg, root)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	core := packagesByName(pkgs)["core"]
 	assert.Equal(t, []string{"stable", "*"}, core.Changelog.Channels,
@@ -2297,7 +2297,7 @@ func TestLoadPackageOverrideRecordLines(t *testing.T) {
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 
-	pkgs, _, _, err := Discover(cfg, root)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	core := packagesByName(pkgs)["core"]
 	assert.Equal(t, []model.EntryLine{{Line: []string{"local"}}}, core.Changelog.Format.Footer,
@@ -2326,7 +2326,7 @@ func TestLoadReleaseNameReachesBothSpecs(t *testing.T) {
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 
-	pkgs, _, _, err := Discover(cfg, root)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 	core := packagesByName(pkgs)["core"]
 	assert.Equal(t, "${DISPAT_PACKAGE} out", core.Changelog.Format.ReleaseName)
@@ -2347,7 +2347,7 @@ func TestLoadInFolderConfigRecordLineShorthands(t *testing.T) {
 	})
 	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(cfg, root)
+	pkgs, _, _, err := DiscoverWorkspace(cfg, root, nil)
 	require.NoError(t, err)
 
 	core := packagesByName(pkgs)["core"]
@@ -2416,7 +2416,7 @@ func TestLoadCustomObjectIsCarriedButNeverRead(t *testing.T) {
 
 	// Discovery is unaffected: the object reaches no part of the model a
 	// package is built from.
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "core", pkgs[0].Name)

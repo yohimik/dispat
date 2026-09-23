@@ -53,11 +53,11 @@ func TestSectionItemsAreSeparatedByExactlyOneBlankLine(t *testing.T) {
 		},
 	}
 	assert.Equal(t, "### Features\n\n- one\n\n- two\n\n### Fixes\n\n- three\n",
-		RenderSections(rel, Format{}))
+		RenderBody(rel, Format{}, nil))
 
 	rel.Units[1].Body = "why it was done"
 	assert.Equal(t, "### Features\n\n- one\n\n- two\n  why it was done\n\n### Fixes\n\n- three\n",
-		RenderSections(rel, Format{}))
+		RenderBody(rel, Format{}, nil))
 }
 
 func TestSectionsRenderInTheConfiguredOrder(t *testing.T) {
@@ -67,7 +67,7 @@ func TestSectionsRenderInTheConfiguredOrder(t *testing.T) {
 		{Builtin: model.SectionFeatures},
 		{Builtin: model.SectionBreaking},
 	}})
-	out := RenderSections(sectionsRelease(), f)
+	out := RenderBody(sectionsRelease(), f, nil)
 	order := []string{"### Dependencies", "### Fixes", "### Features", "### Breaking Changes"}
 	at := -1
 	for _, title := range order {
@@ -89,7 +89,7 @@ func TestOmittedBuiltinSectionsStillRender(t *testing.T) {
 		{Builtin: model.SectionFeatures},
 		{Builtin: model.SectionDependencies},
 	}})
-	out := RenderSections(sectionsRelease(), f)
+	out := RenderBody(sectionsRelease(), f, nil)
 	for _, want := range []string{"- close leak", "- drop old API", "- add streaming", "- utils: 1.1.0 -> 1.2.0"} {
 		assert.Contains(t, out, want)
 	}
@@ -111,7 +111,7 @@ func TestCustomSectionClaimsItsTypes(t *testing.T) {
 		{Builtin: model.SectionFixes},
 		{Builtin: model.SectionDependencies},
 	}})
-	assert.Equal(t, "### Added\n\n- claimed\n\n### Features\n\n- unclaimed\n", RenderSections(rel, f))
+	assert.Equal(t, "### Added\n\n- claimed\n\n### Features\n\n- unclaimed\n", RenderBody(rel, f, nil))
 }
 
 func TestBreakingWinsOverACustomClaim(t *testing.T) {
@@ -134,7 +134,7 @@ func TestBreakingWinsOverACustomClaim(t *testing.T) {
 		{Builtin: model.SectionDependencies},
 	}})
 	assert.Equal(t, "### Added\n\n- ordinary addition\n\n### Breaking Changes\n\n- breaking addition\n",
-		RenderSections(rel, f))
+		RenderBody(rel, f, nil))
 }
 
 func TestCommitRefSuffix(t *testing.T) {
@@ -173,7 +173,7 @@ func TestCommitRefSuffix(t *testing.T) {
 			"### Features\n\n- add streaming ([" + sha + "](https://git.acme.com/c/" + sha + "))\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, RenderSections(rel, tc.f))
+			assert.Equal(t, tc.want, RenderBody(rel, tc.f, nil))
 		})
 	}
 
@@ -183,7 +183,7 @@ func TestCommitRefSuffix(t *testing.T) {
 		// so the line renders unreferenced rather than with a dead reference.
 		rel.UnitCommits = map[*ccme.Unit]string{unit: "msg:feat: add streaming"}
 		assert.Equal(t, "### Features\n\n- add streaming\n",
-			RenderSections(rel, SpecFormat(model.RecordFormat{CommitRefsPlacement: RefsSuffix})))
+			RenderBody(rel, SpecFormat(model.RecordFormat{CommitRefsPlacement: RefsSuffix}), nil))
 	})
 }
 
@@ -225,7 +225,7 @@ func TestDependencyLink(t *testing.T) {
 			"### Dependencies\n\n- utils: 1.1.0 -> 1.2.0\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, RenderSections(rel, tc.f))
+			assert.Equal(t, tc.want, RenderBody(rel, tc.f, nil))
 		})
 	}
 }
@@ -245,7 +245,7 @@ func TestDependenciesStayATightList(t *testing.T) {
 	}
 	assert.Equal(t,
 		"### Dependencies\n\n- utils: 1.0.0 -> 1.1.0\n- models: 2.0.0 -> 2.1.0\n",
-		RenderSections(rel, Format{}))
+		RenderBody(rel, Format{}, nil))
 }
 
 // TestDependencyLinkDeclinesAnAutoLinkWithNoTag: an update the plan took from
@@ -264,15 +264,15 @@ func TestDependencyLinkDeclinesAnAutoLinkWithNoTag(t *testing.T) {
 		}},
 	}
 	assert.Equal(t, "### Dependencies\n\n- utils: 1.1.0 -> 1.2.0\n",
-		RenderSections(rel, SpecFormat(model.RecordFormat{DependencyLink: model.LinkAuto, LinkOwner: "acme", LinkRepo: "tools"})),
+		RenderBody(rel, SpecFormat(model.RecordFormat{DependencyLink: model.LinkAuto, LinkOwner: "acme", LinkRepo: "tools"}), nil),
 		"a tagless update renders the plain line rather than a link to /releases/tag/")
 
 	assert.Equal(t,
 		"### Dependencies\n\n- [utils](https://pkg.example/utils/1.2.0): 1.1.0 -> 1.2.0\n",
-		RenderSections(rel, SpecFormat(model.RecordFormat{
+		RenderBody(rel, SpecFormat(model.RecordFormat{
 			DependencyLink: "https://pkg.example/$DISPAT_DEP_NAME/$DISPAT_DEP_TO",
 			LinkOwner:      "acme", LinkRepo: "tools",
-		})), "a template that never names the tag still resolves")
+		}), nil), "a template that never names the tag still resolves")
 }
 
 // TestResolveRepoEnvCompletesOnlyAnUnstatedPair: the ordinary CI setup states
@@ -326,7 +326,7 @@ func TestRecordersResolveTheRepositoryOnceAtConstruction(t *testing.T) {
 	// The renderer itself reads no environment. A format nobody completed
 	// renders the plain line under the same $GITHUB_REPOSITORY, which is what
 	// makes a rendered entry a function of its format alone.
-	assert.NotContains(t, RenderSections(rel, SpecFormat(model.RecordFormat{DependencyLink: model.LinkAuto})),
+	assert.NotContains(t, RenderBody(rel, SpecFormat(model.RecordFormat{DependencyLink: model.LinkAuto}), nil),
 		"https://github.com/")
 }
 
@@ -337,12 +337,12 @@ func TestNoChangesTextReplacesTheBuiltinSentence(t *testing.T) {
 		Pinned: true,
 	}
 	assert.Equal(t, "see the dispat changelog for core@2.0.0.\n",
-		RenderSections(rel, SpecFormat(model.RecordFormat{NoChangesText: "see the dispat changelog for $DISPAT_TAG."})))
+		RenderBody(rel, SpecFormat(model.RecordFormat{NoChangesText: "see the dispat changelog for $DISPAT_TAG."}), nil))
 
 	// An expansion that comes out empty is a mistake in the template rather
 	// than an instruction to publish an empty entry, so the built-in stands.
 	assert.Equal(t, "No changes: a version set by Release-As.\n",
-		RenderSections(rel, SpecFormat(model.RecordFormat{NoChangesText: "$NOTHING_DEFINES_THIS_NAME"})))
+		RenderBody(rel, SpecFormat(model.RecordFormat{NoChangesText: "$NOTHING_DEFINES_THIS_NAME"}), nil))
 }
 
 func TestLogRecordPolicyWarnsAboutUnavailableCommitRefs(t *testing.T) {
@@ -433,10 +433,10 @@ func TestCommitRefLinkOffRendersThePlainReference(t *testing.T) {
 		UnitCommits: map[*ccme.Unit]string{unit: "a1b2c3d4e5f6"},
 	}
 	assert.Equal(t, "### Features\n\n- add streaming (a1b2c3d)\n",
-		RenderSections(rel, SpecFormat(model.RecordFormat{
+		RenderBody(rel, SpecFormat(model.RecordFormat{
 			CommitRefsPlacement: RefsSuffix, CommitRefsLink: model.LinkOff,
 			LinkOwner: "acme", LinkRepo: "tools",
-		})))
+		}), nil))
 }
 
 // TestRenderOrderHoldsEveryBuiltinSection: a section order missing a built-in
@@ -446,9 +446,9 @@ func TestCommitRefLinkOffRendersThePlainReference(t *testing.T) {
 // assembled in code goes through no resolution at all.
 func TestRenderOrderHoldsEveryBuiltinSection(t *testing.T) {
 	rel := sectionsRelease()
-	out := RenderSections(rel, SpecFormat(model.RecordFormat{
+	out := RenderBody(rel, SpecFormat(model.RecordFormat{
 		Sections: []model.RecordSection{{Title: "Docs", Types: []string{"docs"}}},
-	}))
+	}), nil)
 
 	assert.Contains(t, out, "### Breaking Changes\n\n- drop old API")
 	assert.Contains(t, out, "### Features\n\n- add streaming")
@@ -477,7 +477,7 @@ func TestLogRecordPolicyOnTheNoChangesText(t *testing.T) {
 	// an empty entry wearing the one character that would pass an emptiness
 	// test.
 	blank := SpecFormat(model.RecordFormat{NoChangesText: "${UNSET_ONE} ${UNSET_TWO}"})
-	assert.Equal(t, "No changes: a version set by Release-As.\n", RenderSections(rel, blank),
+	assert.Equal(t, "No changes: a version set by Release-As.\n", RenderBody(rel, blank, nil),
 		"a blank expansion falls back to the built-in line")
 	out := logged(blank)
 	assert.Contains(t, out, plan.CodeNoChangesTextEmpty)

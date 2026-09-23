@@ -428,6 +428,8 @@ The worker's answered-work record has one serving process. It holds a kernel loc
 its whole lifetime; release clears the diagnostic PID and unlocks the file without removing or renaming it. A crash
 releases the kernel lock, while a live PID left by an older worker is still respected. Keeping one inode at one path
 closes the takeover window in which two processes could each claim a different replacement file.
+Older PID-only workers must be stopped before upgrading a shared state folder; their rename-based implementation
+cannot participate safely in the new kernel-lock protocol.
 
 The HTTP calls used for GitHub records, webhooks and self-update keep their request deadline through response-body
 reads and `Close`, not just through the response headers. TinyGo's transport can ignore cancellation; a timed-out

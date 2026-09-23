@@ -19,7 +19,7 @@ exported by CI.
 | [`lint-config-scripts.py`](./lint-config-scripts.py) | the `shellcheck` target of [`Dockerfile.gotest`](../Dockerfile.gotest) | every committed dispat config named on its command line | Each `scripts` entry as one shell file, held to `sh -n` and to shellcheck. It refuses a configuration shape it cannot read rather than skipping it, and `--self-test` holds the reader to the four shapes an entry is written in. |
 | [`tinygo-spike-darwin.sh`](./tinygo-spike-darwin.sh) | by hand, on a Mac                            | its toolchain pins, [`Dockerfile.tinygo`](../Dockerfile.tinygo)'s probe heredocs | The darwin half of the TinyGo spike: build, run, net and self-update probes for darwin/amd64+arm64, recorded as `coverage/tinygo-spike/darwin-*.log`, with `darwin-selfupdate.log` carrying the real-TLS update matrix and the platform verifier's answer about `SSL_CERT_FILE`. |
 
-Repository gates run inside Docker, so the commit CI jobs need Docker, git and dispat itself. The release job also
+The main repository gates run inside Docker, so those CI jobs need Docker, git and dispat itself. The release job also
 installs Node and pnpm to compile, pack and publish the npm distribution through npm trusted publishing. Terraform
 and the native Go builds remain inside Docker. The Go gates (vet, tests, gofmt, the coverage badge, the test report, `go mod tidy`)
 are targets of [`Dockerfile.gotest`](../Dockerfile.gotest) at the repository root; each dispat script drives one
@@ -29,6 +29,11 @@ six release binaries from [`services/dispat/Dockerfile`](../services/dispat/Dock
 carry the current checkout instead of the `pkg/*` versions pinned in `go.mod`. The documentation site and its snapshots
 build from the docs package Dockerfile using the `DOCS_VERSION` build argument, and the remaining images come from
 [`docker compose` builds](../docker/README.md) driven by `docker/dispat.yaml`.
+
+The [native lock gate](../.github/workflows/native-locks.yml) is the platform-specific exception. It uses Go directly
+on Windows and macOS to test worker state ownership, process exclusion and Git directory aliases against those
+kernels. Both the test workflow and the release workflow require it; cross-compilation alone cannot verify Windows
+byte-range locks or macOS filesystem aliases.
 
 Do not run `go work sync` or `go mod tidy` while the link bracket is in place. Both commands delete `go.sum` entries
 that local redirects make redundant, but unlinking requires those entries back. Use `--sync-lock=false` to protect

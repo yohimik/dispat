@@ -300,7 +300,7 @@ func TestFolderConfigRefusesASectionBump(t *testing.T) {
 	})
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	_, _, _, err = Discover(loaded, root)
+	_, _, _, err = DiscoverWorkspace(loaded, root, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bump cannot be set in a folder's own config file")
 
@@ -311,7 +311,7 @@ func TestFolderConfigRefusesASectionBump(t *testing.T) {
 			map[string]any{"title": "Added", "types": []any{"add"}},
 		}},
 	})
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "Added", pkgs[0].Changelog.Format.Sections[0].Title)
@@ -421,7 +421,7 @@ func TestChangelogSpecResolvesSpacingAndForgeCoordinates(t *testing.T) {
 	loaded, err := loadModel(t, cfg, "pkgs/core")
 	require.NoError(t, err)
 	root := filepath.Dir(loaded.SourceFiles[0])
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 
@@ -436,7 +436,7 @@ func TestChangelogSpecDefaultsTheSpacing(t *testing.T) {
 	loaded, err := loadModel(t, minimalConfig(), "pkgs/core")
 	require.NoError(t, err)
 	root := filepath.Dir(loaded.SourceFiles[0])
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	assert.Equal(t, models.DefaultEntrySpacing, pkgs[0].Changelog.EntrySpacing)
 }

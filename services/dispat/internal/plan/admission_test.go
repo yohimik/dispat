@@ -399,7 +399,7 @@ func randomAdmissionMessage(rng *rand.Rand, names []string) string {
 }
 
 // computeAdmission plans the generated workspace under one of the two rules.
-func computeAdmission(t *testing.T, git gitx.Gitx, pkgs []*model.Package,
+func computeAdmission(t *testing.T, git TagInventoryGitx, pkgs []*model.Package,
 	deps []model.Dependency, windowOnly bool) *Plan {
 
 	t.Helper()

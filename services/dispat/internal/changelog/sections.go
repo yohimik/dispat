@@ -167,9 +167,8 @@ type renderCtx struct {
 }
 
 // renderSections groups the release's work and renders it, in the configured
-// order. It is what RenderSections and RenderBody both go through; the lookup
-// is the caller's, so one entry interpolates every template against the same
-// variables.
+// order. RenderBody uses this with the entry's lookup, so every template in
+// one entry reads the same variables.
 func renderSections(rel *plan.Release, f Format, look Lookup) string {
 	// A shared-versioning ride has no content to group: one line states that
 	// the version moved and nothing else did, in the changelog and in the

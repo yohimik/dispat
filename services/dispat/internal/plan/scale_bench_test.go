@@ -29,34 +29,24 @@ import (
 // gitOps totals one fixture's Git queries: the tag listings, the history
 // listings, and the bulk inventories that replace a listing per package. In
 // the CLI each one is a git subprocess.
-type gitOps struct{ tags, logs, bulk int }
+type gitOps struct{ logs, bulk int }
 
 func (o gitOps) add(other gitOps) gitOps {
-	return gitOps{tags: o.tags + other.tags, logs: o.logs + other.logs, bulk: o.bulk + other.bulk}
+	return gitOps{logs: o.logs + other.logs, bulk: o.bulk + other.bulk}
 }
 
 func (o gitOps) sub(other gitOps) gitOps {
-	return gitOps{tags: o.tags - other.tags, logs: o.logs - other.logs, bulk: o.bulk - other.bulk}
+	return gitOps{logs: o.logs - other.logs, bulk: o.bulk - other.bulk}
 }
 
-// ops totals the queries recorded so far. It takes the same lock the
-// concurrent tag fallback writes under.
+// ops totals the queries recorded so far.
 func (c *countingGit) ops() gitOps {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out gitOps
-	for _, n := range c.tagQueries {
-		out.tags += n
-	}
+	out := gitOps{bulk: c.bulkQueries}
 	for _, n := range c.logQueries {
 		out.logs += n
 	}
-	return out
-}
-
-func (b *bulkCountingGit) ops() gitOps {
-	out := b.countingGit.ops()
-	out.bulk = b.bulkQueries
 	return out
 }
 
@@ -69,7 +59,7 @@ func reportGitOps(b *testing.B, iterations int, delta gitOps, stats *HistoryStat
 		return
 	}
 	per := float64(iterations)
-	b.ReportMetric(float64(delta.tags+delta.logs+delta.bulk)/per, "gitcalls/op")
+	b.ReportMetric(float64(delta.logs+delta.bulk)/per, "gitcalls/op")
 	b.ReportMetric(float64(delta.logs)/per, "gitlogs/op")
 	if stats != nil {
 		b.ReportMetric(float64(stats.CommitWindows.Load())/per, "windows/op")
@@ -116,7 +106,7 @@ func linearHistory(commits, packages int) []commit {
 // package's pending window starts at the same boundary. This is the shape the
 // shared-window cache exists for: one history listing for the whole
 // workspace rather than one per package.
-func sharedHistoryWorkspace(packages, commits int) ([]*model.Package, *bulkCountingGit) {
+func sharedHistoryWorkspace(packages, commits int) ([]*model.Package, *countingGit) {
 	git := newFakeGit(linearHistory(commits, packages)...)
 	space := &model.Space{Name: "workspace"}
 	pkgs := make([]*model.Package, packages)
@@ -125,7 +115,7 @@ func sharedHistoryWorkspace(packages, commits int) ([]*model.Package, *bulkCount
 		pkgs[i] = &model.Package{Name: name, Dir: "/r/pkgs/" + name, Space: space}
 		git = git.tag(name, "1.0.0", "base")
 	}
-	return pkgs, &bulkCountingGit{countingGit: counted(git)}
+	return pkgs, counted(git)
 }
 
 // BenchmarkComputeSharedHistory measures many packages over one history. The
@@ -162,7 +152,7 @@ func BenchmarkComputeSharedHistory(b *testing.B) {
 // dependencyGraphWorkspace builds a balanced provider tree: package i provides
 // for 2i+1 and 2i+2, so the closure directive at the root has to expand every
 // package exactly once through log2(n) levels of edges.
-func dependencyGraphWorkspace(packages int) ([]*model.Package, []model.Dependency, *bulkCountingGit) {
+func dependencyGraphWorkspace(packages int) ([]*model.Package, []model.Dependency, *countingGit) {
 	git := newFakeGit(
 		commit{sha: "base", message: "chore: base"},
 		commit{sha: "root", message: "feat(pkg-0000)^^: the closure walks the whole graph",
@@ -180,7 +170,7 @@ func dependencyGraphWorkspace(packages int) ([]*model.Package, []model.Dependenc
 				Consumer: name, Provider: fmt.Sprintf("pkg-%04d", (i-1)/2)})
 		}
 	}
-	return pkgs, deps, &bulkCountingGit{countingGit: counted(git)}
+	return pkgs, deps, counted(git)
 }
 
 // BenchmarkComputeDependencyGraph measures the graph work: the topological
@@ -216,7 +206,7 @@ func BenchmarkComputeDependencyGraph(b *testing.B) {
 
 // tagInventoryWorkspace gives every package a long release line, so baseline
 // selection and the alias filter run over thousands of tags.
-func tagInventoryWorkspace(packages, versions int) ([]*model.Package, *bulkCountingGit) {
+func tagInventoryWorkspace(packages, versions int) ([]*model.Package, *countingGit) {
 	git := newFakeGit(linearHistory(64, packages)...)
 	space := &model.Space{Name: "workspace"}
 	pkgs := make([]*model.Package, packages)
@@ -227,7 +217,7 @@ func tagInventoryWorkspace(packages, versions int) ([]*model.Package, *bulkCount
 			git = git.tag(name, fmt.Sprintf("1.%d.0", v), "base")
 		}
 	}
-	return pkgs, &bulkCountingGit{countingGit: counted(git)}
+	return pkgs, counted(git)
 }
 
 // BenchmarkComputeTagInventory measures planning over a large tag inventory:
@@ -255,7 +245,7 @@ func BenchmarkComputeTagInventory(b *testing.B) {
 
 // versionGroupWorkspace spreads the packages over several versioning groups,
 // which is the shape a fleet of independently versioned product lines takes.
-func versionGroupWorkspace(groups, members int) ([]*model.Package, *bulkCountingGit) {
+func versionGroupWorkspace(groups, members int) ([]*model.Package, *countingGit) {
 	git := newFakeGit(
 		commit{sha: "base", message: "chore: base"},
 		commit{sha: "move", message: "feat(pkg-0000-000)!: moves one group",
@@ -270,7 +260,7 @@ func versionGroupWorkspace(groups, members int) ([]*model.Package, *bulkCounting
 			git = git.tag(name, fmt.Sprintf("1.%d.0", m%8), "base")
 		}
 	}
-	return pkgs, &bulkCountingGit{countingGit: counted(git)}
+	return pkgs, counted(git)
 }
 
 // BenchmarkComputeVersionGroups measures the group aggregate over many groups
@@ -301,7 +291,7 @@ func BenchmarkComputeVersionGroups(b *testing.B) {
 // repositories, each with its own packages, history and tag inventory.
 func fleetWorkspace(repositories, perRepository, commits int) (
 	[]*model.Package, []model.Dependency, map[string]RepositoryHistory,
-	*composedControlGit, []*bulkCountingGit, map[string]ccme.Version) {
+	*composedControlGit, []*countingGit, map[string]ccme.Version) {
 
 	controlCommits := make([]gitx.ControlHistoryCommit, 0, 256)
 	for i := range 256 {
@@ -321,7 +311,7 @@ func fleetWorkspace(repositories, perRepository, commits int) (
 	var (
 		pkgs     []*model.Package
 		deps     []model.Dependency
-		sources  []*bulkCountingGit
+		sources  []*countingGit
 		initials = map[string]ccme.Version{}
 	)
 	space := &model.Space{Name: "fleet"}
@@ -335,7 +325,7 @@ func fleetWorkspace(repositories, perRepository, commits int) (
 				files:   []string{fmt.Sprintf("pkg-%03d/main.go", i%perRepository)},
 			})
 		}
-		git := &bulkCountingGit{countingGit: counted(newFakeGit(history...))}
+		git := counted(newFakeGit(history...))
 		sources = append(sources, git)
 		histories[repository] = RepositoryHistory{
 			Name: repository, Root: "/fleet/" + repository, Path: repository, Git: git}

@@ -49,7 +49,7 @@ func releaseRepo(t *testing.T, token string, tags ...string) (selfupdate.Source,
 	list := func() []map[string]any {
 		out := make([]map[string]any, 0, len(tags))
 		for _, tag := range tags {
-			name := selfupdate.CurrentAssetName()
+			name := selfupdate.AssetName(runtime.GOOS, runtime.GOARCH)
 			out = append(out, map[string]any{
 				"tag_name": tag, "draft": false,
 				"prerelease": len(tag) > 0 && tag[len(tag)-1] >= '0' && strings.Contains(tag, "-rc."),
@@ -242,7 +242,7 @@ func TestSelfUpdateWithoutABinaryForThePlatform(t *testing.T) {
 	_, err := SelfUpdate(context.Background(), *o)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dispat-plan9-386")
-	assert.Contains(t, err.Error(), selfupdate.CurrentAssetName(), "and names what the release does carry")
+	assert.Contains(t, err.Error(), selfupdate.AssetName(runtime.GOOS, runtime.GOARCH), "and names what the release does carry")
 }
 
 // TestSelfUpdateWithNoStableReleaseYet: the state dispat's own repository is
@@ -357,7 +357,7 @@ func withNotes(t *testing.T, tag, body string) selfupdate.Source {
 		"tag_name": tag, "draft": false, "prerelease": false, "body": body,
 		"html_url": "https://github.com/o/r/releases/tag/" + strings.ReplaceAll(tag, "/", "%2F"),
 		"assets": []map[string]any{{
-			"name": selfupdate.CurrentAssetName(), "browser_download_url": "http://example.invalid/x",
+			"name": selfupdate.AssetName(runtime.GOOS, runtime.GOARCH), "browser_download_url": "http://example.invalid/x",
 			"size": 1, "digest": "",
 		}},
 	}

@@ -120,7 +120,7 @@ func TestAuthorSuffixFollowsTheCorrectionNote(t *testing.T) {
 	rel := authored([]*ccme.Unit{u}, map[*ccme.Unit][]plan.Author{u: {ada}}, ada)
 	rel.Corrects = map[*ccme.Unit][]string{u: {"abc1234"}}
 
-	out := RenderSections(rel, SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsInline}))
+	out := RenderBody(rel, SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsInline}), nil)
 	assert.Contains(t, out, "- close leak (corrects abc1234) (by Ada Lovelace)")
 }
 

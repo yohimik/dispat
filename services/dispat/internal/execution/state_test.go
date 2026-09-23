@@ -4,9 +4,11 @@
 package execution
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +37,7 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, config.DiagnosticExecution, config.DiagnosticCode(err))
 		assert.Equal(t, CategoryConfiguration, DiagnosticCategory(err))
-		assert.Contains(t, err.Error(), strconv.Itoa(os.Getpid()))
+		assert.Contains(t, err.Error(), "served by another process")
 	})
 
 	t.Run("another node in the same folder is a folder of its own", func(t *testing.T) {
@@ -103,6 +105,12 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 			require.NoError(t, release())
 		})
 	}
+	t.Run("an oversized legacy owner cannot claim the folder", func(t *testing.T) {
+		lock := filepath.Join(state.Dir, stateLockFile)
+		require.NoError(t, os.WriteFile(lock, []byte(strings.Repeat("9", stateLockOwnerMaxBytes+1)), 0o644))
+		_, _, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
+		require.ErrorContains(t, err, "exceeds 64 bytes")
+	})
 }
 
 // TestNodeStateKeepsOneCachePerEndpoint: a node serving two mailboxes keeps
@@ -161,6 +169,33 @@ func TestSeenSetRemembersAcrossProcesses(t *testing.T) {
 	})
 }
 
+// TestSeenSetRecordPrunesWithoutRestart: a serving worker can remain alive
+// longer than the replay window, so each new answer must bound both its
+// in-memory record and the file without losing a tuple still on the boundary.
+func TestSeenSetRecordPrunesWithoutRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seen.json")
+	first := time.Now().UTC().Truncate(time.Second)
+	set, err := LoadSeenSet(path, first)
+	require.NoError(t, err)
+	require.NoError(t, set.Record("run-old", "probe", 1, first))
+	require.NoError(t, set.Record("run-boundary", "probe", 1, first.Add(time.Second)))
+	latest := first.Add(replayWindow + time.Second)
+	require.NoError(t, set.Record("run-new", "probe", 1, latest))
+
+	assert.False(t, set.IsSeen("run-old", "probe", 1))
+	assert.True(t, set.IsSeen("run-boundary", "probe", 1))
+	assert.True(t, set.IsSeen("run-new", "probe", 1))
+	// A late duplicate cannot replace the newest timestamp of its tuple.
+	require.NoError(t, set.Record("run-new", "probe", 1, first.Add(time.Second)))
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	stored := map[string]time.Time{}
+	require.NoError(t, json.Unmarshal(content, &stored))
+	assert.NotContains(t, stored, formatTriple("run-old", "probe", 1))
+	assert.Equal(t, first.Add(time.Second), stored[formatTriple("run-boundary", "probe", 1)])
+	assert.Equal(t, latest, stored[formatTriple("run-new", "probe", 1)])
+}
+
 // TestNodeStateLockKeepsOneInodeAcrossHolders: a crashed PID is overwritten
 // under the kernel lock and the same inode remains after each release. No
 // second process can claim another inode in a rename or removal gap.
@@ -181,7 +216,7 @@ func TestNodeStateLockKeepsOneInodeAcrossHolders(t *testing.T) {
 	assert.FileExists(t, path)
 	_, _, err = OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), strconv.Itoa(os.Getpid()))
+	assert.Contains(t, err.Error(), "served by another process")
 	require.NoError(t, release())
 
 	released, err := os.Stat(path)

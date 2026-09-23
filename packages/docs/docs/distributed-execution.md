@@ -376,6 +376,11 @@ the publish command had not started is an ordinary publish failure. An acknowled
 started, or no acknowledgement at all, is `E228`: the package failed at its publish stage, no second attempt is made
 in this run, its dependents are blocked, and the run exits non-zero.
 
+A failed response to an authorization push is also `E228`: the worker may already have received permission and
+started publishing. A missing branch, or one reset to its earlier state, cannot prove otherwise. The run retains
+the repository's release lock and any coordination evidence still present. A failure preparing the authorization
+locally happens before a push; dispat withdraws that waiting attempt and waits for its acknowledgement instead.
+
 If the publisher never acknowledged, the release lock of the repository it was publishing into is **retained**. The
 uncertain publication's authorization ref is also retained, whether the node acknowledged after starting publish or
 never answered. Unrelated coordination refs are cleaned up. The error names the order of recovery, and it is the order
@@ -606,6 +611,8 @@ Three conditions dispat already had a code for keep it and join the specificatio
 - **Two workers must not share one state folder for one node name.** The second one to start refuses. Give each node
   its own `--state-dir`. A worker holds a kernel lock on a stable `worker.lock` file while it serves, so a crash
   releases ownership without renaming or deleting the file; the cache and answered-work state remain reconstructible.
+  Stop older PID-lock workers before upgrading a shared state folder; concurrent startup of old and new lock
+  implementations cannot safely share it.
 - **Nested dispat commands on a worker are restricted.** Under a task's authority `release`, a bare `dispat`,
   `commit`, `github`, `changelog`, `autoversion`, `compute` and `worker` are refused with `E226`. Everything a build
   script legitimately uses stays allowed, including `exec`, `if`, `for`, `install`, `scanner`, `writer`, `replacer`,

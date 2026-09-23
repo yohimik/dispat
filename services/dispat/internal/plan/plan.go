@@ -37,7 +37,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/rs/zerolog"
 
@@ -1203,11 +1202,6 @@ type Plan struct {
 	// They are internal execution metadata rather than part of JSON plan output.
 	RepositoryInputOrder []string            `json:"-"`
 	RepositoryInputs     map[string][]uint64 `json:"-"`
-
-	// ancestor answers "is a an ancestor-or-self of b" over the commits the
-	// plan examined; it backs PossiblyBehind.
-	ancestor         func(a, b string) bool
-	stableBoundaries map[string]map[string]string
 }
 
 // IsInvalid reports whether any error-severity diagnostic was raised, of any
@@ -1272,49 +1266,6 @@ func (p *Plan) Deselected() []string {
 		}
 	}
 	return out
-}
-
-// StaleSources is the walk *up* from a consumer described in §13.7b. It is the
-// dual of the downward traversal of §9.2 over the same relation: it is
-// non-empty exactly when the consumer was assigned a non-none propagated bump,
-// and max() over its rows equals that bump. The two formulations MUST agree;
-// disagreement is an implementation bug.
-func (p *Plan) StaleSources(pkg string) []StaleSource {
-	r := p.Releases[pkg]
-	if r == nil {
-		return nil
-	}
-	return r.Sources
-}
-
-// PossiblyBehind is the cheap tag-level screen of §13.7b: the consumer may owe
-// a release to the provider when the provider's baseline tag is not an
-// ancestor-or-self of the consumer's.
-//
-// It MUST NOT be used to decide releases. It is necessary but not sufficient —
-// the units between the two tags may all be `^none`, or `+0`, or scoped away,
-// or reach the consumer only beyond their declared depth, or travel only over
-// devDependencies edges. Use it to find candidates; use the plan to decide.
-func (p *Plan) IsPossiblyBehind(consumer, provider string) bool {
-	c, pr := p.Releases[consumer], p.Releases[provider]
-	if c == nil || pr == nil || pr.StableCommit == "" {
-		return false
-	}
-	if len(p.stableBoundaries) > 0 {
-		providerKey := pr.stableCommitKey
-		consumerKey := p.stableBoundaries[consumer][strings.ToLower(pr.Pkg.Repository)]
-		if consumerKey == "" {
-			return true
-		}
-		return p.ancestor != nil && !p.ancestor(providerKey, consumerKey)
-	}
-	if c.StableCommit == "" {
-		return true // never released while the provider has been
-	}
-	if p.ancestor == nil {
-		return false
-	}
-	return !p.ancestor(pr.StableCommit, c.StableCommit)
 }
 
 // edge is one dependency edge, provider -> consumer.
@@ -1437,7 +1388,7 @@ type Options struct {
 
 type computation struct {
 	ctx      context.Context
-	git      gitx.Gitx
+	git      TagInventoryGitx
 	log      zerolog.Logger
 	root     string
 	initials map[string]ccme.Version
@@ -1613,10 +1564,9 @@ type computation struct {
 // reading is a walk per propagating unit per phase. The CLI inventories
 // reachable tags once for the workspace, reads the union of the pending
 // windows in one bounded log walk and recovers each window from it by the
-// marker pass (ancestry.go). Git implementations without those capabilities
-// retain the per-package tag query and the log range per distinct window
-// origin.
-func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
+// marker pass (ancestry.go). The log range per distinct window origin remains
+// the fallback when a history cannot provide a union walk.
+func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, error) {
 	pkgs := opts.Packages
 	cp := &computation{
 		ctx:              ctx,
@@ -1849,15 +1799,12 @@ func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 		RepositoryHeads:      cp.repositoryHeads,
 		RepositoryInputOrder: repositoryInputOrder,
 		RepositoryInputs:     repositoryInputs,
-		ancestor:             cp.ancestorOrSelf,
-		stableBoundaries:     cp.stableBoundaries,
 	}, nil
 }
 
-// Plan retains the computation through ancestorOrSelf. These composition
-// indexes have no role after the release plan is built; dropping them lets
-// shared window memberships and parser/precedence indexes be collected while
-// publication still needs repository ancestry and stable consumer boundaries.
+// These composition indexes have no role after the release plan is built;
+// dropping them lets shared window memberships and parser/precedence indexes
+// be collected before publication.
 func (cp *computation) releaseWorkspaceScratch() {
 	cp.repositoryReach = nil
 	cp.controlInputs = nil
@@ -1899,7 +1846,7 @@ func (cp *computation) releaseWorkspaceScratch() {
 // specified. Scope diagnostics are deliberately not raised — this selects
 // packages to run a script over, it does not plan a release — and the names
 // come back in dependency order.
-func PackagesChangedSince(ctx context.Context, git gitx.Gitx, opts Options, rev string) ([]string, error) {
+func PackagesChangedSince(ctx context.Context, git TagInventoryGitx, opts Options, rev string) ([]string, error) {
 	cp := &computation{
 		ctx:              ctx,
 		git:              git,
@@ -2075,7 +2022,6 @@ func (cp *computation) fatalPlan() *Plan {
 		Releases:    map[string]*Release{},
 		Providers:   map[string][]string{},
 		Diagnostics: cp.diags,
-		ancestor:    cp.ancestorOrSelf,
 	}
 }
 
@@ -2090,63 +2036,28 @@ func (cp *computation) loadTagsAndWindows() error {
 	return cp.loadLegacyTagsAndWindows()
 }
 
-// loadPackageTags bounds both active Git calls and goroutines for backends
-// without a bulk tag inventory. Cancellation stops scheduling new queries.
-func (cp *computation) loadPackageTags(tagsFor []gitx.Tags, tagsErr []error) error {
-	sem := make(chan struct{}, 16)
-	var wg sync.WaitGroup
-schedule:
-	for i, p := range cp.pkgs {
-		if cp.ctx.Err() != nil {
-			break
-		}
-		if !(&Release{Pkg: p}).IsReleasable() {
-			continue
-		}
-		select {
-		case sem <- struct{}{}:
-		case <-cp.ctx.Done():
-			break schedule
-		}
-		wg.Add(1)
-		go func(i int, p *model.Package) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			tagsFor[i], tagsErr[i] = cp.git.Tags(cp.ctx, p.Name, (&Release{Pkg: p}).TagFormat())
-		}(i, p)
-	}
-	wg.Wait()
-	return cp.ctx.Err()
-}
-
 func (cp *computation) loadLegacyTagsAndWindows() error {
-	// The real CLI can inventory all reachable tags in one git process and
-	// partition them with each package's own format. Other Git implementations
-	// keep the bounded concurrent per-package fallback, so the public Git
-	// interface and lightweight integrations do not need a bulk operation.
+	// Inventory all reachable tags in one Git operation, then partition them
+	// with each package's own format. A plan must see one ref snapshot.
 	tagsFor := make([]gitx.Tags, len(cp.pkgs))
-	tagsErr := make([]error, len(cp.pkgs))
-	if bulk, ok := cp.git.(interface {
-		TagsForPackages(context.Context, map[string]gitx.TagFormat) (map[string]gitx.Tags, error)
-	}); ok {
-		formats := make(map[string]gitx.TagFormat, len(cp.pkgs))
-		for _, p := range cp.pkgs {
-			if (&Release{Pkg: p}).IsReleasable() {
-				formats[p.Name] = (&Release{Pkg: p}).TagFormat()
-			}
+	formats := make(map[string]gitx.TagFormat, len(cp.pkgs))
+	for _, p := range cp.pkgs {
+		if (&Release{Pkg: p}).IsReleasable() {
+			formats[p.Name] = (&Release{Pkg: p}).TagFormat()
 		}
-		all, err := bulk.TagsForPackages(cp.ctx, formats)
-		if err != nil {
-			return fmt.Errorf("plan: loading tags: %w", err)
-		}
-		if cp.stats != nil {
-			cp.stats.TagInventories.Add(1)
-		}
-		for i, p := range cp.pkgs {
-			tagsFor[i] = all[p.Name]
-		}
-	} else if err := cp.loadPackageTags(tagsFor, tagsErr); err != nil {
+	}
+	all, err := cp.git.TagsForPackages(cp.ctx, formats)
+	if err != nil {
 		return fmt.Errorf("plan: loading tags: %w", err)
+	}
+	if err := cp.ctx.Err(); err != nil {
+		return fmt.Errorf("plan: loading tags: %w", err)
+	}
+	if cp.stats != nil {
+		cp.stats.TagInventories.Add(1)
+	}
+	for i, p := range cp.pkgs {
+		tagsFor[i] = all[p.Name]
 	}
 
 	// Windows are keyed by DISTINCT starting commit: packages whose differently
@@ -2165,11 +2076,8 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		rel := &Release{Pkg: p}
 
 		// Both baselines of §12.3 are selections over the same per-package
-		// list, whether it came from the bulk inventory or the fallback.
-		tags, err := tagsFor[i], tagsErr[i]
-		if err != nil {
-			return fmt.Errorf("plan: %s: %w", p.Name, err)
-		}
+		// list returned by the one bulk inventory.
+		tags := tagsFor[i]
 		tags = cp.withoutIgnoredTags("", aliases.Without(tags, p.Name, cp.log))
 		// Kept for the graduation's dependencies record: reconstructing what a
 		// consumer's last stable release shipped against is a question about

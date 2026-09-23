@@ -43,7 +43,7 @@ func TestSpec2RejectedBumpProducesNoStaleSourceRow(t *testing.T) {
 
 	p := compute(t, git, nil)
 	assert.False(t, p.Releases["app"].IsChanged())
-	assert.Empty(t, p.StaleSources("app"), "a W208 rejection must not leave an upward stale row")
+	assert.Empty(t, p.Releases["app"].Sources, "a W208 rejection must not leave an upward stale row")
 	assert.True(t, hasCode(p, CodeBumpSuppressed), "W208, got %v", codes(p))
 }
 
@@ -57,7 +57,7 @@ func TestSpec2RejectedBumpDoesNotSuppressChannel(t *testing.T) {
 	p := compute(t, git, nil)
 	app := p.Releases["app"]
 	assert.Equal(t, ccme.BumpNone, app.PropagatedBump)
-	assert.Empty(t, p.StaleSources("app"))
+	assert.Empty(t, app.Sources)
 	assert.Equal(t, "rc", app.Channel)
 	assert.True(t, app.IsChannelChanged(), "the independently admitted channel still applies")
 	assert.True(t, hasCode(p, CodeBumpSuppressed), "W208, got %v", codes(p))

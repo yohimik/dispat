@@ -76,7 +76,7 @@ func assetServer(t *testing.T, body []byte) (Asset, *httptest.Server) {
 	t.Cleanup(srv.Close)
 	sum := sha256.Sum256(body)
 	return Asset{
-		Name: CurrentAssetName(), URL: srv.URL + "/dl",
+		Name: AssetName(runtime.GOOS, runtime.GOARCH), URL: srv.URL + "/dl",
 		Size: int64(len(body)), Digest: "sha256:" + hex.EncodeToString(sum[:]),
 	}, srv
 }
@@ -493,7 +493,7 @@ func TestInstallWithATokenDownloadsFromTheAPIEndpoint(t *testing.T) {
 	t.Cleanup(api.Close)
 	sum := sha256.Sum256(newBinary)
 	a := Asset{
-		Name: CurrentAssetName(), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1",
+		Name: AssetName(runtime.GOOS, runtime.GOARCH), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1",
 		Size: int64(len(newBinary)), Digest: "sha256:" + hex.EncodeToString(sum[:]),
 	}
 
@@ -574,7 +574,7 @@ func TestInstallDropsTheTokenOnARedirectToAnotherHost(t *testing.T) {
 
 	sum := sha256.Sum256(newBinary)
 	a := Asset{
-		Name: CurrentAssetName(), URL: "http://public.test/never-asked",
+		Name: AssetName(runtime.GOOS, runtime.GOARCH), URL: "http://public.test/never-asked",
 		APIURL: atHost(t, api.URL, "api.test") + "/assets/1",
 		Size:   int64(len(newBinary)), Digest: "sha256:" + hex.EncodeToString(sum[:]),
 	}
@@ -600,7 +600,7 @@ func TestInstallReportsWhatTheAPIEndpointAnswered(t *testing.T) {
 		fmt.Fprint(w, `{"message":"Not Found"}`)
 	}))
 	t.Cleanup(api.Close)
-	a := Asset{Name: CurrentAssetName(), URL: "http://public.test/never-asked", APIURL: api.URL + "/assets/1"}
+	a := Asset{Name: AssetName(runtime.GOOS, runtime.GOARCH), URL: "http://public.test/never-asked", APIURL: api.URL + "/assets/1"}
 
 	i := &Installer{Exe: exe, Token: "sesame"}
 	_, err := i.Install(context.Background(), a)
@@ -685,7 +685,7 @@ func TestInstallReportsBothAddressesWhenNeitherServes(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(public.Close)
-	a := Asset{Name: CurrentAssetName(), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1"}
+	a := Asset{Name: AssetName(runtime.GOOS, runtime.GOARCH), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1"}
 
 	i := &Installer{Exe: exe, Token: "sesame"}
 	_, err := i.Install(context.Background(), a)
@@ -715,7 +715,7 @@ func TestInstallDoesNotFallBackOnAVerifiedFailure(t *testing.T) {
 	}))
 	t.Cleanup(api.Close)
 	a := Asset{
-		Name: CurrentAssetName(), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1",
+		Name: AssetName(runtime.GOOS, runtime.GOARCH), URL: public.URL + "/dl", APIURL: api.URL + "/assets/1",
 		Size: 4096, Digest: "sha256:" + strings.Repeat("0", 64),
 	}
 

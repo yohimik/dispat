@@ -279,7 +279,7 @@ func TestRenderBodyBlockSpacing(t *testing.T) {
 func TestRenderBodyWithoutOptionalBlocks(t *testing.T) {
 	rel := testRelease("/tmp/x", ccme.Version{Major: 2})
 	f := Format{}
-	assert.Equal(t, RenderSections(rel, f), RenderBody(rel, f, nil))
+	assert.Equal(t, renderSections(rel, f.withDefaults(), ReleaseLookup(rel)), RenderBody(rel, f, nil))
 }
 
 // TestRenderBodyWithoutSections: a release with nothing to group still writes

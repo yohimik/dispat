@@ -107,7 +107,7 @@ func TestWebhookLadderReplacesWholesale(t *testing.T) {
 	dir := writeModelRepo(t, cfg, "packages/libs/core", "packages/libs/lib", "packages/apps/app")
 	loaded, err := Load(filepath.Join(dir, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, dir)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, dir, nil)
 	require.NoError(t, err)
 
 	byName := map[string][]WebhookConfig{}
@@ -138,7 +138,7 @@ func TestWebhookEmptyListOptsOut(t *testing.T) {
 	}, "pkgs/data", "pkgs/lib")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
-	pkgs, _, _, err := Discover(loaded, root)
+	pkgs, _, _, err := DiscoverWorkspace(loaded, root, nil)
 	require.NoError(t, err)
 	byName := map[string][]WebhookConfig{}
 	for _, p := range pkgs {

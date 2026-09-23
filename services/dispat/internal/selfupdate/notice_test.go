@@ -202,7 +202,6 @@ func TestAssetNameMatchesTheBuildScript(t *testing.T) {
 	assert.Equal(t, "dispat-darwin-arm64", AssetName("darwin", "arm64"))
 	assert.Equal(t, "dispat-windows-amd64.exe", AssetName("windows", "amd64"))
 	assert.Equal(t, "dispat-windows-arm64.exe", AssetName("windows", "arm64"))
-	assert.Equal(t, AssetName(runtime.GOOS, runtime.GOARCH), CurrentAssetName())
 }
 
 // TestExecutableResolvesThroughASymlink: a symlinked install must replace the

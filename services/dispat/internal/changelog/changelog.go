@@ -258,15 +258,6 @@ func cutBOM(s string) (bom, rest string) {
 	return "", s
 }
 
-// RenderSections renders the grouped commit sections of a release (breaking
-// changes, features, fixes, dependency updates) without any entry header —
-// suitable as the body of a GitHub release. It interpolates against the
-// release's own variables; RenderBody hands its own lookup down instead, so
-// that one entry reads every template against the same values.
-func RenderSections(rel *plan.Release, f Format) string {
-	return renderSections(rel, f.withDefaults(), ReleaseLookup(rel))
-}
-
 // noChangesLine states why an entry carries no sections: the configured
 // sentence, or the built-in that names the release's actual cause.
 //

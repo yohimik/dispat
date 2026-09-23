@@ -197,7 +197,7 @@ func TestPackagesChangedSinceComposedFailures(t *testing.T) {
 	packageOnly := []*model.Package{{
 		Name: "app", Dir: "/w/source/app", RepoRoot: "/w/source", Repository: "source", Space: &model.Space{Name: "apps"},
 	}}
-	base := func(control, source gitx.Gitx) Options {
+	base := func(control, source TagInventoryGitx) Options {
 		return Options{Packages: packageOnly, Repositories: map[string]RepositoryHistory{
 			"control": {Name: "control", Root: "/w", Control: true, Git: control},
 			"source":  {Name: "source", Root: "/w/source", Path: "source", Git: source},
@@ -245,30 +245,6 @@ func TestPackagesChangedSinceComposedFailures(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "repository source parser")
 	})
-}
-
-func TestPossiblyBehindUsesRepositoryQualifiedConsumerBoundary(t *testing.T) {
-	consumer := &Release{Pkg: &model.Package{Name: "app", Repository: "app-source"}}
-	provider := &Release{
-		Pkg: &model.Package{Name: "lib", Repository: "lib-source"}, StableCommit: "l1",
-		stableCommitKey: historyKey("lib-source", "l1"),
-	}
-	pl := &Plan{
-		Releases: map[string]*Release{"app": consumer, "lib": provider},
-		stableBoundaries: map[string]map[string]string{
-			"app": {"lib-source": ""},
-		},
-		ancestor: func(a, b string) bool {
-			return a == historyKey("lib-source", "l1") && b == historyKey("lib-source", "l2")
-		},
-	}
-
-	assert.True(t, pl.IsPossiblyBehind("app", "lib"), "a missing provider boundary means the consumer may be behind")
-	pl.stableBoundaries["app"]["lib-source"] = historyKey("lib-source", "l2")
-	assert.False(t, pl.IsPossiblyBehind("app", "lib"), "provider history proves the consumer includes the stable tag")
-	pl.ancestor = func(string, string) bool { return false }
-	assert.True(t, pl.IsPossiblyBehind("app", "lib"), "a known but non-descendant provider boundary remains behind")
-	assert.False(t, pl.IsPossiblyBehind("missing", "lib"))
 }
 
 func TestControlRevisionCannotOrderAnUnpinnedSourceCommit(t *testing.T) {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,7 +20,7 @@ func TestWorkspaceReleaseRejectsHeadsThatMovedAfterComposition(t *testing.T) {
 			control, source, path := compositionReleaseFixture(t)
 			loaded, err := config.Load(path, nil)
 			require.NoError(t, err)
-			workspace, err := config.ComposeWorkspace(loaded, path, control, nil)
+			workspace, err := config.ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, control, nil, nil, nil)
 			require.NoError(t, err)
 			moved := control
 			if repository == "source" {

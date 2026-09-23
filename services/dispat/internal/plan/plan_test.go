@@ -106,6 +106,18 @@ func (f *fakeGit) Tags(_ context.Context, pkg string, _ gitx.TagFormat) (gitx.Ta
 	return out, nil
 }
 
+func (f *fakeGit) TagsForPackages(ctx context.Context, formats map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
+	out := make(map[string]gitx.Tags, len(formats))
+	for name, format := range formats {
+		var err error
+		out[name], err = f.Tags(ctx, name, format)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // Commits returns the commits after sinceTag, newest first — the pending
 // window of §13.3, computed from history rather than asserted.
 func (f *fakeGit) Commits(_ context.Context, sinceTag string) ([]gitx.Commit, error) {
@@ -173,42 +185,28 @@ func (f *fakeGit) ControlGitlinkHistory(context.Context) ([]gitx.ControlHistoryC
 	return nil, nil
 }
 
-// countingGit records how many git queries planning makes per package. The
-// planner fetches tags concurrently, so the counters take a lock.
+// countingGit records the plan's Git inventory and history queries.
 type countingGit struct {
 	*fakeGit
-	mu         sync.Mutex
-	tagQueries map[string]int
-	logQueries map[string]int
-}
-
-type bulkCountingGit struct {
-	*countingGit
+	mu          sync.Mutex
+	logQueries  map[string]int
 	bulkQueries int
 	bulkErr     error
 }
 
-func (b *bulkCountingGit) TagsForPackages(ctx context.Context, formats map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
-	b.bulkQueries++
-	if b.bulkErr != nil {
-		return nil, b.bulkErr
+func (c *countingGit) TagsForPackages(ctx context.Context, formats map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
+	c.mu.Lock()
+	c.bulkQueries++
+	err := c.bulkErr
+	c.mu.Unlock()
+	if err != nil {
+		return nil, err
 	}
-	out := make(map[string]gitx.Tags, len(formats))
-	for name, format := range formats {
-		out[name], _ = b.fakeGit.Tags(ctx, name, format)
-	}
-	return out, nil
+	return c.fakeGit.TagsForPackages(ctx, formats)
 }
 
 func counted(f *fakeGit) *countingGit {
-	return &countingGit{fakeGit: f, tagQueries: map[string]int{}, logQueries: map[string]int{}}
-}
-
-func (c *countingGit) Tags(ctx context.Context, pkg string, format gitx.TagFormat) (gitx.Tags, error) {
-	c.mu.Lock()
-	c.tagQueries[pkg]++
-	c.mu.Unlock()
-	return c.fakeGit.Tags(ctx, pkg, format)
+	return &countingGit{fakeGit: f, logQueries: map[string]int{}}
 }
 
 func (c *countingGit) Commits(ctx context.Context, sinceTag string) ([]gitx.Commit, error) {
@@ -218,12 +216,9 @@ func (c *countingGit) Commits(ctx context.Context, sinceTag string) ([]gitx.Comm
 	return c.fakeGit.Commits(ctx, sinceTag)
 }
 
-func TestPlanningQueriesGitOncePerPackage(t *testing.T) {
-	// The cost bound dispat claims: one bounded tag query and one bounded log
-	// query per package, never a full-history walk. A package needs *two*
-	// baselines — the newest tag and the newest stable one — and asking for
-	// them separately runs the same `git tag` twice, which is the easy way to
-	// double the tag work for an answer that comes from identical output.
+func TestPlanningInventoriesTagsOnceAndSharesHistory(t *testing.T) {
+	// The newest and stable baselines use one ref inventory. Packages with the
+	// same boundary also share one pending-history listing.
 	git := counted(newFakeGit(
 		commit{sha: "c1", message: "feat(core)^^%beta++*: streaming"},
 		commit{sha: "c2", message: "fix(utils)^: helpers"},
@@ -236,26 +231,12 @@ func TestPlanningQueriesGitOncePerPackage(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	for _, name := range []string{"core", "utils", "app"} {
-		assert.Equal(t, 1, git.tagQueries[name], "%s: one tag query", name)
-	}
+	assert.Equal(t, 1, git.bulkQueries)
 	// Both propagation phases and both baselines read the same history walk:
 	// one log range per distinct window origin.
 	for since, n := range git.logQueries {
 		assert.Equal(t, 1, n, "log range %q must be walked once", since)
 	}
-}
-
-func TestPlanningUsesBulkTagInventoryWhenAvailable(t *testing.T) {
-	base := counted(newFakeGit(
-		commit{sha: "c1", message: "feat(core): streaming"},
-	).tag("core", "1.2.3", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", ""))
-	git := &bulkCountingGit{countingGit: base}
-	pkgs, deps := testPackages()
-	_, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
-	require.NoError(t, err)
-	assert.Equal(t, 1, git.bulkQueries)
-	assert.Empty(t, git.tagQueries, "bulk inventory must replace per-package tag calls")
 }
 
 func TestPlanningSharesHistoryForDifferentTagsAtTheSameCommit(t *testing.T) {
@@ -305,7 +286,8 @@ func TestPlanningDoesNotConflateUnknownStableCommitIDs(t *testing.T) {
 
 func TestPlanningReturnsBulkTagInventoryError(t *testing.T) {
 	want := context.Canceled
-	git := &bulkCountingGit{countingGit: counted(newFakeGit()), bulkErr: want}
+	git := counted(newFakeGit())
+	git.bulkErr = want
 	pkgs, deps := testPackages()
 	_, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
 	require.ErrorIs(t, err, want)
@@ -373,7 +355,7 @@ func testPackages() ([]*model.Package, []model.Dependency) {
 	return pkgs, deps
 }
 
-func compute(t *testing.T, git gitx.Gitx, initials map[string]ccme.Version) *Plan {
+func compute(t *testing.T, git TagInventoryGitx, initials map[string]ccme.Version) *Plan {
 	t.Helper()
 	pkgs, deps := testPackages()
 	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Initials: initials, Root: "/r"})
@@ -1043,8 +1025,8 @@ func TestCatchUpNeverWidensBlastRadius(t *testing.T) {
 	assert.False(t, p2.Releases["c"].IsChanged(), "c must not be dragged in by the catch-up")
 }
 
-// §13.7b: the upward walk and the downward one are duals and MUST agree.
-func TestStaleSourcesAgreesWithPropagation(t *testing.T) {
+// §13.7b: source rows and the propagated bump MUST agree.
+func TestSourceRowsAgreeWithPropagation(t *testing.T) {
 	git := newFakeGit(
 		commit{sha: "c0", message: "chore: setup"},
 		commit{sha: "c1", message: "feat(core)^: streaming"},
@@ -1052,7 +1034,7 @@ func TestStaleSourcesAgreesWithPropagation(t *testing.T) {
 
 	p := compute(t, git, nil)
 
-	sources := p.StaleSources("app")
+	sources := p.Releases["app"].Sources
 	require.NotEmpty(t, sources, "staleSources is non-empty exactly when a bump was propagated")
 	best := ccme.BumpNone
 	for _, s := range sources {
@@ -1060,9 +1042,7 @@ func TestStaleSourcesAgreesWithPropagation(t *testing.T) {
 	}
 	assert.Equal(t, p.Releases["app"].PropagatedBump, best, "max() over the rows equals the propagated bump")
 
-	// The cheap tag-level screen agrees here, but is only ever a screen.
-	assert.True(t, p.IsPossiblyBehind("app", "core"))
-	assert.Empty(t, p.StaleSources("utils"))
+	assert.Empty(t, p.Releases["utils"].Sources)
 }
 
 // ---------------------------------------------------------------------------
@@ -2442,6 +2422,10 @@ type aliasGit struct {
 
 func (g *aliasGit) Tags(context.Context, string, gitx.TagFormat) (gitx.Tags, error) {
 	return g.list, nil
+}
+
+func (g *aliasGit) TagsForPackages(context.Context, map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
+	return map[string]gitx.Tags{"core": g.list}, nil
 }
 
 // TestPlanReadsPastAMovingAlias: the single-repository convention

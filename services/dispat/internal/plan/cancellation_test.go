@@ -4,19 +4,15 @@
 package plan
 
 // Cancellation is a planning outcome, not an afterthought. The planner reads
-// one tag listing and one history listing per boundary, and a Git
-// implementation is free to serve those from a cache, a fixture or an API
-// that has no context to honour. Planning therefore has to stop scheduling
-// work itself rather than rely on every backend to refuse it, which is what
-// these tests hold it to.
+// one tag inventory per repository and one history listing per boundary. A
+// backend may return after cancellation, so planning must not start another
+// read from its answer.
 
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,24 +21,19 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
-// interruptingGitx serves history exactly as fakeGit does and ignores the
-// context it is handed, which is what a lightweight backend looks like. It
-// cancels the run itself on its nth query, so the count of queries that
-// follow the cancellation is the thing under test rather than a race.
+// interruptingGitx ignores the context it is handed and cancels the run on
+// its configured query. A planner must observe that cancellation itself.
 type interruptingGitx struct {
 	*fakeGit
 	cancel    func()
 	tagsAt    int
 	commitsAt int
-	// The legacy tag fallback queries packages concurrently, so the counters
-	// take a lock — which also makes "the nth call cancels" exact rather than
-	// a race between two callers reading the same value.
-	mu       sync.Mutex
-	tagCalls int
-	logCalls int
+	mu        sync.Mutex
+	tagCalls  int
+	logCalls  int
 }
 
-func (g *interruptingGitx) Tags(_ context.Context, pkg string, format gitx.TagFormat) (gitx.Tags, error) {
+func (g *interruptingGitx) TagsForPackages(_ context.Context, formats map[string]gitx.TagFormat) (map[string]gitx.Tags, error) {
 	g.mu.Lock()
 	g.tagCalls++
 	reached := g.tagCalls == g.tagsAt
@@ -50,7 +41,7 @@ func (g *interruptingGitx) Tags(_ context.Context, pkg string, format gitx.TagFo
 	if reached {
 		g.cancel()
 	}
-	return g.fakeGit.Tags(context.Background(), pkg, format)
+	return g.fakeGit.TagsForPackages(context.Background(), formats)
 }
 
 func (g *interruptingGitx) Commits(_ context.Context, since string) ([]gitx.Commit, error) {
@@ -108,11 +99,9 @@ func TestCancellationStopsSchedulingHistoryWindows(t *testing.T) {
 		"no history listing is started after the run was cancelled")
 }
 
-// TestCancellationStopsSchedulingRepositoryTagQueries: the composed loader's
-// per-package tag fallback is the same story on the tag axis. A repository
-// whose backend offers no bulk inventory gets one query per package, and an
-// interrupted run must not walk the whole workspace issuing them.
-func TestCancellationStopsSchedulingRepositoryTagQueries(t *testing.T) {
+// TestCancellationStopsRepositoryInventories: a backend returning an answer
+// after cancellation cannot cause the next repository's refs to be read.
+func TestCancellationStopsRepositoryInventories(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pkgs, history := distinctBoundaryWorkspace(64)
@@ -120,49 +109,18 @@ func TestCancellationStopsSchedulingRepositoryTagQueries(t *testing.T) {
 		p.Repository = "control"
 		p.RepoRoot = "/r"
 	}
-	git := &interruptingGitx{fakeGit: history, cancel: cancel, tagsAt: 3}
+	pkgs = append(pkgs, &model.Package{Name: "remote", Dir: "/source/remote",
+		RepoRoot: "/source", Repository: "source", Space: &model.Space{Name: "source"}})
+	git := &interruptingGitx{fakeGit: history, cancel: cancel, tagsAt: 1}
 
 	_, err := Compute(ctx, git, Options{Packages: pkgs, Root: "/r",
 		Repositories: map[string]RepositoryHistory{
 			"control": {Name: "control", Root: "/r", Git: git, Control: true},
+			"source":  {Name: "source", Root: "/source", Git: git},
 		}})
 
 	require.ErrorIs(t, err, context.Canceled)
 	tags, _ := git.calls()
-	assert.Equal(t, 3, tags,
-		"no tag query is started after the run was cancelled")
-}
-
-// TestRepeatedCancelledPlansLeaveNoGoroutines: the bounded concurrent tag
-// fallback starts goroutines per package. A run cancelled mid-flight joins
-// them before returning, so repeating it — which is what a retrying CI job
-// does — accumulates nothing.
-func TestRepeatedCancelledPlansLeaveNoGoroutines(t *testing.T) {
-	pkgs, history := groupWorkspace(256, model.VersioningFixed)
-	settle := func() int {
-		// Goroutines from an earlier test may still be exiting. Read the
-		// count once it has been stable for a moment rather than at an
-		// arbitrary instant, which is what makes this assertion reliable.
-		last := runtime.NumGoroutine()
-		for range 100 {
-			time.Sleep(5 * time.Millisecond)
-			now := runtime.NumGoroutine()
-			if now == last {
-				return now
-			}
-			last = now
-		}
-		return last
-	}
-	before := settle()
-	for range 8 {
-		ctx, cancel := context.WithCancel(context.Background())
-		git := &interruptingGitx{fakeGit: history, cancel: cancel, tagsAt: 5}
-		_, err := Compute(ctx, git, Options{Packages: pkgs, Root: "/r"})
-		require.ErrorIs(t, err, context.Canceled)
-		cancel()
-	}
-	after := settle()
-	assert.LessOrEqual(t, after, before+2,
-		"cancelled planning runs leaked goroutines: %d before, %d after", before, after)
+	assert.Equal(t, 1, tags,
+		"the planner reads the control inventory, then stops before the source inventory")
 }

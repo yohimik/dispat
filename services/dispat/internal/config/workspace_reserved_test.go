@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +18,7 @@ func TestComposeWorkspaceReservesControlRepositoryIdentity(t *testing.T) {
 			root, path := workspaceControl(t, map[string]string{name: source}, cfg)
 			loaded, err := Load(path, nil)
 			require.NoError(t, err)
-			workspace, err := ComposeWorkspace(loaded, path, root, nil)
+			workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
 			requireWorkspaceDiagnostic(t, err, DiagnosticRepositoryInvalid)
 			assert.ErrorContains(t, err, "reserved submodule name")
 			assert.Nil(t, workspace, "reject the name before constructing an ownership map")

@@ -292,7 +292,7 @@ func TestComposedUnionReadPlansExactlyAsPerBoundaryReads(t *testing.T) {
 		for _, p := range pkgs {
 			p.Repository, p.RepoRoot = "source", git.Dir
 		}
-		plan := func(history gitx.Gitx, stats *HistoryStats) *Plan {
+		plan := func(history TagInventoryGitx, stats *HistoryStats) *Plan {
 			p, err := Compute(ctx, history, Options{Packages: pkgs, Dependencies: deps, Root: git.Dir,
 				HistoryStats: stats,
 				Repositories: map[string]RepositoryHistory{"source": {Name: "source", Root: git.Dir, Git: history}}})

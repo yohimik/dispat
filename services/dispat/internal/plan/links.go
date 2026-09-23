@@ -181,7 +181,7 @@ func (e *linkEvidence) index() error {
 		}
 		reader, ok := history.Git.(commitSubjectReader)
 		if !ok {
-			continue
+			return fmt.Errorf("plan: repository %s cannot read release commit subjects", history.Name)
 		}
 		revisions := make([]string, 0, len(byRepository[key]))
 		for revision := range byRepository[key] {
@@ -302,8 +302,7 @@ func (e *linkEvidence) pins(history RepositoryHistory, revision string) (map[str
 	}
 	reader, ok := history.Git.(gitlinkPathReader)
 	if !ok {
-		e.trees[key] = map[string]string{}
-		return e.trees[key], nil
+		return nil, fmt.Errorf("plan: repository %s cannot read fleet links at %s", history.Name, revision)
 	}
 	paths := linkPathsOf(history)
 	pins, err := reader.GitlinksAtPaths(e.cp.ctx, revision, paths)
