@@ -545,9 +545,10 @@ COPY --from=report /src/packages/docs/data/report.json /
 # nobody has run a suite in.
 FROM runner AS measured
 ARG COMMIT
-# The coverage minimum, combined and integration alike. Every release,
-# including a prerelease, is held to 95 alongside provenance and inventory
-# checks. The release workflow supplies the same minimum to the site report.
+# The coverage minimum, combined and integration alike. A stable release is
+# held to 95; a prerelease passes 0, which measures and publishes the figures
+# without a bar (the release workflow's DISPAT_COVERAGE_MINIMUM). The
+# provenance and inventory checks hold either way.
 ARG COVERAGE_MINIMUM=95
 COPY --from=test-ccme /src/coverage ./coverage
 COPY --from=test-config /src/coverage ./coverage

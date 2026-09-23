@@ -115,11 +115,11 @@ jobs:
             0)
               echo "releasing=true" >> "$GITHUB_OUTPUT"
               # Inspect only packages actually releasing, and among them only
-              # the seven Go modules the coverage figures measure. This
-              # classifies publication of the stable badge only; every
-              # release, including an RC, must pass both 95% coverage gates.
-              # A stable infra, image or spec release alone does not update
-              # the badge for these measured modules.
+              # the seven Go modules the coverage figures measure: the 95%
+              # minimums hold a stable release of that code and nothing else.
+              # A stable catch-up, graduation or mixed stable/RC run of one of
+              # them keeps the gate; a candidate that ships beside a stable
+              # infra, image or spec release does not acquire it.
               stable=$(jq -ser '
                 ["ccme", "config", "manifest", "models", "scanner", "writer", "dispat"] as $measured |
                 [.[] | select(.message == "release plan ready")] as $summaries |
@@ -328,10 +328,12 @@ jobs:
         if: always()
         run: sh scripts/ci-worker.sh delete
 
-      # Every release, including an RC, runs the full suite and must pass both
-      # 95% coverage gates before publication. Only the public stable badge is
-      # restricted to a stable-channel release below.
+      # Every release runs the full suite. The coverage minimums and the badge
+      # gate only a run that publishes one of the measured Go modules on the
+      # stable channel (the plan job's `stable`); a prerelease is not held to
+      # them.
       - name: Verify coverage freshness gate
+        if: needs.plan.outputs.stable == 'true'
         run: sh scripts/badge-cache-test.sh
 
       # The two steps below run through `dispat exec` so the release logic
@@ -344,9 +346,11 @@ jobs:
       # this job just built, so the numbers the site ships are the release's
       # rather than a courier's. This job stays the gate it always was.
       - name: Compute coverage totals
+        if: needs.plan.outputs.stable == 'true'
         run: dispat exec coverage-badge
 
       - name: Upload merged coverage
+        if: needs.plan.outputs.stable == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage
@@ -395,9 +399,11 @@ jobs:
       NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
       CRIER_STAGE_MODE: ${{ vars.CRIER_STAGE_MODE || 'server' }}
       CRIER_STAGE_SERVER_TUNNEL_MODE: ngrok
-      # The report repeats the same coverage minimum enforced before any
-      # publication, including prereleases.
-      DISPAT_COVERAGE_MINIMUM: '95'
+      # The coverage minimum the docs package's report stage requires
+      # (packages/docs/dispat.yaml, Dockerfile.gotest target measured): 95 when
+      # the plan releases a measured Go module on the stable channel, and none
+      # (0) for a prerelease, which publishes its figures without the bar.
+      DISPAT_COVERAGE_MINIMUM: ${{ needs.plan.outputs.stable == 'true' && '95' || '0' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
