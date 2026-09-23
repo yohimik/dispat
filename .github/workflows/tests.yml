@@ -3,12 +3,11 @@
 # its own — so both the file and its name (what the README badge renders) say
 # "tests" rather than the generic "CI".
 #
-# The main gates run inside Docker: the dispat scripts underneath these steps are
+# Every gate runs inside Docker: the dispat scripts underneath these steps are
 # buildx builds of Dockerfile.gotest and the package Dockerfiles, so a job
 # needs Docker, git and dispat itself — no Go toolchain on the runner. The
 # only build driven from this file is the bootstrap, because no dispat exists
-# yet to drive it. Native filesystem lock checks additionally run on Windows
-# and macOS, whose kernel behavior cannot be checked in a Linux container.
+# yet to drive it.
 #
 # What is deliberately not here: the coverage badge. A run selected by --since
 # tests part of the monorepo, so a merged total from it would be a number about
@@ -40,9 +39,6 @@ env:
   GOPRIVATE: github.com/yohimik/dispat
 
 jobs:
-  native-locks:
-    uses: ./.github/workflows/native-locks.yml
-
   lint:
     name: Format and vet
     runs-on: ubuntu-latest

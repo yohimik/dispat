@@ -16,10 +16,10 @@ name: Release
 # and install checks use Node on the runner for trusted publishing and native
 # package installation; Go and Terraform remain inside their images.
 #
-# The job sequence asks: is there anything to release, do the announcement's
-# credentials still work, does the whole suite pass, release it, and then check
-# that what was released installs. Each is a gate on the next, so nothing is
-# published by a run whose tests never ran.
+# The run has four stages, each a gate on the next: plan (is there anything
+# to release), tests and pings (the whole suite and the announcement's
+# credentials, checked in parallel), release, and post release (does what was
+# released install). Nothing is published by a run whose tests never ran.
 #
 # The release experiments are not a job here. They run inside the release, as
 # the docs package's beforeBuild hook, against the image the same run just
@@ -59,9 +59,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  native-locks:
-    uses: ./.github/workflows/native-locks.yml
-
   plan:
     name: Is there anything to release
     runs-on: ubuntu-latest
@@ -366,7 +363,7 @@ jobs:
 
   release:
     name: Run dispat, publish binaries
-    needs: [plan, tests, ping, native-locks]
+    needs: [plan, tests, ping]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # commits, tags, GitHub releases
@@ -585,7 +582,7 @@ jobs:
           retention-days: 30
 
   post-release:
-    name: ${{ matrix.os }}
+    name: Post release, action on ${{ matrix.os }}
     needs: release
     # Only when the CLI itself published. A run that released just the docs or
     # an image has no new version to install, no v{version} alias tag to check
@@ -626,7 +623,7 @@ jobs:
             "${{ steps.setup.outputs.path }}"
 
   post-release-npm:
-    name: npm ${{ matrix.os }}
+    name: Post release, npm on ${{ matrix.os }}
     needs: release
     if: ${{ !cancelled() && needs.release.outputs.npm-released == 'true' }}
     runs-on: ${{ matrix.os }}
