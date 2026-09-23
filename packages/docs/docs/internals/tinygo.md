@@ -118,6 +118,8 @@ draft tag. The darwin spike checks the recorded version on every run and reuses 
 The release export gate runs the complete integration suite against the exact native TinyGo binary it will export.
 Version-stamped self-update fixtures use the same compiler, including trusted TLS update and offline rollback checks.
 Any failed or skipped test blocks export. CI exercises this gate on native Linux AMD64 and ARM64 builders.
+The test reporter retains the complete event stream and prints failed-test output separately, so Docker's log
+limit cannot bury a failure behind the output from passing tests.
 
 The base image is upstream 0.42.0 and every stage up to `tinygo-spike-net` measures it, so the verdict above keeps
 its evidence. The two fork stages are the re-asking.
@@ -281,6 +283,8 @@ should expect:
   this.
 - **`signal.Ignored` does not link.** The runtime has never implemented `os/signal.signal_ignored`, so a program
   calling it fails at link time. dispat's only signal call is `signal.NotifyContext`, so nothing in dispat reaches it.
+- **`os.Chtimes` is unimplemented.** The TinyGo build uses the supported timestamp syscall when self-update
+  promotes or retains a rollback copy. Its retention period starts at that update, even when the file itself is old.
 - **A script's bounded pipe wait does not fire.** A script may leave a child holding the pipes its output is read
   through. The gc build stops waiting for those pipes after five seconds and reports the script by its own exit. The
   scheduler here is single-threaded, so the blocking read of the inherited pipe stalls every goroutine, the timer

@@ -198,23 +198,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends git jq \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1001 gopher
 COPY tests/integration /src/tests/integration
+COPY tools /src/tools
 COPY packages/cli/dispat.yaml /src/packages/cli/dispat.yaml
 COPY packages/docs/dispat.yaml /src/packages/docs/dispat.yaml
 COPY packages/docs/demo/fixtures /src/packages/docs/demo/fixtures
 COPY go.work /src/go.work
-RUN cd /src && go work edit -dropuse=./tools go.work \
- && mkdir -p /gate && chown -R gopher:gopher /src /gate
+RUN mkdir -p /gate && chown -R gopher:gopher /src /gate
 USER gopher
 ENV GOWORK=/src/go.work GOPATH=/home/gopher/go GOMAXPROCS=2 GOMEMLIMIT=6GiB
 ENV DISPAT_TEST_COMPILER=/usr/local/tinygo/bin/tinygo
+# Keep the complete event stream on disk, but print only the summary and
+# failed tests. Dumping a full suite hides its failures behind BuildKit's
+# per-step log limit.
 RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/gopher/go/pkg/mod,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
     DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
-      go test -C /src/tests/integration -json -count=1 -timeout 120m \
-        -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./... > /gate/integration.json \
-      || { cat /gate/integration.json; exit 1; }; \
+      go run /src/tools/testreport test tiny-integration -- \
+        -C /src/tests/integration -count=1 -timeout 120m \
+        -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./...; \
+    cp /src/coverage/testlog/tiny-integration.json /gate/integration.json; \
     jq -s -e 'any(.[]; .Action == "pass" and .Package == "github.com/yohimik/dispat/tests/integration" and (has("Test") | not)) and all(.[]; .Action != "fail" and (.Action != "skip" or (has("Test") | not)))' /gate/integration.json > /dev/null \
       || { jq -r 'select(has("Test") and (.Action == "skip" or .Action == "fail")) | "\(.Action): \(.Test)"' /gate/integration.json; \
            echo "the TinyGo acceptance gate refuses failed and skipped tests" >&2; exit 1; }; \

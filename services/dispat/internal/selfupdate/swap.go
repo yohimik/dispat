@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // Replace puts incoming where exe is, keeping the outgoing binary as exe's
@@ -204,13 +203,4 @@ func Restore(exe string) (err error) {
 	}
 	touch(backup)
 	return nil
-}
-
-// touch starts the backup's clock, so PruneBackup measures the age of the
-// backup rather than the age of the binary that became one. A clock that
-// cannot be set is not worth failing a completed install over: the copy is
-// simply pruned at whatever date it carries.
-func touch(path string) {
-	now := time.Now()
-	_ = os.Chtimes(path, now, now)
 }

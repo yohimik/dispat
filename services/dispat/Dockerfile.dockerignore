@@ -41,7 +41,10 @@ packages/docs/*
 packages/docs/demo/*
 !packages/docs/demo/fixtures
 
-# Scoped tool bootstrap policy.
+# Scoped tool bootstrap policy and the test failure renderer.
 !tools
 tools/*
 !tools/bootstrap.yaml
+!tools/go.mod
+!tools/go.sum
+!tools/testreport
