@@ -206,7 +206,7 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 				// The publication has started being prepared, so the run-time
 				// clock starts with it: the queue this assignment waited in is
 				// not this attempt's own time.
-				state.isClaimed, state.tip = true, reply.commit
+				state.isQueueSettled, state.tip = true, reply.commit
 				deadline.Reset(c.Timeouts.Task)
 				continue
 			}
@@ -228,12 +228,12 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 			state.isAuthorized, state.tip = true, offer.observer.readAuthorizedTip(offer.branch)
 			deadline.Reset(c.Timeouts.Task)
 		case <-deadline.C:
-			if !state.isClaimed && !state.isAuthorized {
-				expired, err := c.settleQueuedAttempt(ctx, lease, task, attempt, offer)
+			if !state.isQueueSettled && !state.isAuthorized {
+				boundary, err := c.settleQueuedAttempt(ctx, lease, task, attempt, offer)
 				if err != nil {
 					return outcome, err
 				}
-				state.isClaimed, state.tip = true, expired
+				state.isQueueSettled, state.tip = true, boundary
 				deadline.Reset(c.Timeouts.Task)
 				continue
 			}
@@ -253,18 +253,18 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 	}
 }
 
-// publicationState is how far one delegated publication has got: the object
-// its branch now carries, whether a node has taken the work on, and whether
-// this run has authorized the effect.
+// publicationState is how far one delegated publication has got:
+// its trusted branch boundary, whether its initial queue wait has settled,
+// and whether this run has authorized the effect.
 //
 // The last field is the one that changes what every other outcome means. An
 // attempt that was never authorized is abandoned for free; one that was is an
 // effect this run asked for and may not be able to account for, which is a
 // different class of outcome with a code of its own (§28.6).
 type publicationState struct {
-	tip          string
-	isClaimed    bool
-	isAuthorized bool
+	tip            string
+	isQueueSettled bool
+	isAuthorized   bool
 }
 
 // readPublicationOutcome turns one publisher's terminal result into what the

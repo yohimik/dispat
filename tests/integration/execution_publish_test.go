@@ -429,6 +429,7 @@ git -c user.name=fixture -c user.email=fixture@example.com commit -q -m "chore: 
 // and the run exits non-zero having published nothing further.
 func TestExecutionUnauthorizedPublisherNeverStarts(t *testing.T) {
 	rig := newExecutionPublishRig(t, func(cfg *models.File) {
+		cfg.LogLevel = "debug"
 		cfg.Scripts["postpublish"] = models.Script{
 			executionPostPublishProbe,
 			`[ "$DISPAT_PACKAGE" != assets ] || ` +

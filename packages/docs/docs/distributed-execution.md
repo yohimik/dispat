@@ -378,8 +378,9 @@ slot is not reused, and the packages downstream of it are not attempted. A task 
 inside the same run: the next run builds it again.
 
 **Capacity returns only on evidence.** A slot goes back when a result arrives, when a withdrawal is acknowledged, or
-when an unclaimed assignment's branch is revoked. An attempt that simply stopped answering leaves its slot where it
-is, because the work may still be running on that machine.
+when an unclaimed assignment is fenced before any worker can claim it. Deleting the branch or writing cancellation
+under an exact lease on that assignment provides this proof without a worker acknowledgement. An attempt that
+simply stopped answering leaves its slot where it is, because the work may still be running on that machine.
 
 **A publication whose outcome cannot be established is reported as such.** When a publication was authorized and no
 result came back, the run withdraws it and waits `timeouts.cancel` for an acknowledgement. An acknowledgement saying

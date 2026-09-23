@@ -298,6 +298,8 @@ func assertRejectedTipRetained(t *testing.T, rig *executionRig, result harness.R
 		"rev-parse", branch)), "cancellation and cleanup leave the rejected tip untouched")
 	assert.True(t, harness.IsCodePresent(executionEvents(result), executionRetainedCode),
 		"retained coordination content needs investigation\nstdout:\n%s", result.Stdout)
+	assert.NotContains(t, result.Stdout, "the attempt is fenced by revoking its coordination ref",
+		"a refused deletion cannot be reported as a completed fence")
 }
 
 // TestExecutionOldRunReceiptGrantsNothing (spec vector 20): a receipt of an

@@ -55,9 +55,9 @@ const (
 // merely reads like this one.
 var errQueueExpired = errors.New("execution: the assignment was revoked before any node claimed it")
 
-// cancellation is what a withdrawn attempt's node said about itself: whether
-// it answered at all, how far the frame had got, and whether the stage's own
-// command sequence had begun.
+// cancellation is what the withdrawal established: either the node answered,
+// or the assignment was fenced before the node could claim it. It also says
+// how far an answered frame got and whether its command sequence had begun.
 //
 // The last field is the whole reason the type exists. For a build it is
 // information; for a publication it is the difference between an outcome this
@@ -108,6 +108,15 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 	})
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", node).Int("attempt", attempt).
 		Str("commit", withdrawn.oid).Msg("attempt withdrawn")
+	if withdrawn.parent == offer.offered {
+		// The worker must claim under a lease over the assignment before any
+		// command starts. Our successful Cancel on that exact assignment makes
+		// its claim impossible; a worker that never saw the assignment cannot
+		// acknowledge it, and waiting for one would only hold the node's slot.
+		c.Log.Debug().Str("run", c.Run).Str("task", task).Str("worker", node).
+			Int("attempt", attempt).Msg("unclaimed assignment fenced before work started")
+		return cancellation{isAcknowledged: true, phase: "queued"}
+	}
 	return c.awaitAcknowledgement(settling, node, task, attempt, offer, withdrawn.oid)
 }
 
@@ -115,73 +124,64 @@ type withdrawalAdvance struct {
 	oid, parent string
 }
 
-// writeWithdrawal pushes the withdrawal, re-reading the branch once when the
-// lease is refused.
+// writeWithdrawal pushes the withdrawal, re-reading the branch when a lease
+// is refused.
 //
 // The re-read is the whole of the concurrency story here. Both parties advance
 // one branch under expected-old checks, so a withdrawal written against the
 // object this run last saw loses to a node that moved the branch in the
 // meantime, and that happens on the ordinary path: a build's claim reaches the
 // poller up to one poll interval after the node wrote it, and an interrupt
-// arriving inside that window is leased against the assignment. So the branch
-// is asked where it actually is, once, and the withdrawal is written against
-// that. A branch that has reached its terminal message needs no withdrawal at
-// all, and an empty oid says so.
+// arriving inside that window is leased against the assignment. The worker
+// can move again before the retry push, so every failed push gets another
+// authenticated re-read, bounded by the protocol's maximum chain depth. A
+// terminal message needs no withdrawal at all, and an empty oid says so.
 func (c *Coordinator) writeWithdrawal(ctx context.Context, node, task string, attempt int,
 	kind string, offer taskOffer, tipOID string) (withdrawalAdvance, error) {
-	withdrawn, err := c.advance(ctx, node, offer.branch, tipOID, MessageCancel, Withdrawal{
-		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
-		Assignment: offer.offered, Tip: tipOID,
-	})
-	if err == nil {
-		return withdrawalAdvance{oid: withdrawn, parent: tipOID}, nil
-	}
-	head, rereadErr := c.mailboxes[node].Reread(ctx, offer.branch)
-	if rereadErr != nil || head.OID == "" || head.OID == tipOID {
-		return withdrawalAdvance{}, err
-	}
-	tip, inspectErr := c.mailboxes[node].Inspect(ctx, head)
-	if inspectErr != nil {
-		return withdrawalAdvance{}, err
-	}
 	expected := attemptIdentity{
 		node: node, want: c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
 		offered: offer.offered,
 	}
-	if tip.Kind == MessageResult || tip.Kind == MessageAck {
-		if !c.isOwnTerminalAttempt(ctx, tip, expected) {
-			// An unauthenticated terminal-looking step proves nothing about
-			// whether this worker stopped. Keep the old cleanup lease, so a
-			// foreign writer's data is retained rather than deleted as ours.
+	var lastErr error
+	for retry := 0; retry < maxChainDepth; retry++ {
+		withdrawn, err := c.advance(ctx, node, offer.branch, tipOID, MessageCancel, Withdrawal{
+			Header: expected.want, Assignment: offer.offered, Tip: tipOID,
+		})
+		if err == nil {
+			return withdrawalAdvance{oid: withdrawn, parent: tipOID}, nil
+		}
+		lastErr = err
+		head, rereadErr := c.mailboxes[node].Reread(ctx, offer.branch)
+		if rereadErr != nil || head.OID == "" || head.OID == tipOID {
 			return withdrawalAdvance{}, err
 		}
-		// The node won the lease race and has stopped. Close must use the
-		// terminal object it just read, not the earlier tip the withdrawal
-		// lost against, or its exact-lease delete leaves this ref behind.
-		c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
-			oid: tip.OID, parent: tip.PreviousOID})
-		return withdrawalAdvance{}, nil
+		tip, inspectErr := c.mailboxes[node].Inspect(ctx, head)
+		if inspectErr != nil {
+			return withdrawalAdvance{}, err
+		}
+		if tip.Kind == MessageResult || tip.Kind == MessageAck {
+			if !c.isOwnTerminalAttempt(ctx, tip, expected) {
+				// A foreign terminal-looking step proves nothing about whether
+				// this worker stopped or what this run may clean up.
+				return withdrawalAdvance{}, err
+			}
+			c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
+				oid: tip.OID, parent: tip.PreviousOID})
+			return withdrawalAdvance{}, nil
+		}
+		if !c.isOwnCancellationPredecessor(ctx, tip, expected) {
+			// A foreign or unreadable tip authorizes neither cancellation nor cleanup.
+			return withdrawalAdvance{}, err
+		}
+		if tip.Kind == MessageCancel {
+			// A lost push response can leave our cancellation on the remote.
+			c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
+				oid: tip.OID, parent: tip.PreviousOID})
+			return withdrawalAdvance{oid: tip.OID, parent: tip.PreviousOID}, nil
+		}
+		tipOID = head.OID
 	}
-	if !c.isOwnCancellationPredecessor(ctx, tip, expected) {
-		// A lease lost to a foreign or unreadable tip does not authorize
-		// this run to sign a cancellation on top of another writer's data.
-		return withdrawalAdvance{}, err
-	}
-	if tip.Kind == MessageCancel {
-		// A push response can be lost after our cancellation reached the
-		// remote. It is already the withdrawal the worker must answer.
-		c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
-			oid: tip.OID, parent: tip.PreviousOID})
-		return withdrawalAdvance{oid: tip.OID, parent: tip.PreviousOID}, nil
-	}
-	withdrawn, err = c.advance(ctx, node, offer.branch, head.OID, MessageCancel, Withdrawal{
-		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
-		Assignment: offer.offered, Tip: head.OID,
-	})
-	if err != nil {
-		return withdrawalAdvance{}, err
-	}
-	return withdrawalAdvance{oid: withdrawn, parent: head.OID}, nil
+	return withdrawalAdvance{}, lastErr
 }
 
 // isOwnCancellationPredecessor refuses a retried cancellation unless the
@@ -427,7 +427,11 @@ func (c *Coordinator) revokeAttempt(ctx context.Context, node, task string, atte
 func (c *Coordinator) settleAbandonedAttempt(ctx context.Context, lease *Lease, task string,
 	attempt int, offer taskOffer, tipOID string) error {
 	lease.Leak(LeakTaskDeadline)
-	c.revokeAttempt(context.WithoutCancel(ctx), lease.Node, task, attempt, offer.branch, tipOID)
+	if !c.revokeAttempt(context.WithoutCancel(ctx), lease.Node, task, attempt, offer.branch, tipOID) {
+		return c.refuseTask(task, lease.Node, attempt, fmt.Errorf(
+			"the node did not report within %s: the coordination ref could not be revoked and is retained for investigation, and the node is not used again by this run",
+			c.Timeouts.Task))
+	}
 	return c.refuseTask(task, lease.Node, attempt, fmt.Errorf(
 		"the node did not report within %s: the attempt is fenced by revoking its coordination ref, and the node is not used again by this run",
 		c.Timeouts.Task))

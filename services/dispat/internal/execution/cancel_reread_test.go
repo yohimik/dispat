@@ -4,6 +4,7 @@
 package execution
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -11,6 +12,89 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// A cancellation placed directly on the assignment fences the only claim a
+// worker could use to start commands. A worker that never saw the assignment
+// cannot acknowledge the cancellation, so the run must settle immediately.
+func TestWithdrawalOfUnclaimedAssignmentNeedsNoWorkerAcknowledgement(t *testing.T) {
+	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, answeredPreflight)
+	fixture.coordinator.Timeouts.Cancel = time.Second
+	branch := FormatBranch("build-a", KindBuild, time.Now())
+	assignment := probeAssignment("build-a", branch)
+	assignment.Kind, assignment.Task = KindBuild, "app:build"
+	offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+	require.NoError(t, err)
+	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
+		node: "build-a", branch: branch, oid: offered,
+	})
+
+	settled := fixture.coordinator.withdrawAttempt(t.Context(), "build-a", "app:build", 1,
+		KindBuild, taskOffer{branch: branch, offered: offered}, offered)
+
+	assert.True(t, settled.isAcknowledged, "the exact lease fenced any worker claim")
+	assert.False(t, settled.isCommandStarted)
+	assert.Equal(t, "queued", settled.phase)
+	require.NoError(t, fixture.coordinator.Close(t.Context()))
+	assert.Empty(t, fixture.orchestrator.remoteBranches(t))
+}
+
+// The real Git lease can lose twice: first to a Claim, then to a Result
+// written while the coordinator is retrying on the Claim. The transport
+// wrapper only schedules the second worker push; both leases and all messages
+// still pass through the real bare repository and signature checks.
+func TestWithdrawalSettlesAResultAfterTwoLeaseLosses(t *testing.T) {
+	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, answeredPreflight)
+	branch := FormatBranch("build-a", KindBuild, time.Now())
+	assignment := probeAssignment("build-a", branch)
+	assignment.Kind, assignment.Task = KindBuild, "app:build"
+	offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+	require.NoError(t, err)
+	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
+		node: "build-a", branch: branch, oid: offered,
+	})
+	_, err = fixture.node.mailbox.Reread(t.Context(), branch)
+	require.NoError(t, err)
+	claimed, err := fixture.node.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+		mustMarshalValue(Claim{Header: replyHeader(*assignment), Assignment: offered}), nil)
+	require.NoError(t, err)
+
+	var terminal string
+	transport := &retryRaceTransport{transportx: fixture.orchestrator.mailbox.remote}
+	transport.onRetry = func() error {
+		var pushErr error
+		terminal, pushErr = fixture.node.mailbox.Advance(t.Context(), branch, claimed, MessageResult,
+			mustMarshalValue(Result{Header: replyHeader(*assignment), Assignment: offered,
+				Status: StatusSucceeded}), nil)
+		return pushErr
+	}
+	fixture.orchestrator.mailbox.remote = transport
+
+	withdrawn, err := fixture.coordinator.writeWithdrawal(t.Context(), "build-a", "app:build", 1,
+		KindBuild, taskOffer{branch: branch, offered: offered}, offered)
+
+	require.NoError(t, err, "the second reread must see the worker's signed terminal result")
+	assert.Empty(t, withdrawn.oid, "no cancellation follows a completed task")
+	assert.Equal(t, 2, transport.calls, "the coordinator attempted one original and one retried lease")
+	assert.Equal(t, terminal, fixture.coordinator.owned["build-a"][0].ExpectedOld)
+	require.NoError(t, fixture.coordinator.Close(t.Context()))
+	assert.Empty(t, fixture.orchestrator.remoteBranches(t))
+}
+
+type retryRaceTransport struct {
+	transportx
+	onRetry func() error
+	calls   int
+}
+
+func (transport *retryRaceTransport) PushAdvance(ctx context.Context, remote, oid, branch, expectedOld string) error {
+	transport.calls++
+	if transport.calls == 2 {
+		if err := transport.onRetry(); err != nil {
+			return err
+		}
+	}
+	return transport.transportx.PushAdvance(ctx, remote, oid, branch, expectedOld)
+}
 
 // Losing the cancellation push lease to a foreign live step cannot give the
 // coordinator authority to sign a Cancel on top of that untrusted step.

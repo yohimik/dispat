@@ -363,14 +363,14 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 	deadline := time.NewTimer(c.Timeouts.Task)
 	defer deadline.Stop()
 	tip := offer.offered
-	isClaimed := false
+	isQueueSettled := false
 	offeredAt, claimedAt := time.Now(), time.Time{}
 	for {
 		select {
 		case reply := <-offer.replies:
 			if reply.kind == MessageClaim {
 				// The work has started, so the run-time clock starts with it.
-				isClaimed, tip, claimedAt = true, reply.commit, time.Now()
+				isQueueSettled, tip, claimedAt = true, reply.commit, time.Now()
 				deadline.Reset(c.Timeouts.Task)
 				continue
 			}
@@ -379,14 +379,15 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 			lease.Release()
 			return read(ctx, outcome, reply, offer.branch)
 		case <-deadline.C:
-			if !isClaimed {
-				expired, err := c.settleQueuedAttempt(ctx, lease, task, attempt, offer)
+			if !isQueueSettled {
+				boundary, err := c.settleQueuedAttempt(ctx, lease, task, attempt, offer)
 				if err != nil {
 					return outcome, err
 				}
-				// The node claimed the work while the withdrawal was being
-				// written, so this is the run-time wait after all.
-				isClaimed, tip = true, expired
+				// The branch moved while revocation was attempted. Allow
+				// one bounded wait for the watcher to authenticate its reply;
+				// an observed tip is not yet a trusted cancellation boundary.
+				isQueueSettled, tip = true, boundary
 				deadline.Reset(c.Timeouts.Task)
 				continue
 			}
@@ -397,8 +398,9 @@ func (c *Coordinator) awaitResult(ctx context.Context, lease *Lease, task string
 	}
 }
 
-// settleQueuedAttempt revokes an assignment nobody claimed, and answers the
-// object the branch now carries when the revocation lost the race.
+// settleQueuedAttempt revokes an assignment nobody claimed. When a changed
+// tip wins the lease race, it keeps the assignment as the trusted boundary
+// until the watcher authenticates the changed tip.
 //
 // The error it answers is the sentinel that makes the caller place the task
 // again: nothing was executed anywhere, so this is not a failure of the task
@@ -422,7 +424,7 @@ func (c *Coordinator) settleQueuedAttempt(ctx context.Context, lease *Lease, tas
 	// watcher immediately for validation: otherwise Observe skips that
 	// unchanged tip and accepted work can time out unheard.
 	offer.observer.reconsider(head.Name)
-	return head.OID, nil
+	return offer.offered, nil
 }
 
 // readTaskOutcome turns one accepted result into what the executor does with
