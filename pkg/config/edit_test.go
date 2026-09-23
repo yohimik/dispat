@@ -334,6 +334,39 @@ func TestPrepareEditsRendersWithoutWriting(t *testing.T) {
 	}
 }
 
+// TestPreparedEditRefusesTargetReplacedBySymlink: a config can change after
+// preparation while another file's edits are rendered. Commit must not save a
+// backup or replace an alias that appeared in that interval.
+func TestPreparedEditRefusesTargetReplacedBySymlink(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "app.json", `{"tags":["old"]}`)
+	target := writeFile(t, dir, "other.json", `{"tags":["kept"]}`)
+	p, err := PrepareEdits(t.Context(), path,
+		[]Edit{{KeyPath: []string{"tags"}, Value: []string{"new"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := p.Commit(); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("commit = %v, want a symlink refusal", err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("config alias = %v, %v; want symlink", info, err)
+	}
+	if got := readBack(t, target); got != `{"tags":["kept"]}` {
+		t.Errorf("target changed: %s", got)
+	}
+	if _, err := os.Lstat(path + BackupSuffix); !os.IsNotExist(err) {
+		t.Errorf("backup was written before refusal: %v", err)
+	}
+}
+
 // TestCommitKeepsTheFilesPermissions: a 0600 config must not leak through a
 // world-readable backup.
 func TestCommitKeepsTheFilesPermissions(t *testing.T) {

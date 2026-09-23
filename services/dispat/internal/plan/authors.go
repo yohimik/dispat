@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
 // coAuthorTrailer is the trailer key that names someone besides the git author
@@ -194,7 +196,7 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 		// pending for it, whatever its key says. Deciding that from the
 		// repository alone saves consulting every shared window view for
 		// every commit of every other repository in the fleet.
-		if reachable != nil && !reachable[strings.ToLower(rec.repository)] {
+		if reachable != nil && !reachable[globx.Fold(rec.repository)] {
 			continue
 		}
 		if !cp.inWindow(name, rec.key) {
@@ -295,9 +297,9 @@ func (cp *computation) windowRepositories(name string) map[string]bool {
 	}
 	out := make(map[string]bool, len(cp.stableBoundaries[name])+1)
 	for repository := range cp.stableBoundaries[name] {
-		out[strings.ToLower(repository)] = true
+		out[globx.Fold(repository)] = true
 	}
-	out[strings.ToLower(cp.controlRepo)] = true
+	out[globx.Fold(cp.controlRepo)] = true
 	return out
 }
 

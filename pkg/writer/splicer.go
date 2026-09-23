@@ -195,7 +195,11 @@ func atomicWrite(path string, data []byte) error {
 		return err
 	}
 	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
+	n, err := tmp.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		tmp.Close()
 		os.Remove(name)
 		return err

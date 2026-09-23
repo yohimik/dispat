@@ -7,22 +7,15 @@ package globx
 
 import (
 	"strings"
-	"unicode"
+
+	config "github.com/yohimik/dispat/pkg/config"
 )
 
 // Fold uses the canonical representative of each Unicode SimpleFold cycle.
 // This keeps glob terms and the registry's EqualFold-equivalent names in the
 // same namespace, including the Greek final sigma.
 func Fold(name string) string {
-	return strings.Map(func(r rune) rune {
-		smallest := r
-		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
-			if next < smallest {
-				smallest = next
-			}
-		}
-		return unicode.ToLower(smallest)
-	}, name)
+	return config.Fold(name)
 }
 
 // IsMatch reports whether s matches pattern, where "*" matches any run of

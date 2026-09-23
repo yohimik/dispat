@@ -165,7 +165,11 @@ func replaceCommitMessage(path string, message []byte) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(message); err != nil {
+	n, err := tmp.Write(message)
+	if err == nil && n != len(message) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		tmp.Close()
 		return err
 	}

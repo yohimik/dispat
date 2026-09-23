@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/ignore"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
@@ -319,7 +320,7 @@ func (d *discovery) scanSpace(sn string) error {
 				s.excluded = append(s.excluded, excludedDir{sn, name})
 				continue
 			}
-			fold := strings.ToLower(name)
+			fold := globx.Fold(name)
 			if prev, dup := foundIn[fold]; dup {
 				return fmt.Errorf(
 					"config: %s exists in two folders of space %q (%s and %s); package names must be unique, case included",
@@ -521,7 +522,7 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 		return nil, fmt.Errorf("config: %s: path %q is not a folder", label, po.Path)
 	}
 	d.owner[key] = ""
-	d.ownerFold[strings.ToLower(key)] = key
+	d.ownerFold[globx.Fold(key)] = key
 	pkg := &model.Package{
 		Name:          key,
 		Dir:           dir,
@@ -625,7 +626,7 @@ func (d *discovery) checkAutoVersionOnly(spaceNames []string) error {
 			continue
 		}
 		for _, name := range av.Only {
-			if _, ok := d.ownerFold[strings.ToLower(name)]; !ok {
+			if _, ok := d.ownerFold[globx.Fold(name)]; !ok {
 				return fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
 			}
 		}
@@ -635,7 +636,7 @@ func (d *discovery) checkAutoVersionOnly(spaceNames []string) error {
 			continue
 		}
 		for _, name := range chk.av.Only {
-			if _, ok := d.ownerFold[strings.ToLower(name)]; !ok {
+			if _, ok := d.ownerFold[globx.Fold(name)]; !ok {
 				return fmt.Errorf("config: %s: autoVersion.only: unknown package %q", chk.label, name)
 			}
 		}

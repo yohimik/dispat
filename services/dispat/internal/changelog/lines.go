@@ -116,7 +116,7 @@ func matchesAny(patterns []string, value string) bool {
 		return false // a package outside any space matches no space or group filter
 	}
 	for _, p := range patterns {
-		if globx.IsMatch(strings.ToLower(p), strings.ToLower(value)) {
+		if globx.IsMatch(globx.Fold(p), globx.Fold(value)) {
 			return true
 		}
 	}

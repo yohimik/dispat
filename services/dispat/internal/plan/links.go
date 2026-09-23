@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -167,7 +168,7 @@ func (e *linkEvidence) index() error {
 			if tag.Name == "" || tag.Commit == "" {
 				continue
 			}
-			key := strings.ToLower(p.Repository)
+			key := globx.Fold(p.Repository)
 			if byRepository[key] == nil {
 				byRepository[key] = map[string]bool{}
 			}
@@ -296,7 +297,7 @@ func (e *linkEvidence) project(from, revision, to string) (string, string) {
 // remembers it: the consumers of a hub all ask about the same few revisions,
 // and each answer costs a Git process.
 func (e *linkEvidence) pins(history RepositoryHistory, revision string) (map[string]string, error) {
-	key := strings.ToLower(history.Name) + historyKeySeparator + revision
+	key := globx.Fold(history.Name) + historyKeySeparator + revision
 	if pins, ok := e.trees[key]; ok {
 		return pins, nil
 	}
@@ -327,7 +328,7 @@ func (e *linkEvidence) pins(history RepositoryHistory, revision string) (map[str
 // another, both ends included. The links form a tree, so the route is unique
 // and is remembered for the rest of the plan.
 func (e *linkEvidence) route(from, to string) []string {
-	key := strings.ToLower(from) + historyKeySeparator + strings.ToLower(to)
+	key := globx.Fold(from) + historyKeySeparator + globx.Fold(to)
 	if route, ok := e.routes[key]; ok {
 		return route
 	}
@@ -348,17 +349,17 @@ func (cp *computation) linkRoute(from, to string) []string {
 	if strings.EqualFold(start.Name, end.Name) {
 		return []string{start.Name}
 	}
-	previous := map[string]string{strings.ToLower(start.Name): ""}
+	previous := map[string]string{globx.Fold(start.Name): ""}
 	for queue := []string{start.Name}; len(queue) > 0; queue = queue[1:] {
 		for _, peer := range cp.linkNeighbours(queue[0]) {
-			if _, seen := previous[strings.ToLower(peer)]; seen {
+			if _, seen := previous[globx.Fold(peer)]; seen {
 				continue
 			}
-			previous[strings.ToLower(peer)] = queue[0]
+			previous[globx.Fold(peer)] = queue[0]
 			if strings.EqualFold(peer, end.Name) {
 				route := []string{peer}
 				for current := peer; !strings.EqualFold(current, start.Name); {
-					current = previous[strings.ToLower(current)]
+					current = previous[globx.Fold(current)]
 					if current == "" {
 						return nil
 					}
@@ -381,10 +382,10 @@ func (cp *computation) linkNeighbours(name string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(peer string) {
-		if peer == "" || seen[strings.ToLower(peer)] {
+		if peer == "" || seen[globx.Fold(peer)] {
 			return
 		}
-		seen[strings.ToLower(peer)] = true
+		seen[globx.Fold(peer)] = true
 		out = append(out, peer)
 	}
 	for _, key := range sortedNames(cp.histories) {
@@ -401,7 +402,7 @@ func (cp *computation) linkNeighbours(name string) []string {
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
+	sort.Slice(out, func(i, j int) bool { return globx.Fold(out[i]) < globx.Fold(out[j]) })
 	return out
 }
 
@@ -506,7 +507,7 @@ func (cp *computation) projectSince(rev string, linked bool) (func(RepositoryHis
 			return revision
 		}, nil
 	}
-	control, ok := cp.histories[strings.ToLower(cp.controlRepo)]
+	control, ok := cp.histories[globx.Fold(cp.controlRepo)]
 	if !ok {
 		return nil, fmt.Errorf("plan: composed history has no control repository")
 	}
@@ -533,7 +534,7 @@ func (cp *computation) isLinkPath(repository, file string) bool {
 	if len(cp.linkPaths) == 0 || repository == "" {
 		return false
 	}
-	paths, ok := cp.linkPaths[strings.ToLower(repository)]
+	paths, ok := cp.linkPaths[globx.Fold(repository)]
 	if !ok {
 		return false
 	}

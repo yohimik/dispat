@@ -39,10 +39,10 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
-
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
@@ -1620,12 +1620,12 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 		if history.Name == "" {
 			history.Name = key
 		}
-		cp.histories[strings.ToLower(history.Name)] = history
+		cp.histories[globx.Fold(history.Name)] = history
 		scopes := make(map[string]bool, len(history.NonPackageScopes))
 		for _, scope := range history.NonPackageScopes {
 			scopes[scope] = true
 		}
-		cp.nonPackageByRepo[strings.ToLower(history.Name)] = scopes
+		cp.nonPackageByRepo[globx.Fold(history.Name)] = scopes
 		if history.Control {
 			cp.controlRepo = history.Name
 		}
@@ -1639,11 +1639,11 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 	}
 	for _, baseline := range opts.RepositoryBaselines {
 		repository := baseline.Repository
-		if history, ok := cp.histories[strings.ToLower(repository)]; ok {
+		if history, ok := cp.histories[globx.Fold(repository)]; ok {
 			repository = history.Name
 		}
-		key := baselineKey{consumer: strings.ToLower(baseline.Consumer), tag: baseline.ReleaseTag,
-			repository: strings.ToLower(repository)}
+		key := baselineKey{consumer: globx.Fold(baseline.Consumer), tag: baseline.ReleaseTag,
+			repository: globx.Fold(repository)}
 		if _, duplicate := cp.baselines[key]; duplicate {
 			cp.err(CodeRepositoryBoundary, baseline.Consumer, "", fmt.Sprintf(
 				"duplicate repository baseline for release %s and repository %s", baseline.ReleaseTag, repository))
@@ -1726,7 +1726,7 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 		if err != nil {
 			return nil, fmt.Errorf("plan: repository %s parser: %w", history.Name, err)
 		}
-		cp.parsers[strings.ToLower(history.Name)] = configured
+		cp.parsers[globx.Fold(history.Name)] = configured
 	}
 
 	if err := cp.loadTagsAndWindows(); err != nil { // §13.2, §13.3
@@ -1863,12 +1863,12 @@ func PackagesChangedSince(ctx context.Context, git TagInventoryGitx, opts Option
 		if history.Name == "" {
 			history.Name = key
 		}
-		cp.histories[strings.ToLower(history.Name)] = history
+		cp.histories[globx.Fold(history.Name)] = history
 		scopes := make(map[string]bool, len(history.NonPackageScopes))
 		for _, scope := range history.NonPackageScopes {
 			scopes[scope] = true
 		}
-		cp.nonPackageByRepo[strings.ToLower(history.Name)] = scopes
+		cp.nonPackageByRepo[globx.Fold(history.Name)] = scopes
 		if history.Control {
 			cp.controlRepo = history.Name
 		}
@@ -1890,7 +1890,7 @@ func PackagesChangedSince(ctx context.Context, git TagInventoryGitx, opts Option
 		if err != nil {
 			return nil, fmt.Errorf("plan: repository %s parser: %w", history.Name, err)
 		}
-		cp.parsers[strings.ToLower(history.Name)] = configured
+		cp.parsers[globx.Fold(history.Name)] = configured
 	}
 
 	var records []*commitRec
@@ -1921,7 +1921,7 @@ func PackagesChangedSince(ctx context.Context, git TagInventoryGitx, opts Option
 	selected := make(map[string]bool)
 	for _, rec := range records {
 		configured := cp.parser
-		if parser := cp.parsers[strings.ToLower(rec.repository)]; parser != nil {
+		if parser := cp.parsers[globx.Fold(rec.repository)]; parser != nil {
 			configured = parser
 		}
 		data, err := configured.Parse(rec.commit.Message)
@@ -1952,7 +1952,7 @@ func (cp *computation) loadWorkspace(deps []model.Dependency) error {
 	g := graph.New()
 	for _, p := range cp.pkgs {
 		cp.byName[p.Name] = p
-		cp.byFold[strings.ToLower(p.Name)] = p.Name
+		cp.byFold[globx.Fold(p.Name)] = p.Name
 		g.AddNode(p.Name)
 	}
 	cp.providers = make(map[string][]string)
@@ -2451,8 +2451,8 @@ func (cp *computation) containedInBaseline(pkg, key string) bool {
 	rel := cp.rel[pkg]
 	if len(cp.histories) > 0 {
 		repository, _ := splitHistoryKey(key)
-		stable := cp.stableBoundaries[pkg][strings.ToLower(repository)]
-		published := cp.publishedBoundaries[pkg][strings.ToLower(repository)]
+		stable := cp.stableBoundaries[pkg][globx.Fold(repository)]
+		published := cp.publishedBoundaries[pkg][globx.Fold(repository)]
 		if published == "" || published == stable {
 			return false
 		}
@@ -2472,7 +2472,7 @@ func (cp *computation) inWindow(pkg, key string) bool {
 	repository, _ := splitHistoryKey(key)
 	if p := cp.byName[pkg]; p != nil && strings.EqualFold(repository, cp.controlRepo) &&
 		!strings.EqualFold(p.Repository, cp.controlRepo) {
-		boundary := cp.stableBoundaries[pkg][strings.ToLower(cp.controlRepo)]
+		boundary := cp.stableBoundaries[pkg][globx.Fold(cp.controlRepo)]
 		return boundary == "" || !cp.ancestorOrSelf(key, boundary)
 	}
 	for _, window := range cp.windowRefs[pkg] {
@@ -2596,7 +2596,7 @@ func (cp *computation) markedAncestor(a, b string) (yes, known bool) {
 // promises complete parent lists (gitx.UnionHistoryx), which is what lets
 // ancestry among its commits be read off them.
 func (cp *computation) parentsAreAncestry(repository string) bool {
-	folded := strings.ToLower(repository)
+	folded := globx.Fold(repository)
 	if isTrusted, ok := cp.ancTrusted[folded]; ok {
 		return isTrusted
 	}
@@ -2734,7 +2734,7 @@ func (cp *computation) ancestorLookup(a, b string) bool {
 	if !hasGit {
 		git = cp.git
 	}
-	if !cp.ancNoGit[strings.ToLower(repoA)] && cp.ancErr == nil {
+	if !cp.ancNoGit[globx.Fold(repoA)] && cp.ancErr == nil {
 		if cp.stats != nil {
 			cp.stats.AncestryLookups.Add(1)
 		}
@@ -2743,7 +2743,7 @@ func (cp *computation) ancestorLookup(a, b string) bool {
 		case err == nil:
 			return yes
 		case errors.Is(err, gitx.ErrNoAncestry):
-			cp.ancNoGit[strings.ToLower(repoA)] = true
+			cp.ancNoGit[globx.Fold(repoA)] = true
 		default:
 			cp.ancErr = err
 		}
@@ -2792,7 +2792,7 @@ func (cp *computation) ancestryFailed() error {
 func (cp *computation) parseAndResolve() error {
 	for _, rec := range cp.commits {
 		parser := cp.parser
-		if configured := cp.parsers[strings.ToLower(rec.repository)]; configured != nil {
+		if configured := cp.parsers[globx.Fold(rec.repository)]; configured != nil {
 			parser = configured
 		}
 		data, err := parser.Parse(rec.commit.Message)
@@ -3071,7 +3071,7 @@ func (cp *computation) resolveHolds() {
 		repositoryIndex := make(map[string]int)
 		for _, candidate := range recs {
 			repository, _ := splitHistoryKey(candidate.commit)
-			key := strings.ToLower(repository)
+			key := globx.Fold(repository)
 			if index, exists := repositoryIndex[key]; exists {
 				previous := frontier[index]
 				if newer, comparable := cp.commitPrecedence(candidate.commit, previous.commit); comparable && newer {
@@ -3697,7 +3697,7 @@ func (cp *computation) versionForConsumerAt(provider, consumer string, stable bo
 	if stable {
 		boundaries = cp.stableBoundaries
 	}
-	return cp.versionAt(provider, boundaries[consumer][strings.ToLower(p.Repository)])
+	return cp.versionAt(provider, boundaries[consumer][globx.Fold(p.Repository)])
 }
 
 // AliasFilter recognises every alias tag the workspace's packages write, so a

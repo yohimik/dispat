@@ -38,6 +38,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
 // The kinds of fleet change compute proposes.
@@ -146,10 +147,10 @@ func (a *App) fleetRoster() []rosterEntry {
 	byFold := map[string]*rosterEntry{}
 	disabled := make(map[string]bool)
 	for _, repository := range a.workspace.DisabledRepositories() {
-		disabled[strings.ToLower(repository.Name)] = true
+		disabled[globx.Fold(repository.Name)] = true
 	}
 	remember := func(name string) *rosterEntry {
-		key := strings.ToLower(name)
+		key := globx.Fold(name)
 		if entry, ok := byFold[key]; ok {
 			return entry
 		}
@@ -161,7 +162,7 @@ func (a *App) fleetRoster() []rosterEntry {
 		repository := &a.workspace.Repositories[i]
 		remember(repository.Name).composed = true
 		for _, declared := range repository.Config.Repositories {
-			if disabled[strings.ToLower(declared.Name)] {
+			if disabled[globx.Fold(declared.Name)] {
 				continue
 			}
 			entry := remember(declared.Name)
@@ -177,7 +178,7 @@ func (a *App) fleetRoster() []rosterEntry {
 	for _, entry := range byFold {
 		out = append(out, *entry)
 	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].name) < strings.ToLower(out[j].name) })
+	sort.Slice(out, func(i, j int) bool { return globx.Fold(out[i].name) < globx.Fold(out[j].name) })
 	return out
 }
 
@@ -384,12 +385,12 @@ func (a *App) missingRosterEntries(fleet []rosterEntry) []linkSuggestion {
 	var out []linkSuggestion
 	for i := range a.workspace.Repositories {
 		repository := &a.workspace.Repositories[i]
-		stated := map[string]bool{strings.ToLower(repository.Name): true}
+		stated := map[string]bool{globx.Fold(repository.Name): true}
 		for _, declared := range repository.Config.Repositories {
-			stated[strings.ToLower(declared.Name)] = true
+			stated[globx.Fold(declared.Name)] = true
 		}
 		for _, member := range fleet {
-			if stated[strings.ToLower(member.name)] {
+			if stated[globx.Fold(member.name)] {
 				continue
 			}
 			if member.url == "" {
@@ -433,13 +434,13 @@ type fleetGroups struct{ parent map[string]string }
 func newFleetGroups(fleet []rosterEntry) *fleetGroups {
 	groups := &fleetGroups{parent: make(map[string]string, len(fleet))}
 	for _, entry := range fleet {
-		groups.parent[strings.ToLower(entry.name)] = strings.ToLower(entry.name)
+		groups.parent[globx.Fold(entry.name)] = globx.Fold(entry.name)
 	}
 	return groups
 }
 
 func (g *fleetGroups) find(name string) string {
-	key := strings.ToLower(name)
+	key := globx.Fold(name)
 	for {
 		parent, ok := g.parent[key]
 		if !ok {
@@ -482,7 +483,7 @@ func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []link
 	pending := apply
 	for round := 0; round <= len(a.fleetRoster()) && len(pending) > 0; round++ {
 		for _, change := range pending {
-			key := change.kind + "\x00" + strings.ToLower(change.repository) + "\x00" + strings.ToLower(change.peer)
+			key := change.kind + "\x00" + globx.Fold(change.repository) + "\x00" + globx.Fold(change.peer)
 			if done[key] {
 				continue
 			}
@@ -687,7 +688,7 @@ func (a *App) collectLinkEdits(edits *fileEdits, cfgPath string, apply []linkSug
 				Name: change.peer, URL: change.url, Path: change.path, Branch: change.branch})
 		}
 		sort.Slice(next, func(i, j int) bool {
-			return strings.ToLower(next[i].Name) < strings.ToLower(next[j].Name)
+			return globx.Fold(next[i].Name) < globx.Fold(next[j].Name)
 		})
 		owner.Config.Repositories = next
 		if err := edits.add(path, config.Edit{KeyPath: []string{"repositories"}, Value: next}); err != nil {

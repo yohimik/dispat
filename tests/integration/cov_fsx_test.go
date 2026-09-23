@@ -124,7 +124,7 @@ func TestAtomicChangelogSurvivesPartialDiskWrite(t *testing.T) {
 	failed := r.Shell("trap '' XFSZ; ulimit -f 2048; dispat changelog --package core")
 
 	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
-	assert.Contains(t, failed.Stdout+failed.Stderr, "file too large")
+	assert.Regexp(t, `file too large|short write`, failed.Stdout+failed.Stderr)
 	assert.Equal(t, history, readRepoFile(t, r, "packages/core/CHANGELOG.md"))
 	partial, err := filepath.Glob(path + ".tmp-*")
 	require.NoError(t, err)
@@ -138,4 +138,38 @@ func TestAtomicChangelogSurvivesPartialDiskWrite(t *testing.T) {
 	content := readRepoFile(t, r, "packages/core/CHANGELOG.md")
 	assert.Equal(t, 1, strings.Count(content, "## core@0.1.0 ("))
 	assert.Equal(t, 150000, strings.Count(content, "previous release notes\n"))
+}
+
+// TestAtomicManifestSurvivesPartialDiskWrite exercises the public manifest
+// writer through the CLI. A short temporary-file write cannot replace a
+// package manifest with its truncated prefix, including on runtimes that
+// report the short count without an error.
+func TestAtomicManifestSurvivesPartialDiskWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the file-size limit fixture uses a POSIX shell")
+	}
+	r := singlePackageRepo(t, echoBuild)
+	body := `{"name":"core","version":"0.0.0","description":"` +
+		strings.Repeat("previous manifest note", 150000) + `"}`
+	r.WriteFile("packages/core/package.json", body)
+	r.Commit("feat(core): first feature")
+	path := r.Path("packages", "core", "package.json")
+	require.NoError(t, os.Chmod(path, 0o640))
+
+	failed := r.Shell("trap '' XFSZ; ulimit -f 2048; dispat autowriter --package core --set-version 0.1.0")
+
+	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.Regexp(t, `file too large|short write`, failed.Stdout+failed.Stderr)
+	assert.Equal(t, body, readRepoFile(t, r, "packages/core/package.json"))
+	partial, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".dispat-write-*"))
+	require.NoError(t, err)
+	assert.Empty(t, partial, "the incomplete manifest was removed")
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+
+	retried := r.Command("autowriter", "--package", "core", "--set-version", "0.1.0")
+	require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+	assert.Equal(t, strings.Replace(body, `"version":"0.0.0"`, `"version":"0.1.0"`, 1),
+		readRepoFile(t, r, "packages/core/package.json"))
 }

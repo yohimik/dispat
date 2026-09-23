@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -302,7 +303,7 @@ func newWorkspace(controlRoot string, repositories []Repository, modules []submo
 	}
 	for i := range repositories {
 		w.byName[repositories[i].Name] = i
-		w.byFold[strings.ToLower(repositories[i].Name)] = i
+		w.byFold[globx.Fold(repositories[i].Name)] = i
 		w.byRoot[repositories[i].Root] = i
 		if !repositories[i].Control {
 			w.sourceOrder = append(w.sourceOrder, i)
@@ -336,7 +337,7 @@ func (w *Workspace) RepositoryByName(name string) *Repository {
 	if w == nil {
 		return nil
 	}
-	if i, ok := w.byFold[strings.ToLower(name)]; ok {
+	if i, ok := w.byFold[globx.Fold(name)]; ok {
 		return &w.Repositories[i]
 	}
 	for i := range w.Repositories {
@@ -455,10 +456,10 @@ func loadSubmodules(controlRoot string, overrides map[string]RepositoryOverrideC
 		if name == "" || strings.EqualFold(name, ControlRepository) {
 			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: invalid or reserved submodule name %q", name))
 		}
-		if seen[strings.ToLower(name)] {
+		if seen[globx.Fold(name)] {
 			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: duplicate submodule name %q (names are case-insensitive)", name))
 		}
-		seen[strings.ToLower(name)] = true
+		seen[globx.Fold(name)] = true
 		exactSeen[name] = true
 		if override, ok := overrides[name]; ok && !override.IsEnabled() {
 			// Disabled repositories stop at the read-only .gitmodules inventory.
@@ -603,7 +604,7 @@ func resolveRepositoryBaselines(cfg *File, repos []Repository, participants *par
 			strings.TrimSpace(b.Repository) == "" || strings.TrimSpace(b.Revision) == "" {
 			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: consumer, releaseTag, repository and revision are required", where))
 		}
-		key := strings.ToLower(b.Consumer) + "\x00" + b.ReleaseTag + "\x00" + b.Repository
+		key := globx.Fold(b.Consumer) + "\x00" + b.ReleaseTag + "\x00" + b.Repository
 		if previous, ok := seen[key]; ok {
 			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s duplicates baseline for consumer %q and releaseTag %q (previous repository %q revision %q)",
 				where, b.Consumer, b.ReleaseTag, previous.Repository, previous.Revision))
@@ -964,7 +965,7 @@ func (m *gitRootMemo) nearest(path string) (string, error) {
 func validatePackageOwnershipMode(pkgs []*model.Package, perRepository bool) error {
 	byName := map[string]*model.Package{}
 	for _, p := range pkgs {
-		fold := strings.ToLower(p.Name)
+		fold := globx.Fold(p.Name)
 		if previous := byName[fold]; previous != nil {
 			return WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: duplicate package name %q in repositories %q and %q (names are case-insensitive)", p.Name, previous.Repository, p.Repository))
 		}

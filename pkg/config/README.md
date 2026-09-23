@@ -161,7 +161,8 @@ err = config.ApplyEdits(ctx, file, []config.Edit{{KeyPath: keyPath, Value: []str
 
 `ResolveEdit` follows the same references the loader did, so a configuration split across files is written where each
 key is written and the reference itself survives the write. The previous bytes are saved beside the file with
-`BackupSuffix`, and both writes are atomic through a temporary file, fsync, and rename.
+`BackupSuffix`, and both writes are atomic through a temporary file, fsync, and rename. Reads may follow a filesystem
+symlink, but an edit refuses a symlinked target before saving a backup; callers should edit the real file path.
 
 ## Logging
 

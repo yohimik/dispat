@@ -806,20 +806,48 @@ func TestConfigNamesKeepTheirCaseEndToEnd(t *testing.T) {
 // process boundary. Two keys of one object that fold together have no lookup
 // that could choose between them, so the load says so and nothing runs.
 func TestConfigRefusesTwoSpellingsOfOneName(t *testing.T) {
+	for _, tc := range []struct{ name, scripts string }{
+		{"ASCII", `"build": "echo one", "Build": "echo two"`},
+		{"Unicode", `"Σ": "echo one", "ς": "echo two"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := harness.New(t)
+			// Two spellings of one script name cannot be authored through the
+			// typed model, which is a Go map: raw JSON keeps both spellings.
+			r.WriteConfig(`{
+  "logLevel": "info",
+  "logFormat": "json",
+  "scripts": {` + tc.scripts + `},
+  "spaces": {"libs": {"path": "packages"}}
+}`)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
+
+			res := r.Release()
+			assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout+res.Stderr, "collide case-insensitively")
+			assert.Empty(t, r.TagList(), "nothing ran")
+		})
+	}
+}
+
+func TestConfigUnicodeSimpleFoldKeepsDistinctScriptNames(t *testing.T) {
 	r := harness.New(t)
-	// Two spellings of one script name cannot be authored through the typed
-	// model, which is a Go map: the raw JSON is the only way to write them.
 	r.WriteConfig(`{
   "logLevel": "info",
   "logFormat": "json",
-  "scripts": {"build": "echo one", "Build": "echo two"},
-  "spaces": {"libs": {"path": "packages", "flow": {"build": ["build"]}}}
+  "scripts": {"İ": "echo dotted", "i": "echo plain"},
+  "spaces": {"libs": {"path": "packages"}}
 }`)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first")
 
-	res := r.Release()
-	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout+res.Stderr, "collide case-insensitively")
-	assert.Empty(t, r.TagList(), "nothing ran")
+	dotted := r.Command("run", "İ")
+	require.Equal(t, 0, dotted.Code, "stdout:\n%s\nstderr:\n%s", dotted.Stdout, dotted.Stderr)
+	assert.Contains(t, dotted.Stdout, "dotted")
+	assert.NotContains(t, dotted.Stdout, "plain")
+	plain := r.Command("run", "i")
+	require.Equal(t, 0, plain.Code, "stdout:\n%s\nstderr:\n%s", plain.Stdout, plain.Stderr)
+	assert.Contains(t, plain.Stdout, "plain")
+	assert.NotContains(t, plain.Stdout, "dotted")
 }

@@ -116,6 +116,8 @@ func TestDecodeRefusesTwoSpellingsOfOneKey(t *testing.T) {
 			`areas: keys "Libs" and "libs" collide case-insensitively`},
 		{"in a map of values", map[string]any{"env": map[string]any{"a": "1", "A": "2"}},
 			`env: keys "A" and "a" collide case-insensitively`},
+		{"Unicode aliases in a map of values", map[string]any{"env": map[string]any{"Σ": "1", "ς": "2"}},
+			`env: keys "Σ" and "ς" collide case-insensitively`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := decodeApp(tc.src)
@@ -126,6 +128,19 @@ func TestDecodeRefusesTwoSpellingsOfOneKey(t *testing.T) {
 				t.Errorf("err = %v, want ErrFoldCollision", err)
 			}
 		})
+	}
+}
+
+func TestDecodeKeepsDistinctUnicodeSimpleFoldNames(t *testing.T) {
+	cfg, err := decodeApp(map[string]any{"env": map[string]any{"İ": "dotted", "i": "plain"}})
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got, want := cfg.Env["İ"], "dotted"; got != want {
+		t.Errorf("env[İ] = %q, want %q", got, want)
+	}
+	if got, want := cfg.Env["i"], "plain"; got != want {
+		t.Errorf("env[i] = %q, want %q", got, want)
 	}
 }
 

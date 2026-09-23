@@ -1034,6 +1034,15 @@ func TestPackagesKeyAmbiguous(t *testing.T) {
 		"both spellings are named, or the reader sees one name colliding with itself")
 }
 
+func TestPackagesRejectUnicodeCaseFoldCollision(t *testing.T) {
+	cfg := validConfig()
+	root := writeModelRepo(t, cfg, "packages/libs/Σ", "packages/libs/ς", "packages/apps/app")
+	_, err := discoverPackages(t, root)
+	require.ErrorContains(t, err, "package names must be unique")
+	assert.Contains(t, err.Error(), "Σ")
+	assert.Contains(t, err.Error(), "ς")
+}
+
 // TestDiscoveryRefusesTwoSpacesSpellingOnePackage: the same rule across two
 // spaces, which is the other way a fold-colliding pair can arrive.
 func TestDiscoveryRefusesTwoSpacesSpellingOnePackage(t *testing.T) {
@@ -1737,6 +1746,23 @@ func TestDependencyMapFormMatchesPackageNamesCaseInsensitively(t *testing.T) {
 	require.Len(t, deps, 1)
 	assert.Equal(t, "Web", deps[0].Consumer, "the package's own spelling, not the folded key")
 	assert.Equal(t, "Core", deps[0].Provider)
+}
+
+func TestDependencyEndpointUsesUnicodeCaseFold(t *testing.T) {
+	root := writeRawRepo(t, map[string]any{
+		"scripts": map[string]any{"build": "echo b"},
+		"spaces": map[string]any{
+			"libs": map[string]any{"path": "pkgs", "flow": map[string]any{"build": "build"}},
+		},
+		"dependencies": map[string]any{"app": []any{"ς"}},
+	}, "pkgs/Σ", "pkgs/app")
+	cfg, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	_, deps, _, err := DiscoverWorkspace(cfg, root, nil)
+	require.NoError(t, err)
+	require.Len(t, deps, 1)
+	assert.Equal(t, "app", deps[0].Consumer)
+	assert.Equal(t, "Σ", deps[0].Provider)
 }
 
 // TestCanonicaliseEndpoints covers the resolver on its own: two packages

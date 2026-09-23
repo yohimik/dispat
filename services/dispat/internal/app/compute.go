@@ -13,6 +13,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -165,13 +166,13 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	if a.workspace != nil {
 		byName := make(map[string]*model.Package, len(pkgs))
 		for _, p := range pkgs {
-			byName[strings.ToLower(p.Name)] = p
+			byName[globx.Fold(p.Name)] = p
 		}
 		for i := range sugs.deps {
 			if sugs.deps[i].action != actionAdd {
 				continue
 			}
-			if owner := a.workspace.ConfigurationForPackage(byName[strings.ToLower(sugs.deps[i].entry.Consumer)]); owner != nil {
+			if owner := a.workspace.ConfigurationForPackage(byName[globx.Fold(sugs.deps[i].entry.Consumer)]); owner != nil {
 				sugs.deps[i].src.Repository = owner.Name
 			}
 		}

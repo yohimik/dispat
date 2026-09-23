@@ -28,11 +28,11 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/yohimik/dispat/pkg/ccme"
 	lib "github.com/yohimik/dispat/pkg/config"
-
 	public "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/cond"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -1419,7 +1419,7 @@ func validateRepositoryRoster(c *File) error {
 			return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
 				"%s: name %q is this repository; the roster names the other peers of the fleet", where, entry.Name))
 		}
-		fold := strings.ToLower(entry.Name)
+		fold := globx.Fold(entry.Name)
 		if previous, duplicate := seen[fold]; duplicate {
 			return WithDiagnostic(DiagnosticIdentity, fmt.Errorf(
 				"%s: name %q repeats repositories[%d] (identities are compared without case)", where, entry.Name, previous))
@@ -1665,7 +1665,7 @@ func resolveAutoVersion(scope scriptScope, av *public.AutoVersionConfig) *model.
 		// package.
 		only = make(map[string]bool, len(av.Only))
 		for _, name := range av.Only {
-			only[strings.ToLower(name)] = true
+			only[globx.Fold(name)] = true
 		}
 	}
 	manifests := model.ScopeRoot
@@ -1849,9 +1849,9 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 	owner := make(map[string]string, len(pkgs))
 	unversioned := make(map[string]bool)
 	for _, p := range pkgs {
-		owner[strings.ToLower(p.Name)] = p.Name
+		owner[globx.Fold(p.Name)] = p.Name
 		if p.Space != nil && !p.Space.Versioning.IsReleasable() {
-			unversioned[strings.ToLower(p.Name)] = true
+			unversioned[globx.Fold(p.Name)] = true
 		}
 	}
 
@@ -1859,7 +1859,7 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 	var inactive []model.Dependency
 	seenInactive := make(map[model.Dependency]bool)
 	for _, d := range declared {
-		consumer, consumerOK := owner[strings.ToLower(d.Consumer)]
+		consumer, consumerOK := owner[globx.Fold(d.Consumer)]
 		if !consumerOK {
 			return nil, nil, fmt.Errorf("config: %s: unknown consumer package %q%s", d.Source.Label(), d.Consumer, remedy(d.Consumer))
 		}
@@ -1867,7 +1867,7 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 		if err != nil {
 			return nil, nil, fmt.Errorf("config: %s: %w", d.Source.Label(), err)
 		}
-		provider, providerOK := owner[strings.ToLower(d.Provider)]
+		provider, providerOK := owner[globx.Fold(d.Provider)]
 		if !providerOK && d.External {
 			edge := model.Dependency{Consumer: consumer, Provider: d.Provider, Kind: kind}
 			if !seenInactive[edge] {
@@ -1879,7 +1879,7 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 		if !providerOK {
 			return nil, nil, fmt.Errorf("config: %s: unknown provider package %q%s", d.Source.Label(), d.Provider, remedy(d.Provider))
 		}
-		if unversioned[strings.ToLower(provider)] && !unversioned[strings.ToLower(consumer)] {
+		if unversioned[globx.Fold(provider)] && !unversioned[globx.Fold(consumer)] {
 			return nil, nil, fmt.Errorf(
 				"config: %s: package %q cannot depend on %q: a space with versioning \"none\" is never released, so a releasable package cannot follow it",
 				d.Source.Label(), d.Consumer, d.Provider)
@@ -2101,11 +2101,11 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 func canonicaliseEndpoints(declared []DeclaredDependency, pkgs []*model.Package) error {
 	byFold := make(map[string][]string, len(pkgs))
 	for _, p := range pkgs {
-		fold := strings.ToLower(p.Name)
+		fold := globx.Fold(p.Name)
 		byFold[fold] = append(byFold[fold], p.Name)
 	}
 	resolve := func(name string, src DepSource) (string, error) {
-		matches := byFold[strings.ToLower(name)]
+		matches := byFold[globx.Fold(name)]
 		switch len(matches) {
 		case 0:
 			return name, nil

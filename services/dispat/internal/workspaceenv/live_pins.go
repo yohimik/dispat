@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/yohimik/dispat/services/dispat/internal/fsx"
 )
 
 // LivePins is the inherited path of one release run's private, transient pin
@@ -62,7 +64,7 @@ func NewLivePins(root, configPath string, owners map[string]string, repositories
 	store := &LivePinStore{dir: dir, owners: liveOwnerSet(metadata)}
 	data, err := json.Marshal(metadata)
 	if err == nil {
-		err = os.WriteFile(filepath.Join(dir, liveMetadataFile), append(data, '\n'), 0o600)
+		err = fsx.WriteFileComplete(filepath.Join(dir, liveMetadataFile), append(data, '\n'), 0o600)
 	}
 	if err != nil {
 		_ = os.RemoveAll(dir)
@@ -285,7 +287,12 @@ func writeLivePin(dir string, owners map[string]bool, owner, revision string) er
 	}()
 	err = temporary.Chmod(0o600)
 	if err == nil {
-		_, err = temporary.Write(append(record, '\n'))
+		payload := append(record, '\n')
+		n, writeErr := temporary.Write(payload)
+		err = writeErr
+		if err == nil && n != len(payload) {
+			err = io.ErrShortWrite
+		}
 	}
 	if err == nil {
 		err = temporary.Close()

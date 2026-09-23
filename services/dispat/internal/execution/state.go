@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/yohimik/dispat/services/dispat/internal/fsx"
 )
 
 // The files one node's state folder holds. They are named rather than
@@ -208,7 +210,12 @@ func writeNodeLockOwner(file *os.File, owner int) error {
 	if _, err := file.Seek(0, 0); err != nil {
 		return err
 	}
-	if _, err := file.WriteString(strconv.Itoa(owner)); err != nil {
+	ownerText := strconv.Itoa(owner)
+	n, err := file.WriteString(ownerText)
+	if err == nil && n != len(ownerText) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		return err
 	}
 	return file.Sync()
@@ -332,7 +339,8 @@ func (s *SeenSet) Record(run, task string, attempt int, now time.Time) error {
 		return fmt.Errorf("execution: writing the answered-work record: %w", err)
 	}
 	temporary := s.path + ".tmp"
-	if err := os.WriteFile(temporary, content, 0o644); err != nil {
+	if err := fsx.WriteFileComplete(temporary, content, 0o644); err != nil {
+		_ = os.Remove(temporary)
 		return fmt.Errorf("execution: writing the answered-work record %s: %w", temporary, err)
 	}
 	if err := os.Rename(temporary, s.path); err != nil {

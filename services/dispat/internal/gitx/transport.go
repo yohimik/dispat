@@ -1048,7 +1048,12 @@ func (r *ObjectReader) ReadBlob(oid string, to io.Writer, maxBytes int64) (int64
 
 // request asks for one object and answers the length the header promised.
 func (r *ObjectReader) request(oid string) (int64, error) {
-	if _, err := io.WriteString(r.stdin, oid+"\n"); err != nil {
+	request := oid + "\n"
+	n, err := io.WriteString(r.stdin, request)
+	if err == nil && n != len(request) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		r.isBroken = true
 		return 0, fmt.Errorf("gitx: asking the object reader for %s: %w", oid, err)
 	}

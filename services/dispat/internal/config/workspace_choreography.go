@@ -31,6 +31,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
 // DefaultLinkPath is where a link to a peer lives when the roster states no
@@ -174,14 +176,14 @@ func (w *Workspace) LinkRoute(from, to string) []string {
 	if strings.EqualFold(start.Name, end.Name) {
 		return []string{start.Name}
 	}
-	previous := map[string]string{strings.ToLower(start.Name): ""}
+	previous := map[string]string{globx.Fold(start.Name): ""}
 	for queue := []string{start.Name}; len(queue) > 0; queue = queue[1:] {
 		current := queue[0]
 		for _, peer := range w.linkNeighbours(current) {
-			if _, seen := previous[strings.ToLower(peer)]; seen {
+			if _, seen := previous[globx.Fold(peer)]; seen {
 				continue
 			}
-			previous[strings.ToLower(peer)] = current
+			previous[globx.Fold(peer)] = current
 			if strings.EqualFold(peer, end.Name) {
 				return linkRouteBack(previous, start.Name, peer)
 			}
@@ -198,10 +200,10 @@ func (w *Workspace) linkNeighbours(name string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(peer string) {
-		if peer == "" || seen[strings.ToLower(peer)] {
+		if peer == "" || seen[globx.Fold(peer)] {
 			return
 		}
-		seen[strings.ToLower(peer)] = true
+		seen[globx.Fold(peer)] = true
 		out = append(out, peer)
 	}
 	for i := range w.Repositories {
@@ -218,7 +220,7 @@ func (w *Workspace) linkNeighbours(name string) []string {
 			}
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
+	sort.Slice(out, func(i, j int) bool { return globx.Fold(out[i]) < globx.Fold(out[j]) })
 	return out
 }
 
@@ -227,7 +229,7 @@ func (w *Workspace) linkNeighbours(name string) []string {
 func linkRouteBack(previous map[string]string, start, end string) []string {
 	route := []string{end}
 	for current := end; !strings.EqualFold(current, start); {
-		current = previous[strings.ToLower(current)]
+		current = previous[globx.Fold(current)]
 		if current == "" {
 			return nil
 		}
@@ -300,7 +302,7 @@ func (w *linkWalk) compose(entry *linkNode) error {
 // enter follows one fleet link. It answers the repository the walk must still
 // visit, or nil when the link ends somewhere the walk has already been.
 func (w *linkWalk) enter(node *linkNode, peer, path string) (*linkNode, error) {
-	if visited, ok := w.byFold[strings.ToLower(peer)]; ok {
+	if visited, ok := w.byFold[globx.Fold(peer)]; ok {
 		// The identity cut. Every two-sided link is reached twice, once
 		// forwards and once as the back-link of the repository it came from,
 		// and the second sighting is the same edge rather than another route.
@@ -369,7 +371,7 @@ func (w *linkWalk) enter(node *linkNode, peer, path string) (*linkNode, error) {
 
 func (w *linkWalk) admit(node *linkNode) {
 	w.order = append(w.order, node)
-	w.byFold[strings.ToLower(node.identity)] = node
+	w.byFold[globx.Fold(node.identity)] = node
 }
 
 // refuse turns one fleet problem into an error, or into a finding when the
@@ -436,12 +438,12 @@ func (w *linkWalk) isDisabled(name string) bool {
 // this run is the invocation's question, and the invocation is the entry.
 func (w *linkWalk) disable(cfg *File) error {
 	roster := make(map[string]bool, len(cfg.Repositories)+1)
-	roster[strings.ToLower(cfg.Repository)] = true
+	roster[globx.Fold(cfg.Repository)] = true
 	for _, entry := range cfg.Repositories {
-		roster[strings.ToLower(entry.Name)] = true
+		roster[globx.Fold(entry.Name)] = true
 	}
 	for _, name := range sortedKeys(cfg.RepositoryOverrides) {
-		if !roster[strings.ToLower(name)] {
+		if !roster[globx.Fold(name)] {
 			return WithDiagnostic(DiagnosticComposition,
 				fmt.Errorf("linked fleet: repositoryOverrides names %q, which no roster entry declares", name))
 		}
@@ -464,7 +466,7 @@ func (w *linkWalk) disable(cfg *File) error {
 func (w *linkWalk) reportOneSidedLinks() {
 	for _, node := range w.order {
 		for _, peer := range foldedOrder(node.links) {
-			other, ok := w.byFold[strings.ToLower(peer)]
+			other, ok := w.byFold[globx.Fold(peer)]
 			if !ok {
 				continue
 			}
@@ -490,15 +492,15 @@ func (w *linkWalk) reportRosterDisagreement() {
 	for _, node := range w.order {
 		fleet = append(fleet, node.identity)
 	}
-	sort.Slice(fleet, func(i, j int) bool { return strings.ToLower(fleet[i]) < strings.ToLower(fleet[j]) })
+	sort.Slice(fleet, func(i, j int) bool { return globx.Fold(fleet[i]) < globx.Fold(fleet[j]) })
 	for _, node := range w.order {
-		stated := map[string]bool{strings.ToLower(node.identity): true}
+		stated := map[string]bool{globx.Fold(node.identity): true}
 		for _, entry := range node.config.Repositories {
-			stated[strings.ToLower(entry.Name)] = true
+			stated[globx.Fold(entry.Name)] = true
 		}
 		var missing []string
 		for _, name := range fleet {
-			if !stated[strings.ToLower(name)] {
+			if !stated[globx.Fold(name)] {
 				missing = append(missing, name)
 			}
 		}
@@ -523,7 +525,7 @@ func (w *linkWalk) repositories() []Repository {
 		if (nodes[i].linker == "") != (nodes[j].linker == "") {
 			return nodes[i].linker == ""
 		}
-		return strings.ToLower(nodes[i].identity) < strings.ToLower(nodes[j].identity)
+		return globx.Fold(nodes[i].identity) < globx.Fold(nodes[j].identity)
 	})
 	repos := make([]Repository, 0, len(nodes))
 	for _, node := range nodes {
@@ -551,7 +553,7 @@ func (w *linkWalk) repositories() []Repository {
 func mergePeerBaselines(cfg *File, repos []Repository) {
 	seen := make(map[string]bool, len(cfg.RepositoryBaselines))
 	key := func(b RepositoryBaselineConfig) string {
-		return strings.ToLower(b.Consumer) + "\x00" + b.ReleaseTag + "\x00" + strings.ToLower(b.Repository)
+		return globx.Fold(b.Consumer) + "\x00" + b.ReleaseTag + "\x00" + globx.Fold(b.Repository)
 	}
 	for _, b := range cfg.RepositoryBaselines {
 		seen[key(b)] = true
@@ -656,6 +658,6 @@ func foldedOrder(links map[string]string) []string {
 	for name := range links {
 		names = append(names, name)
 	}
-	sort.Slice(names, func(i, j int) bool { return strings.ToLower(names[i]) < strings.ToLower(names[j]) })
+	sort.Slice(names, func(i, j int) bool { return globx.Fold(names[i]) < globx.Fold(names[j]) })
 	return names
 }

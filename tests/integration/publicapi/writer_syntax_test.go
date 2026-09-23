@@ -18,26 +18,32 @@ func TestPublicAPIWriterSurvivesTOMLQuoting(t *testing.T) {
 		res, out, _ := rewriteFixture(t, "Cargo.toml", `[package]
 name = "acme"            # the crate
 version = "1.0.0"        # bumped by the release
-description = "a \" quote, a # hash and an = sign"
+description = "a \" quote, a # hash, ''' and an = sign"
 keywords = 'a # hash'
 readme = """
 a multi-line
 description
-"""
+""" # description ends here
+
+[package.metadata]
+literal-delimiters = 'embedded """ text'
+commented-delimiters = 'embedded """ text' # kept
 
 [dependencies]
 core = "1.0"             # the core crate
 literal = '1.0'
 escaped = "1.0!"
 inline = { version = "1.0", features = ["a", "b"] }
+quoted-version = { "version" = "1.0", features = ["a"] }
 "quoted-key" = "1.0"
 'literal-key' = "1.0"
 enabled = true
 `, "2.0.0", []writer.Edit{
-			{Name: "core", Range: "1.1"},
+			{Name: "core", Kind: "dependencies", Range: "1.1"},
 			{Name: "literal", Range: "1.1"},
 			{Name: "escaped", Range: "1.1"},
 			{Name: "inline", Range: "1.1"},
+			{Name: "quoted-version", Range: "1.1"},
 			{Name: "quoted-key", Range: "1.1"},
 			{Name: "literal-key", Range: "1.1"},
 			{Name: "enabled", Range: "1.1"},
@@ -48,7 +54,7 @@ enabled = true
 		if !strings.Contains(out, `version = "2.0.0"        # bumped by the release`) {
 			t.Errorf("the trailing comment was disturbed:\n%s", out)
 		}
-		if !strings.Contains(out, `description = "a \" quote, a # hash and an = sign"`) ||
+		if !strings.Contains(out, `description = "a \" quote, a # hash, ''' and an = sign"`) ||
 			!strings.Contains(out, `keywords = 'a # hash'`) ||
 			!strings.Contains(out, "a multi-line") {
 			t.Errorf("an unrelated string was disturbed:\n%s", out)
@@ -62,7 +68,17 @@ enabled = true
 		if !strings.Contains(out, `enabled = true`) {
 			t.Error("a value that is not a version was rewritten")
 		}
-		if len(res.Applied) < 4 {
+		for _, preserved := range []string{
+			`""" # description ends here`,
+			`literal-delimiters = 'embedded """ text'`,
+			`commented-delimiters = 'embedded """ text' # kept`,
+			`quoted-version = { "version" = "1.1", features = ["a"] }`,
+		} {
+			if !strings.Contains(out, preserved) {
+				t.Errorf("quoted delimiters or version-key spelling were changed: want %s\n%s", preserved, out)
+			}
+		}
+		if len(res.Applied) != 7 || len(res.Skipped) != 0 || len(res.Missing) != 1 {
 			t.Errorf("cargo outcome = %s", rewriteOutcome(res))
 		}
 	})

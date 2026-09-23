@@ -3,7 +3,7 @@
 
 package plan
 
-import "strings"
+import "github.com/yohimik/dispat/services/dispat/internal/globx"
 
 // The bump axis's admission (§9.2 phase 3, §13.4a): a source package's
 // contribution at one commit is owed to a dependent until a release of that
@@ -79,7 +79,7 @@ func (cp *computation) owedSources(target, commitKey string, sources []string) [
 func (cp *computation) baselineBoundary(pkg, commitKey string) string {
 	if len(cp.histories) > 0 {
 		repository, _ := splitHistoryKey(commitKey)
-		return cp.publishedBoundaries[pkg][strings.ToLower(repository)]
+		return cp.publishedBoundaries[pkg][globx.Fold(repository)]
 	}
 	if rel := cp.rel[pkg]; rel != nil {
 		// A single history's keys are raw commit ids, which is what

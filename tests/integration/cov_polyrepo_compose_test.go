@@ -78,6 +78,34 @@ func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 		assert.Contains(t, out, "case-insensitive")
 	})
 
+	t.Run("Unicode alias identities are valid singly but ambiguous together", func(t *testing.T) {
+		source := harness.New(t)
+		source.SeedPackage("packages", "lib")
+		source.Commit("feat(lib): bootstrap library")
+
+		control := harness.New(t)
+		addPolyrepoSource(t, control, "Σ", "sources/Σ", source)
+		cfg := covPolyrepoFile()
+		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/Σ/packages"})
+		control.WriteConfigModel(cfg)
+		control.Commit("chore: pin one Unicode-named source")
+		valid := control.Status()
+		require.Equal(t, 0, valid.Code, "stdout:\n%s\nstderr:\n%s", valid.Stdout, valid.Stderr)
+
+		covPolyrepoWriteGitmodules(t, control, `[submodule "Σ"]
+	path = sources/Σ
+	url = `+source.Root+`
+[submodule "ς"]
+	path = sources/Σ
+	url = `+source.Root+`
+`)
+		control.Commit("chore: repeat source under Unicode alias")
+		ambiguous := control.Status()
+		require.Equal(t, 1, ambiguous.Code, "stdout:\n%s\nstderr:\n%s", ambiguous.Stdout, ambiguous.Stderr)
+		assert.Contains(t, covPolyrepoOutput(ambiguous), "duplicate submodule name")
+		assert.Empty(t, control.TagList())
+	})
+
 	t.Run("a path that leaves the control workspace", func(t *testing.T) {
 		source := harness.New(t)
 		source.SeedPackage("packages", "lib")

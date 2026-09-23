@@ -16,6 +16,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -100,11 +101,11 @@ func (a *App) manifestBaselines(scanned []scannedPackage, sel filter.Result) []m
 		if !indexed {
 			decided = make(map[string]bool, len(cfg.Initials))
 			for name := range cfg.Initials {
-				decided[strings.ToLower(name)] = true
+				decided[globx.Fold(name)] = true
 			}
 			decidedByConfig[cfg] = decided
 		}
-		if decided[strings.ToLower(s.pkg.Name)] {
+		if decided[globx.Fold(s.pkg.Name)] {
 			continue
 		}
 		if found, ok := a.pickManifestVersion(s); ok {

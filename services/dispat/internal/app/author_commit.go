@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yohimik/dispat/services/dispat/internal/fsx"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
@@ -59,7 +60,7 @@ func (a *App) AuthorCommit(ctx context.Context, args []string, stdout, stderr io
 	invoker += `editor=$(git var GIT_EDITOR) || exit $?
 exec /bin/sh -c "$editor \"\$@\"" "$editor" "$@"
 `
-	if err := os.WriteFile(editor, []byte(invoker), 0o700); err != nil {
+	if err := fsx.WriteFileComplete(editor, []byte(invoker), 0o700); err != nil {
 		return err
 	}
 	proxy := filepath.Join(tmp, "hooks")
@@ -71,7 +72,7 @@ exec /bin/sh -c "$editor \"\$@\"" "$editor" "$@"
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(parserFile, encoded, 0o600); err != nil {
+	if err := fsx.WriteFileComplete(parserFile, encoded, 0o600); err != nil {
 		return err
 	}
 	exe, err := os.Executable()
@@ -88,7 +89,7 @@ exec /bin/sh -c "$editor \"\$@\"" "$editor" "$@"
 		" DISPAT_COMMIT_LOG_FORMAT=" + shellQuote(a.cfg.LogFormat) +
 		" DISPAT_COMMIT_LOG_LEVEL=" + shellQuote(a.cfg.LogLevel) +
 		" DISPAT_COMMIT_CLEANUP=" + shellQuote(cleanup) + " " + shellQuote(filepath.ToSlash(exe)) + " \"$1\"\n"
-	if err := os.WriteFile(filepath.Join(proxy, "commit-msg"), []byte(script), 0o700); err != nil {
+	if err := fsx.WriteFileComplete(filepath.Join(proxy, "commit-msg"), []byte(script), 0o700); err != nil {
 		return err
 	}
 	a.log.Debug().Str("cleanup", cleanup).Msg("validating git commit message")
@@ -318,7 +319,7 @@ func copyHooksForPlatform(source, target string, windows bool) error {
 			continue
 		}
 		wrapper := "#!/bin/sh\nexec " + shellQuote(filepath.ToSlash(path)) + " \"$@\"\n"
-		if err := os.WriteFile(filepath.Join(target, name), []byte(wrapper), 0o700); err != nil {
+		if err := fsx.WriteFileComplete(filepath.Join(target, name), []byte(wrapper), 0o700); err != nil {
 			return err
 		}
 	}

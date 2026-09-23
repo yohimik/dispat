@@ -27,9 +27,9 @@ package app
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
 // centredGroup is one group of the fleet as its existing links leave it: the
@@ -75,20 +75,20 @@ func (g centredGroup) nearestComposedMember() (rosterEntry, bool) {
 func fleetLinkAdjacency(fleet []rosterEntry, repositories []config.Repository) map[string][]string {
 	isMember := make(map[string]bool, len(fleet))
 	for _, entry := range fleet {
-		isMember[strings.ToLower(entry.name)] = true
+		isMember[globx.Fold(entry.name)] = true
 	}
 	composed := make(map[string]*config.Repository, len(repositories))
 	for i := range repositories {
-		composed[strings.ToLower(repositories[i].Name)] = &repositories[i]
+		composed[globx.Fold(repositories[i].Name)] = &repositories[i]
 	}
 	adjacency := make(map[string][]string, len(fleet))
 	recorded := make(map[string]bool)
 	for _, entry := range fleet {
-		linker := strings.ToLower(entry.name)
+		linker := globx.Fold(entry.name)
 		// A fleet member this run never walked into declares nothing, and
 		// LinkPeers answers nothing for it.
 		for _, name := range composed[linker].LinkPeers() {
-			peer := strings.ToLower(name)
+			peer := globx.Fold(name)
 			if peer == linker || !isMember[peer] || recorded[linker+"\x00"+peer] {
 				continue
 			}
@@ -108,12 +108,12 @@ func fleetLinkAdjacency(fleet []rosterEntry, repositories []config.Repository) m
 func splitFleetIntoGroups(fleet []rosterEntry, adjacency map[string][]string) []centredGroup {
 	byFold := make(map[string]rosterEntry, len(fleet))
 	for _, entry := range fleet {
-		byFold[strings.ToLower(entry.name)] = entry
+		byFold[globx.Fold(entry.name)] = entry
 	}
 	isVisited := make(map[string]bool, len(fleet))
 	var groups []centredGroup
 	for _, entry := range fleet {
-		start := strings.ToLower(entry.name)
+		start := globx.Fold(entry.name)
 		if isVisited[start] {
 			continue
 		}
@@ -123,7 +123,7 @@ func splitFleetIntoGroups(fleet []rosterEntry, adjacency map[string][]string) []
 		groups = append(groups, resolveCentredGroup(start, byFold, adjacency))
 	}
 	sort.Slice(groups, func(i, j int) bool {
-		return strings.ToLower(groups[i].centre().name) < strings.ToLower(groups[j].centre().name)
+		return globx.Fold(groups[i].centre().name) < globx.Fold(groups[j].centre().name)
 	})
 	return groups
 }
@@ -232,7 +232,7 @@ func isHubPreferred(candidate, current centredGroup) bool {
 	if candidate.radius != current.radius {
 		return candidate.radius > current.radius
 	}
-	return strings.ToLower(candidate.centre().name) < strings.ToLower(current.centre().name)
+	return globx.Fold(candidate.centre().name) < globx.Fold(current.centre().name)
 }
 
 // chooseGroupJoinEnds answers the two repositories the link joining one group
@@ -262,7 +262,7 @@ func chooseGroupJoinEnds(group, hub centredGroup) (rosterEntry, rosterEntry, boo
 // first under case folding owns it, so one fleet is computed the same way
 // twice.
 func chooseLinkOwner(first, second rosterEntry) (rosterEntry, rosterEntry) {
-	if strings.ToLower(second.name) < strings.ToLower(first.name) {
+	if globx.Fold(second.name) < globx.Fold(first.name) {
 		first, second = second, first
 	}
 	if first.composed {

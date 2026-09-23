@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
 // DisabledRepository is one source repository the control inventory excluded
@@ -67,7 +69,7 @@ func (w *Workspace) ExcludedPackageRepository(name string) (string, bool) {
 	if w == nil || len(w.excludedPackages) == 0 {
 		return "", false
 	}
-	repository, ok := w.excludedPackages[strings.ToLower(name)]
+	repository, ok := w.excludedPackages[globx.Fold(name)]
 	return repository, ok
 }
 
@@ -147,7 +149,7 @@ func resolveParticipation(cfg *File, controlRoot string, disabled []DisabledRepo
 			continue
 		}
 		for declared := range space.Packages {
-			p.packages[strings.ToLower(declared)] = removedBy
+			p.packages[globx.Fold(declared)] = removedBy
 		}
 		delete(cfg.Spaces, name)
 	}
@@ -159,7 +161,7 @@ func resolveParticipation(cfg *File, controlRoot string, disabled []DisabledRepo
 		if cfg.Packages[name].Path != "" {
 			continue
 		}
-		if _, excluded := p.packages[strings.ToLower(name)]; excluded {
+		if _, excluded := p.packages[globx.Fold(name)]; excluded {
 			delete(cfg.Packages, name)
 		}
 	}
@@ -179,6 +181,6 @@ func (p *participation) recordExcludedFolders(dir, repository string) {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		p.packages[strings.ToLower(entry.Name())] = repository
+		p.packages[globx.Fold(entry.Name())] = repository
 	}
 }

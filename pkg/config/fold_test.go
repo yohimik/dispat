@@ -8,16 +8,17 @@ import (
 	"testing"
 )
 
-// TestFoldAgreesWithStringsToLower: the fast path is an optimisation, not a
-// second definition, so it has to answer what strings.ToLower answers for
-// every shape of name a config file can carry.
-func TestFoldAgreesWithStringsToLower(t *testing.T) {
+// TestFoldAgreesWithUnicodeSimpleFold: the canonical key and LookupFold's
+// EqualFold lookup must agree even when lowercasing gives different results.
+func TestFoldAgreesWithUnicodeSimpleFold(t *testing.T) {
 	for _, s := range []string{
 		"", "build", "Build", "BUILD", "logLevel", "log-level", "log_level_2",
-		"ÄÖÜ", "straße", "İstanbul", "ıi", "日本語", "mixedÄ", "a1B2c3",
+		"ÄÖÜ", "straße", "İstanbul", "İ", "ıi", "日本語", "mixedÄ", "a1B2c3", "Σ", "σ", "ς", "K",
 	} {
-		if got, want := Fold(s), strings.ToLower(s); got != want {
-			t.Errorf("Fold(%q) = %q, want %q", s, got, want)
+		for _, other := range []string{"Σ", "σ", "ς", "K", "k", "K", "İ", "I", "i", "ı", s} {
+			if got, want := Fold(s) == Fold(other), strings.EqualFold(s, other); got != want {
+				t.Errorf("Fold(%q) == Fold(%q) = %v, EqualFold = %v", s, other, got, want)
+			}
 		}
 	}
 }

@@ -100,7 +100,7 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		// A scope is written in a commit message and a package name in a folder
 		// or a config file, so the two are matched case-insensitively, the way
 		// every other selector in dispat matches a name.
-		matches := cp.globMatches(strings.ToLower(t.Name), rec)
+		matches := cp.globMatches(globx.Fold(t.Name), rec)
 		for _, i := range matches {
 			out[cp.pkgs[i].Name] = true
 		}
@@ -109,7 +109,7 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		}
 
 	default:
-		name := cp.byFold[strings.ToLower(t.Name)]
+		name := cp.byFold[globx.Fold(t.Name)]
 		if p := cp.byName[name]; p != nil && cp.commitCanScope(rec, p) {
 			out[name] = true
 			return
@@ -120,7 +120,7 @@ func (cp *computation) expandTerm(t ccme.ScopeTerm, rec *commitRec, out map[stri
 		// one to trip over.
 		nonPackage := cp.nonPackage
 		if rec != nil && rec.repository != "" {
-			if owned := cp.nonPackageByRepo[strings.ToLower(rec.repository)]; owned != nil {
+			if owned := cp.nonPackageByRepo[globx.Fold(rec.repository)]; owned != nil {
 				nonPackage = owned
 			}
 		}
@@ -168,7 +168,7 @@ func (cp *computation) globMatches(pattern string, rec *commitRec) []int {
 		gi := &globIndex{folded: make([]string, len(cp.pkgs)), sorted: make([]int, len(cp.pkgs)),
 			memo: make(map[globKey][]int)}
 		for i, p := range cp.pkgs {
-			gi.folded[i], gi.sorted[i] = strings.ToLower(p.Name), i
+			gi.folded[i], gi.sorted[i] = globx.Fold(p.Name), i
 		}
 		sort.SliceStable(gi.sorted, func(a, b int) bool { return gi.folded[gi.sorted[a]] < gi.folded[gi.sorted[b]] })
 		cp.globs = gi
@@ -177,7 +177,7 @@ func (cp *computation) globMatches(pattern string, rec *commitRec) []int {
 	// commitCanScope, as a key: unrestricted unless a source history reads it.
 	class := ""
 	if rec != nil && rec.repository != "" && len(cp.histories) > 0 && !strings.EqualFold(rec.repository, cp.controlRepo) {
-		class = strings.ToLower(rec.repository)
+		class = globx.Fold(rec.repository)
 	}
 	key := globKey{pattern: pattern, class: class}
 	if matches, ok := gi.memo[key]; ok {

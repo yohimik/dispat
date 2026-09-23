@@ -58,7 +58,7 @@ func resolveLinkedGroups(workspace *Workspace, gitRoots *gitRootMemo) (map[strin
 	discoveries := make(map[string]*discovery, len(workspace.Repositories))
 	groups := fleetGroups{}
 	repositories := slices.Clone(workspace.Repositories)
-	slices.SortFunc(repositories, func(a, b Repository) int { return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)) })
+	slices.SortFunc(repositories, func(a, b Repository) int { return strings.Compare(globx.Fold(a.Name), globx.Fold(b.Name)) })
 	for _, repo := range repositories {
 		policy := newWorkspaceFolderPolicy(workspace, &repo, gitRoots)
 		discovery, err := newDiscoveryMode(repo.Config, repo.Root, policy.allow)

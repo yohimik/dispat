@@ -12,22 +12,37 @@ package config
 import (
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Fold renders a name in the one spelling the decode's tables are keyed by.
 //
-// It is strings.ToLower with the common case free: a name already written in
-// lower-case ASCII — which is nearly every key of nearly every config file —
-// comes back as the string that went in, with nothing allocated. A name
-// carrying anything above ASCII goes through strings.ToLower itself, so a
-// non-ASCII key folds the way Unicode says rather than the way a byte loop
-// would.
+// It is the canonical representative of each Unicode SimpleFold cycle, the
+// equivalence LookupFold uses. A lower-case ASCII name takes the allocation-
+// free path. Lowercasing alone would split Σ and ς into different keys.
 func Fold(s string) string {
 	upper := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if c >= 0x80 {
-			return strings.ToLower(s)
+			return strings.Map(func(r rune) rune {
+				smallest := r
+				for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+					if next < smallest {
+						smallest = next
+					}
+				}
+				lower := unicode.ToLower(smallest)
+				if lower == smallest {
+					return smallest
+				}
+				for next := unicode.SimpleFold(smallest); next != smallest; next = unicode.SimpleFold(next) {
+					if next == lower {
+						return lower
+					}
+				}
+				return smallest
+			}, s)
 		}
 		if 'A' <= c && c <= 'Z' {
 			upper = true

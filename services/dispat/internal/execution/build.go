@@ -102,7 +102,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
 	c.watchers = make(map[string]*watcher, len(c.Links))
 	for _, link := range c.Links {
 		observer := &watcher{coordinator: c, link: link, mailbox: c.mailboxes[link.Name],
-			attempts: map[string]*attemptState{}}
+			wake: make(chan struct{}, 1), attempts: map[string]*attemptState{}}
 		c.watchers[link.Name] = observer
 		c.watching.Add(1)
 		go func() {
@@ -418,6 +418,10 @@ func (c *Coordinator) settleQueuedAttempt(ctx context.Context, lease *Lease, tas
 			"no node claimed this task within %s and the assignment could not be revoked: %w",
 			c.Timeouts.Task, err))
 	}
+	// Reread fetched the moved tip and memoized it. Give it back to the
+	// watcher immediately for validation: otherwise Observe skips that
+	// unchanged tip and accepted work can time out unheard.
+	offer.observer.reconsider(head.Name)
 	return head.OID, nil
 }
 
@@ -689,6 +693,7 @@ type watcher struct {
 	coordinator *Coordinator
 	link        Link
 	mailbox     *GitMailbox
+	wake        chan struct{}
 
 	// mu guards attempts alone: the loop reads it, and the tasks that come and
 	// go write it.
@@ -814,6 +819,17 @@ func (w *watcher) isIdle() bool {
 	return len(w.attempts) == 0
 }
 
+// reconsider makes a tip read by the task's own deadline path visible to the
+// watcher again. The watcher remains the sole goroutine that validates and
+// delivers replies, while the wake avoids waiting for its idle poll backoff.
+func (w *watcher) reconsider(branch string) {
+	w.mailbox.Reconsider(branch)
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+}
+
 // serve is the poll loop: one tick, then a wait whose length is what the tick
 // found.
 func (w *watcher) serve(ctx context.Context) {
@@ -825,6 +841,8 @@ func (w *watcher) serve(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-next.C:
+		case <-w.wake:
+			next.Stop()
 		}
 		interval = resolvePollInterval(interval, w.tick(ctx))
 		next.Reset(interval)

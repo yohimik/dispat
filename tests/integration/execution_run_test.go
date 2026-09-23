@@ -589,10 +589,6 @@ func TestExecutionRunOutputsCraftedRefusals(t *testing.T) {
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			rejected, isRejected := executionLine(res, "outputs rejected")
 			require.True(t, isRejected, "stdout:\n%s", res.Stdout)
-			failure, isFailureLogged := executionLine(res, "run outputs could not be merged")
-			require.True(t, isFailureLogged, "the failed sweep must report its cause")
-			assert.Equal(t, "error", failure.Str("level"))
-			assert.NotEmpty(t, failure.Str("error"))
 			assert.Equal(t, tc.reason, rejected.Str("reason"))
 			assert.Equal(t, executionIntegrityCode, rejected.Code())
 			assert.NoDirExists(t, rig.repo.Path("coverage"), "nothing of the set was merged")
@@ -801,6 +797,10 @@ esac`
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			rejected, isRejected := executionLine(res, "outputs rejected")
 			require.True(t, isRejected, "stdout:\n%s", res.Stdout)
+			failure, isFailureLogged := executionLine(res, "run outputs could not be merged")
+			require.True(t, isFailureLogged, "the failed sweep must report its cause")
+			assert.Equal(t, "error", failure.Str("level"))
+			assert.NotEmpty(t, failure.Str("error"))
 			if !strings.HasPrefix(obstruction, "read-only") {
 				assert.Equal(t, "destination-component", rejected.Str("reason"))
 			} else {

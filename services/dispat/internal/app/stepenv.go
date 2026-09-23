@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -168,11 +170,11 @@ func (a *App) maskRunTags(env *runEnv) {
 	}
 	byName := make(map[string]*model.Package, len(pkgs))
 	for _, p := range pkgs {
-		byName[strings.ToLower(p.Name)] = p
+		byName[globx.Fold(p.Name)] = p
 	}
 	if a.workspace != nil {
 		mask := func(packageName, tag string) {
-			p := byName[strings.ToLower(packageName)]
+			p := byName[globx.Fold(packageName)]
 			if p == nil {
 				a.log.Debug().Str("package", packageName).Str("tag", tag).
 					Msg("cannot resolve package owner to mask the run's tag")
@@ -191,7 +193,7 @@ func (a *App) maskRunTags(env *runEnv) {
 		}
 		mask(env.pkg, env.tag)
 		for _, r := range env.releasing {
-			p := byName[strings.ToLower(r.name)]
+			p := byName[globx.Fold(r.name)]
 			if p == nil {
 				continue
 			}
@@ -200,7 +202,7 @@ func (a *App) maskRunTags(env *runEnv) {
 		return
 	}
 	for _, r := range env.releasing {
-		p := byName[strings.ToLower(r.name)]
+		p := byName[globx.Fold(r.name)]
 		if p == nil {
 			continue
 		}

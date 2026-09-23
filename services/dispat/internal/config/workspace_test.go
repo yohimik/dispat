@@ -91,6 +91,32 @@ func TestComposeCentralWorkspaceAssignsSourceOwner(t *testing.T) {
 	assert.Equal(t, "sources/sdk", repo.GitlinkPath)
 }
 
+func TestComposeCentralWorkspaceRejectsUnicodeAliasSubmoduleIdentities(t *testing.T) {
+	sigma := workspaceRepo(t, "sigma", nil)
+	finalSigma := workspaceRepo(t, "final-sigma", nil)
+	root, path := workspaceControl(t, map[string]string{"Σ": sigma, "ς": finalSigma}, File{
+		Polyrepo: true, Packages: map[string]PackageConfig{"sigma": {Path: "sources/Σ/pkgs/sigma"}},
+	})
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
+	require.ErrorContains(t, err, "duplicate submodule name")
+}
+
+func TestComposeCentralWorkspaceFindsUnicodeAliasSubmodule(t *testing.T) {
+	sigma := workspaceRepo(t, "sigma", nil)
+	root, path := workspaceControl(t, map[string]string{"Σ": sigma}, File{
+		Polyrepo: true, Packages: map[string]PackageConfig{"sigma": {Path: "sources/Σ/pkgs/sigma"}},
+	})
+	loaded, err := Load(path, nil)
+	require.NoError(t, err)
+	workspace, err := ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)
+	require.NoError(t, err)
+	repo := workspace.RepositoryByName("ς")
+	require.NotNil(t, repo)
+	assert.Equal(t, "Σ", repo.Name)
+}
+
 func TestComposeWorkspaceNormalizesGitlinkPathForTreeLookup(t *testing.T) {
 	sdk := workspaceRepo(t, "sdk", nil)
 	root, path := workspaceControl(t, map[string]string{"sdk": sdk}, File{

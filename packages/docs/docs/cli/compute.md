@@ -89,11 +89,13 @@ Every write is guarded. dispat writes everything one file receives in a single p
 still leaves one backup. Every edited file is first copied to `<name>.backup`, and each write is atomic. The backup
 file is untracked, worth a `.gitignore` entry, and overwritten on every applying run.
 
-dispat refuses two cases rather than guessing at them. A TOML file is not rewritten in place, so `--write` prints a
+dispat refuses cases it cannot write safely. A TOML file is not rewritten in place, so `--write` prints a
 paste-ready block for it and fails. A key composed from both a [referenced file](../configuration/refs.md) *and* the
 keys written beside it belongs to two files at once, so `--write` refuses it rather than choosing one. A key kept
 wholly in a referenced file is written in that file at the key it holds there. The `$ref` survives the write, and the
-backup sits beside the file that changed.
+backup sits beside the file that changed. Reading through a filesystem symlink works for preview and `--check`, but
+`--write` or an accepted interactive edit refuses a symlinked config path before writing a backup. Replacing the link
+atomically would leave its target stale. Point `--config` at the real file to apply the suggestions.
 
 **Fleet links.** In an [identity-linked fleet](../choreographed-repositories.md), the command also reads the fleet and
 proposes what joins it. The suggestions are independent of the package selection, because a fleet is either linked or

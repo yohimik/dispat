@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -481,7 +481,7 @@ func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
 	byLower := make(map[string]string, len(pkgs)) // lowercase -> real name
 	collided := make(map[string][]string)
 	for _, p := range pkgs {
-		low := strings.ToLower(p.Name)
+		low := globx.Fold(p.Name)
 		if prev, dup := byLower[low]; dup {
 			collided[low] = append(collided[low], prev, p.Name)
 		}
@@ -489,7 +489,7 @@ func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
 	}
 	out := make(map[string]ccme.Version, len(a.cfg.InitialVersions))
 	for key, v := range a.cfg.InitialVersions {
-		low := strings.ToLower(key)
+		low := globx.Fold(key)
 		if names := collided[low]; len(names) > 0 {
 			a.log.Warn().Str("initial", key).Strs("candidates", names).
 				Msg("initials entry is ambiguous between case-colliding packages, ignoring")

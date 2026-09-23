@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,9 @@ func PrepareEdits(ctx context.Context, path string, edits []Edit) (*PreparedEdit
 	if len(edits) == 0 {
 		return p, nil
 	}
+	if err := refuseEditSymlink(path); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -135,6 +139,9 @@ func PrepareEdits(ctx context.Context, path string, edits []Edit) (*PreparedEdit
 func (p *PreparedEdit) Commit() error {
 	if p.noop {
 		return nil
+	}
+	if err := refuseEditSymlink(p.Path); err != nil {
+		return err
 	}
 	if err := writeFileAtomic(p.Path+BackupSuffix, p.data, p.mode); err != nil {
 		return fmt.Errorf("saving backup: %w", err)
@@ -549,13 +556,20 @@ func replaceValueYAML(data []byte, keyPath []string, value any) ([]byte, error) 
 // rename. The temp file lands beside the target so the rename never crosses a
 // filesystem, and it is removed on every failure.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	if err := refuseEditSymlink(path); err != nil {
+		return err
+	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-")
 	if err != nil {
 		return err
 	}
 	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
+	n, err := tmp.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		tmp.Close()
 		os.Remove(name)
 		return err
@@ -576,6 +590,20 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := os.Rename(name, path); err != nil {
 		os.Remove(name)
 		return err
+	}
+	return nil
+}
+
+func refuseEditSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s: refusing to rewrite a symbolic link", path)
 	}
 	return nil
 }

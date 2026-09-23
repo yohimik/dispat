@@ -30,6 +30,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
@@ -112,7 +113,7 @@ func (w *workspaceRecorder) planLinks(rel *plan.Release) (*settlePlan, error) {
 	}
 	route := &settlePlan{nodes: map[string]*settleNode{}}
 	route.root = &settleNode{record: own}
-	route.nodes[strings.ToLower(own.repo.Name)] = route.root
+	route.nodes[globx.Fold(own.repo.Name)] = route.root
 	for _, target := range w.linkPlan[rel.Pkg.Name] {
 		hops := w.app.workspace.LinkRoute(own.repo.Name, target)
 		if len(hops) == 0 {
@@ -122,7 +123,7 @@ func (w *workspaceRecorder) planLinks(rel *plan.Release) (*settlePlan, error) {
 		}
 		parent := route.root
 		for _, hop := range hops[1:] {
-			node, seen := route.nodes[strings.ToLower(hop)]
+			node, seen := route.nodes[globx.Fold(hop)]
 			if !seen {
 				record := w.byName[hop]
 				if record == nil {
@@ -136,7 +137,7 @@ func (w *workspaceRecorder) planLinks(rel *plan.Release) (*settlePlan, error) {
 				if node.path == "" {
 					return nil, fmt.Errorf("repository %s holds no fleet link to %s", parent.record.repo.Name, hop)
 				}
-				route.nodes[strings.ToLower(hop)] = node
+				route.nodes[globx.Fold(hop)] = node
 				parent.children = append(parent.children, node)
 			}
 			parent = node

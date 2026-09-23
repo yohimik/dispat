@@ -4,10 +4,10 @@
 package app
 
 import (
-	"strings"
-
 	"github.com/yohimik/dispat/pkg/ccme"
+
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -42,7 +42,7 @@ func (a *App) workspaceInitialVersions(pkgs []*model.Package) map[string]ccme.Ve
 		if names[cfg] == nil {
 			names[cfg] = make(map[string]string)
 		}
-		names[cfg][strings.ToLower(p.Name)] = p.Name
+		names[cfg][globx.Fold(p.Name)] = p.Name
 	}
 	out := make(map[string]ccme.Version)
 	for _, repo := range a.workspace.Repositories {
@@ -50,7 +50,7 @@ func (a *App) workspaceInitialVersions(pkgs []*model.Package) map[string]ccme.Ve
 			continue
 		}
 		for key, version := range repo.Config.InitialVersions {
-			if name, exists := names[repo.Config][strings.ToLower(key)]; exists {
+			if name, exists := names[repo.Config][globx.Fold(key)]; exists {
 				out[name] = version
 			} else {
 				a.log.Warn().Str("package", key).Str("repository", repo.Name).

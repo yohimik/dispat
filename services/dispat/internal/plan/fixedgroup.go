@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -650,7 +652,7 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 		}
 		pinnedVersions[p.version.String()] = true
 		repository, _ := splitHistoryKey(p.commit)
-		key := strings.ToLower(repository)
+		key := globx.Fold(repository)
 		if index, exists := repositoryIndex[key]; exists {
 			previous := frontier[index]
 			if newer, comparable := cp.commitPrecedence(p.commit, previous.commit); comparable && newer {

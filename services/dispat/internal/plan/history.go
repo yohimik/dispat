@@ -10,7 +10,9 @@ import (
 	"sync/atomic"
 
 	"github.com/yohimik/dispat/pkg/ccme"
+
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -162,7 +164,7 @@ type controlHistoryReader interface {
 }
 
 func checkpointTagKey(repository, tag string) string {
-	return strings.ToLower(repository) + historyKeySeparator + tag
+	return globx.Fold(repository) + historyKeySeparator + tag
 }
 
 // loadRepositoryTagsAndWindows is the composed-history form of §13.2-13.3.
@@ -191,7 +193,7 @@ func (cp *computation) loadRepositoryTagsAndWindows() error {
 func (cp *computation) loadRepositoryTags() error {
 	packagesByRepo := make(map[string][]*model.Package)
 	for _, p := range cp.pkgs {
-		key := strings.ToLower(p.Repository)
+		key := globx.Fold(p.Repository)
 		packagesByRepo[key] = append(packagesByRepo[key], p)
 	}
 	// Sorted, so which repository a failure names and the order the trace
@@ -421,7 +423,7 @@ func (cp *computation) readRepositoryUnions(idx *windowIndex) error {
 	byRepository := make(map[string]*repositoryBoundaries)
 	for _, p := range cp.pkgs {
 		for _, repository := range cp.relevantRepositories(p.Name) {
-			folded := strings.ToLower(repository)
+			folded := globx.Fold(repository)
 			history := cp.histories[folded]
 			if history.Control && cp.controlIndexed {
 				continue
@@ -454,7 +456,7 @@ func (cp *computation) readRepositoryUnions(idx *windowIndex) error {
 			continue
 		}
 		packageOwner := cp.byName[provider]
-		folded := strings.ToLower(packageOwner.Repository)
+		folded := globx.Fold(packageOwner.Repository)
 		history := cp.histories[folded]
 		if history.Control && cp.controlIndexed {
 			continue
@@ -574,12 +576,12 @@ func (cp *computation) loadRepositoryWindows() error {
 			if err != nil {
 				return err
 			}
-			cp.stableBoundaries[p.Name][strings.ToLower(repository)] = boundary
+			cp.stableBoundaries[p.Name][globx.Fold(repository)] = boundary
 			published, err := cp.repositoryBoundary(p, latest, repository, snapshots, ambiguous)
 			if err != nil {
 				return err
 			}
-			cp.publishedBoundaries[p.Name][strings.ToLower(repository)] = published
+			cp.publishedBoundaries[p.Name][globx.Fold(repository)] = published
 		}
 	}
 	if err := cp.readRepositoryUnions(idx); err != nil {
@@ -587,10 +589,10 @@ func (cp *computation) loadRepositoryWindows() error {
 	}
 	for _, p := range cp.pkgs {
 		for _, repository := range cp.relevantRepositories(p.Name) {
-			boundary := cp.stableBoundaries[p.Name][strings.ToLower(repository)]
-			published := cp.publishedBoundaries[p.Name][strings.ToLower(repository)]
+			boundary := cp.stableBoundaries[p.Name][globx.Fold(repository)]
+			published := cp.publishedBoundaries[p.Name][globx.Fold(repository)]
 
-			history := cp.histories[strings.ToLower(repository)]
+			history := cp.histories[globx.Fold(repository)]
 			stableWindow, stableKey, err := cp.load(idx, history, boundary, p.Name)
 			if err != nil {
 				return err
@@ -625,13 +627,13 @@ func (cp *computation) loadRepositoryWindows() error {
 		if !cp.needsReceiptHistory(provider, seenTag) {
 			continue
 		}
-		history := cp.histories[strings.ToLower(cp.byName[provider].Repository)]
+		history := cp.histories[globx.Fold(cp.byName[provider].Repository)]
 		if _, _, err := cp.load(idx, history, historyKey(history.Name, seen.Commit), consumer); err != nil {
 			return err
 		}
 	}
 	if cp.controlIndexed {
-		control := cp.histories[strings.ToLower(cp.controlRepo)]
+		control := cp.histories[globx.Fold(cp.controlRepo)]
 		if _, _, err := cp.load(idx, control, "", controlIntentLabel); err != nil {
 			return err
 		}
@@ -679,10 +681,10 @@ func (cp *computation) validateRepositoryBaselines() error {
 				index[tag.Name] = true
 			}
 		}
-		tagsByConsumer[strings.ToLower(consumer)] = index
+		tagsByConsumer[globx.Fold(consumer)] = index
 	}
 	for _, baseline := range cp.baselineSpecs {
-		consumer := strings.ToLower(baseline.Consumer)
+		consumer := globx.Fold(baseline.Consumer)
 		if cp.byName[baseline.Consumer] == nil {
 			// Package lookup is case-insensitive in configuration, but byName is
 			// canonical. Avoid a per-tuple scan by using the prebuilt tag index.
@@ -718,7 +720,7 @@ func (cp *computation) prepareRepositoryReach() {
 	}
 	slices.Sort(repositories)
 	for i, repository := range repositories {
-		index[strings.ToLower(repository)] = i
+		index[globx.Fold(repository)] = i
 	}
 	words := (len(repositories) + 63) / 64
 	sets := make(map[string][]uint64, len(cp.order))
@@ -726,7 +728,7 @@ func (cp *computation) prepareRepositoryReach() {
 	for _, name := range cp.order {
 		bits := make([]uint64, words)
 		if p := cp.byName[name]; p != nil {
-			i := index[strings.ToLower(p.Repository)]
+			i := index[globx.Fold(p.Repository)]
 			bits[i/64] |= uint64(1) << uint(i%64)
 		}
 		seenProvider := make(map[string]bool)
@@ -767,7 +769,7 @@ func (cp *computation) repositoryBoundary(pkg *model.Package, tag gitx.Tag, repo
 	if strings.EqualFold(pkg.Repository, repository) {
 		return historyKey(repository, tag.Commit), nil
 	}
-	key := baselineKey{consumer: strings.ToLower(pkg.Name), tag: tag.Name, repository: strings.ToLower(repository)}
+	key := baselineKey{consumer: globx.Fold(pkg.Name), tag: tag.Name, repository: globx.Fold(repository)}
 	if revision := cp.baselines[key]; revision != "" {
 		cp.log.Trace().Str("consumer", pkg.Name).Str("releaseTag", tag.Name).
 			Str("repository", repository).Str("revision", rawHistoryKey(revision)).
@@ -803,7 +805,7 @@ func (cp *computation) controlCheckpoints() (map[string]controlSnapshot, map[str
 	if cp.controlRepo == "" {
 		return out, ambiguous, nil
 	}
-	control := cp.histories[strings.ToLower(cp.controlRepo)]
+	control := cp.histories[globx.Fold(cp.controlRepo)]
 	reader, ok := control.Git.(controlHistoryReader)
 	if !ok {
 		return nil, nil, fmt.Errorf("plan: control repository %s cannot report release checkpoint history", control.Name)
@@ -860,7 +862,7 @@ func (cp *computation) controlCheckpoints() (map[string]controlSnapshot, map[str
 	tagOwners := make(map[string][]owner)
 	controlTags := make(map[string][]string)
 	for _, p := range cp.pkgs {
-		history := cp.histories[strings.ToLower(p.Repository)]
+		history := cp.histories[globx.Fold(p.Repository)]
 		for _, tag := range cp.tags[p.Name] {
 			if tag.Name != "" && tag.Commit != "" {
 				if history.Control {
@@ -1096,12 +1098,12 @@ func (cp *computation) validateControlProjectionHeads() error {
 			for _, packageName := range packageNames {
 				pkg := cp.byName[packageName]
 				if pkg == nil || pkg.Repository == "" || strings.EqualFold(pkg.Repository, cp.controlRepo) ||
-					checked[strings.ToLower(pkg.Repository)] || !cp.inWindow(packageName, rec.key) ||
+					checked[globx.Fold(pkg.Repository)] || !cp.inWindow(packageName, rec.key) ||
 					cp.containedInBaseline(packageName, rec.key) ||
 					cp.cancelledFor(rec.key, packageName) || cp.held[packageName] {
 					continue
 				}
-				checked[strings.ToLower(pkg.Repository)] = true
+				checked[globx.Fold(pkg.Repository)] = true
 				history, ok := cp.history(pkg.Repository)
 				head := cp.repositoryHeads[history.Name]
 				pin := cp.controlLinkAt(rec.commit.SHA, history.Path)
@@ -1293,7 +1295,7 @@ func (cp *computation) history(name string) (RepositoryHistory, bool) {
 	if name == "" && len(cp.histories) == 0 {
 		return RepositoryHistory{Git: cp.git, Root: cp.root}, true
 	}
-	h, ok := cp.histories[strings.ToLower(name)]
+	h, ok := cp.histories[globx.Fold(name)]
 	return h, ok
 }
 
@@ -1358,7 +1360,7 @@ func (cp *computation) resolveApplicableControlBoundaries() error {
 			if err != nil {
 				return err
 			}
-			candidate.boundaries[name][strings.ToLower(cp.controlRepo)] = boundary
+			candidate.boundaries[name][globx.Fold(cp.controlRepo)] = boundary
 		}
 	}
 	return nil
@@ -1387,7 +1389,7 @@ func (cp *computation) releaseRepositoryInputs() ([]string, map[string][]uint64)
 	}
 	slices.Sort(repositories)
 	for i, repository := range repositories {
-		index[strings.ToLower(repository)] = i
+		index[globx.Fold(repository)] = i
 	}
 	wordCount := (len(repositories) + 63) / 64
 
@@ -1402,12 +1404,12 @@ func (cp *computation) releaseRepositoryInputs() ([]string, map[string][]uint64)
 	for i, name := range cp.order {
 		bits := make([]uint64, wordCount)
 		for _, repository := range cp.repositoryReach[name] {
-			if r, ok := index[strings.ToLower(repository)]; ok {
+			if r, ok := index[globx.Fold(repository)]; ok {
 				bits[r/64] |= uint64(1) << uint(r%64)
 			}
 		}
 		if cp.controlInputs[name] {
-			if r, ok := index[strings.ToLower(cp.controlRepo)]; ok {
+			if r, ok := index[globx.Fold(cp.controlRepo)]; ok {
 				bits[r/64] |= uint64(1) << uint(r%64)
 			}
 		}

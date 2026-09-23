@@ -1,13 +1,14 @@
-// Package fsx holds the one filesystem primitive the CLI shares: an atomic
-// file replace. Every writer that rewrites a file a user keeps — a config, a
-// changelog — goes through it, so a crash mid-write can truncate the temp file
-// but never the file itself. pkg/writer carries its own copy on purpose: it is
-// a separate module, and exporting a generic filesystem helper from its public
-// API would outlive the convenience.
+// Package fsx holds the CLI's checked file writes. Every writer that rewrites
+// a file a user keeps — a config, a changelog — uses an atomic replace so a
+// crash mid-write can truncate the temp file but never the file itself.
+// pkg/writer carries its own copy on purpose: it is a separate module, and
+// exporting a generic filesystem helper from its public API would outlive the
+// convenience.
 package fsx
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -27,7 +28,13 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
+	// A supported runtime can return a short count with no error when a file
+	// size limit interrupts this write. Never rename that truncated temp file.
+	n, err := tmp.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
 		tmp.Close()
 		os.Remove(name)
 		return err
@@ -50,4 +57,21 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	return nil
+}
+
+// WriteFileComplete writes a newly created or temporary file and refuses a
+// short write even when a runtime reports it without an error.
+func WriteFileComplete(path string, data []byte, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	n, err := file.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }

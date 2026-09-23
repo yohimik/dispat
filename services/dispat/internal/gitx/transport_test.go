@@ -11,8 +11,10 @@ package gitx
 // chain is the one `git rev-list` walks.
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +27,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type shortRequestPipe struct{}
+
+func (shortRequestPipe) Write(data []byte) (int, error) { return len(data) - 1, nil }
+func (shortRequestPipe) Close() error                   { return nil }
 
 // transportFixture is a repository with two commits and a bare remote to
 // coordinate through, plus the two commit ids the scenarios push around.
@@ -455,6 +462,19 @@ func TestObjectReaderRefusesAnOversizedBlobAndStops(t *testing.T) {
 	_, err = reader.ReadBlob(oid, &bytes.Buffer{}, 1<<20)
 	assert.ErrorIs(t, err, ErrTransportLimit, "a reader that stopped mid-stream answers nothing more")
 	assert.NoError(t, reader.Close())
+}
+
+// TestObjectReaderRefusesAShortRequest: a pipe that accepted only a prefix of
+// the object id cannot be trusted to answer the request, even if its writer
+// returned no error with the short count.
+func TestObjectReaderRefusesAShortRequest(t *testing.T) {
+	reader := &ObjectReader{
+		stdin: shortRequestPipe{}, stdout: bufio.NewReader(strings.NewReader("unexpected\n")),
+	}
+	size, err := reader.request(strings.Repeat("a", 40))
+	assert.Zero(t, size)
+	assert.ErrorIs(t, err, io.ErrShortWrite)
+	assert.True(t, reader.isBroken, "a partial request cannot share the next response")
 }
 
 // TestResolveSubtreeNarrowsARepositoryTreeToAFolder: a tree written from an

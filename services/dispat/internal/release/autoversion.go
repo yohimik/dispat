@@ -14,6 +14,7 @@ import (
 	"github.com/yohimik/dispat/pkg/scanner"
 	"github.com/yohimik/dispat/pkg/writer"
 
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -209,7 +210,7 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 		if !av.Kinds[model.DepKind(d.Kind)] {
 			continue
 		}
-		if av.Only != nil && !av.Only[strings.ToLower(provider)] {
+		if av.Only != nil && !av.Only[globx.Fold(provider)] {
 			continue
 		}
 		if !matchAny(av.Match, d.Range) {
