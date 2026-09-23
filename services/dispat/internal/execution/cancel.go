@@ -95,7 +95,7 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 			Str("category", CategoryTransportCleanup).Msg("the attempt could not be withdrawn")
 		return cancellation{}
 	}
-	if withdrawn == "" {
+	if withdrawn.oid == "" {
 		// The attempt ended by itself while the withdrawal was being written.
 		// The node has provably stopped, since it wrote the terminal message
 		// itself, and nothing here may say what its command did or did not do.
@@ -103,10 +103,16 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 			Int("attempt", attempt).Msg("the attempt ended before it could be withdrawn")
 		return cancellation{isAcknowledged: true, isCommandStarted: true}
 	}
-	c.recordOwnedRef(node, offer.branch, withdrawn)
+	c.recordOwnedRef(settling, ownedRefStep{
+		node: node, branch: offer.branch, oid: withdrawn.oid, parent: withdrawn.parent,
+	})
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", node).Int("attempt", attempt).
-		Str("commit", withdrawn).Msg("attempt withdrawn")
-	return c.awaitAcknowledgement(settling, node, task, attempt, offer, withdrawn)
+		Str("commit", withdrawn.oid).Msg("attempt withdrawn")
+	return c.awaitAcknowledgement(settling, node, task, attempt, offer, withdrawn.oid)
+}
+
+type withdrawalAdvance struct {
+	oid, parent string
 }
 
 // writeWithdrawal pushes the withdrawal, re-reading the branch once when the
@@ -120,45 +126,135 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 // arriving inside that window is leased against the assignment. So the branch
 // is asked where it actually is, once, and the withdrawal is written against
 // that. A branch that has reached its terminal message needs no withdrawal at
-// all, and the empty string says so.
+// all, and an empty oid says so.
 func (c *Coordinator) writeWithdrawal(ctx context.Context, node, task string, attempt int,
-	kind string, offer taskOffer, tipOID string) (string, error) {
+	kind string, offer taskOffer, tipOID string) (withdrawalAdvance, error) {
 	withdrawn, err := c.advance(ctx, node, offer.branch, tipOID, MessageCancel, Withdrawal{
 		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
 		Assignment: offer.offered, Tip: tipOID,
 	})
 	if err == nil {
-		return withdrawn, nil
+		return withdrawalAdvance{oid: withdrawn, parent: tipOID}, nil
 	}
 	head, rereadErr := c.mailboxes[node].Reread(ctx, offer.branch)
 	if rereadErr != nil || head.OID == "" || head.OID == tipOID {
-		return "", err
+		return withdrawalAdvance{}, err
 	}
 	tip, inspectErr := c.mailboxes[node].Inspect(ctx, head)
-	if inspectErr == nil && (tip.Kind == MessageResult || tip.Kind == MessageAck) {
-		if !c.isOwnTerminalAttempt(ctx, tip, terminalAttempt{
-			node:    node,
-			want:    c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
-			offered: offer.offered,
-		}) {
+	if inspectErr != nil {
+		return withdrawalAdvance{}, err
+	}
+	expected := attemptIdentity{
+		node: node, want: c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
+		offered: offer.offered,
+	}
+	if tip.Kind == MessageResult || tip.Kind == MessageAck {
+		if !c.isOwnTerminalAttempt(ctx, tip, expected) {
 			// An unauthenticated terminal-looking step proves nothing about
 			// whether this worker stopped. Keep the old cleanup lease, so a
 			// foreign writer's data is retained rather than deleted as ours.
-			return "", err
+			return withdrawalAdvance{}, err
 		}
 		// The node won the lease race and has stopped. Close must use the
 		// terminal object it just read, not the earlier tip the withdrawal
 		// lost against, or its exact-lease delete leaves this ref behind.
-		c.recordOwnedRef(node, offer.branch, head.OID)
-		return "", nil
+		c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
+			oid: tip.OID, parent: tip.PreviousOID})
+		return withdrawalAdvance{}, nil
 	}
-	return c.advance(ctx, node, offer.branch, head.OID, MessageCancel, Withdrawal{
+	if !c.isOwnCancellationPredecessor(ctx, tip, expected) {
+		// A lease lost to a foreign or unreadable tip does not authorize
+		// this run to sign a cancellation on top of another writer's data.
+		return withdrawalAdvance{}, err
+	}
+	if tip.Kind == MessageCancel {
+		// A push response can be lost after our cancellation reached the
+		// remote. It is already the withdrawal the worker must answer.
+		c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
+			oid: tip.OID, parent: tip.PreviousOID})
+		return withdrawalAdvance{oid: tip.OID, parent: tip.PreviousOID}, nil
+	}
+	withdrawn, err = c.advance(ctx, node, offer.branch, head.OID, MessageCancel, Withdrawal{
 		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
 		Assignment: offer.offered, Tip: head.OID,
 	})
+	if err != nil {
+		return withdrawalAdvance{}, err
+	}
+	return withdrawalAdvance{oid: withdrawn, parent: head.OID}, nil
 }
 
-type terminalAttempt struct {
+// isOwnCancellationPredecessor refuses a retried cancellation unless the
+// reread tip is an authentic step of this exact attempt. Merely finding a
+// changed branch proves neither its ownership nor a legal protocol state.
+func (c *Coordinator) isOwnCancellationPredecessor(ctx context.Context, tip ChainTip,
+	attempt attemptIdentity) bool {
+	if tip.Kind != MessageClaim && tip.Kind != MessageReady &&
+		tip.Kind != MessageGo && tip.Kind != MessageCancel {
+		return false
+	}
+	if tip.Kind != MessageCancel && !IsTransitionLegal(tip.Kind, MessageCancel, PartyOrchestrator) {
+		return false
+	}
+	if tip.PreviousOID != attempt.offered {
+		isLater, err := c.isFirstParentSuccessor(ctx, attempt.node, attempt.offered, tip.OID)
+		if err != nil || !isLater {
+			return false
+		}
+	}
+	waiting := &attemptState{offered: attempt.offered, assignment: &Assignment{Header: attempt.want}}
+	observer := &watcher{coordinator: c, link: Link{Name: attempt.node},
+		mailbox: c.mailboxes[attempt.node]}
+	switch tip.Kind {
+	case MessageClaim:
+		return observer.readClaim(ctx, tip, waiting) == ""
+	case MessageReady:
+		_, reason := observer.readReady(ctx, tip, waiting)
+		return reason == ""
+	case MessageGo, MessageCancel:
+		return c.isOwnOrchestratorStep(ctx, tip, attempt)
+	}
+	return false
+}
+
+// isOwnOrchestratorStep verifies a Go or Cancel written by this run before
+// adopting it as a cleanup lease or writing a cancellation after it.
+func (c *Coordinator) isOwnOrchestratorStep(ctx context.Context, tip ChainTip,
+	attempt attemptIdentity) bool {
+	document, err := c.mailboxes[attempt.node].Read(ctx, tip, c.Limits.MaxManifestBytes)
+	if err != nil {
+		return false
+	}
+	var header Header
+	var assignment, previous string
+	switch tip.Kind {
+	case MessageGo:
+		var goMessage Go
+		if json.Unmarshal(document, &goMessage) != nil {
+			return false
+		}
+		header, assignment, previous = goMessage.Header, goMessage.Assignment, goMessage.Ready
+	case MessageCancel:
+		var withdrawal Withdrawal
+		if json.Unmarshal(document, &withdrawal) != nil {
+			return false
+		}
+		header, assignment, previous = withdrawal.Header, withdrawal.Assignment, withdrawal.Tip
+	default:
+		return false
+	}
+	if CheckHeader(header, Binding{Node: attempt.node, Branch: tip.Branch}, time.Now()) != "" ||
+		!IsTransitionLegal(tip.Previous, tip.Kind, PartyOrchestrator) ||
+		previous != tip.PreviousOID || assignment != attempt.offered {
+		return false
+	}
+	want := attempt.want
+	return header.Kind == want.Kind && header.Run == want.Run &&
+		header.PlanDigest == want.PlanDigest && header.Task == want.Task &&
+		header.Attempt == want.Attempt && header.Generation == want.Generation
+}
+
+type attemptIdentity struct {
 	node    string
 	want    Header
 	offered string
@@ -169,7 +265,7 @@ type terminalAttempt struct {
 // object onto a mailbox; it must not turn a failed withdrawal into proof the
 // worker stopped or make that foreign tip eligible for cleanup.
 func (c *Coordinator) isOwnTerminalAttempt(ctx context.Context, tip ChainTip,
-	attempt terminalAttempt) bool {
+	attempt attemptIdentity) bool {
 	if tip.Kind != MessageResult && tip.Kind != MessageAck {
 		return false
 	}
@@ -239,7 +335,6 @@ func (c *Coordinator) awaitAcknowledgement(ctx context.Context, node, task strin
 		if err != nil || tip.Kind != MessageAck {
 			continue
 		}
-		c.recordOwnedRef(node, offer.branch, head.OID)
 		answered, reason := c.readAcknowledgement(ctx, node, task, attempt, offer, tip, withdrawn)
 		if reason != "" {
 			c.Log.Warn().Str("worker", node).Str("branch", tip.Branch).Str("commit", tip.OID).
@@ -247,6 +342,8 @@ func (c *Coordinator) awaitAcknowledgement(ctx context.Context, node, task strin
 				Str("category", CategoryAuthority).Msg("stale or foreign receipt ignored")
 			continue
 		}
+		c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
+			oid: tip.OID, parent: tip.PreviousOID})
 		c.Log.Debug().Str("run", c.Run).Str("task", task).Str("worker", node).
 			Int("attempt", attempt).Str("phase", answered.phase).
 			Bool("commandStarted", answered.isCommandStarted).

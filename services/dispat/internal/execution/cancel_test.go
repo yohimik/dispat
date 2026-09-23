@@ -70,7 +70,9 @@ func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
 			observed, err := fixture.orchestrator.mailbox.Reread(t.Context(), branch)
 			require.NoError(t, err)
 			require.Equal(t, claimed, observed.OID)
-			fixture.coordinator.recordOwnedRef("build-a", branch, claimed)
+			fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
+				node: "build-a", branch: branch, oid: claimed, parent: offered,
+			})
 			writer := fixture.node.mailbox
 			if tc.badSignature {
 				otherSigner, err := NewSigner("another-secret")

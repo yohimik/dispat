@@ -152,7 +152,7 @@ func TestClosePreservesUnknownPublicationEvidence(t *testing.T) {
 	for _, branch := range []string{unknownBranch, cleanBranch} {
 		oid, err := mailbox.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
 		require.NoError(t, err)
-		coordinator.recordOwnedRef("build-a", branch, oid)
+		coordinator.recordOwnedRef(t.Context(), ownedRefStep{node: "build-a", branch: branch, oid: oid})
 	}
 	coordinator.rememberUnknownPublication(unknownPublication{
 		Task: "pkg:publish", Attempt: 1, Node: "build-a", Branch: unknownBranch})
@@ -257,7 +257,9 @@ func TestPreflightReportsARetainedBranch(t *testing.T) {
 	require.NoError(t, err)
 	// The run believes the branch is somewhere it is not, which is what a
 	// branch somebody else advanced looks like from here.
-	fixture.coordinator.recordOwnedRef("build-a", branch, "0000000000000000000000000000000000000000")
+	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
+		node: "build-a", branch: branch, oid: "0000000000000000000000000000000000000000",
+	})
 
 	err = fixture.coordinator.Close(t.Context())
 

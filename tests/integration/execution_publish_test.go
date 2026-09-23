@@ -453,7 +453,8 @@ func TestExecutionUnauthorizedPublisherNeverStarts(t *testing.T) {
 	assert.Equal(t, []string{"assets"}, executionPublishedPackages(rig),
 		"only the package that published before the loss ever ran a publish command: %v", rig.runs())
 	assert.Equal(t, []string{"assets@0.1.0"}, rig.repo.TagList())
-	assert.Empty(t, rig.branches(), "and the run still closed the branches it created")
+	assert.Empty(t, rig.branches(), "and the run still closed the branches it created\nstdout:\n%s\nstderr:\n%s",
+		res.Stdout, res.Stderr)
 	stopAll(t, workers)
 }
 

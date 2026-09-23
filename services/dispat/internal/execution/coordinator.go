@@ -231,7 +231,7 @@ func (c *Coordinator) probe(ctx context.Context, link Link) (*NodeReport, error)
 	if err != nil {
 		return nil, err
 	}
-	c.recordOwnedRef(link.Name, branch, offered)
+	c.recordOwnedRef(ctx, ownedRefStep{node: link.Name, branch: branch, oid: offered})
 	return c.awaitReport(ctx, link, branch, offered)
 }
 
@@ -278,7 +278,6 @@ func (c *Coordinator) readReport(ctx context.Context, link Link, branch, offered
 		if err != nil {
 			return nil, err
 		}
-		c.recordOwnedRef(link.Name, branch, head.OID)
 		if tip.Kind != MessageResult {
 			continue
 		}
@@ -296,6 +295,8 @@ func (c *Coordinator) readReport(ctx context.Context, link Link, branch, offered
 				Str("category", CategoryAuthority).Msg("result rejected")
 			continue
 		}
+		c.recordOwnedRef(ctx, ownedRefStep{node: link.Name, branch: branch,
+			oid: tip.OID, parent: tip.PreviousOID})
 		return report, nil
 	}
 	return nil, nil
@@ -407,19 +408,106 @@ func (c *Coordinator) refuse(node string, err error) error {
 		"worker node %s did not pass preflight: %w", node, err)
 }
 
-// recordOwnedRef remembers a ref this run created, and the value it was last
-// seen at, so that closing the run deletes exactly what it put there and
-// under a lease that is current.
-func (c *Coordinator) recordOwnedRef(node, branch, oid string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for index, lease := range c.owned[node] {
-		if lease.Branch == branch {
-			c.owned[node][index].ExpectedOld = oid
+// ownedRefStep is a branch value this run created or an authenticated worker
+// message it accepted. parent is the message's first parent when known.
+type ownedRefStep struct {
+	node, branch, oid, parent string
+}
+
+// recordOwnedRef advances a cleanup lease only along the branch's first-parent
+// chain. A delayed poll may arrive after a cancel or acknowledgement was
+// recorded; it must not replace the newer lease with the older observed tip.
+func (c *Coordinator) recordOwnedRef(ctx context.Context, step ownedRefStep) {
+	for retry := 0; retry <= maxChainDepth; retry++ {
+		c.mu.Lock()
+		index := -1
+		for candidate, lease := range c.owned[step.node] {
+			if lease.Branch == step.branch {
+				index = candidate
+				break
+			}
+		}
+		if index < 0 {
+			if retry == 0 {
+				c.owned[step.node] = append(c.owned[step.node], gitx.BranchLease{
+					Branch: step.branch, ExpectedOld: step.oid,
+				})
+			}
+			c.mu.Unlock()
 			return
 		}
+		current := c.owned[step.node][index].ExpectedOld
+		if current == step.oid {
+			c.mu.Unlock()
+			return
+		}
+		if current == step.parent {
+			c.owned[step.node][index].ExpectedOld = step.oid
+			c.mu.Unlock()
+			return
+		}
+		c.mu.Unlock()
+
+		// A skipped protocol message needs a bounded first-parent proof. Do the
+		// Git reads outside the coordinator lock: another node's bookkeeping
+		// must not wait for this node's object store.
+		isLater, err := c.isFirstParentSuccessor(ctx, step.node, current, step.oid)
+		c.mu.Lock()
+		index = -1
+		for candidate, lease := range c.owned[step.node] {
+			if lease.Branch == step.branch {
+				index = candidate
+				break
+			}
+		}
+		if index < 0 {
+			c.mu.Unlock()
+			return // Close already took the owned refs.
+		}
+		if c.owned[step.node][index].ExpectedOld != current {
+			c.mu.Unlock()
+			continue
+		}
+		if err == nil && isLater {
+			c.owned[step.node][index].ExpectedOld = step.oid
+		}
+		c.mu.Unlock()
+		if err != nil {
+			c.Log.Warn().Err(err).Str("branch", step.branch).
+				Msg("the cleanup lease could not be advanced")
+		} else if !isLater {
+			c.Log.Debug().Str("branch", step.branch).Str("commit", step.oid).
+				Msg("an older coordination tip cannot replace the cleanup lease")
+		}
+		return
 	}
-	c.owned[node] = append(c.owned[node], gitx.BranchLease{Branch: branch, ExpectedOld: oid})
+	c.Log.Warn().Str("branch", step.branch).
+		Msg("the cleanup lease changed too often to record this coordination tip")
+}
+
+// isFirstParentSuccessor checks only the bounded coordination chain, not a
+// merge parent: cleanup ownership follows the exact branch history.
+func (c *Coordinator) isFirstParentSuccessor(ctx context.Context, node, earlier, candidate string) (bool, error) {
+	for depth := 0; depth < maxChainDepth; depth++ {
+		if candidate == earlier {
+			return true, nil
+		}
+		parent, err := c.mailboxes[node].plumbing.ResolveCommit(ctx, candidate+"^")
+		if err != nil {
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
+			// An existing root commit has no first parent. Check that the
+			// candidate itself is readable before treating this as a normal
+			// stale observation rather than an object-store failure.
+			if _, inspectErr := c.mailboxes[node].plumbing.ResolveCommit(ctx, candidate); inspectErr != nil {
+				return false, inspectErr
+			}
+			return false, nil
+		}
+		candidate = parent
+	}
+	return candidate == earlier, nil
 }
 
 // Close deletes settled refs this run created, in one push per node, and
@@ -480,7 +568,7 @@ func (c *Coordinator) Close(ctx context.Context) error {
 		return nil
 	}
 	return NewIdentifiedDiagnostic(Identity{Run: c.Run}, CodeTransportRetained, CategoryTransportCleanup,
-		"%d coordination branches of this run could not be closed (%v): they carry no release record and can be deleted at any time",
+		"%d coordination branches of this run could not be closed (%v): they carry no release record; inspect each current tip and ownership before deletion",
 		len(retained)+len(failures), append(retained, formatFailures(failures)...))
 }
 

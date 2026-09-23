@@ -179,7 +179,7 @@ git ls-remote --heads <mailbox> 'dispat-worker-*'   # the run's coordination ref
    running the publish command is not.
 3. Check the registry for the version the package was publishing. That, and not the tags, is what says whether the
    publication happened.
-4. Delete the run's coordination refs from the mailbox.
+4. Delete the run's coordination refs from the mailbox, after verifying that their current tips still belong to that run's authenticated chain. Investigate a changed or unauthenticated tip instead of deleting it as residue.
 5. Only then delete the lock tag, exactly as for an abandoned lock:
 
 ```sh

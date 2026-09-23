@@ -345,7 +345,7 @@ func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task st
 		lease.Release()
 		return taskOffer{}, c.refuseTask(task, lease.Node, attempt, err)
 	}
-	c.recordOwnedRef(lease.Node, assignment.Branch, offered)
+	c.recordOwnedRef(ctx, ownedRefStep{node: lease.Node, branch: assignment.Branch, oid: offered})
 	observer.bind(assignment.Branch, offered, assignment)
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
@@ -572,7 +572,7 @@ func (c *Coordinator) offerInput(ctx context.Context, node string, source Source
 	if err := c.dispatch.OpenRepository(source.Dir).PushCreate(ctx, c.endpointOf(node), commit, branch); err != nil {
 		return "", fmt.Errorf("offering the input state of %s: %w", source.Dir, err)
 	}
-	c.recordOwnedRef(node, branch, commit)
+	c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: branch, oid: commit})
 	c.offered[key] = offeredState{commit: commit, branch: branch}
 	c.Log.Debug().Str("worker", node).Str("repository", source.Name).Str("branch", branch).
 		Str("commit", commit).Str("run", c.Run).Msg("input state pushed")
@@ -888,7 +888,6 @@ func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
 	if waiting == nil {
 		return false
 	}
-	w.coordinator.recordOwnedRef(w.link.Name, head.Name, head.OID)
 	tip, err := w.mailbox.Inspect(ctx, head)
 	if err != nil {
 		// The objects are here and this process could not make anything of
@@ -938,6 +937,8 @@ func (w *watcher) acceptReply(ctx context.Context, tip ChainTip, waiting *attemp
 		w.reportRejectedReply(tip, reason)
 		return false
 	}
+	w.coordinator.recordOwnedRef(ctx, ownedRefStep{node: w.link.Name, branch: tip.Branch,
+		oid: tip.OID, parent: tip.PreviousOID})
 	waiting.replies <- taskReply{kind: MessageResult, result: result, tip: tip, commit: tip.OID}
 	w.forget(tip.Branch)
 	return true
@@ -985,6 +986,8 @@ func (w *watcher) offerReady(ctx context.Context, tip ChainTip, waiting *attempt
 		return false
 	}
 	waiting.isReadyAccepted = true
+	w.coordinator.recordOwnedRef(ctx, ownedRefStep{node: w.link.Name, branch: tip.Branch,
+		oid: tip.OID, parent: tip.PreviousOID})
 	waiting.replies <- taskReply{kind: MessageReady, ready: ready, tip: tip, commit: tip.OID}
 	return true
 }
@@ -1005,6 +1008,8 @@ func (w *watcher) offerClaim(ctx context.Context, tip ChainTip, waiting *attempt
 		return false
 	}
 	waiting.isClaimAccepted = true
+	w.coordinator.recordOwnedRef(ctx, ownedRefStep{node: w.link.Name, branch: tip.Branch,
+		oid: tip.OID, parent: tip.PreviousOID})
 	waiting.replies <- taskReply{kind: MessageClaim, tip: tip, commit: tip.OID}
 	w.coordinator.Log.Debug().Str("worker", w.link.Name).Str("branch", tip.Branch).
 		Str("commit", tip.OID).Msg("the node claimed the work")

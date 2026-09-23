@@ -229,6 +229,7 @@ func TestExecutionForgedClaimsAreRejectedBeforeWork(t *testing.T) {
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
 			assert.Empty(t, rig.repo.TagList(), "no invalid claim can lead to publication")
 			assert.Empty(t, rig.runs(), "no build ran on the strength of a forged claim")
+			assertRejectedTipRetained(t, rig, res)
 		})
 	}
 }
@@ -280,8 +281,23 @@ func TestExecutionForgedReadyCannotAuthorizePublication(t *testing.T) {
 			assert.Empty(t, rig.repo.TagList(), "no publication was recorded")
 			_, authorized := executionLine(res, "publication authorized")
 			assert.False(t, authorized, "the coordinator never sent Go")
+			assertRejectedTipRetained(t, rig, res)
 		})
 	}
+}
+
+// A refused message is not cleanup authority, even when cancellation runs
+// after the refusal. Keep exactly the rejected commit for investigation.
+func assertRejectedTipRetained(t *testing.T, rig *executionRig, result harness.RunResult) {
+	t.Helper()
+	rejected, isRejected := executionLine(result, "result rejected")
+	require.True(t, isRejected, "stdout:\n%s", result.Stdout)
+	branch := "refs/heads/" + rejected.Str("branch")
+	require.Equal(t, []string{branch}, rig.branches(), "only the rejected branch remains")
+	assert.Equal(t, rejected.Str("commit"), strings.TrimSpace(bareGit(t, rig.mailbox,
+		"rev-parse", branch)), "cancellation and cleanup leave the rejected tip untouched")
+	assert.True(t, harness.IsCodePresent(executionEvents(result), executionRetainedCode),
+		"retained coordination content needs investigation\nstdout:\n%s", result.Stdout)
 }
 
 // TestExecutionOldRunReceiptGrantsNothing (spec vector 20): a receipt of an

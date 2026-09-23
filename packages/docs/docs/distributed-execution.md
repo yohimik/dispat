@@ -394,7 +394,7 @@ locally happens before a push; dispat withdraws that waiting attempt and waits f
 
 If the publisher never acknowledged, the release lock of the repository it was publishing into is **retained**. The
 uncertain publication's authorization ref is also retained, whether the node acknowledged after starting publish or
-never answered. Unrelated coordination refs are cleaned up. The error names the order of recovery, and it is the order
+never answered. Other owned coordination refs are cleaned up when their current tips still belong to this run. The error names the order of recovery, and it is the order
 to follow:
 
 1. list the run's coordination refs in the mailbox (`dispat-worker-*`);
@@ -403,6 +403,9 @@ to follow:
 4. check the registry for the version;
 5. delete the run's refs;
 6. and only then delete the lock tag on the remote.
+
+Before deleting a ref, verify that its current tip still belongs to this run's authenticated chain. A changed or
+unauthenticated tip needs investigation, not deletion under this run's cleanup procedure.
 
 [The release lock](./reference/releasing/release-lock.md#a-lock-a-distributed-run-retained) has the commands. A run
 may end with a lock retained and no release record at all, so the registry is the evidence, not the tags.
@@ -414,7 +417,9 @@ ordinary run plans what is still owed and publishes it, exactly as it does after
 **Leftover coordination branches need classification before deletion.** A completed run deletes its own refs and
 reports `W244` when one survives, with exit code `0`, because a coordination branch carries no release record. An
 `E228` run retains the uncertain publication's authorization as evidence; follow the recovery order above before
-deleting it. Other branches of a crashed run are safe to delete once no process is still using them.
+deleting it. For other branches of a crashed run, confirm that no process still uses them and that their current tips
+belong to that run's authenticated chain. Investigate a ref whose tip changed unexpectedly or cannot be authenticated
+rather than deleting it as this run's residue.
 
 ## Security: what distributed execution exposes and how to contain it
 
@@ -597,7 +602,7 @@ switches on.
 | `E227` | `io-integrity`              | input or output data that is missing, changed, incomplete, incompatible or escaping its declared roots, or two tasks of one sweep writing one path with different bytes; it fails one prerequisite and blocks that prerequisite's consumers |
 | `E228` | `publication-unknown`       | an authorized publication that never reported back; the run is incomplete, makes no second attempt, and retains the lock of an unfenced publisher |
 | `E229` | `transport-cleanup`         | transport state the run could not leave in a safe place: an attempt that had to be fenced, or owned refs whose survival leaves an effect unresolved |
-| `W244` | `transport-cleanup`         | the harmless half of the same subject: refs a completed run could not delete, and writes a build made outside what it declared. A run that is otherwise clean still exits `0` |
+| `W244` | `transport-cleanup`         | the harmless half of the same subject: refs a completed run could not safely delete, and writes a build made outside what it declared. A run that is otherwise clean still exits `0`; inspect a retained ref before deleting it |
 
 Three conditions dispat already had a code for keep it and join the specification's `native-recording-or-lock` class:
 `E220`, `E221` and `E222` for a tag or a record, and `E335` and `E336` for a lock.
@@ -608,9 +613,9 @@ Three conditions dispat already had a code for keep it and join the specificatio
 
 - **The first push to a fresh mailbox carries the repository's history.** A prepared input state descends from the
   planned head, so the first push to a mailbox that shares no objects with the source sends everything reachable.
-  For a very large repository that is measured in gigabytes and in minutes. Cleanup deletes every coordination ref,
-  so nothing keeps those objects referenced and the next run pays it again. Use the source's own origin as the
-  mailbox, or a clone of it, when this matters.
+  For a very large repository that is measured in gigabytes and in minutes. Normal completed-run cleanup deletes
+  the run's owned coordination refs, so nothing keeps those objects referenced and the next run pays it again. Use
+  the source's own origin as the mailbox so the history is already present.
 - **A heterogeneous pool waits for its slowest node.** Placement is first free, not fastest: one machine much slower
   than the others will be given work and the run will wait for it. Prefer a homogeneous pool, or separate the classes
   of machine with `runOnly` and `buildPlatforms`.

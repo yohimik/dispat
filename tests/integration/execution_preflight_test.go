@@ -220,6 +220,10 @@ func TestExecutionPreflightIgnoresUnauthenticReplies(t *testing.T) {
 			rejected, isRejected := executionLine(res, "result rejected")
 			require.True(t, isRejected, "stdout:\n%s", res.Stdout)
 			assert.NotEmpty(t, rejected.Str("reason"))
+			require.Equal(t, []string{"refs/heads/" + branch}, rig.branches(),
+				"cleanup cannot adopt a rejected reply")
+			assert.Equal(t, result, strings.TrimSpace(bareGit(t, rig.mailbox,
+				"rev-parse", "refs/heads/"+branch)), "the rejected tip remains untouched")
 			assert.Equal(t, 0, buildRuns(rig.repo), "no stage ran")
 			assert.Empty(t, rig.repo.TagList())
 		})

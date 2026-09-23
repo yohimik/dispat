@@ -298,7 +298,7 @@ func (c *Coordinator) reachOutputs(ctx context.Context, node string, admitted *a
 		return "", fmt.Errorf("execution: relaying the outputs of %s to %s: %w",
 			admitted.manifest.Package, node, err)
 	}
-	c.recordOwnedRef(node, branch, admitted.commit)
+	c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: branch, oid: admitted.commit})
 	c.outputs.rememberRelay(endpoint, admitted.commit, branch)
 	c.Log.Debug().Str("run", c.Run).Str("worker", node).Str("branch", branch).
 		Str("commit", admitted.commit).Str("package", admitted.manifest.Package).

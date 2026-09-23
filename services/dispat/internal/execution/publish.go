@@ -322,7 +322,8 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 	if err != nil {
 		return c.reportLostAuthorization(ctx, lease, task, attempt, repository, offer, reply, err)
 	}
-	c.recordOwnedRef(lease.Node, offer.branch, authorized)
+	c.recordOwnedRef(ctx, ownedRefStep{node: lease.Node, branch: offer.branch,
+		oid: authorized, parent: reply.commit})
 	// The authorization is what a withdrawal of a running publisher is leased
 	// against, so the object is remembered where the waiting task can read it.
 	waiting.authorizedTip = authorized
