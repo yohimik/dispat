@@ -358,6 +358,67 @@ func TestChoreographyMergesBaselinesFromEveryPeer(t *testing.T) {
 	assert.Len(t, cfg.RepositoryBaselines, 1, "the same boundary from two peers is one baseline")
 }
 
+// TestChoreographyKeepsSameNamedGroupsRepositoryLocal: every peer is an
+// ordinary repository-local root (§27.11), so a group two peers both call
+// platform is two groups. Selectors and scripts read the authored name, and
+// the planner's identity is qualified by the owning peer from either entry,
+// whether the group is declared or is a space that versions as one.
+func TestChoreographyKeepsSameNamedGroupsRepositoryLocal(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		join func(cfg *File)
+	}{
+		{"declared group", func(cfg *File) {
+			cfg.VersionGroups = map[string]VersionGroupConfig{"platform": {Versioning: VersioningFixed}}
+			cfg.Spaces = map[string]SpaceConfig{"libs": {Path: PathList{"pkgs"}, VersionGroup: "platform"}}
+		}},
+		{"shared space", func(cfg *File) {
+			cfg.Spaces = map[string]SpaceConfig{"platform": {Path: PathList{"pkgs"}, Versioning: VersioningFixed}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			peerConfig := func(identity, peer string) File {
+				cfg := choreoConfig(identity, peer)
+				cfg.Packages = nil
+				tc.join(&cfg)
+				return cfg
+			}
+			api := choreoRepo(t, "api", peerConfig("api", "sdk"))
+			sdk := choreoRepo(t, "sdk", peerConfig("sdk", "api"))
+			choreoLink(t, api, sdk, "sdk")
+			choreoLink(t, sdk, api, "api")
+			choreoFollowRemote(t, api, DefaultLinkPath("sdk"))
+			for _, root := range []string{api, sdk} {
+				workspace, cfg, err := choreoCompose(t, root, LinkedOptions{})
+				require.NoError(t, err)
+				pkgs, _, _, err := DiscoverWorkspace(cfg, root, workspace)
+				require.NoError(t, err)
+				byOwner := map[string]*model.Package{}
+				for _, p := range pkgs {
+					byOwner[p.Repository] = p
+				}
+				require.Len(t, byOwner, 2)
+				assert.Equal(t, "platform", byOwner["api"].VersionGroupName())
+				assert.Equal(t, "platform", byOwner["sdk"].VersionGroupName())
+				assert.NotEqual(t, byOwner["api"].VersionGroupIdentity(), byOwner["sdk"].VersionGroupIdentity(),
+					"a group belongs to the peer that declares it")
+			}
+		})
+	}
+}
+
+// TestChoreographyRefusesAPeerGroupReferenceAtLoad: a versionGroup names a
+// group of its own repository. A peer that names one only another peer
+// declares is refused when its file loads, before any fleet is composed.
+func TestChoreographyRefusesAPeerGroupReferenceAtLoad(t *testing.T) {
+	cfg := choreoConfig("sdk", "api")
+	cfg.Packages = nil
+	cfg.Spaces = map[string]SpaceConfig{"libs": {Path: PathList{"pkgs"}, VersionGroup: "platform"}}
+	sdk := choreoRepo(t, "sdk", cfg)
+	_, err := Load(filepath.Join(sdk, "dispat.json"), nil)
+	require.ErrorContains(t, err, `versionGroup "platform" matches no versionGroups entry and no space`)
+}
+
 // TestValidateLinkedRefusesContradictoryConfigurations: every way of writing a
 // fleet that could not be released as written, refused where it is written.
 func TestValidateLinkedRefusesContradictoryConfigurations(t *testing.T) {

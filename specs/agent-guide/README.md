@@ -122,12 +122,6 @@ error rather than an implicitly discovered source.
 Package names form one graph. Spaces and groups from an imported configuration stay repository-local. A shared space
 or group declared centrally keeps ordinary monorepository semantics and can span sources. An unqualified CLI space or
 group selector can match local declarations in several sources.
-In an identity-linked fleet, the active peers instead share one case-insensitive version-group namespace. Matching
-explicit declarations and implicit groups from shared spaces join across repositories only when their effective
-semver, counter and channel policies agree; conflicting policies are a configuration error. A peer may reference a
-group declared by another active peer, while a disabled peer contributes no declaration. Keep scripts, environment,
-paths, flow, parser, commit and lock policy with each package's owner. Read `execution`, `runOutputs` and participation
-from the entry peer alone. Do not apply this group-merging rule to ordinary centrally imported sources.
 
 Read source commits as local direct intent. A source commit can name only its repository's packages directly; its
 propagation may cross the combined dependency graph. An explicit control commit can address packages across the fleet

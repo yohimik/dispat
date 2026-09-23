@@ -198,23 +198,17 @@ is computed from, and a relevant head or tag that moves before publication is `E
 
 ### Which settings combine
 
-The linked peers share one case-insensitive version-group namespace. Two peers can declare `versionGroups.platform`,
-or shared spaces with the same implicit group name, and their packages then version together when the declarations
-have the same effective semver, counter and channel policy. A peer may also set `versionGroup: platform` and use a
-declaration from another active peer. Conflicting declarations are refused during composition. A disabled peer adds
-no packages or group declarations.
+Each peer's configuration is an ordinary repository-local root. The table shows how far each kind of setting reaches
+in the composed fleet.
 
 | Setting | Boundary in an identity-linked fleet |
 | --- | --- |
 | Package names and `dependencies` | One package namespace and one dependency graph, including edges between peers. |
-| `versionGroups` and implicit groups from shared spaces | Matching names join across active peers when their effective semver, counter and channel policies agree. Names ignore case. |
+| `versionGroups` and implicit groups from shared spaces | Local to the peer that declares them. A same-named group in another peer is a separate group with its own version, and `versionGroup` names a group of the same repository. An unqualified `--group` selects the matching group of every peer. |
 | Other space definitions and package configuration | Each peer owns its own paths and package declarations. A matching space name alone does not combine folders or scripts. |
 | `scripts`, `env`, `flow`, parser, commit and lock policy | Resolve from the owning peer and its normal configuration layers. They do not merge across peers. |
 | `execution`, `runOutputs` and repository participation | Read from the entry peer for this invocation. |
 | Run concurrency, logging and root `webhooks` | Read from the entry peer, as described under [What to watch for](#what-to-watch-for). |
-
-This merging rule belongs to identity-linked fleets. In a [control repository](./control-repository.md), imported
-source groups remain local unless the control file itself declares a shared group.
 
 ## How commits reach packages
 

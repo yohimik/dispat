@@ -1066,10 +1066,7 @@ func validate(c *File, allowEmpty bool) error {
 	// versioning is normalized: a reference may name another space's
 	// implicit group.
 	for name, s := range c.Spaces {
-		// A linked peer may reference a group declared by another participant,
-		// including a space whose folder supplies its shared policy. Discovery
-		// validates those references after the fleet namespace has been composed.
-		if s.VersionGroup == "" || c.Repository != "" {
+		if s.VersionGroup == "" {
 			continue
 		}
 		if _, _, err := resolveVersionGroup(c, s.VersionGroup); err != nil {
@@ -1921,11 +1918,7 @@ func discoverPackagesMode(c *File, root string, folderInputs folderInputPolicy) 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return d.discoverPackages()
-}
-
-func (d *discovery) discoverPackages() ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	spaceNames := sortedSpaceNames(d.c) // deterministic discovery order
+	spaceNames := sortedSpaceNames(c) // deterministic discovery order
 	for _, sn := range spaceNames {
 		if err := d.scanSpace(sn); err != nil {
 			return nil, nil, nil, err
@@ -1936,7 +1929,7 @@ func (d *discovery) discoverPackages() ([]*model.Package, []DeclaredDependency, 
 	// ones below.
 	if err := (keyCheck{
 		label:      "packages",
-		entries:    d.c.Packages,
+		entries:    c.Packages,
 		consumed:   d.consumed,
 		ignored:    d.excluded,
 		missing:    "matches no package folder (a standalone package needs a path)",

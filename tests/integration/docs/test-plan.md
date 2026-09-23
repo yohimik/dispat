@@ -1334,7 +1334,7 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestForIteratesPackages`                       | `-p` iterates over the packages the terms name, in discovery order, describing each with the release environment's own variable names: a declared group, a space that versions as one lending its members its name, and `DISPAT_GROUP` unset rather than empty for an independent package. A term matching nothing is an error, never a loop that ran zero times. |
 | `TestForRunsEveryItemWhereTheCommandWasInvoked` | The two halves of one decision: a relative path in the script resolves in the invocation folder for every item, so one path means one file however long the list, while `DISPAT_DIR` carries the item's own folder as an absolute path for a script that wants it. |
 | `TestForIteratesSpacesAndGroups`                | `-s` and `-g` iterate over the spaces and the versioning groups themselves rather than over the packages inside them; a space carries its primary folder, a group carries no folder because it is a versioning relationship; and an unknown term fails with the filter's own message, cross-flag hint included. |
-| `TestFleetSpaceLoopsAndCurrentFolderKeepDistinctOwners` | A fleet loop visits each owner of an equal space name, shared version groups remain a single item, and a current-folder subject reads the actual peer owner. |
+| `TestFleetSpaceLoopsAndCurrentFolderKeepDistinctOwners` | A fleet loop visits each owner of an equal space name, a group name two peers declare lists once, and a current-folder subject reads the actual peer owner. |
 | `TestForReadsTheConfigOnlyWhenTheListNeedsIt`   | The command's cost rule as one comparison: a path and `cwd` place the loop with nothing read, `pkg:` places it correctly, and then the config file is broken and only the invocations that had to look something up notice. `--in` moves every iteration, not only the first. |
 | `TestForCannotBeToldWhichItemItIsOn`            | The iterator variables are appended last, so an outer `DISPAT_ITEM`, `DISPAT_INDEX`, `DISPAT_TOTAL` or `DISPAT_PACKAGE` inherited from an enclosing run loses. That is what makes a loop safe to nest inside a release stage, which is its natural home. |
 | `TestForUsesTheConfiguredShell`                 | The reason the command exists: a bashism invalid under `/bin/sh -c` succeeds once `shell` names bash, so the loop body runs through the shell the repository configured rather than through a fixed one.        |
@@ -2053,16 +2053,8 @@ cannot make the rest of the goal pass.
 
 | Test | Invariant |
 | --- | --- |
-| `TestLinkedGroupsUseTheReferenceUnicodeEquivalence` | Unicode-equivalent group names merge consistently and conflicting policies fail from either fleet entry. |
-| `TestLinkedGroupsMergeEverySharedModeFromEitherEntry` | All six shared-version modes combine same-name groups across linked peers and produce the same plan from either entry. |
-| `TestLinkedGroupsResolvePeerDeclarationsAndKeepOwnerSettings` | A group declared by only one peer resolves throughout the fleet, releases at one version, preserves owner scripts and environment, and converges. |
+| `TestLinkedGroupsStayRepositoryLocal` | Two linked peers each version a group named `platform`, declared or as a shared space, at different baselines: each group releases on its own version, the plan is the same from either entry, an unqualified `--group platform` releases both local groups and nothing else, and a `versionGroup` naming only the other peer's group is refused at load. |
 | `TestLinkedSpaceExecUsesEntrySettings` | Equal local space names in linked peers do not lend `exec --for space:` the other peer's script, environment, or working directory; the named space belongs to the entry. |
-| `TestLinkedGroupsResolveImplicitFolderPolicies` | A folder-level shared space policy supplies an implicit group another peer can reference. |
-| `TestLinkedGroupsRefuseConflictingAxes` | Conflicting semver, counter or channel declarations fail visibly before publication from either entry. |
-| `TestLinkedGroupsExcludeDisabledDeclarations` | Disabled peers neither contribute missing groups nor veto active group policies. |
-| `TestLinkedGroupsKeepIndependentChannelsAcrossPeerReleases` | Shared prefixes cross repository boundaries while independent channels graduate only the named peer and survive later group movement. |
-| `TestLinkedGroupsMergeImplicitNamesAndPreserveMemberOverrides` | Implicit space names merge case-insensitively while deeper package policies retain W237 convergence. |
-| `TestLinkedGroupsKeepIndependentSpacesOutsideTheNamespace` | An owner-local independent space neither joins nor vetoes another peer's explicit group. |
 | `TestChoreographyComposesOneFleetFromAnyEntry` | A run started in either peer composes the same repositories and plans the same packages, naming the entry and linked repositories, and a two-sided pair reports nothing. |
 | `TestChoreographyRefusesASecondLinkPath` | A cyclic link graph fails release planning with E338 because two paths give ambiguous release evidence. |
 | `TestChoreographyRefusesAnIdentityItCannotTrust` | A linked checkout with a missing or mismatched identity is `E339`; both planning and compute refuse to trust that identity. |

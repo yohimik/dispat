@@ -180,24 +180,18 @@ boundaries, so nothing else may reach into them.
 ### Choreographed fleets
 
 An identity-linked fleet has no control repository: every participant states its own `repository` identity, optionally
-lists other peers in `repositories`, carries its own configuration and records, and is joined to its neighbours by two-sided submodule links. The
-keys a control repository owns are refused rather than ignored there, because a fleet with no such repository cannot
-honour a policy written for one, and a key nothing reads is how a fleet comes to believe it is linked. Participation is
-still the invocation's question and is read from the entry repository alone, while commit policy, lock policy and
-release records belong to each peer. Active peers share one case-insensitive version-group namespace: matching
-`versionGroups` declarations and implicit groups from shared spaces join when their effective semver, counter and
-channel policies agree, and conflicting declarations are refused. A peer may refer to a group another active peer
-declares; disabled peers contribute no declarations. This differs from centrally imported sources, whose local groups
-remain separate unless the control repository declares a shared group. Package dependencies form one graph, while
-scripts, environment, paths, flow, parser, commit and lock settings remain with their owning peer; `execution`,
-`runOutputs` and participation are read from the entry only. The links must form a tree, so exactly one route joins any two repositories and
-cross-repository evidence has one reading. `dispat compute --topology minimal` preserves existing links and proposes
-the fewest additions that connect the roster. Every such proposal adds the same number of links, so it joins the
-groups the existing links leave the fleet in at their centres, which keeps the longest route between two repositories
-as short as those links allow: the work of reading link evidence and of settling a release across the fleet grows
-with that route. `--topology star` proposes a direct link from the entry repository to every peer and errors when
-existing links cannot fit that shape. Neither mode commits nor removes a link. The full contract is
-[A choreographed fleet](packages/docs/docs/choreographed-repositories.md).
+lists other peers in `repositories`, carries its own configuration and records, and is joined to its neighbours by
+two-sided submodule links. The keys a control repository owns are refused rather than ignored there, because a fleet
+with no such repository cannot honour a policy written for one, and a key nothing reads is how a fleet comes to believe
+it is linked. Participation is still the invocation's question and is read from the entry repository alone, while
+commit policy, lock policy and release records belong to each peer. The links must form a tree, so exactly one route
+joins any two repositories and cross-repository evidence has one reading. `dispat compute --topology minimal` preserves
+existing links and proposes the fewest additions that connect the roster. Every such proposal adds the same number of
+links, so it joins the groups the existing links leave the fleet in at their centres, which keeps the longest route
+between two repositories as short as those links allow: the work of reading link evidence and of settling a release
+across the fleet grows with that route. `--topology star` proposes a direct link from the entry repository to every
+peer and errors when existing links cannot fit that shape. Neither mode commits nor removes a link. The full contract
+is [A choreographed fleet](packages/docs/docs/choreographed-repositories.md).
 
 ### Linked configuration
 

@@ -47,9 +47,8 @@ type discovery struct {
 
 	// spaceConfigs and onlyChecks feed the autoVersion.only check, which needs
 	// every package discovered before it can say a name is unknown.
-	spaceConfigs   map[string]SpaceConfig
-	resolvedSpaces map[string]spaceLayers
-	onlyChecks     []onlyCheck
+	spaceConfigs map[string]SpaceConfig
+	onlyChecks   []onlyCheck
 }
 
 // onlyCheck is one autoVersion block whose `only` list is still to be held
@@ -95,15 +94,6 @@ type spaceScan struct {
 	fileConsumed  map[string][]string
 }
 
-// spaceLayers is the immutable folder configuration snapshot used by both
-// fleet group composition and package discovery.
-type spaceLayers struct {
-	config  SpaceConfig
-	dirs    []string
-	files   []SpaceFile
-	sources []string
-}
-
 type folderInputPolicy func(string) bool
 
 func allowAllFolderInputs(string) bool { return true }
@@ -125,14 +115,13 @@ func newDiscoveryMode(c *File, root string, folderInputs folderInputPolicy) (*di
 		// The merged declaration list: the root config's own `dependencies`
 		// first, in file order, then each space's object and each package's
 		// list in discovery order.
-		declared:       collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}}),
-		owner:          make(map[string]string),
-		ownerFold:      make(map[string]string),
-		consumed:       make(map[string][]string),
-		baseIgnore:     appendLayer(nil, rootIgnore),
-		folderInputs:   folderInputs,
-		spaceConfigs:   make(map[string]SpaceConfig, len(c.Spaces)),
-		resolvedSpaces: make(map[string]spaceLayers, len(c.Spaces)),
+		declared:     collectObjectDeps(nil, c.Dependencies, DepSource{KeyPath: []string{"dependencies"}}),
+		owner:        make(map[string]string),
+		ownerFold:    make(map[string]string),
+		consumed:     make(map[string][]string),
+		baseIgnore:   appendLayer(nil, rootIgnore),
+		folderInputs: folderInputs,
+		spaceConfigs: make(map[string]SpaceConfig, len(c.Spaces)),
 	}, nil
 }
 
@@ -142,9 +131,6 @@ func newDiscoveryMode(c *File, root string, folderInputs folderInputPolicy) (*di
 // is the first phase of resolveSpace, and the whole of what
 // ResolvedSpaceConfigs needs.
 func (d *discovery) resolveSpaceConfig(sn string) (SpaceConfig, []string, []SpaceFile, []string, error) {
-	if cached, ok := d.resolvedSpaces[sn]; ok {
-		return cached.config, cached.dirs, cached.files, cached.sources, nil
-	}
 	sc := spaceBase(d.c, d.c.Spaces[sn])
 	dirs := make([]string, len(sc.Path))
 	for i, p := range sc.Path {
@@ -183,7 +169,6 @@ func (d *discovery) resolveSpaceConfig(sn string) (SpaceConfig, []string, []Spac
 		srcs = append(srcs, spaceSrc)
 	}
 	d.spaceConfigs[sn] = sc
-	d.resolvedSpaces[sn] = spaceLayers{config: sc, dirs: dirs, files: files, sources: srcs}
 	return sc, dirs, files, srcs, nil
 }
 

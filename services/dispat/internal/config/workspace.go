@@ -717,14 +717,6 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 	var declared []DeclaredDependency
 	var excluded []ExcludedDir
 	gitRoots := &gitRootMemo{byDir: make(map[string]string)}
-	var linkedDiscoveries map[string]*discovery
-	if workspace.IsLinked() {
-		var err error
-		linkedDiscoveries, err = resolveLinkedGroups(workspace, gitRoots)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
 	for _, repo := range workspace.Repositories {
 		if !repo.Control && !repo.Imported {
 			continue
@@ -734,11 +726,7 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 		var ex []ExcludedDir
 		var err error
 		folderInputs := newWorkspaceFolderPolicy(workspace, &repo, gitRoots)
-		if linkedDiscoveries != nil {
-			local, deps, ex, err = linkedDiscoveries[repo.Name].discoverPackages()
-		} else {
-			local, deps, ex, err = discoverPackagesMode(repo.Config, repo.Root, folderInputs.allow)
-		}
+		local, deps, ex, err = discoverPackagesMode(repo.Config, repo.Root, folderInputs.allow)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -776,9 +764,6 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 						group = p.Space.Name
 					}
 					p.Space.GroupIdentity = repo.Name + "\x00" + group
-					if workspace.IsLinked() {
-						p.Space.GroupIdentity = foldGroupName(group)
-					}
 				}
 			}
 			pkgs = append(pkgs, p)

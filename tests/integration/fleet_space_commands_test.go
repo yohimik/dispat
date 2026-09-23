@@ -74,8 +74,10 @@ func TestFleetSpaceCommandsResolvePeerOwner(t *testing.T) {
 	}
 }
 
-// Selecting spaces visits each physical owner's primary folder, while a
-// current-folder subject selects that owner despite an equal entry name.
+// Selecting spaces visits each physical owner's primary folder. A group name
+// both peers declare lists once, because a group loop iterates over names while
+// each peer keeps its own group. A current-folder subject selects the actual
+// owner despite an equal entry name.
 func TestFleetSpaceLoopsAndCurrentFolderKeepDistinctOwners(t *testing.T) {
 	fleet := spaceCommandFleet(t, true)
 	entry := fleet.enter("api")
@@ -86,7 +88,7 @@ func TestFleetSpaceLoopsAndCurrentFolderKeepDistinctOwners(t *testing.T) {
 	assert.FileExists(t, entry.Path(".links", "sdk", "packages", "visited.txt"))
 	groups := entry.Command("for", "-g", "train", "--do", `echo "GROUP:$DISPAT_GROUP"`)
 	require.Zero(t, groups.Code, "%s\n%s", groups.Stdout, groups.Stderr)
-	assert.Equal(t, 1, strings.Count(groups.Stdout, "GROUP:Train\n"), "shared fleet version groups remain one loop item")
+	assert.Equal(t, 1, strings.Count(groups.Stdout, "GROUP:Train\n"), "a group name two peers declare lists once")
 	res = entry.Shell("dispat exec visit-peer --for root")
 	require.Zero(t, res.Code, "%s\n%s", res.Stdout, res.Stderr)
 	body, err := os.ReadFile(entry.Path(".links", "sdk", "packages", "owner.txt"))
