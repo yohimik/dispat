@@ -466,10 +466,20 @@ func (c *Coordinator) readReportedOutcome(task string, attempt int, outcome rele
 	}
 	if result.Status != StatusSucceeded {
 		return outcome, c.refuseTask(task, result.Node, attempt, fmt.Errorf(
-			"the node reported the %s frame as %s%s (exit %d)",
-			result.Kind, result.Status, formatFailedPart(result), result.Exit))
+			"the node reported the %s frame as %s%s%s",
+			result.Kind, result.Status, formatFailedPart(result), formatExitStatus(result.Exit)))
 	}
 	return outcome, nil
+}
+
+// formatExitStatus names the exit status a node reported for the command that
+// failed its frame, and says nothing for a failure that was not a command's,
+// which a node reports as 0.
+func formatExitStatus(exit int) string {
+	if exit == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (exit %d)", exit)
 }
 
 // reportTaskFinished is the one line a finished task produces: what it was,

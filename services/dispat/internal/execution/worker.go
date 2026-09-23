@@ -513,6 +513,7 @@ func (w *Worker) answerTask(ctx context.Context, bounded context.Context, task *
 		Assignment:  tip.OID,
 		Status:      outcome.status,
 		FailedPart:  outcome.failedPart,
+		Exit:        outcome.exit,
 		Reason:      string(outcome.reason),
 		Platform:    Platform{OS: w.Report.OS, Arch: w.Report.Arch, Dispat: w.Report.Dispat},
 		Exports:     formatExports(outcome.exports),

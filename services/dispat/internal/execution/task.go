@@ -19,7 +19,9 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -47,8 +49,11 @@ const taskReportTimeout = 30 * time.Second
 // taskOutcome is what running one frame produced, in the shape a result
 // message states it.
 type taskOutcome struct {
-	status      string
-	failedPart  string
+	status     string
+	failedPart string
+	// exit is the exit status of the command that failed the frame, 0 when
+	// the failure was not a command's (an input, a deadline, a refusal).
+	exit        int
 	reason      OutputReason
 	exports     []plan.Output
 	strayWrites int
@@ -243,10 +248,23 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 			continue
 		}
 		log.Warn().Err(err).Str("stage", part.stage).Str("part", part.name).Msg("stage failed")
-		return taskOutcome{status: StatusFailed, failedPart: part.name,
+		return taskOutcome{status: StatusFailed, failedPart: part.name, exit: resolveExitStatus(err),
 			exports: produced.Outputs, expectedTip: expectedTip}
 	}
 	return taskOutcome{status: StatusSucceeded, exports: produced.Outputs, expectedTip: expectedTip}
+}
+
+// resolveExitStatus is the exit status of the command behind a frame failure,
+// so that the run hears "exit 1" for a script that failed and not the zero of
+// a field nobody filled. A failure that was not a command's, a script the
+// shell could not start or a context ended by the node, has none and reads
+// as 0.
+func resolveExitStatus(err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return 0
 }
 
 // resolveFrameStage is the stage the scripts of one assignment believe they
