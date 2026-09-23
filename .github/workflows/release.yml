@@ -547,7 +547,9 @@ jobs:
         # with the cross-compiled binaries its containerised build stage
         # exported. The dispat package's postPublish hook writes this step's
         # cli-released / cli-version outputs, and fires only when that package
-        # published (services/dispat/dispat.yaml). The announcement is the
+        # published (services/dispat/dispat.yaml); the npm package's writes
+        # npm-released / npm-version / npm-binary-version the same way
+        # (packages/cli/dispat.yaml). The announcement is the
         # docs package's announce stage, which posts after the site deploy and
         # only for a docs release that picks up a new dispat
         # (packages/docs/dispat.yaml).

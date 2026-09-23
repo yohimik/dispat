@@ -25,7 +25,13 @@ scripts:
     pnpm compile:test
     node test-build/smoke-artifact.js
   publish: node build/scripts/publish.js
-  announce: |
+  # What the release did, as step outputs for the job that installs the npm
+  # package afterwards. Like the dispat package's `released`, it is the
+  # postPublish hook: it runs only after this package's own publish succeeded,
+  # so a run that never published it leaves npm-released unset. The
+  # announcement is the docs package's. Outside Actions there is no
+  # $GITHUB_OUTPUT, and /dev/null takes the lines a human does not need.
+  released: |
     echo "npm-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "npm-version=$DISPAT_NEW_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "npm-binary-version=$DISPAT_WORKSPACE_DISPAT_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
@@ -33,7 +39,7 @@ scripts:
 flow:
   build: release-build
   publish: publish
-  announce: announce
+  postPublish: released
 github:
   footer:
     - line: ["---", ""]
