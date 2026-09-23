@@ -478,6 +478,8 @@ func TestExecutionRemoteBuildFailureFailsThePackageLocally(t *testing.T) {
 				"the package failed at its build stage\nstdout:\n%s", res.Stdout)
 			assert.Equal(t, "orchestrator", executionProbeValue(t, rig, "onfail", "ui"),
 				"the outcome script ran here, never on the node")
+			assert.Contains(t, res.Stdout, "(exit 4)",
+				"the run names the exit status of the command that failed on the node\nstdout:\n%s", res.Stdout)
 			placed := rig.nodesByPackage()
 			assert.Equal(t, executionNode, placed["docs"], "an unrelated package still built: %v", rig.runs())
 			assert.Equal(t, executionNode, placed["app"],
