@@ -1,5 +1,37 @@
 # Changelog
 
+## specs/agent-guide/v1.11.0-rc.4 (2026-09-23)
+
+### Fixes
+
+- keep the guide's tests on the machine with release authority ([768f2ed](https://github.com/yohimik/dispat/commit/768f2ed0ca62c05c4c867a7050fca3de59df89ef)) (by yohimik, Claude Fable 5.1)
+  The guide's test suite performs releases on throwaway repositories, and a
+  worker refuses release initiation by design, so a sweep that placed the
+  suite on a worker failed it with E226. Every stage of the package now runs
+  on the orchestrator.
+
+- say that a sweep uses the pool and takes no lock ([4f65527](https://github.com/yohimik/dispat/commit/4f65527990454eaafa27841fda0ea120eecf1462)) (by yohimik, Claude Opus 5.5)
+  An agent reading a distributed repository is told that `--worker` adds
+  links for one invocation, and that `dispat run` places its tasks on the
+  same pool, carries the declared `runOutputs` back, and takes no release
+  lock, so it neither waits for a release nor stops one.
+
+- describe a distributed release ([bede09b](https://github.com/yohimik/dispat/commit/bede09bd29412bdb946b214bc3ce411bfbc2be9d)) (by yohimik, Claude Opus 5)
+  What to check before a run that delegates work, how to read the per-task
+  summary, what an unknown publication outcome means, and why a retained lock
+  is an operator's decision.
+
+- say how a group's sharing rule limits a directive's reach ([e1b83ab](https://github.com/yohimik/dispat/commit/e1b83ab6e4235ae18e5992c2fb20f05345385c84)) (by yohimik)
+  With independent channels only the packages a directive names enter or leave
+  a train, so an agent reviewing version-group effects has to name every
+  package it intends to move and confirm the result before releasing.
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## specs/agent-guide/v1.11.0-rc.3 (2026-09-20)
 
 No changes: a version bump to keep the versioning group on one major and minor version.
