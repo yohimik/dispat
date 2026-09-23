@@ -26,14 +26,18 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"sync"
+
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // ownership is the run's memory of the last answer, and of the cancellations
 // that a loss has to reach.
 type ownership struct {
 	// verify is the question itself, supplied by the caller that holds the
-	// locks: this package knows nothing about a release lock and must not.
+	// locks: this package does not know how a release lock is read, and knows
+	// only the two answers a verification that failed can give.
 	verify func(context.Context) error
 
 	// verifyGate orders remote checks so a successful check cannot return
@@ -105,12 +109,34 @@ func (c *Coordinator) checkOwnership(ctx context.Context) error {
 	c.ownership.isLost = true
 	c.ownership.failure = NewIdentifiedDiagnostic(Identity{Run: c.Run},
 		CodeLockLost, CategoryNativeRecordingOrLock,
-		"this run no longer owns the release lock it took, so it starts no further assignment and issues no further authorization: %w", err)
+		"this run cannot show that it still owns the release lock it took, so it starts no further assignment and issues no further authorization: %w", err)
 	c.Log.Error().Err(err).Str("run", c.Run).Str("code", CodeLockLost).
-		Str("category", CategoryNativeRecordingOrLock).
+		Str("category", CategoryNativeRecordingOrLock).Str("reason", resolveLossReason(err)).
 		Msg("the release lock was lost, so no new effect may start")
 	c.haltAttempts()
 	return c.ownership.failure
+}
+
+// The two reasons a verification ends ownership, as the lost line names them.
+const (
+	// lossReasonLost is a remote that was read and carries another lock object
+	// under the lock's name, or none.
+	lossReasonLost = "lost"
+	// lossReasonUnverified is a remote that could not be read within the
+	// verification's bounded reads. The lock may still be there; this run just
+	// cannot show that it owns it, which is what a new effect needs.
+	lossReasonUnverified = "unverified"
+)
+
+// resolveLossReason tells the two apart for the lost line. The question and
+// its reading belong to the caller that holds the locks; what this package
+// knows is only the two answers a verification that did not succeed can give,
+// and anything that is not a positive loss is an answer that was not read.
+func resolveLossReason(err error) string {
+	if errors.Is(err, release.ErrLockLost) {
+		return lossReasonLost
+	}
+	return lossReasonUnverified
 }
 
 // haltAttempts ends every attempt this run has in flight. It runs under the

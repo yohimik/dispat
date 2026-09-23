@@ -9,14 +9,19 @@ package execution
 // asked about again.
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // TestAnAuthorizedPublisherMayBeWithdrawn: the state machine gains one step,
@@ -220,6 +225,35 @@ func TestOwnershipIsAskedAgainAndRememberedOnce(t *testing.T) {
 	after, done := coordinator.watchOwnership(t.Context())
 	defer done()
 	assert.Error(t, after.Err())
+}
+
+// TestOwnershipLossNamesItsReason: a lock read as gone and a lock that could
+// not be read at all both end ownership, because a new effect needs a lock
+// this run can show it owns. The one line that says so names which of the two
+// it was, so an operator reading an unreliable remote is not sent looking for
+// a second run that never existed.
+func TestOwnershipLossNamesItsReason(t *testing.T) {
+	for name, tc := range map[string]struct {
+		answer error
+		reason string
+	}{
+		"a lock read as gone":       {answer: fmt.Errorf("verifying: %w", release.ErrLockLost), reason: "lost"},
+		"a lock that was not read":  {answer: fmt.Errorf("verifying: %w", release.ErrLockUnverified), reason: "unverified"},
+		"a git that cannot read it": {answer: release.ErrLockUnreadable, reason: "unverified"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			coordinator := &Coordinator{Run: "run-1", Log: zerolog.New(&logs)}
+			coordinator.VerifyOwnershipWith(func(context.Context) error { return tc.answer })
+
+			err := coordinator.checkOwnership(t.Context())
+
+			require.ErrorIs(t, err, tc.answer)
+			assert.Equal(t, CodeLockLost, config.DiagnosticCode(err))
+			assert.Contains(t, logs.String(), `"reason":"`+tc.reason+`"`)
+			assert.Contains(t, logs.String(), "the release lock was lost, so no new effect may start")
+		})
+	}
 }
 
 func TestCancelledOwnershipLookupDoesNotReportLockLoss(t *testing.T) {

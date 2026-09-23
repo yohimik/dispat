@@ -100,7 +100,7 @@ func (a *App) newCoordinator(generation string, ownership func(context.Context) 
 //
 // It reads the locks the acquisition recorded rather than the remote, because
 // the generation names what this run took: asking the remote again would
-// answer what is there now, which is the question IsHeld exists for.
+// answer what is there now, which is the question VerifyHeld exists for.
 func (a *App) resolveOwnershipGeneration(fleet *workspaceRecorder) string {
 	if fleet == nil {
 		return release.ResolveGeneration(map[string]*release.Lock{"": a.releaseLock})

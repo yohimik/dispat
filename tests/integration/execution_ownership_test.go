@@ -76,6 +76,63 @@ func TestExecutionLostLockIsRememberedForEveryLaterTask(t *testing.T) {
 // orchestrator handles the lock loss and cancels later work.
 const executionOwnershipHold = "1"
 
+// executionLockReadPattern selects the one read of the remote release lock an
+// ownership check makes, and nothing else a release asks a remote: the
+// records comparison lists every tag without naming this one, and giving the
+// lock back is a push.
+const executionLockReadPattern = "*ls-remote --tags -- *refs/tags/" + lockTag
+
+// executionLockReadRetry is the line each failed read that is read again
+// writes.
+const executionLockReadRetry = "the release lock could not be read; reading it again"
+
+// TestExecutionOwnershipReadIsRetriedBeforeALoss: a read of the lock that
+// fails once says nothing about the lock, so it is read again and the release
+// carries on. A remote that answers none of the three reads is a lock this run
+// cannot show it owns, which stops every new effect exactly as a lost lock
+// does and says which of the two it was; the lock itself is still this run's,
+// so it is given back rather than left for an operator.
+func TestExecutionOwnershipReadIsRetriedBeforeALoss(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fault  harness.GitFault
+		isLost bool
+	}{
+		"the first read fails": {fault: harness.GitFault{Pattern: executionLockReadPattern, Nth: 1}},
+		"every read fails":     {fault: harness.GitFault{Pattern: executionLockReadPattern}, isLost: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newExecutionRig(t, func(cfg *models.File) {
+				cfg.Scripts["publish"] = models.Script{executionPublishProbe}
+			})
+			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+			fault := harness.NewGitFault(t, tc.fault)
+
+			res := rig.release(fault.Env()...)
+			stopAll(t, []*executionWorker{worker})
+
+			assert.False(t, remoteHoldsLock(t, rig.origin), "the lock this run still owned is given back")
+			if !tc.isLost {
+				require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+				assert.Equal(t, 1, executionLineCount(res, executionLockReadRetry),
+					"the failed read is read again once\nstdout:\n%s", res.Stdout)
+				assert.Zero(t, executionLineCount(res, "the release lock was lost, so no new effect may start"))
+				assert.Equal(t, []string{"core"}, executionProbedPackages(rig, "publish"))
+				assert.NotEmpty(t, executionReleaseTags(rig), "the release was recorded")
+				return
+			}
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Equal(t, 3, fault.Matches(), "three reads, then the answer")
+			assert.Equal(t, 2, executionLineCount(res, executionLockReadRetry))
+			lost, isLost := executionLine(res, "the release lock was lost, so no new effect may start")
+			require.True(t, isLost, "stdout:\n%s", res.Stdout)
+			assert.Equal(t, "unverified", lost.Str("reason"), "a lock nobody could read is not a lock read as gone")
+			assert.True(t, harness.IsCodePresent(executionEvents(res), executionLockCode))
+			assert.Empty(t, executionProbedPackages(rig, "publish"), "no publish command ran")
+			assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
+		})
+	}
+}
+
 // executionOriginRef is how a fixture script names the bare remote it writes
 // to, expanded by the shell that runs the script on the node.
 const executionOriginRef = "$" + executionOriginEnv

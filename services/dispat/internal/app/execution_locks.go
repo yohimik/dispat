@@ -24,7 +24,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
@@ -105,10 +104,13 @@ func formatRetainedRepository(repository string) string {
 // resolveOwnershipCheck is the question a distributed run asks before every
 // new assignment: does it still hold every lock it took.
 //
-// It is one query per owning repository and it asks the remote, because that
-// is the only place the answer can have changed. A run with no lock at all
-// asks nothing: the lock bypass is already refused for a run that delegates
-// work, so the only caller that reaches this without a lock is one that is not
+// It is one verification per owning repository and it asks the remote,
+// because that is the only place the answer can have changed. Each
+// verification is bounded and retries a failed read before it gives up (see
+// release.Lock.VerifyHeld), so an unreachable remote costs a bounded wait
+// rather than every later check of the run. A run with no lock at all asks
+// nothing: the lock bypass is already refused for a run that delegates work,
+// so the only caller that reaches this without a lock is one that is not
 // dispatching anything.
 func (a *App) resolveOwnershipCheck(fleet *workspaceRecorder) func(context.Context) error {
 	locks := a.resolveHeldLocks(fleet)
@@ -117,12 +119,11 @@ func (a *App) resolveOwnershipCheck(fleet *workspaceRecorder) func(context.Conte
 	}
 	return func(ctx context.Context) error {
 		for _, held := range locks {
-			isHeld, err := held.IsHeld(ctx)
-			if err != nil {
-				return fmt.Errorf("reading the release lock before starting a new effect: %w", err)
-			}
-			if !isHeld {
-				return errors.New("the release lock this run acquired is no longer on the remote")
+			if err := held.VerifyHeld(ctx); err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				return fmt.Errorf("verifying the release lock before starting a new effect: %w", err)
 			}
 		}
 		return nil
