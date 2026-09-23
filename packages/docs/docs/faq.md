@@ -22,8 +22,8 @@ because the tags are the whole memory. Follow the four steps in [Getting started
 Run `dispat status` to see the exact cause in the `reason` field before anything runs. The package might share a
 [version group](./reference/releasing/versioning.md) with something that moved (`fixed group versioning`, reported as
 `W234`), or a provider's commit carried a propagation marker such as `feat(core)^` (`propagated from core`). The third
-cause is a provider publishing in an earlier run where this package failed, so the current run discharges that debt
-(`catch-up from core`, reported as `W193`).
+cause is a provider publishing in an earlier run where this package failed or sat out, so the current run discharges
+that debt (`catch-up from core`, reported as `W193`).
 
 ## Why does `status` show fewer packages when I run it inside a package folder?
 

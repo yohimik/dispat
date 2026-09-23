@@ -36,9 +36,10 @@ func TestUnicodePackageSelectionRefusesAnAmbiguousRelease(t *testing.T) {
 	assert.Empty(t, r.TagList(), "no package may publish under an ambiguous selector")
 }
 
-// Receipt keys and tag spellings stay the package's exact published name even
-// when a dependency declared it through a Unicode case alias.
-func TestUnicodeDependencyReceiptRemainsReadableOnTheNextRun(t *testing.T) {
+// A dependency declared through a Unicode case alias of its provider's name
+// resolves to the provider's exact published name, so the release tags are
+// read back on the next run and nothing is released twice.
+func TestUnicodeDependencyAliasConvergesOnTheNextRun(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Dependencies = models.Dependencies{{Consumer: "app", Provider: "ς"}}

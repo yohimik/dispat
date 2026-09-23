@@ -11,11 +11,12 @@ import (
 	"github.com/yohimik/dispat/pkg/models"
 )
 
-// A consumer can ship its own work while a provider fails, then the project
-// can deliberately retire that provider before it publishes. The consumer's
-// immutable receipt still names the old provider release, but there is no
-// current edge or package to catch up; ordinary planning must converge.
-func TestAdmissionRemovedProviderLeavesHistoricalReceiptInert(t *testing.T) {
+// TestAdmissionRemovedProviderCreatesNoDebt: a consumer ships its own work
+// while its provider fails, then the project retires that provider before it
+// publishes. The provider's unit is still in the history the consumer released
+// past, but there is no current package or edge for it to be owed through, so
+// planning converges with nothing released.
+func TestAdmissionRemovedProviderCreatesNoDebt(t *testing.T) {
 	r := admissionRepo(t, admissionShape{})
 	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 	require.NotZero(t, r.Release().Code, "the provider publish fails")

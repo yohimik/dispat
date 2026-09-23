@@ -70,10 +70,10 @@ func TestChoreographyRecordsEveryPeerLocallyAndConverges(t *testing.T) {
 	}
 }
 
-// TestChoreographyMissingProviderTagBlocksConsumerReceipt makes the source
-// record fail after its publish script. The consumer cannot be tagged with a
-// receipt naming a provider version that never acquired its release record.
-func TestChoreographyMissingProviderTagBlocksConsumerReceipt(t *testing.T) {
+// TestChoreographyMissingProviderTagBlocksConsumer makes the source record
+// fail after its publish script. The consumer is blocked rather than tagged
+// against a provider version that never acquired its release record.
+func TestChoreographyMissingProviderTagBlocksConsumer(t *testing.T) {
 	fleet := crossRepositoryFleet(t)
 	fleet.writeConfig("sdk", func(cfg *models.File) {
 		cfg.Scripts["tag-collision"] = models.Script{
@@ -95,8 +95,10 @@ func TestChoreographyMissingProviderTagBlocksConsumerReceipt(t *testing.T) {
 
 // TestChoreographyCatchesUpAfterProviderOnlyRetry exercises the composed
 // history and fleet-link boundary: an app publishes its own work while its
-// library fails, misses the successful library-only retry, and later receives
-// the owed propagation without another library release or new source commit.
+// library fails, misses the successful library-only retry at a later commit,
+// and later receives the owed propagation without another library release or
+// new source commit. The owed window over the library's repository is what
+// keeps the library's unit in the plan once both have released past it.
 func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
 	fleet := crossRepositoryFleet(t)
 	fleet.writeConfig("api", func(cfg *models.File) {
@@ -126,6 +128,11 @@ func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
 	assert.Equal(t, []string{"sdk-pkg@0.1.0"}, tagsIn(api.Repo, ".links/sdk"),
 		"provider should keep only its bootstrap tag")
 
+	// The library's retry lands on a commit of its own, past the app's release:
+	// two releases on one commit could not be ordered afterwards.
+	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "chore(sdk-pkg): retry the provider")
+	api.Git("add", ".links/sdk")
+	api.Commit("chore: pin the provider retry")
 	provider := api.CommandEnv([]string{"DISPAT_IT_SDK_OK=1"}, "--package", "sdk-pkg")
 	require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
 	require.Contains(t, tagsIn(api.Repo, ".links/sdk"), "sdk-pkg@0.2.0")
@@ -141,20 +148,13 @@ func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
 	settled := api.Status("--require-release", "--package", "*")
 	assert.NotEqual(t, 0, settled.Code, "the catch-up converges")
 	assert.Contains(t, settled.Stdout, `"releasing":0`)
-
-	// A later deletion of the exact foreign tag named by the app's receipt
-	// is damaged fleet history, never permission to infer an old boundary.
-	api.Git("-C", ".links/sdk", "tag", "-d", "sdk-pkg@0.2.0")
-	damaged := api.Status("--package", "*")
-	assert.NotEqual(t, 0, damaged.Code)
-	assert.Contains(t, damaged.Stdout+damaged.Stderr, "records missing provider tag sdk-pkg@0.2.0")
 }
 
-// Retiring a package while keeping its source repository in the fleet leaves
-// old consumer tags with immutable receipts naming the removed provider.
-// Those receipts describe history, not a request to plan a deleted package or
-// release its former consumer again.
-func TestChoreographyRemovedProviderLeavesHistoricalReceiptInert(t *testing.T) {
+// TestChoreographyRemovedProviderCreatesNoDebt: retiring a package while its
+// source repository stays in the fleet leaves the consumer's old release, which
+// picked the provider up, as history. It is not a request to plan a deleted
+// package or to release its former consumer again.
+func TestChoreographyRemovedProviderCreatesNoDebt(t *testing.T) {
 	fleet := crossRepositoryFleet(t)
 	api := fleet.peer("api")
 	api.ReleaseOK("--package", "*")
@@ -165,7 +165,7 @@ func TestChoreographyRemovedProviderLeavesHistoricalReceiptInert(t *testing.T) {
 	api.Commit("chore: pin the library change")
 	fleet.workOnly("api", "feat(api-pkg): own work")
 	api.ReleaseOK("--package", "*")
-	require.Equal(t, 1, api.TagCount("api-pkg@0.2.0"), "the consumer has a provider receipt")
+	require.Equal(t, 1, api.TagCount("api-pkg@0.2.0"), "the consumer picked the provider up")
 
 	fleet.writeConfig("api", func(cfg *models.File) {
 		cfg.Dependencies = nil

@@ -216,25 +216,15 @@ own progress changes that on its own. A consumer that missed a run is still owed
 happens with no state file, no timestamp comparison, and no second traversal.
 
 Delivered has a precise meaning: some release of the provider sits on a commit that carries the propagating commit, and
-the dependant's own last release reached that release. A consumer release tag records which provider tag it saw, so
-two releases attached to one commit can still be ordered by durable evidence. Almost always the dependant's pending
-window answers this by
+the dependant's own last release reached that release. Almost always the dependant's pending window answers this by
 itself, because a dependant that has released nothing past the commit has been delivered nothing. The finer question is
 asked only about a dependant that got *ahead* of the commit, which is what a consumer does when it releases on a reason
 of its own while its provider's publish fails or is held. Such a consumer used to be lost: its own window no longer held
 the commit, so it was never planned again and kept the provider's previous version for ever. It is now released again
 when the provider publishes, and bumped for the delivery.
 
-The provider receipt is forward-looking. Older consumer tags have no such evidence. If an old consumer and provider
-tag point at the same commit, ancestry alone cannot prove which one published first; check the shipped dependency
-range and registry records before treating an empty plan as proof of delivery.
-Before a release runs its hooks or publishes anything, dispat checks that each planned provider receipt fits the
-16 KiB generated-receipt limit for the publish environment, allowing for either the provider's current tag or its planned tag. It checks the
-actual observation again immediately before each publish, including packages without a publish script. If a receipt
-is too large, the release stops before publication and reports the affected package; split the dependency fan-in or
-shorten package names before retrying. Older receipts above this generation limit remain readable up to the format's
-1 MiB decoding limit. A nested `dispat commit --tag` accepts an inherited receipt only when its provider names exist
-in the composed plan, and refuses an invalid receipt before making the release commit.
+When the provider publishes in a run the consumer sits out, dispat still reads the history after the provider's last
+release that the consumer reached, so the next run finds the debt.
 
 Four properties explain safe [failure recovery](#failure-and-recovery):
 
@@ -246,9 +236,8 @@ Four properties explain safe [failure recovery](#failure-and-recovery):
   exists rather than promise exactly-once network delivery.
 - **Same version under the same inputs.** A catch-up keeps its reviewed version while its baseline, corrected sources,
   and resolved source and target channels remain unchanged. If those inputs move, dispat surfaces the recomputed plan.
-- **No widening under the same admission inputs.** Targets only shrink while sources, traversal, channel eligibility,
-  and recorded provider delivery stay fixed. A provider published after the consumer's recorded boundary can expose
-  a finite follow-up, which must be reviewed before publishing.
+- **No widening under the same admission inputs.** Targets only shrink while sources, traversal, and channel eligibility
+  stay fixed. A newly eligible source or channel can expose a finite follow-up, which must be reviewed before publishing.
 
 dispat labels such a release a **catch-up** in the plan and reports it with the origin's *published* version. A package
 appearing with no commits of its own and no releasing dependency is otherwise baffling to review. Its version stage

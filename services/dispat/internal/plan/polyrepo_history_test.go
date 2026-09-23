@@ -240,6 +240,65 @@ func TestComposedPrereleaseUsesItsOwnProviderBoundary(t *testing.T) {
 	assert.EqualValues(t, 4, stats.CommitWindows.Load(), "each owner and provider keeps distinct stable and fresh shared windows")
 }
 
+// TestComposedOwedWindowOverTheProvidersRepository is §13.3's owed window in a
+// composed workspace (§27): app, in its own repository, released at a boundary
+// in lib's repository that holds lib's caret unit, lib failed to publish it and
+// published it later in a run app sat out. Neither ordinary window over lib's
+// repository holds the unit any more, so the owed window over that repository,
+// after the lib release app's boundary reaches, keeps app's debt visible.
+func TestComposedOwedWindowOverTheProvidersRepository(t *testing.T) {
+	libGit := newFakeGit(
+		commit{sha: "l1", message: "feat(lib): initial"},
+		commit{sha: "l2", message: "feat(lib)^: streaming"},
+		commit{sha: "l3", message: "chore(lib): retry the provider"},
+	).tag("lib", "1.0.0", "l1").tag("lib", "1.1.0", "l3")
+	appGit := newFakeGit(
+		commit{sha: "a1", message: "feat(app): own flag"},
+		commit{sha: "a2", message: "chore(app): catch up"},
+	).tag("app", "1.1.0", "a1")
+	control := &composedControlGit{fakeGit: newFakeGit()}
+	options := Options{
+		Packages: []*model.Package{
+			{Name: "lib", Dir: "/w/lib/lib", RepoRoot: "/w/lib", Repository: "lib-source", Space: &model.Space{Name: "libs"}},
+			{Name: "app", Dir: "/w/app/app", RepoRoot: "/w/app", Repository: "app-source", Space: &model.Space{Name: "apps"}},
+		},
+		Dependencies: []model.Dependency{{Consumer: "app", Provider: "lib"}},
+		Repositories: map[string]RepositoryHistory{
+			"control":    {Name: "control", Root: "/w", Git: control, Control: true},
+			"lib-source": {Name: "lib-source", Root: "/w/lib", Path: "lib", Git: libGit},
+			"app-source": {Name: "app-source", Root: "/w/app", Path: "app", Git: appGit},
+		},
+		RepositoryBaselines: []RepositoryBaseline{
+			{Consumer: "app", ReleaseTag: "app@1.1.0", Repository: "lib-source", Revision: "l2"},
+		},
+	}
+	stats := &HistoryStats{}
+	options.HistoryStats = stats
+	pl, err := Compute(context.Background(), control, options)
+	require.NoError(t, err)
+	require.False(t, pl.IsFatal(), "%v", pl.Diagnostics)
+	assert.False(t, pl.Releases["lib"].IsReleasing(), "lib released everything it had")
+	app := pl.Releases["app"]
+	require.True(t, app.IsReleasing(), "lib still owes app l2: %v", pl.Diagnostics)
+	assert.Equal(t, v(1, 1, 1), app.Next)
+	assert.True(t, app.CatchUp)
+	require.Len(t, app.Sources, 1)
+	assert.Equal(t, "lib", app.Sources[0].Provider)
+	assert.Equal(t, "l2", app.Sources[0].Commit, "public provenance keeps the raw source SHA")
+	assert.EqualValues(t, 4, stats.CommitWindows.Load(),
+		"three ordinary windows (lib's and app's in lib's repository, app's own) and one owed")
+
+	// app released the catch-up at a boundary past lib's release: its window
+	// over lib's repository is lib's own again and nothing is owed.
+	appGit.tag("app", "1.1.1", "a2")
+	options.RepositoryBaselines = append(options.RepositoryBaselines,
+		RepositoryBaseline{Consumer: "app", ReleaseTag: "app@1.1.1", Repository: "lib-source", Revision: "l3"})
+	settled, err := Compute(context.Background(), control, options)
+	require.NoError(t, err)
+	require.False(t, settled.IsFatal(), "%v", settled.Diagnostics)
+	assert.False(t, settled.Releases["app"].IsReleasing(), "the catch-up delivered lib's release")
+}
+
 func TestRepositoryBaselineMustNameExactConsumerReleaseTag(t *testing.T) {
 	source := newFakeGit(commit{sha: "a1", message: "feat(app): initial"}).tag("app", "1.0.0", "a1")
 	control := &composedControlGit{fakeGit: newFakeGit()}

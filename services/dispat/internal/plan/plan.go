@@ -9,14 +9,22 @@
 // properties of that text drive the whole design and are worth stating up
 // front:
 //
-//   - A unit bumps its own package while that package's window holds it.
-//     A dependent is bumped until its release has observed a provider tag
-//     carrying the unit. The dependent's window is the cheap pending case;
-//     an immutable provider receipt resolves releases at the same commit.
+//   - Every question of the form "does this commit still count?" is answered
+//     from tags and ancestry, and which package's release is consulted
+//     depends on the purpose. A unit bumps its own package while that
+//     package's window holds the commit (§13.6). It bumps a dependent until a
+//     release of the unit's source that carries the commit is one the
+//     dependent's own release reached (§13.4a): the dependent's window is the
+//     cheap pending case, and a dependent that got ahead of its source is
+//     owed the source's release all the same. Conflating the two silently
+//     orphans consumers after a partial publish, the failure §13.7a exists
+//     to prevent.
 //
-//   - Catch-up is part of normal propagation. The planner reads historical
-//     source units from the provider tag a consumer observed when needed,
-//     then uses the same dependency walk. No timestamp comparison decides it.
+//   - Catch-up is therefore not a repair pass. There is no second traversal
+//     and no timestamp comparison anywhere in this package. A consumer that
+//     is behind is a consumer some source still owes, found by the ordinary
+//     rule; the owed windows of §13.3 keep the commit it is owed in the
+//     union once the source has released it in a run the consumer sat out.
 //
 //   - The window is measured from the last *stable* tag, not the last tag of
 //     any kind. For a package on the stable channel the two coincide; for one
@@ -285,6 +293,7 @@ const (
 	// CodeBlocked marks a package that was planned but not attempted because a
 	// dependency failed to publish (§19.3). Non-suppressible.
 	CodeBlocked = "W194"
+
 	// --- manifests (§9.4, §12.4; emitted by the executor and by compute) ---
 
 	// CodeManifestVersionDrift marks a manifest whose declared own version
@@ -622,10 +631,7 @@ type Release struct {
 	// kind. On a prerelease train it is ahead of StableCommit, and everything
 	// at or behind it has already been published by the train; for a stable
 	// package the two coincide.
-	BaselineCommit string
-	// BaselineTagName is the exact ref read from Git. A parseable SemVer tag
-	// may carry build metadata that Version.String intentionally drops.
-	BaselineTagName   string `json:"-"`
+	BaselineCommit    string
 	baselineCommitKey string
 	FromInitials      bool // Current came from the config initials
 
@@ -674,9 +680,6 @@ type Release struct {
 
 	DueTo   []string      // providers that forced (at least) part of the bump
 	Sources []StaleSource // the same, with commit and depth detail
-	// SeenProviders is filled at publication with the provider release tags
-	// actually visible to this consumer. It is written into the release tag.
-	SeenProviders map[string]string
 	// Updates is every provider whose version this release picks up:
 	//
 	//	Updates = DueTo ∪ { configured providers releasing this run }
@@ -1431,12 +1434,9 @@ type computation struct {
 
 	parser *ccme.Parser
 
-	rel           map[string]*Release
-	tags          map[string]gitx.Tags           // package -> its tag listing, newest first
-	seenProviders map[string]map[string]string   // consumer -> provider -> tag seen at publication
-	seenCommits   map[string]map[string]string   // consumer -> provider -> qualified seen tag commit
-	receiptTags   map[string]map[string]gitx.Tag // provider -> exact tag, built lazily for receipts
-	window        map[string]*commitSet          // package -> the commits it has not released
+	rel    map[string]*Release
+	tags   map[string]gitx.Tags  // package -> its tag listing, newest first
+	window map[string]*commitSet // package -> the commits it has not released
 	// anc answers ancestry among the union's commits by the marker pass, for
 	// the repositories whose Git implementation lets Parents be trusted
 	// (gitx.UnionHistoryx). behindUnion holds the tag commits the union does
@@ -2097,15 +2097,9 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		}
 
 		newest, hasNewest := tags.Baseline()
-		if hasNewest {
-			if err := cp.loadReceipt(p.Name, newest); err != nil {
-				return fmt.Errorf("plan: %w", err)
-			}
-		}
 		if hasNewest && newest.Parsed {
 			rel.Baseline, rel.HasBaseline = newest.Version, true
 			rel.BaselineCommit = newest.Commit
-			rel.BaselineTagName = newest.Name
 		}
 		// §11.1: a package with no baseline is on the stable channel, so a
 		// never-released package is graduated by nothing and entered onto a
@@ -2152,33 +2146,14 @@ func (cp *computation) loadLegacyTagsAndWindows() error {
 		}
 		cp.windowKey[p.Name] = cacheKey
 	}
-	// A consumer may have published before its provider and then sat out the
-	// provider's successful retry. Its ordinary window starts after the
-	// source unit, so widen only the history read for that durable receipt;
-	// package windows themselves stay exactly where their tags put them.
-	for _, receipt := range cp.listProviderReceipts() {
-		consumer, provider, seenTag := receipt.consumer, receipt.provider, receipt.tag
-		if !cp.hasReceiptProvider(provider) {
-			continue // a deleted or disabled provider is outside this workspace
-		}
-		seen, err := cp.resolveReceiptBoundary(consumer, provider, seenTag)
-		if err != nil {
-			return fmt.Errorf("plan: %w", err)
-		}
-		if !cp.needsReceiptHistory(provider, seenTag) {
-			continue
-		}
-		cacheKey := commitWindowCacheKey(seen.Commit, seen.Name)
-		if seenBoundary[cacheKey] {
-			continue
-		}
-		seenBoundary[cacheKey] = true
-		boundaries = append(boundaries, windowBoundary{
-			key: cacheKey, since: seen.Name, commit: seen.Commit, pkg: consumer})
-	}
 
 	windows, err := cp.loadLegacyWindows(boundaries)
 	if err != nil {
+		return err
+	}
+	// The owed windows extend the union and nothing else: they are nobody's
+	// pending window, so the package windows below are the ordinary ones.
+	if err := cp.loadOwedWindows(boundaries); err != nil {
 		return err
 	}
 	for _, p := range cp.pkgs {
@@ -2955,9 +2930,12 @@ func (cp *computation) cancelledFor(commitKey, pkg string) bool {
 	return false
 }
 
-// cancelledForOwed checks a source contribution that the consumer released
-// past before the source published it. The consumer's tag cannot make this
-// obligation immutable; a later cancel of the consumer must still discard it.
+// cancelledForOwed is cancelledFor for a contribution the package released
+// past before its source delivered it (§13.4a). The package's own release,
+// prerelease included, published the commit and not the source's version, so
+// nothing about it is beyond a cancel's reach: the pending contribution lives
+// in the consumer's ledger, and a later `cancel(<consumer>)` discards it
+// (§13.5a, §13.7d).
 func (cp *computation) cancelledForOwed(commitKey, pkg string) bool {
 	for _, cancellation := range cp.cancels {
 		if cancellation.scope[pkg] && cancellation.closure(commitKey) {
@@ -3291,7 +3269,6 @@ func (cp *computation) finalise() {
 			continue
 		}
 		rel.Updates = cp.providerUpdates(rel, name)
-		rel.SeenProviders = cp.observedProviders(rel)
 	}
 
 	cp.reportCatchUp()

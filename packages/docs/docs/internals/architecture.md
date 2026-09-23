@@ -155,17 +155,14 @@ on the purpose. Conflating the two is the bug that loses releases:
 
 Reading the last two questions against the *source's* window silently orphans consumers after a partial publish. The
 commit leaves the provider's window when it releases, making the unit lose its source packages. The consumer then never
-releases on this or any future run. The target's window handles the ordinary catch-up. When a consumer has itself
-released past the propagating commit, its annotated tag also records the provider tag it saw. If the provider later
-publishes a release the consumer did not see, planning reads the earlier provider boundary and admits that still-owed
-contribution. This orders releases even when both tags point at the same source commit, without comparing tag dates.
-Tags written before provider receipts existed cannot supply this evidence; ancestry alone may miss that legacy case.
-The release planner bounds the canonical receipt against both baseline and possible same-run provider tags before
-scripts can have effects. Publish admission freezes and checks the actual receipt again, so even a no-script publish
-cannot leave an artefact whose tag dispat would reject on the next run. Generated receipts are capped at 16 KiB because
-the same encoded value enters a nested publish command's environment; the reader accepts earlier canonical receipts
-up to 1 MiB. Annotated tag messages go to Git through stdin, so the tag's payload is not constrained by command-line
-argument length. Nested commit steps validate inherited provider names against the composed plan before committing.
+releases on this or any future run. The target's window handles the ordinary catch-up. A consumer that has itself
+released past the propagating commit, on a change of its own while its provider failed or was held, is asked the finer
+question of §13.4a instead: whether some release of the provider carries the commit and the consumer's own release
+reached it. Once the provider has published in a run the consumer sat out, no ordinary window holds the commit, so the
+planner also reads the *owed window* of each provider and consumer pair (§13.3): the history after the newest provider
+release the consumer's baseline reaches. It is taken for every consumer the provider reaches, not only the direct ones,
+and read only where it reaches further back than the union of the ordinary windows; it admits nothing by itself. dispat
+uses no repair pass, no second traversal, and no timestamp comparison anywhere in the package.
 
 On a prerelease train, the window deliberately spans commits the train's prereleases already published. This lets §11.4
 recompute the train's target and a graduation's version over the whole train. But published work remains published. A
@@ -190,16 +187,16 @@ cancels only.
    dependency.
 
 There is no circularity in the other direction. Phase 1 reads only the units and the packages' *baselines*, never a
-value computed in this run. Normally both axes admit a contribution only while its commit remains in the
-dependant's fresh window. On the bump axis, a provider receipt can additionally keep a propagated contribution owed when the consumer
-published its own work before the provider did. After a successful consumer tag records seeing that provider release,
-the contribution is spent. The channel check also rejects a proposal when the package is already on that channel.
+value computed in this run. The channel axis admits a contribution only while its commit remains in the dependant's
+fresh window. The bump axis admits it there as well, and beyond it for as long as the provider still owes the dependant
+the commit: until a release of the provider carrying it is one the dependant's own release reached. The channel check
+also rejects a proposal when the package is already on that channel.
 
 Both axes share the traversal. It runs breadth-first from the unit's source packages with a single-visit, shortest-path
 depth. dispat measures this from the originating source set and never re-bases on an intermediate. A package
 republishing as a catch-up does not propagate onward. Across a retry, targets only shrink while the corrected sources,
-traversal, channel eligibility, and provider delivery boundaries remain unchanged. A provider publication after the
-consumer's recorded boundary can expose a newly owed delivery; dispat surfaces it in the next plan for review.
+traversal, and channel eligibility remain unchanged. If those inputs move, dispat surfaces any newly eligible targets
+for review before publishing.
 
 **Versioning groups.** Packages with shared versioning are grouped by their resolved group key. This key is the space's
 own name for a space with its own mode, or the declared `versionGroups` entry the space or package joined. A group may

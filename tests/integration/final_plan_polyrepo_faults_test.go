@@ -358,11 +358,11 @@ func TestFinalPolyrepoMalformedTagInventoryCannotEraseThePublishedBaseline(t *te
 	}{
 		{name: "missing fields", record: "core@0.1.0-without-object-fields", want: "malformed tag inventory record"},
 		{name: "missing peeled field", record: "core@0.1.0\t%s", want: "malformed tag inventory record"},
-		{name: "missing subject field", record: "core@0.1.0\t%s\t", want: "malformed tag inventory record"},
-		{name: "surplus malformed row", record: "core@0.1.0\t%s\t\tvalid subject\nsurplus", want: "malformed tag inventory record"},
-		{name: "missing tag identity", record: "\t%s\t\t", want: "malformed tag inventory identity"},
-		{name: "invalid object identity", record: "core@0.1.0\tinvalid\t\t", want: "malformed tag inventory identity"},
-		{name: "invalid peeled identity", record: "core@0.1.0\t%s\tinvalid\t", want: "malformed peeled tag object id"},
+		{name: "extra fields", record: "core@0.1.0\t%s\t\textra", want: "malformed tag inventory record"},
+		{name: "surplus malformed row", record: "core@0.1.0\t%s\t\nsurplus", want: "malformed tag inventory record"},
+		{name: "missing tag identity", record: "\t%s\t", want: "malformed tag inventory identity"},
+		{name: "invalid object identity", record: "core@0.1.0\tinvalid\t", want: "malformed tag inventory identity"},
+		{name: "invalid peeled identity", record: "core@0.1.0\t%s\tinvalid", want: "malformed peeled tag object id"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			fleet := finalPolyrepo(t)

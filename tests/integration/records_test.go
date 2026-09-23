@@ -112,8 +112,8 @@ func TestRecordsChangelogCustomFileTitleAndSections(t *testing.T) {
 }
 
 // TestRecordsTagsAreAnnotatedWithReleaseMessages: a release tag is an
-// annotated tag object (not a lightweight ref), its message includes a
-// canonical empty provider receipt, and it points at the released commit.
+// annotated tag object (not a lightweight ref), its message is the release
+// message, and it points at the commit that was released.
 func TestRecordsTagsAreAnnotatedWithReleaseMessages(t *testing.T) {
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): first release")
@@ -122,7 +122,7 @@ func TestRecordsTagsAreAnnotatedWithReleaseMessages(t *testing.T) {
 
 	assert.Equal(t, "tag", r.Git("cat-file", "-t", "core@0.1.0"),
 		"a release tag is an annotated tag object, not a lightweight ref")
-	assert.Equal(t, "release core@0.1.0 dispat-seen-v1:e30",
+	assert.Equal(t, "release core@0.1.0",
 		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@0.1.0"))
 	assert.Equal(t, r.Git("rev-parse", "HEAD"), r.Git("rev-list", "-n1", "core@0.1.0"),
 		"the tag peels to the released commit")
@@ -200,7 +200,7 @@ func TestRecordsForceRewritesAnUnreachableTag(t *testing.T) {
 
 	r.ReleaseOK()
 
-	assert.Equal(t, "release core@0.1.0 dispat-seen-v1:e30",
+	assert.Equal(t, "release core@0.1.0",
 		r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/core@0.1.0"),
 		"the tag now records this release")
 	assert.Equal(t, r.Git("rev-parse", "HEAD"), r.Git("rev-list", "-n1", "core@0.1.0"))

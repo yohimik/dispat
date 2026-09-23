@@ -114,7 +114,7 @@ func TestFinalHistoryRetainsWorkWhenBoundariesLeaveHEAD(t *testing.T) {
 		r.Commit("feat(utils): released utility feature")
 		r.Git("tag", "-a", "utils@1.1.0", "-m", "utils released")
 		inventory := r.Git("tag", "--list", "--merged", "HEAD", "--sort=-v:refname", "--sort=-creatordate",
-			"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)") + "\n"
+			"--format=%(refname:short)\t%(objectname)\t%(*objectname)") + "\n"
 		r.Git("checkout", "-q", "--orphan", "rewritten")
 		r.WriteFile("packages/core/rewritten.txt", "new root\n")
 		r.Commit("fix(core,utils): pending after rewritten history")
@@ -131,7 +131,7 @@ func TestFinalHistoryRetainsWorkWhenBoundariesLeaveHEAD(t *testing.T) {
 		f := finalFreshPrereleaseHistory(t)
 		oldInventory := f.control.Git("-C", "sources/lib", "tag", "--list", "--merged", "HEAD",
 			"--sort=-v:refname", "--sort=-creatordate",
-			"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)") + "\n"
+			"--format=%(refname:short)\t%(objectname)\t%(*objectname)") + "\n"
 		stable := f.control.Git("-C", "sources/lib", "rev-list", "-n", "1", "core@0.1.0")
 		fresh := f.control.Git("-C", "sources/lib", "rev-list", "-n", "1", "core@0.2.0-beta.0")
 

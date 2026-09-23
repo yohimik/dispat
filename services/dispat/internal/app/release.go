@@ -108,10 +108,6 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err != nil {
 		return nil, err
 	}
-	if err := plan.ValidatePlannedProviderReceipts(pl); err != nil {
-		a.log.Error().Err(err).Msg("refusing release with an unrecordable provider receipt")
-		return nil, err
-	}
 	if fleet != nil {
 		cleanup, err := a.prepareFleetRelease(ctx, pl, fleet)
 		if err != nil {

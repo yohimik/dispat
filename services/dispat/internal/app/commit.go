@@ -75,26 +75,6 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		a.log.Error().Err(err).Msg("cannot commit")
 		return err
 	}
-	// A nested publish can supply the outer run's provider observation. Check
-	// it before the commit or fleet settlement changes Git state; the nested
-	// replan's Sources need not match the outer run's Sources.
-	if opts.Tag && os.Getenv("DISPAT_STAGE") == "publish" {
-		if consumer := os.Getenv("DISPAT_PACKAGE"); consumer != "" {
-			for _, name := range covered {
-				if name != consumer {
-					continue
-				}
-				if payload, ok := os.LookupEnv(plan.ProviderReceiptEnvVar); ok {
-					if err := plan.ValidateInheritedProviderReceipt(pl, consumer, payload); err != nil {
-						err = fmt.Errorf("tag %s: invalid outer release receipt: %w", consumer, err)
-						a.log.Error().Err(err).Msg("cannot commit")
-						return err
-					}
-				}
-				break
-			}
-		}
-	}
 	if a.workspace != nil {
 		return a.commitWorkspace(ctx, pl, covered, opts)
 	}

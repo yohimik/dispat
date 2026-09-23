@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"sync"
 	"time"
@@ -61,9 +60,8 @@ type Result struct {
 	Name     string
 	From, To ccme.Version
 	// Channel is the channel the package is being released on (§11.1).
-	Channel     string
-	Status      Status
-	TagRecorded bool // the immutable release tag was written in this run
+	Channel string
+	Status  Status
 	// FailedStage names the stage that failed ("version", "build" or
 	// "publish"); empty unless Status is StatusFailed. Informational (shown
 	// in the summary).
@@ -619,10 +617,7 @@ type taskCtx struct {
 	// version stage wrote and which have since died. Non-empty only on a
 	// publish task admit decided may still proceed, and the whole of what that
 	// task's re-reconciliation has to act on (§19.5).
-	deadPickups []string
-	// Frozen immediately before publish, after provider outcomes settle. The
-	// same checked bytes go to nested commands and the eventual release tag.
-	receiptPayload string
+	deadPickups    []string
 	log            zerolog.Logger
 	publishRelease func()
 	// worker is the node this task's frame was executed on, empty for a frame
@@ -654,54 +649,10 @@ func (tc *taskCtx) finishPublishGuard() {
 	}
 }
 
-// captureSeenProviders freezes the provider records available when this
-// consumer published. A later provider-only run may put its tag on the same
-// Git commit; the consumer's tag needs this receipt to distinguish the order.
-func (tc *taskCtx) captureSeenProviders() {
-	seen := make(map[string]string)
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	for _, source := range tc.rel.Sources {
-		if _, recorded := seen[source.Provider]; recorded {
-			continue
-		}
-		provider := tc.plan.Releases[source.Provider]
-		if provider == nil {
-			continue
-		}
-		if provider.HasBaseline {
-			seen[source.Provider] = provider.BaselineTagName
-		} else {
-			seen[source.Provider] = ""
-		}
-		result := tc.results[source.Provider]
-		if provider.IsReleasing() && result != nil && result.Status == StatusPublished &&
-			(result.TagRecorded || tc.Tagger == nil) {
-			seen[source.Provider] = provider.TagName()
-		}
-	}
-	tc.rel.SeenProviders = seen
-	tc.log.Debug().Int("providers", len(seen)).Msg("release provider receipt fixed")
-}
-
-func (tc *taskCtx) prepareProviderReceipt() error {
-	tc.captureSeenProviders()
-	payload, err := plan.EncodeProviderReceipt(tc.rel.SeenProviders)
-	if err != nil {
-		return fmt.Errorf("%s: %w", tc.rel.Pkg.Name, err)
-	}
-	tc.receiptPayload = payload
-	return nil
-}
-
 // env builds the DISPAT_* environment of the task's scripts and hooks; stage
 // is what DISPAT_STAGE carries.
 func (tc *taskCtx) env(stage string) []string {
-	env := packageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, stage)
-	if stage == "publish" {
-		env = append(env, plan.ProviderReceiptEnvVar+"="+tc.receiptPayload)
-	}
-	return env
+	return packageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, stage)
 }
 
 // sequence assembles the task's command sequence in its package folder.
@@ -1078,10 +1029,6 @@ func (r *run) execute(ctx context.Context, t task) {
 	}
 
 	if t.kind == taskPublish {
-		if err := tc.prepareProviderReceipt(); err != nil {
-			fail(err, "provider receipt cannot be recorded")
-			return
-		}
 		if err := tc.loginGate(ctx); err != nil {
 			fail(err, "login failed")
 			return
@@ -1263,9 +1210,6 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 		if err := CreateReleaseTag(recCtx, tc.Tagger, rel, tc.Force, tc.log); err != nil {
 			tc.critical(res, TagFailureCode(err), err, "tagging failed")
 		} else {
-			tc.mu.Lock()
-			res.TagRecorded = true
-			tc.mu.Unlock()
 			tc.log.Debug().Str("tag", rel.TagName()).Msg("release tag written")
 		}
 	}
@@ -1400,22 +1344,6 @@ func CreateReleaseTagAs(ctx context.Context, tagger Taggerx, rel *plan.Release, 
 	if name != "" {
 		tag = name
 	}
-	// A publish script may explicitly run a step for another package. Only
-	// the outer package owns this receipt; the other package's replan must
-	// supply its own observed providers.
-	if os.Getenv("DISPAT_STAGE") == "publish" && os.Getenv("DISPAT_PACKAGE") == rel.Pkg.Name {
-		if encoded, ok := os.LookupEnv(plan.ProviderReceiptEnvVar); ok {
-			seen, err := plan.DecodeProviderReceipt(encoded)
-			if err != nil {
-				return fmt.Errorf("tag %s: invalid outer release receipt: %w", tag, err)
-			}
-			rel.SeenProviders = seen
-		}
-	}
-	message, err := plan.RenderReleaseTagMessage(tag, rel.SeenProviders)
-	if err != nil {
-		return fmt.Errorf("tag %s: %w", tag, err)
-	}
 	if insp, ok := tagger.(tagInspector); ok {
 		tags, err := insp.Tags(ctx, rel.Pkg.Name, rel.TagFormat())
 		if err != nil {
@@ -1450,7 +1378,7 @@ func CreateReleaseTagAs(ctx context.Context, tagger Taggerx, rel *plan.Release, 
 			}
 		}
 	}
-	if err := writeTag(ctx, tagger, force, tag, message, rel.ExportedCommit()); err != nil {
+	if err := writeTag(ctx, tagger, force, tag, "release "+tag, rel.ExportedCommit()); err != nil {
 		return err
 	}
 	createAliasTags(ctx, tagger, rel, log)

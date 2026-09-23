@@ -37,11 +37,6 @@ type Tag struct {
 	Name    string
 	Version ccme.Version
 	Parsed  bool
-	// Subject is the first line of an annotated tag's message. Release tags
-	// use it for durable delivery evidence; lightweight tags have no such
-	// evidence and retain the ordinary ancestry-only interpretation.
-	Subject   string
-	Annotated bool
 	// Commit is the commit the tag points at, annotated tags peeled. For a
 	// stable tag this is stableCommit(P) of §12.3, which is the origin of the
 	// package's pending window (§13.3) and the operand of the ancestry screen
@@ -876,7 +871,7 @@ func (c *LocalGitx) Tags(ctx context.Context, pkg string, format TagFormat) (Tag
 	// space, and %(*objectname) is empty for a lightweight tag.
 	out, err := c.run(ctx, "tag", "--list", "--merged", "HEAD",
 		"--sort=-v:refname", "--sort=-creatordate",
-		"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)",
+		"--format=%(refname:short)\t%(objectname)\t%(*objectname)",
 		format.Glob(pkg))
 	if err != nil {
 		return nil, err
@@ -899,7 +894,7 @@ func (c *LocalGitx) TagsForPackages(ctx context.Context, formats map[string]TagF
 	}
 	out, err := c.run(ctx, "tag", "--list", "--merged", "HEAD",
 		"--sort=-v:refname", "--sort=-creatordate",
-		"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)")
+		"--format=%(refname:short)\t%(objectname)\t%(*objectname)")
 	if err != nil {
 		return nil, err
 	}
@@ -940,10 +935,8 @@ func (m packageTagMatcher) matches(tag string) bool {
 }
 
 type tagInventoryEntry struct {
-	name      string
-	commit    string
-	subject   string
-	annotated bool
+	name   string
+	commit string
 }
 
 func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
@@ -959,18 +952,11 @@ func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 	if !ok {
 		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
 	}
-	object, remainder, ok := strings.Cut(rest, "\t")
-	if !ok {
+	object, peeled, ok := strings.Cut(rest, "\t")
+	if !ok || strings.Contains(peeled, "\t") {
 		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
 	}
-	peeled, subject, hasSubject := strings.Cut(remainder, "\t")
-	if !hasSubject {
-		// Every production listing requests the subject. Treating a truncated
-		// row as an old format would erase a delivery receipt and silently
-		// fall back to ancestry for releases at the same commit.
-		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
-	}
-	entry := tagInventoryEntry{name: strings.TrimSpace(name), commit: strings.TrimSpace(object), subject: subject}
+	entry := tagInventoryEntry{name: strings.TrimSpace(name), commit: strings.TrimSpace(object)}
 	if entry.name == "" || !fullObjectID(entry.commit) {
 		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory identity")
 	}
@@ -979,7 +965,6 @@ func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 			return tagInventoryEntry{}, fmt.Errorf("gitx: malformed peeled tag object id")
 		}
 		entry.commit = peeled
-		entry.annotated = true
 	}
 	return entry, nil
 }
@@ -988,11 +973,11 @@ func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 // A Tag can outlive planning, so keeping a small matching slice must not retain
 // the potentially very large inventory string that surrounded it.
 func (e tagInventoryEntry) detach() tagInventoryEntry {
-	return tagInventoryEntry{name: strings.Clone(e.name), commit: strings.Clone(e.commit), subject: strings.Clone(e.subject), annotated: e.annotated}
+	return tagInventoryEntry{name: strings.Clone(e.name), commit: strings.Clone(e.commit)}
 }
 
 func (m packageTagMatcher) read(entry tagInventoryEntry) Tag {
-	tag := Tag{Name: entry.name, Commit: entry.commit, Subject: entry.subject, Annotated: entry.annotated}
+	tag := Tag{Name: entry.name, Commit: entry.commit}
 	if version, ok := m.reader.ParseVersion(entry.name); ok {
 		tag.Version, tag.Parsed = version, true
 	}
@@ -1573,14 +1558,11 @@ func (c *LocalGitx) createTag(ctx context.Context, name, message, target string,
 	if force {
 		args = append(args, "-f")
 	}
-	// A release receipt can be large enough to exceed the operating system's
-	// per-argument limit. Git reads -F - from stdin without putting the
-	// annotation in the process arguments or in a temporary file.
-	args = append(args, "-a", name, "-F", "-")
+	args = append(args, "-a", name, "-m", message)
 	if target != "" {
 		args = append(args, target)
 	}
-	_, err := c.runStream(ctx, gitStream{stdin: strings.NewReader(message)}, args...)
+	_, err := c.run(ctx, args...)
 	return err
 }
 

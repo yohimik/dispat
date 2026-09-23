@@ -61,7 +61,7 @@ func (cp *computation) owedSources(target, commitKey string, sources []string) [
 	}
 	owed := make([]string, 0, len(sources))
 	for _, name := range sources {
-		if cp.isDelivered(target, name, commitKey, baseline) {
+		if cp.isDelivered(name, commitKey, baseline) {
 			continue
 		}
 		owed = append(owed, name)
@@ -95,17 +95,7 @@ func (cp *computation) baselineBoundary(pkg, commitKey string) string {
 // carrying C that the target's own release did not reach has delivered nothing
 // to it, and a release of P the target reached that does not carry C delivered
 // something older.
-func (cp *computation) isDelivered(consumer, provider, commitKey, baseline string) bool {
-	seenName, hasReceipt := cp.seenProviders[consumer][provider]
-	if hasReceipt {
-		if seenName == "" {
-			return false
-		}
-		// The exact provider tag visible to the consumer is authoritative.
-		// SemVer order cannot establish publication order across branches.
-		seen := cp.seenCommits[consumer][provider]
-		return cp.ancestorOrSelf(commitKey, seen) && cp.ancestorOrSelf(seen, baseline)
-	}
+func (cp *computation) isDelivered(provider, commitKey, baseline string) bool {
 	for _, released := range cp.releaseCommits(provider) {
 		if !cp.ancestorOrSelf(commitKey, released) {
 			continue // that release of the provider does not carry the commit
