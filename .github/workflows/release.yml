@@ -224,8 +224,17 @@ jobs:
     if: needs.plan.outputs.releasing == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write     # the badge branch
+      contents: write     # the badge branch, and the suite's coordination branches
       id-token: write     # Workload Identity Federation, for the worker machine
+    env:
+      # The worker machine runs only where the GitHub App that gives it a Git
+      # credential of its own is configured: its client id as a repository
+      # variable and its private key as a secret. Without them the suite runs
+      # on this runner alone.
+      CI_WORKER: ${{ (vars.CI_WORKER_APP_CLIENT_ID != '' && secrets.CI_WORKER_APP_PRIVATE_KEY != '') && 'true' || '' }}
+      # The node's name, this run's own, so the coordination branches of one
+      # run are never mistaken for another's.
+      DISPAT_CI_WORKER_NODE: ci-worker-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -253,28 +262,53 @@ jobs:
       # The suite runs distributed: this job is the orchestrator and one
       # Compute Engine worker, created here and deleted at the end of the job
       # whatever the suite did, takes tasks beside it. dispat dog-foods its own
-      # worker nodes on every release. auth is the same Workload Identity
-      # exchange the release job performs; the worker script runs gcloud
-      # inside the release tools image, so the runner installs nothing. The
-      # signing secret is this run's alone: generated here, masked, handed to
-      # the machine over ssh, and the orchestrator reaches the mailbox with
-      # the ephemeral key the script made.
+      # worker nodes on every release. The mailbox is this repository: the job
+      # names the node alone and reaches the repository with the credential
+      # its checkout persisted, and the worker polls it over https with an
+      # installation token of a GitHub App, never this job's GITHUB_TOKEN,
+      # which can push the release branch and tags. auth is the same Workload
+      # Identity exchange the release job performs; the worker script runs
+      # gcloud inside the release tools image, so the runner installs nothing.
+      # The signing secret is this run's alone: generated here, masked, and
+      # handed to the machine over ssh.
       - name: Authenticate to Google Cloud
+        if: env.CI_WORKER != ''
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_RELEASER_SA }}
 
-      - name: Add a worker machine to this job
+      - name: Create the worker machine
+        if: env.CI_WORKER != ''
         run: |
           secret=$(openssl rand -hex 32)
           echo "::add-mask::$secret"
           echo "DISPAT_EXECUTION_SECRET=$secret" >> "$GITHUB_ENV"
-          export DISPAT_EXECUTION_SECRET="$secret"
           sh scripts/ci-worker.sh create
-          sh scripts/ci-worker.sh start "$RUNNER_TEMP/dispat-fresh/dispat"
-          echo "DISPAT_CI_WORKER_ENDPOINT=$(sh scripts/ci-worker.sh endpoint)" >> "$GITHUB_ENV"
-          echo "GIT_SSH_COMMAND=$(sh scripts/ci-worker.sh git-ssh)" >> "$GITHUB_ENV"
+
+      # Minted once the machine exists, so that the token's hour covers the
+      # suite rather than the wait for a machine. The action revokes it when
+      # the job ends.
+      - name: Mint the worker's token
+        id: worker-token
+        if: env.CI_WORKER != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.CI_WORKER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CI_WORKER_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      # The token reaches this step's environment and the machine, over ssh,
+      # and nothing else: it is never written to GITHUB_ENV.
+      - name: Start the worker
+        if: env.CI_WORKER != ''
+        env:
+          DISPAT_CI_WORKER_TOKEN: ${{ steps.worker-token.outputs.token }}
+        run: sh scripts/ci-worker.sh start "$RUNNER_TEMP/dispat-fresh/dispat"
+
+      - name: No worker machine
+        if: env.CI_WORKER == ''
+        run: echo "::warning::CI_WORKER_APP_CLIENT_ID or CI_WORKER_APP_PRIVATE_KEY is not configured; the suite runs on this runner alone"
 
       # The bracket the release binary build puts around itself, put around the
       # suite as well: `link` writes the replace directives into
@@ -289,12 +323,26 @@ jobs:
       - name: Link the workspace dependencies
         run: dispat run link --since all -p dispat
 
+      # A snapshot of this checkout travels to the worker through the
+      # repository, and a snapshot carries every untracked file Git does not
+      # ignore, so a stray file would be pushed where everyone who can read
+      # the repository reads it. The suite refuses to start beside one.
+      - name: Refuse untracked files
+        if: env.CI_WORKER != ''
+        run: |
+          untracked=$(git status --porcelain --untracked-files=all | sed -n 's/^?? //p')
+          if [ -n "$untracked" ]; then
+            echo "::error::untracked files would travel to the worker through the repository:"
+            printf '%s\n' "$untracked"
+            exit 1
+          fi
+
       # --since all, not a window: this is the gate on a release, so every
       # package's tests run whether or not it changed. It is also the only run
       # that produces a complete set of coverage profiles, which is why the
       # badge is computed here and nowhere else.
       - name: Run every package's tests
-        run: dispat run tests --since all --worker "ci-worker=$DISPAT_CI_WORKER_ENDPOINT"
+        run: dispat run tests --since all ${CI_WORKER:+--worker "$DISPAT_CI_WORKER_NODE"}
 
       # always(): the redirects must not outlive the job whatever the suite
       # did, and unlink is idempotent, so closing an already-closed bracket is
@@ -312,11 +360,11 @@ jobs:
       # deletes itself after its lifetime, so a job that never reaches this
       # step leaves nothing behind for long.
       - name: Collect the worker's log
-        if: always()
+        if: always() && env.CI_WORKER != ''
         run: sh scripts/ci-worker.sh collect "$RUNNER_TEMP/dispat-ci-worker-logs"
 
       - name: Upload the worker's log
-        if: always()
+        if: always() && env.CI_WORKER != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: worker-log
@@ -324,9 +372,16 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      # The machine first, so that nothing writes a branch after the prune;
+      # then this run's coordination branches, with this job's own
+      # credential, in case the sweep could not close them itself.
       - name: Delete the worker machine
-        if: always()
-        run: sh scripts/ci-worker.sh delete
+        if: always() && env.CI_WORKER != ''
+        run: |
+          status=0
+          sh scripts/ci-worker.sh delete || status=$?
+          sh scripts/ci-worker.sh prune || status=$?
+          exit "$status"
 
       # Every release runs the full suite. The coverage minimums and the badge
       # gate only a run that publishes one of the measured Go modules on the

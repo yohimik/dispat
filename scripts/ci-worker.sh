@@ -8,16 +8,23 @@
 #
 #   sh scripts/ci-worker.sh create          create the instance and wait until it answers
 #   sh scripts/ci-worker.sh start <dispat>  install that binary and start the worker on it
-#   sh scripts/ci-worker.sh endpoint        print the mailbox URL the orchestrator links to
-#   sh scripts/ci-worker.sh git-ssh         print the GIT_SSH_COMMAND value that reaches it
+#   sh scripts/ci-worker.sh endpoint        print the repository URL the worker polls
+#   sh scripts/ci-worker.sh prune           delete this run's coordination branches left on it
 #   sh scripts/ci-worker.sh collect <dir>   copy the worker's log into <dir>
 #   sh scripts/ci-worker.sh delete          delete the instance (a missing one is not an error)
 #
+# The mailbox is the repository being released. The orchestrator names the
+# node alone (`--worker "$DISPAT_CI_WORKER_NODE"`) and reaches the repository
+# with the credential its checkout persisted; the worker polls the same
+# repository over https with a token of its own, DISPAT_CI_WORKER_TOKEN, which
+# the job mints for the run from a GitHub App, never the job's GITHUB_TOKEN.
+#
 # Everything the steps share lives in DISPAT_CI_WORKER_DIR: the ephemeral ssh
-# key pair, the instance's address, its host keys and the endpoint. The
-# signing secret is DISPAT_EXECUTION_SECRET in the environment of `start`; it
-# travels to the machine over ssh and is never written into instance
-# metadata, which anyone with project access can read.
+# key pair, the instance's address and its host keys. The signing secret
+# (DISPAT_EXECUTION_SECRET) and the token are in the environment of `start`;
+# both travel to the machine over ssh into files only the worker's user reads,
+# and neither is ever written into instance metadata, which anyone with
+# project access can read.
 #
 # gcloud runs on the host when it is installed, and otherwise inside the
 # release tools image exactly as the infra and docs stages run it, with the
@@ -27,7 +34,7 @@
 set -eu
 
 command=${1:-}
-[ -n "$command" ] || { echo "usage: ci-worker.sh create|start|endpoint|git-ssh|collect|delete" >&2; exit 2; }
+[ -n "$command" ] || { echo "usage: ci-worker.sh create|start|endpoint|prune|collect|delete" >&2; exit 2; }
 shift
 
 dir=${DISPAT_CI_WORKER_DIR:-${RUNNER_TEMP:-/tmp}/dispat-ci-worker}
@@ -46,14 +53,11 @@ disk_gb=${DISPAT_CI_WORKER_DISK_GB:-100}
 # The instance deletes itself at this age even if the job that made it died
 # before its delete step; a suite that legitimately runs longer raises it.
 lifetime=${DISPAT_CI_WORKER_LIFETIME:-4h}
-# The repository whose history seeds the mailbox, so the orchestrator's first
-# push carries the working tree and not every object the checkout reaches.
-# A repository the machine cannot clone (private, or no network) leaves the
-# mailbox empty and the push carries everything, which is slower and correct.
-seed=${DISPAT_CI_WORKER_SEED:-}
+# The node's name: the orchestrator's link and the worker's own
+# execution.name. A run names it after itself, so the coordination branches of
+# one run are told apart from every other run's by name alone.
 node=${DISPAT_CI_WORKER_NODE:-ci-worker}
 user=dispat
-mailbox_path=/home/$user/mailbox.git
 ready_marker=/var/lib/dispat-worker-ready
 failed_marker=/var/lib/dispat-worker-failed
 
@@ -104,16 +108,22 @@ require_state() {
   [ -f "$dir/ip" ] || fail "no worker state in $dir: run 'create' first"
 }
 
-resolve_seed() {
-  [ -z "$seed" ] || { printf '%s' "$seed"; return; }
+# resolve_repository is the repository the worker polls, over https because
+# the token reaches it there: DISPAT_CI_WORKER_REPOSITORY when it is set, the
+# repository this workflow runs for otherwise, and outside a workflow the
+# checkout's origin rewritten from its ssh spelling.
+resolve_repository() {
+  if [ -n "${DISPAT_CI_WORKER_REPOSITORY:-}" ]; then
+    printf '%s' "$DISPAT_CI_WORKER_REPOSITORY"
+    return
+  fi
   if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
     printf '%s' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
     return
   fi
-  # A developer's origin is often an ssh remote the machine holds no key
-  # for; a public GitHub repository is reachable at its https address.
-  git remote get-url origin 2>/dev/null \
-    | sed -E 's#^(git@|ssh://git@)github\.com[:/]#https://github.com/#' || true
+  origin=$(git remote get-url origin 2>/dev/null) \
+    || fail "no repository to poll: set DISPAT_CI_WORKER_REPOSITORY"
+  printf '%s' "$origin" | sed -E 's#^(git@|ssh://git@)github\.com[:/]#https://github.com/#'
 }
 
 write_startup_script() {
@@ -231,7 +241,6 @@ create_instance() {
   [ -f "$dir/zone" ] || fail "no zone of $zones could provide any of $machines"
   [ -s "$dir/ip" ] || fail "the instance was created without an external address"
   printf '%s\n' "$name" > "$dir/name"
-  printf 'ssh://%s@%s%s\n' "$user" "$(cat "$dir/ip")" "$mailbox_path" > "$dir/endpoint"
   log "$(cat "$dir/machine") instance $name at $(cat "$dir/ip") in $(cat "$dir/zone"); waiting for its host keys"
   await_host_keys || return 1
   log "waiting for the startup script"
@@ -245,19 +254,24 @@ start() {
     fail "start needs the path of a linux/amd64 dispat binary"
   fi
   : "${DISPAT_EXECUTION_SECRET:?DISPAT_EXECUTION_SECRET is required: the secret the orchestrator signs with}"
+  : "${DISPAT_CI_WORKER_TOKEN:?DISPAT_CI_WORKER_TOKEN is required: the token the worker reaches the repository with}"
+  repository=$(resolve_repository)
+  case "$repository" in
+    https://*) ;;
+    *) fail "the worker reaches the repository over https with its token; $repository is not an https URL" ;;
+  esac
   require_state
   worker_scp "$binary" "$user@$(cat "$dir/ip"):dispat"
-  seed_url=$(resolve_seed)
   # The docker group takes effect on the next login, which is why the worker
   # starts in a session of its own below rather than in this one.
   worker_ssh "sudo install -m 0755 dispat /usr/local/bin/dispat && sudo usermod -aG docker $user \
     && mkdir -p ~/node ~/state && chmod 700 ~/node \
-    && git config --global user.email worker@dispat.invalid && git config --global user.name 'dispat worker' \
-    && if [ ! -d $mailbox_path ]; then \
-         if [ -n '$seed_url' ] && git clone -q --bare '$seed_url' $mailbox_path 2>/dev/null; then \
-           echo 'mailbox seeded from $seed_url'; else rm -rf $mailbox_path; git init -q --bare $mailbox_path; \
-           echo 'mailbox empty (no seed)'; fi; fi"
+    && git config --global user.email worker@dispat.invalid && git config --global user.name 'dispat worker'"
+  # The secret, the token, the repository and the commit travel one way:
+  # over ssh, into files only this user reads, never on a command line.
   printf '%s' "$DISPAT_EXECUTION_SECRET" | worker_ssh "umask 077 && cat > ~/node/secret"
+  printf '%s' "$DISPAT_CI_WORKER_TOKEN" | worker_ssh "umask 077 && cat > ~/node/github-token"
+  printf '%s' "$repository" | worker_ssh "umask 077 && cat > ~/node/endpoint"
   # The job's build cache, for this machine as well as the runner. Every gate
   # is a buildx build that scripts/buildx-cache.sh gives the Actions cache
   # flags when GITHUB_ACTIONS is true, and the gha backend authenticates with
@@ -291,7 +305,7 @@ $name='$value'"
   "execution": {
     "role": "worker",
     "name": "$node",
-    "endpoint": "file://$mailbox_path",
+    "endpoint": "$repository",
     "secretEnv": "DISPAT_EXECUTION_SECRET",
     "concurrency": ${DISPAT_CI_WORKER_CONCURRENCY:-2},
     "transfer": {"maxFiles": 200000, "maxBytes": 8589934592, "maxManifestBytes": 67108864, "timeout": 3600}
@@ -306,21 +320,60 @@ EOF
   # variable the profiles it sends back would name a commit the job's own
   # profiles do not, and the coverage freshness gate would refuse the set.
   commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
-  worker_ssh "setsid -f sh -c 'set -a; . ~/node/cache.env; set +a; GITHUB_SHA=$commit DISPAT_EXECUTION_SECRET=\$(cat ~/node/secret) exec dispat worker --root ~/node --state-dir ~/state --idle-timeout 0 --log-level debug' > ~/worker.log 2>&1 < /dev/null"
+  printf '%s' "$commit" | worker_ssh "umask 077 && cat > ~/node/commit"
+  # The launcher, written as it runs: nothing in it expands on this side. It
+  # hands git the token as an extra header scoped to this repository's URL, so
+  # the header is sent to that repository and to no other URL of the host,
+  # and it never reaches a command line, a git config file or the log.
+  cat <<'LAUNCHER' | worker_ssh "umask 077 && cat > ~/node/serve.sh && chmod 700 ~/node/serve.sh"
+#!/bin/sh
+# Written by scripts/ci-worker.sh start: serves this node until it is stopped.
+set -eu
+set -a
+. "$HOME/node/cache.env"
+set +a
+endpoint=$(cat "$HOME/node/endpoint")
+basic=$(printf 'x-access-token:%s' "$(cat "$HOME/node/github-token")" | base64 | tr -d '\n')
+GIT_TERMINAL_PROMPT=0
+GIT_CONFIG_COUNT=1
+GIT_CONFIG_KEY_0="http.$endpoint.extraheader"
+GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic"
+DISPAT_EXECUTION_SECRET=$(cat "$HOME/node/secret")
+GITHUB_SHA=$(cat "$HOME/node/commit")
+export GIT_TERMINAL_PROMPT GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 DISPAT_EXECUTION_SECRET GITHUB_SHA
+exec dispat worker --root "$HOME/node" --state-dir "$HOME/state" --idle-timeout 0 --log-level debug
+LAUNCHER
+  worker_ssh "setsid -f ~/node/serve.sh > ~/worker.log 2>&1 < /dev/null"
   sleep 3
   worker_ssh "pgrep -x dispat >/dev/null && tail -n 3 ~/worker.log" \
     || fail "the worker did not stay up; its log follows: $(worker_ssh 'cat ~/worker.log' 2>/dev/null)"
-  log "worker $node serving $(cat "$dir/endpoint")"
+  log "worker $node serving $repository"
 }
 
+# endpoint prints the repository the worker polls, as start resolves it. It
+# reads nothing but the environment and the checkout, so a job can check what
+# its worker will reach before any machine exists.
 endpoint() {
-  require_state
-  cat "$dir/endpoint"
+  printf '%s\n' "$(resolve_repository)"
 }
 
-git_ssh() {
-  require_state
-  printf 'ssh %s\n' "$(ssh_options)"
+# prune deletes the coordination branches this run's node left on the
+# repository, with the job's own credential. The orchestrator closes every
+# branch it created when the sweep ends, so this finds something only after a
+# sweep that was interrupted or could not close; the pattern is this run's
+# node, anchored on the date that follows it, so no other run's branch
+# matches.
+prune() {
+  pattern="refs/heads/dispat-worker-$node-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*"
+  refs=$(git ls-remote --heads origin "$pattern" | awk '{print $2}')
+  if [ -z "$refs" ]; then
+    log "no coordination branch of $node is left"
+    return
+  fi
+  # shellcheck disable=SC2046
+  git push --quiet origin $(printf '%s\n' "$refs" | sed 's#^#:#') \
+    || fail "the coordination branches of $node could not all be deleted"
+  log "deleted $(printf '%s\n' "$refs" | wc -l | tr -d ' ') coordination branches of $node"
 }
 
 # collect copies the worker's log; a job that never had a machine, or was
@@ -333,8 +386,6 @@ collect() {
   worker_scp "$user@$(cat "$dir/ip"):worker.log" "$dest/worker.log" || log "no worker log to collect"
 }
 
-# delete_instance removes the instance and what the job knows about it,
-# keeping the ssh key pair for a replacement.
 # delete_instance removes the instance and what the job knows about it,
 # keeping the ssh key pair for a replacement. A job cancelled while create
 # was still running may hold no state at all although the instance exists,
@@ -356,7 +407,7 @@ delete_instance() {
       log "delete reported an error; the instance deletes itself after $lifetime in any case"
     fi
   done
-  rm -f "$dir/name" "$dir/ip" "$dir/zone" "$dir/machine" "$dir/endpoint" "$dir/known_hosts"
+  rm -f "$dir/name" "$dir/ip" "$dir/zone" "$dir/machine" "$dir/known_hosts"
 }
 
 delete() {
@@ -368,7 +419,7 @@ case "$command" in
   create) create ;;
   start) start "$@" ;;
   endpoint) endpoint ;;
-  git-ssh) git_ssh ;;
+  prune) prune ;;
   collect) collect "$@" ;;
   delete) delete ;;
   *) echo "unknown command: $command" >&2; exit 2 ;;
