@@ -603,6 +603,13 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 // published, just not under its own tag yet — which is what lets the group
 // stay put and the member catch up at the version that already carries its
 // work, instead of the whole group burning the next prefix on a re-count.
+//
+// A source the member's own window no longer holds is never masked. It is a
+// contribution the member released past before its provider delivered it
+// (§13.4a), so it sits behind the member's release, and behind the mask, by
+// definition: the group version at the mask carries the commit, never the
+// provider's version, and masking it would split the group, the member
+// catching up alone while the rest of the group stays behind.
 func (cp *computation) groupFresh(name, mask string) (own, propagated ccme.Bump, fresh bool) {
 	for _, c := range cp.ownContribs[name] {
 		if cp.ancestorOrSelf(c.key, mask) {
@@ -615,7 +622,7 @@ func (cp *computation) groupFresh(name, mask string) (own, propagated ccme.Bump,
 		if key == "" {
 			key = s.Commit
 		}
-		if cp.ancestorOrSelf(key, mask) {
+		if cp.inWindow(name, key) && cp.ancestorOrSelf(key, mask) {
 			continue
 		}
 		propagated = ccme.MaxBump(propagated, s.Bump)

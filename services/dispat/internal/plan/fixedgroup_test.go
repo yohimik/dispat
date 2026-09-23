@@ -737,3 +737,57 @@ func TestRideCatchUpUpdatesSpanTheMovementItRodeFor(t *testing.T) {
 	assert.Equal(t, "1.2.0", b.Updates[0].From.String(), "From is what b's last release shipped against")
 	assert.Equal(t, "1.3.0", b.Updates[0].To.String())
 }
+
+// groupMemberAheadHistory is vector 80d inside a fixed group: one commit
+// carries core's caret and app's own feature, core fails and app proceeds,
+// and the group releases 1.1.0 at the commit with tool riding; c3 is a later
+// commit a provider-only retry can land on.
+func groupMemberAheadHistory() []commit {
+	return []commit{
+		{sha: "c1", message: "chore: base"},
+		{sha: "c2", message: "feat(core)^: streaming\n\n---\n\nfeat(app): own flag"},
+		{sha: "c3", message: "chore(core): retry the provider"},
+	}
+}
+
+// aheadGroupMember tags the state that run leaves behind.
+func aheadGroupMember(f *fakeGit) *fakeGit {
+	return f.tag("core", "1.0.0", "c1").tag("app", "1.0.0", "c1").tag("tool", "1.0.0", "c1").
+		tag("app", "1.1.0", "c2").tag("tool", "1.1.0", "c2")
+}
+
+// planGroupMemberAhead plans core, and app and tool sharing a fixed version,
+// with app consuming core.
+func planGroupMemberAhead(t *testing.T, git *fakeGit) *Plan {
+	t.Helper()
+	libs := &model.Space{Name: "libs"}
+	apps := &model.Space{Name: "apps", Versioning: model.VersioningFixed}
+	pkgs := []*model.Package{
+		{Name: "core", Dir: "/r/libs/core", Space: libs},
+		{Name: "app", Dir: "/r/apps/app", Space: apps},
+		{Name: "tool", Dir: "/r/apps/tool", Space: apps},
+	}
+	deps := []model.Dependency{{Consumer: "app", Provider: "core"}}
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+	return p
+}
+
+// TestFixedGroupMovesAsOneWhenAMemberGotAheadOfItsProvider is the group's
+// freshness mask against an owed contribution. app released past core's c2
+// while core failed, so what app is owed sits at the commit of the tag
+// holding the group's version, which is the mask. The mask is there so work
+// the group's line already versioned is not counted twice; a contribution app
+// released past before core delivered it is not such work, and masking it
+// would release app alone while tool stayed behind.
+func TestFixedGroupMovesAsOneWhenAMemberGotAheadOfItsProvider(t *testing.T) {
+	p := planGroupMemberAhead(t, aheadGroupMember(newFakeGit(groupMemberAheadHistory()[:2]...)))
+	require.True(t, p.Releases["core"].IsReleasing(), "core retries its release of c2")
+	app, tool := p.Releases["app"], p.Releases["tool"]
+	require.True(t, app.IsReleasing(), "core still owes app c2: %v", codes(p))
+	assertVersion(t, v(1, 1, 1), app.Next)
+	assert.False(t, app.CatchUp, "core releases in the same run")
+	assert.True(t, tool.IsReleasing(), "the group moves as one")
+	assertVersion(t, v(1, 1, 1), tool.Next)
+	assert.True(t, tool.FixedRide, "tool rides to the group's version")
+}
