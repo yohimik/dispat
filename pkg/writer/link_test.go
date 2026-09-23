@@ -551,6 +551,30 @@ func TestNpmLinkNoChangeLeavesFileAlone(t *testing.T) {
 	}
 }
 
+// TestNpmLinkTreatsARegistryOverrideAsNoLink: a version override pins a
+// package rather than pointing it at a folder. Removing a link by that name
+// changes nothing and reports it Missing; a new link for the name goes into
+// the chosen field, where it takes the pin's place.
+func TestNpmLinkTreatsARegistryOverrideAsNoLink(t *testing.T) {
+	src := "{\n  \"overrides\": {\n    \"core\": \"^2.0.0\"\n  }\n}"
+	path := seed(t, "package.json", src)
+	res, err := Relink(path, []Link{{Name: "core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Missing) != 1 || len(res.Applied) != 0 || read(t, path) != src {
+		t.Errorf("removing a name only a registry override declares = %+v\n%s", res, read(t, path))
+	}
+	res, err = Relink(path, []Link{{Name: "core", Path: "../core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); len(res.Applied) != 1 || !strings.Contains(got, `"core": "file:../core"`) ||
+		strings.Contains(got, "^2.0.0") {
+		t.Errorf("linking a name only a registry override declares = %+v\n%s", res, got)
+	}
+}
+
 func TestPubspecLinkReplacesAnInlineVersionConstraint(t *testing.T) {
 	// A scalar dependency override is a version constraint, even when its text
 	// resembles a path. An explicit link request replaces that nonlocal shape

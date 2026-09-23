@@ -2,6 +2,7 @@ package writer
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -238,7 +239,7 @@ func findCargoKeyVersionSpan(lines []string, tableParts, keyParts []string) (idx
 			}
 			continue
 		}
-		if !areCargoKeyPartsEqual(current, tableParts) {
+		if !slices.Equal(current, tableParts) {
 			continue
 		}
 		_, afterEq, entry := tomlKeyValue(body)
@@ -246,7 +247,7 @@ func findCargoKeyVersionSpan(lines []string, tableParts, keyParts []string) (idx
 			continue
 		}
 		parts, valid := parseTOMLDottedKeyParts(body[:afterEq-1])
-		if !valid || !areCargoKeyPartsEqual(parts, keyParts) {
+		if !valid || !slices.Equal(parts, keyParts) {
 			continue
 		}
 		value := afterEq
@@ -261,18 +262,6 @@ func findCargoKeyVersionSpan(lines []string, tableParts, keyParts []string) (idx
 		return li, start, end, ok
 	}
 	return 0, 0, 0, false
-}
-
-func areCargoKeyPartsEqual(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // cargoPatchTable is where Cargo keeps redirects for crates.io dependencies.

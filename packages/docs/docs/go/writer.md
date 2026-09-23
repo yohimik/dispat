@@ -90,8 +90,8 @@ Five formats have such a directive. These are `go.mod` (`replace`), `Cargo.toml`
 (`dependency_overrides`), `pyproject.toml` (`[tool.uv.sources]`), and `package.json` (`overrides`, `resolutions`, or
 `pnpm.overrides`). The `package.json` directive is chosen by reading the file rather than guessing.
 
-Call `IsLinkSupported` to report the same five formats at runtime. Every other format writes nothing and reports each link
-in `Skipped`.
+Call `IsLinkSupported` to report the same five formats at runtime. Every other format writes nothing and reports each
+link in `Skipped`.
 
 Call `Links` to read the other direction and enumerate the directives a file already carries. This lets a CI gate prove
 no local link survived a build without knowing any names in advance. Call `DropLinks` to run `Links` followed by the
@@ -105,6 +105,12 @@ res, err := writer.DropLinks("services/svc/go.mod")
 In `pubspec.yaml`, only an override with its own `path` field is a local redirect. Version constraints and Git,
 hosted or SDK overrides remain intact, including a `path` nested inside a Git source. In `package.json`, a selected
 override container must be an object; a malformed container is refused without changing the file.
+
+In `package.json`, linking a name repoints every `file:` or `link:` copy of it across `overrides`, `resolutions` and
+`pnpm.overrides`, and removing it deletes every such copy, while a registry override of the same name in another field
+stays as written. A name with no local copy gets one `file:` entry in the chosen field, which replaces a registry
+override of that name in that field. Removing a name that only a registry override declares changes nothing and reports
+the name in `Missing`.
 
 ## Writing the build counter
 

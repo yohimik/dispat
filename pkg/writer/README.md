@@ -1,9 +1,9 @@
 # writer
 
 Use dispat's manifest writer to update version declarations in place. Most formats use byte edits that preserve
-surrounding indentation, key order, and comments. Go modules use the Go module formatter. This library serves as the writing
-counterpart to [`pkg/scanner`](../scanner), shares its vocabulary through [`pkg/manifest`](../manifest), and powers
-native auto-versioning in dispat.
+surrounding indentation, key order, and comments. Go modules use the Go module formatter. This library serves as the
+writing counterpart to [`pkg/scanner`](../scanner), shares its vocabulary through [`pkg/manifest`](../manifest), and
+powers native auto-versioning in dispat.
 
 Every format writer reads and writes through a single internal splicer. That splicer enforces the read cap, performs
 the splice, proves the output parses, and executes the atomic write. `Replace` uses that same engine without
@@ -202,6 +202,12 @@ In `package.json`, dispat selects the redirect field by inspecting your manifest
 or `pnpm.overrides` fields, checks `packageManager` for yarn or pnpm, and defaults to npm's `overrides`. All three
 managers accept `file:` specifiers, which the scanner reads as local paths. A selected override container that exists
 as a scalar or array is refused without modifying the file.
+
+Linking a name repoints every `file:` or `link:` copy of it across `overrides`, `resolutions` and `pnpm.overrides`, and
+removing it deletes every such copy, while a registry override of the same name in another field stays as written. A
+name with no local copy gets one `file:` entry in the selected field, which replaces a registry override of that name
+in that field. Removing a name that only a registry override declares changes nothing and reports the name in
+`Missing`.
 
 Be aware of npm's override rule: npm rejects overrides for direct dependencies unless the target specifier matches
 exactly, making it suitable primarily for transitive dependencies. Yarn and pnpm impose no such restriction.
