@@ -34,8 +34,14 @@ dir=${DISPAT_CI_WORKER_DIR:-${RUNNER_TEMP:-/tmp}/dispat-ci-worker}
 run_id=${GITHUB_RUN_ID:-local}
 attempt=${GITHUB_RUN_ATTEMPT:-1}
 name=${DISPAT_CI_WORKER_NAME:-dispat-ci-worker-$run_id-$attempt}
-zone=${DISPAT_CI_WORKER_ZONE:-us-central1-a}
-machine=${DISPAT_CI_WORKER_MACHINE:-c3-standard-8}
+# The zones tried in turn: a zone can be out of a machine type for a while,
+# and a run waits for nobody. The zone the instance landed in is remembered
+# for every later step.
+zones=${DISPAT_CI_WORKER_ZONES:-us-central1-a,us-central1-b,us-central1-c,us-central1-f}
+# The machine types tried in turn, the first being the one the release is
+# measured on; a zone can be out of one of them for a while, so every zone is
+# asked for the first type before any is asked for the second.
+machines=${DISPAT_CI_WORKER_MACHINES:-c3-standard-8,n2-standard-8,e2-standard-8}
 disk_gb=${DISPAT_CI_WORKER_DISK_GB:-100}
 # The instance deletes itself at this age even if the job that made it died
 # before its delete step; a suite that legitimately runs longer raises it.
@@ -52,6 +58,10 @@ ready_marker=/var/lib/dispat-worker-ready
 
 log() { printf 'ci-worker: %s\n' "$*" >&2; }
 fail() { log "$*"; exit 1; }
+
+zone_of_instance() {
+  cat "$dir/zone" 2>/dev/null || printf '%s' "${zones%%,*}"
+}
 
 run_gcloud() {
   if command -v gcloud >/dev/null 2>&1; then
@@ -122,7 +132,7 @@ EOF
 await_host_keys() {
   deadline=$(( $(date +%s) + 600 ))
   while :; do
-    keys=$(run_gcloud compute instances get-guest-attributes "$name" --zone "$zone" \
+    keys=$(run_gcloud compute instances get-guest-attributes "$name" --zone "$(zone_of_instance)" \
       --query-path=hostkeys/ --format='value(key,value)' 2>/dev/null || true)
     if [ -n "$keys" ]; then
       ip=$(cat "$dir/ip")
@@ -150,22 +160,33 @@ create() {
   [ -f "$dir/key" ] || ssh-keygen -q -t ed25519 -N '' -C "dispat-ci-worker" -f "$dir/key"
   printf '%s:%s\n' "$user" "$(cat "$dir/key.pub")" > "$dir/ssh-keys"
   write_startup_script
-  log "creating $machine instance $name in $zone"
-  run_gcloud compute instances create "$name" --zone "$zone" \
-    --machine-type "$machine" \
-    --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
-    --boot-disk-size "${disk_gb}GB" --boot-disk-type pd-balanced \
-    --no-service-account --no-scopes \
-    --provisioning-model STANDARD \
-    --max-run-duration "$lifetime" --instance-termination-action DELETE \
-    --labels "dispat-ci=worker,run=$run_id" \
-    --metadata enable-guest-attributes=TRUE,enable-oslogin=FALSE \
-    --metadata-from-file "startup-script=$dir/startup.sh,ssh-keys=$dir/ssh-keys" \
-    --format 'value(networkInterfaces[0].accessConfigs[0].natIP)' > "$dir/ip"
+  rm -f "$dir/ip" "$dir/zone" "$dir/machine"
+  for machine in $(printf '%s' "$machines" | tr ',' ' '); do
+  for zone in $(printf '%s' "$zones" | tr ',' ' '); do
+    log "creating $machine instance $name in $zone"
+    if run_gcloud compute instances create "$name" --zone "$zone" \
+      --machine-type "$machine" \
+      --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
+      --boot-disk-size "${disk_gb}GB" --boot-disk-type pd-balanced \
+      --no-service-account --no-scopes \
+      --provisioning-model STANDARD \
+      --max-run-duration "$lifetime" --instance-termination-action DELETE \
+      --labels "dispat-ci=worker,run=$run_id" \
+      --metadata enable-guest-attributes=TRUE,enable-oslogin=FALSE \
+      --metadata-from-file "startup-script=$dir/startup.sh,ssh-keys=$dir/ssh-keys" \
+      --format 'value(networkInterfaces[0].accessConfigs[0].natIP)' > "$dir/ip"; then
+      printf '%s\n' "$zone" > "$dir/zone"
+      printf '%s\n' "$machine" > "$dir/machine"
+      break 2
+    fi
+    log "no $machine in $zone right now; trying the next"
+  done
+  done
+  [ -f "$dir/zone" ] || fail "no zone of $zones could provide any of $machines"
   [ -s "$dir/ip" ] || fail "the instance was created without an external address"
   printf '%s\n' "$name" > "$dir/name"
   printf 'ssh://%s@%s%s\n' "$user" "$(cat "$dir/ip")" "$mailbox_path" > "$dir/endpoint"
-  log "instance $name at $(cat "$dir/ip"); waiting for its host keys"
+  log "$(cat "$dir/machine") instance $name at $(cat "$dir/ip") in $(cat "$dir/zone"); waiting for its host keys"
   await_host_keys
   log "waiting for the startup script"
   await_ready
@@ -231,10 +252,10 @@ collect() {
 
 delete() {
   [ -f "$dir/name" ] || { log "nothing to delete"; return; }
-  log "deleting instance $(cat "$dir/name")"
-  run_gcloud compute instances delete "$(cat "$dir/name")" --zone "$zone" --quiet \
+  log "deleting instance $(cat "$dir/name") in $(zone_of_instance)"
+  run_gcloud compute instances delete "$(cat "$dir/name")" --zone "$(zone_of_instance)" --quiet \
     || log "delete reported an error; the instance deletes itself after $lifetime in any case"
-  rm -f "$dir/key" "$dir/key.pub" "$dir/name" "$dir/ip" "$dir/endpoint" "$dir/known_hosts" "$dir/ssh-keys"
+  rm -f "$dir/key" "$dir/key.pub" "$dir/name" "$dir/ip" "$dir/zone" "$dir/machine" "$dir/endpoint" "$dir/known_hosts" "$dir/ssh-keys"
 }
 
 case "$command" in
