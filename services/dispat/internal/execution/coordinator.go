@@ -179,7 +179,15 @@ func NewCoordinator(run, planDigest, generation string, local LocalNode, links [
 // wait and not the sum of them. The platform question is asked afterwards,
 // across the whole set: whether a package can be built is a property of the
 // pool rather than of any one node.
+//
+// Before any of that, the run asks whether it still owns what it locked
+// (§28.3): a probe is the first thing of this run that exists on another
+// machine, and a run that lost its lock while it planned must not reach one.
+// A sweep holds no lock and no gate, so for it the question is no question.
 func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms) error {
+	if err := c.checkOwnership(ctx); err != nil {
+		return err
+	}
 	reports := make([]*NodeReport, len(c.Links))
 	failures := make([]error, len(c.Links))
 	var waiting sync.WaitGroup

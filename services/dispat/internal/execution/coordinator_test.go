@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // coordinatorFixture is one run with one configured node, and the second
@@ -137,6 +139,32 @@ func TestPreflightAcceptsANodeThatCanTakeTheWork(t *testing.T) {
 	require.NoError(t, fixture.coordinator.Close(t.Context()))
 	assert.Empty(t, fixture.orchestrator.remoteBranches(t), "and the run closes what it created")
 	require.NoError(t, fixture.coordinator.Close(t.Context()), "closing a run that owns nothing is nothing")
+}
+
+// TestPreflightRefusesALostLockBeforeAnyProbe: a probe is the first thing of a
+// run that exists on another machine, so a run that lost its lock while it
+// planned is refused before one is written. The refusal is the lock's own,
+// E336, and the mailbox holds no branch at all afterwards: nothing was offered
+// that anybody would have to close.
+func TestPreflightRefusesALostLockBeforeAnyProbe(t *testing.T) {
+	limits := TransferLimits{MaxFiles: 10, MaxBytes: 20, MaxManifestBytes: 1 << 20}
+	fixture := newCoordinatorFixture(t, limits, answeredPreflight)
+	asked := 0
+	fixture.coordinator.VerifyOwnershipWith(func(context.Context) error {
+		asked++
+		return fmt.Errorf("verifying: %w", release.ErrLockLost)
+	})
+
+	err := fixture.coordinator.Preflight(t.Context(),
+		[]PackagePlatforms{{Package: "core", Platforms: []string{"linux/amd64"}}})
+
+	require.Error(t, err)
+	assert.Equal(t, CodeLockLost, config.DiagnosticCode(err))
+	assert.Equal(t, CategoryNativeRecordingOrLock, DiagnosticCategory(err))
+	assert.ErrorIs(t, err, release.ErrLockLost)
+	assert.Equal(t, 1, asked, "the lock is asked about once, before the pool")
+	assert.Empty(t, fixture.orchestrator.remoteBranches(t), "no probe was offered")
+	assert.Nil(t, fixture.coordinator.Pool, "and no pool was assembled")
 }
 
 // A probe claim may be the last thing a node could persist. Cleanup owns that
