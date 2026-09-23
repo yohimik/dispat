@@ -103,10 +103,13 @@ func TestCovTailGitHubRefusesALookupItCannotRead(t *testing.T) {
 			want: "parsing lookup",
 		},
 		"the lookup answers with more than a release can be": {
+			// One release is read under a 1 MiB bound, above the 125,000
+			// characters of notes GitHub accepts; an answer past that is not a
+			// release at all.
 			lookup: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"id":1,"body":"` + strings.Repeat("x", 100<<10) + `"}`))
+				_, _ = w.Write([]byte(`{"id":1,"body":"` + strings.Repeat("x", 1<<20+1) + `"}`))
 			},
 			want: "response exceeds",
 		},
