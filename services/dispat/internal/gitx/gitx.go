@@ -746,10 +746,28 @@ type gitStream struct {
 	env    []string
 }
 
-// runStream is the one place a git subprocess is started. It exists apart
-// from runEnv so that the transport's bounded streaming (see transport.go)
-// shares the identical environment, process group, cancellation, redaction
-// and trace logging rather than reimplementing them beside it.
+// newCommand keeps Git's automatic maintenance in this process tree. A worker
+// can poll a mailbox for days; detached maintenance would become a zombie
+// under a container PID 1 that does not reap grandchildren. These request-scoped
+// options preserve automatic maintenance without changing repository config.
+func (c *LocalGitx) newCommand(ctx context.Context, args ...string) *exec.Cmd {
+	base := []string{"-C", c.Dir,
+		"-c", "maintenance.autoDetach=false",
+		"-c", "gc.autoDetach=false",
+	}
+	if c.Name != "" {
+		base = append(base, "-c", "user.name="+c.Name)
+	}
+	if c.Email != "" {
+		base = append(base, "-c", "user.email="+c.Email)
+	}
+	return exec.CommandContext(ctx, "git", append(base, args...)...)
+}
+
+// runStream is the shared runner for Git commands with buffered or streamed
+// output. It exists apart from runEnv so that the transport's bounded
+// streaming (see transport.go) shares the identical environment, process
+// group, cancellation, redaction and trace logging.
 //
 // The standard output is returned whether or not git succeeded. One family of
 // commands reports its machine-readable answer there and still exits
@@ -760,14 +778,7 @@ type gitStream struct {
 // other caller was written against and return nothing beside an error.
 func (c *LocalGitx) runStream(ctx context.Context, stream gitStream, args ...string) (string, error) {
 	gitInvocations.Add(1)
-	base := []string{"-C", c.Dir}
-	if c.Name != "" {
-		base = append(base, "-c", "user.name="+c.Name)
-	}
-	if c.Email != "" {
-		base = append(base, "-c", "user.email="+c.Email)
-	}
-	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
+	cmd := c.newCommand(ctx, args...)
 	// git speaks the operator's language unless told otherwise, and one of
 	// these answers is read rather than only shown: a push refused over a
 	// branch that moved is recognised by its wording (see classifyPush). A
@@ -1314,8 +1325,7 @@ func (c *LocalGitx) IsCommitPresent(ctx context.Context, rev string) (bool, erro
 	if rev == "" {
 		return false, nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", c.Dir,
-		"rev-parse", "--quiet", "--verify", rev+"^{commit}")
+	cmd := c.newCommand(ctx, "rev-parse", "--quiet", "--verify", rev+"^{commit}")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = 10 * time.Second // same backstop as run()
@@ -1579,11 +1589,14 @@ func (c *LocalGitx) createTag(ctx context.Context, name, message, target string,
 	if force {
 		args = append(args, "-f")
 	}
-	args = append(args, "-a", name, "-m", message)
+	// A release receipt can be large enough to exceed the operating system's
+	// per-argument limit. Git reads -F - from stdin without putting the
+	// annotation in the process arguments or in a temporary file.
+	args = append(args, "-a", name, "-F", "-")
 	if target != "" {
 		args = append(args, target)
 	}
-	_, err := c.run(ctx, args...)
+	_, err := c.runStream(ctx, gitStream{stdin: strings.NewReader(message)}, args...)
 	return err
 }
 

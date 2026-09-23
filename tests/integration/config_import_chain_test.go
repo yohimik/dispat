@@ -21,7 +21,7 @@ func TestConfigNestedImportFragmentsKeepOriginsAndFailClosed(t *testing.T) {
 	control.WriteFile("cfg/list.json", `{"$ref":["one.json","missing.json"]}`+"\n")
 	control.WriteConfigRaw(map[string]any{
 		"polyrepo": true, "logFormat": "json", "updateCheck": false,
-		"github": map[string]any{"enabled": false},
+		"github":  map[string]any{"enabled": false},
 		"configs": map[string]any{"$ref": "cfg/list.json"},
 	})
 	control.Commit("chore: assemble source imports from nested fragments")

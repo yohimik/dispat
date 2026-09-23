@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -66,7 +67,7 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 		require.NoError(t, release())
 	})
 
-	t.Run("a lock its owner has created and not yet written is waited for", func(t *testing.T) {
+	t.Run("a late legacy writer cannot overlap ownership", func(t *testing.T) {
 		// The owner creates the file and writes its id in two steps. A second
 		// process arriving between them used to read the empty file as stale
 		// and remove a live owner's claim.
@@ -78,9 +79,21 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 			written <- os.WriteFile(lock, []byte(strconv.Itoa(os.Getpid())), 0o644)
 		}()
 
-		_, _, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
-
-		require.NoError(t, <-written)
+		_, release, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
+		if release != nil {
+			t.Cleanup(func() { require.NoError(t, release()) })
+		}
+		writeErr := <-written
+		if runtime.GOOS == "windows" {
+			// Windows byte-range locks also exclude legacy writes through a
+			// second handle. The claimant owns the empty file after the grace;
+			// the legacy writer must fail rather than overwrite its owner.
+			require.Error(t, writeErr)
+			require.NoError(t, err)
+			require.NoError(t, release())
+			return
+		}
+		require.NoError(t, writeErr)
 		require.Error(t, err, "the owner was starting, not gone")
 		assert.Contains(t, err.Error(), strconv.Itoa(os.Getpid()))
 		require.NoError(t, os.Remove(lock))

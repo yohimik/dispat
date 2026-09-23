@@ -121,6 +121,20 @@ A long-running service, started once and left serving:
 dispat worker --config dispat.worker.yaml --state-dir /var/lib/dispat/worker
 ```
 
+For a long-running Docker worker, use `--init` so the container reaps subprocesses
+started by Git and by package commands. Give the worker a writable state volume
+and use an image with the tools its assigned commands need:
+
+```sh
+docker run --rm --init \
+  -e DISPAT_EXECUTION_SECRET \
+  -v "$PWD:/workspace:ro" \
+  -v dispat-worker-state:/var/lib/dispat/worker \
+  -w /workspace \
+  yohimik/dispat-alpine:1 \
+  dispat worker --config dispat.worker.yaml --state-dir /var/lib/dispat/worker
+```
+
 A CI job that serves one release and ends:
 
 ```yaml

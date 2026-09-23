@@ -986,7 +986,7 @@ var ErrObjectMissing = errors.New("gitx: the object store does not hold the obje
 func OpenObjectReader(ctx context.Context, git *LocalGitx) (*ObjectReader, error) {
 	gitInvocations.Add(1)
 	running, stop := context.WithCancel(ctx)
-	cmd := exec.CommandContext(running, "git", "-C", git.Dir, "cat-file", "--batch")
+	cmd := git.newCommand(running, "cat-file", "--batch")
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	cmd.WaitDelay = 10 * time.Second
 	script.SetProcessGroup(cmd)
