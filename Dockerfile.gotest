@@ -545,6 +545,11 @@ COPY --from=report /src/packages/docs/data/report.json /
 # nobody has run a suite in.
 FROM runner AS measured
 ARG COMMIT
+# The coverage minimum, combined and integration alike. A stable release is
+# held to 95; a prerelease passes 0, which measures and publishes the figures
+# without a bar (the release workflow's DISPAT_COVERAGE_MINIMUM). The
+# provenance and inventory checks hold either way.
+ARG COVERAGE_MINIMUM=95
 COPY --from=test-ccme /src/coverage ./coverage
 COPY --from=test-config /src/coverage ./coverage
 COPY --from=test-manifest /src/coverage ./coverage
@@ -563,7 +568,7 @@ COPY --chown=gopher:gopher coverag[e]/experiment[s] ./coverage/experiments
 RUN <<'EOF'
 set -eu
 go run github.com/yohimik/dispat/tools/testreport coverage -coverage coverage \
-  -commit "$COMMIT" -minimum-total 95 -minimum-integration 95
+  -commit "$COMMIT" -minimum-total "$COVERAGE_MINIMUM" -minimum-integration "$COVERAGE_MINIMUM"
 go run github.com/yohimik/dispat/tools/testreport build -commit "$COMMIT" \
   -require-fresh -modules packages/docs/data/benchmarked.txt
 EOF

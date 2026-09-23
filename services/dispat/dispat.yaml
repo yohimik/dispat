@@ -126,11 +126,11 @@ scripts:
   # announcement, and crier says which file it looked for.
   #
   # Nothing is posted unless the run asks for it with ANNOUNCE, which the
-  # release workflow sets when it has the platforms' secrets and was not told
-  # to skip announcements; a release or `dispat run announce` on a laptop
-  # stays quiet. An incomplete announcement returns failure; inspect the
-  # reported destinations before replaying. The announcement belongs to this
-  # package; Docker build contexts exclude its fonts and audio.
+  # release workflow sets when it has the platforms' secrets; a release or
+  # `dispat run announce` on a laptop stays quiet. An incomplete announcement
+  # returns failure; inspect the reported destinations before replaying. The
+  # announcement belongs to this package; Docker build contexts exclude its
+  # fonts and audio.
   announce: >-
     dispat if ANNOUNCE
     --then 'crier publish --config "announce/$DISPAT_CHANNEL/crier.yaml"'

@@ -14,7 +14,8 @@ previous major version internally.
 
 The report keeps unit, integration, and combined coverage separate. Combined coverage counts each statement once and
 marks it covered when either layer reaches it. It supplies the README badge. The integration gate uses only the
-integration profiles; unit tests cannot satisfy it. Both integration and combined coverage must reach 95%.
+integration profiles; unit tests cannot satisfy it. A stable release of the measured modules requires both integration
+and combined coverage to reach 95%. A release candidate publishes its figures without that minimum.
 
 Before calculating a total, the report checks that every expected module and production block is present and that
 profile provenance matches the run. Missing profiles, mixed revisions, and omitted subpackages fail the report rather

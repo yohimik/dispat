@@ -288,6 +288,10 @@ Two gates are measured separately and neither substitutes for the other:
 - **Integration-only** statement coverage is at least 95% across the CLI and the six public Go modules: `pkg/ccme`,
   `pkg/config`, `pkg/manifest`, `pkg/models`, `pkg/scanner`, `pkg/writer` and `services/dispat`.
 
+Both minimums hold a stable release: a release run that publishes one of those seven modules on the stable channel. A
+prerelease is measured and checked for provenance and inventory the same way, and its figures are published without a
+minimum; the release workflow passes the report stage `COVERAGE_MINIMUM=0` for it.
+
 The integration denominator is a frozen inventory. Every one of those seven modules must appear in it, and a production
 package or block missing from the instrumented build is a failure rather than a smaller denominator. Unit coverage is
 not integration coverage.
