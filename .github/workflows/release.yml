@@ -118,11 +118,11 @@ jobs:
             0)
               echo "releasing=true" >> "$GITHUB_OUTPUT"
               # Inspect only packages actually releasing, and among them only
-              # the seven Go modules the coverage figures measure: the 95%
-              # minimums hold a stable release of that code and nothing else.
-              # A stable catch-up, graduation or mixed stable/RC run of one of
-              # them keeps the gate; a candidate that ships beside a stable
-              # infra, image or spec release does not acquire it.
+              # the seven Go modules the coverage figures measure. This
+              # classifies publication of the stable badge only; every
+              # release, including an RC, must pass both 95% coverage gates.
+              # A stable infra, image or spec release alone does not update
+              # the badge for these measured modules.
               stable=$(jq -ser '
                 ["ccme", "config", "manifest", "models", "scanner", "writer", "dispat"] as $measured |
                 [.[] | select(.message == "release plan ready")] as $summaries |
