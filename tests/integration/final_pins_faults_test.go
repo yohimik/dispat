@@ -3,9 +3,10 @@
 
 package integration
 
-// Final production-review faults around transient fleet pins, local mutation
-// locks, and the fixed ref snapshot. These scenarios drive the compiled binary
-// over real source/control repositories; only selected Git reads use GitFault.
+// Final production-review faults around transient fleet pins, the checks every
+// native record transaction makes before it writes, and the fixed ref
+// snapshot. These scenarios drive the compiled binary over real source/control
+// repositories; only selected Git reads use GitFault.
 
 import (
 	"crypto/sha256"
@@ -123,29 +124,32 @@ func TestFinalLivePinWriteFaultsStopBeforeTagAndCheckpoint(t *testing.T) {
 	}
 }
 
-// TestFinalMutationLockPathCollisionRefusesBeforePlanning: every snapshot and
-// record transaction opens the same repository-local advisory lock. A
-// directory occupying that path is real filesystem corruption; release must
-// report E330 before publication and recover cleanly once the collision is
-// removed.
-func TestFinalMutationLockPathCollisionRefusesBeforePlanning(t *testing.T) {
+// TestFinalMutationCommonDirectoryFailureRefusesBeforePlanning: every snapshot
+// and record transaction is serialized by the repository's Git common
+// directory, so the first one of a run has to resolve it. Git failing to
+// answer is a repository dispat cannot serialize; release must report E330
+// before planning or publication and recover cleanly once Git answers again.
+func TestFinalMutationCommonDirectoryFailureRefusesBeforePlanning(t *testing.T) {
 	fleet := newFinalFaultFleet(t)
 	control := fleet.control
-	common := control.Git("-C", "sources/lib", "rev-parse", "--path-format=absolute", "--git-common-dir")
-	lockPath := filepath.Join(strings.TrimSpace(common), "dispat-mutation.lock")
-	require.NoError(t, os.Mkdir(lockPath, 0o700))
+	sourceRoot := filepath.Join(canonicalRoot(t, control), "sources", "lib")
+	fault := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*-C " + sourceRoot + " *rev-parse --path-format=absolute --git-common-dir*",
+		Code:    128,
+	})
 
-	failed := control.Release()
+	failed := control.CommandEnv(fault.Env())
 	require.NotZero(t, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 	combined := failed.Stdout + failed.Stderr
 	assert.True(t, harness.IsCodePresent(failed.Events, "E330"), "stdout:\n%s", failed.Stdout)
-	assert.Contains(t, combined, "opening Git mutation lock")
+	assert.Contains(t, combined, "resolving Git common directory")
+	assert.Contains(t, combined, harness.GitFaultMarker)
+	assert.Equal(t, 1, fault.Matches())
 	assert.NotContains(t, combined, "release plan ready")
 	assert.NoFileExists(t, control.Path("sources", "lib", "publish-count"))
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	assert.Equal(t, fleet.sourceBefore, control.Git("rev-parse", "HEAD:sources/lib"))
 
-	require.NoError(t, os.Remove(lockPath))
 	retry := control.Release()
 	require.Equal(t, 0, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
 	assert.Equal(t, 1, finalPublishCount(t, control))
@@ -289,21 +293,19 @@ func TestFinalMutationCommonDirectoryRepliesRefuseBeforePublication(t *testing.T
 	}
 }
 
-// TestFinalMutationLockBreakAfterPublicationLeavesNoFalseRecord: the fixed
-// snapshot was valid when package work began, but the advisory lock path is
-// replaced after upload and before native recording. The package is already
-// published, yet no source commit, tag, or checkpoint can be written. Once
-// the filesystem is repaired, the absent tag makes retry upload and record
-// the release once more.
-func TestFinalMutationLockBreakAfterPublicationLeavesNoFalseRecord(t *testing.T) {
+// TestFinalSourceChangeAfterPublicationLeavesNoFalseRecord: the fixed snapshot
+// was valid when package work began, but something commits into the source
+// after upload and before native recording. The release commit re-proves the
+// head the run expects before it writes, so the package is already published
+// yet no source release commit, tag, or checkpoint can be written. Once the
+// unplanned commit is removed, the absent tag makes retry upload and record the
+// release once more.
+func TestFinalSourceChangeAfterPublicationLeavesNoFalseRecord(t *testing.T) {
 	fleet := newFinalFaultFleet(t)
 	control := fleet.control
-	common := strings.TrimSpace(control.Git("-C", "sources/lib", "rev-parse",
-		"--path-format=absolute", "--git-common-dir"))
-	lockPath := filepath.Join(common, "dispat-mutation.lock")
 	publish := `printf 'published\n' >> ../../publish-count; ` +
-		`lock=$(git rev-parse --path-format=absolute --git-common-dir)/dispat-mutation.lock; ` +
-		`rm -f "$lock"; mkdir "$lock"`
+		`git -c user.name=intruder -c user.email=intruder@dispat.test ` +
+		`commit -q --allow-empty -m 'chore(lib): an unplanned source commit'`
 	rewriteFinalFleetConfig(t, fleet, publish, false)
 	controlBefore := control.Git("rev-parse", "HEAD")
 
@@ -311,16 +313,17 @@ func TestFinalMutationLockBreakAfterPublicationLeavesNoFalseRecord(t *testing.T)
 	require.NotZero(t, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 	combined := failed.Stdout + failed.Stderr
 	assert.True(t, harness.IsCodePresent(failed.Events, "E335"), "stdout:\n%s", failed.Stdout)
-	assert.Contains(t, combined, "opening Git mutation lock")
+	assert.Contains(t, combined, "repository changed after planning")
 	assert.Contains(t, failed.Stdout, `"status":"published"`)
 	assert.Equal(t, 1, finalPublishCount(t, control))
-	assert.Equal(t, fleet.sourceBefore, control.Git("-C", "sources/lib", "rev-parse", "HEAD"))
+	assert.Equal(t, "chore(lib): an unplanned source commit",
+		control.Git("-C", "sources/lib", "log", "-1", "--format=%s"), "no release commit follows the change")
+	assert.Equal(t, fleet.sourceBefore, control.Git("-C", "sources/lib", "rev-parse", "HEAD~1"))
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	assert.Equal(t, fleet.sourceBefore, control.Git("rev-parse", "HEAD:sources/lib"))
 	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
 
-	require.NoError(t, os.Remove(lockPath))
-	control.Git("-C", "sources/lib", "reset", "--hard", "HEAD")
+	control.Git("-C", "sources/lib", "reset", "-q", "--hard", fleet.sourceBefore)
 	_ = os.Remove(control.Path("sources", "lib", "packages", "lib", "CHANGELOG.md"))
 	rewriteFinalFleetConfig(t, fleet, "printf 'published\\n' >> ../../publish-count", false)
 	retry := control.Release()
@@ -358,27 +361,27 @@ func TestFinalSourceTagWriteFaultKeepsCommitBelowTheCheckpoint(t *testing.T) {
 	repairFinalPinRecord(t, fleet, sourceAfter)
 }
 
-// TestFinalCheckpointMutationLockFailurePreservesTheRemoteSource: the source
-// commit, tag, branch, and live pin are durable before the source afterPush
-// hook damages the control repository's local mutation-lock path. Checkpoint
-// acquisition must fail without advancing control. Repairing that one gitlink
-// and retrying does not republish the source.
-func TestFinalCheckpointMutationLockFailurePreservesTheRemoteSource(t *testing.T) {
+// TestFinalCheckpointControlChangePreservesTheRemoteSource: the source commit,
+// tag, branch, and live pin are durable before the source afterPush hook
+// commits into the control repository. The checkpoint re-proves the control
+// head the run expects before it writes, so it fails without advancing the
+// gitlink. Repairing that one gitlink and retrying does not republish the
+// source.
+func TestFinalCheckpointControlChangePreservesTheRemoteSource(t *testing.T) {
 	fleet := newFinalFaultFleet(t)
 	control := fleet.control
-	common := strings.TrimSpace(control.Git("rev-parse", "--path-format=absolute", "--git-common-dir"))
-	lockPath := filepath.Join(common, "dispat-mutation.lock")
 	raw, err := os.ReadFile(control.Path("dispat.json"))
 	require.NoError(t, err)
 	var cfg map[string]any
 	require.NoError(t, json.Unmarshal(raw, &cfg))
 	scripts := cfg["scripts"].(map[string]any)
-	scripts["break-control-lock"] = []string{
-		`rm -f ` + harness.ShQuote(lockPath) + `; mkdir ` + harness.ShQuote(lockPath),
+	scripts["move-control"] = []string{
+		`git -C ` + harness.ShQuote(control.Root) + ` -c user.name=intruder -c user.email=intruder@dispat.test ` +
+			`commit -q --allow-empty -m 'chore: an unplanned control commit'`,
 	}
-	cfg["run"] = map[string]any{"afterPush": []string{"break-control-lock"}}
+	cfg["run"] = map[string]any{"afterPush": []string{"move-control"}}
 	writePolyrepoJSON(t, control, "dispat.json", cfg)
-	control.Commit("chore: configure checkpoint lock damage")
+	control.Commit("chore: configure a control change during the record")
 	control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 	controlBefore := control.Git("rev-parse", "HEAD")
 
@@ -387,16 +390,17 @@ func TestFinalCheckpointMutationLockFailurePreservesTheRemoteSource(t *testing.T
 	combined := failed.Stdout + failed.Stderr
 	assert.True(t, harness.IsCodePresent(failed.Events, "E335"), "stdout:\n%s", failed.Stdout)
 	assert.Contains(t, combined, "control checkpoint failed")
-	assert.Contains(t, combined, "opening Git mutation lock")
+	assert.Contains(t, combined, "repository changed after planning")
 	assert.Equal(t, 1, finalPublishCount(t, control))
 	sourceAfter := control.Git("-C", "sources/lib", "rev-parse", "HEAD")
 	assert.Equal(t, sourceAfter, control.Git("-C", fleet.sourceRemote, "rev-parse", "lib@0.1.0^{commit}"))
 	assert.Equal(t, sourceAfter,
 		control.Git("-C", fleet.sourceRemote, "rev-parse", "refs/heads/"+harness.DefaultBranch))
 	assert.Equal(t, fleet.sourceBefore, control.Git("rev-parse", "HEAD:sources/lib"))
-	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
+	assert.Equal(t, "chore: an unplanned control commit", control.Git("log", "-1", "--format=%s"),
+		"no checkpoint follows the change")
+	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD~1"))
 
-	require.NoError(t, os.Remove(lockPath))
 	control.Git("add", "sources/lib")
 	control.Git("commit", "-q", "-m", "chore(release): repair lib@0.1.0 checkpoint")
 	control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)

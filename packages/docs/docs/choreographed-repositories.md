@@ -261,9 +261,9 @@ A consumer whose own release commits are disabled records nothing. That is a val
 info level, and a later boundary across it needs the explicit tuple described below. No settlement is created where the
 recorded pins already equal the revisions to record, and no empty commit is ever made to mark one.
 
-Because a settlement commits and pushes in a repository, that repository's `beforeCommit`, `afterCommit`,
-`postCommit`, `beforePush` and `afterPush` hooks bracket it, outside the advisory lock and only when a commit or a push
-actually happens.
+Because a settlement commits and pushes in a repository, that repository's `beforeCommit`, `afterCommit`, `postCommit`,
+`beforePush` and `afterPush` hooks bracket it, outside the settlement's Git transactions and only when a commit or a
+push actually happens.
 
 A settlement moves a repository's head before the package publishes, and dispat admits exactly the revision it wrote
 as that repository's expected head. It checks the head the run expects before it writes, so a head that anything else

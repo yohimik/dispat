@@ -292,7 +292,7 @@ func (w *workspaceRecorder) settleNode(ctx context.Context, hooks recordHooks, r
 			}
 		}
 		// The hooks bracket the commit exactly where a checkpoint's do: before
-		// the advisory lock is taken and after it is released, so no user
+		// the repository is taken and after it is given back, so no user
 		// script ever runs while this repository is held.
 		hooks.run(record.hooks, "beforeCommit", record.repo.Config.Run.BeforeCommit)
 		unlock, lockErr := gitx.AcquireMutations(ctx, record.git)

@@ -250,8 +250,8 @@ func TestWorkspaceSnapshotFailsClosedWhenRepositoryDisappears(t *testing.T) {
 		}
 		saved, err := os.ReadFile(headPath)
 		require.NoError(t, err)
-		// Retain a valid Git directory so the mutation lock is acquired;
-		// the unborn reference makes the subsequent HEAD read fail.
+		// Retain a valid Git directory so the repository is taken; the
+		// unborn reference makes the subsequent HEAD read fail.
 		require.NoError(t, os.WriteFile(headPath, []byte("ref: refs/heads/missing-snapshot\n"), 0o644))
 		t.Cleanup(func() { _ = os.WriteFile(headPath, saved, 0o644) })
 

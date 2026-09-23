@@ -198,9 +198,9 @@ func TestCovPolyrepoCheckpointRefusesARevisionTheSourceRemoteLacks(t *testing.T)
 // TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision: the hooks around
 // a push are user scripts, and a script that commits in the repository about
 // to be pushed would make the push publish something the release never
-// planned. The pin is re-proved under the repository's mutation lock after the
-// hook and before the push, so the push does not happen and the run says which
-// revision it recorded.
+// planned. The pin is re-proved inside the push transaction, after the hook and
+// before the push, so the push does not happen and the run says which revision
+// it recorded.
 func TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision(t *testing.T) {
 	control, sourceBare, _ := covPolyrepoPushableFleet(t)
 	cfg := covPolyrepoFile()

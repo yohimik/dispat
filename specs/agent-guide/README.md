@@ -166,9 +166,10 @@ revision, or restore the intended pin. Until that repair, another run correctly 
 republish the source or force an automatic checkpoint.
 
 The release lock must cover the combined fleet, including standalone packages. dispat acquires participating remote
-locks in exact repository-name order and releases them in reverse; `control` has no special first position. Native
-multi-repository Git transactions order local advisory locks by canonical Git common directory and release them in
-reverse. Hooks and scripts run outside those local locks.
+locks in exact repository-name order and releases them in reverse; `control` has no special first position. Within one
+process, dispat serializes its native Git transactions per repository, takes several repositories in canonical Git
+common-directory order, and gives them back in reverse; it claims no exclusion against other processes. Hooks and
+scripts run outside those transactions.
 Partial publication remains non-atomic:
 preserve successful source tags, block consumers of failures, allow independent work, and re-plan from durable records.
 After all `beforeAll` hooks, dispat rechecks the whole fleet. After each `beforePublish` hook, it rechecks that package's

@@ -246,10 +246,13 @@ echo "PACKAGE_CORE=$(git rev-parse HEAD)" >> "$DISPAT_OUTPUT"
 
 In source-history mode, the outer release also publishes an admitted full source commit through private per-run
 coordination. Nested dispat commands validate that live pin against the same control root, configuration, exact source
-identity, and current Git head while holding the source mutation lock. This lets a command in an already-running sibling
-script observe a native record completed elsewhere in the same run. An explicit `--root`, `--config`, `--configs`, or
-`--polyrepo` suppresses inherited coordination. The private data is removed when the release ends and is never a
-release record, baseline, tag payload, or input to a later plan.
+identity, and current Git head. The outer release commits a source revision a moment before it publishes it, so a
+nested command reads the pin, then the head, then the pin again, and accepts only a head that two agreeing pin reads
+admit. Any other reading is repeated for up to a few seconds before the checkout is refused with `E330`, and an
+interrupt ends that wait. This lets a command in an already-running sibling script observe a native record completed
+elsewhere in the same run. An explicit `--root`, `--config`, `--configs`, or `--polyrepo` suppresses inherited
+coordination. The private data is removed when the release ends and is never a release record, baseline, tag payload,
+or input to a later plan.
 
 ## Run outcome data
 

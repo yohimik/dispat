@@ -338,15 +338,17 @@ Packages in one source publish and record in a deterministic repository order. T
 dependency failure edges; it only prevents two packages from observing a half-recorded source transition. Packages in
 different repositories can still publish concurrently.
 
-When locking is enabled, dispat acquires the remote release lock in every participating repository in exact repository-
-name order and releases those locks in reverse. The reserved `control` identity is ordered like any other name; it is
-not forced to the front. Native transactions that touch several worktrees acquire their local advisory locks in
-canonical Git common-directory order, deduplicate linked worktrees, and release in reverse. Hooks and scripts run
-outside the local advisory locks.
+When locking is enabled, dispat acquires the remote release lock in every participating repository in exact
+repository-name order and releases those locks in reverse. The reserved `control` identity is ordered like any other
+name; it is not forced to the front. Within one dispat process, native Git transactions are serialized per repository:
+a transaction that touches several worktrees takes them in canonical Git common-directory order, takes linked worktrees
+of one repository once, and gives them back in reverse. Hooks and scripts run outside those transactions.
 
-The fleet and repository locks coordinate dispat operations. They cannot exclude every process that can write the Git
-worktrees. The checks detect relevant changes visible before publication; they do not make publication atomic with an
-arbitrary external writer after the final check.
+The fleet lock coordinates dispat runs, and the per-repository serialization covers one process only. Neither can
+exclude every process that can write the Git worktrees. Git's own lock files refuse a conflicting writer of the index
+or of a ref, and every transaction re-proves the revision it records before it writes. The checks detect relevant
+changes visible before publication; they do not make publication atomic with an arbitrary external writer after the
+final check.
 
 ### Using `--since` across the fleet
 

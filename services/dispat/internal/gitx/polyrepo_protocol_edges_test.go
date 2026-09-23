@@ -2,10 +2,11 @@ package gitx
 
 import (
 	"context"
-	"os"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,25 +34,58 @@ func TestControlHistoryProtocolRejectsMalformedIdentityAndDiffFrames(t *testing.
 	}
 }
 
-func TestMutationLockOpenFailureAndLateCancellationReleaseResources(t *testing.T) {
-	root, g := initRepo(t)
-	path, err := g.mutationLockPath(t.Context())
+// TestMutationLockLateCancellationReleasesWhatItTook: a transaction over two
+// repositories that is cancelled while waiting for the second gives back the
+// first. Otherwise one interrupted checkpoint would leave a repository held
+// for the life of the process and every later record there would wait on it.
+func TestMutationLockLateCancellationReleasesWhatItTook(t *testing.T) {
+	firstRoot, first := initRepo(t)
+	secondRoot, second := initRepo(t)
+	firstCommon, err := first.mutationCommonDir(t.Context())
 	require.NoError(t, err)
-	require.NoError(t, os.Mkdir(path, 0o700))
-	unlock, err := g.AcquireMutation(t.Context())
-	require.ErrorContains(t, err, "opening Git mutation lock")
-	assert.Nil(t, unlock)
-	require.NoError(t, os.Remove(path))
+	secondCommon, err := second.mutationCommonDir(t.Context())
+	require.NoError(t, err)
+	if firstCommon > secondCommon {
+		// The waiter must reach the held repository second, which is the
+		// order the lock takes them in, whatever the temporary names were.
+		firstRoot, secondRoot = secondRoot, firstRoot
+		first, second = second, first
+	}
+	holding, err := second.AcquireMutation(t.Context())
+	require.NoError(t, err)
+
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // cancellation after the common directory has already been resolved
-	unlock, err = acquireMutationPath(ctx, path)
-	require.ErrorIs(t, err, context.Canceled)
-	assert.Nil(t, unlock)
-	unlock, err = g.AcquireMutation(t.Context())
-	require.NoError(t, err, "a failed attempt must not leave the repository locked")
+	waited := make(chan error, 1)
+	go func() {
+		unlock, waitErr := AcquireMutations(ctx, first, second)
+		if unlock != nil {
+			unlock()
+		}
+		waited <- waitErr
+	}()
+	// The waiter holds the first repository while it waits for the second.
+	require.Eventually(t, func() bool {
+		probe, cancelProbe := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		defer cancelProbe()
+		unlock, probeErr := first.AcquireMutation(probe)
+		if probeErr == nil {
+			unlock()
+		}
+		return errors.Is(probeErr, context.DeadlineExceeded)
+	}, 5*time.Second, 10*time.Millisecond, "the waiter takes the first repository before it waits")
+	cancel()
+	require.ErrorIs(t, <-waited, context.Canceled)
+
+	unlock, err := first.AcquireMutation(t.Context())
+	require.NoError(t, err, "a cancelled acquisition must not leave the first repository held")
+	unlock()
+	holding()
+	unlock, err = AcquireMutations(t.Context(), second, first)
+	require.NoError(t, err)
 	unlock()
 	unlock()
-	assert.FileExists(t, filepath.Join(root, ".git", mutationLockFile))
+	assert.NoFileExists(t, filepath.Join(firstRoot, ".git", "dispat-mutation.lock"))
+	assert.NoFileExists(t, filepath.Join(secondRoot, ".git", "dispat-mutation.lock"))
 }
 
 func TestTagSnapshotsIncludeVersionAndNamedMovingAliases(t *testing.T) {

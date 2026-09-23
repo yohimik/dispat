@@ -6,20 +6,18 @@
 package integration
 
 // Goal: composing an inherited workspace is interruptible. A nested command
-// that accepted a live run context validates each source checkout while
-// holding that source's Git mutation lock, so composition can queue behind
-// whatever release is recording there. The wait is bounded at thirty seconds
-// so a lock nobody will release cannot hang a command forever, but the bound
-// is not the answer to Ctrl-C: an operator who interrupts a queued command
-// must get the terminal back at once, and the run must say what it was
-// waiting for rather than exit in silence.
+// that accepted a live run context validates each source checkout against the
+// pin the release around it publishes, and a checkout at a revision that pin
+// does not admit yet is read again for a few seconds: the release commits into
+// a source before it publishes the revision it admitted. That wait is bounded,
+// but the bound is not the answer to Ctrl-C: an operator who interrupts a
+// waiting command must get the terminal back at once, and the run must say
+// what it was waiting for rather than exit in silence.
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -29,11 +27,11 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// mutationLockWait is how long the binary bounds one live pin validation lock
-// acquisition. The scenario's oracle is that an interrupt beats it by a wide
-// margin, so the assertions are written against this number rather than
-// against a bare stopwatch reading.
-const mutationLockWait = 30 * time.Second
+// livePinReadsLeft is how long the binary's bounded pin reads still have to
+// run once the second read has happened: eight more intervals of a quarter of
+// a second. The scenario's oracle is that an interrupt beats it, so the
+// assertions are written against this number rather than a bare stopwatch.
+const livePinReadsLeft = 8 * 250 * time.Millisecond
 
 // liveWorkspaceEnv builds the inherited workspace context a release exports to
 // the scripts it runs: the composed control invocation, the exact package
@@ -41,8 +39,8 @@ const mutationLockWait = 30 * time.Second
 // directory the coordinator publishes verified source revisions through.
 //
 // Written here rather than driven through a real parent release because the
-// scenario is about the nested command alone: a parent would hold the lock
-// this test has to hold itself, and would take the same interrupt.
+// scenario is about the nested command alone: a parent would publish the pin
+// this test has to withhold, and would take the same interrupt.
 func liveWorkspaceEnv(t *testing.T, control *harness.Repo, owners map[string]string, repositories []string) []string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(control.Root)
@@ -71,32 +69,11 @@ func liveWorkspaceEnv(t *testing.T, control *harness.Repo, owners map[string]str
 	}
 }
 
-// holdMutationLock takes the Git mutation lock of the checkout at relPath, the
-// way another dispat process recording there would hold it, and keeps it for
-// the rest of the test.
-//
-// The descriptor is this process's own: flock is a property of the open file
-// description, so an independent open is exactly what a second process brings,
-// and a waiter cannot tell the two apart.
-func holdMutationLock(t *testing.T, control *harness.Repo, relPath string) {
-	t.Helper()
-	common := strings.TrimSpace(control.Git("-C", relPath, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-	require.NotEmpty(t, common, "the checkout reports no Git common directory")
-	file, err := os.OpenFile(filepath.Join(common, "dispat-mutation.lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		_ = file.Close()
-	})
-	require.NoError(t, syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB),
-		"the lock was already held, so the scenario would prove nothing")
-}
-
-// TestCancelWorkspaceCompositionStopsOnInterrupt: a nested command queued
-// behind another run's Git mutation lock stops on SIGINT instead of sitting
-// out the thirty-second bound. The error names the wait it was in, and says
-// it was cancelled rather than timed out, so the two outcomes cannot be
-// mistaken for one another.
+// TestCancelWorkspaceCompositionStopsOnInterrupt: a nested command waiting for
+// the live pin of a source whose checkout nobody has admitted stops on SIGINT
+// instead of reading out its bound. The error names the wait it was in, and
+// says it was cancelled, so it cannot be mistaken for the checkout refusal the
+// bound would have ended in.
 func TestCancelWorkspaceCompositionStopsOnInterrupt(t *testing.T) {
 	source := harness.New(t)
 	source.SeedPackage("packages", "sdk")
@@ -109,19 +86,20 @@ func TestCancelWorkspaceCompositionStopsOnInterrupt(t *testing.T) {
 	writePolyrepoJSON(t, control, "dispat.json", cfg)
 	control.Commit("chore: assemble the control repository")
 
-	// The composition below has to wait, so somebody else has to be holding
-	// the source's lock before the command starts.
-	holdMutationLock(t, control, "sources/sdk")
+	// The checkout moves past its gitlink and the live context names no
+	// revision for it, which is what a nested command sees between the
+	// release's commit and its pin; here the pin never comes.
+	control.Git("-C", "sources/sdk", "-c", "user.name=release", "-c", "user.email=release@dispat.test",
+		"commit", "-q", "--allow-empty", "-m", "chore(sdk): a commit no pin admits")
+	// Every HEAD read of the pin validation is counted and passed through, so
+	// the scenario knows when the command is inside its reads and can
+	// interrupt the wait rather than the start of the process.
+	reads := harness.NewGitFault(t, harness.GitFault{Pattern: "*/sources/sdk rev-parse HEAD", Nth: 1 << 20})
 
 	env := liveWorkspaceEnv(t, control, map[string]string{"sdk": "sdk-source"}, []string{"sdk-source"})
-	proc := control.StartCommandEnv(env, "status")
-
-	// Long enough for the binary to reach composition and install its signal
-	// handler, and short enough to leave the bound untouched. An interrupt
-	// that arrived before the handler would kill the process outright and
-	// leave the output empty, which the assertions below report as a failure
-	// rather than passing on.
-	time.Sleep(2 * time.Second)
+	proc := control.StartCommandEnv(append(env, reads.Env()...), "status")
+	require.Eventually(t, func() bool { return reads.Matches() >= 2 }, time.Minute, 10*time.Millisecond,
+		"the command reads the checkout again because no pin admits it")
 	signalled := time.Now()
 	proc.Signal(os.Interrupt)
 	res := proc.Wait()
@@ -129,12 +107,10 @@ func TestCancelWorkspaceCompositionStopsOnInterrupt(t *testing.T) {
 
 	output := res.Stdout + res.Stderr
 	assert.NotEqual(t, 0, res.Code, "an interrupted composition does not exit 0")
-	assert.Contains(t, output, "acquiring live pin validation lock",
+	assert.Contains(t, output, "waiting for a stable live run pin",
 		"the run must say which wait it was interrupted in; stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, output, "context canceled",
-		"the interrupt is what ended the wait, not the bound")
-	assert.NotContains(t, output, "context deadline exceeded",
-		"the thirty-second bound must not be what answers a Ctrl-C")
-	assert.Less(t, waited, mutationLockWait-10*time.Second,
-		"the interrupt has to end the wait at once, not after the bound")
+	assert.Contains(t, output, "context canceled", "the interrupt is what ended the wait")
+	assert.NotContains(t, output, "is checked out at",
+		"the bounded reads must not be what answers a Ctrl-C")
+	assert.Less(t, waited, livePinReadsLeft, "the interrupt has to end the wait at once, not after the bound")
 }

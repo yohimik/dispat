@@ -107,8 +107,8 @@ integration suite itself.
    packages at the version they were owed. The resource half of the same goal lives in `cancel_resources_test.go`: an
    interrupted run stops launching the commands still ahead of it, leaves none of its working files behind, and does
    not disturb a second run covering the same repository. `cancel_workspace_test.go` covers the phase before any of
-   that: composing an inherited workspace can queue behind another run's Git mutation lock, and that wait answers the
-   interrupt rather than its own bound.
+   that: composing an inherited workspace can wait a few seconds for the live pin of a source the enclosing release is
+   recording, and that wait answers the interrupt rather than its own bound.
 9. **The script frames** (`hooks_test.go`): every stage sits inside a frame of hooks, and the frames nest: nine
    per-package hooks around the version, build and publish stages, the announce frame after a publish, the
    `flow.onFail` / `flow.onSkip` outcome scripts, the once-per-space login gate, and the run-level bracket around the
@@ -757,7 +757,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestCancelStopsTheRemainingCommandsOfAWarnOnlySequence` | The announce frame only warns, so nothing downstream would notice it running on after an interrupt. A SIGINT inside the first announce command leaves the release published and reports exactly one failed command: the two behind it are never launched. |
 | `TestCancelledRunsLeaveNoTemporaryFiles` | Three interrupted runs in a row, each with its own `TMPDIR`, leave no `dispat-*` working file behind: the output staging file of every hook and stage sequence is removed on the cancellation path as well as the successful one. |
 | `TestCancelDoesNotDisturbAConcurrentRun` | An interruption reaches its own run's script tree and nothing else: a second invocation covering the same repository at the same moment finishes its script and exits zero. |
-| `TestCancelWorkspaceCompositionStopsOnInterrupt` | Composing an inherited workspace queues behind the source repository's Git mutation lock, and the wait is the invocation's own rather than a detached one: a SIGINT ends it within seconds instead of sitting out the thirty-second bound, and the refusal names the wait and reports `context canceled` rather than `context deadline exceeded`. |
+| `TestCancelWorkspaceCompositionStopsOnInterrupt` | A nested command whose source checkout no live pin admits yet reads it again for a bounded few seconds, and the wait is the invocation's own rather than a detached one: a SIGINT during it ends the command at once instead of sitting out the bounded reads, and the refusal names the wait and reports `context canceled` rather than the `E330` checkout refusal the bound ends in. |
 
 ### Goal 9: the script frames (`hooks_test.go`)
 
@@ -2267,7 +2267,7 @@ sentence. Goal 52 continues to own what a composition *means*; nothing here repe
 | `TestCovPolyrepoExportThatIsNotACommitIsNotAdmitted` | A package export the right length but not an object id is neither admitted into the fixed snapshot nor usable as the revision to tag: the record fails and no tag or gitlink names a revision that does not exist. |
 | `TestCovPolyrepoCheckpointRefusesARevisionTheSourceRemoteLacks` | The checkpoint push is preceded by proof that the source tag is on the source remote, so a source that records without publishing keeps its own record while the control branch is left untouched. |
 | `TestCovPolyrepoCheckpointRefusesASourceRemoteItCannotAsk` | A source remote that cannot be asked is not proof either: the checkpoint is withheld and the control repository's local and pushed HEADs both stay where they were. |
-| `TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision` | The pin is re-proved under the repository's mutation lock after the `beforePush` hook and before the push, so a hook that commits in the repository stops the push and the tag still names the planned revision. |
+| `TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision` | The pin is re-proved inside the push transaction after the `beforePush` hook and before the push, so a hook that commits in the repository stops the push and the tag still names the planned revision. |
 | `TestCovPolyrepoCommitStepOwnsItsWholeTransaction` | Invoked from a shell rather than a release stage, `dispat commit` applies its identity, remote, message-format and include overrides for that invocation alone, pushes the branch and tags it wrote, and moves and pushes the control gitlink itself — tagged against the pushed tag, untagged against the pushed branch, and writing a first moving alias even when told not to force. |
 
 ### The live pin coordinator
@@ -2489,13 +2489,13 @@ These cases extend the existing planning, configuration, publication, command an
 | `TestFinalTagSnapshotReadFaultsRefuseAnUnprovenFleet` | A real relevant-tag read failure at either initial snapshot capture or pre-publish revalidation is E330, publishes nothing, writes no source/control record, and a healthy retry publishes exactly once. |
 | `TestFinalCheckpointTreeRepliesCannotInventAControlRecord` | A failed or malformed control `ls-tree` reply after the source release is durable cannot be treated as a changed gitlink: E335 preserves the remote source tag/branch and old control checkpoint, and explicit checkpoint repair makes retry a publication no-op. |
 | `TestFinalLivePinWriteFaultsStopBeforeTagAndCheckpoint` | If the private live-pin coordinator becomes unwritable or its atomic destination is replaced after publication, the truthful source commit remains but no tag or control checkpoint advances; explicitly recording that exact commit makes retry a publication no-op. |
-| `TestFinalMutationLockPathCollisionRefusesBeforePlanning` | A real directory collision at the repository mutation-lock path is E330 before planning or publication; removing the collision lets the unchanged fleet publish exactly once. |
+| `TestFinalMutationCommonDirectoryFailureRefusesBeforePlanning` | A Git failure resolving a source's common directory, by which every snapshot and record transaction is serialized, is E330 before planning or publication; once Git answers again the unchanged fleet publishes exactly once. |
 | `TestFinalImmutableBaselineRefDriftNeedsExactRepair` | Deleting an immutable baseline tag or replacing only its annotated tag object at the same peeled commit is detected before publication; restoring the exact original ref object makes retry safe. |
 | `TestFinalSourceRecordPreflightGitFaultsRefuseBeforePublication` | Failures reading a pushable source's current branch, remote branch position, or protected release paths refuse before publication and mutation; a healthy retry publishes and records exactly once. |
-| `TestFinalMutationCommonDirectoryRepliesRefuseBeforePublication` | Empty, missing, and relative successful Git common-directory replies cannot redirect the local mutation lock or make an unprotected fleet appear ready: no package publishes, and a healthy retry records exactly once. |
-| `TestFinalMutationLockBreakAfterPublicationLeavesNoFalseRecord` | Mutation-lock path damage after upload but before native source recording leaves no source commit, tag, or checkpoint; after filesystem/generated-state repair, the absent durable baseline makes retry upload again. |
+| `TestFinalMutationCommonDirectoryRepliesRefuseBeforePublication` | Empty, missing, and relative successful Git common-directory replies cannot redirect the per-repository serialization or make an unprotected fleet appear ready: no package publishes, and a healthy retry records exactly once. |
+| `TestFinalSourceChangeAfterPublicationLeavesNoFalseRecord` | A source commit made after upload but before native source recording is refused by the release commit's head check: no release commit, tag, or checkpoint is written; after the unplanned commit and the generated state are removed, the absent durable baseline makes retry upload again. |
 | `TestFinalSourceTagWriteFaultKeepsCommitBelowTheCheckpoint` | A direct source-tag Git failure after the source commit leaves that commit reviewable while control remains old; explicitly publishing the exact source tag/branch and checkpoint makes retry a no-op. |
-| `TestFinalCheckpointMutationLockFailurePreservesTheRemoteSource` | Damage to the control mutation-lock path after source push preserves the remote source commit, branch, and tag while withholding the control checkpoint; explicit gitlink repair prevents duplicate publication on retry. |
+| `TestFinalCheckpointControlChangePreservesTheRemoteSource` | A control commit made by the source's `afterPush` hook is refused by the checkpoint's head check: the remote source commit, branch, and tag are preserved while the control checkpoint is withheld; explicit gitlink repair prevents duplicate publication on retry. |
 | `TestFinalRecoveryReadFaultsKeepThePublishedRecordLocal` | After publication and a concurrent remote advance, failure reading remote tags or fetching for recovery is E224; the immutable tag and release commit remain local, the foreign remote commit remains durable, and explicit merge/ref repair makes retry a publication no-op. |
 | `TestFinalConflictSettlementFaultsKeepBothDurableInputs` | Git failures resolving the release side, pushing the quarantine branch, staging the audit note, or committing the settlement are E224; the local immutable release tag, remote foreign commit, visible merge state, and any successfully pushed quarantine ref truthfully describe how far recovery reached. |
 | `TestFinalDeferredTagWriteFaultRetainsTheReleaseCommit` | A direct Git failure writing a finalize-deferred tag is E220 after publication; the release commit and changelog remain for review, no false baseline exists, and a healthy retry republishes once before establishing the missing immutable tag. |
@@ -2600,7 +2600,7 @@ These cases extend the existing planning, configuration, publication, command an
 
 | Test | Claim proven |
 | --- | --- |
-| `TestFinalFleetUnlockMutationDamageFailsAfterPublishing` | If `postAll` damages one source repository's local mutation-lock path after publication and durable source/control recording, fleet cleanup reports E336, preserves the published result, source tag, source commit and control checkpoint, continues releasing the remaining control lock, leaves only the affected source lock visible for repair, exits nonzero, and emits one failed `release.finished` webhook with `published=1`. |
+| `TestFinalFleetUnlockFailureFailsAfterPublishing` | If one source repository's remote refuses to give back its release lock after publication and durable source/control recording, fleet cleanup reports E336, preserves the published result, source tag, source commit and control checkpoint, continues releasing the remaining control lock, leaves only the affected source lock visible for repair, exits nonzero, and emits one failed `release.finished` webhook with `published=1`. |
 
 ### Command failure recovery
 
@@ -2659,7 +2659,7 @@ These cases extend the existing planning, configuration, publication, command an
 | `TestReleaseLockRecoversItsOwnAcceptedPushAfterAResponseFailure` | A lost lock-push response is reconciled by attempt identity and the owned lock is cleaned after release. |
 | `TestReleaseLockCreationFailurePreventsPlanningAndPublication` | Local lock-tag creation failure prevents planning, package work and remote locking. |
 | `TestReleaseLockLocalCleanupFailurePreservesThePublishedOutcome` | Local cleanup failure returns E336 while retaining publication and successful remote lock cleanup. |
-| `TestRecordSourceLockFailureAfterCommitPreservesTheUnadvertisedRevision` | A post-commit lock failure preserves the source commit but withholds its tag and checkpoint; exact record repair prevents republishing. |
+| `TestRecordSourceChangeAfterCommitPreservesTheUnadvertisedRevision` | A source commit made by an `afterCommit` hook is refused by the tag transaction's pin check: the truthful release commit remains, but no tag, remote ref, or checkpoint advertises it; exact record repair prevents republishing. |
 | `TestReleaseBehindGuardRefusesUnreadableRemoteState` | Unreadable branch or remote evidence stops push-mode release before mutation; a healthy retry publishes once. |
 | `TestReleaseLockRefusesAnAmbiguousPushDestination` | Multiple push destinations prevent lock acquisition and publication. |
 | `TestReleasePropagatesAnUnreadableAllowedBranchBeforeMutation` | An unreadable allowed branch prevents package work and release records. |

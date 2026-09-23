@@ -9,120 +9,103 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 )
 
-const mutationLockFile = "dispat-mutation.lock"
-
-// AcquireMutation serializes a complete native Git mutation transaction with
-// every other dispat process using this repository. The lock lives in Git's
+// AcquireMutation serializes a complete native Git transaction in this
+// repository with every other transaction this process runs in it: a commit,
+// a tag, a push, and any enclosing checkpoint. The exclusion belongs to Git's
 // common directory, so linked worktrees sharing an object database and refs
-// also share the same exclusion point.
+// also share it.
 //
-// Acquisition polls a non-blocking platform lock so context cancellation can
-// stop a waiter. The returned release is idempotent and closes the descriptor;
-// callers must hold it across commit, tag, push, and any enclosing checkpoint,
-// but not while running user scripts.
+// The exclusion is this process's own and claims nothing about any other. Git
+// refuses a second writer of the index or of a ref through its own lock files,
+// every transaction re-proves the revision it is about to record before it
+// writes, and releases are serialized by the remote release lock.
+//
+// A waiter stops when ctx is done. The returned release is idempotent; callers
+// hold it across the transaction and never while a user script runs.
 func (c *LocalGitx) AcquireMutation(ctx context.Context) (release func(), err error) {
 	return AcquireMutations(ctx, c)
 }
 
 // AcquireMutations acquires several repositories in Git-common-directory
-// order. Duplicate common directories are locked once, which matters when a
-// transaction names two linked worktrees of the same repository.
+// order and releases them in reverse. Duplicate common directories are
+// acquired once, which matters when a transaction names two linked worktrees
+// of the same repository: each common directory has a single slot, and taking
+// it twice would wait for a release only the waiter itself could make.
+//
+// The one order is what keeps two transactions from waiting on each other: a
+// transaction only ever waits for a slot that sorts after every slot it
+// already holds, so no chain of waits can close into a cycle.
 func AcquireMutations(ctx context.Context, repositories ...*LocalGitx) (release func(), err error) {
-	paths := make([]string, 0, len(repositories))
+	commons := make([]string, 0, len(repositories))
 	seen := make(map[string]bool, len(repositories))
 	for _, repository := range repositories {
 		if repository == nil {
 			continue
 		}
-		path, pathErr := repository.mutationLockPath(ctx)
-		if pathErr != nil {
-			return nil, pathErr
+		common, resolveErr := repository.mutationCommonDir(ctx)
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
-		if !seen[path] {
-			seen[path] = true
-			paths = append(paths, path)
+		if !seen[common] {
+			seen[common] = true
+			commons = append(commons, common)
 		}
 	}
-	sort.Strings(paths)
+	sort.Strings(commons)
 
-	var held []func()
+	held := make([]chan struct{}, 0, len(commons))
 	releaseAll := func() {
 		for i := len(held) - 1; i >= 0; i-- {
-			held[i]()
+			<-held[i]
 		}
 	}
-	for _, path := range paths {
-		unlock, lockErr := acquireMutationPath(ctx, path)
-		if lockErr != nil {
+	for _, common := range commons {
+		slot := mutationSlot(common)
+		// A context that is already done takes nothing, even where the slot is
+		// free: a select with both cases ready picks one at random.
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			releaseAll()
-			return nil, lockErr
+			return nil, ctxErr
 		}
-		held = append(held, unlock)
+		select {
+		case slot <- struct{}{}:
+			held = append(held, slot)
+		case <-ctx.Done():
+			releaseAll()
+			return nil, ctx.Err()
+		}
 	}
 	var once sync.Once
 	return func() { once.Do(releaseAll) }, nil
 }
 
-func acquireMutationPath(ctx context.Context, path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("opening Git mutation lock %s: %w", path, err)
-	}
+// mutationSlots holds one single-slot channel per canonical Git common
+// directory this process has taken. Sending takes the repository and
+// receiving gives it back, so a waiter can also wait on its context.
+var mutationSlots sync.Map
 
-	closeFile := func() { _ = f.Close() }
-	retry := time.NewTicker(25 * time.Millisecond)
-	defer retry.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			closeFile()
-			return nil, err
-		}
-		locked, lockErr := tryMutationFileLock(f)
-		if lockErr != nil {
-			closeFile()
-			return nil, fmt.Errorf("acquiring Git mutation lock %s: %w", path, lockErr)
-		}
-		if locked {
-			var once sync.Once
-			return func() {
-				once.Do(func() {
-					_ = unlockMutationFile(f)
-					closeFile()
-				})
-			}, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			closeFile()
-			return nil, ctx.Err()
-		case <-retry.C:
-		}
+// mutationSlot answers the one slot of a canonical common directory, creating
+// it on first use.
+func mutationSlot(common string) chan struct{} {
+	if slot, ok := mutationSlots.Load(common); ok {
+		return slot.(chan struct{})
 	}
+	slot, _ := mutationSlots.LoadOrStore(common, make(chan struct{}, 1))
+	return slot.(chan struct{})
 }
 
-func (c *LocalGitx) mutationLockPath(ctx context.Context) (string, error) {
-	common, err := c.mutationCommonDir(ctx)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(common, mutationLockFile), nil
-}
-
-// mutationCommonDir answers the Git common directory this repository's lock
-// lives in, in the one spelling this process uses for that directory.
+// mutationCommonDir answers the Git common directory a repository's mutations
+// are serialized by, in the one spelling this process uses for that directory.
 //
 // Two things the plain `rev-parse` answer cannot do are done here. The answer
-// is canonicalized through the filesystem, because the lock's identity is the
-// directory rather than the string that names it: on a case-insensitive
-// filesystem "/w/Repo/.git" and "/w/repo/.git" are one directory and one lock
-// file, and opening it twice would take two file descriptions of it — flock
-// belongs to the description, so the second acquisition would wait for a
-// release the first only makes afterwards, and the caller would spin until
-// its context gave up. And the answer is remembered, because a release takes
+// is canonicalized through the filesystem, because the exclusion's identity is
+// the directory rather than the string that names it: on a case-insensitive
+// filesystem "/w/Repo/.git" and "/w/repo/.git" are one directory, and two
+// spellings would be two slots, so two transactions in one repository would
+// not exclude each other and one transaction naming both spellings would take
+// the repository twice. And the answer is remembered, because a release takes
 // this lock on every commit, tag and push while the common directory of a
 // repository does not move: one `git rev-parse` per repository per process
 // rather than one per acquisition.
@@ -157,13 +140,13 @@ func (c *LocalGitx) mutationCommonDir(ctx context.Context) (string, error) {
 	return common, nil
 }
 
-// mutationDirs is what makes one directory one lock: the spelling this process
-// settled on for every real directory it has locked in, and the resolved
-// common directory of every repository folder it has been asked about.
+// mutationDirs is what makes one directory one slot: the spelling this process
+// settled on for every real directory it has taken, and the resolved common
+// directory of every repository folder it has been asked about.
 //
 // Both are process-wide because the hazard and the cost are both process-wide:
-// one process must not hold two descriptions of one lock file, and a release
-// asks the same repository the same question hundreds of times.
+// one repository must not be taken under two names, and a release asks the
+// same repository the same question hundreds of times.
 var mutationDirs struct {
 	mu       sync.Mutex
 	known    []mutationDir
@@ -174,7 +157,7 @@ var mutationDirs struct {
 // The recorded FileInfo is what a later candidate is compared against, and
 // what a re-stat of the same path is checked against before it is trusted: an
 // inode a deleted folder left behind can be handed to a new one, and a stale
-// entry would otherwise send the lock somewhere else entirely.
+// entry would otherwise send the transaction somewhere else entirely.
 type mutationDir struct {
 	info os.FileInfo
 	path string
@@ -209,7 +192,7 @@ func canonicalMutationDir(path string) (string, error) {
 
 // cachedCommonDir answers from the per-process table, and only while the
 // answer still exists: a temporary repository that was removed must not have
-// its lock resolved from memory.
+// its common directory resolved from memory.
 func cachedCommonDir(folder string) (string, bool) {
 	mutationDirs.mu.Lock()
 	defer mutationDirs.mu.Unlock()

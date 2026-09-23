@@ -7,11 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
@@ -21,9 +21,10 @@ import (
 const ControlRepository = "control"
 
 // SourcePinResolver reads the latest run-authorized revisions for one exact
-// .gitmodules repository identity. Composition invokes it while holding that
-// source's Git mutation lock, so a nested command compares a coherent pin and
-// HEAD even while another source is recording in the same release run.
+// .gitmodules repository identity. Composition reads it before and after the
+// source's HEAD and accepts only a pair the two reads agree on, so a nested
+// command compares a coherent pin and HEAD even while the release around it is
+// recording in that source.
 type SourcePinResolver func(repository string) ([]string, error)
 
 // ComposeWorkspaceWithPinResolver validates and loads the repositories in a
@@ -31,10 +32,10 @@ type SourcePinResolver func(repository string) ([]string, error)
 // Legacy configurations return no workspace. Paths authored by the control
 // file and CLI imports start at their respective declaring roots.
 //
-// ctx is the invocation's own cancellable context. Validating a live pin takes
-// the source repository's Git mutation lock, which waits for whatever release
-// is recording there, so the wait has to be interruptible: an operator who
-// presses Ctrl-C while composition is queued behind another run must stop.
+// ctx is the invocation's own cancellable context. Validating a live pin can
+// wait a few seconds for the release around the command to publish a revision
+// it has just committed, so the wait has to be interruptible: an operator who
+// presses Ctrl-C while composition waits must stop.
 func ComposeWorkspaceWithPinResolver(ctx context.Context, cfg *File, configPath, controlRoot string, cliConfigs []string, runPins map[string][]string, resolve SourcePinResolver) (*Workspace, error) {
 	return composeWorkspace(ctx, cfg, configPath, controlRoot, cliConfigs, runPins, resolve, false)
 }
@@ -539,33 +540,73 @@ func requireCompleteRepository(root, name string) error {
 }
 
 func requirePinnedModule(controlRoot, controlRevision string, module submodule, runPins []string) (string, error) {
-	pinned, err := gitOutput(controlRoot, "rev-parse", controlRevision+":"+module.Path)
+	pinned, head, err := readPinnedModule(controlRoot, controlRevision, module)
 	if err != nil {
-		return "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q is not pinned by control HEAD: %w", module.Name, err))
+		return "", err
 	}
-	head, err := gitOutput(module.Root, "rev-parse", "HEAD")
-	if err != nil {
-		return "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q has no HEAD: %w", module.Name, err))
-	}
-	if pinned != head {
-		for _, pin := range runPins {
-			if pin == head {
-				return head, nil
-			}
-		}
-		return "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("E330: polyrepo source repository %q is checked out at %s but control HEAD pins %s", module.Name, head, pinned))
+	if !isAdmittedHead(head, pinned, runPins) {
+		return "", refuseUnpinnedModule(module, head, pinned)
 	}
 	return head, nil
+}
+
+// readPinnedModule answers the revision control pins a source at and the
+// revision the source's checkout is at.
+func readPinnedModule(controlRoot, controlRevision string, module submodule) (pinned, head string, err error) {
+	pinned, err = gitOutput(controlRoot, "rev-parse", controlRevision+":"+module.Path)
+	if err != nil {
+		return "", "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q is not pinned by control HEAD: %w", module.Name, err))
+	}
+	head, err = gitOutput(module.Root, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: source repository %q has no HEAD: %w", module.Name, err))
+	}
+	return pinned, head, nil
+}
+
+// isAdmittedHead reports whether a source checkout may take part: it is at the
+// revision control pins, or at one the enclosing run admitted.
+func isAdmittedHead(head, pinned string, runPins []string) bool {
+	return head == pinned || slices.Contains(runPins, head)
+}
+
+func refuseUnpinnedModule(module submodule, head, pinned string) error {
+	return WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("E330: polyrepo source repository %q is checked out at %s but control HEAD pins %s", module.Name, head, pinned))
+}
+
+// livePinPolicy is how a nested command reads a live run pin: how many times
+// at most, and how long it waits between two reads.
+type livePinPolicy struct {
+	attempts int
+	interval time.Duration
+}
+
+// livePinReads is the policy composition uses: ten reads a quarter of a second
+// apart. The enclosing release publishes a revision a few milliseconds after
+// it commits it, so the bound is what a checkout nobody admitted costs before
+// its refusal rather than what an admitted one waits.
+var livePinReads = livePinPolicy{attempts: 10, interval: 250 * time.Millisecond}
+
+// livePinCheck is one source checkout validated against control HEAD and the
+// run-scoped pins of an enclosing release.
+type livePinCheck struct {
+	controlRoot     string
+	controlRevision string
+	module          submodule
+	runPins         []string
+	resolve         SourcePinResolver
 }
 
 // requirePinnedModuleResolved validates one source checkout against control
 // HEAD, admitting the run-scoped pins a resolver reports.
 //
-// The resolver runs under the source's Git mutation lock, and acquiring that
-// lock waits for whatever release is recording there. The wait is bounded at
-// 30 seconds so a lock nobody will release cannot hang a command forever, and
-// it is derived from ctx so an interrupt stops it at once: a detached context
-// here would make Ctrl-C do nothing for up to half a minute.
+// The enclosing release commits into a source and only then publishes the
+// revision it admitted, and nothing makes the two steps one transaction for a
+// reader in another process: a nested command reading between them finds a
+// HEAD nobody has admitted yet. So the reader proves its own observation
+// instead (requireStableLivePin), and it reads again, a bounded number of
+// times, before the checkout is refused with E330. The waits are derived from
+// ctx, so an interrupt stops them at once.
 func requirePinnedModuleResolved(ctx context.Context, controlRoot, controlRevision string, module submodule, runPins []string, resolve SourcePinResolver) (string, error) {
 	if resolve == nil {
 		return requirePinnedModule(controlRoot, controlRevision, module, runPins)
@@ -573,22 +614,74 @@ func requirePinnedModuleResolved(ctx context.Context, controlRoot, controlRevisi
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	git := &gitx.LocalGitx{Dir: module.Root}
-	unlock, err := git.AcquireMutation(ctx)
-	if err != nil {
-		return "", WithDiagnostic(DiagnosticRepositoryInvalid,
-			fmt.Errorf("E330: polyrepo source repository %q: acquiring live pin validation lock: %w", module.Name, err))
+	return requireStableLivePin(ctx, livePinCheck{
+		controlRoot: controlRoot, controlRevision: controlRevision,
+		module: module, runPins: runPins, resolve: resolve,
+	}, livePinReads)
+}
+
+// requireStableLivePin reads the live pin, then HEAD, then the live pin again,
+// and accepts HEAD only when the two pin reads agree and admit it. Two reads
+// that disagree are the enclosing release publishing a revision while HEAD was
+// read, and a HEAD they do not admit is that release between its commit and
+// its pin: either is read again after policy.interval, at most
+// policy.attempts times, and the last refusal is the one reported. A pin that
+// cannot be read, and a checkout Git cannot answer for, are refused at once.
+func requireStableLivePin(ctx context.Context, check livePinCheck, policy livePinPolicy) (string, error) {
+	for attempt := 1; ; attempt++ {
+		before, err := check.readLivePin()
+		if err != nil {
+			return "", err
+		}
+		pinned, head, err := readPinnedModule(check.controlRoot, check.controlRevision, check.module)
+		if err != nil {
+			return "", err
+		}
+		after, err := check.readLivePin()
+		if err != nil {
+			return "", err
+		}
+		isStable := slices.Equal(before, after)
+		isAdmitted := isAdmittedHead(head, pinned, append(slices.Clone(check.runPins), before...))
+		if isStable && isAdmitted {
+			return head, nil
+		}
+		refusal := refuseUnpinnedModule(check.module, head, pinned)
+		if isAdmitted {
+			refusal = WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf(
+				"E330: polyrepo source repository %q: its live run pin kept moving while the checkout was read", check.module.Name))
+		}
+		if attempt >= policy.attempts {
+			return "", refusal
+		}
+		if err := waitForLivePin(ctx, policy.interval); err != nil {
+			return "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf(
+				"E330: polyrepo source repository %q: waiting for a stable live run pin: %w", check.module.Name, err))
+		}
 	}
-	defer unlock()
-	fresh, err := resolve(module.Name)
+}
+
+// readLivePin is the enclosing release's current pin for the checked source.
+func (c livePinCheck) readLivePin() ([]string, error) {
+	pins, err := c.resolve(c.module.Name)
 	if err != nil {
-		return "", WithDiagnostic(DiagnosticRepositoryInvalid,
-			fmt.Errorf("E330: polyrepo source repository %q: reading live run pin: %w", module.Name, err))
+		return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
+			fmt.Errorf("E330: polyrepo source repository %q: reading live run pin: %w", c.module.Name, err))
 	}
-	pins := append(append([]string(nil), runPins...), fresh...)
-	return requirePinnedModule(controlRoot, controlRevision, module, pins)
+	return pins, nil
+}
+
+// waitForLivePin sleeps one interval between two reads, or less when ctx ends
+// first, which is what lets Ctrl-C stop a nested command in composition.
+func waitForLivePin(ctx context.Context, interval time.Duration) error {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func resolveRepositoryBaselines(cfg *File, repos []Repository, participants *participation) error {

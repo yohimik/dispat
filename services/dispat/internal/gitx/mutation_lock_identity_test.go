@@ -52,17 +52,17 @@ func isCaseInsensitive(t *testing.T, dir string) bool {
 	return os.SameFile(info, original)
 }
 
-// TestCanonicalMutationDirIsOneSpellingPerDirectory: the lock's identity is the
-// directory, not the string that names it.
+// TestCanonicalMutationDirIsOneSpellingPerDirectory: the exclusion's identity
+// is the directory, not the string that names it.
 //
-// Two spellings of one folder would mean two lock paths, two descriptors on
-// one file and a process waiting on its own flock — a wait it could leave only
-// by being cancelled, because the release it waits for is its own and comes
-// afterwards. Asked of the resolver directly because the caller above it
-// cannot produce the input any more: `git rev-parse --git-common-dir` returns
-// the filesystem's own spelling, so on this host git already folds the case of
-// a repository path. That is a property of git rather than of this package,
-// and this is the rule that holds whatever git returns.
+// Two spellings of one folder would mean two slots: two transactions in one
+// repository that do not exclude each other, and one transaction naming both
+// spellings taking the repository twice. Asked of the resolver directly
+// because the caller above it cannot produce the input any more:
+// `git rev-parse --git-common-dir` returns the filesystem's own spelling, so on
+// this host git already folds the case of a repository path. That is a
+// property of git rather than of this package, and this is the rule that holds
+// whatever git returns.
 func TestCanonicalMutationDirIsOneSpellingPerDirectory(t *testing.T) {
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestCanonicalMutationDirIsOneSpellingPerDirectory(t *testing.T) {
 	require.NoError(t, err)
 	second, err := canonicalMutationDir(filepath.Join(base, "common"))
 	require.NoError(t, err)
-	assert.Equal(t, first, second, "one directory under two spellings is one lock, not a deadlock")
+	assert.Equal(t, first, second, "one directory under two spellings is one slot")
 
 	// A folder that went away takes its entry with it, so a new folder at the
 	// same path is answered as itself rather than as the one it replaced: an
@@ -95,7 +95,8 @@ func TestCanonicalMutationDirIsOneSpellingPerDirectory(t *testing.T) {
 
 // TestMutationLockIsOneLockHoweverTheRepositoryIsSpelled is the same rule seen
 // from the caller: acquiring two spellings of one repository in one
-// transaction must take one lock. The bound is deliberately short, so a
+// transaction takes it once, and a transaction holding one spelling excludes a
+// transaction naming the other. The bound is deliberately short, so a
 // regression is a two-second failure rather than a hung suite.
 func TestMutationLockIsOneLockHoweverTheRepositoryIsSpelled(t *testing.T) {
 	base := t.TempDir()
@@ -108,18 +109,19 @@ func TestMutationLockIsOneLockHoweverTheRepositoryIsSpelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	release, err := AcquireMutations(ctx, upper, lower)
-	require.NoError(t, err, "one repository under two spellings must be one lock, not a deadlock")
+	require.NoError(t, err, "one repository under two spellings is taken once, not twice")
+	requireMutationHeld(t, lower, "the other spelling names the repository already held")
 	release()
 
-	upperPath, err := upper.mutationLockPath(context.Background())
+	upperCommon, err := upper.mutationCommonDir(context.Background())
 	require.NoError(t, err)
-	lowerPath, err := lower.mutationLockPath(context.Background())
+	lowerCommon, err := lower.mutationCommonDir(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, upperPath, lowerPath, "both spellings resolve to one lock path")
+	assert.Equal(t, upperCommon, lowerCommon, "both spellings resolve to one common directory")
 }
 
 // TestMutationLockResolvesTheCommonDirectoryOncePerRepository: the `rev-parse`
-// behind the lock path is asked once per repository folder and the answer is
+// behind the exclusion is asked once per repository folder and the answer is
 // reused, because a release takes this lock on every commit, tag and push.
 //
 // The counter is the process-wide git invocation counter, so the claim is
@@ -128,19 +130,22 @@ func TestMutationLockResolvesTheCommonDirectoryOncePerRepository(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 
-	first, err := cli.mutationLockPath(ctx)
+	first, err := cli.mutationCommonDir(ctx)
 	require.NoError(t, err)
 	// The resolved path, because the answer is canonicalized: on macOS the
 	// temporary folder reaches the repository through /var, which is a link.
 	real, err := filepath.EvalSymlinks(root)
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(real, ".git", mutationLockFile), first)
+	assert.Equal(t, filepath.Join(real, ".git"), first)
 
 	before := GitInvocations()
 	for range 5 {
-		again, err := cli.mutationLockPath(ctx)
+		again, err := cli.mutationCommonDir(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, first, again)
+		release, err := cli.AcquireMutation(ctx)
+		require.NoError(t, err)
+		release()
 	}
 	assert.Equal(t, uint64(0), GitInvocations()-before, "the resolved common directory is remembered")
 
@@ -148,7 +153,7 @@ func TestMutationLockResolvesTheCommonDirectoryOncePerRepository(t *testing.T) {
 	// dropped and the next question reaches git again, which is what makes a
 	// removed temporary checkout an error rather than a stale path.
 	require.NoError(t, os.RemoveAll(filepath.Join(root, ".git")))
-	_, err = cli.mutationLockPath(ctx)
+	_, err = cli.mutationCommonDir(ctx)
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "Git common directory"), err)
 }

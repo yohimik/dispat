@@ -1,13 +1,10 @@
 package gitx
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,97 +12,155 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const mutationHelperEnv = "DISPAT_TEST_MUTATION_LOCK_HELPER"
-
-// TestMutationLockHelper is invoked as a separate process by the contention
-// test. A process boundary is material here: an in-process mutex would pass a
-// goroutine test while still allowing two dispat commands to mutate one Git
-// index and HEAD concurrently.
-func TestMutationLockHelper(t *testing.T) {
-	if os.Getenv(mutationHelperEnv) == "" {
-		return
+// requireMutationHeld proves that repository cannot be taken right now: an
+// acquisition bounded by a short deadline must run out of time rather than
+// succeed. The bound only decides how long the proof takes, never its answer,
+// because the slot is held for the whole wait.
+func requireMutationHeld(t *testing.T, repository *LocalGitx, msgAndArgs ...any) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	release, err := repository.AcquireMutation(ctx)
+	if err == nil {
+		release()
 	}
-	repo, ready, stop := os.Getenv("DISPAT_TEST_MUTATION_REPO"),
-		os.Getenv("DISPAT_TEST_MUTATION_READY"), os.Getenv("DISPAT_TEST_MUTATION_STOP")
-	release, err := (&LocalGitx{Dir: repo}).AcquireMutation(context.Background())
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(ready, []byte("held"), 0o600))
-	for {
-		if _, err := os.Stat(stop); err == nil {
-			break
-		} else if !os.IsNotExist(err) {
-			require.NoError(t, err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	release()
-	release() // callers may safely defer and explicitly release during recovery
+	assert.Nil(t, release, msgAndArgs...)
+	assert.ErrorIs(t, err, context.DeadlineExceeded, msgAndArgs...)
 }
 
-func TestMutationLockCoordinatesLinkedWorktreesAcrossProcesses(t *testing.T) {
+// TestMutationLockSerializesTransactionsInOneRepository: every transaction a
+// process runs in one repository runs alone. Eight goroutines each take the
+// repository several times and count who is inside; the count never passes
+// one, and none of them is left waiting.
+func TestMutationLockSerializesTransactionsInOneRepository(t *testing.T) {
+	root, cli := initRepo(t)
+	var inside, overlaps atomic.Int32
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 5 {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				release, err := (&LocalGitx{Dir: root}).AcquireMutation(ctx)
+				cancel()
+				if !assert.NoError(t, err) {
+					return
+				}
+				if inside.Add(1) != 1 {
+					overlaps.Add(1)
+				}
+				time.Sleep(time.Millisecond)
+				inside.Add(-1)
+				release()
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Zero(t, overlaps.Load(), "two transactions of one repository ran at once")
+
+	release, err := cli.AcquireMutation(context.Background())
+	require.NoError(t, err)
+	requireMutationHeld(t, cli, "a second transaction waits for the first")
+	release()
+	assert.NoFileExists(t, filepath.Join(root, ".git", "dispat-mutation.lock"),
+		"the exclusion is the process's own and leaves nothing in the repository")
+}
+
+// TestMutationLockIsSharedByLinkedWorktrees: a linked worktree shares its
+// object database and refs with the checkout it was added to, so the two are
+// one repository to the lock. One transaction naming both, in any order and
+// even twice, takes that repository once rather than waiting for itself.
+func TestMutationLockIsSharedByLinkedWorktrees(t *testing.T) {
 	root, cli := initRepo(t)
 	linked := filepath.Join(t.TempDir(), "linked")
 	runGit(t, root, "worktree", "add", "--detach", linked, "HEAD")
-
-	signals := t.TempDir()
-	ready, stop := filepath.Join(signals, "ready"), filepath.Join(signals, "stop")
-	exe, err := os.Executable()
-	require.NoError(t, err)
-	cmd := exec.Command(exe, "-test.run=^TestMutationLockHelper$")
-	cmd.Env = append(os.Environ(), mutationHelperEnv+"=1",
-		"DISPAT_TEST_MUTATION_REPO="+linked,
-		"DISPAT_TEST_MUTATION_READY="+ready,
-		"DISPAT_TEST_MUTATION_STOP="+stop)
-	output := newLockedBuffer()
-	cmd.Stdout, cmd.Stderr = output, output
-	require.NoError(t, cmd.Start())
-	done := make(chan struct{})
-	var waitErr error
-	go func() {
-		waitErr = cmd.Wait()
-		close(done)
-	}()
-	t.Cleanup(func() {
-		select {
-		case <-done:
-		default:
-			_ = cmd.Process.Kill()
-			<-done
-		}
-	})
-	waitForFile(t, ready, done, func() error { return waitErr }, output)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	defer cancel()
-	release, err := cli.AcquireMutation(ctx)
-	assert.Nil(t, release)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, context.DeadlineExceeded), err)
-
-	require.NoError(t, os.WriteFile(stop, []byte("release"), 0o600))
-	select {
-	case <-done:
-		require.NoError(t, waitErr, output.String())
-	case <-time.After(5 * time.Second):
-		t.Fatal("mutation-lock helper did not release")
-	}
-
 	linkedCLI := &LocalGitx{Dir: linked}
-	release, err = AcquireMutations(context.Background(), linkedCLI, cli, linkedCLI)
+
+	release, err := linkedCLI.AcquireMutation(context.Background())
 	require.NoError(t, err)
-	release()
+	requireMutationHeld(t, cli, "the checkout waits while its linked worktree records")
 	release()
 
-	lockPath, err := cli.mutationLockPath(context.Background())
-	require.NoError(t, err)
-	// Windows refuses removal while any process still holds the file. On every
-	// platform this also leaves the fixture clean and exercises recreation.
-	require.NoError(t, os.Remove(lockPath), "release must close the lock descriptor")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	release, err = AcquireMutations(ctx, linkedCLI, cli, linkedCLI)
+	require.NoError(t, err, "one repository named three times is taken once")
+	requireMutationHeld(t, linkedCLI)
+	release()
+
 	release, err = cli.AcquireMutation(context.Background())
-	require.NoError(t, err)
+	require.NoError(t, err, "giving the repository back once frees it")
 	release()
 }
 
+// TestMutationLockAcquiresRepositoriesInOneOrder: two transactions that each
+// need the same two repositories, named in opposite orders, never wait on one
+// another. Both orders run against each other many times; every acquisition
+// completes well inside its bound.
+func TestMutationLockAcquiresRepositoriesInOneOrder(t *testing.T) {
+	_, first := initRepo(t)
+	_, second := initRepo(t)
+	var wg sync.WaitGroup
+	for index := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			repositories := []*LocalGitx{first, second}
+			if index%2 == 1 {
+				repositories = []*LocalGitx{second, first}
+			}
+			for range 20 {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				release, err := AcquireMutations(ctx, repositories...)
+				cancel()
+				if !assert.NoError(t, err, "opposite orders must not deadlock") {
+					return
+				}
+				release()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestMutationLockWaiterStopsWithItsContext: a waiter is somebody's command,
+// and cancelling the command ends the wait at once. The cancelled waiter takes
+// nothing, so the repository is free as soon as its holder gives it back.
+func TestMutationLockWaiterStopsWithItsContext(t *testing.T) {
+	_, cli := initRepo(t)
+	release, err := cli.AcquireMutation(context.Background())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	waited := make(chan error, 1)
+	go func() {
+		waiting, waitErr := cli.AcquireMutation(ctx)
+		if waiting != nil {
+			waiting()
+		}
+		waited <- waitErr
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case waitErr := <-waited:
+		assert.ErrorIs(t, waitErr, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled waiter kept waiting")
+	}
+	release()
+
+	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	release, err = cli.AcquireMutation(ctx)
+	require.NoError(t, err, "the cancelled waiter left the repository free")
+	release()
+}
+
+// TestMutationLockHonorsAlreadyCanceledContext: a context that is already done
+// takes nothing, whether the common directory still has to be resolved or is
+// already known and its slot is free.
 func TestMutationLockHonorsAlreadyCanceledContext(t *testing.T) {
 	_, cli := initRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -114,45 +169,37 @@ func TestMutationLockHonorsAlreadyCanceledContext(t *testing.T) {
 	release, err := cli.AcquireMutation(ctx)
 	assert.Nil(t, release)
 	require.ErrorIs(t, err, context.Canceled)
-}
 
-func waitForFile(t *testing.T, path string, done <-chan struct{}, waitErr func() error, output interface{ String() string }) {
-	t.Helper()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		} else if !os.IsNotExist(err) {
-			require.NoError(t, err)
-		}
-		select {
-		case <-done:
-			t.Fatalf("mutation-lock helper exited before acquiring: %v\n%s", waitErr(), output.String())
-		case <-deadline.C:
-			t.Fatalf("mutation-lock helper did not acquire\n%s", output.String())
-		case <-tick.C:
-		}
+	warm, err := cli.AcquireMutation(context.Background())
+	require.NoError(t, err)
+	warm()
+	for range 20 {
+		release, err = cli.AcquireMutation(ctx)
+		assert.Nil(t, release)
+		require.ErrorIs(t, err, context.Canceled, "a free slot is no reason to ignore a done context")
 	}
 }
 
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
+// TestMutationLockReleaseIsIdempotent: a release may be deferred and also
+// called early on a recovery path. The second call gives back nothing, above
+// all not a hold some later transaction has taken since.
+func TestMutationLockReleaseIsIdempotent(t *testing.T) {
+	_, cli := initRepo(t)
+	release, err := cli.AcquireMutation(context.Background())
+	require.NoError(t, err)
+	release()
+	release()
 
-func newLockedBuffer() *lockedBuffer { return &lockedBuffer{} }
+	later, err := cli.AcquireMutation(context.Background())
+	require.NoError(t, err)
+	release()
+	requireMutationHeld(t, cli, "a stale release must not free a later holder")
+	later()
+	later()
 
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	again, err := cli.AcquireMutation(ctx)
+	require.NoError(t, err, "the later holder's own release freed the repository")
+	again()
 }

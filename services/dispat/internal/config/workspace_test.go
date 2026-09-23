@@ -626,7 +626,8 @@ func TestComposeWorkspaceRejectsUnpinnedSource(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.True(t, workspace.IsInheritedPinsEnabled())
-	assert.Equal(t, []string{"sdk"}, resolved)
+	assert.Equal(t, []string{"sdk", "sdk"}, resolved,
+		"the live pin is read before and after the checkout's HEAD, and the two reads agree")
 	assert.Equal(t, advanced, workspace.RepositoryByName("sdk").CompositionHead)
 	assert.Equal(t, strings.TrimSpace(workspaceGit(t, root, "rev-parse", "HEAD")),
 		workspace.RepositoryByName(ControlRepository).CompositionHead)

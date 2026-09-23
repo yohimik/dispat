@@ -671,9 +671,9 @@ func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *
 		// The lock is held across the verification and the push and released
 		// before the afterPush hook, which is a user script. An inner
 		// function rather than unlock calls on each path: this runs inside a
-		// release, and a panic that left the flock held would make every
-		// later dispat process in this repository wait for a descriptor
-		// nobody will close.
+		// release, and a panic that left the repository held would make every
+		// later transaction of this process in it wait for a release nobody
+		// will make.
 		err := func() error {
 			unlock, err := gitx.AcquireMutations(ctx, r.git)
 			if err != nil {
@@ -720,8 +720,8 @@ func (w *workspaceRecorder) commitWithHooks(ctx context.Context, hooks recordHoo
 	// The lock covers the head check, the commit and the pin that records it,
 	// and is released before the afterCommit and postCommit hooks, which are
 	// user scripts. An inner function rather than an unlock on each path: a
-	// panic between the two would hold the flock for the life of the process
-	// and every later dispat in this repository would wait for it.
+	// panic between the two would hold the repository for the life of the
+	// process and every later transaction of it there would wait for it.
 	err := func() error {
 		unlock, err := gitx.AcquireMutations(ctx, r.git)
 		if err != nil {
@@ -943,7 +943,7 @@ func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, hooks recordHo
 	if committed {
 		control.git.Log.Info().Str("commitMessage", msg).Msg("created release commit")
 	}
-	// Hooks observe the commit and must never run under the advisory lock.
+	// Hooks observe the commit and must never run while the repository is held.
 	unlock()
 	hooks.run(control.hooks, "afterCommit", control.repo.Config.Run.AfterCommit)
 	hooks.run(control.hooks, "postCommit", control.repo.Config.Run.PostCommit)

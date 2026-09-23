@@ -1049,8 +1049,9 @@ func (r *runner) runConfigured() int {
 	}
 	// The interruptible context of everything below, opened here rather than
 	// at each command because composition itself can wait: validating a live
-	// pin takes the source repository's Git mutation lock, and a run queued
-	// behind another release's record has to stop when the operator does.
+	// pin reads again, for a few seconds, while the enclosing release is
+	// between committing a source revision and publishing it, and that wait
+	// has to stop when the operator does.
 	ctx, stop := signalCtx()
 	defer stop()
 	compose := config.ComposeWorkspaceWithPinResolver
