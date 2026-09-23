@@ -73,8 +73,9 @@ const (
 // level of the configuration, --in names a folder, and the three read the same
 // because they are three answers to the same question.
 type Location struct {
-	kind locationKind
-	name string
+	kind  locationKind
+	name  string
+	owner string // repository root retained when cwd resolves a local space
 }
 
 // IsPackage reports whether the location is a package, which is what the
@@ -283,7 +284,31 @@ func (a *App) ResolveSubject(loc Location, dir string) (Location, error) {
 		return LocationPackage(at.Package), nil
 	case at.Space != "":
 		a.log.Debug().Str("dir", dir).Str("subject", at.Space).Msg("current folder resolved to a space")
-		return LocationSpace(at.Space), nil
+		location := LocationSpace(at.Space)
+		spaces, err := a.resolveSpaces()
+		if err != nil {
+			return Location{}, err
+		}
+		best := -1
+		target := absDir(dir)
+		for _, space := range spaces {
+			if !strings.EqualFold(space.name, at.Space) {
+				continue
+			}
+			for _, path := range space.space.Path {
+				root := absDir(filepath.Join(space.root, filepath.FromSlash(path)))
+				relative, err := filepath.Rel(root, target)
+				if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || len(root) <= best {
+					continue
+				}
+				best = len(root)
+				location.owner = ""
+				if space.file != a.cfg {
+					location.owner = space.root
+				}
+			}
+		}
+		return location, nil
 	}
 	a.log.Info().Str("dir", dir).Msg("the current folder is in no package and no space, using the top level")
 	return LocationRoot(), nil
@@ -356,17 +381,11 @@ func (a *App) locationDir(loc Location, dir string) (string, error) {
 		}
 		return p.Dir, nil
 	case kindSpace:
-		// The root file's entry, not the effective configuration the levels
-		// below read: `path` is the space's identity rather than an
-		// overridable value, so no folder layer can move it, and asking the
-		// entry keeps --in as cheap as it has always been.
-		sc, ok := a.cfg.Space(loc.name)
-		if !ok {
-			return "", fmt.Errorf("unknown space %q", loc.name)
+		space, err := a.resolveSpace(loc)
+		if err != nil {
+			return "", err
 		}
-		// The same join discovery uses for a space's primary folder — the
-		// first configured path — so a space means one folder whoever asks.
-		return filepath.Join(a.root, filepath.FromSlash(sc.Path.First())), nil
+		return space.resolveDirectory(), nil
 	case kindRoot:
 		return a.root, nil
 	}
@@ -426,13 +445,13 @@ func (a *App) scriptLevels(from Location, fallback bool) ([]scriptLevel, error) 
 	root := scriptLevel{a.cfg.Scripts, "the top level"}
 	switch from.kind {
 	case kindSpace:
-		sc, err := a.spaceConfig(from.name)
+		owner, err := a.resolveSpace(from)
 		if err != nil {
 			return nil, err
 		}
-		levels := []scriptLevel{{sc.Scripts, from.label()}}
+		levels := []scriptLevel{{owner.space.Scripts, from.label()}}
 		if fallback {
-			levels = append(levels, root)
+			levels = append(levels, scriptLevel{owner.file.Scripts, "its repository top level"})
 		}
 		return levels, nil
 	case kindPackage:
@@ -449,25 +468,6 @@ func (a *App) scriptLevels(from Location, fallback bool) ([]scriptLevel, error) 
 		}, nil
 	}
 	return []scriptLevel{root}, nil
-}
-
-// spaceConfig finds one space's effective configuration by name,
-// case-insensitively, for the same reason discoverPackage matches that way.
-//
-// Effective rather than as written in the root file: a space declares its
-// scripts and its env across two layers, the `spaces` entry and each of its
-// folders' own config files, and `dispat run` resolves both through the built
-// package. A subject naming the space has no package to read, so it reads the
-// settled pair here and the two commands answer with one set.
-func (a *App) spaceConfig(name string) (config.SpaceConfig, error) {
-	spaces, err := a.spaces()
-	if err != nil {
-		return config.SpaceConfig{}, err
-	}
-	if _, sc, ok := public.FoldLookup(spaces, name); ok {
-		return sc, nil
-	}
-	return config.SpaceConfig{}, fmt.Errorf("unknown space %q", name)
 }
 
 // discoverPackage finds one package in the workspace by name,
@@ -530,11 +530,11 @@ func (a *App) execEnv(ctx context.Context, subj Location, scope string) ([]strin
 func (a *App) declaredEnv(subj Location) ([]string, error) {
 	switch subj.kind {
 	case kindSpace:
-		sc, err := a.spaceConfig(subj.name)
+		owner, err := a.resolveSpace(subj)
 		if err != nil {
 			return nil, err
 		}
-		return config.EnvPairs(config.MergeEnv(a.cfg.Env, sc.Env)), nil
+		return config.EnvPairs(config.MergeEnv(owner.file.Env, owner.space.Env)), nil
 	case kindPackage:
 		p, err := a.discoverPackage(subj.name)
 		if err != nil {

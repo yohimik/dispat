@@ -160,6 +160,12 @@ released past the propagating commit, its annotated tag also records the provide
 publishes a release the consumer did not see, planning reads the earlier provider boundary and admits that still-owed
 contribution. This orders releases even when both tags point at the same source commit, without comparing tag dates.
 Tags written before provider receipts existed cannot supply this evidence; ancestry alone may miss that legacy case.
+The release planner bounds the canonical receipt against both baseline and possible same-run provider tags before
+scripts can have effects. Publish admission freezes and checks the actual receipt again, so even a no-script publish
+cannot leave an artefact whose tag dispat would reject on the next run. Generated receipts are capped at 16 KiB because
+the same encoded value enters a nested publish command's environment; the reader accepts earlier canonical receipts
+up to 1 MiB. Annotated tag messages go to Git through stdin, so the tag's payload is not constrained by command-line
+argument length. Nested commit steps validate inherited provider names against the composed plan before committing.
 
 On a prerelease train, the window deliberately spans commits the train's prereleases already published. This lets §11.4
 recompute the train's target and a graduation's version over the whole train. But published work remains published. A

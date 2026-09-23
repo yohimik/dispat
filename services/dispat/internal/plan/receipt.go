@@ -16,6 +16,10 @@ import (
 // version, and therefore survives a filtered or interrupted later run.
 const (
 	receiptMarker = " dispat-seen-v1:"
+	// The receipt is also passed to a nested publish command in one environment
+	// value. Keep generated values below the smallest common process-environment
+	// limits, while continuing to read older tags up to the decoder's limit.
+	MaxGeneratedProviderReceiptLength = 16 << 10
 	// ProviderReceiptEnvVar carries the outer run's provider observations into
 	// a nested `dispat commit --tag` publish step. The orchestrator supplies
 	// it after provider outcomes are known.
@@ -25,16 +29,73 @@ const (
 // RenderReleaseTagMessage renders the tag's human-readable subject and its compact
 // provider receipt. A sorted JSON map is encoded so names cannot inject tag
 // syntax, and Go's JSON encoder gives identical inputs identical bytes.
-func RenderReleaseTagMessage(tag string, providers map[string]string) string {
-	return "release " + tag + receiptMarker + EncodeProviderReceipt(providers)
+func RenderReleaseTagMessage(tag string, providers map[string]string) (string, error) {
+	payload, err := EncodeProviderReceipt(providers)
+	if err != nil {
+		return "", err
+	}
+	return "release " + tag + receiptMarker + payload, nil
 }
 
-func EncodeProviderReceipt(providers map[string]string) string {
+func EncodeProviderReceipt(providers map[string]string) (string, error) {
 	if providers == nil {
 		providers = map[string]string{}
 	}
 	encoded, _ := json.Marshal(providers)
-	return base64.RawURLEncoding.EncodeToString(encoded)
+	payload := base64.RawURLEncoding.EncodeToString(encoded)
+	if len(payload) > MaxGeneratedProviderReceiptLength {
+		return "", fmt.Errorf("provider receipt is %d bytes, above the %d-byte publish limit", len(payload), MaxGeneratedProviderReceiptLength)
+	}
+	return payload, nil
+}
+
+// ValidatePlannedProviderReceipts reserves enough room for either the baseline
+// observation or the tag a provider may publish in this run. It runs before
+// release hooks or package effects, so a large dependency graph cannot first
+// fail while recording an already-published consumer.
+func ValidatePlannedProviderReceipts(p *Plan) error {
+	for _, rel := range p.Releasing() {
+		worst := make(map[string]string, len(rel.Sources))
+		for _, source := range rel.Sources {
+			provider := p.Releases[source.Provider]
+			if provider == nil {
+				return fmt.Errorf("%s: receipt provider %s is missing from the plan", rel.Pkg.Name, source.Provider)
+			}
+			value := provider.BaselineTagName
+			if provider.IsReleasing() {
+				planned := provider.TagName()
+				baselineJSON, _ := json.Marshal(value)
+				plannedJSON, _ := json.Marshal(planned)
+				if len(plannedJSON) > len(baselineJSON) {
+					value = planned
+				}
+			}
+			worst[source.Provider] = value
+		}
+		if _, err := EncodeProviderReceipt(worst); err != nil {
+			return fmt.Errorf("%s: %w", rel.Pkg.Name, err)
+		}
+	}
+	return nil
+}
+
+// ValidateInheritedProviderReceipt checks a nested publish command's outer
+// observation against the composed workspace inventory. A nested replan may
+// have different Sources, so its own source list cannot be used as the gate.
+func ValidateInheritedProviderReceipt(p *Plan, consumer, payload string) error {
+	seen, err := DecodeProviderReceipt(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := EncodeProviderReceipt(seen); err != nil {
+		return err
+	}
+	for provider := range seen {
+		if provider == consumer || p.Releases[provider] == nil {
+			return fmt.Errorf("provider receipt for %s names unknown provider %s", consumer, provider)
+		}
+	}
+	return nil
 }
 
 func parseReleaseReceipt(tag gitx.Tag) (map[string]string, error) {

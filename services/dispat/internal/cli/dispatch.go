@@ -372,7 +372,7 @@ func (r *runner) runIf() (int, bool) {
 	if *r.o.ifChanged || (in != nil && in.IsDeferred()) {
 		return 0, false
 	}
-	dir := *r.o.root
+	dir := r.resolveHelperDir()
 	if in != nil {
 		// Neither kind left needs the configuration, so no App is built to
 		// resolve them: a path and cwd are answered by the command line alone.
@@ -500,7 +500,7 @@ func (r *runner) runFor() (int, bool) {
 	if domain != "" || (in != nil && in.IsDeferred()) {
 		return 0, false
 	}
-	dir := *r.o.root
+	dir := r.resolveHelperDir()
 	if in != nil {
 		// Neither kind left needs the configuration, so no App is built to
 		// resolve them: a path and cwd are answered by the command line alone.
@@ -601,6 +601,15 @@ func literalItems(values []string) []app.ForItem {
 	return items
 }
 
+// resolveHelperDir keeps a nested helper in its invocation folder. Inherited
+// workspace context changes which configuration it reads, not where cwd is.
+func (r *runner) resolveHelperDir() string {
+	if r.o.nestedWorkspace {
+		return "."
+	}
+	return *r.o.root
+}
+
 // prepareExec validates exec's flags and builds its options. The command
 // itself needs the config, so it runs later; only its usage checks belong
 // here, for the same reason every other command's do.
@@ -626,7 +635,7 @@ func (r *runner) prepareExec() (int, bool) {
 	r.execOpts = app.ExecOptions{
 		Script: r.inv.script, Subject: subj, ScriptFrom: from, In: in,
 		Fallback: *r.o.execFallback, Env: *r.o.execEnv, OnFailure: *r.o.onFailure,
-		Args: r.inv.args, Dir: *r.o.root, Stdout: r.stdout, Stderr: r.stderr,
+		Args: r.inv.args, Dir: r.resolveHelperDir(), Stdout: r.stdout, Stderr: r.stderr,
 	}
 	return 0, false
 }

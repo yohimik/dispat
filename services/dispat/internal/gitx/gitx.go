@@ -751,7 +751,7 @@ type gitStream struct {
 // under a container PID 1 that does not reap grandchildren. These request-scoped
 // options preserve automatic maintenance without changing repository config.
 func (c *LocalGitx) newCommand(ctx context.Context, args ...string) *exec.Cmd {
-	base := []string{"-C", c.Dir,
+	base := []string{
 		"-c", "maintenance.autoDetach=false",
 		"-c", "gc.autoDetach=false",
 	}
@@ -761,6 +761,7 @@ func (c *LocalGitx) newCommand(ctx context.Context, args ...string) *exec.Cmd {
 	if c.Email != "" {
 		base = append(base, "-c", "user.email="+c.Email)
 	}
+	base = append(base, "-C", c.Dir)
 	return exec.CommandContext(ctx, "git", append(base, args...)...)
 }
 

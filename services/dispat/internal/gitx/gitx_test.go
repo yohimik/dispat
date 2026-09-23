@@ -1417,7 +1417,10 @@ func TestMergeRemoteReportsAConflictItCannotFinish(t *testing.T) {
 
 	body, rerr := os.ReadFile(ours)
 	require.NoError(t, rerr)
-	assert.Equal(t, "# Our changelog\n", string(body), "this side of the conflict is what the branch carries")
+	assert.Equal(t, "# Our changelog\n", runGit(t, root, "show", "HEAD:packages/core/CHANGELOG.md"),
+		"the merged Git object carries this side's exact bytes")
+	assert.Equal(t, "# Our changelog\n", strings.ReplaceAll(string(body), "\r\n", "\n"),
+		"the checkout shows this side of the conflict under the platform's line-ending policy")
 	assert.NotContains(t, string(body), "<<<<", "and no conflict markers were committed")
 	assert.FileExists(t, filepath.Join(root, "THEIRS.md"),
 		"while everything of theirs that did not conflict is in the merge")

@@ -67,6 +67,41 @@ func TestExecutionWorkerAnswersProbe(t *testing.T) {
 		"a node started for one release ends by itself")
 }
 
+// An accepted claim is durable before its task starts. If the replay record
+// cannot be replaced, the worker must leave the claimed attempt unanswered;
+// after the state path is repaired it must still serve fresh work.
+func TestExecutionWorkerRefusesWorkWhenItsReplayRecordCannotBeSaved(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 8)
+
+	control := executionBranchName("state-write-control")
+	orchestrator.offer(control, orchestrator.probe(control, "control"))
+	executionAwaitMessage(t, rig.mailbox, control, "result")
+	seen := filepath.Join(worker.stateDir, executionNode, "seen.json")
+	require.FileExists(t, seen, "the first answer established the durable replay record")
+	require.NoError(t, os.Remove(seen))
+	require.NoError(t, os.Mkdir(seen, 0o755))
+
+	blocked := executionBranchName("state-write-blocked")
+	orchestrator.offer(blocked, orchestrator.probe(blocked, "blocked"))
+	executionAwaitMessage(t, rig.mailbox, blocked, "claim")
+	require.Never(t, func() bool {
+		return len(executionChain(t, rig.mailbox, blocked)) > 2
+	}, 2*time.Second, 50*time.Millisecond,
+		"work cannot start when the node cannot remember its claim")
+	require.NoError(t, os.Remove(seen))
+
+	fresh := executionBranchName("state-write-recovered")
+	orchestrator.offer(fresh, orchestrator.probe(fresh, "recovered"))
+	executionAwaitMessage(t, rig.mailbox, fresh, "result")
+	reply := worker.proc.Wait()
+	require.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
+	assert.Equal(t, []string{"assignment", "claim"}, executionChain(t, rig.mailbox, blocked))
+	assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, fresh))
+	assert.Contains(t, reply.Stdout, "the mailbox could not be served")
+}
+
 // TestExecutionWorkerRejectsAssignments: every acceptance rule, through the
 // binary. None of these is claimed, each is refused with a reason the log can
 // be filtered on and nothing of what it said, and a valid probe offered

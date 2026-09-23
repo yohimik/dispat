@@ -77,6 +77,11 @@ not over the packages inside them. A loop over the three packages of a space is
 not the job a loop over the space is, and `--since all -s libs` is how you ask
 for the first: the window that selects every package, narrowed to the space.
 
+In a fleet, a space loop visits each repository's matching space separately.
+Equal names keep separate primary folders in `DISPAT_DIR`; their scripts and
+environment are still owned by their repositories. A shared version group is
+one group item even when its packages belong to different repositories.
+
 ### The selection flags mean two things
 
 Under `--changed`, `--unchanged` or `--since`, the `-p`, `-s` and `-g` flags

@@ -347,6 +347,51 @@ fi`
 	stopAll(t, []*executionWorker{worker})
 }
 
+// A declared root can itself be one file. The receiver must stage that file
+// without first making a directory at its name, replace an older tracked file
+// of the same name, and carry the new bytes into later workers' checkouts.
+func TestExecutionFileOutputRootReplacesAFileAndFeedsConsumers(t *testing.T) {
+	rig := newExecutionWorkspace(t, func(*harness.Repo) string {
+		return executionRecordingScript + ` &&
+case "$DISPAT_PACKAGE" in
+  assets) printf 'bundle:%s\n' "$DISPAT_NEW_VERSION" > bundle.txt ;;
+  ui|docs) test -f ../assets/bundle.txt && cp ../assets/bundle.txt bundle.txt ;;
+  app) test -f ../ui/bundle.txt && test -f ../docs/bundle.txt &&
+       cat ../ui/bundle.txt ../docs/bundle.txt > bundle.txt ;;
+esac &&
+printf 'probe-file-inputs %s %s\n' "$DISPAT_PACKAGE" "$(cat bundle.txt | tr '\n' '+')" >> "$DISPAT_IT_EXECUTION_LOG"`
+	}, func(cfg *models.File) {
+		cfg.BuildOutputs = []string{"bundle.txt"}
+		cfg.Scripts["publish"] = models.Script{
+			`test -f bundle.txt && printf 'probe-file-publish %s %s\n' "$DISPAT_PACKAGE" "$(cat bundle.txt | tr '\n' '+')" >> "$DISPAT_IT_EXECUTION_LOG"`,
+		}
+		executionOneWorker(cfg)
+	})
+	rig.repo.WriteFile(".gitignore", "bundle.txt\n")
+	rig.repo.WriteFile("packages/assets/bundle.txt", "previous\n")
+	rig.repo.Git("add", "-f", "--", "packages/assets/bundle.txt")
+	rig.repo.Commit("chore(assets,ui,docs,app): track the previous file output")
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
+		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 0)
+
+	res := rig.release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assets := "bundle:0.1.0+"
+	for _, packageName := range []string{"assets", "ui", "docs"} {
+		assert.Equal(t, assets, executionProbeValues(rig, "file-inputs")[packageName])
+		assert.Equal(t, assets, executionProbeValues(rig, "file-publish")[packageName],
+			"the orchestrator published the file installed from the worker")
+	}
+	assert.Equal(t, assets+assets, executionProbeValues(rig, "file-inputs")["app"])
+	assert.Equal(t, assets+assets, executionProbeValues(rig, "file-publish")["app"])
+	assert.Equal(t, "bundle:0.1.0\n", readRepoFile(t, rig.repo, "packages/assets/bundle.txt"),
+		"the single-file root replaced the tracked previous file")
+	assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("packages", "assets")))
+	assert.ElementsMatch(t,
+		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
+	stopAll(t, []*executionWorker{worker})
+}
+
 // TestExecutionOutputInstallRollsBackEarlierRoots: a node produced a complete
 // two-root set, but the orchestrator's destination gained an ignored file or
 // a link at the parent of the second root. Installing that root must fail

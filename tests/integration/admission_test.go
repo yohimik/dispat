@@ -19,6 +19,9 @@ package integration
 // not do, rather than something a timer happened to catch.
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -269,6 +272,72 @@ func TestAdmissionNestedTagRetainsProviderReceipt(t *testing.T) {
 	require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
 	assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "the nested tag must retain delivery evidence")
 	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "provider is never republished")
+}
+
+// TestAdmissionOversizedProviderReceiptRefusesBeforePublish makes a star graph
+// whose canonical receipt cannot fit the bounded nested-publish environment.
+// The planner must refuse it before any package publish script or tag runs.
+func TestAdmissionOversizedProviderReceiptRefusesBeforePublish(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]models.Script{"publish": {"touch published.marker"}}
+	cfg.Spaces = map[string]models.SpaceConfig{"all": {
+		Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{Publish: []string{"publish"}},
+	}}
+	r.SeedPackage("packages", "app")
+	var units []string
+	for i := 0; i < 90; i++ {
+		name := fmt.Sprintf("provider%03d%s", i, strings.Repeat("x", 150))
+		r.SeedPackage("packages", name)
+		cfg.Dependencies = append(cfg.Dependencies, models.DependencyConfig{Consumer: "app", Provider: name})
+		units = append(units, "feat("+name+")^: change")
+	}
+	r.WriteConfigModel(cfg)
+	r.Commit(strings.Join(units[:45], "\n\n---\n\n"))
+	r.CommitEmpty(strings.Join(append(units[45:], "feat(app): own work"), "\n\n---\n\n"))
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "oversized receipt must fail preflight: %s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "provider receipt")
+	assert.Contains(t, res.Stdout+res.Stderr, "publish limit")
+	assert.Empty(t, r.TagList(), "preflight must refuse before any release tag")
+	assert.NoFileExists(t, r.Path("packages", "app", "published.marker"))
+}
+
+// TestAdmissionNestedReceiptUnknownProviderRefusesBeforeCommit checks the
+// inherited-map boundary against the composed plan, before the nested step
+// has written a release commit or tag.
+func TestAdmissionNestedReceiptUnknownProviderRefusesBeforeCommit(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Name: "admission-test", Email: "admission@example.com"}
+	cfg.Spaces = map[string]models.SpaceConfig{"all": {Path: models.PathList{"packages"}}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(app): own work")
+	before := r.Git("rev-parse", "HEAD")
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"ghost":"ghost@0.1.0"}`))
+	res := r.CommandEnv([]string{
+		"DISPAT_STAGE=publish", "DISPAT_PACKAGE=app", "DISPAT_PROVIDER_RECEIPT=" + payload,
+	}, "commit", "--tag", "--package", "app")
+	require.NotEqual(t, 0, res.Code, "unknown provider receipt must be refused: %s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "unknown provider ghost")
+	assert.Equal(t, before, r.Git("rev-parse", "HEAD"), "refusal must precede the release commit")
+	assert.Empty(t, r.TagList())
+
+	large := make(map[string]string)
+	for i := 0; i < 100; i++ {
+		large[fmt.Sprintf("provider%03d%s", i, strings.Repeat("x", 150))] = ""
+	}
+	data, err := json.Marshal(large)
+	require.NoError(t, err)
+	res = r.CommandEnv([]string{
+		"DISPAT_STAGE=publish", "DISPAT_PACKAGE=app",
+		"DISPAT_PROVIDER_RECEIPT=" + base64.RawURLEncoding.EncodeToString(data),
+	}, "commit", "--tag", "--package", "app")
+	require.NotEqual(t, 0, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "publish limit")
+	assert.Equal(t, before, r.Git("rev-parse", "HEAD"))
+	assert.Empty(t, r.TagList())
 }
 
 // TestAdmissionNestedOtherPackageKeepsItsOwnReceipt exercises an explicit

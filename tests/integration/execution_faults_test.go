@@ -52,6 +52,7 @@ func newExecutionFaultWorkspace(t *testing.T) *executionRig {
 	t.Helper()
 	return newExecutionWorkspace(t, recordingBuild, executionOneWorker, func(cfg *models.File) {
 		cfg.Execution.Timeouts.Task = executionFaultTaskTimeout
+		cfg.Execution.Timeouts.Cancel = 20
 	})
 }
 
@@ -62,6 +63,7 @@ func newExecutionFaultPreparation(t *testing.T) *executionRig {
 	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
 		cfg.Execution.Workers = cfg.Execution.Workers[:1]
 		cfg.Execution.Timeouts.Task = executionFaultTaskTimeout
+		cfg.Execution.Timeouts.Cancel = 20
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker, Publish: models.RunOnlyBoth}
 	})
 	rig.commitTo("the page and the manual use the new asset", "docs", "ui")
@@ -74,6 +76,7 @@ func newExecutionFaultOutputs(t *testing.T) *executionRig {
 	t.Helper()
 	return newExecutionOutputWorkspace(t, executionOneWorker, func(cfg *models.File) {
 		cfg.Execution.Timeouts.Task = executionFaultTaskTimeout
+		cfg.Execution.Timeouts.Cancel = 20
 	})
 }
 

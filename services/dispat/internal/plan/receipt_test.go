@@ -2,6 +2,9 @@ package plan
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,10 +14,12 @@ import (
 )
 
 func TestReleaseReceiptUsesOnlyAnAnnotatedCanonicalTag(t *testing.T) {
+	message, err := RenderReleaseTagMessage("cli@1.0.0", map[string]string{
+		"core": "core@0.1.0", "engine": "",
+	})
+	require.NoError(t, err)
 	tag := gitx.Tag{Name: "cli@1.0.0", Annotated: true,
-		Subject: RenderReleaseTagMessage("cli@1.0.0", map[string]string{
-			"core": "core@0.1.0", "engine": "",
-		})}
+		Subject: message}
 	providers, err := parseReleaseReceipt(tag)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"core": "core@0.1.0", "engine": ""}, providers)
@@ -40,4 +45,20 @@ func TestReleaseReceiptRejectsDamagedEvidence(t *testing.T) {
 		_, err := parseReleaseReceipt(gitx.Tag{Name: "cli@1.0.0", Annotated: true, Subject: subject})
 		assert.Error(t, err, subject)
 	}
+}
+
+func TestGeneratedReceiptLimitPreservesLegacyReadLimit(t *testing.T) {
+	providers := make(map[string]string)
+	for i := 0; i < 100; i++ {
+		providers[fmt.Sprintf("provider%03d%s", i, strings.Repeat("x", 150))] = ""
+	}
+	_, err := EncodeProviderReceipt(providers)
+	require.ErrorContains(t, err, "publish limit")
+	_, err = RenderReleaseTagMessage("app@0.1.0", providers)
+	require.ErrorContains(t, err, "publish limit")
+	bytes, err := json.Marshal(providers)
+	require.NoError(t, err)
+	decoded, err := DecodeProviderReceipt(base64.RawURLEncoding.EncodeToString(bytes))
+	require.NoError(t, err, "older canonical tags within the decoder limit remain readable")
+	assert.Equal(t, providers, decoded)
 }

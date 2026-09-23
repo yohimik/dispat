@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -316,7 +317,14 @@ func TestTransportPlumbingCapturesAndReadsBackAWorkingFolder(t *testing.T) {
 	// real machine are named.
 	dist := filepath.Join(f.root, "packages", "core", "dist")
 	require.NoError(t, os.MkdirAll(filepath.Join(dist, "nested"), 0o755))
-	names := []string{"a file with spaces.js", "ünïcode.js", "new\nline.js"}
+	names := []string{"a file with spaces.js", "ünïcode.js"}
+	if runtime.GOOS == "windows" {
+		// Windows file names cannot contain a newline. Keep a punctuation case
+		// here while POSIX exercises the newline-delimited hash-list fallback.
+		names = append(names, "semi;colon.js")
+	} else {
+		names = append(names, "new\nline.js")
+	}
 	for _, name := range names {
 		require.NoError(t, os.WriteFile(filepath.Join(dist, name), []byte("payload of "+name), 0o644))
 	}
@@ -537,7 +545,13 @@ func TestTransportPlumbingCapturesBytesUntouchedByAttributes(t *testing.T) {
 		modes[fields[3]] = fields[0]
 	}
 	assert.Equal(t, "100644", modes["packages/core/dist/lib/libcore.a"])
-	assert.Equal(t, "100755", modes["packages/core/dist/lib/tool"], "the executable bit is recorded")
+	executableMode := "100755"
+	if runtime.GOOS == "windows" {
+		// Windows does not expose the POSIX executable bit through os.FileMode.
+		// A new regular output therefore has Git's ordinary file mode.
+		executableMode = "100644"
+	}
+	assert.Equal(t, executableMode, modes["packages/core/dist/lib/tool"], "the native file mode is recorded")
 	assert.Equal(t, "120000", modes["packages/core/dist/lib/alias"], "a link is recorded as a link")
 
 	var captured bytes.Buffer

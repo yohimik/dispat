@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/yohimik/dispat/services/dispat/internal/filter"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -96,27 +97,32 @@ func (a *App) ForItems(ctx context.Context, sel ForSelection) ([]ForItem, error)
 // folder is the same one `--in space:<name>` places a script in, so a loop and
 // a script agree about where a space is.
 func (a *App) spaceItems(terms []string) ([]ForItem, error) {
-	pkgs, err := a.packages()
+	names, err := filter.MatchSpaces(a.discoveredWorkspace(nil), terms)
 	if err != nil {
-		return nil, err
-	}
-	names, err := filter.MatchSpaces(a.discoveredWorkspace(pkgs), terms)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]ForItem, 0, len(names))
-	for _, name := range names {
-		sc, ok := a.cfg.Space(name)
-		if !ok {
-			// MatchSpaces resolved the name against the configured spaces, so
-			// this is unreachable; refusing beats iterating over a folder nobody
-			// could name.
-			return nil, fmt.Errorf("unknown space %q", name)
+		// Discovery is only needed to explain an unknown term with package
+		// and implicit-group hints. A valid space loop reads declarations.
+		pkgs, discoveryErr := a.packages()
+		if discoveryErr != nil {
+			return nil, discoveryErr
 		}
-		items = append(items, ForItem{Value: name, Env: []string{
-			"DISPAT_SPACE=" + name,
-			DirEnvVar + "=" + absDir(filepath.Join(a.root, filepath.FromSlash(sc.Path.First()))),
-		}})
+		_, err = filter.MatchSpaces(a.discoveredWorkspace(pkgs), terms)
+		return nil, err
+	}
+	spaces, err := a.resolveSpaces()
+	if err != nil {
+		return nil, err
+	}
+	var items []ForItem
+	for _, name := range names {
+		for _, space := range spaces {
+			if !strings.EqualFold(name, space.name) {
+				continue
+			}
+			items = append(items, ForItem{Value: space.name, Env: []string{
+				"DISPAT_SPACE=" + space.name,
+				DirEnvVar + "=" + absDir(space.resolveDirectory()),
+			}})
+		}
 	}
 	return items, nil
 }

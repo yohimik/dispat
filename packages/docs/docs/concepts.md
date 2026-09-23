@@ -228,6 +228,13 @@ when the provider publishes, and bumped for the delivery.
 The provider receipt is forward-looking. Older consumer tags have no such evidence. If an old consumer and provider
 tag point at the same commit, ancestry alone cannot prove which one published first; check the shipped dependency
 range and registry records before treating an empty plan as proof of delivery.
+Before a release runs its hooks or publishes anything, dispat checks that each planned provider receipt fits the
+16 KiB generated-receipt limit for the publish environment, allowing for either the provider's current tag or its planned tag. It checks the
+actual observation again immediately before each publish, including packages without a publish script. If a receipt
+is too large, the release stops before publication and reports the affected package; split the dependency fan-in or
+shorten package names before retrying. Older receipts above this generation limit remain readable up to the format's
+1 MiB decoding limit. A nested `dispat commit --tag` accepts an inherited receipt only when its provider names exist
+in the composed plan, and refuses an invalid receipt before making the release commit.
 
 Four properties explain safe [failure recovery](#failure-and-recovery):
 

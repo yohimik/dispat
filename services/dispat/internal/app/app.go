@@ -64,7 +64,7 @@ type App struct {
 	// same reason as pkgs: one exec invocation can ask for a space's scripts
 	// and its env separately. See spaces.
 	spacesOnce sync.Once
-	spaceCfgs  map[string]config.SpaceConfig
+	spaceCfgs  []spaceOwner
 	spacesErr  error
 
 	// ignoreTags are tag names masked from baseline resolution when this
@@ -129,22 +129,6 @@ func (a *App) packages() ([]*model.Package, error) {
 		}
 	})
 	return a.pkgs, a.pkgsErr
-}
-
-// spaces is every space as it effectively is, keyed by name and settled once
-// per App.
-//
-// A space is declared across two layers — the root file's `spaces` entry and
-// each of its folders' own config files — and `dispat run` resolves a script
-// or an env value through the built package, which already carries both. A
-// command naming a space directly has no package to read, so it settles the
-// same two layers here: reading the entry alone would make one command blind
-// to a layer every other command sees.
-func (a *App) spaces() (map[string]config.SpaceConfig, error) {
-	a.spacesOnce.Do(func() {
-		a.spaceCfgs, a.spacesErr = config.ResolvedControlSpaceConfigs(a.cfg, a.root, a.workspace)
-	})
-	return a.spaceCfgs, a.spacesErr
 }
 
 // New assembles an App for one monorepo.

@@ -17,6 +17,8 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,27 +31,40 @@ import (
 func TestExecutionWorkerStateRefusals(t *testing.T) {
 	rig := newExecutionRig(t)
 
-	for name, prepare := range map[string]func(*testing.T, string){
-		"a node folder that cannot be created": func(t *testing.T, state string) {
+	for name, tc := range map[string]struct {
+		prepare func(*testing.T, string)
+		says    string
+	}{
+		"a node folder that cannot be created": {prepare: func(t *testing.T, state string) {
 			// Something else already holds the name the node's own folder needs.
 			require.NoError(t, os.WriteFile(filepath.Join(state, executionNode), nil, 0o644))
-		},
-		"a lock that cannot be read": func(t *testing.T, state string) {
+		}},
+		"a lock that cannot be read": {prepare: func(t *testing.T, state string) {
 			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode, "worker.lock"), 0o755))
-		},
-		"an answered-work record that is not JSON": func(t *testing.T, state string) {
+		}},
+		"a live legacy owner still holds the state folder": {prepare: func(t *testing.T, state string) {
+			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "worker.lock"),
+				[]byte(strconv.Itoa(os.Getpid())), 0o644))
+		}, says: strconv.Itoa(os.Getpid())},
+		"an oversized legacy owner is refused": {prepare: func(t *testing.T, state string) {
+			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "worker.lock"),
+				[]byte(strings.Repeat("9", 65)), 0o644))
+		}, says: "exceeds 64 bytes"},
+		"an answered-work record that is not JSON": {prepare: func(t *testing.T, state string) {
 			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
 			require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "seen.json"),
 				[]byte("{this is not a record"), 0o644))
-		},
-		"an answered-work record that cannot be read": func(t *testing.T, state string) {
+		}},
+		"an answered-work record that cannot be read": {prepare: func(t *testing.T, state string) {
 			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode, "seen.json"), 0o755))
-		},
+		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
 			state := t.TempDir()
-			prepare(t, state)
+			tc.prepare(t, state)
 
 			res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
 				"worker", "--root", root, "--state-dir", state, "--idle-timeout", "1")
@@ -59,6 +74,9 @@ func TestExecutionWorkerStateRefusals(t *testing.T) {
 			assert.True(t, isRefused, "the node said why it cannot serve\nstdout:\n%s", res.Stdout)
 			_, isStarted := executionLine(res, "worker started")
 			assert.False(t, isStarted, "and never started")
+			if tc.says != "" {
+				assert.Contains(t, diagnosticText(res), tc.says)
+			}
 			assert.Empty(t, executionMailboxBranches(t, rig.mailbox),
 				"nothing of the mailbox was read")
 		})

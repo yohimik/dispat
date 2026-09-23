@@ -349,6 +349,9 @@ var defaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dis
 // the error says so and names every candidate tried.
 func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
 	if explicit {
+		if filepath.IsAbs(name) {
+			return filepath.Clean(name), root, nil
+		}
 		return filepath.Join(root, name), root, nil
 	}
 	p, r, err := loader.Resolve(context.Background(), root, dispatResolver())

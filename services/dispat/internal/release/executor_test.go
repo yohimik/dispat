@@ -1785,6 +1785,36 @@ func TestCreateReleaseTagWithoutInspectorUnchanged(t *testing.T) {
 	assert.Equal(t, []string{"a@1.0.1"}, tg.tags)
 }
 
+func TestCreateReleaseTagRefusesReceiptItCouldNotReadBack(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	rel := p.Releases["a"]
+	rel.SeenProviders = make(map[string]string)
+	for i := 0; i < 100; i++ {
+		rel.SeenProviders[fmt.Sprintf("provider%03d%s", i, strings.Repeat("x", 150))] = ""
+	}
+	tg := &fakeTagger{}
+	err := CreateReleaseTag(context.Background(), tg, rel, false, zerolog.Nop())
+	require.ErrorContains(t, err, "publish limit")
+	assert.Empty(t, tg.tags)
+}
+
+func TestNoScriptPublishChecksActualProviderReceiptBeforeRecording(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"app"}})
+	app := p.Releases["app"]
+	app.Pkg.Space.BuildScript = nil
+	app.Pkg.Space.PublishScript = nil
+	for i := 0; i < 100; i++ {
+		name := fmt.Sprintf("provider%03d%s", i, strings.Repeat("x", 150))
+		p.Releases[name] = &plan.Release{Pkg: &model.Package{Name: name, Space: app.Pkg.Space}}
+		app.Sources = append(app.Sources, plan.StaleSource{Provider: name})
+	}
+	tagger := &fakeTagger{}
+	results := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: tagger, Build: 1, Publish: 1}).Run(t.Context(), p)
+	require.Equal(t, StatusFailed, results["app"].Status)
+	assert.ErrorContains(t, results["app"].Err, "publish limit")
+	assert.Empty(t, tagger.tags)
+}
+
 // forcingTagger records which writes asked to force, so the alias tests can
 // tell a moving alias from an immutable one.
 type forcingTagger struct {

@@ -72,10 +72,10 @@ func (r *runner) runConfiguredIf(ctx context.Context, command configuredCommand)
 	// this. The caller dispatches here before the update check: no `if` path
 	// may cost a GitHub request, however much else it asked for.
 	a := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log)
-	dir := *r.o.root
+	dir := r.resolveHelperDir()
 	if r.ifIn != nil {
 		var err error
-		if dir, err = a.ResolveDir(*r.ifIn, *r.o.root); err != nil {
+		if dir, err = a.ResolveDir(*r.ifIn, dir); err != nil {
 			log.Error().Err(err).Msg("invalid --in")
 			return 1
 		}
@@ -87,13 +87,13 @@ func (r *runner) runConfiguredIf(ctx context.Context, command configuredCommand)
 		// never fills an empty one. Refused only here, because whether the
 		// invocation folder narrows the selection needs the resolved root.
 		if *r.o.consumers && len(*r.o.pkgFilter)+len(*r.o.spaceFilter)+len(*r.o.groupFilter) == 0 &&
-			sameDir(*r.o.root, resolvedRoot) {
+			sameDir(r.resolveHelperDir(), resolvedRoot) {
 			log.Error().Msg("--consumers expands what the changes reach and cannot change the answer when everything is selected; add --package, --space or --group, or run from inside a package folder")
 			r.usage(cmdIf)
 			return 2
 		}
 		sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
-			Groups: *r.o.groupFilter, Dir: *r.o.root}
+			Groups: *r.o.groupFilter, Dir: r.resolveHelperDir()}
 		names, err := a.ChangedSelection(ctx, app.WindowOptions{
 			Filter: sel, Since: *r.o.since, Consumers: *r.o.consumers})
 		if err != nil {
@@ -114,10 +114,10 @@ func (r *runner) runConfiguredFor(ctx context.Context, command configuredCommand
 	// this. The caller dispatches here before the update check: no loop path
 	// may cost a GitHub request, however much else it asked for.
 	a := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log)
-	dir := *r.o.root
+	dir := r.resolveHelperDir()
 	if r.forIn != nil {
 		var err error
-		if dir, err = a.ResolveDir(*r.forIn, *r.o.root); err != nil {
+		if dir, err = a.ResolveDir(*r.forIn, dir); err != nil {
 			log.Error().Err(err).Msg("invalid --in")
 			return 1
 		}
@@ -129,7 +129,7 @@ func (r *runner) runConfiguredFor(ctx context.Context, command configuredCommand
 		// other command does. It is inert for the three domains whose terms
 		// are the source, since explicit terms beat the inference.
 		sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
-			Groups: *r.o.groupFilter, Dir: *r.o.root}
+			Groups: *r.o.groupFilter, Dir: r.resolveHelperDir()}
 		var err error
 		if items, err = a.ForItems(ctx, app.ForSelection{Domain: r.forDomain,
 			Window: app.WindowOptions{Filter: sel, Since: *r.o.since, Consumers: *r.o.consumers},

@@ -287,3 +287,14 @@ Run this when the script fails, and exit with its code instead.
 
 The command needs a config file to look up the script name. It uses the
 configured `shell` if you set one.
+
+### Spaces in a fleet
+
+A named space uses the entry repository's declaration when it has one. Otherwise,
+a space declared by one participating peer uses that peer's scripts, environment,
+and primary folder. `--fallback` reads the same owner's top-level scripts.
+
+If several peers declare the same name and the entry does not, a singular space
+location is ambiguous and the command stops before running a script. Use a package
+subject, or enter the intended space folder and use `--for cwd --in cwd`. A current
+folder always resolves its own space owner, even when the entry has an equal name.

@@ -8,6 +8,7 @@ package integration
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,23 @@ import (
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
+
+// External CI configuration keeps package paths anchored to --root while an
+// absolute --config names exactly one file, without falling back to a local one.
+func TestConfigAbsoluteFileKeepsTheRequestedRepositoryRoot(t *testing.T) {
+	repo := singlePackageRepo(t, echoBuild)
+	repo.Commit("feat(core): seed package")
+	body, err := os.ReadFile(repo.Path("dispat.json"))
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "release.json")
+	require.NoError(t, os.WriteFile(path, body, 0o600))
+	repo.WriteFile("dispat.json", "{broken local configuration")
+	result := repo.Status("--config", path)
+	require.Zero(t, result.Code, "%s\n%s", result.Stdout, result.Stderr)
+	assert.Equal(t, []string{"core"}, plannedPackages(result))
+	assert.Empty(t, repo.TagList())
+	assert.Equal(t, "{broken local configuration", readRepoFile(t, repo, "dispat.json"))
+}
 
 // TestConfigReleaseRejectsAShallowImportedPolicyOwner proves a source must
 // have complete history at the point its repository-owned policy is admitted.

@@ -673,31 +673,22 @@ func ResolvedWorkspaceSpaceConfigs(c *File, controlRoot string, workspace *Works
 	return out, nil
 }
 
-// ResolvedControlSpaceConfigs settles the control repository's spaces the way
-// ResolvedSpaceConfigs does and keys them by name, which is what a command
-// resolving one space the user named needs: `dispat exec --for space:<name>`
-// reads the control repository's configuration, and a space's scripts and env
-// live as much in the space folder's own config file as in the root file's
-// entry. ResolvedWorkspaceSpaceConfigs answers the other question — every
-// space of every participating repository, unkeyed, for a name that only has
-// to exist somewhere.
-//
-// The folder policy is the composed one when a workspace is present, so a file
-// belonging to a source repository never speaks for a control space.
-func ResolvedControlSpaceConfigs(c *File, controlRoot string, workspace *Workspace) (map[string]SpaceConfig, error) {
+// ResolvedRepositorySpaceConfigs settles one owner's spaces while refusing
+// folder configuration belonging to another participating repository.
+func ResolvedRepositorySpaceConfigs(c *File, root string, workspace *Workspace) (map[string]SpaceConfig, error) {
 	if workspace == nil {
-		return ResolvedSpaceConfigs(c, controlRoot)
+		return ResolvedSpaceConfigs(c, root)
 	}
 	for i := range workspace.Repositories {
 		repository := &workspace.Repositories[i]
-		if !repository.Control {
+		if repository.Root != root {
 			continue
 		}
 		gitRoots := &gitRootMemo{byDir: make(map[string]string)}
 		folderInputs := newWorkspaceFolderPolicy(workspace, repository, gitRoots)
-		return resolvedSpaceConfigsMode(c, controlRoot, folderInputs.allow)
+		return resolvedSpaceConfigsMode(c, root, folderInputs.allow)
 	}
-	return ResolvedSpaceConfigs(c, controlRoot)
+	return nil, fmt.Errorf("space configuration has no owner for %s", root)
 }
 
 // DiscoverWorkspacePlan returns both active dependency edges and declared
