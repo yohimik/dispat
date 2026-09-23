@@ -35,9 +35,9 @@ func TestExecutionInterruptedPublisherBeforeAuthorization(t *testing.T) {
 		}
 	})
 	started := rig.repo.StartReleaseEnv(rig.env(), "release")
-	finished := false
+	isFinished := false
 	t.Cleanup(func() {
-		if !finished {
+		if !isFinished {
 			started.Signal(os.Interrupt)
 			_ = started.Wait()
 		}
@@ -46,19 +46,19 @@ func TestExecutionInterruptedPublisherBeforeAuthorization(t *testing.T) {
 	executionAwaitProbe(t, rig, "probe-prepublish")
 	started.Signal(syscall.SIGINT)
 	res := started.Wait()
-	finished = true
+	isFinished = true
 
 	require.NotEqual(t, 0, res.Code, "interruption stops the release\nstdout:\n%s", res.Stdout)
 	assert.Empty(t, executionAuthorizations(res), "no Go was issued while the hook prepared")
 	assert.Empty(t, executionProbedPackages(rig, "publish"), "the publish command never started")
 	assert.Empty(t, executionReleaseTags(rig))
-	_, unknown := executionLine(res, executionUnknownPublicationMessage)
-	assert.False(t, unknown, "no authorized effect has an unknown outcome")
-	ack, acknowledged := executionLine(res, "the withdrawn attempt was acknowledged")
-	require.True(t, acknowledged, "the node confirms it stopped\nstdout:\n%s", res.Stdout)
+	_, isUnknown := executionLine(res, executionUnknownPublicationMessage)
+	assert.False(t, isUnknown, "no authorized effect has an unknown outcome")
+	ack, isAcknowledged := executionLine(res, "the withdrawn attempt was acknowledged")
+	require.True(t, isAcknowledged, "the node confirms it stopped\nstdout:\n%s", res.Stdout)
 	assert.Equal(t, false, ack["commandStarted"], "the publish command had not begun")
-	summary, summarized := executionLine(res, "summary")
-	require.True(t, summarized, "the package has a release outcome\nstdout:\n%s", res.Stdout)
+	summary, isSummarized := executionLine(res, "summary")
+	require.True(t, isSummarized, "the package has a release outcome\nstdout:\n%s", res.Stdout)
 	assert.Equal(t, "cancelled", summary.Str("status"))
 	assert.Empty(t, rig.branches())
 	assert.False(t, remoteHoldsLock(t, rig.origin))

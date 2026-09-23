@@ -131,6 +131,10 @@ func TestPublicAPIConfigFoldingAndKeyPaths(t *testing.T) {
 			{"", ""},
 			{"Grüße", "grüße"},
 			{"straße", "straße"},
+			{"Σ", "σ"},
+			{"ς", "σ"},
+			{"İ", "İ"},
+			{"i", "i"},
 		} {
 			if got := config.Fold(c.in); got != c.want {
 				t.Errorf("Fold(%q) = %q, want %q", c.in, got, c.want)
@@ -154,6 +158,19 @@ func TestPublicAPIConfigFoldingAndKeyPaths(t *testing.T) {
 		}
 		if _, ok := config.FoldKey(m, "absent"); ok {
 			t.Error("FoldKey found a key that is not there")
+		}
+		greek := map[string]int{"Σ": 2}
+		if key, value, ok := config.LookupFold(greek, "ς"); !ok || key != "Σ" || value != 2 {
+			t.Errorf("Unicode folded lookup = %q, %d, %v", key, value, ok)
+		}
+		if key, ok := config.FoldKey(greek, "σ"); !ok || key != "Σ" {
+			t.Errorf("Unicode FoldKey = %q, %v", key, ok)
+		}
+		// The dotted capital I is its own SimpleFold class. Lowercasing it
+		// to ASCII i would make a lookup read the wrong user-authored key.
+		dotted := map[string]int{"İ": 3}
+		if key, _, ok := config.LookupFold(dotted, "i"); ok || key != "" {
+			t.Errorf("distinct Unicode lookup = %q, %v", key, ok)
 		}
 	})
 

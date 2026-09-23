@@ -23,18 +23,18 @@ func TestForCancellationStopsRemainingItemsAndRunsCleanup(t *testing.T) {
 		"--log-level", "debug", "--log-format", "json",
 		"--do", `printf '%s\n' "$DISPAT_ITEM" >> started; exec sleep 60`,
 		"--on-failure", `printf 'cleanup\n' >> cleaned; exit 3`)
-	started := false
+	isStarted := false
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(r.Path("started")); err == nil {
-			started = true
+			isStarted = true
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	proc.Signal(os.Interrupt)
 	res := proc.Wait()
-	require.True(t, started, "the first loop item must start before cancellation")
+	require.True(t, isStarted, "the first loop item must start before cancellation")
 	require.Equal(t, 3, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, "first\n", readRepoFile(t, r, "started"))
 	assert.Equal(t, "cleanup\n", readRepoFile(t, r, "cleaned"))

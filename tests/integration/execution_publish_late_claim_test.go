@@ -46,9 +46,9 @@ func TestExecutionPublishClaimWinsQueuedRevocation(t *testing.T) {
 	})
 	revokeGate := newPublishRevocationGate(t, realGit)
 	started := rig.repo.StartReleaseEnv(rig.env(revokeGate.env...), "release")
-	finished := false
+	isFinished := false
 	t.Cleanup(func() {
-		if !finished {
+		if !isFinished {
 			started.Signal(os.Interrupt)
 			_ = started.Wait()
 		}
@@ -72,7 +72,7 @@ func TestExecutionPublishClaimWinsQueuedRevocation(t *testing.T) {
 	require.NoError(t, os.WriteFile(revokeGate.proceed, nil, 0o600))
 
 	res := started.Wait()
-	finished = true
+	isFinished = true
 	node := worker.stop(t)
 	worker = nil
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s\nworker stdout:\n%s\nworker stderr:\n%s",

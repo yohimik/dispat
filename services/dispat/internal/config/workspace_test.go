@@ -93,10 +93,12 @@ func TestComposeCentralWorkspaceAssignsSourceOwner(t *testing.T) {
 
 func TestComposeCentralWorkspaceRejectsUnicodeAliasSubmoduleIdentities(t *testing.T) {
 	sigma := workspaceRepo(t, "sigma", nil)
-	finalSigma := workspaceRepo(t, "final-sigma", nil)
-	root, path := workspaceControl(t, map[string]string{"Σ": sigma, "ς": finalSigma}, File{
+	root, path := workspaceControl(t, map[string]string{"Σ": sigma}, File{
 		Polyrepo: true, Packages: map[string]PackageConfig{"sigma": {Path: "sources/Σ/pkgs/sigma"}},
 	})
+	workspaceGit(t, root, "config", "--file", filepath.Join(root, ".gitmodules"), "submodule.ς.path", "sources/final-sigma")
+	workspaceGit(t, root, "add", ".")
+	workspaceGit(t, root, "commit", "-m", "chore: declare colliding submodule identity")
 	loaded, err := Load(path, nil)
 	require.NoError(t, err)
 	_, err = ComposeWorkspaceWithPinResolver(context.Background(), loaded, path, root, nil, nil, nil)

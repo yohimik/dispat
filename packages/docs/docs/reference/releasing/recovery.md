@@ -4,8 +4,9 @@ description: Recover a stopped release safely by using recorded tags and checkin
 
 # Recovering from a failed run
 
-Run `dispat` again to recover from a failed release run. Tags written after successful publishes let the next plan
-skip recorded packages and continue with their pending consumers.
+A repeat `dispat` run plans from durable tags: it skips recorded packages and continues with their pending
+consumers. Check which record failed before retrying, because a package can have its native tag while its separate
+GitHub release record is still missing.
 
 There is one interval a tag cannot describe: a publish command may succeed and the process may stop before dispat
 writes its tag. If a run is killed during that interval, inspect that package's registry or destination before you
@@ -176,6 +177,28 @@ old range until its own next release, when the version stage reconciles the rang
 (`W197`). This pickup is
 [the auto-version reconciliation](../../configuration/autoversion.md#picking-up-providers-released-without-you), not a
 release triggered by the provider.
+
+## Repair GitHub metadata after the package was recorded
+
+A GitHub API error can happen after a successful publish, source tag, and (in a fleet) control checkpoint. An ordinary
+`dispat release` retry sees the source tag and skips that package: it does not republish it, but it also does not
+recreate the missing GitHub release. Verify the exact published version and source tag, the control checkpoint if one
+was required, and the absence of the GitHub release before repairing only the metadata.
+
+Run the standalone GitHub step in a reviewed CI repair job using the original run's configuration, credentials,
+`DISPAT_PACKAGE`, `DISPAT_NEW_VERSION`, and `DISPAT_TAG`. The `--since all` window includes the already-tagged package.
+For a package covered by `github.allPackages`, the CI command can be:
+
+```sh
+DISPAT_PACKAGE=core DISPAT_NEW_VERSION=0.1.0 DISPAT_TAG=core@0.1.0 \
+  dispat github --package core --since all
+```
+
+Use the actual package, version, and tag from the failed run. If the original GitHub release was opted in through
+`DISPAT_EXPORT_GITHUB`, restore that variable and make its original attachment files available to the CI job as well.
+Check that the GitHub release names the existing tag and contains the intended assets. Do not run a new publication,
+create or move a tag, or choose a new version to repair metadata; do not run this production repair from a local
+workstation. An existing GitHub release is skipped by the standalone step (`W224`).
 
 ## When somebody pushes while the release runs
 

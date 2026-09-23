@@ -1036,7 +1036,7 @@ func TestPackagesKeyAmbiguous(t *testing.T) {
 
 func TestPackagesRejectUnicodeCaseFoldCollision(t *testing.T) {
 	cfg := validConfig()
-	root := writeModelRepo(t, cfg, "packages/libs/Σ", "packages/libs/ς", "packages/apps/app")
+	root := writeModelRepo(t, cfg, "packages/libs/Σ", "packages/apps/ς")
 	_, err := discoverPackages(t, root)
 	require.ErrorContains(t, err, "package names must be unique")
 	assert.Contains(t, err.Error(), "Σ")
