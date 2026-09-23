@@ -184,3 +184,29 @@ attempt had its outputs checked against the first attempt's identity and refused
 2026-09-23: every package's tests as one sweep of seventeen tasks from a clean checkout, on a c3-standard-8 the pipeline
 created and deleted, seventeen ran and none failed, coverage of every task merged back, 16 minutes of wall time; no
 single-node run of the same sweep was timed beside it, so this is a record of use, not a measurement.
+
+
+## 2026-09-24: Delivery by tags and ancestry
+
+The provider receipt of CCME 3.1.0-rc.4 is withdrawn. That candidate had every consumer release record name the
+provider tags it observed, as `release <tag> dispat-seen-v1:<payload>` in the tag message, and read delivery from that
+record. Delivery is again read from tags and ancestry alone ([section 13.4a](./SPEC.md#134a-source-packages)): a source
+has delivered a commit to a target when some release of the source carries the commit and the target's baseline reaches
+that release. The one state ancestry cannot order, two releases on one commit, is kept from arising unseen by `E201`
+([section 19.3](./SPEC.md#193-partial-failure)) rather than recorded, and a debt that the source's later release left
+in no ordinary window stays visible through the owed windows of [section 13.3](./SPEC.md#133-pending-window). A tag
+written with a receipt remains an ordinary release tag: its message is text the engine does not read, whatever the
+payload says and whether or not it decodes.
+
+The dispat engine implements both, which closes the departure recorded on 2026-09-22. An owed window is taken for every
+pair of a provider and a consumer the provider reaches over `propagation.kinds`, not only for the edges, and is read
+only where it reaches further back than the union of the ordinary windows, so a history in which no consumer got ahead
+of its provider reads nothing more. `E201` refuses, before anything is published, a run that would release a provider
+at the baseline commit of a consumer it still owes without releasing that consumer after it, and names both remedies:
+the consumer in the same run, or the provider after a new commit. A consumer that fails after its provider published on
+its baseline commit is reported with the one remedy left, an exact `Release-As` at the version the run planned (section
+8.6). The refusal is conservative whenever the consumer's baseline is the head the run starts from: in commit mode the
+provider's tag usually lands on a release commit past that head, but a run cannot know before it publishes whether that
+commit will be empty. The same work found that a member of a shared-version group that got ahead of its provider was
+masked out of the group's freshness test, so the member caught up alone while the rest of its group stayed behind; the
+group now moves as one.
