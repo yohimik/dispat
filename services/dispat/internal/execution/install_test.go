@@ -47,13 +47,11 @@ func TestOutputStagingSeparatesCollidingPackageNames(t *testing.T) {
 	destinations := []string{t.TempDir(), t.TempDir()}
 	staging := make([]string, 2)
 	for i, name := range []string{"α", "β"} {
-		staging[i], err = resolveOutputStagingPath(outputStagingSpec{
-			indexPath: index, ownerDir: fixture.dir, destination: destinations[i],
-			run: "same-run", packageName: name,
+		staging[i] = resolvePrivateStagingPath(outputStagingSpec{
+			indexPath: index, ownerDir: fixture.dir, run: "same-run", packageName: name,
 		})
-		require.NoError(t, err)
 		assert.Equal(t, filepath.Dir(index), filepath.Dir(staging[i]),
-			"same-device checkouts keep their private Git staging")
+			"a set is staged in the checkout's private Git directory first")
 	}
 	assert.NotEqual(t, staging[0], staging[1])
 	start := make(chan struct{})
@@ -74,9 +72,8 @@ func TestOutputStagingSeparatesCollidingPackageNames(t *testing.T) {
 		assert.Equal(t, "kept\n", readInstalled(t, destinations[i], "dist/value.txt"))
 		assert.NoDirExists(t, staging[i])
 	}
-	long, err := resolveOutputStagingPath(outputStagingSpec{
-		indexPath: index, ownerDir: fixture.dir, destination: destinations[0],
-		run: "same-run", packageName: strings.Repeat("α", 300),
+	long, err := resolveSiblingStagingPath(outputStagingSpec{
+		indexPath: index, ownerDir: fixture.dir, run: "same-run", packageName: strings.Repeat("α", 300),
 	})
 	require.NoError(t, err)
 	assert.Less(t, len(filepath.Base(long)), 255, "one path component stays bounded")

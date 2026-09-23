@@ -62,15 +62,12 @@ The layout is `<state-dir>/<node name>/`, holding `cache/` (one bare repository 
 answered-work record) and `worker.lock`. Everything in it is reconstructible: a node whose folder was deleted makes
 one again and pays a fetch, so a container may use an empty volume for it.
 
-Two processes must not serve one node name from one state folder. The second one to start refuses, because two
-nodes sharing a folder would each hold half the record of what has been answered.
-The worker holds an operating-system lock on `worker.lock` while it serves. The file stays at the same path after a
-normal stop; its PID is diagnostic, and a crash releases the lock without a stale-file cleanup step. Leave the file
-in place when restarting a worker.
-
-When upgrading from a worker that used PID-file ownership, stop every old worker sharing that state folder before
-starting the new version. The older implementation can rename the lock file and does not honor the kernel lock;
-mixed-version concurrent startup against one folder is unsupported.
+Two processes must not serve one node name from one state folder. The second one to start refuses, because two nodes
+sharing a folder would each hold half the record of what has been answered. `worker.lock` holds the serving process's
+id and is removed when that process stops. A worker that finds the id of a process that is gone takes the folder over,
+so a crashed worker restarts without anybody deleting the file. A new claim is trusted after it has settled for a
+second, which is how one of several workers started at once against one folder serves and the others refuse. A serving
+worker reads the lock again before it claims each assignment, and stops when another process's id is written there.
 
 ### `--idle-timeout`
 
@@ -95,6 +92,7 @@ tick and every ref inspected.
 | `--idle-timeout` elapsed                           | `0`                                                                       |
 | a required setting is missing, or the secret is unset or empty | non-zero, reported as `E225`                                   |
 | the state folder is already held by another process | non-zero, reported as `E225`                                             |
+| another process's id appears in `worker.lock` while serving | non-zero, reported as `E225`, after the tasks already claimed have finished |
 
 A signalled node stops claiming new work, withdraws nothing it has not been asked to withdraw, and lets what it has
 claimed finish before the process ends. Give a supervisor a grace period as long as `execution.timeouts.task` if its

@@ -215,12 +215,13 @@ assignment names before it installs a single file.
 are written, then each declared root replaces its destination by a rename. No command of a task starts before every
 one of its inputs is installed.
 
-Staging stays in private Git storage when that storage shares the output destination's filesystem. A linked worktree
-on another filesystem uses a private (`0700`) staging folder beside the outermost checkout instead, so the final
-rename remains atomic and temporary files stay outside Git status and release records. Normal completion removes the
-folder. If a process is killed during installation, a `dispat-outputs-` folder can remain in Git storage or as a
-hidden sibling of the checkout. After confirming that no release using that checkout is active, an operator may
-remove that run's leftover folder; dispat does not guess that another run's staging is abandoned.
+The set is staged in the checkout's private Git storage. When the final rename from there into the checkout fails, as
+it does for a linked worktree whose private Git storage is on another filesystem, the set is staged again in a private
+(`0700`) folder beside the outermost checkout and renamed from there, so the install stays a rename and temporary files
+stay outside Git status and release records. When that rename fails too, the install fails with its error. Normal
+completion removes the folder. If a process is killed during installation, a `dispat-outputs-` folder can remain in Git
+storage or as a hidden sibling of the checkout. After confirming that no release using that checkout is active, an
+operator may remove that run's leftover folder; dispat does not guess that another run's staging is abandoned.
 
 **What is refused.** The prerequisite fails with `E227`, and the consumers of that prerequisite are blocked, when a
 declared root is absent, when the manifest and the tree disagree, when the totals do not match the entries, when an
@@ -629,10 +630,9 @@ Three conditions dispat already had a code for keep it and join the specificatio
 - **A worker's task deadline is enforced by the node itself.** The orchestrator's wait and the node's own are the
   same number, so a task that overruns is stopped on the machine rather than abandoned while it is still running.
 - **Two workers must not share one state folder for one node name.** The second one to start refuses. Give each node
-  its own `--state-dir`. A worker holds a kernel lock on a stable `worker.lock` file while it serves, so a crash
-  releases ownership without renaming or deleting the file; the cache and answered-work state remain reconstructible.
-  Stop older PID-lock workers before upgrading a shared state folder; concurrent startup of old and new lock
-  implementations cannot safely share it.
+  its own `--state-dir`, and expect the folder to be disposable: everything in it is rebuilt. The owning worker's
+  process id is in `worker.lock`; a worker that finds the id of a process that is gone takes the folder over, so a
+  crashed worker restarts without anybody deleting a file.
 - **Nested dispat commands on a worker are restricted.** Under a task's authority `release`, a bare `dispat`,
   `commit`, `github`, `changelog`, `autoversion`, `compute` and `worker` are refused with `E226`. Everything a build
   script legitimately uses stays allowed, including `exec`, `if`, `for`, `install`, `scanner`, `writer`, `replacer`,

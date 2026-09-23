@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -508,7 +509,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 	t.Run("a lock its writer never filled is taken over after the grace", func(t *testing.T) {
 		// Creating the lock and writing the process id are two steps, so an
 		// empty lock is either an owner that is starting or one that died in
-		// between. It is waited for, then filled under the kernel lock.
+		// between. It is waited for, then replaced, and the node starts.
 		root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
 		state := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
@@ -557,19 +558,18 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 	})
 }
 
-// A stale PID file must not create an absent-path takeover window. All of
-// these workers start against the same inode at once; exactly one can serve
-// the state folder while the others are refused.
+// TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner: taking over a
+// stale lock is several filesystem operations, and processes started at once
+// can each finish one they read as a win. Every claim settles before it is
+// trusted, so of four workers started together against one stale lock exactly
+// one serves the state folder and the others are refused.
 func TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner(t *testing.T) {
 	rig := newExecutionRig(t)
 	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
 	state := t.TempDir()
 	dir := filepath.Join(state, executionNode)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
-	lock := filepath.Join(dir, "worker.lock")
-	require.NoError(t, os.WriteFile(lock, []byte("4194304"), 0o644))
-	original, err := os.Stat(lock)
-	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "worker.lock"), []byte("4194304"), 0o644))
 
 	const contenders = 4
 	workers := make([]*harness.Proc, contenders)
@@ -590,9 +590,41 @@ func TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner(t *testing.T) {
 		requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
 	}
 	assert.Equal(t, 1, started, "only one process served the shared state")
-	final, err := os.Stat(lock)
-	require.NoError(t, err)
-	assert.True(t, os.SameFile(original, final), "the lock inode was never removed or replaced")
+}
+
+// TestExecutionWorkerStopsWhenAnotherProcessClaimsItsFolder: a serving node
+// reads its worker.lock again before every claim. Once another process's id
+// is written there, the node leaves the assignment where the orchestrator put
+// it, stops through its ordinary exit path with E225, and leaves the other
+// process's lock in place.
+func TestExecutionWorkerStopsWhenAnotherProcessClaimsItsFolder(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60)
+	served := executionBranchName("before-takeover")
+	orchestrator.offer(served, orchestrator.probe(served, "served"))
+	executionAwaitMessage(t, rig.mailbox, served, "result")
+
+	// This test process is running and is not the worker, which is what a
+	// process that took the folder over looks like from inside it.
+	lock := filepath.Join(worker.stateDir, executionNode, "worker.lock")
+	other := strconv.Itoa(os.Getpid())
+	require.NoError(t, os.WriteFile(lock, []byte(other), 0o644))
+	left := executionBranchName("after-takeover")
+	orchestrator.offer(left, orchestrator.probe(left, "left"))
+	res := worker.proc.Wait()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
+	assert.Contains(t, diagnosticText(res), "served by process "+other)
+	stopped, isStopped := executionLine(res, "worker stopped")
+	require.True(t, isStopped, "the node stopped through its ordinary exit path\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, "disowned", stopped.Str("reason"))
+	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, left),
+		"the assignment is left for the process that owns the folder")
+	held, err := os.ReadFile(lock)
+	require.NoError(t, err, "the other process's lock is not removed")
+	assert.Equal(t, other, string(held))
 }
 
 // TestExecutionWorkerStopsOnSignal: a node asked to stop stops, cleanly and

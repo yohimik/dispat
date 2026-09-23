@@ -75,6 +75,9 @@ const (
 	// StopIdle is --idle-timeout elapsing with nothing claimed and nothing in
 	// flight, which is how a node started for one release ends by itself.
 	StopIdle = "idle"
+	// StopDisowned is another process's id found in this node's worker.lock
+	// before a claim: the folder is no longer this process's to serve from.
+	StopDisowned = "disowned"
 )
 
 // Worker is one serving node: which node it is, what it can take on, and the
@@ -109,6 +112,9 @@ type Worker struct {
 	Cache *gitx.LocalGitx
 	// Seen is the record of the work this node has already answered.
 	Seen *SeenSet
+	// VerifyOwner reports another process's claim on this node's state folder,
+	// and is asked before every assignment is claimed. Nil asks nothing.
+	VerifyOwner func() error
 	// PrepareStore opens the object store behind the mailbox, and is called
 	// again after any failure: the store is a cache, so recovering from a
 	// deleted or broken one is the same operation as creating it.
@@ -140,6 +146,10 @@ type Worker struct {
 	// entry carries across that boundary.
 	claims  sync.Mutex
 	claimed map[string]*claimedTask
+	// refusal is what stopped this node when neither a signal nor idleness
+	// did: the refusal VerifyOwner answered. Only the poll goroutine writes
+	// it, and Err reads it once Serve has returned.
+	refusal error
 }
 
 // Serve polls until the process is signalled or goes idle, and answers the
@@ -168,6 +178,12 @@ func (w *Worker) Serve(ctx context.Context) string {
 	w.running.Wait()
 	w.Log.Info().Str("reason", reason).Msg("worker stopped")
 	return reason
+}
+
+// Err is the refusal that stopped this node, and nil for a node that stopped
+// because it was signalled or went idle. It is read once Serve has returned.
+func (w *Worker) Err() error {
+	return w.refusal
 }
 
 // poll is the loop itself: one tick, then a wait whose length is what the
@@ -199,6 +215,9 @@ func (w *Worker) poll(ctx context.Context) string {
 	}
 	for {
 		interval = resolvePollInterval(interval, w.tick(ctx))
+		if w.refusal != nil {
+			return StopDisowned
+		}
 		next.Reset(interval)
 		for isWaiting := true; isWaiting; {
 			select {
@@ -323,6 +342,11 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 		if err != nil {
 			return isProgress, err
 		}
+		if w.refusal != nil {
+			// The rest of the mailbox belongs to the process that owns the
+			// state folder now.
+			return isProgress, nil
+		}
 	}
 	return isProgress, nil
 }
@@ -383,6 +407,11 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		w.reportRejection(tip, reason)
 		return false, nil
 	}
+	if (assignment.Kind == KindProbe || isFrameKind(assignment.Kind)) && !w.isStateOwned() {
+		// Left exactly where the orchestrator put it, for the node that owns
+		// the state folder now.
+		return false, nil
+	}
 	if assignment.Kind == KindProbe {
 		return true, w.answerProbe(ctx, tip, assignment)
 	}
@@ -401,6 +430,29 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Msg("assignment inspected")
 	return false, nil
+}
+
+// isStateOwned asks, before a claim, whether this process still owns its
+// state folder, and records the refusal that stops the node when another
+// process has written its id there. Claims are compare-and-swap pushes, so
+// the two processes can never both claim one assignment; asking before every
+// claim bounds how long they serve side by side to the claims already in
+// flight.
+func (w *Worker) isStateOwned() bool {
+	if w.refusal != nil {
+		return false
+	}
+	if w.VerifyOwner == nil {
+		return true
+	}
+	err := w.VerifyOwner()
+	if err == nil {
+		return true
+	}
+	w.refusal = err
+	w.Log.Error().Err(err).Str("code", CodeConfiguration).Str("category", CategoryConfiguration).
+		Msg("the worker state folder is claimed by another process; this node stops claiming work")
+	return false
 }
 
 // isFrameKind reports whether an assignment of this kind is a frame this node

@@ -279,27 +279,21 @@ func (c *Coordinator) MergeSweepOutputs(ctx context.Context) error {
 
 // mergeSweepSet merges one admitted set into the repository it belongs to.
 //
-// Staging follows the same private, destination-filesystem choice as build
-// outputs, including when a linked worktree's Git directory is elsewhere.
+// Staging follows the same private choice as build outputs, including the
+// second assembly beside the checkout when a linked worktree's Git directory
+// cannot rename into it.
 func (c *Coordinator) mergeSweepSet(ctx context.Context, set *sweepSet) error {
 	index, err := set.repository.IndexPath(ctx)
 	if err != nil {
 		return c.refuseSweepOutputs(set.task, set.node, "",
 			fmt.Errorf("execution: locating the private folder of %s: %w", set.repository.Dir, err))
 	}
-	staging, err := resolveOutputStagingPath(outputStagingSpec{
-		indexPath: index, ownerDir: set.repository.Dir, destination: set.repository.Dir,
-		run: c.Run, packageName: set.task,
-	})
-	if err != nil {
-		return c.refuseSweepOutputs(set.task, set.node, "", err)
-	}
 	c.guard.RLock()
-	err = MergeInstallOutputs(ctx, InstallRequest{
-		Git: c.dispatch.Store, Manifest: set.manifest, Dir: set.repository.Dir,
-		Staging: staging,
-		Log:     c.Log,
-	})
+	err = installStaged(ctx, outputStagingSpec{
+		indexPath: index, ownerDir: set.repository.Dir, run: c.Run, packageName: set.task,
+	}, InstallRequest{
+		Git: c.dispatch.Store, Manifest: set.manifest, Dir: set.repository.Dir, Log: c.Log,
+	}, MergeInstallOutputs)
 	c.guard.RUnlock()
 	if err != nil {
 		return c.refuseSweepOutputs(set.task, set.node, OutputFaultReason(err), err)

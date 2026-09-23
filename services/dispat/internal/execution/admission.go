@@ -204,12 +204,13 @@ func (c *Coordinator) refuseOutputSet(task, node string, reason OutputReason, er
 // installLocally puts an admitted set into this machine's own checkout of the
 // package that produced it.
 //
-// The staging folder is outside every checkout and on the destination's own
-// filesystem. Ordinarily it sits in the owning repository's private Git
-// directory; a linked worktree whose Git directory is on another filesystem
-// uses a private sibling instead. Either way Git cannot record the staged
-// bytes, and installing each root is an atomic rename rather than a copy. The
-// shared side of the snapshot guard is held while it happens.
+// The set is assembled in the owning repository's private Git directory, so
+// Git cannot record the staged bytes, and installing each root is a rename
+// rather than a copy. When that rename fails, as it does for a linked
+// worktree whose private Git directory is on another filesystem, the set is
+// assembled again in a private folder beside the outermost checkout (see
+// installStaged). The shared side of the snapshot guard is held while it
+// happens.
 func (c *Coordinator) installLocally(ctx context.Context, request release.StageRequest,
 	store *gitx.LocalGitx, manifest *OutputManifest) error {
 	owner, err := c.resolveOwnerRepository(request)
@@ -220,20 +221,11 @@ func (c *Coordinator) installLocally(ctx context.Context, request release.StageR
 	if err != nil {
 		return fmt.Errorf("execution: locating the private folder of %s: %w", owner.Dir, err)
 	}
-	staging, err := resolveOutputStagingPath(outputStagingSpec{
-		indexPath: index, ownerDir: owner.Dir, destination: request.Dir,
-		run: c.Run, packageName: manifest.Package,
-	})
-	if err != nil {
-		return err
-	}
 	c.guard.RLock()
 	defer c.guard.RUnlock()
-	return InstallOutputs(ctx, InstallRequest{
-		Git: store, Manifest: manifest, Dir: request.Dir,
-		Staging: staging,
-		Log:     c.Log,
-	})
+	return installStaged(ctx, outputStagingSpec{
+		indexPath: index, ownerDir: owner.Dir, run: c.Run, packageName: manifest.Package,
+	}, InstallRequest{Git: store, Manifest: manifest, Dir: request.Dir, Log: c.Log}, InstallOutputs)
 }
 
 // resolveOwnerRepository opens the repository the package being built belongs

@@ -73,6 +73,7 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 	// The lock is this node's claim on its own folder, so giving it back is
 	// reported rather than dropped: a lock left behind is taken over by the
 	// next process, and an operator should still be able to see that it was.
+	// A lock another process has written since is left for that process.
 	defer func() {
 		if err := release(); err != nil {
 			a.log.Warn().Err(err).Msg("the worker state lock was not released")
@@ -106,9 +107,14 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 			}
 			return git.InitBareStore(ctx)
 		},
+		// Asked before every claim: another process's id in worker.lock
+		// means this one no longer owns the folder, and it stops.
+		VerifyOwner: state.VerifyOwner,
 	}
 	worker.Serve(ctx)
-	return nil
+	// A node another process displaced has already said so where it noticed;
+	// the refusal comes back only to make the exit non-zero.
+	return worker.Err()
 }
 
 // checkWorkerSettings refuses a node that could not serve, naming the setting

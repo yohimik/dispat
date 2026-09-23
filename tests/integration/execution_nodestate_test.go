@@ -42,12 +42,12 @@ func TestExecutionWorkerStateRefusals(t *testing.T) {
 		"a lock that cannot be read": {prepare: func(t *testing.T, state string) {
 			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode, "worker.lock"), 0o755))
 		}},
-		"a live legacy owner still holds the state folder": {prepare: func(t *testing.T, state string) {
+		"a live owner still holds the state folder": {prepare: func(t *testing.T, state string) {
 			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
 			require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "worker.lock"),
 				[]byte(strconv.Itoa(os.Getpid())), 0o644))
 		}, says: strconv.Itoa(os.Getpid())},
-		"an oversized legacy owner is refused": {prepare: func(t *testing.T, state string) {
+		"an oversized owner is refused": {prepare: func(t *testing.T, state string) {
 			require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
 			require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "worker.lock"),
 				[]byte(strings.Repeat("9", 65)), 0o644))

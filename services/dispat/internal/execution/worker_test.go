@@ -427,6 +427,43 @@ func TestWorkerStopsWhenItHasNothingToDo(t *testing.T) {
 	})
 }
 
+// TestWorkerStopsWhenAnotherProcessClaimsItsFolder: before every claim the
+// node asks whether its state folder is still its own. Another process's
+// claim leaves the assignment where the orchestrator put it, stops the node
+// with a reason of its own after the work in flight, and hands the refusal
+// back for a non-zero exit. A folder that is still its own is served as usual.
+func TestWorkerStopsWhenAnotherProcessClaimsItsFolder(t *testing.T) {
+	branch := "dispat-worker-build-a-20260921-probe-abc"
+	tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
+
+	t.Run("a folder still its own is served", func(t *testing.T) {
+		worker, mailbox := newWorkerFixture(t, branch, tip, validProbe(branch))
+		asked := 0
+		worker.VerifyOwner = func() error {
+			asked++
+			return nil
+		}
+
+		assert.True(t, worker.tick(t.Context()))
+		assert.Equal(t, 1, asked, "asked once, before the claim")
+		assert.Equal(t, []MessageKind{MessageClaim, MessageResult}, mailbox.written)
+		assert.NoError(t, worker.Err())
+	})
+
+	t.Run("a folder another process claimed stops the node", func(t *testing.T) {
+		worker, mailbox := newWorkerFixture(t, branch, tip, validProbe(branch))
+		claimed := NewDiagnostic(CodeConfiguration, CategoryConfiguration,
+			"the worker state folder is served by process 7 already")
+		worker.VerifyOwner = func() error { return claimed }
+		worker.IdleTimeout = time.Minute
+
+		assert.Equal(t, StopDisowned, worker.Serve(t.Context()))
+		assert.Empty(t, mailbox.written, "the assignment is left for the node that owns the folder")
+		assert.Empty(t, mailbox.reconsidered)
+		require.ErrorIs(t, worker.Err(), claimed)
+	})
+}
+
 // TestPollIntervalBacksOff: a node with nothing to do asks less and less
 // often, up to a stated ceiling, and goes back to asking at once the moment
 // anything arrives.

@@ -334,7 +334,8 @@ func replaceOneRoot(request InstallRequest, root string) (replacedRoot, error) {
 	}
 	if err := os.Rename(staged, destination); err != nil {
 		restoreRootAside(request, destination, aside)
-		return replacedRoot{}, fmt.Errorf("execution: installing the build output root %s: %w", root, err)
+		return replacedRoot{}, &stagedRenameError{
+			err: fmt.Errorf("execution: installing the build output root %s: %w", root, err)}
 	}
 	return replacedRoot{destination: destination, aside: aside}, nil
 }
@@ -481,7 +482,8 @@ func mergeOneEntry(request InstallRequest, entry ManifestEntry) (mergedFile, err
 	staged := filepath.Join(request.Staging, filepath.FromSlash(entry.Path))
 	if err := os.Rename(staged, destination); err != nil {
 		restoreRootAside(request, destination, aside)
-		return mergedFile{}, fmt.Errorf("execution: moving a merged output into place: %w", err)
+		return mergedFile{}, &stagedRenameError{
+			err: fmt.Errorf("execution: moving a merged output into place: %w", err)}
 	}
 	return mergedFile{destination: destination, aside: aside}, nil
 }

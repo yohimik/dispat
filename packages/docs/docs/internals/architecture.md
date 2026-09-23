@@ -430,14 +430,14 @@ What its tasks declare they write under `runOutputs` is admitted through the sam
 merged into the orchestrator's checkout once the drain is over, because a merge that ran as each task answered would
 let arrival order decide a path two tasks disagree about.
 
-The worker's answered-work record has one serving process. It holds a kernel lock on a stable `worker.lock` file for
-its whole lifetime; release clears the diagnostic PID and unlocks the file without removing or renaming it. A crash
-releases the kernel lock, while a live PID left by an older worker is still respected. Keeping one inode at one path
-closes the takeover window in which two processes could each claim a different replacement file.
-Its answered-work tuples remain for 48 hours after acceptance, covering the full validity of a message accepted
-with an issue time up to 24 hours ahead of the worker's clock. Loading and recording both prune only older tuples.
-Older PID-only workers must be stopped before upgrading a shared state folder; their rename-based implementation
-cannot participate safely in the new kernel-lock protocol.
+The worker's answered-work record has one serving process, and `worker.lock` holds that process's id. A lock naming a
+process that is gone is renamed aside, checked and replaced, and a lock naming a live process refuses the newcomer with
+`E225`. Processes started together can each finish a takeover they read as a win, so every claim settles for a second
+and is trusted only if the lock still names its process. A serving worker reads the lock again before each claim and
+stops with `E225` when another process's id is there, and release removes the lock only while it names the releasing
+process. The answered-work tuples remain for 48 hours after acceptance, covering the full validity of a message
+accepted with an issue time up to 24 hours ahead of the worker's clock. Loading and recording both prune only older
+tuples.
 
 The HTTP calls used for GitHub records, webhooks and self-update keep their request deadline through response-body
 reads and `Close`, not just through the response headers. TinyGo's transport can ignore cancellation; a timed-out
