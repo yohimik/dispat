@@ -185,8 +185,13 @@ rather than having a node silently truncate what it was asked to move.
 
 ## What a distributed run refuses
 
-Every refusal below carries `E225` and the `execution-configuration` category, and every one of them happens before
-a lock, a plan or a command:
+Every refusal below carries `E225` and the `execution-configuration` category, and none of them lets a command run.
+The refusals of the object's own values happen when the configuration loads, and the refusals of a run that would
+dispatch (a lock bypass, `commit.verify`, the signing secret, the release remote a link reaches) happen when it starts,
+before any lock. The two that depend on the plan, a stage pinned to `worker` with no worker links and a
+`buildPlatforms` no node satisfies, happen once the plan is fixed, which for a release is after it has taken its locks,
+and still before any hook, stage or record; a release then gives its locks back. A node that fails preflight is
+refused at the same point:
 
 - an unknown `role`, a `concurrency` below 1, a negative timeout or ceiling;
 - a `name` or a worker `name` that is not a node name, or two links whose names fold together;
@@ -200,8 +205,8 @@ a lock, a plan or a command:
   `DISPAT_UNSAFE_DISABLE_LOCK`;
 - `workers` on a release where any participating repository sets `commit.verify: false`, because such a release
   reads its lock back before every assignment and publication (a sweep, which takes no lock, is not refused for it);
-- a package whose `runOnly` pins a stage to `worker` while the run has no worker links;
-- a package whose `buildPlatforms` no configured worker satisfies;
+- a package whose `runOnly` pins a stage to `worker` while the run has no worker links, once the plan is fixed;
+- a package whose `buildPlatforms` no configured worker satisfies, once the nodes have answered;
 - two packages whose `buildOutputs` claim one folder, or a declared root holding another package's folder, which
   `dispat status` reports as well;
 - a `runOutputs` root that is or holds a package folder, or overlaps a package's `buildOutputs` root, which

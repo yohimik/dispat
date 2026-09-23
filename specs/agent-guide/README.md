@@ -616,7 +616,7 @@ Before a release:
 2. Confirm the pipeline starts the worker nodes. `dispat worker` belongs in a CI job or a cluster workload beside the release job, not in your shell: a node you start locally executes the commands of any authentic assignment with your machine's credentials.
 3. Confirm the signing secret reaches every node from the secret store, and never read, print or copy its value. Report a secret written literally in a configuration file rather than fixing it silently.
 4. Run `dispat status`. With workers configured it names the plan it fixed in one `plan fixed` line, which is the plan every assignment of the run states.
-5. Expect the run to refuse rather than proceed when a node cannot be reached, when a package's `buildPlatforms` no node satisfies, or when any release-lock bypass is configured. These are `E225` and they happen before any lock, plan or command.
+5. Expect the run to refuse rather than proceed when any release-lock bypass is configured, when `commit.verify` is off, when the release remote a link with no endpoint reaches has a push URL carrying a credential, when a node cannot be reached, or when a package's `buildPlatforms` no node satisfies. These are `E225`, and no command runs: the first three are refused before any lock, the last two after the locks and the plan, before any hook or stage, with the locks given back.
 
 After a release, read the per-task summary rather than the last line of the log. One line per task states where it ran, and keeps four outcomes apart: computation, outputs, publication and recording. A completed task is not a released package. The `execution metrics` line beside it is measurement only and is not a claim about speed.
 

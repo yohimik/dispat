@@ -119,7 +119,8 @@ webhooks:
 A `{field}` token (letters only) is replaced by that field of the event, and every other byte is literal, so a
 template may itself be JSON. The fields are the payload's own scalar names: `event`, `timestamp`, `package`, `stage`,
 `version`, `previousVersion`, `channel`, `tag`, `status`, `failedStage`, `error`, `code`, `blockedBy`, `progress`,
-`message`, `root`, `published`, `failed`, `skipped`, and `cancelled`. A token naming anything else is refused at load.
+`message`, `root`, `published`, `failed`, `skipped`, `cancelled`, `role`, `node`, and `worker`. A token naming anything
+else is refused at load.
 
 Substituted values are escaped for a JSON string position, so a template embedding `{error}` inside its quotes stays
 valid JSON whatever the error text carries. The delivery still carries the `X-Dispat-Event` and `X-Dispat-Delivery`
@@ -150,6 +151,11 @@ A `package.published` delivery:
 A `package.failed` delivery carries `failedStage` and `error` instead of `tag`; a `package.skipped` delivery carries
 `code` and `blockedBy`. A `stage.started` or `stage.succeeded` delivery names its `stage` beside the same package
 fields. `channel` is absent on a stable release.
+
+A run with an [`execution`](./execution.md) object names the process every delivery was sent from: `role`
+(`orchestrator` or `worker`) and `node`, that process's node name. A stage the run placed on a worker is still
+reported by the orchestrator, which names the node that ran it in `worker`. A run with no `execution` object sends
+none of the three.
 
 A `release.finished` delivery:
 

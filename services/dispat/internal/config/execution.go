@@ -55,13 +55,17 @@ func LoadNode(path string, flags *pflag.FlagSet) (*File, error) {
 }
 
 // DiagnosticExecution reports a configuration no distributed run could be
-// executed under. That is an `execution` object with an unknown role, a
-// capacity that is not a capacity, a worker link that names no node or an
-// endpoint no mailbox could be, or a missing signing secret; and it is a `buildOutputs`
-// or `buildPlatforms` list that does not describe a place a build product can
-// travel from, two packages that claimed one folder included. Every one of
-// them is refused as the configuration is read, so the code fires before any
-// lock, plan or command.
+// executed under. As the configuration is read, that is an `execution` object
+// with an unknown role, a capacity that is not a capacity, a worker link that
+// names no node or states an endpoint no mailbox could be, or a missing
+// signing secret; and it is a `buildOutputs` or `buildPlatforms` list that
+// does not describe a place a build product can travel from, two packages that
+// claimed one folder included. A run that dispatches reports the same code for
+// what only it can decide: before any lock, a lock bypass, a lock it could not
+// read back, a missing secret or a release remote a link with no endpoint may
+// not reach; and once the plan is fixed, a stage pinned to a worker it has
+// none of, a platform no node satisfies or a node that failed preflight. No
+// command has run whichever it is.
 const DiagnosticExecution = "E225"
 
 // executionNodeName is the whole vocabulary of a node name. It is the fleet

@@ -383,11 +383,15 @@ whose file says `role: worker`, because a worker dispatches nothing. It is no pa
 all refused with `E225` when workers are configured. Every node writes through a remote, and the lock is the only
 thing that stops a second run authorizing the same publication from somewhere else.
 
-**Ownership is re-verified before every new effect.** The orchestrator re-reads each release lock before every
-assignment and every publication authorization, with the answer cached for five seconds. A lock that is no longer on
-the remote ends the run with `E336`: no new assignment is written, every attempt in flight is withdrawn, and a
-publication that was authorized before the loss is still recorded, because a create-only record of an effect that
-already happened is not a new effect. One failed read of the lock is currently treated as a loss.
+**Ownership is re-verified before every new effect.** The orchestrator reads every release lock back from its remote
+before the first worker probe, before every assignment and before every publication, whether that publication is
+delegated or kept here, and a successful answer is never reused for the next effect. A lock that is no longer on the
+remote ends the run with `E336`: no new assignment is written, every attempt in flight is withdrawn, and a publication
+that was authorized before the loss is still recorded, because a create-only record of an effect that already happened
+is not a new effect. A read that fails is not a loss: each read is bounded at fifteen seconds, and a failed one is
+read again, one and then two seconds later, with a warning each time. Only when three reads have failed does the run
+stop as it stops for a loss, with the lost line naming the reason `unverified` instead of `lost`; the lock is still
+this run's, so it is given back. A run that was interrupted during a read has lost nothing.
 
 **A node that stops answering blocks its dependents.** A compute task that was never claimed is withdrawn by
 revoking its branch and placed again. A claimed attempt that passes its deadline takes its node out of the pool, its
@@ -660,8 +664,10 @@ Three conditions dispat already had a code for keep it and join the specificatio
   `commit`, `github`, `changelog`, `autoversion`, `compute` and `worker` are refused with `E226`. Everything a build
   script legitimately uses stays allowed, including `exec`, `if`, `for`, `install`, `scanner`, `writer`, `replacer`,
   `autowriter` and `trigger`.
-- **Webhook endpoints and their variables must exist on every node a stage may be placed on.** A delegated stage
-  raises its events from the node that runs it, and events of a delegated stage name that node in `worker`.
+- **Stage events come from the orchestrator.** A delegated stage's events are raised on the orchestrator, which names
+  the node that ran it in `worker`. Only a `dispat trigger` inside a delegated script is sent from the worker, so the
+  endpoints such a script reaches, and the variables their headers and `secretEnv` read, have to exist on every node
+  that script may run on.
 - **The summary is the answer to "what happened where".** One line per task in plan order with its placement, and
   the four outcomes kept apart: computation, outputs, publication and recording. A completed task is not a released
   package.
