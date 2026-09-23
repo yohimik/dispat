@@ -1,5 +1,16 @@
 # Changelog
 
+## pkg/config/v1.0.2-rc.0 (2026-09-23)
+
+### Fixes
+
+- preserve complete writes and reconcile release identities and late claims ([7fb8a84](https://github.com/yohimik/dispat/commit/7fb8a84693d4472e31a73d1cdc10f5db64578b88)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## pkg/config/v1.0.1 (2026-09-20)
 
 ### Fixes
