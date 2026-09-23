@@ -118,6 +118,18 @@ func (cp *computation) fixedGroups() map[string][]string {
 	return out
 }
 
+// formatGroupLabel is a versioning group as a diagnostic names it: its name,
+// quoted, and for a group that belongs to one repository of a composed
+// workspace also that repository, whose name the planner's identity for the
+// group carries before a NUL. A group of one history reads exactly as before.
+func formatGroupLabel(identity string) string {
+	repository, group, isRepositoryLocal := strings.Cut(identity, "\x00")
+	if !isRepositoryLocal {
+		return fmt.Sprintf("%q", identity)
+	}
+	return fmt.Sprintf("%q of repository %q", group, repository)
+}
+
 // groupDepth is the shared depth the whole group versions at: the deepest any
 // of its members declares. A mode is each member's own — a group joined from
 // two spaces may mix them — and the deepest declaration satisfies all of them
@@ -138,8 +150,8 @@ func (cp *computation) groupDepth(g *Release, groupName string, members []string
 	}
 	if mixed {
 		cp.warn(CodeFixedDepthConflict, g.Pkg.Name, "",
-			fmt.Sprintf("members of versioning group %q share different parts of the version; the group holds %s in common, the deepest any member asks for",
-				groupName, SharedPartName(depth)))
+			fmt.Sprintf("members of versioning group %s share different parts of the version; the group holds %s in common, the deepest any member asks for",
+				formatGroupLabel(groupName), SharedPartName(depth)))
 	}
 	return depth
 }
@@ -393,8 +405,8 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 	// report.
 	if len(channelCands) > 1 && rule.channels.IsShared() {
 		cp.warn(CodeFixedChannelConflict, g.Pkg.Name, "",
-			fmt.Sprintf("members of versioning group %q resolve to different channels %v; the group moves as one, using %q",
-				groupName, channelCands, g.Channel))
+			fmt.Sprintf("members of versioning group %s resolve to different channels %v; the group moves as one, using %q",
+				formatGroupLabel(groupName), channelCands, g.Channel))
 	}
 
 	for _, name := range members {
@@ -438,8 +450,8 @@ func (cp *computation) applyFixedGroup(groupName string, members []string) {
 		}
 		if !own {
 			cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
-				"released at %s with no changes of its own, to keep versioning group %q on %s",
-				rel.Next.String(), groupName, SharedPartName(depth)))
+				"released at %s with no changes of its own, to keep versioning group %s on %s",
+				rel.Next.String(), formatGroupLabel(groupName), SharedPartName(depth)))
 		}
 	}
 }
@@ -497,8 +509,8 @@ func (cp *computation) reportMajorSpread(g *Release, groupName string, members [
 		return
 	}
 	cp.warn(CodeFixedMajorSpread, g.Pkg.Name, "", fmt.Sprintf(
-		"members of versioning group %q are on different major versions: %s is at %s while %s is at %s; the group versions from the newest, so every member moves to major %d",
-		groupName, ahead, cp.rel[ahead].Baseline.String(),
+		"members of versioning group %s are on different major versions: %s is at %s while %s is at %s; the group versions from the newest, so every member moves to major %d",
+		formatGroupLabel(groupName), ahead, cp.rel[ahead].Baseline.String(),
 		behind, cp.rel[behind].Baseline.String(), g.Baseline.Major))
 }
 
@@ -701,8 +713,8 @@ func (cp *computation) fixedGroupPin(g *Release, groupName string, members []str
 	groupPin.packages = 1
 	if len(pinnedVersions) > 1 {
 		cp.warn(CodeFixedPinConflict, g.Pkg.Name, groupPin.commit,
-			fmt.Sprintf("%d exact Release-As pins compete for versioning group %q; the newest (%s) wins",
-				len(pinnedVersions), groupName, groupPin.version.String()))
+			fmt.Sprintf("%d exact Release-As pins compete for versioning group %s; the newest (%s) wins",
+				len(pinnedVersions), formatGroupLabel(groupName), groupPin.version.String()))
 	}
 	return groupPin, true
 }
@@ -771,7 +783,7 @@ func (cp *computation) alignFixedGroup(groupName string, g *Release, members []s
 		rel.Next = next
 		rel.Channel = channel
 		cp.pkgWarn(rel, CodeFixedAlign, "", fmt.Sprintf(
-			"released at %s with no changes of its own, catching up to versioning group %q's published version",
-			next.String(), groupName))
+			"released at %s with no changes of its own, catching up to the published version of versioning group %s",
+			next.String(), formatGroupLabel(groupName)))
 	}
 }

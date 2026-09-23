@@ -791,3 +791,13 @@ func TestFixedGroupMovesAsOneWhenAMemberGotAheadOfItsProvider(t *testing.T) {
 	assertVersion(t, v(1, 1, 1), tool.Next)
 	assert.True(t, tool.FixedRide, "tool rides to the group's version")
 }
+
+// TestFormatGroupLabelNamesTheRepositoryOfALocalGroup: a diagnostic about a
+// group names it the way its author wrote it. A group of one history reads as
+// it always did; a group local to one repository of a composed workspace names
+// that repository instead of printing the planner's NUL-joined identity.
+func TestFormatGroupLabelNamesTheRepositoryOfALocalGroup(t *testing.T) {
+	assert.Equal(t, `"libs"`, formatGroupLabel("libs"))
+	assert.Equal(t, `"platform" of repository "web"`, formatGroupLabel("web\x00platform"))
+	assert.NotContains(t, formatGroupLabel("web\x00platform"), `\x00`)
+}
