@@ -20,7 +20,7 @@ func TestFleetPlanningHeadMismatchStopsBeforePublication(t *testing.T) {
 	cfg := polyrepoFile()
 	cfg["spaces"] = centralSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg["scripts"] = map[string]any{
-		"build": []string{"echo building"},
+		"build":   []string{"echo building"},
 		"publish": []string{"echo published >> " + harness.ShQuote(marker)},
 	}
 	writePolyrepoJSON(t, fleet.control, "dispat.json", cfg)

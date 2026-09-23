@@ -26,7 +26,7 @@ func TestFleetSourceRemoteReadFailureStopsBeforePublicationAndCanRetry(t *testin
 	cfg := polyrepoFile()
 	cfg["spaces"] = centralSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg["scripts"] = map[string]any{
-		"build": []string{"echo building"},
+		"build":   []string{"echo building"},
 		"publish": []string{"echo published >> " + harness.ShQuote(marker)},
 	}
 	cfg["repositoryOverrides"] = map[string]any{
