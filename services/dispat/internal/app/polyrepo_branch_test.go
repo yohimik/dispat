@@ -46,7 +46,7 @@ func TestWorkspacePreflightSkipsUnusedDetachedPushRepository(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, w.verify(context.Background(), pl))
+	require.NoError(t, w.verifyPushBranches(context.Background(), pl))
 	require.NoError(t, w.prepare(context.Background(), pl))
 	assert.Empty(t, source.branch)
 }
@@ -60,7 +60,7 @@ func TestWorkspaceDetachedCleanReleasePushesTagWithoutBranch(t *testing.T) {
 	recordGit(t, source.repo.Root, "checkout", "-q", "--detach")
 	pl := &plan.Plan{Order: []string{rel.Pkg.Name}, Releases: map[string]*plan.Release{rel.Pkg.Name: rel}}
 
-	require.NoError(t, w.verify(context.Background(), pl))
+	require.NoError(t, w.verifyPushBranches(context.Background(), pl))
 	before := recordGit(t, source.repo.Root, "rev-parse", "HEAD")
 	require.NoError(t, w.Record(context.Background(), rel))
 
@@ -80,7 +80,7 @@ func TestWorkspaceDetachedReleaseCommitRequiresExplicitBranchBeforeGitMutation(t
 	rel.Pkg.Changelog.Enabled = true
 	pl := &plan.Plan{Order: []string{rel.Pkg.Name}, Releases: map[string]*plan.Release{rel.Pkg.Name: rel}}
 
-	require.NoError(t, w.verify(context.Background(), pl))
+	require.NoError(t, w.verifyPushBranches(context.Background(), pl))
 	before := recordGit(t, source.repo.Root, "rev-parse", "HEAD")
 	err := w.Record(context.Background(), rel)
 	require.Error(t, err)
@@ -101,7 +101,7 @@ func TestWorkspaceDetachedReleaseCommitIsRejectedBeforePublish(t *testing.T) {
 	recordGit(t, source.repo.Root, "checkout", "-q", "--detach")
 	rel.Pkg.Changelog.Enabled = true
 	pl := &plan.Plan{Order: []string{rel.Pkg.Name}, Releases: map[string]*plan.Release{rel.Pkg.Name: rel}}
-	require.NoError(t, w.verify(context.Background(), pl))
+	require.NoError(t, w.verifyPushBranches(context.Background(), pl))
 
 	err := w.verifyPublishBranch(context.Background(), rel)
 	require.Error(t, err)
@@ -118,7 +118,7 @@ func TestWorkspaceDetachedCleanTagOnlyReleasePassesPublishGuard(t *testing.T) {
 	source.repo.Commit.Verify = &verify
 	recordGit(t, source.repo.Root, "checkout", "-q", "--detach")
 	pl := &plan.Plan{Order: []string{rel.Pkg.Name}, Releases: map[string]*plan.Release{rel.Pkg.Name: rel}}
-	require.NoError(t, w.verify(context.Background(), pl))
+	require.NoError(t, w.verifyPushBranches(context.Background(), pl))
 
 	require.NoError(t, w.verifyPublishBranch(context.Background(), rel))
 }
@@ -135,7 +135,7 @@ func TestWorkspaceDetachedControlCheckpointIsRejectedBeforePublish(t *testing.T)
 	pin := recordGit(t, source.repo.Root, "rev-parse", "HEAD")
 	rel = pinnedRelease(rel, pin)
 	pl := &plan.Plan{Order: []string{rel.Pkg.Name}, Releases: map[string]*plan.Release{rel.Pkg.Name: rel}}
-	require.NoError(t, w.verify(context.Background(), pl))
+	require.NoError(t, w.verifyPushBranches(context.Background(), pl))
 
 	err := w.verifyPublishBranch(context.Background(), rel)
 	require.Error(t, err)

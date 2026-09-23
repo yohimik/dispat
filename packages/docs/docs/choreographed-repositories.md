@@ -276,9 +276,11 @@ that revision. The branch it asks about is the peer's own `commit.branch` when i
 the fleet roster states for it. A recorded link therefore never names a commit nobody else can fetch, which is the same
 rule a control checkpoint follows.
 
-Every repository a release records a link in is checked the way a publishing repository always is. With pushing
-enabled, its remote must be reachable and its branch must not be behind: a checkout that is behind stops the run
-before anything is written.
+Every participating repository that pushes is checked before anything is planned, the way a single repository's
+checkout is: its remote must be reachable and the branch it has checked out must not be behind it, so a checkout that
+is behind stops the run before a plan exists. A detached checkout has no branch to compare at that point. Once the
+plan names the repositories a release records a link in, each of them settles the branch its commit is pushed to,
+and that branch, when it is not the checked-out one, must not be behind either.
 
 Every linked checkout is detached, because that is what `git submodule update` leaves behind. A repository that must
 push what it records therefore needs `commit.branch`, and `E337` stops the release before publication without one.

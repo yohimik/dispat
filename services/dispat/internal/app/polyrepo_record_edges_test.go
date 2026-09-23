@@ -52,7 +52,8 @@ func TestWorkspaceRecordVerificationRejectsInvalidAndStaleBranches(t *testing.T)
 
 		err := w.verifySelected(t.Context(), map[string]bool{"source": true})
 		require.ErrorContains(t, err, "behind remote branch main")
-		assert.Equal(t, "main", source.branch)
+		assert.Equal(t, "main", source.checkedBranch, "the checked-out branch is the one compared")
+		assert.Empty(t, source.branch, "a checkout refused as stale settles no push branch")
 		assert.NotEqual(t, base, remoteTip)
 	})
 }
@@ -208,4 +209,74 @@ func TestWorkspaceSnapshotRejectsDeletedReleaseTag(t *testing.T) {
 	assert.Equal(t, config.DiagnosticRepositoryInvalid, config.DiagnosticCode(err))
 	assert.ErrorContains(t, err, "relevant tag "+rel.TagName()+" at")
 	assert.ErrorContains(t, err, "was deleted")
+}
+
+// TestWorkspaceParticipantsAreVerifiedBeforeThePlan: a fleet plans from every
+// participant's tags, so every participant that pushes is proved reachable and
+// not behind the branch it has checked out before anything is planned, as a
+// single history's checkout is. A detached checkout has no branch to compare,
+// and `commit.verify: false` reads nothing at all.
+func TestWorkspaceParticipantsAreVerifiedBeforeThePlan(t *testing.T) {
+	stale := func(t *testing.T) (*workspaceRecorder, *repositoryRecord, string) {
+		t.Helper()
+		w, _ := recordFixture(t, true, false)
+		source := w.byName["source"]
+		addRecordBareRemote(t, source.repo.Root, "publish")
+		source.repo.Commit.Push = true
+		source.repo.Commit.Remote = "publish"
+		base := recordGit(t, source.repo.Root, "rev-parse", "HEAD")
+		recordGit(t, source.repo.Root, "commit", "--allow-empty", "-qm", "feat: remote-only release")
+		recordGit(t, source.repo.Root, "push", "-q", "publish", "HEAD:refs/heads/main")
+		recordGit(t, source.repo.Root, "reset", "--hard", "-q", base)
+		return w, source, base
+	}
+
+	t.Run("a participant behind its checked-out branch", func(t *testing.T) {
+		w, source, _ := stale(t)
+		err := w.verifyParticipants(t.Context())
+		require.ErrorContains(t, err, "repository source is behind remote branch main")
+		assert.Equal(t, "main", source.checkedBranch)
+	})
+
+	t.Run("a detached participant pinned behind its branch", func(t *testing.T) {
+		w, source, _ := stale(t)
+		recordGit(t, source.repo.Root, "checkout", "-q", "--detach")
+		require.NoError(t, w.verifyParticipants(t.Context()))
+		assert.Empty(t, source.checkedBranch, "a detached checkout has no branch to compare")
+	})
+
+	t.Run("a participant whose remote is not verified", func(t *testing.T) {
+		w, source, _ := stale(t)
+		verify := false
+		source.repo.Commit.Verify = &verify
+		source.repo.Commit.Remote = "missing-remote"
+		require.NoError(t, w.verifyParticipants(t.Context()), "commit.verify off reads no remote")
+	})
+}
+
+// TestWorkspacePushBranchIsComparedOnlyWhenItDiffers: the branch a release
+// commit is pushed to is settled after the plan, and read from the remote only
+// when it is not the branch the participant check already compared. A
+// `commit.branch` that names another branch the remote has moved is refused;
+// the checked-out branch is not read a second time.
+func TestWorkspacePushBranchIsComparedOnlyWhenItDiffers(t *testing.T) {
+	w, rel := recordFixture(t, true, false)
+	source := w.byName["source"]
+	remote := addRecordBareRemote(t, source.repo.Root, "publish")
+	source.repo.Commit.Push = true
+	source.repo.Commit.Remote = "publish"
+	pl := &plan.Plan{Order: []string{rel.Pkg.Name}, Releases: map[string]*plan.Release{rel.Pkg.Name: rel}}
+	require.NoError(t, w.verifyParticipants(t.Context()))
+
+	require.NoError(t, w.verifyPushBranches(t.Context(), pl))
+	assert.Equal(t, "main", source.branch)
+
+	recordGit(t, source.repo.Root, "commit", "--allow-empty", "-qm", "feat: release line work")
+	recordGit(t, source.repo.Root, "push", "-q", "publish", "HEAD:refs/heads/release")
+	recordGit(t, source.repo.Root, "reset", "--hard", "-q", "HEAD~1")
+	source.repo.Commit.Branch = "release"
+	err := w.verifyPushBranches(t.Context(), pl)
+	require.ErrorContains(t, err, "repository source is behind remote branch release")
+	assert.Equal(t, "release", source.branch)
+	assert.NotEmpty(t, recordGit(t, remote, "rev-parse", "refs/heads/release"))
 }

@@ -26,7 +26,12 @@ type repositoryRecord struct {
 	git    *gitx.LocalGitx
 	hooks  *runHooks
 	branch string
-	mu     sync.Mutex
+	// checkedBranch is the branch whose remote tip was compared with this
+	// checkout before the plan: the one checked out, and empty when HEAD is
+	// detached or the remote was not verified. The branch a release commit is
+	// pushed to is compared again only when it is another one.
+	checkedBranch string
+	mu            sync.Mutex
 	// expectedHead advances only after an owned commit or an explicit nested
 	// step export. Unrelated Git mutations must not change a planned release.
 	expectedHead string
@@ -240,8 +245,44 @@ func (w *workspaceRecorder) routeRepositories(rel *plan.Release) []string {
 	return route.order
 }
 
-func (w *workspaceRecorder) verify(ctx context.Context, pl *plan.Plan) error {
-	return w.verifySelected(ctx, w.selectedRepositories(pl))
+// verifyParticipants proves, before anything is planned, that every
+// participating repository that pushes can reach its remote and is not behind
+// the branch it has checked out.
+//
+// It is the check a single history makes before its plan (checkNotBehind),
+// made of every repository whose tags the plan is about to read: a checkout
+// that has fallen behind produces a plan that is wrong rather than one that
+// fails, because it recomputes versions somebody else already published.
+// Which repositories a release selects is not known yet, so every participant
+// that pushes with `commit.verify` on is asked. The branch a selected
+// repository's release commit is pushed to is settled after the plan, by
+// verifyPushBranches, and read from the remote only when it is another branch.
+func (w *workspaceRecorder) verifyParticipants(ctx context.Context) error {
+	for _, r := range w.ordered {
+		if !r.repo.Commit.IsPushEnabled() || !r.repo.Commit.IsVerifyEnabled() {
+			continue
+		}
+		if err := verifyRemoteState(ctx, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// verifyPushBranches settles the push branch of every repository this plan
+// selects: the repositories that release, and the ones a release records a
+// fleet link or a checkpoint in.
+func (w *workspaceRecorder) verifyPushBranches(ctx context.Context, pl *plan.Plan) error {
+	selected := w.selectedRepositories(pl)
+	for _, r := range w.ordered {
+		if !selected[r.repo.Name] || !r.repo.Commit.IsPushEnabled() {
+			continue
+		}
+		if err := verifyPushBranch(ctx, r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // verifyPlannedHeads proves that the history planner read the same repository
@@ -270,41 +311,84 @@ func (w *workspaceRecorder) verifyPlannedHeads(pl *plan.Plan) error {
 	return nil
 }
 
+// verifySelected makes both checks, in order, for the selected repositories
+// that push. It is what a standalone commit step asks, where no plan came
+// between the two.
 func (w *workspaceRecorder) verifySelected(ctx context.Context, selected map[string]bool) error {
 	for _, r := range w.ordered {
 		if !selected[r.repo.Name] || !r.repo.Commit.IsPushEnabled() {
 			continue
 		}
-		branch, err := r.git.CurrentBranch(ctx)
-		if err != nil {
+		if r.repo.Commit.IsVerifyEnabled() {
+			if err := verifyRemoteState(ctx, r); err != nil {
+				return err
+			}
+		}
+		if err := verifyPushBranch(ctx, r); err != nil {
 			return err
 		}
-		if r.repo.Commit.Branch != "" {
-			branch = r.repo.Commit.Branch
+	}
+	return nil
+}
+
+// verifyRemoteState proves one repository's remote reachable and its checkout
+// not behind the branch it has checked out, and records that branch as
+// compared.
+//
+// A detached checkout has no branch to compare, and is not refused for it: a
+// detached repository may still push an immutable tag, and the branch check
+// becomes mandatory only if the run creates a commit, whose branch
+// verifyPushBranch settles.
+func verifyRemoteState(ctx context.Context, r *repositoryRecord) error {
+	if err := r.git.VerifyRemote(ctx, r.remote()); err != nil {
+		return fmt.Errorf("repository %s: %w", r.repo.Name, err)
+	}
+	branch, err := r.git.CurrentBranch(ctx)
+	if err != nil {
+		return fmt.Errorf("repository %s: %w", r.repo.Name, err)
+	}
+	r.checkedBranch = branch
+	if branch == "" {
+		return nil
+	}
+	return checkRepositoryNotBehind(ctx, r, branch)
+}
+
+// verifyPushBranch settles the branch one repository's release commit is
+// pushed to: `commit.branch` when it states one, the checked-out branch
+// otherwise, and E337 when git would not accept the name. With `commit.verify`
+// on, that branch is compared with the remote only when it is not the branch
+// verifyRemoteState already compared, so no branch is read twice.
+func verifyPushBranch(ctx context.Context, r *repositoryRecord) error {
+	branch := r.repo.Commit.Branch
+	if branch == "" {
+		current, err := r.git.CurrentBranch(ctx)
+		if err != nil {
+			return fmt.Errorf("repository %s: %w", r.repo.Name, err)
 		}
-		if branch != "" {
-			if err := gitx.ValidRefName("refs/heads/" + branch); err != nil {
-				return config.WithDiagnostic("E337", fmt.Errorf("E337: repository %s: %w", r.repo.Name, err))
-			}
+		branch = current
+	}
+	if branch != "" {
+		if err := gitx.ValidRefName("refs/heads/" + branch); err != nil {
+			return config.WithDiagnostic("E337", fmt.Errorf("E337: repository %s: %w", r.repo.Name, err))
 		}
-		r.branch = branch
-		if r.repo.Commit.IsVerifyEnabled() {
-			if err := r.git.VerifyRemote(ctx, r.remote()); err != nil {
-				return fmt.Errorf("repository %s: %w", r.repo.Name, err)
-			}
-			// A detached repository may still push an immutable tag. The branch
-			// check becomes mandatory only if this run actually creates a commit.
-			if branch == "" {
-				continue
-			}
-			behind, err := r.git.BehindRemote(ctx, r.remote(), branch)
-			if err != nil {
-				return fmt.Errorf("repository %s: %w", r.repo.Name, err)
-			}
-			if behind {
-				return fmt.Errorf("repository %s is behind remote branch %s; update the checkout before releasing", r.repo.Name, branch)
-			}
-		}
+	}
+	r.branch = branch
+	if !r.repo.Commit.IsVerifyEnabled() || branch == "" || branch == r.checkedBranch {
+		return nil
+	}
+	return checkRepositoryNotBehind(ctx, r, branch)
+}
+
+// checkRepositoryNotBehind refuses a checkout the remote's tip of branch holds
+// commits of that this checkout does not.
+func checkRepositoryNotBehind(ctx context.Context, r *repositoryRecord, branch string) error {
+	behind, err := r.git.BehindRemote(ctx, r.remote(), branch)
+	if err != nil {
+		return fmt.Errorf("repository %s: %w", r.repo.Name, err)
+	}
+	if behind {
+		return fmt.Errorf("repository %s is behind remote branch %s; update the checkout before releasing", r.repo.Name, branch)
 	}
 	return nil
 }

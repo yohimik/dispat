@@ -43,13 +43,20 @@ func TestFleetSourceRemoteReadFailureStopsBeforePublicationAndCanRetry(t *testin
 	failed := fleet.control.CommandEnv(fault.Env(), "release")
 	require.NotZero(t, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 	assert.Equal(t, 1, fault.Matches(), "the source remote proof was attempted")
+	assert.Equal(t, -1, firstIndex(failed.Events, planningStarted),
+		"the remote is proved before anything is planned\nstdout:\n%s", failed.Stdout)
 	assert.Empty(t, polyrepoTags(fleet.control, "sources/lib"))
 	assert.NoFileExists(t, marker, "publisher did not run without the remote proof")
 
 	// Git answers again on retry. The exact same push policy and source work
-	// must now finish, without loosening any release requirement.
-	retried := fleet.control.Release()
+	// must now finish, without loosening any release requirement. The branch
+	// the source has checked out is also the branch it pushes to, so its
+	// remote tip is read once, before the plan, and not again after it.
+	branchReads := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*-C */sources/lib *ls-remote origin refs/heads/main*", Nth: 1 << 20})
+	retried := fleet.control.CommandEnv(branchReads.Env(), "release")
 	require.Zero(t, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+	assert.Equal(t, 1, branchReads.Matches(), "the checked-out push branch is read from the remote once")
 	assert.Contains(t, polyrepoTags(fleet.control, "sources/lib"), "core@0.1.0")
 	assert.Contains(t, fleet.control.Git("-C", bare, "tag", "--list"), "core@0.1.0")
 	assert.Equal(t,

@@ -311,6 +311,12 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 		}
 	}
 	if fleet != nil {
+		// The same check, made of every participating repository that pushes,
+		// because a fleet plans from every one of their tags.
+		if err := fleet.verifyParticipants(ctx); err != nil {
+			a.logError(err).Msg("source repository verification failed")
+			return nil, err
+		}
 		packages, err := a.packages()
 		if err != nil {
 			a.logError(err).Msg("package discovery failed")
@@ -349,7 +355,7 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 			a.logError(err).Msg("repository changed after workspace composition")
 			return nil, err
 		}
-		if err := fleet.verify(ctx, pl); err != nil {
+		if err := fleet.verifyPushBranches(ctx, pl); err != nil {
 			a.logError(err).Msg("source repository verification failed")
 			return nil, err
 		}

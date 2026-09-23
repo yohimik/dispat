@@ -1967,6 +1967,78 @@ func TestPolyrepoDetachedPushRequiresBranch(t *testing.T) {
 		"detached branch validation must finish before publication")
 }
 
+// TestPolyrepoControlBehindItsRemoteRefusesBeforePlanning: a fleet plans from
+// every participant's tags, so a control checkout that has fallen behind its
+// remote is refused before anything is planned, exactly as a single history's
+// checkout is. The refusal names the repository and the branch, no planning
+// event precedes it, no package script runs and nothing is tagged.
+func TestPolyrepoControlBehindItsRemoteRefusesBeforePlanning(t *testing.T) {
+	fleet := finalPolyrepo(t)
+	control := fleet.control
+	marker := control.Path("built.txt")
+	cfg := polyrepoFile()
+	cfg["spaces"] = centralSpaces(map[string]string{"libs": "sources/lib/packages"})
+	cfg["commit"] = map[string]any{"enabled": true, "push": true}
+	cfg["scripts"] = map[string]any{
+		"build": []string{"echo built >> " + harness.ShQuote(marker)}, "publish": []string{"echo publishing"},
+	}
+	writePolyrepoJSON(t, control, "dispat.json", cfg)
+	control.Commit("chore: push the control repository's records")
+	control.AddBareRemote()
+	control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	control.Git("commit", "--allow-empty", "-q", "-m", "chore: work another clone pushed first")
+	control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	control.Git("reset", "-q", "--hard", "HEAD~1")
+
+	res := control.Release()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "repository control is behind remote branch "+harness.DefaultBranch)
+	assert.Equal(t, -1, firstIndex(res.Events, planningStarted),
+		"the stale checkout is refused before anything is planned\nstdout:\n%s", res.Stdout)
+	assert.NoFileExists(t, marker, "no package script ran")
+	assert.Empty(t, polyrepoTags(control, "sources/lib"))
+}
+
+// TestPolyrepoDetachedSourcePinnedBehindItsBranchStillReleases: the check a
+// fleet makes before it plans compares the branch each participant has
+// checked out, and a detached source has none. A source pinned at a revision
+// its remote's branch has since moved past is therefore not refused: with
+// nothing to commit it pushes an immutable tag at the pinned revision, and the
+// remote's branch stays where it is. Its remote is proved reachable once.
+func TestPolyrepoDetachedSourcePinnedBehindItsBranchStillReleases(t *testing.T) {
+	fleet := finalPolyrepo(t)
+	control := fleet.control
+	bare := filepath.Join(t.TempDir(), "source.git")
+	control.Git("init", "-q", "--bare", bare)
+	control.Git("-C", "sources/lib", "remote", "set-url", "origin", bare)
+	control.Git("-C", "sources/lib", "push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	pinned := control.Git("-C", "sources/lib", "rev-parse", "HEAD")
+	control.Git("-C", "sources/lib", "commit", "--allow-empty", "-q", "-m", "chore: later work on the branch")
+	control.Git("-C", "sources/lib", "push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	control.Git("-C", "sources/lib", "checkout", "-q", "--detach", pinned)
+	cfg := polyrepoFile()
+	cfg["spaces"] = centralSpaces(map[string]string{"libs": "sources/lib/packages"})
+	cfg["repositoryOverrides"] = map[string]any{
+		"lib-source": map[string]any{"commit": map[string]any{"enabled": true, "push": true, "remote": "origin"}},
+	}
+	writePolyrepoJSON(t, control, "dispat.json", cfg)
+	control.Commit("chore: push the pinned source's records")
+	branchTip := control.Git("-C", bare, "rev-parse", "refs/heads/"+harness.DefaultBranch)
+	proofs := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*-C */sources/lib *ls-remote --heads origin*", Nth: 1 << 20})
+
+	res := control.CommandEnv(proofs.Env())
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, 1, proofs.Matches(), "the source remote is proved once, before the plan")
+	assert.Contains(t, polyrepoTags(control, "sources/lib"), "core@0.1.0")
+	assert.Equal(t, pinned, control.Git("-C", bare, "rev-parse", "core@0.1.0^{commit}"),
+		"the tag names the pinned revision")
+	assert.Equal(t, branchTip, control.Git("-C", bare, "rev-parse", "refs/heads/"+harness.DefaultBranch),
+		"and the remote's branch is where it was")
+}
+
 // TestPolyrepoCheckpointFailurePreservesSourceAndBlocksConsumer makes the
 // control commit fail after the provider's source commit and tag succeeded.
 // The result reports E335, does not run the dependent leg, and leaves enough
