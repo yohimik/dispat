@@ -28,14 +28,6 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      skip_announcements:
-        description: Publish packages without social announcements
-        type: boolean
-        default: false
-      skip_tinygo_gate:
-        description: Export the tiny binaries without running the integration suite against them
-        type: boolean
-        default: false
       coverage_minimum_integration:
         description: The integration coverage percentage the badge and report gates require
         type: string
@@ -63,9 +55,6 @@ env:
   # so a tag ever recreated at different content (a rolled-back run) leaves
   # the proxy's first copy pinned for good and every checksum check failing.
   GOPRIVATE: github.com/yohimik/dispat
-  # The TinyGo acceptance gate of the dispat build (services/dispat/Dockerfile,
-  # stage tiny-test) runs unless the dispatch asked to skip it.
-  DISPAT_TINY_GATE: ${{ inputs.skip_tinygo_gate && 'skip' || 'test' }}
   # The integration coverage minimum of the badge and report gates
   # (Dockerfile.gotest); 95 unless the dispatch states another figure.
   DISPAT_COVERAGE_MINIMUM_INTEGRATION: ${{ inputs.coverage_minimum_integration || '95' }}
@@ -173,12 +162,12 @@ jobs:
     # services/dispat/dispat.yaml, which is one crier command behind it. Without it this job still succeeds, so the
     # release keeps its normal dependencies.
     env:
-      ANNOUNCE: ${{ !inputs.skip_announcements && (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
-      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN || '' }}
-      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID || '' }}
-      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_LINKEDIN_TOKEN || '' }}
-      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ !inputs.skip_announcements && secrets.LINKEDIN_URN || '' }}
-      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL || '' }}
+      ANNOUNCE: ${{ (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
+      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
+      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
+      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
+      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -402,13 +391,13 @@ jobs:
     # is the escape hatch from the tunnel: setting it to s3 or url points the
     # staging somewhere that needs no ngrok.
     env:
-      ANNOUNCE: ${{ !inputs.skip_announcements && (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
-      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN || '' }}
-      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID || '' }}
-      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_LINKEDIN_TOKEN || '' }}
-      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ !inputs.skip_announcements && secrets.LINKEDIN_URN || '' }}
-      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ !inputs.skip_announcements && secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL || '' }}
-      NGROK_AUTHTOKEN: ${{ !inputs.skip_announcements && secrets.NGROK_AUTHTOKEN || '' }}
+      ANNOUNCE: ${{ (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
+      CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
+      CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
+      CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
+      CRIER_PUBLISH_LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_URN }}
+      CRIER_PUBLISH_DISCORD_WEBHOOK_URL: ${{ secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL }}
+      NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
       CRIER_STAGE_MODE: ${{ vars.CRIER_STAGE_MODE || 'server' }}
       CRIER_STAGE_SERVER_TUNNEL_MODE: ngrok
     steps:

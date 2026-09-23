@@ -102,10 +102,9 @@ All three destinations are enabled in `publish.yaml`, and each needs its credent
 | `CRIER_PUBLISH_DISCORD_WEBHOOK_URL` | Incoming Discord webhook. Keep it out of files and logs. |
 | `NGROK_AUTHTOKEN` | Public media staging for Instagram when `CRIER_STAGE_MODE=server`. |
 
-The release workflow sets `ANNOUNCE` when the repository holds any of these secrets and the dispatch did not select
-`skip_announcements`. Without `ANNOUNCE` the announce script posts nothing, which also keeps a release run from a laptop
-quiet. Skipping announcements leaves the test suite, package publication, release records, and installation checks in
-place. To run without one destination, set `CRIER_PUBLISH_<NAME>_ENABLED=false` in the environment.
+The release workflow sets `ANNOUNCE` when the repository holds any of these secrets. Without `ANNOUNCE` the announce
+script posts nothing, which also keeps a release run from a laptop quiet. To run without one destination, set
+`CRIER_PUBLISH_<NAME>_ENABLED=false` in the environment.
 
 With `ANNOUNCE` set, the workflow checks the destinations with `crier ping` before publishing packages and puts the same
 verified executable first on `PATH` for the announcement. The check runs against both channel configurations, because

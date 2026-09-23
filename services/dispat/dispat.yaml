@@ -63,7 +63,6 @@ scripts:
       docker buildx build --file Dockerfile --target export
       --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
       --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
-      --build-arg TINY_GATE="${DISPAT_TINY_GATE:-test}"
       ${GITHUB_TOKEN:+--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN}
       --output "type=local,dest=$PWD/dist" ../..
     # Already this stage's outputs, in $DISPAT_OUTPUT's own format.

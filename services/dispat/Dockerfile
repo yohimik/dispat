@@ -36,12 +36,6 @@
 # Go's own, from one native builder — there is no --platform fan-out and no
 # emulation, which is why six targets cost roughly what one does.
 ARG GO_VERSION=1.26
-# Which stage the export takes its TinyGo gate marker from: `test` runs the
-# whole integration suite against the tiny binaries, `skip` only writes the
-# marker. A release skips the gate on request only (`DISPAT_TINY_GATE=skip`),
-# and says so in its build log.
-ARG TINY_GATE=test
-
 FROM golang:${GO_VERSION}-alpine AS build
 
 # The version the ldflags bake in. `dev` is what an un-stamped build reports
@@ -227,29 +221,9 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     jq -s '{passed:([.[] | select(.Action == "pass" and has("Test"))] | length),failed:([.[] | select(.Action == "fail")] | length),skipped:([.[] | select(.Action == "skip" and has("Test"))] | length)}' /gate/integration.json; \
     touch /gate/passed
 
-# The smoke gate: the binaries above, proven to work before anything exports
-# them. Tests run against /out's exact bytes — a fresh native build passing
-# says nothing about what a cross-compile produced — via DISPAT_TEST_BINARY,
-# which points the integration harness at a prebuilt binary instead of its
-# own `go build` (see tests/integration/internal/harness/binary.go).
-#
-# The suite drives dispat against disposable git repositories, so git is
-# installed and then asserted: without it the harness skips every test, and a
-# gate that passes by skipping is worse than no gate.
-# The gate a release asked to skip: the marker alone, so the export below can
-# be built without running the suite against the tiny binaries. The tiny
-# binaries are still built and still exported; only their acceptance run is
-# left out, and the build log states it.
-FROM tiny-build AS tiny-skip
-RUN mkdir -p /gate && touch /gate/passed \
- && echo "the TinyGo acceptance gate was skipped on request (TINY_GATE=skip)" >&2
-
-FROM tiny-${TINY_GATE} AS tiny-gate
-
 FROM tiny AS test
-# This dependency prevents export if full TinyGo integration acceptance fails,
-# unless the build asked for the `skip` stage above.
-COPY --from=tiny-gate /gate/passed /tmp/tinygo-integration-passed
+# This dependency prevents export if full TinyGo integration acceptance fails.
+COPY --from=tiny-test /gate/passed /tmp/tinygo-integration-passed
 
 # The builder's own architecture — which of the six binaries can carry the
 # test suite natively.
