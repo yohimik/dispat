@@ -1,6 +1,10 @@
 # CCME is a separate specification package in the parser’s version group.
 # Its tag path is stable even if the implementation later moves modules.
 tagFormat: specs/ccme-spec/v{version}
+# The specification's tests perform releases on throwaway repositories, and a
+# worker refuses release initiation by design (E226), so every stage of this
+# package stays on the machine that holds release authority.
+runOnly: orchestrator
 versionGroup: ccme
 
 scripts:
