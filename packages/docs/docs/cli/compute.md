@@ -94,8 +94,9 @@ paste-ready block for it and fails. A key composed from both a [referenced file]
 keys written beside it belongs to two files at once, so `--write` refuses it rather than choosing one. A key kept
 wholly in a referenced file is written in that file at the key it holds there. The `$ref` survives the write, and the
 backup sits beside the file that changed. Reading through a filesystem symlink works for preview and `--check`, but
-`--write` or an accepted interactive edit refuses a symlinked config path before writing a backup. Replacing the link
-atomically would leave its target stale. Point `--config` at the real file to apply the suggestions.
+`--write` or an accepted interactive edit refuses a symlinked configuration file, the root file or a `$ref` fragment
+alike, before writing a backup: replacing the link atomically would turn it into a regular file and leave its target
+stale. To apply the suggestions, replace the link with the file it points to, or edit that file by hand.
 
 **Fleet links.** In an [identity-linked fleet](../choreographed-repositories.md), the command also reads the fleet and
 proposes what joins it. The suggestions are independent of the package selection, because a fleet is either linked or
@@ -184,9 +185,9 @@ lagging the manifests, and it overrides both apply modes.
 ### `--topology`
 
 Choose the fleet-link shape proposed by `compute`: `minimal` (the default) or `star`. Minimal preserves existing links
-and adds the fewest needed to connect the roster, joining the groups those links leave the fleet in at their centres
-so that the longest route between two repositories stays as short as the existing links allow. Star proposes a direct
-link from every peer to the entry repository and errors if the existing links are incompatible.
-`--write` and `--interactive` apply these suggestions in the same
-way as other compute suggestions; no topology mode removes a link. `star` requires a linked fleet with a repository identity.
-`minimal` also works with ordinary configurations, where compute still derives dependencies and baselines.
+and adds the fewest needed to connect the roster, joining the groups those links leave the fleet in at their centres so
+that the longest route between two repositories stays as short as the existing links allow. Star proposes a direct link
+from every peer to the entry repository and errors if the existing links are incompatible. `--write` and
+`--interactive` apply these suggestions in the same way as other compute suggestions; no topology mode removes a link.
+`star` requires a linked fleet with a repository identity. `minimal` also works with ordinary configurations, where
+compute still derives dependencies and baselines.

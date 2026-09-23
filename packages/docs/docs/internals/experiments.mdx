@@ -65,12 +65,12 @@ registry says what shipped and the tags say what was recorded; a range a release
 rolled back, appears in neither.
 
 The `build` and `publish` propagation cells start with a patch to `core` that remains inside the consumers' `~1.0.0` dependency
-range, so semver alone asks for no consumer release. Dispat receives `fix(core)^: correct reader`, whose caret is
+range, so semver alone asks for no consumer release. dispat receives `fix(core)^: correct reader`, whose caret is
 explicit propagation intent. Lerna receives the plain `fix(core): correct reader` and decides for itself: nothing is
 forced on its side, and what its version command selects is part of the record. Changesets receives explicit patch
 entries for `core` and its three direct consumers, the closest way to request the same release set with that tool.
 
-The release sets differ. Dispat releases `core` and its three declared consumers, writing each consumer's range up to
+The release sets differ. dispat releases `core` and its three declared consumers, writing each consumer's range up to
 the provider it shipped with. Lerna releases all six, because it bumps every transitive dependent of a changed
 package, `theme` and `docs` included, although `~1.0.0` already accepted `core@1.0.1`.
 
@@ -86,7 +86,7 @@ The `publish` scenario lets the build succeed and has the registry refuse the up
 and the same registry under both tools, so the two scenarios separate a failed build from a refused publication rather
 than naming one failure twice.
 
-After the fault is removed, no commit is made and no new release intent is supplied. Dispat's next plan contains the
+After the fault is removed, no commit is made and no new release intent is supplied. dispat's next plan contains the
 owed `cli` catch-up alone, its recovery publishes `cli` without republishing `core`, and the plan after it is empty.
 Lerna's tag-based `lerna changed` is already empty, because its version command tagged every package before any was
 published; `lerna publish from-package` then queries the registry and republishes the five packages it finds missing,
@@ -94,13 +94,13 @@ rather than the one that failed. Changesets' status is empty after its `version`
 `changeset publish` queries the registry and publishes the remaining `cli`, `ui` and `api`. It does not tag `core`,
 which the operator published separately before the fault, so that provider is still unrecorded in this protocol.
 
-The Dispat-only `deferred` cell tests a further edge: `cli` has no build command and publishes its own fix after `core` fails, then an operator
+The dispat-only `deferred` cell tests a further edge: `cli` has no build command and publishes its own fix after `core` fails, then an operator
 releases `core`, `ui` and `api` on the next run while leaving `cli` out. With no new source commit, the next full plan must catch up `cli` from the
 provider's durable publication, and the run after that must be empty. The earlier `cli` tag already contains the
 propagation commit, so the pending commit window alone cannot reveal this debt.
 
 The `deferred-build` companion keeps `cli`'s actual build script. When it has already built over the planned provider
-version, Dispat withholds it with `W194` after the provider fails; the next run rebuilds and publishes the consumer's
+version, dispat withholds it with `W194` after the provider fails; the next run rebuilds and publishes the consumer's
 own pending fix against the version that really shipped. It tests the artifact safety boundary beside the no-build
 delivery-receipt case.
 

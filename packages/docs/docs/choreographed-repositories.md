@@ -424,8 +424,8 @@ each one. `W332` and `W333` are what `dispat compute` repairs.
 
 ## See also
 
-- [A control repository](./control-repository.md) for central hub topology, and for the pointer-history pattern that needs
-  no conventional commits in the linked repositories at all.
+- [A control repository](./control-repository.md) for central hub topology, and for the pointer-history pattern that
+  needs no conventional commits in the linked repositories at all.
 - [Distributed execution](./distributed-execution.md) for running the builds of one release on several machines.
   Execution links are not fleet links: a worker node runs commands and owns no history, so it never joins the roster,
   and a peer's own `execution` object is ignored because the run reads that object from the repository it was started

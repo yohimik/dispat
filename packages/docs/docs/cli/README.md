@@ -7,7 +7,10 @@ commands to narrow that release or perform a single step.
 dispat [command] [flags]
 ```
 
-From dispat 1.8.2, `dispat --help` links to the agent guide, configuration reference, and API reference captured by that binary's release tag. Development builds explicitly link to upcoming documentation. Agents should check for newer guide patches on the installed CLI's major/minor line, while keeping the configuration and API references pinned to the installed binary.
+From dispat 1.8.2, `dispat --help` links to the agent guide, configuration reference, and API reference captured by
+that binary's release tag. Development builds explicitly link to upcoming documentation. Agents should check for newer
+guide patches on the installed CLI's major/minor line, while keeping the configuration and API references pinned to the
+installed binary.
 
 ## Commands
 
@@ -47,9 +50,9 @@ package folder.
 
 ### `--config`
 
-The default is auto. Set the config file name relative to `--root`. Leave this unset to let dispat discover the file
-using the [resolution rules](../configuration/README.md). Passing an explicit name uses that exact file with no
-fallback and no ascent.
+The default is auto. Set the config file as a path relative to `--root` or as an absolute path. Leave this unset to let
+dispat discover the file using the [resolution rules](../configuration/README.md). Passing an explicit path uses that
+exact file with no fallback and no ascent.
 
 ### `--configs`
 
@@ -63,9 +66,9 @@ there.
 ### `--polyrepo`
 
 Read the independent Git histories of linked repositories. Identity-linked fleets enable this automatically when the
-entry configuration states a non-empty `repository` identity; its optional `repositories` roster names other peers. A control repository can enable it with
-`polyrepo: true` or imported `configs`. It requires each
-declared source to be initialized at its pinned gitlink commit with complete history. See
+entry configuration states a non-empty `repository` identity; its optional `repositories` roster names other peers. A
+control repository can enable it with `polyrepo: true` or imported `configs`. It requires each declared source to be
+initialized at its pinned gitlink commit with complete history. See
 [A control repository](../control-repository.md#source-history-mode).
 
 Passing `--polyrepo=false` to an identity-linked repository is the standalone escape hatch: the
@@ -95,7 +98,8 @@ The default comes from config. Override the log format. Choose `pretty` or `json
 
 The default comes from config. Override `parser.quiet` to hide the commit-message parser's own diagnostics. Pass
 `--quiet-parser=false` to show them again when your config sets `quiet: true`; see
-[the parser options](../configuration/parser.md#quiet). Standalone diagnostics and source-commit authoring always show its validation diagnostics so the author can correct the proposed message.
+[the parser options](../configuration/parser.md#quiet). Standalone diagnostics and source-commit authoring always show
+its validation diagnostics so the author can correct the proposed message.
 
 ### `--version`
 
