@@ -6389,9 +6389,11 @@ the current run. That state MUST be bound to the same control root, configuratio
 authorize only the admitted full commit ID and MUST be removed when the run ends. It is coordination between live
 commands, not a baseline, release record, tag payload, recovery ledger, or input to a later plan.
 
-The fleet lock and per-worktree mutation locks coordinate participating CCME/dispat operations. They do not claim to
-exclude every external Git writer. The checks above detect relevant changes visible at their validation points; the
-implementation MUST NOT claim that they make publication atomic with arbitrary processes after the final check.
+The fleet lock coordinates participating CCME/dispat runs. Within one process, an implementation serializes its own
+native Git transactions per repository; that serialization claims no exclusion against other processes, and the fleet
+lock does not exclude every external Git writer. The checks above detect relevant changes visible at their validation
+points; the implementation MUST NOT claim that they make publication atomic with arbitrary processes after the final
+check.
 
 A commit identity is always `(repository, full object ID)`. Logs MAY display a unique abbreviation beside the
 repository name, but stored keys, correction lookup, caches, diagnostics, and plan provenance MUST use the qualified
@@ -6605,16 +6607,16 @@ already-published package's outcome, but the run MUST exit nonzero. If a complet
 `failed` or `interrupted`, never `succeeded`. Fleet cleanup MUST continue through the remaining owned locks. Status and other read-only planning retain their ordinary lock-free
 behavior.
 
-Every operation that can hold more than one fleet or worktree lock MUST use one stable total order over the lock
-resource identities and release them in reverse order. An acquisition that waits for a held lock needs the order to be
-free of deadlock. One that fails instead, releasing what it took, cannot deadlock under any order and needs the order
-for progress: the lock a run stopped at sorts after every lock it held, so among contending runs the chain of who
-stopped whom never closes, and one of them acquires its whole set. The guarantee reaches only runs that spell the
-contended identities alike. Two control repositories that name one source differently may order it differently, and
-both runs can then fail; that is lost progress, never lost exclusion, because each repository's lock is still one lock.
-Per-worktree mutation locks cover only the complete native Git transaction that reads, commits, tags, pushes, or
-checkpoints the affected repositories. Hooks and arbitrary scripts
-run outside those mutation locks; their changes remain subject to the fixed-input checks of §27.2.
+Every operation that can hold more than one fleet lock, or serialize more than one repository at once, MUST use one
+stable total order over those resource identities and release them in reverse order. An acquisition that waits for a
+held lock needs the order to be free of deadlock. One that fails instead, releasing what it took, cannot deadlock under
+any order and needs the order for progress: the lock a run stopped at sorts after every lock it held, so among
+contending runs the chain of who stopped whom never closes, and one of them acquires its whole set. The guarantee
+reaches only runs that spell the contended identities alike. Two control repositories that name one source differently
+may order it differently, and both runs can then fail; that is lost progress, never lost exclusion, because each
+repository's lock is still one lock. Per-repository serialization covers only the complete native Git transaction that
+reads, commits, tags, pushes, or checkpoints the affected repositories, within the process that runs it. Hooks and
+arbitrary scripts run outside those transactions; their changes remain subject to the fixed-input checks of §27.2.
 
 No rollback is inferred after a partial publish. Record every success that can still be recorded, stop dependent work,
 report publication and recording failures separately, and retry from durable source tags. Never delete, move, or
@@ -6889,10 +6891,10 @@ that the repository still holds the head the run expects. A head that no settlem
 `E330`. Without this admission the pre-publish revalidation of every settled consumer would refuse the head its own
 settlement wrote.
 
-A settlement commits and pushes in a repository, so that repository's ordinary commit and push hooks bracket it and
-run outside the advisory mutation lock, exactly as §27.7 requires of every other native transaction. A repository
-whose settlement must be pushed while it is at detached `HEAD` requires `commit.branch` and otherwise fails with
-`E337` before publication.
+A settlement commits and pushes in a repository, so that repository's ordinary commit and push hooks bracket it and run
+outside the settlement's native Git transaction, exactly as §27.7 requires of every other native transaction. A
+repository whose settlement must be pushed while it is at detached `HEAD` requires `commit.branch` and otherwise fails
+with `E337` before publication.
 
 **A pin never outruns its target.** Before a repository that pushes records a revision of a peer, the engine MUST
 verify that the peer's own remote already holds that revision on the branch the fleet states for it: the peer's own
