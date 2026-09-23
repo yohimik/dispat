@@ -192,11 +192,19 @@ func (w *Worker) observeWithdrawal(ctx context.Context, tip ChainTip) bool {
 // lock released and a lock retained.
 func (w *Worker) acknowledgeCancellation(ctx context.Context, task *claimedTask,
 	log zerolog.Logger) {
-	cancel, reached, isCommandStarted := task.readProgress()
-	phase := resolveCancelledPhase(reached)
 	acked, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
 	defer done()
-	written, err := w.advance(acked, task.tip, cancel, MessageAck, Ack{
+	w.writeCancellationAcknowledgement(acked, task, log)
+}
+
+// writeCancellationAcknowledgement uses the caller's already bounded report
+// context. A Result that lost to Cancel must settle inside its original report
+// deadline rather than starting a second one.
+func (w *Worker) writeCancellationAcknowledgement(ctx context.Context, task *claimedTask,
+	log zerolog.Logger) {
+	cancel, reached, isCommandStarted := task.readProgress()
+	phase := resolveCancelledPhase(reached)
+	written, err := w.advance(ctx, task.tip, cancel, MessageAck, Ack{
 		Header: w.formatReplyHeader(task.assignment.Header), Assignment: task.tip.OID,
 		Cancel: cancel, Phase: phase, CommandStarted: isCommandStarted,
 	}, nil)

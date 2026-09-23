@@ -104,7 +104,7 @@ func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
 			require.NoError(t, err)
 
 			settled := fixture.coordinator.withdrawAttempt(t.Context(), "build-a", PreflightTask, 1,
-				KindProbe, taskOffer{branch: branch, offered: offered}, claimed)
+				KindProbe, taskOffer{branch: branch, kind: KindProbe, offered: offered}, claimed)
 
 			if tc.isOwn {
 				assert.True(t, settled.isAcknowledged, "the node's own terminal result proves it stopped")

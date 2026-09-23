@@ -152,6 +152,8 @@ func TestExecutionStaleReceiptIsRejected(t *testing.T) {
 	}{
 		"a reply of another run": {
 			mangle: executionRebind("run", "0123456789abcdef0123456789abcdef"), reason: "replay"},
+		"a reply for another kind of work": {
+			mangle: executionRebind("kind", "publish"), reason: "replay"},
 		"a reply of another planning": {
 			mangle: executionRebind("planDigest",
 				strings.Repeat("a", 64)), reason: "replay"},
@@ -212,6 +214,9 @@ func TestExecutionForgedClaimsAreRejectedBeforeWork(t *testing.T) {
 		"answers another assignment": {
 			mangle: executionRebind("assignment", strings.Repeat("0", 40)), reason: "replay",
 		},
+		"claims another kind of work": {
+			mangle: executionRebind("kind", "publish"), reason: "replay",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := newExecutionSaboteurRig(t)
@@ -251,6 +256,9 @@ func TestExecutionForgedReadyCannotAuthorizePublication(t *testing.T) {
 		},
 		"names another claim": {
 			mangle: executionRebind("claim", strings.Repeat("0", 40)), reason: "replay",
+		},
+		"readies another kind of work": {
+			mangle: executionRebind("kind", "build"), reason: "replay",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

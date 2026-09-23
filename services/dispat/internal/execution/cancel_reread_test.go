@@ -29,7 +29,7 @@ func TestWithdrawalOfUnclaimedAssignmentNeedsNoWorkerAcknowledgement(t *testing.
 	})
 
 	settled := fixture.coordinator.withdrawAttempt(t.Context(), "build-a", "app:build", 1,
-		KindBuild, taskOffer{branch: branch, offered: offered}, offered)
+		KindBuild, taskOffer{branch: branch, kind: KindBuild, offered: offered}, offered)
 
 	assert.True(t, settled.isAcknowledged, "the exact lease fenced any worker claim")
 	assert.False(t, settled.isCommandStarted)
@@ -70,7 +70,7 @@ func TestWithdrawalSettlesAResultAfterTwoLeaseLosses(t *testing.T) {
 	fixture.orchestrator.mailbox.remote = transport
 
 	withdrawn, err := fixture.coordinator.writeWithdrawal(t.Context(), "build-a", "app:build", 1,
-		KindBuild, taskOffer{branch: branch, offered: offered}, offered)
+		KindBuild, taskOffer{branch: branch, kind: KindBuild, offered: offered}, offered)
 
 	require.NoError(t, err, "the second reread must see the worker's signed terminal result")
 	assert.Empty(t, withdrawn.oid, "no cancellation follows a completed task")
@@ -143,7 +143,7 @@ func TestWithdrawalRetryRefusesForeignLiveTip(t *testing.T) {
 			// cancellation CAS loses; the reread must refuse the new tip.
 			_, err = fixture.coordinator.writeWithdrawal(t.Context(), "build-a",
 				"core:publish", 1, KindPublish,
-				taskOffer{branch: branch, offered: offered}, prior)
+				taskOffer{branch: branch, kind: KindPublish, offered: offered}, prior)
 			require.Error(t, err)
 			head, err := fixture.orchestrator.mailbox.Reread(t.Context(), branch)
 			require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestWithdrawalRetryAcceptsOwnLiveTip(t *testing.T) {
 			require.NoError(t, err)
 			result, err := fixture.coordinator.writeWithdrawal(t.Context(), "build-a",
 				"core:publish", 1, KindPublish,
-				taskOffer{branch: branch, offered: offered}, prior)
+				taskOffer{branch: branch, kind: KindPublish, offered: offered}, prior)
 			require.NoError(t, err)
 			if movedKind == MessageCancel {
 				assert.Equal(t, moved, result.oid, "the first cancellation is already on the branch")

@@ -19,16 +19,18 @@ import (
 )
 
 type authorizedAckCase struct {
-	name           string
-	wrongCancel    bool
-	wrongSignature bool
+	name             string
+	isWrongCancel    bool
+	isWrongKind      bool
+	isWrongSignature bool
 }
 
 func TestExecutionAuthorizedWithdrawalNeedsItsOwnAcknowledgement(t *testing.T) {
 	for _, scenario := range []authorizedAckCase{
 		{name: "stopped before command"},
-		{name: "acknowledges an earlier tip", wrongCancel: true},
-		{name: "signed with another key", wrongSignature: true},
+		{name: "acknowledges an earlier tip", isWrongCancel: true},
+		{name: "acknowledges another kind of work", isWrongKind: true},
+		{name: "signed with another key", isWrongSignature: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) { runAuthorizedWithdrawalAck(t, scenario) })
 	}
@@ -69,7 +71,7 @@ func runAuthorizedWithdrawalAck(t *testing.T, scenario authorizedAckCase) {
 		executionChain(t, rig.mailbox, branch), "authorization was withdrawn before the fake node answered")
 
 	acknowledged := cancelOID
-	if scenario.wrongCancel {
+	if scenario.isWrongCancel {
 		acknowledged = strings.TrimSpace(bareGit(t, rig.mailbox, "rev-parse", "refs/heads/"+branch+"^"))
 	}
 	assignment, ok := goMessage["assignment"].(string)
@@ -80,8 +82,11 @@ func runAuthorizedWithdrawalAck(t *testing.T, scenario authorizedAckCase) {
 		executionField{"phase", "authorization-wait"},
 		executionField{"commandStarted", false},
 	)
+	if scenario.isWrongKind {
+		ack = ack.set("kind", "build")
+	}
 	secret := executionSecret
-	if scenario.wrongSignature {
+	if scenario.isWrongSignature {
 		secret = "another-node-secret"
 	}
 	worker.pushSigned(branch, cancelOID, "ack", ack, "", true, secret)
@@ -91,7 +96,7 @@ func runAuthorizedWithdrawalAck(t *testing.T, scenario authorizedAckCase) {
 	require.NotEqual(t, 0, res.Code, "the interrupted release cannot publish\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Empty(t, executionReleaseTags(rig))
 	assert.Empty(t, executionProbedPackages(rig, "publish"))
-	if !scenario.wrongCancel && !scenario.wrongSignature {
+	if !scenario.isWrongCancel && !scenario.isWrongKind && !scenario.isWrongSignature {
 		settled, isFound := executionLine(res, "the withdrawn attempt was acknowledged")
 		require.True(t, isFound, "the node stopped before its command\nstdout:\n%s", res.Stdout)
 		assert.Equal(t, false, settled["commandStarted"])
@@ -103,7 +108,7 @@ func runAuthorizedWithdrawalAck(t *testing.T, scenario authorizedAckCase) {
 	}
 	rejected, isFound := executionLine(res, "stale or foreign receipt ignored")
 	require.True(t, isFound, "a different acknowledgement cannot prove quiescence\nstdout:\n%s", res.Stdout)
-	if scenario.wrongCancel {
+	if scenario.isWrongCancel || scenario.isWrongKind {
 		assert.Equal(t, "replay", rejected.Str("reason"))
 	} else {
 		assert.Equal(t, "signature", rejected.Str("reason"))

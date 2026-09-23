@@ -257,6 +257,7 @@ func (w *Worker) checkAuthorization(ctx context.Context, answer ChainTip, tip Ch
 	}
 	if !IsTransitionLegal(answer.Previous, MessageGo, PartyOrchestrator) ||
 		answer.PreviousOID != ready || message.Ready != ready || message.Assignment != tip.OID ||
+		message.Kind != assignment.Kind ||
 		message.Run != assignment.Run || message.Task != assignment.Task ||
 		message.Attempt != assignment.Attempt || message.Generation != assignment.Generation ||
 		message.PlanDigest != assignment.PlanDigest {
@@ -328,6 +329,7 @@ func (w *Worker) checkWithdrawal(ctx context.Context, answer ChainTip, tip Chain
 	}
 	if !IsTransitionLegal(answer.Previous, MessageCancel, PartyOrchestrator) ||
 		answer.PreviousOID != withdrawn || message.Tip != withdrawn || message.Assignment != tip.OID ||
+		message.Kind != assignment.Kind ||
 		message.Run != assignment.Run || message.Task != assignment.Task ||
 		message.Attempt != assignment.Attempt || message.Generation != assignment.Generation ||
 		message.PlanDigest != assignment.PlanDigest {

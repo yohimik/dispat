@@ -295,6 +295,39 @@ packages:
 	}
 }
 
+// One bad imported package list must not hide its healthy siblings. The
+// ordinary walk does not recognize these arbitrary YAML file names; they are
+// reached only through Aqua's import_dir expansion.
+func TestPublicAPIScannerKeepsValidAquaImportsBesideRejectedSiblings(t *testing.T) {
+	dir := writeTree(t, t.TempDir(), map[string]string{
+		"aqua.yaml":         "import_dir: imports\npackages:\n  - name: cli/cli@v2.55.0\n",
+		"imports/good.yaml": "packages:\n  - name: junegunn/fzf@v0.54.0\n",
+		"imports/bad.yaml":  "- not a mapping\n",
+	})
+	huge := filepath.Join(dir, "imports", "huge.yaml")
+	if err := os.WriteFile(huge, make([]byte, (16<<20)+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mans, err := scanner.Scan(t.Context(), dir)
+	if !errors.Is(err, scanner.ErrManifestTooLarge) || !strings.Contains(err.Error(), "imports/bad.yaml") {
+		t.Fatalf("import errors = %v; want both the oversized and malformed siblings", err)
+	}
+	var paths []string
+	for _, m := range mans {
+		paths = append(paths, m.Path)
+	}
+	if got, want := strings.Join(paths, ","), "aqua.yaml,imports/good.yaml"; got != want {
+		t.Fatalf("partial import result = %q; want %q", got, want)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "imports", "bad.yaml")); err != nil || string(got) != "- not a mapping\n" {
+		t.Fatalf("rejected malformed import changed: %q, %v", got, err)
+	}
+	if info, err := os.Stat(huge); err != nil || info.Size() != (16<<20)+1 {
+		t.Fatalf("rejected oversized import changed: %v, %v", info, err)
+	}
+}
+
 func TestPublicAPIScannerRefusesAquaImportsThatLeaveTheTree(t *testing.T) {
 	parent := t.TempDir()
 	outside := writeTree(t, parent, map[string]string{

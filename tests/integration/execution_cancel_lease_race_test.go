@@ -110,6 +110,10 @@ type terminalLeaseRendezvous struct {
 // push before Git sees it gives the test an exact place to write the competing
 // terminal message, independent of scheduler timing.
 func newTerminalLeaseRendezvous(t *testing.T) terminalLeaseRendezvous {
+	return newTerminalLeaseRendezvousFor(t, "build")
+}
+
+func newTerminalLeaseRendezvousFor(t *testing.T, kind string) terminalLeaseRendezvous {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
 	require.NoError(t, err)
@@ -123,7 +127,7 @@ func newTerminalLeaseRendezvous(t *testing.T) terminalLeaseRendezvous {
 	require.NoError(t, os.WriteFile(filepath.Join(wrapDir, "git"), []byte(`#!/bin/sh
 for argument do
   case "$argument" in
-    --force-with-lease=refs/heads/dispat-worker-build-a-*-build-*:*)
+    --force-with-lease=refs/heads/dispat-worker-build-a-*-"$DISPAT_IT_CANCEL_KIND"-*:*)
       printf '%s\n' "$argument" >> "$DISPAT_IT_CANCEL_TRACE"
       if mkdir "$DISPAT_IT_CANCEL_FIRST" 2>/dev/null; then
         :
@@ -144,6 +148,7 @@ exec "$DISPAT_IT_REAL_GIT" "$@"
 	barrier.env = []string{
 		"PATH=" + wrapDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"DISPAT_IT_REAL_GIT=" + realGit,
+		"DISPAT_IT_CANCEL_KIND=" + kind,
 		"DISPAT_IT_CANCEL_FIRST=" + filepath.Join(wrapDir, "first-build-push"),
 		"DISPAT_IT_CANCEL_ENTERED=" + barrier.entered,
 		"DISPAT_IT_CANCEL_PROCEED=" + barrier.proceed,

@@ -27,6 +27,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -527,12 +528,47 @@ func (w *Worker) answerTask(ctx context.Context, bounded context.Context, task *
 	reported, err := w.advance(reportCtx, tip, resolveResultLease(task.claimed, outcome),
 		MessageResult, report, carried)
 	if err != nil {
+		if errors.Is(err, gitx.ErrLeaseRejected) &&
+			w.acknowledgeResultWithdrawal(reportCtx, task, resolveResultLease(task.claimed, outcome), log) {
+			return
+		}
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the task result could not be reported")
 		return
 	}
 	log.Info().Str("commit", reported).Str("status", outcome.status).
 		Int("strayWrites", outcome.strayWrites).Msg("task finished")
+}
+
+// acknowledgeResultWithdrawal settles the one lease loss a finished task can
+// prove: the run cancelled this exact attempt between the progress check and
+// the Result push. The task's processes have ended, so an authenticated Cancel
+// can be acknowledged immediately. Other moved tips and transport failures
+// remain failed reports; none is a reason to retry the Result or a publish Go.
+func (w *Worker) acknowledgeResultWithdrawal(ctx context.Context, task *claimedTask,
+	resultLease string, log zerolog.Logger) bool {
+	head, err := w.Mailbox.Reread(ctx, task.tip.Branch)
+	if err != nil || head.OID == "" {
+		return false
+	}
+	answer, err := w.Mailbox.Inspect(ctx, head)
+	if err != nil || answer.Kind != MessageCancel || answer.PreviousOID != resultLease {
+		return false
+	}
+	if reason := w.checkWithdrawal(ctx, answer, task.tip, resultLease, task.assignment); reason != "" {
+		w.reportRejection(answer, reason)
+		return false
+	}
+	if !task.withdraw(answer.OID) {
+		withdrawn, _, _ := task.readProgress()
+		if withdrawn != answer.OID {
+			return false
+		}
+	}
+	log.Debug().Str("commit", answer.OID).
+		Msg("the result lease lost to this attempt's withdrawal; acknowledging completed work")
+	w.writeCancellationAcknowledgement(ctx, task, log)
+	return true
 }
 
 // resolveReportTimeout is how long a finished task may take to report. A

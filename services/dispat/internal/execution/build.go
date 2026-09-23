@@ -315,6 +315,7 @@ type taskOffer struct {
 	observer *watcher
 	replies  <-chan taskReply
 	branch   string
+	kind     string
 	// offered is the assignment's own object id, which every message of the
 	// attempt names and which every message this party writes afterwards has
 	// to echo back.
@@ -350,7 +351,7 @@ func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task st
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
 		Str("kind", kind).Msg("task assigned")
-	return taskOffer{observer: observer, replies: replies, branch: assignment.Branch,
+	return taskOffer{observer: observer, replies: replies, branch: assignment.Branch, kind: kind,
 		offered: offered}, nil
 }
 
@@ -1040,6 +1041,7 @@ func (w *watcher) readClaim(ctx context.Context, tip ChainTip, waiting *attemptS
 	offered := waiting.assignment.Header
 	if !IsTransitionLegal(tip.Previous, MessageClaim, PartyWorker) ||
 		claim.Assignment != waiting.offered || tip.PreviousOID != waiting.offered ||
+		claim.Kind != offered.Kind ||
 		claim.Run != offered.Run || claim.Task != offered.Task ||
 		claim.Attempt != offered.Attempt || claim.Generation != offered.Generation ||
 		claim.PlanDigest != offered.PlanDigest {
@@ -1107,6 +1109,7 @@ func (w *watcher) readReady(ctx context.Context, tip ChainTip, waiting *attemptS
 	}
 	offered := waiting.assignment.Header
 	if ready.Assignment != waiting.offered || ready.Claim != tip.PreviousOID ||
+		ready.Kind != offered.Kind ||
 		ready.Run != offered.Run || ready.Task != offered.Task ||
 		ready.Attempt != offered.Attempt || ready.Generation != offered.Generation ||
 		ready.PlanDigest != offered.PlanDigest {
@@ -1127,7 +1130,7 @@ func checkTaskResult(result Result, node string, tip ChainTip, waiting *attemptS
 		return ReasonChain
 	}
 	offered := waiting.assignment.Header
-	if result.Assignment != waiting.offered || result.Run != offered.Run ||
+	if result.Assignment != waiting.offered || result.Kind != offered.Kind || result.Run != offered.Run ||
 		result.Task != offered.Task || result.Attempt != offered.Attempt ||
 		result.Generation != offered.Generation || result.PlanDigest != offered.PlanDigest {
 		return ReasonReplay

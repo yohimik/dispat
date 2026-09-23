@@ -139,6 +139,82 @@ func TestPreflightAcceptsANodeThatCanTakeTheWork(t *testing.T) {
 	require.NoError(t, fixture.coordinator.Close(t.Context()), "closing a run that owns nothing is nothing")
 }
 
+// A probe claim may be the last thing a node could persist. Cleanup owns that
+// signed step even when the report never arrives, but it cannot adopt a claim
+// signed by somebody else or bound to a different kind of work.
+func TestPreflightClaimWithoutReportKeepsOnlyAuthenticatedCleanupOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		isWrongSignature bool
+		isWrongKind      bool
+		isOwn            bool
+	}{
+		{name: "signed probe claim", isOwn: true},
+		{name: "claim with another signature", isWrongSignature: true},
+		{name: "claim for another kind", isWrongKind: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, silentPreflight)
+			branch := FormatBranch("build-a", KindProbe, time.Now())
+			assignment := probeAssignment("build-a", branch)
+			offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+			require.NoError(t, err)
+			fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
+				node: "build-a", branch: branch, oid: offered,
+			})
+			heads, err := fixture.node.mailbox.Observe(t.Context(), "refs/heads/"+branch)
+			require.NoError(t, err)
+			require.Len(t, heads, 1)
+
+			claim := Claim{Header: replyHeader(*assignment), Assignment: offered}
+			if tc.isWrongKind {
+				claim.Kind = KindBuild
+			}
+			nodeMailbox := fixture.node.mailbox
+			if tc.isWrongSignature {
+				other, err := NewSigner("another-secret")
+				require.NoError(t, err)
+				nodeMailbox = NewGitMailbox(fixture.node.endpoint, fixture.node.git, other, zerolog.Nop())
+			}
+			claimed, err := nodeMailbox.Advance(t.Context(), branch, offered, MessageClaim,
+				mustMarshalValue(claim), nil)
+			require.NoError(t, err)
+			report, err := fixture.coordinator.readReport(t.Context(), Link{Name: "build-a"}, branch, offered)
+			require.NoError(t, err)
+			assert.Nil(t, report, "no result was written")
+
+			if tc.isOwn {
+				assert.Equal(t, claimed, fixture.coordinator.owned["build-a"][0].ExpectedOld)
+				require.NoError(t, fixture.coordinator.Close(t.Context()))
+				assert.Empty(t, fixture.orchestrator.remoteBranches(t), "the signed claim is the exact cleanup lease")
+				return
+			}
+			assert.Equal(t, offered, fixture.coordinator.owned["build-a"][0].ExpectedOld,
+				"an unverified claim cannot advance the cleanup lease")
+			require.Error(t, fixture.coordinator.Close(t.Context()))
+			assert.Equal(t, []string{branch}, fixture.orchestrator.remoteBranches(t),
+				"a foreign claim must not be deleted")
+		})
+	}
+}
+
+func TestPreflightResultRequiresAClaim(t *testing.T) {
+	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, silentPreflight)
+	branch := FormatBranch("build-a", KindProbe, time.Now())
+	assignment := probeAssignment("build-a", branch)
+	result := Result{Header: replyHeader(*assignment), Assignment: "offered",
+		Report: &NodeReport{Protocol: ProtocolVersion, Capacity: 1}}
+	for _, previous := range []MessageKind{MessageAssignment, MessageGo, MessageAck} {
+		t.Run(string(previous), func(t *testing.T) {
+			tip := ChainTip{Branch: branch, Kind: MessageResult, Previous: previous,
+				PreviousOID: "earlier"}
+			assert.Equal(t, ReasonChain, fixture.coordinator.checkResult(result,
+				Link{Name: "build-a"}, tip, "offered"),
+				"a probe result can only follow its worker claim")
+		})
+	}
+}
+
 // TestClosePreservesUnknownPublicationEvidence: a run whose publisher never
 // reported back leaves that attempt's branch for reconciliation, while its
 // unrelated temporary branch is cleaned normally.
@@ -169,15 +245,44 @@ func TestPreflightRefusesBeforeAnythingIsDispatched(t *testing.T) {
 	limits := TransferLimits{MaxFiles: 10, MaxBytes: 20, MaxManifestBytes: 1 << 20}
 
 	for name, tc := range map[string]struct {
-		report   func(Assignment, string) any
-		secret   string
-		packages []PackagePlatforms
-		says     string
+		report          func(Assignment, string) any
+		secret          string
+		packages        []PackagePlatforms
+		says            string
+		isRejectedReply bool
 	}{
 		"a node that never answers": {
 			says: "did not pass preflight"},
 		"a node signing with another secret": {
 			report: healthyReport(limits), secret: "hunter3", says: "did not pass preflight"},
+		"a probe report naming another kind of work": {
+			report: func(assignment Assignment, offered string) any {
+				result := healthyReport(limits)(assignment, offered).(Result)
+				result.Kind = KindBuild
+				return result
+			},
+			says: "did not pass preflight", isRejectedReply: true},
+		"a probe report naming another attempt": {
+			report: func(assignment Assignment, offered string) any {
+				result := healthyReport(limits)(assignment, offered).(Result)
+				result.Attempt = 2
+				return result
+			},
+			says: "did not pass preflight", isRejectedReply: true},
+		"a probe report naming another plan": {
+			report: func(assignment Assignment, offered string) any {
+				result := healthyReport(limits)(assignment, offered).(Result)
+				result.PlanDigest = "another-plan"
+				return result
+			},
+			says: "did not pass preflight", isRejectedReply: true},
+		"a probe report naming another ownership": {
+			report: func(assignment Assignment, offered string) any {
+				result := healthyReport(limits)(assignment, offered).(Result)
+				result.Generation = "another-generation"
+				return result
+			},
+			says: "did not pass preflight", isRejectedReply: true},
 		"a node speaking another protocol version": {
 			report: func(assignment Assignment, offered string) any {
 				result := healthyReport(limits)(assignment, offered).(Result)
@@ -211,7 +316,7 @@ func TestPreflightRefusesBeforeAnythingIsDispatched(t *testing.T) {
 			// A report signed with the run's secret is answered; no report,
 			// or one the run cannot verify, is waited out.
 			preflight := silentPreflight
-			if tc.report != nil && tc.secret == "" {
+			if tc.report != nil && tc.secret == "" && !tc.isRejectedReply {
 				preflight = answeredPreflight
 			}
 			fixture := newCoordinatorFixture(t, limits, preflight)

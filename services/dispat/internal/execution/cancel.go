@@ -377,7 +377,8 @@ func (c *Coordinator) readAcknowledgement(ctx context.Context, node, task string
 	}
 	if !IsTransitionLegal(tip.Previous, MessageAck, PartyWorker) ||
 		tip.PreviousOID != withdrawn || message.Cancel != withdrawn ||
-		message.Assignment != offer.offered || message.Run != c.Run || message.Task != task ||
+		message.Assignment != offer.offered || message.Kind != offer.kind ||
+		message.Run != c.Run || message.Task != task ||
 		message.Attempt != attempt || message.Generation != c.Generation ||
 		message.PlanDigest != c.PlanDigest {
 		return cancellation{}, ReasonReplay

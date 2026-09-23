@@ -188,6 +188,22 @@ func TestExecutionPreflightIgnoresUnauthenticReplies(t *testing.T) {
 			reply["run"] = "0123456789abcdef0123456789abcdef"
 			return reply
 		},
+		"a report bound to another kind of work": func(_ *executionFakeOrchestrator, _ string, reply map[string]any) map[string]any {
+			reply["kind"] = "build"
+			return reply
+		},
+		"a report bound to another attempt": func(_ *executionFakeOrchestrator, _ string, reply map[string]any) map[string]any {
+			reply["attempt"] = 2
+			return reply
+		},
+		"a report bound to another plan": func(_ *executionFakeOrchestrator, _ string, reply map[string]any) map[string]any {
+			reply["planDigest"] = strings.Repeat("a", 64)
+			return reply
+		},
+		"a report bound to another ownership": func(_ *executionFakeOrchestrator, _ string, reply map[string]any) map[string]any {
+			reply["generation"] = "another-generation"
+			return reply
+		},
 		"a result carrying no report at all": func(_ *executionFakeOrchestrator, _ string, reply map[string]any) map[string]any {
 			delete(reply, "report")
 			return reply

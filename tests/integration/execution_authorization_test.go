@@ -291,6 +291,9 @@ func TestExecutionCraftedPublicationAuthorizations(t *testing.T) {
 		"an authorization of another run": {
 			change: func(m map[string]any) { m["run"] = "runsomebodyelse" },
 			reason: "replay"},
+		"an authorization for another kind of work": {
+			change: func(m map[string]any) { m["kind"] = "build" },
+			reason: "replay"},
 		"an authorization of another attempt": {
 			change: func(m map[string]any) { m["attempt"] = 2 },
 			reason: "replay"},

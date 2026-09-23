@@ -278,6 +278,23 @@ func (c *Coordinator) readReport(ctx context.Context, link Link, branch, offered
 		if err != nil {
 			return nil, err
 		}
+		if tip.Kind == MessageClaim {
+			// A node can claim the probe and then fail before writing its
+			// report. Its signed claim is still this run's cleanup boundary;
+			// an unverified branch movement is not.
+			waiting := &attemptState{offered: offered, assignment: &Assignment{Header: Header{
+				Kind: KindProbe, Run: c.Run, PlanDigest: c.PlanDigest,
+				Task: PreflightTask, Attempt: 1, Generation: c.Generation,
+			}}}
+			observer := watcher{coordinator: c, link: link, mailbox: mailbox}
+			if reason := observer.readClaim(ctx, tip, waiting); reason == "" {
+				c.recordOwnedRef(ctx, ownedRefStep{node: link.Name, branch: branch,
+					oid: tip.OID, parent: tip.PreviousOID})
+			} else {
+				observer.reportRejectedReply(tip, reason)
+			}
+			continue
+		}
 		if tip.Kind != MessageResult {
 			continue
 		}
@@ -331,7 +348,13 @@ func (c *Coordinator) checkResult(result Result, link Link, tip ChainTip, offere
 		Binding{Node: link.Name, Branch: tip.Branch}, time.Now()); reason != "" {
 		return reason
 	}
-	if result.Assignment != offered || result.Run != c.Run || result.Task != PreflightTask {
+	if tip.Previous != MessageClaim {
+		return ReasonChain
+	}
+	if result.Assignment != offered || result.Kind != KindProbe ||
+		result.Run != c.Run || result.PlanDigest != c.PlanDigest ||
+		result.Task != PreflightTask || result.Attempt != 1 ||
+		result.Generation != c.Generation {
 		return ReasonReplay
 	}
 	if result.Report == nil {

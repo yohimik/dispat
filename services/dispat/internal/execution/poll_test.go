@@ -254,6 +254,9 @@ func TestAWithdrawalNobodySignedStopsNothing(t *testing.T) {
 		"one of another run": {
 			message: func() Withdrawal { m := valid; m.Run = "run-2"; return m }(),
 			reason:  ReasonReplay},
+		"one for another kind of work": {
+			message: func() Withdrawal { m := valid; m.Kind = KindBuild; return m }(),
+			reason:  ReasonReplay},
 		"one of another attempt": {
 			message: func() Withdrawal { m := valid; m.Attempt = 2; return m }(),
 			reason:  ReasonReplay},

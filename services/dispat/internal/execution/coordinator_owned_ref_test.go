@@ -48,7 +48,7 @@ func TestDelayedObservedClaimCannotReplaceAcknowledgedCleanupLease(t *testing.T)
 	tip, err := fixture.orchestrator.mailbox.Inspect(t.Context(), head)
 	require.NoError(t, err)
 	_, reason := fixture.coordinator.readAcknowledgement(t.Context(), "build-a", PreflightTask, 1,
-		taskOffer{branch: branch, offered: offered}, tip, withdrawn)
+		taskOffer{branch: branch, kind: KindProbe, offered: offered}, tip, withdrawn)
 	require.Empty(t, reason)
 	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
 		node: "build-a", branch: branch, oid: tip.OID, parent: tip.PreviousOID,

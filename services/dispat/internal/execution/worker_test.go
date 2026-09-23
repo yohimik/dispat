@@ -159,6 +159,81 @@ func TestWorkerAnswersAValidProbe(t *testing.T) {
 	assert.Equal(t, "1.11.0", result.Platform.Dispat)
 }
 
+// The run may cancel after the task's last progress read but before its Result
+// push. Real Git rejects the stale Result lease; only this exact, signed Cancel
+// may replace it with an Ack after the commands have stopped.
+func TestWorkerResultLeaseLostToCancellation(t *testing.T) {
+	for _, scenario := range []struct {
+		name  string
+		isOwn bool
+	}{
+		{name: "own cancellation is acknowledged", isOwn: true},
+		{name: "foreign cancellation is left alone"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			orchestrator := newMailboxFixture(t)
+			node := orchestrator.second(t)
+			branch := FormatBranch("build-a", KindBuild, time.Now())
+			assignment := probeAssignment("build-a", branch)
+			assignment.Kind, assignment.Task = KindBuild, "app:build"
+			assignment.Limits.MaxManifestBytes = 1 << 20
+			offered, err := orchestrator.mailbox.Assign(t.Context(), assignment)
+			require.NoError(t, err)
+			_, err = node.mailbox.Reread(t.Context(), branch)
+			require.NoError(t, err)
+			claimed, err := node.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+				mustMarshalValue(Claim{Header: replyHeader(*assignment), Assignment: offered}), nil)
+			require.NoError(t, err)
+
+			tip := ChainTip{Branch: branch, OID: offered, Kind: MessageAssignment}
+			task := &claimedTask{assignment: *assignment, tip: tip, claimed: claimed,
+				expectedTip: claimed}
+			task.reportPhase("build", true)
+			worker := &Worker{Node: "build-a", Mailbox: node.mailbox, Log: zerolog.Nop()}
+			seenCancel, _, _ := task.readProgress() // the last read in answerTask, before Result
+			assert.Empty(t, seenCancel)
+
+			_, err = orchestrator.mailbox.Reread(t.Context(), branch)
+			require.NoError(t, err)
+			writer := orchestrator.mailbox
+			if !scenario.isOwn {
+				otherSigner, signerErr := NewSigner("another-secret")
+				require.NoError(t, signerErr)
+				writer = NewGitMailbox(orchestrator.endpoint, orchestrator.git, otherSigner, zerolog.Nop())
+			}
+			cancel, err := writer.Advance(t.Context(), branch, claimed, MessageCancel,
+				mustMarshalValue(Withdrawal{Header: assignment.Header,
+					Assignment: offered, Tip: claimed}), nil)
+			require.NoError(t, err)
+			_, err = worker.advance(t.Context(), tip, claimed, MessageResult,
+				Result{Header: replyHeader(*assignment), Assignment: offered,
+					Status: StatusSucceeded}, nil)
+			require.ErrorIs(t, err, gitx.ErrLeaseRejected)
+
+			settled := worker.acknowledgeResultWithdrawal(t.Context(), task, claimed, zerolog.Nop())
+			assert.Equal(t, scenario.isOwn, settled)
+			head, err := orchestrator.mailbox.Reread(t.Context(), branch)
+			require.NoError(t, err)
+			if !scenario.isOwn {
+				assert.Equal(t, cancel, head.OID, "the forged tip is not acknowledged")
+				return
+			}
+			answer, err := orchestrator.mailbox.Inspect(t.Context(), head)
+			require.NoError(t, err)
+			assert.Equal(t, MessageAck, answer.Kind)
+			assert.Equal(t, cancel, answer.PreviousOID)
+			document, err := orchestrator.mailbox.Read(t.Context(), answer, 1<<20)
+			require.NoError(t, err)
+			var ack Ack
+			require.NoError(t, json.Unmarshal(document, &ack))
+			assert.Equal(t, offered, ack.Assignment)
+			assert.Equal(t, cancel, ack.Cancel)
+			assert.Equal(t, "build", ack.Phase)
+			assert.True(t, ack.CommandStarted, "the acknowledgement preserves what actually ran")
+		})
+	}
+}
+
 // TestWorkerRefusesEveryUnacceptableAssignment: one row per acceptance rule.
 // None of them is claimed, and the loop reports no progress, which is what
 // keeps a mailbox full of rubbish from holding a node awake.

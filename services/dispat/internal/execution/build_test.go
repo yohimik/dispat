@@ -53,6 +53,8 @@ func TestResultsThisRunDoesNotBelieve(t *testing.T) {
 	}{
 		"a reply naming another assignment": {
 			forge: func(r *Result) { r.Assignment = "another-oid" }, want: ReasonReplay},
+		"a reply for another kind of work": {
+			forge: func(r *Result) { r.Kind = KindPublish }, want: ReasonReplay},
 		"a reply of another run": {
 			forge: func(r *Result) { r.Run = "run-2" }, want: ReasonReplay},
 		"a reply for another task": {
