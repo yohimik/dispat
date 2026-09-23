@@ -13,26 +13,22 @@
 --- |-
   {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is ready for testing.
   This release candidate: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
+  Catch-up experiment: https://dispat.dev/next/internals/experiments/
   Worker nodes guide: https://dispat.dev/next/distributed-execution/
-  Linked repositories guide: https://dispat.dev/next/choreographed-repositories/
   Report a problem: https://github.com/yohimik/dispat/issues
 
-  Worker nodes. One release, builds on several machines.
+  Nothing repeated, nothing stranded.
 
-  Start a release on one machine and let others do the building. The machine you started on keeps the locks, the plan and the records.
+  If a library ships and an app using it fails, the next run finishes what is left, with one command and no manual step. An app with changes of its own ships anyway and picks the library up later, also when it sat out the run where the library shipped.
 
-  Everything travels over Git. The orchestrator leaves work in a mailbox repository and workers pick it up, so there are no open ports and nothing to install but dispat.
+  Shipping the library alone on the very commit the app was last released at is refused, because two tags on one commit cannot say which came first. Commit first, or ship both together.
 
-  What one machine builds, the next one can use, checked before it is used.
+  Measured, not claimed. A new release experiment breaks the app's publish after the library shipped and counts what dispat, lerna, nx and changesets each need to catch up. The table is on the site.
 
-  Publishing and credentials stay on one machine. Without a workers section, nothing changes.
-
-  First real workloads: the Linux kernel and LLVM. Two kernel build groups from a public test farm came in under the farm's own times on two cloud machines, and an LLVM release split across two workers finished sooner than on one machine. Run once each, with the same code this candidate ships. More runs to come.
-
-  If a library ships and an app using it fails, nothing is repeated: the next run finishes what is left. An app with changes of its own ships anyway and picks the library up later. One gap in this candidate: that pick-up only happens when the app is part of the run where the library ships. The next candidate closes it.
+  Worker nodes use the repository itself. The orchestrator leaves work on branches of the project's own repository and workers pick it up; another endpoint is one setting away. Publishing and credentials stay on one machine, and a stage that ran on a worker is caught up exactly like one that ran locally.
 
   Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
 
   Preview with `dispat status`; it publishes nothing.{{ if ne .Platform "discord" }}
 
-  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #distributedbuilds #releasemanagement #buildtools #orchestration #sagapattern #linux #linuxkernel #llvm #compilers #distributedsystems #terraform #docker #platformengineering{{ end }}
+  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #distributedbuilds #releasemanagement #buildtools #orchestration #sagapattern #distributedsystems #platformengineering{{ end }}

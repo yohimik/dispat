@@ -1,6 +1,6 @@
 # The release announcement
 
-Dispat's own release workflow renders a card and posts it to configured Instagram, LinkedIn, and Discord destinations.
+dispat's own release workflow renders a card and posts it to configured Instagram, LinkedIn, and Discord destinations.
 It uses the [`flow.announce`](../configuration/spaces.md#flowannounce) stage and the
 [updated-provider listing](../reference/environment.md), which other projects can use with their own announcement
 scripts.
