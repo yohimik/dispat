@@ -212,12 +212,22 @@ ENV DISPAT_TEST_COMPILER=/usr/local/tinygo/bin/tinygo
 # Keep the complete event stream on disk, but print only the summary and
 # failed tests. Dumping a full suite hides its failures behind BuildKit's
 # per-step log limit.
+#
+# The suite runs in three go test processes over an exact round-robin split
+# of its tests (`testreport test --shards`, as the integration gate of
+# Dockerfile.gotest runs six), and still leaves the one log the check below
+# reads. It waits far more than it computes, so the processes wait side by
+# side rather than one after another. Three rather than one per core of the
+# release runner, because each shard compiles the version-stamped fixtures it
+# needs with TinyGo on its own, about 3 GiB apiece while it links: four doing
+# so at once held 12 GiB, more than a 16 GB runner can spare. Each -timeout
+# bounds one shard.
 RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/gopher/go/pkg/mod,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
     DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
-      testreport test tiny-integration -- \
+      testreport test tiny-integration --shards 3 -- \
         -C /src/tests/integration -count=1 -timeout 120m \
         -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./...; \
     cp /src/coverage/testlog/tiny-integration.json /gate/integration.json; \
