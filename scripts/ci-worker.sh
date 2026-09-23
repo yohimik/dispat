@@ -55,6 +55,7 @@ node=${DISPAT_CI_WORKER_NODE:-ci-worker}
 user=dispat
 mailbox_path=/home/$user/mailbox.git
 ready_marker=/var/lib/dispat-worker-ready
+failed_marker=/var/lib/dispat-worker-failed
 
 log() { printf 'ci-worker: %s\n' "$*" >&2; }
 fail() { log "$*"; exit 1; }
@@ -120,11 +121,25 @@ write_startup_script() {
 #!/bin/sh
 # Runs as root at boot: the tools a task needs and the marker the job waits
 # for. The worker itself is installed and started over ssh afterwards, as the
-# user the ssh key metadata created.
-set -eu
+# user the ssh key metadata created. A fresh image runs its own package
+# maintenance at boot and mirrors fail now and then, so the installs are
+# retried, and a boot that still cannot install writes a failure marker with
+# the reason so the job stops waiting and says why.
+set -u
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -q
-apt-get install -y -q docker.io docker-buildx docker-compose-v2 git
+install_tools() {
+  apt-get update -q && apt-get install -y -q docker.io docker-buildx docker-compose-v2 git
+}
+tries=0
+until install_tools; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 6 ]; then
+    echo "package installation failed after $tries attempts" > /var/lib/dispat-worker-failed
+    exit 1
+  fi
+  echo "package installation failed (attempt $tries); retrying" >&2
+  sleep 20
+done
 touch /var/lib/dispat-worker-ready
 EOF
 }
@@ -141,25 +156,56 @@ await_host_keys() {
       done > "$dir/known_hosts"
       [ -s "$dir/known_hosts" ] && return
     fi
-    [ "$(date +%s)" -lt "$deadline" ] || fail "the instance published no host keys within ten minutes"
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      log "the instance published no host keys within ten minutes"
+      return 1
+    fi
     sleep 5
   done
 }
 
+# await_ready waits for the startup script's marker, and answers 1 rather
+# than failing when the machine cannot be made ready, so that create may try
+# another machine. A failure marker ends the wait at once; a machine that is
+# still silent at the deadline has its startup log printed for the record.
 await_ready() {
   deadline=$(( $(date +%s) + 900 ))
   until worker_ssh "test -e $ready_marker" 2>/dev/null; do
-    [ "$(date +%s)" -lt "$deadline" ] || fail "the instance did not finish its startup script within fifteen minutes"
+    if worker_ssh "test -e $failed_marker" 2>/dev/null; then
+      log "the instance's startup script failed: $(worker_ssh "cat $failed_marker" 2>/dev/null)"
+      return 1
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      log "the instance did not finish its startup script within fifteen minutes; its log follows"
+      worker_ssh "sudo journalctl -u google-startup-scripts.service --no-pager 2>/dev/null | tail -n 40" >&2 \
+        || log "(the instance could not be reached over ssh)"
+      return 1
+    fi
     sleep 10
   done
 }
 
+# create makes the instance and waits until it is ready to serve; a machine
+# that never becomes ready is deleted and one more is made, in the zones
+# after the one it came from, before the job is told there is none.
 create() {
   mkdir -p "$dir"
   chmod 700 "$dir"
   [ -f "$dir/key" ] || ssh-keygen -q -t ed25519 -N '' -C "dispat-ci-worker" -f "$dir/key"
   printf '%s:%s\n' "$user" "$(cat "$dir/key.pub")" > "$dir/ssh-keys"
   write_startup_script
+  if create_instance; then
+    return
+  fi
+  log "replacing the instance with a fresh one"
+  failed_zone=$(zone_of_instance)
+  delete_instance
+  zones=$(printf '%s' "$zones" | tr ',' '\n' | grep -v "^$failed_zone\$" | paste -sd, -)
+  [ -n "$zones" ] || zones=us-central1-b
+  create_instance || fail "no instance became ready to serve"
+}
+
+create_instance() {
   rm -f "$dir/ip" "$dir/zone" "$dir/machine"
   for machine in $(printf '%s' "$machines" | tr ',' ' '); do
   for zone in $(printf '%s' "$zones" | tr ',' ' '); do
@@ -187,9 +233,9 @@ create() {
   printf '%s\n' "$name" > "$dir/name"
   printf 'ssh://%s@%s%s\n' "$user" "$(cat "$dir/ip")" "$mailbox_path" > "$dir/endpoint"
   log "$(cat "$dir/machine") instance $name at $(cat "$dir/ip") in $(cat "$dir/zone"); waiting for its host keys"
-  await_host_keys
+  await_host_keys || return 1
   log "waiting for the startup script"
-  await_ready
+  await_ready || return 1
   log "ready"
 }
 
@@ -257,12 +303,19 @@ collect() {
   worker_scp "$user@$(cat "$dir/ip"):worker.log" "$dest/worker.log" || log "no worker log to collect"
 }
 
-delete() {
+# delete_instance removes the instance and what the job knows about it,
+# keeping the ssh key pair for a replacement.
+delete_instance() {
   [ -f "$dir/name" ] || { log "nothing to delete"; return; }
   log "deleting instance $(cat "$dir/name") in $(zone_of_instance)"
   run_gcloud compute instances delete "$(cat "$dir/name")" --zone "$(zone_of_instance)" --quiet \
     || log "delete reported an error; the instance deletes itself after $lifetime in any case"
-  rm -f "$dir/key" "$dir/key.pub" "$dir/name" "$dir/ip" "$dir/zone" "$dir/machine" "$dir/endpoint" "$dir/known_hosts" "$dir/ssh-keys"
+  rm -f "$dir/name" "$dir/ip" "$dir/zone" "$dir/machine" "$dir/endpoint" "$dir/known_hosts"
+}
+
+delete() {
+  delete_instance
+  rm -f "$dir/key" "$dir/key.pub" "$dir/ssh-keys"
 }
 
 case "$command" in
