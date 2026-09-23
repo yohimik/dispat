@@ -130,7 +130,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o := &options{}
 	o.root = fs.String("root", ".", "monorepo root folder")
 	o.cfgName = fs.String("config", "dispat.json",
-		"config file name, relative to --root; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
+		"config file, a path relative to --root or an absolute path; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
 	o.configs = fs.StringArray("configs", nil,
 		"import a repository-local config, relative to the control repository root (repeatable; imports imply --polyrepo)")
 	o.polyrepo = fs.Bool("polyrepo", false,
