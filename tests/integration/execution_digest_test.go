@@ -71,6 +71,32 @@ func planDigestOf(t *testing.T, res harness.RunResult) string {
 	return ""
 }
 
+// A plan whose final source identity cannot be read must not be advertised as
+// fixed, even though the preceding history walk completed successfully.
+func TestExecutionPlanDigestRefusesUnreadableHead(t *testing.T) {
+	for _, args := range [][]string{{"status"}, {"release"}, {"run", "build", "--since", "all"}} {
+		t.Run(args[0], func(t *testing.T) {
+			r := executionDigestRepo(t, executionDigestConfig(echoBuild, models.PathList{"dist"}, executionWorkers(1, "build-a")))
+			fault := harness.NewGitFault(t, harness.GitFault{
+				Pattern: "*rev-parse HEAD^{commit}", Code: 128,
+			})
+			env := append(fault.Env(), "DISPAT_IT_EXECUTION_SECRET="+executionSecret, "DISPAT_UNSAFE_DISABLE_LOCK=")
+			failed := r.CommandEnv(env, append(args, "--log-format", "json")...)
+			require.NotZero(t, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+			assert.Equal(t, 1, fault.Matches())
+			assert.Contains(t, failed.Stdout+failed.Stderr, "cannot fix the plan for distributed execution")
+			assert.Contains(t, failed.Stdout+failed.Stderr, harness.GitFaultMarker)
+			for _, event := range failed.Events {
+				assert.NotEqual(t, "plan fixed", event.Str("message"), "unreadable source identity cannot name a plan")
+				assert.NotEqual(t, "task assigned", event.Str("message"), "no worker may act on an unnamed plan")
+			}
+			assert.Empty(t, r.TagList())
+			assert.False(t, remoteHoldsLock(t, r.Git("remote", "get-url", "origin")), "planning failure releases any acquired lock")
+			assert.NotEmpty(t, planDigestOf(t, r.StatusOK("--log-format", "json")), "a healthy read can plan again")
+		})
+	}
+}
+
 // executionDigestRepo is the fixture every digest below is taken of: two
 // packages, one consuming the other, with a remote to clone from.
 func executionDigestRepo(t *testing.T, cfg models.File) *harness.Repo {

@@ -254,6 +254,9 @@ func TestExecutionForgedReadyCannotAuthorizePublication(t *testing.T) {
 		"unparseable header": {
 			mangle: executionRebind("issuedAt", []any{"not a time"}), reason: "unreadable",
 		},
+		"unsupported protocol": {
+			mangle: executionRebind("protocol", executionProtocolVersion+1), reason: "protocol",
+		},
 		"names another claim": {
 			mangle: executionRebind("claim", strings.Repeat("0", 40)), reason: "replay",
 		},

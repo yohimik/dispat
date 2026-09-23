@@ -447,68 +447,80 @@ func TestExecutionOutputInstallRollsBackEarlierRoots(t *testing.T) {
 	}
 }
 
-// TestExecutionOutputInstallPermissionFailureCanRetry: a write-denied second
-// destination fails at the real final rename, after the first root has been
-// replaced. The old first root must be restored, another independent package
-// must still release, and repairing the directory must permit one publication
-// of the failed package on the next run.
+// TestExecutionOutputInstallPermissionFailureCanRetry: denying a move of an
+// existing root or the final rename of a new root leaves the old output in
+// place. Independent work can release, and repairing the destination permits
+// one publication of the failed package on the next run.
 func TestExecutionOutputInstallPermissionFailureCanRetry(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "published.log")
-	rig := newExecutionPlacementRig(t, []string{"assets", "spare"},
-		func(*harness.Repo) string {
-			return `mkdir -p a-dist z-assets/nested && ` +
-				`printf new > a-dist/new.txt && printf new > z-assets/nested/new.txt`
-		}, func(cfg *models.File) {
-			cfg.BuildOutputs = []string{"a-dist", "z-assets/nested"}
-			cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
-			cfg.Scripts["publish"] = models.Script{fmt.Sprintf(
-				"printf '%%s\\n' \"$DISPAT_PACKAGE\" >> %q", marker)}
-			cfg.Execution.Concurrency = models.Int(2)
+	for _, tc := range []struct {
+		name                      string
+		isExistingRootMoveBlocked bool
+	}{
+		{name: "existing root cannot move aside", isExistingRootMoveBlocked: true},
+		{name: "new root cannot be installed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "published.log")
+			rig := newExecutionPlacementRig(t, []string{"assets", "spare"},
+				func(*harness.Repo) string {
+					return `mkdir -p a-dist z-assets/nested && ` +
+						`printf new > a-dist/new.txt && printf new > z-assets/nested/new.txt`
+				}, func(cfg *models.File) {
+					cfg.BuildOutputs = []string{"a-dist", "z-assets/nested"}
+					cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+					cfg.Scripts["publish"] = models.Script{fmt.Sprintf(
+						"printf '%%s\\n' \"$DISPAT_PACKAGE\" >> %q", marker)}
+					cfg.Execution.Concurrency = models.Int(2)
+				})
+			rig.repo.WriteFile(".gitignore", "a-dist/\nz-assets/\n")
+			rig.repo.Commit("chore(assets,spare): ignore build outputs")
+			rig.repo.WriteFile("packages/assets/a-dist/old.txt", "old\n")
+			blocked := rig.repo.Path("packages", "assets", "z-assets")
+			if tc.isExistingRootMoveBlocked {
+				blocked = rig.repo.Path("packages", "assets")
+			}
+			require.NoError(t, os.MkdirAll(blocked, 0o755))
+			require.NoError(t, os.Chmod(blocked, 0o555))
+			t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+			probeErr := os.WriteFile(filepath.Join(blocked, "permission-probe"), []byte("x"), 0o600)
+			if probeErr == nil {
+				t.Skip("this user can write into a 0555 directory")
+			}
+			require.True(t, os.IsPermission(probeErr), "fixture must fail due to directory permissions: %v", probeErr)
+			worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
+				func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(2) }), 0)
+
+			failed := rig.release()
+
+			require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+			assert.True(t, harness.IsCodePresentForPackage(executionEvents(failed), executionIntegrityCode, "assets"),
+				"the write-denied root fails its own prerequisite")
+			assert.Contains(t, failed.Stdout+failed.Stderr, "permission denied",
+				"the refused install reached the destination filesystem")
+			assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "packages/assets/a-dist/old.txt"))
+			assert.NoFileExists(t, rig.repo.Path("packages", "assets", "a-dist", "new.txt"))
+			assert.NoDirExists(t, rig.repo.Path("packages", "assets", "z-assets", "nested"))
+			assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("packages", "assets")))
+			assert.False(t, rig.repo.IsTagged("assets@0.1.0"), "no partial installation can publish")
+			assert.True(t, rig.repo.IsTagged("spare@0.1.0"), "independent work still releases")
+			firstPublications, err := os.ReadFile(marker)
+			require.NoError(t, err)
+			assert.Equal(t, "spare\n", string(firstPublications))
+
+			require.NoError(t, os.Chmod(blocked, 0o755))
+			retried := rig.release()
+
+			require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+			assert.Equal(t, "new", readRepoFile(t, rig.repo, "packages/assets/a-dist/new.txt"))
+			assert.Equal(t, "new", readRepoFile(t, rig.repo, "packages/assets/z-assets/nested/new.txt"))
+			assert.ElementsMatch(t, []string{"assets@0.1.0", "spare@0.1.0"}, rig.repo.TagList())
+			content, err := os.ReadFile(marker)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, []string{"spare", "assets"}, strings.Fields(string(content)),
+				"each package published exactly once across the failed run and retry")
+			stopAll(t, []*executionWorker{worker})
 		})
-	rig.repo.WriteFile(".gitignore", "a-dist/\nz-assets/\n")
-	rig.repo.Commit("chore(assets,spare): ignore build outputs")
-	rig.repo.WriteFile("packages/assets/a-dist/old.txt", "old\n")
-	blocked := rig.repo.Path("packages", "assets", "z-assets")
-	require.NoError(t, os.MkdirAll(blocked, 0o755))
-	require.NoError(t, os.Chmod(blocked, 0o555))
-	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
-	probeErr := os.WriteFile(filepath.Join(blocked, "permission-probe"), []byte("x"), 0o600)
-	if probeErr == nil {
-		t.Skip("this user can write into a 0555 directory")
 	}
-	require.True(t, os.IsPermission(probeErr), "fixture must fail due to directory permissions: %v", probeErr)
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
-		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(2) }), 0)
-
-	failed := rig.release()
-
-	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
-	assert.True(t, harness.IsCodePresentForPackage(executionEvents(failed), executionIntegrityCode, "assets"),
-		"the write-denied root fails its own prerequisite")
-	assert.Contains(t, failed.Stdout+failed.Stderr, "permission denied",
-		"the refused install reached the destination filesystem")
-	assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "packages/assets/a-dist/old.txt"))
-	assert.NoFileExists(t, rig.repo.Path("packages", "assets", "a-dist", "new.txt"))
-	assert.NoDirExists(t, filepath.Join(blocked, "nested"))
-	assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("packages", "assets")))
-	assert.False(t, rig.repo.IsTagged("assets@0.1.0"), "no partial installation can publish")
-	assert.True(t, rig.repo.IsTagged("spare@0.1.0"), "independent work still releases")
-	firstPublications, err := os.ReadFile(marker)
-	require.NoError(t, err)
-	assert.Equal(t, "spare\n", string(firstPublications))
-
-	require.NoError(t, os.Chmod(blocked, 0o755))
-	retried := rig.release()
-
-	require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
-	assert.Equal(t, "new", readRepoFile(t, rig.repo, "packages/assets/a-dist/new.txt"))
-	assert.Equal(t, "new", readRepoFile(t, rig.repo, "packages/assets/z-assets/nested/new.txt"))
-	assert.ElementsMatch(t, []string{"assets@0.1.0", "spare@0.1.0"}, rig.repo.TagList())
-	content, err := os.ReadFile(marker)
-	require.NoError(t, err)
-	assert.ElementsMatch(t, []string{"spare", "assets"}, strings.Fields(string(content)),
-		"each package published exactly once across the failed run and retry")
-	stopAll(t, []*executionWorker{worker})
 }
 
 // asideLeftoverNames is every folder an interrupted installation would have

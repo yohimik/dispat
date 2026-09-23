@@ -23,6 +23,8 @@ type authorizedAckCase struct {
 	isWrongCancel    bool
 	isWrongKind      bool
 	isWrongSignature bool
+	isMalformed      bool
+	isWrongProtocol  bool
 }
 
 func TestExecutionAuthorizedWithdrawalNeedsItsOwnAcknowledgement(t *testing.T) {
@@ -31,6 +33,8 @@ func TestExecutionAuthorizedWithdrawalNeedsItsOwnAcknowledgement(t *testing.T) {
 		{name: "acknowledges an earlier tip", isWrongCancel: true},
 		{name: "acknowledges another kind of work", isWrongKind: true},
 		{name: "signed with another key", isWrongSignature: true},
+		{name: "signed unreadable acknowledgement", isMalformed: true},
+		{name: "signed unsupported protocol", isWrongProtocol: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) { runAuthorizedWithdrawalAck(t, scenario) })
 	}
@@ -85,18 +89,29 @@ func runAuthorizedWithdrawalAck(t *testing.T, scenario authorizedAckCase) {
 	if scenario.isWrongKind {
 		ack = ack.set("kind", "build")
 	}
+	if scenario.isWrongProtocol {
+		ack = ack.set("protocol", executionProtocolVersion+1)
+	}
 	secret := executionSecret
 	if scenario.isWrongSignature {
 		secret = "another-node-secret"
 	}
-	worker.pushSigned(branch, cancelOID, "ack", ack, "", true, secret)
+	if scenario.isMalformed {
+		writer := newExecutionFakeOrchestrator(t, rig.mailbox)
+		malformed := writer.commit(executionMessageOptions{secret: executionSecret, kind: "ack", isSigned: true},
+			[]byte("{"), cancelOID)
+		bareGit(t, rig.mailbox, "update-ref", "refs/heads/"+branch, malformed)
+	} else {
+		worker.pushSigned(branch, cancelOID, "ack", ack, "", true, secret)
+	}
 	res := release.Wait()
 	isFinished = true
 
 	require.NotEqual(t, 0, res.Code, "the interrupted release cannot publish\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Empty(t, executionReleaseTags(rig))
 	assert.Empty(t, executionProbedPackages(rig, "publish"))
-	if !scenario.isWrongCancel && !scenario.isWrongKind && !scenario.isWrongSignature {
+	if !scenario.isWrongCancel && !scenario.isWrongKind && !scenario.isWrongSignature &&
+		!scenario.isMalformed && !scenario.isWrongProtocol {
 		settled, isFound := executionLine(res, "the withdrawn attempt was acknowledged")
 		require.True(t, isFound, "the node stopped before its command\nstdout:\n%s", res.Stdout)
 		assert.Equal(t, false, settled["commandStarted"])
@@ -108,11 +123,17 @@ func runAuthorizedWithdrawalAck(t *testing.T, scenario authorizedAckCase) {
 	}
 	rejected, isFound := executionLine(res, "stale or foreign receipt ignored")
 	require.True(t, isFound, "a different acknowledgement cannot prove quiescence\nstdout:\n%s", res.Stdout)
-	if scenario.isWrongCancel || scenario.isWrongKind {
-		assert.Equal(t, "replay", rejected.Str("reason"))
-	} else {
-		assert.Equal(t, "signature", rejected.Str("reason"))
+	wantReason := "replay"
+	if scenario.isWrongSignature {
+		wantReason = "signature"
 	}
+	if scenario.isMalformed {
+		wantReason = "unreadable"
+	}
+	if scenario.isWrongProtocol {
+		wantReason = "protocol"
+	}
+	assert.Equal(t, wantReason, rejected.Str("reason"))
 	_, isUnknown := executionLine(res, executionUnknownPublicationMessage)
 	assert.True(t, isUnknown, "without an authentic acknowledgement the outcome remains unknown\nstdout:\n%s", res.Stdout)
 	assert.True(t, remoteHoldsLock(t, rig.origin), "the unanswered authorization keeps its lock")
