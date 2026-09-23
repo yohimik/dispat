@@ -1,6 +1,10 @@
 # The guide shares dispat's major/minor line and carries its own patches.
 versionGroup: cli
 tagFormat: specs/agent-guide/v{version}
+# The guide's tests perform releases on throwaway repositories, and a worker
+# refuses release initiation by design (E226), so every stage of this package
+# stays on the machine that holds release authority.
+runOnly: orchestrator
 
 scripts:
   verify-guide: sh verify.sh
