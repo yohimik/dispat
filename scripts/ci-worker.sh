@@ -225,7 +225,14 @@ start() {
   "logFormat": "json"
 }
 EOF
-  worker_ssh "setsid -f sh -c 'DISPAT_EXECUTION_SECRET=\$(cat ~/node/secret) exec dispat worker --root ~/node --state-dir ~/state --idle-timeout 0 --log-level debug' > ~/worker.log 2>&1 < /dev/null"
+  # The commit this machine serves. A task's commands inherit the worker's
+  # environment, and scripts/buildx-cache.sh stamps every coverage profile
+  # with GITHUB_SHA when it is set and with the checkout's HEAD otherwise;
+  # on this machine HEAD is the snapshot the node built from, so without the
+  # variable the profiles it sends back would name a commit the job's own
+  # profiles do not, and the coverage freshness gate would refuse the set.
+  commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
+  worker_ssh "setsid -f sh -c 'GITHUB_SHA=$commit DISPAT_EXECUTION_SECRET=\$(cat ~/node/secret) exec dispat worker --root ~/node --state-dir ~/state --idle-timeout 0 --log-level debug' > ~/worker.log 2>&1 < /dev/null"
   sleep 3
   worker_ssh "pgrep -x dispat >/dev/null && tail -n 3 ~/worker.log" \
     || fail "the worker did not stay up; its log follows: $(worker_ssh 'cat ~/worker.log' 2>/dev/null)"
