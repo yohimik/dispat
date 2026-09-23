@@ -10,12 +10,15 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -135,4 +138,51 @@ func TestAPublisherPrefersTheNodeThatBuilt(t *testing.T) {
 	second, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "b-node")
 	require.NoError(t, err)
 	assert.Equal(t, "a-node", second.Node, "and a busy preference is passed over, not waited for")
+}
+
+// TestARefusedAuthorizationPushIsNoUnknownPublication: an authorization push
+// the remote refused provably never became the branch's value, so nobody can
+// have read it and nothing can have started under it. The run withdraws the
+// waiting publisher as it does after any refused authorization, reports no
+// unknown publication and retains no lock. A push with no answer is the case
+// that stays unknown: the authorization may already have been read, so its
+// repository's lock stays for an operator.
+func TestARefusedAuthorizationPushIsNoUnknownPublication(t *testing.T) {
+	for name, tc := range map[string]struct {
+		failure  error
+		retained []string
+	}{
+		"a push the remote refused": {
+			failure: &messagePushError{cause: errors.New("the lease was rejected"), isRejected: true}},
+		"a failure preparing the message": {
+			failure: errors.New("writing the go document")},
+		"a push with no answer": {
+			failure:  &messagePushError{cause: errors.New("the connection was reset")},
+			retained: []string{"web"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, silentPreflight)
+			fixture.coordinator.Timeouts.Cancel = 200 * time.Millisecond
+			pool := NewPool([]Link{{Name: "build-a", Endpoint: fixture.orchestrator.endpoint}},
+				[]*NodeReport{linuxNode(1)}, LocalNode{Name: "here", Capacity: 1}, zerolog.Nop())
+			lease, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
+			require.NoError(t, err)
+			branch := FormatBranch("build-a", KindPublish, time.Now())
+
+			err = fixture.coordinator.reportLostAuthorization(t.Context(), lease, "core:publish", 1, "web",
+				taskOffer{branch: branch, kind: KindPublish, offered: "assignment-oid"},
+				taskReply{kind: MessageReady, commit: "ready-oid"}, tc.failure)
+
+			require.Error(t, err)
+			if tc.retained == nil {
+				require.ErrorIs(t, err, tc.failure, "the package fails with what refused the authorization")
+				assert.Empty(t, fixture.coordinator.RetainedRepositories(), "no lock is retained")
+				assert.Empty(t, fixture.coordinator.UnknownPublications(), "and nothing is unknown")
+				assert.NotEqual(t, CodePublicationUnknown, config.DiagnosticCode(err))
+				return
+			}
+			assert.Equal(t, tc.retained, fixture.coordinator.RetainedRepositories())
+			assert.Equal(t, CodePublicationUnknown, config.DiagnosticCode(err))
+		})
+	}
 }

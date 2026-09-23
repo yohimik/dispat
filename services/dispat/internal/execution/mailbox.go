@@ -159,7 +159,10 @@ func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, ki
 	if errors.Is(err, gitx.ErrLeaseRejected) {
 		resolved, resolveErr := m.resolveLostPush(ctx, branch, oid, err)
 		if resolveErr != nil {
-			return "", &messagePushError{cause: resolveErr}
+			// The remote answered this push, and answered it with a refusal:
+			// whether the re-read then failed or found another object, the
+			// message this call wrote never became the branch's value.
+			return "", &messagePushError{cause: resolveErr, isRejected: true}
 		}
 		return resolved, nil
 	}
@@ -176,8 +179,13 @@ func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, ki
 // failure preparing a message. After a push starts, a missing response cannot
 // establish what another machine already received, even if the ref is later
 // removed or reset to its previous value.
+//
+// A refusal is the one answer that does establish it. isRejected marks a push
+// the remote answered with a rejected lease: the ref never took this call's
+// object, so nobody can have read the message from it.
 type messagePushError struct {
-	cause error
+	cause      error
+	isRejected bool
 }
 
 func (e *messagePushError) Error() string { return e.cause.Error() }

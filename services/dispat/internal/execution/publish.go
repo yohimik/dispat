@@ -333,14 +333,21 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 	return nil
 }
 
-// reportLostAuthorization distinguishes a local preparation failure from a
-// push whose outcome is unknown. Only the former proves no authorization was
-// sent. The current remote tip is not historical evidence: an authorization
-// may have been read before somebody deleted or rewound the branch.
+// reportLostAuthorization distinguishes an authorization that provably never
+// reached the branch from a push whose outcome is unknown.
+//
+// Two failures prove it never did: a local failure preparing the message,
+// which happens before any push, and a push the remote refused, whose lease
+// was rejected so that the branch never took the message. Both withdraw the
+// waiting publisher exactly as a refused authorization does; the attempt stays
+// marked authorized, so no second authorization can follow either way. Every
+// other push failure is a push with no answer, and the current remote tip is
+// not historical evidence about it: an authorization may have been read before
+// somebody deleted or rewound the branch, so that outcome is unknown.
 func (c *Coordinator) reportLostAuthorization(ctx context.Context, lease *Lease, task string,
 	attempt int, repository string, offer taskOffer, reply taskReply, err error) error {
 	var pushed *messagePushError
-	if !errors.As(err, &pushed) {
+	if !errors.As(err, &pushed) || pushed.isRejected {
 		return c.withdrawPublication(ctx, lease, task, attempt, offer, reply, err)
 	}
 	lease.Leak(LeakTransport)

@@ -391,8 +391,10 @@ in this run, its dependents are blocked, and the run exits non-zero.
 
 A failed response to an authorization push is also `E228`: the worker may already have received permission and
 started publishing. A missing branch, or one reset to its earlier state, cannot prove otherwise. The run retains
-the repository's release lock and any coordination evidence still present. A failure preparing the authorization
-locally happens before a push; dispat withdraws that waiting attempt and waits for its acknowledgement instead.
+the repository's release lock and any coordination evidence still present. Two failures do prove that no node read
+the authorization: a failure preparing it locally, which happens before any push, and a push the remote refused,
+because a rejected lease means the branch never took it. For either one dispat withdraws the waiting attempt, waits
+for its acknowledgement, fails the package at the authorization and gives the lock back.
 
 If the publisher never acknowledged, the release lock of the repository it was publishing into is **retained**. The
 uncertain publication's authorization ref is also retained, whether the node acknowledged after starting publish or

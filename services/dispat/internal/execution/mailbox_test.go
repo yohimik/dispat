@@ -294,7 +294,38 @@ func TestMailboxResolvesALostPushResponse(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gitx.ErrLeaseRejected)
+		var pushed *messagePushError
+		require.ErrorAs(t, err, &pushed)
+		assert.True(t, pushed.isRejected,
+			"a refusal is the one push failure that proves the message never became the branch")
 	})
+
+	t.Run("the remote could not be read after the refusal", func(t *testing.T) {
+		fixture.mailbox.remote = &unreadableAfterRefusalTransport{real: fixture.git}
+		defer func() { fixture.mailbox.remote = fixture.git }()
+
+		_, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+			mustMarshal(t, Claim{Assignment: offered, Header: Header{Task: "third"}}), nil)
+
+		var pushed *messagePushError
+		require.ErrorAs(t, err, &pushed)
+		assert.True(t, pushed.isRejected, "the push was still refused, whatever the re-read found")
+	})
+}
+
+// unreadableAfterRefusalTransport refuses the push the real remote refuses and
+// then cannot read the remote back.
+type unreadableAfterRefusalTransport struct {
+	*gitx.LocalGitx
+	real *gitx.LocalGitx
+}
+
+func (t *unreadableAfterRefusalTransport) PushAdvance(ctx context.Context, remote, oid, branch, expectedOld string) error {
+	return t.real.PushAdvance(ctx, remote, oid, branch, expectedOld)
+}
+
+func (t *unreadableAfterRefusalTransport) ListRemoteHeads(context.Context, string, string) ([]gitx.RemoteHead, error) {
+	return nil, errors.New("the remote hung up")
 }
 
 // lostResponseTransport applies a leased push and then reports that it was
