@@ -167,7 +167,7 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 			return nil, config.WithDiagnostic("E336", fmt.Errorf(
 				"E336: repository %s: resolve release-lock push destination: %w", r.repo.Name, resolveErr))
 		}
-		lock := &release.Lock{Git: r.git, Remote: lockRemote, Log: r.git.Log}
+		lock := &release.Lock{Git: r.git, Remote: lockRemote, Log: r.git.Log, Run: w.app.runID}
 		releaseMutation, err := r.git.AcquireMutation(ctx)
 		if err == nil {
 			err = lock.Acquire(ctx)

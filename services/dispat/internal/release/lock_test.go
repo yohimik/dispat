@@ -181,6 +181,49 @@ func TestLockMessagesAreUniquePerAttempt(t *testing.T) {
 	}
 }
 
+// TestLockMessageNamesADistributedRun: a run that delegates work writes its run
+// id into the tag, because a run that ends holding its lock has to be findable
+// from the lock (CCME §28.6, vector 29): the run id is what its coordination
+// branches carry. A run with no run id writes the message it always wrote,
+// line for line.
+func TestLockMessageNamesADistributedRun(t *testing.T) {
+	git := &fakeLockGit{}
+	distributed := newLock(git, &bytes.Buffer{})
+	distributed.Run = "6f1a9f0d2b90c8f96f1a9f0d2b90c8f9"
+	require.NoError(t, distributed.Acquire(context.Background()))
+	local := newLock(git, &bytes.Buffer{})
+	require.NoError(t, local.Acquire(context.Background()))
+
+	require.Len(t, git.messages, 2)
+	assert.True(t, strings.HasSuffix(git.messages[0], "\nrun 6f1a9f0d2b90c8f96f1a9f0d2b90c8f9\n"),
+		"the run is the last line of a distributed run's lock: %q", git.messages[0])
+	assert.NotContains(t, git.messages[1], "\nrun ", "a run with no run id names none")
+	lines := strings.Split(strings.TrimSuffix(git.messages[1], "\n"), "\n")
+	require.Len(t, lines, 6, "the local message keeps its shape: %q", git.messages[1])
+	assert.Equal(t, "dispat release lock", lines[0])
+	assert.Empty(t, lines[1])
+	for index, prefix := range []string{"host ", "pid ", "at ", "attempt "} {
+		assert.True(t, strings.HasPrefix(lines[2+index], prefix), "line %d is %q", 2+index, lines[2+index])
+	}
+}
+
+// TestLockRefusalNamesTheHoldingRun: a refusal met by a distributed run's lock
+// names that run, which is the one fact an operator needs to find the
+// coordination branches it left before the lock may be removed.
+func TestLockRefusalNamesTheHoldingRun(t *testing.T) {
+	git := &inspectingLockGit{
+		fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}},
+		message: "dispat release lock\n\nhost ci-7\npid 4242\nat " +
+			time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano) +
+			"\nattempt dispat-release-lock-attempt-someone-else\nrun 0123456789abcdef0123456789abcdef\n",
+	}
+	lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&bytes.Buffer{})}
+
+	err := lock.Acquire(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "host ci-7 pid 4242 run 0123456789abcdef0123456789abcdef")
+}
+
 // TestLockReleaseReportsFailuresAndCarriesOn: the end of a run is no place to
 // give up. A remote that will not take the delete is said out loud, with the
 // remedy the next run's refusal will echo, and the local half is still cleaned

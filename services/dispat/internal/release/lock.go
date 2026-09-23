@@ -72,6 +72,13 @@ type Lock struct {
 	Git    LockGitx
 	Remote string
 	Log    zerolog.Logger
+	// Run names the distributed run taking the lock, and is empty for a run
+	// that delegates nothing. It is written into the tag message, because a
+	// run that ends holding its lock has to be findable from it (CCME §28.6):
+	// the run id is what every coordination branch of that run carries, and an
+	// operator reading the lock has no other way to learn which branches to
+	// settle before removing it.
+	Run string
 
 	// held records that this run, and not some earlier one, put the tag on the
 	// remote. Release does nothing without it, because deleting a lock nobody
@@ -97,7 +104,7 @@ func (l *Lock) Acquire(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("creating a release lock identity: %w", err)
 	}
-	if err := l.Git.CreateTag(ctx, l.localTag, lockMessage(l.localTag), "HEAD"); err != nil {
+	if err := l.Git.CreateTag(ctx, l.localTag, lockMessage(l.localTag, l.Run), "HEAD"); err != nil {
 		return fmt.Errorf("creating the release lock tag: %w", err)
 	}
 	oid, err := l.Git.TagObject(ctx, l.localTag)
@@ -263,14 +270,16 @@ func carriesAttempt(message, attempt string) bool {
 }
 
 // describeHolder turns the remote lock tag's message into "held for 3h12m by
-// host ci-7 pid 4242", or nothing when the message is absent or unparsed.
-// The refusal is already correct without it; this is the difference between
-// "somebody holds the lock" and knowing whether that somebody is still alive.
+// host ci-7 pid 4242", followed by "run <id>" when a distributed run holds it,
+// or nothing when the message is absent or unparsed. The refusal is already
+// correct without it; this is the difference between "somebody holds the
+// lock" and knowing whether that somebody is still alive, and the run id is
+// what finds the coordination branches a distributed holder left behind.
 func describeHolder(msg string) string {
 	if msg == "" {
 		return ""
 	}
-	var host, pid string
+	var host, pid, run string
 	var at time.Time
 	for _, line := range strings.Split(msg, "\n") {
 		switch {
@@ -280,12 +289,18 @@ func describeHolder(msg string) string {
 			pid = strings.TrimPrefix(line, "pid ")
 		case strings.HasPrefix(line, "at "):
 			at, _ = time.Parse(time.RFC3339Nano, strings.TrimPrefix(line, "at "))
+		case strings.HasPrefix(line, "run "):
+			run = strings.TrimPrefix(line, "run ")
 		}
 	}
 	if host == "" || at.IsZero() {
 		return ""
 	}
-	return fmt.Sprintf("held for %s by host %s pid %s", time.Since(at).Round(time.Second), host, pid)
+	holder := fmt.Sprintf("held for %s by host %s pid %s", time.Since(at).Round(time.Second), host, pid)
+	if run != "" {
+		holder += " run " + run
+	}
+	return holder
 }
 
 // lockMessage is the body of the lock tag, and the reason two runs can never
@@ -295,14 +310,23 @@ func describeHolder(msg string) string {
 // second and its message. Two runs tagging the same commit in the same second
 // under the same identity with the same message would produce one object, and
 // pushing an object the remote already has under a ref it already has is not a
-// rejection — it is a no-op that succeeds. Both runs would then believe they
+// rejection: it is a no-op that succeeds. Both runs would then believe they
 // held the lock. The host, the process id and a nanosecond timestamp are here
 // to make that impossible; they are worth reading in `git show` besides.
-func lockMessage(attempt string) string {
+//
+// A distributed run adds a `run` line naming itself, which is the documented
+// place CCME §28.6 asks for: the run id is what the coordination branches of
+// an abandoned run are found by. A run that delegates nothing has no run id,
+// and its message is the one it has always been.
+func lockMessage(attempt, run string) string {
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown"
 	}
-	return fmt.Sprintf("dispat release lock\n\nhost %s\npid %d\nat %s\nattempt %s\n",
+	message := fmt.Sprintf("dispat release lock\n\nhost %s\npid %d\nat %s\nattempt %s\n",
 		host, os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano), attempt)
+	if run != "" {
+		message += "run " + run + "\n"
+	}
+	return message
 }

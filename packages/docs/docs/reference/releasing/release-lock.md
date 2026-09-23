@@ -71,7 +71,7 @@ git fetch origin tag dispat-release-lock          # bring it here
 git show dispat-release-lock                      # who wrote it, and when
 ```
 
-The tag message names the host, the process, and the moment the lock was taken:
+The tag message names the host, the process, the moment the lock was taken and the attempt that took it:
 
 ```
 dispat release lock
@@ -79,9 +79,18 @@ dispat release lock
 host ci-runner-7
 pid 3412
 at 2026-08-12T05:41:09.882374Z
+attempt dispat-release-lock-attempt-9d2c4e7a1b3f5d6e8a0c2b4d6f8e1a3c
+run 6f1a9f0d2b90c8f96f1a9f0d2b90c8f9
 ```
 
-Confirm that run is genuinely gone. Then delete the tag and release again:
+The `run` line is present only when the release delegates work to [worker nodes](../../distributed-execution.md). It
+is the run id every coordination branch of that run carries, and it is the place dispat records it so that a run
+which ended holding its lock can be found from the lock. A later run refused by this lock quotes the same facts,
+including the run.
+
+Confirm that run is genuinely gone. A lock that names a run is cleared in the order
+[a lock a distributed run retained](#a-lock-a-distributed-run-retained) gives, because a worker of that run may hold
+a publication it was authorized to start. Any other lock is cleared by deleting the tag and releasing again:
 
 ```sh
 git push origin --delete dispat-release-lock
@@ -163,7 +172,7 @@ run would be handing over an exclusion that does not exclude.
 The log line says so, names the run and points here:
 
 ```
-ERR release lock retained code=E228 category=publication-unknown run=6f1a9f0d2b90c8f9 tag=dispat-release-lock
+ERR release lock retained code=E228 category=publication-unknown run=6f1a9f0d2b90c8f96f1a9f0d2b90c8f9 tag=dispat-release-lock
 ```
 
 The uncertain publication's authorization ref is retained even when its node acknowledged after starting publish.

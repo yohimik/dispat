@@ -263,7 +263,7 @@ func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func
 			Str("remote", gitx.RedactURL(a.pushRemote())).Msg("unable to create the release lock tag")
 		return nil, nil, fmt.Errorf("resolve release-lock push destination: %w", resolveErr)
 	}
-	lock := &release.Lock{Git: a.git, Remote: lockRemote, Log: a.log}
+	lock := &release.Lock{Git: a.git, Remote: lockRemote, Log: a.log, Run: a.runID}
 	if err := lock.Acquire(ctx); err != nil {
 		a.log.Error().Err(err).Str("tag", release.LockTagName).Str("remote", gitx.RedactURL(a.pushRemote())).
 			Str("remedy", release.LockRemedy).Msg("unable to create the release lock tag")

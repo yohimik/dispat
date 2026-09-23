@@ -2,12 +2,14 @@ package app
 
 import (
 	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
 // What the lock does around a release is a black-box claim and lives in
@@ -90,4 +92,56 @@ func TestPushRemoteResolution(t *testing.T) {
 			assert.Equal(t, tc.want, a.pushRemote())
 		})
 	}
+}
+
+// TestReleaseLocksNameTheDistributedRun: the run id a distributed run was
+// named with before it locked anything reaches the lock tag on both
+// acquisition paths, a single history's and a fleet's, because the lock is
+// the documented place an abandoned run is found from (CCME §28.6). A run
+// that delegates nothing has no run id and writes no run line.
+func TestReleaseLocksNameTheDistributedRun(t *testing.T) {
+	t.Setenv(lockDisableEnv, "")
+	require.NoError(t, os.Unsetenv(lockDisableEnv))
+	const run = "6f1a9f0d2b90c8f96f1a9f0d2b90c8f9"
+
+	t.Run("a single history", func(t *testing.T) {
+		for name, runID := range map[string]string{"distributed": run, "local": ""} {
+			t.Run(name, func(t *testing.T) {
+				root, a := guardRepo(t, &config.File{Run: &config.RunConfig{}})
+				origin := t.TempDir()
+				out, err := exec.Command("git", "init", "-q", "--bare", origin).CombinedOutput()
+				require.NoError(t, err, "%s", out)
+				recordGit(t, root, "remote", "add", "origin", origin)
+				a.runID = runID
+
+				_, unlock, err := a.acquireReleaseLocks(t.Context())
+				require.NoError(t, err)
+				message, err := a.git.RemoteTagMessage(t.Context(), "origin", gitx.LockTagName)
+				require.NoError(t, err)
+				require.NoError(t, unlock())
+
+				if runID == "" {
+					assert.NotContains(t, message, "\nrun ")
+					return
+				}
+				assert.Contains(t, message, "\nrun "+run+"\n")
+			})
+		}
+	})
+
+	t.Run("a fleet", func(t *testing.T) {
+		w, _ := recordFixture(t, false, false)
+		source := w.byName["source"]
+		w.app.cfg.UnsafeDisableLock = false
+		source.repo.Config.UnsafeDisableLock = false
+		w.ordered = []*repositoryRecord{source}
+		w.app.runID = run
+
+		unlock, err := w.acquire(t.Context())
+		require.NoError(t, err)
+		message, err := source.git.RemoteTagMessage(t.Context(), "origin", gitx.LockTagName)
+		require.NoError(t, err)
+		require.NoError(t, unlock())
+		assert.Contains(t, message, "\nrun "+run+"\n")
+	})
 }
