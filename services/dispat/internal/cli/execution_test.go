@@ -96,17 +96,18 @@ func TestWorkerAuthorityGuardReportsTheRefusal(t *testing.T) {
 	})
 }
 
-// TestWorkerFlagShapeIsAUsageError: a `--worker` value is name=endpoint with
-// both halves stated, and anything else is refused before any file is read,
-// without echoing the value, whose second half may be carrying a credential.
+// TestWorkerFlagShapeIsAUsageError: a `--worker` value is a node name alone or
+// name=endpoint with both halves stated, and anything else is refused before
+// any file is read, without echoing the value, whose second half may be
+// carrying a credential.
 func TestWorkerFlagShapeIsAUsageError(t *testing.T) {
 	root := t.TempDir()
 	for name, value := range map[string]string{
-		"no separator":     "build-a",
-		"an empty name":    "=file:///srv/mailbox",
-		"an empty mailbox": "build-a=",
-		"nothing at all":   "",
-		"a bare separator": "=",
+		"an endpoint with no name": "file:///srv/mailbox",
+		"an empty name":            "=file:///srv/mailbox",
+		"an empty mailbox":         "build-a=",
+		"nothing at all":           "",
+		"a bare separator":         "=",
 	} {
 		for _, command := range []string{cmdRelease, cmdRun, cmdStatus} {
 			t.Run(name+" on "+command, func(t *testing.T) {
@@ -117,7 +118,7 @@ func TestWorkerFlagShapeIsAUsageError(t *testing.T) {
 				var stdout, stderr bytes.Buffer
 				code := Run(args, &stdout, &stderr)
 				assert.Equal(t, 2, code, "stderr:\n%s", stderr.String())
-				assert.Contains(t, stderr.String(), "name=endpoint")
+				assert.Contains(t, stderr.String(), "name or name=endpoint")
 			})
 		}
 	}
@@ -171,4 +172,16 @@ func TestWorkerFlagIsRefusedUnderWorkerAuthority(t *testing.T) {
 			assert.Contains(t, stderr.String(), `"category":"`+execution.CategoryAuthority+`"`)
 		})
 	}
+}
+
+// TestWorkerFlagAcceptsANameAlone: a node name alone is a link to the
+// repository being released, so the flag's shape check passes it and the run
+// goes on to read its configuration.
+func TestWorkerFlagAcceptsANameAlone(t *testing.T) {
+	t.Setenv(execution.AuthorityEnv, "")
+	require.NoError(t, os.Unsetenv(execution.AuthorityEnv))
+	r := &runner{o: &options{workers: &[]string{"build-a", "build-b=file:///srv/mailbox"}}}
+	code, isRefused := r.validateWorkerLinks()
+	assert.Equal(t, 0, code)
+	assert.False(t, isRefused)
 }

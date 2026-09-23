@@ -88,7 +88,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	// anything is planned. A sweep with no worker links asks nothing and is
 	// named nothing, which keeps it the run it always was.
 	if a.cfg.Execution.IsDistributed() {
-		if err := a.checkExecutionEntry(runSweep); err != nil {
+		if err := a.checkExecutionEntry(ctx, runSweep); err != nil {
 			return err
 		}
 		a.startExecutionRun()

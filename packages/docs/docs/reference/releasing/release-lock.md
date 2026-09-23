@@ -184,19 +184,23 @@ ERR release lock retained code=E228 category=publication-unknown run=6f1a9f0d2b9
 ```
 
 The uncertain publication's authorization ref is retained even when its node acknowledged after starting publish.
-Other coordination refs may already have been cleaned up. The evidence is in the remaining run refs, and the order of
-the steps matters:
+Other coordination refs may already have been cleaned up. The evidence is in the remaining run refs, which live on the
+repository's own remote unless a worker link named another endpoint, and the order of the steps matters:
 
 ```sh
-git ls-remote --heads <mailbox> 'dispat-worker-*'   # the run's coordination refs
+git fetch origin tag dispat-release-lock && git show dispat-release-lock   # the `run` line names the run
+git ls-remote --heads origin 'dispat-worker-*'                             # the coordination refs
 ```
 
-1. Find the branch of the publication: it carries an authorization (`go`) with no result beside it.
+1. Find the branches of the run: the messages on each one (`dispat/assignment.json` and the ones after it) carry the
+   run id in their `run` field. Among them, find the branch of the publication: it carries an authorization (`go`)
+   with no result beside it.
 2. Confirm on that node that the publisher has stopped. A machine that is gone is confirmation; a machine still
    running the publish command is not.
 3. Check the registry for the version the package was publishing. That, and not the tags, is what says whether the
    publication happened.
-4. Delete the run's coordination refs from the mailbox, after verifying that their current tips still belong to that run's authenticated chain. Investigate a changed or unauthenticated tip instead of deleting it as residue.
+4. Delete the run's coordination refs, after verifying that their current tips still belong to that run's
+   authenticated chain. Investigate a changed or unauthenticated tip instead of deleting it as residue.
 5. Only then delete the lock tag, exactly as for an abandoned lock:
 
 ```sh

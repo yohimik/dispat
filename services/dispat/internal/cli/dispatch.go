@@ -1261,11 +1261,11 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 }
 
 // validateWorkerLinks is what the `--worker` values decide before any file is
-// read: each is name=endpoint, and a process holding worker authority names
-// none at all.
+// read: each is a node name alone or name=endpoint, and a process holding
+// worker authority names none at all.
 //
 // The shape is a usage mistake, like every other malformed flag value, and
-// the value is never echoed because its second half is an endpoint. The
+// the value is never echoed because it may be an endpoint. The
 // authority is a refusal with its own code rather than a usage mistake: a
 // task executes what its assignment authorized, and a build script that
 // named a pool of its own would be a node dispatching work, which is exactly

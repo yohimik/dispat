@@ -50,9 +50,9 @@ refusal. Only packages this run will actually publish count, while held, withhel
 
 ### `--worker`
 
-Adds a worker node for this invocation, written `name=endpoint`, beside the ones
+Adds a worker node for this invocation, written `name` or `name=endpoint`, beside the ones
 [`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists. You can repeat it. With
 worker links, from the file or from the flag, `status` fixes and prints the plan digest a distributed run would carry,
-in its `plan fixed` line, and it still takes no lock, probes no node and assigns nothing. The links are no part of the
-digest. A value that is not `name=endpoint` exits `2`, and a link breaking a rule a configured link is held to exits
-`1` with `E225`.
+in its `plan fixed` line, and it still takes no lock, resolves no remote, probes no node and assigns nothing. The
+links are no part of the digest. A value that is neither a node name alone nor `name=endpoint` with both halves stated
+exits `2`, and a link breaking a rule a configured link is held to exits `1` with `E225`.

@@ -36,7 +36,13 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 	if !a.cfg.Execution.IsDistributed() {
 		return nil, nil
 	}
-	coordinator, err := a.newCoordinator(a.resolveOwnershipGeneration(fleet), a.ownership)
+	// The links reach the release remote at the destination this run's own
+	// lock was taken on, the destination its cleanup reaches too.
+	remote := a.coordination
+	if locked := a.resolveLockedEndpoint(fleet); locked != "" {
+		remote.url = locked
+	}
+	coordinator, err := a.newCoordinator(a.resolveOwnershipGeneration(fleet), a.ownership, remote)
 	if err != nil {
 		return nil, a.reportPreflightFailure(err)
 	}
@@ -54,7 +60,9 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 
 // newCoordinator assembles this run's coordinator: who it is, what plan it
 // executes, which ownership it holds and the gate that ownership is verified
-// through again, and one mailbox per configured link.
+// through again, and one mailbox per configured link, each reached at the
+// link's own endpoint or, for a link that states none, at the release remote
+// handed in, whose push URL is held to the rules of an endpoint once more.
 //
 // The ownership is the caller's, because the two runs that dispatch hold
 // different things: a release holds the locks it acquired, and the coordinator
@@ -67,7 +75,8 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 // Transport objects are unreachable there the moment their refs are deleted,
 // so they cost a `git gc` and nothing else, and using the checkout that is
 // already open is what keeps a release from needing a second store of its own.
-func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGate) (*execution.Coordinator, error) {
+func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGate,
+	remote coordinationRemote) (*execution.Coordinator, error) {
 	settings := a.cfg.Execution
 	signer, err := execution.NewSigner(os.Getenv(settings.SecretEnv))
 	if err != nil {
@@ -75,11 +84,13 @@ func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGa
 			"execution.secretEnv names %s and it is unset or empty in this environment: %w",
 			settings.SecretEnv, err)
 	}
-	links := make([]execution.Link, 0, len(settings.Workers))
-	mailboxes := make(map[string]*execution.GitMailbox, len(settings.Workers))
-	for _, worker := range settings.Workers {
-		links = append(links, execution.Link{Name: worker.Name, Endpoint: worker.Endpoint})
-		mailboxes[worker.Name] = execution.NewGitMailbox(worker.Endpoint, a.git, signer, a.log)
+	links, err := a.formatWorkerLinks(remote)
+	if err != nil {
+		return nil, err
+	}
+	mailboxes := make(map[string]*execution.GitMailbox, len(links))
+	for _, link := range links {
+		mailboxes[link.Name] = execution.NewGitMailbox(link.Endpoint, a.git, signer, a.log)
 	}
 	timeouts := settings.ResolveTimeouts()
 	// This machine joins its own pool: it is a node under the same rules

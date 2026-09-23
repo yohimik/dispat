@@ -88,6 +88,10 @@ type App struct {
 	// for every run that delegates nothing, and the question is then never
 	// asked.
 	retention lockRetentionx
+	// coordination is the remote a worker link with no endpoint reaches, as
+	// resolved when a run that dispatches started: the release remote's name
+	// and push URL. It is empty when every link states an endpoint.
+	coordination coordinationRemote
 	// coordinator is this run's distributed execution, kept so that the
 	// closing summary can ask it what every task came to. It is nil for every
 	// run that delegates nothing, and the summary then prints nothing.

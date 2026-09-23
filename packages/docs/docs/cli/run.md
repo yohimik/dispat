@@ -69,7 +69,7 @@ takes no release lock, so it neither waits for nor excludes a release of the sam
 before the usual `run finished` line.
 
 ```sh
-dispat run tests --since all --worker ci-worker-1=git@github.com:acme/project.git
+dispat run tests --since all --worker ci-worker-1
 ```
 
 What a delegated task writes stays on its node unless the script declares it.
@@ -218,7 +218,8 @@ or `continue`. Either way, the command exits `1` on any failure.
 
 ### `--worker`
 
-Adds a worker node for this sweep, written `name=endpoint`, beside the ones
-[`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists. You can repeat it. The link
-is held to every rule a configured one is, and the file has to name `execution.secretEnv`. See
+Adds a worker node for this sweep, written `name` or `name=endpoint`, beside the ones
+[`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists. A name alone reaches the
+repository being released, whose remote is resolved when the sweep starts, and an endpoint names another mailbox. You
+can repeat it. The link is held to every rule a configured one is, and the file has to name `execution.secretEnv`. See
 [Running on worker nodes](#running-on-worker-nodes).

@@ -237,7 +237,7 @@ func TestCheckExecutionEntryRefusals(t *testing.T) {
 			}
 			a, logs := executionEntry(t, cfg)
 
-			err := a.checkExecutionEntry(runRelease)
+			err := a.checkExecutionEntry(t.Context(), runRelease)
 
 			if tc.code == "" {
 				require.NoError(t, err)
@@ -271,7 +271,7 @@ func TestCheckExecutionEntryNamesTheBypassedRepositories(t *testing.T) {
 		{Name: "web", Config: &config.File{}},
 	}}
 
-	err := a.checkExecutionEntry(runRelease)
+	err := a.checkExecutionEntry(t.Context(), runRelease)
 
 	require.Error(t, err)
 	assert.Equal(t, execution.CodeConfiguration, config.DiagnosticCode(err))
@@ -301,7 +301,7 @@ func TestCheckExecutionEntryReportsIgnoredPeerSettings(t *testing.T) {
 		{Name: "docs"},
 	}}
 
-	require.NoError(t, a.checkExecutionEntry(runRelease))
+	require.NoError(t, a.checkExecutionEntry(t.Context(), runRelease))
 
 	assert.Contains(t, logs.String(),
 		`"repository":"sdk","message":"execution settings ignored outside the entry configuration"`)
@@ -344,7 +344,7 @@ func TestCheckExecutionEntryRefusesASweepByTheSameRules(t *testing.T) {
 			require.NoError(t, os.Unsetenv(lockDisableEnv))
 			a, logs := executionEntry(t, &config.File{Execution: tc.execution, UnsafeDisableLock: tc.bypass})
 
-			err := a.checkExecutionEntry(runSweep)
+			err := a.checkExecutionEntry(t.Context(), runSweep)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
@@ -366,6 +366,156 @@ func TestCheckExecutionEntryLetsASweepSkipTheLockRead(t *testing.T) {
 	a, _ := executionEntry(t, &config.File{Execution: executionWorkers(),
 		Commit: &config.CommitConfig{Verify: public.Bool(false)}})
 
-	require.NoError(t, a.checkExecutionEntry(runSweep))
-	require.Error(t, a.checkExecutionEntry(runRelease))
+	require.NoError(t, a.checkExecutionEntry(t.Context(), runSweep))
+	require.Error(t, a.checkExecutionEntry(t.Context(), runRelease))
+}
+
+// linkedEntry is a single history with one origin and a configuration naming
+// the given links, ready to start a distributed run, with its log captured.
+func linkedEntry(t *testing.T, origin string, workers ...public.ExecutionWorkerConfig) (*App, *bytes.Buffer) {
+	t.Helper()
+	t.Setenv(execution.AuthorityEnv, "")
+	require.NoError(t, os.Unsetenv(execution.AuthorityEnv))
+	t.Setenv(executionSecretEnv, "hunter2")
+	t.Setenv(lockDisableEnv, "")
+	require.NoError(t, os.Unsetenv(lockDisableEnv))
+	root, a := guardRepo(t, &config.File{Run: &config.RunConfig{},
+		Execution: &public.ExecutionConfig{SecretEnv: executionSecretEnv, Workers: workers}})
+	if origin != "" {
+		recordGit(t, root, "remote", "add", "origin", origin)
+	}
+	var logs bytes.Buffer
+	a.log = zerolog.New(&logs).Level(zerolog.DebugLevel)
+	return a, &logs
+}
+
+// TestWorkerLinksReachTheReleaseRemoteByDefault: a link that states no
+// endpoint reaches the repository being released, at the push URL of the
+// remote the release takes its lock on, and says so in one debug line per
+// such link; a link that states one keeps it.
+func TestWorkerLinksReachTheReleaseRemoteByDefault(t *testing.T) {
+	origin := t.TempDir()
+	recordGit(t, origin, "init", "-q", "--bare")
+	a, logs := linkedEntry(t, origin,
+		public.ExecutionWorkerConfig{Name: "build-a"},
+		public.ExecutionWorkerConfig{Name: "build-b", Endpoint: "/srv/mailboxes/b.git"})
+
+	require.NoError(t, a.checkExecutionEntry(t.Context(), runRelease))
+
+	assert.Equal(t, coordinationRemote{name: "origin", url: origin}, a.coordination)
+	links, err := a.formatWorkerLinks(a.coordination)
+	require.NoError(t, err)
+	assert.Equal(t, []execution.Link{
+		{Name: "build-a", Endpoint: origin},
+		{Name: "build-b", Endpoint: "/srv/mailboxes/b.git"},
+	}, links)
+	assert.Equal(t, 1, strings.Count(logs.String(), "worker link reaches the release remote"),
+		"one line per link that states no endpoint")
+	assert.Contains(t, logs.String(), `"worker":"build-a","remote":"origin"`)
+}
+
+// TestWorkerLinksFollowTheConfiguredRemote: commit.remote names the remote a
+// release pushes to and locks on, so it is the remote a link with no endpoint
+// reaches too.
+func TestWorkerLinksFollowTheConfiguredRemote(t *testing.T) {
+	upstream := t.TempDir()
+	recordGit(t, upstream, "init", "-q", "--bare")
+	a, _ := linkedEntry(t, "", public.ExecutionWorkerConfig{Name: "build-a"})
+	recordGit(t, a.root, "remote", "add", "upstream", upstream)
+	a.cfg.Commit = &config.CommitConfig{Remote: "upstream"}
+
+	require.NoError(t, a.checkExecutionEntry(t.Context(), runSweep))
+	assert.Equal(t, coordinationRemote{name: "upstream", url: upstream}, a.coordination)
+}
+
+// TestWorkerLinksInAComposedWorkspaceReachTheEntryRemote: in a composed
+// workspace the release remote a link reaches is the entry repository's, which
+// is where the node reads every peer's history from.
+func TestWorkerLinksInAComposedWorkspaceReachTheEntryRemote(t *testing.T) {
+	w, _ := recordFixture(t, false, false)
+	controlRemote := t.TempDir()
+	recordGit(t, controlRemote, "init", "-q", "--bare")
+	control := w.byName[config.ControlRepository]
+	recordGit(t, control.repo.Root, "remote", "add", "origin", controlRemote)
+	for i := range w.app.workspace.Repositories {
+		repository := &w.app.workspace.Repositories[i]
+		repository.Entry = repository.Name == config.ControlRepository
+	}
+
+	name, url, err := w.app.resolveCoordinationRemote(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, "origin", name)
+	assert.Equal(t, controlRemote, url, "the entry repository's remote, not the source's")
+}
+
+// TestWorkerLinksRefuseARemoteNoMailboxCouldBe: the push URL a link with no
+// endpoint reaches is held to the rules of an endpoint before any lock. A URL
+// carrying a token is refused with E225, naming the link and the remote, and
+// the token is never written; a relative path is refused for its shape.
+func TestWorkerLinksRefuseARemoteNoMailboxCouldBe(t *testing.T) {
+	for name, tc := range map[string]struct {
+		pushURL string
+		want    string
+	}{
+		"a push URL carrying a token": {
+			pushURL: "https://x-access-token:ghs_itFAKE@example.invalid/acme/project.git",
+			want:    "carries credentials"},
+		"a relative push URL": {
+			pushURL: "../origin.git",
+			want:    "cannot be a mailbox"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, logs := linkedEntry(t, tc.pushURL, public.ExecutionWorkerConfig{Name: "build-a"})
+
+			err := a.checkExecutionEntry(t.Context(), runRelease)
+
+			require.Error(t, err)
+			assert.Equal(t, execution.CodeConfiguration, config.DiagnosticCode(err))
+			assert.Equal(t, execution.CategoryConfiguration, execution.DiagnosticCategory(err))
+			assert.Contains(t, err.Error(), "worker link build-a states no endpoint")
+			assert.Contains(t, err.Error(), "the release remote origin")
+			assert.Contains(t, err.Error(), tc.want)
+			assert.NotContains(t, err.Error()+logs.String(), "ghs_itFAKE", "the token is never written")
+			assert.Contains(t, logs.String(), `"code":"E225"`)
+		})
+	}
+}
+
+// TestWorkerLinksWithEndpointsResolveNothing: a run whose links all state an
+// endpoint asks no remote anything, so a repository with no remote at all
+// still starts it.
+func TestWorkerLinksWithEndpointsResolveNothing(t *testing.T) {
+	a, logs := linkedEntry(t, "", public.ExecutionWorkerConfig{Name: "build-a", Endpoint: "/srv/mailboxes/a.git"})
+
+	require.NoError(t, a.checkExecutionEntry(t.Context(), runRelease))
+	assert.Equal(t, coordinationRemote{}, a.coordination)
+	assert.NotContains(t, logs.String(), "worker link reaches the release remote")
+}
+
+// TestWorkerLinksReachTheDestinationTheLockWasTakenOn: a release's coordinator
+// reaches the release remote at the destination its own lock was pushed to,
+// the single history's or the entry repository's, and holds that URL to the
+// rules of an endpoint once more.
+func TestWorkerLinksReachTheDestinationTheLockWasTakenOn(t *testing.T) {
+	single := &App{releaseLock: &release.Lock{Remote: "/srv/locked.git"}}
+	assert.Equal(t, "/srv/locked.git", single.resolveLockedEndpoint(nil))
+	assert.Empty(t, (&App{}).resolveLockedEndpoint(nil), "a run that holds no lock has no destination")
+
+	entry := &repositoryRecord{repo: &config.Repository{Name: config.ControlRepository, Entry: true}}
+	peer := &repositoryRecord{repo: &config.Repository{Name: "sdk"}}
+	fleet := &workspaceRecorder{held: []heldLock{
+		{repository: peer, lock: &release.Lock{Remote: "/srv/sdk.git"}},
+		{repository: entry, lock: &release.Lock{Remote: "/srv/control.git"}},
+	}}
+	assert.Equal(t, "/srv/control.git", single.resolveLockedEndpoint(fleet))
+
+	a, _ := linkedEntry(t, "", public.ExecutionWorkerConfig{Name: "build-a"})
+	coordinator, err := a.newCoordinator("generation", nil, coordinationRemote{name: "origin", url: "/srv/locked.git"})
+	require.NoError(t, err)
+	assert.Equal(t, []execution.Link{{Name: "build-a", Endpoint: "/srv/locked.git"}}, coordinator.Links)
+	_, err = a.newCoordinator("generation", nil,
+		coordinationRemote{name: "origin", url: "https://token@example.invalid/acme/project.git"})
+	require.Error(t, err, "the destination is held to the rules again")
+	assert.Equal(t, execution.CodeConfiguration, config.DiagnosticCode(err))
 }

@@ -90,8 +90,8 @@ Yes. Configure [`execution`](./configuration/execution.md) with one or more work
 of them, and the release delegates its build frames to them while the machine you started it on keeps the locks, the
 plan, the authorizations and the records. Verified build outputs travel from the node that produced them to the nodes
 that consume them, so a consumer reads its provider's `dist` without that folder ever being committed. The transport
-is Git alone: an orchestrator pushes to a mailbox repository and a node polls it, so no worker needs an inbound
-network address.
+is Git alone: an orchestrator pushes coordination branches to the repository being released and a node polls it, so
+no worker needs an inbound network address and the pool needs no repository of its own.
 
 It is one release either way. There is one plan, one lock set and one set of records, and a run with no worker links
 behaves exactly as it always did. Read [Distributed execution](./distributed-execution.md), and its security section

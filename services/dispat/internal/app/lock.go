@@ -107,14 +107,23 @@ func lockDisabledByEnv() bool {
 }
 
 // pushRemote is the remote this repository coordinates through: what the
-// release commit and tags are pushed to, and what the release lock is taken
-// on. commit.remote names it; unset it is git's own default name.
+// release commit and tags are pushed to, what the release lock is taken on,
+// and what a worker link with no endpoint reaches.
+func (a *App) pushRemote() string {
+	return commitRemote(a.cfg.Commit)
+}
+
+// commitRemote is the remote one repository's commit policy names:
+// commit.remote, and git's own default name when it names none. It is the one
+// answer for a single history and for every repository of a composed
+// workspace, so the lock, the records and the coordination branches of one
+// repository cannot end up on two different remotes.
 //
 // Nil-safe, because the lock is taken whether or not the release commit is
 // configured at all.
-func (a *App) pushRemote() string {
-	if a.cfg.Commit != nil && a.cfg.Commit.Remote != "" {
-		return a.cfg.Commit.Remote
+func commitRemote(commit *config.CommitConfig) string {
+	if commit != nil && commit.Remote != "" {
+		return commit.Remote
 	}
 	return "origin"
 }

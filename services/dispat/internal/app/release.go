@@ -75,7 +75,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// be coordinated at all. Both are refused before the first lock is pushed
 	// and report themselves; with no execution settings this returns nil
 	// without writing a line.
-	if err := a.checkExecutionEntry(runRelease); err != nil {
+	if err := a.checkExecutionEntry(ctx, runRelease); err != nil {
 		return nil, err
 	}
 	// A distributed run is named here, before the plan is fixed, so that the

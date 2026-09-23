@@ -131,14 +131,19 @@ jobs:
           DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
 ```
 
-Four details make this work:
+Five details make this work:
 
-- **Both jobs read the same mailbox repository and hold the same signing secret.** The release job's `execution`
-  object lists `build-a` and `build-b` with that mailbox as their endpoint; each worker's file names itself and the
-  same endpoint. A job that creates its workers with names the committed file cannot know passes them as
-  `--worker name=endpoint` instead.
-- **A hosted runner needs no inbound network.** The transport is Git only: a worker polls the mailbox and pushes its
-  answers back, so it serves from behind NAT with no port open and no address to reach it at.
+- **Both jobs reach the repository being released and hold the same signing secret.** The release job's
+  `execution` object lists `build-a` and `build-b` by name alone, so their coordination branches go to the remote the
+  release takes its lock on; each worker's file names itself and that repository as its endpoint. A job that creates
+  its workers with names the committed file cannot know passes them as `--worker name` instead.
+- **A hosted runner needs no inbound network.** The transport is Git only: a worker polls the repository and pushes
+  its answers back, so it serves from behind NAT with no port open and no address to reach it at.
+- **A worker's Git credential writes coordination branches and nothing else.** The worker jobs reach the repository
+  with the credential their checkout persisted, and the host's branch and tag rules are what keep it from release
+  branches, release tags and the lock tag. A job token is the same identity in every job of a workflow, so those rules
+  cannot tell a worker job from the release job; give the workers a credential of their own, as
+  [a machine the job creates for itself](#a-machine-the-job-creates-for-itself) does, when the rules have to.
 - **The jobs start in parallel.** The release job plans, then probes every configured worker within
   `execution.timeouts.preflight`, so raise that timeout to cover a runner starting up and pulling its image. A node
   that has not answered by then fails the release with `E225`, before anything is dispatched.

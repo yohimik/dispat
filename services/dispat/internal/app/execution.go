@@ -15,6 +15,7 @@ package app
 // release it always was.
 
 import (
+	"context"
 	"os"
 	"sort"
 	"strings"
@@ -30,10 +31,11 @@ import (
 // The order is the order the answers become knowable, and it is also the
 // order a reader wants them in: who is asking comes before what they are
 // asking for. A process that may not initiate at all is refused before its
-// configuration is examined any further, and the two rules a distributed run
-// is held to are checked only once it is established that this run delegates
-// work to anybody.
-func (a *App) checkExecutionEntry(started runKind) error {
+// configuration is examined any further, and the rules a distributed run is
+// held to are checked only once it is established that this run delegates
+// work to anybody. The last of them resolves where every link with no
+// endpoint reaches, which is the one question here the remote is asked.
+func (a *App) checkExecutionEntry(ctx context.Context, started runKind) error {
 	a.logIgnoredExecutionSettings()
 	if err := a.refuseWorkerInitiation(started); err != nil {
 		return err
@@ -47,7 +49,10 @@ func (a *App) checkExecutionEntry(started runKind) error {
 	if err := a.refuseDispatchWithoutLockRead(started); err != nil {
 		return err
 	}
-	return a.refuseDispatchWithoutSecret(started)
+	if err := a.refuseDispatchWithoutSecret(started); err != nil {
+		return err
+	}
+	return a.resolveWorkerLinks(ctx, started)
 }
 
 // runKind is what a process is about to start and may be refused the

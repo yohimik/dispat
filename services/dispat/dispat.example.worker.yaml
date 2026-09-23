@@ -41,10 +41,12 @@ execution:
   # with no two dots in a row.
   name: build-a
   # The Git repository this node reads assignments from and answers in: the
-  # same value as the link's `endpoint`. No credentials in the address; Git's
-  # own credentials reach it. No port is opened and nothing connects to this
-  # machine: the node polls, so it runs behind NAT and on hosted CI runners.
-  endpoint: git@github.com:acme/release-mailbox.git
+  # repository being released, which is what the orchestrator's link reaches
+  # when it states no endpoint of its own, and the link's `endpoint` when it
+  # does. No credentials in the address; Git's own credentials reach it. No
+  # port is opened and nothing connects to this machine: the node polls, so it
+  # runs behind NAT and on hosted CI runners.
+  endpoint: git@github.com:acme/project.git
   # The name of the variable holding the signing secret. A message that does
   # not verify under it is refused with a reason and never run.
   secretEnv: DISPAT_EXECUTION_SECRET

@@ -157,6 +157,9 @@ func TestExecutionAcceptsEveryMailboxForm(t *testing.T) {
 			{Name: "absolute", Endpoint: "/srv/a.git"},
 			{Name: "scp", Endpoint: "git@git.example.test:a.git"},
 			{Name: "scp-without-user", Endpoint: "git.example.test:a.git"},
+			// No endpoint: the repository being released, whose remote this
+			// repository does not even have. Status resolves no remote.
+			{Name: "the-repository"},
 		},
 		Timeouts: &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 600, Cancel: 15},
 		Transfer: &models.ExecutionTransferConfig{MaxFiles: 10, MaxBytes: 4096, MaxManifestBytes: 1024, Timeout: 60},
@@ -263,10 +266,6 @@ func TestExecutionConfigRefusals(t *testing.T) {
 				{Name: "BUILD-A", Endpoint: "/srv/b.git"},
 			},
 		}, "execution.workers[1]: name"),
-		"a link with no mailbox": executionStated(&models.ExecutionConfig{
-			SecretEnv: "DISPAT_IT_EXECUTION_SECRET",
-			Workers:   []models.ExecutionWorkerConfig{{Name: "build-a"}},
-		}, "execution.workers[0]: endpoint is required"),
 		"links with no signing secret": executionStated(&models.ExecutionConfig{
 			Workers: []models.ExecutionWorkerConfig{{Name: "build-a", Endpoint: "/srv/a.git"}},
 		}, "execution.secretEnv is required with execution.workers"),

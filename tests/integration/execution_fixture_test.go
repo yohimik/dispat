@@ -90,6 +90,29 @@ func newExecutionRig(t *testing.T, adjust ...func(*models.File)) *executionRig {
 	return newExecutionRigOver(t, repo, mailbox)
 }
 
+// newExecutionRigOnOrigin builds the rig of the default mailbox: one package,
+// a link that names its node and no endpoint, and the repository's own remote
+// as both the place the lock is taken on and the mailbox the worker polls.
+func newExecutionRigOnOrigin(t *testing.T, adjust ...func(*models.File)) *executionRig {
+	t.Helper()
+	repo := harness.New(t)
+	repo.SeedPackage("packages", "core")
+	cfg := libsConfig(markerBuild, 1)
+	cfg.Execution = &models.ExecutionConfig{
+		SecretEnv: executionSecretEnv,
+		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode}},
+		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30},
+	}
+	for _, change := range adjust {
+		change(&cfg)
+	}
+	repo.WriteConfigModel(cfg)
+	repo.Commit("feat(core): bootstrap")
+	origin := repo.AddBareRemote()
+	return &executionRig{t: t, repo: repo, origin: origin, mailbox: origin,
+		builds: filepath.Join(t.TempDir(), "builds.log")}
+}
+
 // newExecutionRigOver wraps an already-seeded repository as a rig: a remote to
 // take the release lock on, the mailbox, and the file the build scripts of the
 // fixture record themselves in.

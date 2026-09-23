@@ -38,19 +38,19 @@ import (
 func RequireTransportEndpoint(endpoint string) error {
 	if strings.HasPrefix(endpoint, "-") {
 		return fmt.Errorf("gitx: execution endpoint %s starts with a dash, which git reads as an option rather than a remote",
-			redactEndpoint(endpoint))
+			RedactEndpoint(endpoint))
 	}
 	if strings.Contains(endpoint, "::") {
 		return fmt.Errorf("gitx: execution endpoint %s uses the transport::address form, which names a helper program to run",
-			redactEndpoint(endpoint))
+			RedactEndpoint(endpoint))
 	}
 	if strings.Contains(endpoint, "?") {
 		return fmt.Errorf("gitx: execution endpoint %s carries a query, which a mailbox address has no use for",
-			redactEndpoint(endpoint))
+			RedactEndpoint(endpoint))
 	}
 	if strings.Contains(endpoint, "#") {
 		return fmt.Errorf("gitx: execution endpoint %s carries a fragment, which a mailbox address has no use for",
-			redactEndpoint(endpoint))
+			RedactEndpoint(endpoint))
 	}
 	// An absolute path is answered before the scheme is read, so that a folder
 	// whose name happens to hold "://" is still the path it plainly is.
@@ -71,11 +71,11 @@ func requireTransportURL(endpoint, scheme string) error {
 	switch scheme {
 	case "http", "git":
 		return fmt.Errorf("gitx: execution endpoint %s uses %s, which authenticates nobody; use https, ssh or file",
-			redactEndpoint(endpoint), scheme)
+			RedactEndpoint(endpoint), scheme)
 	case "https", "ssh", "file":
 	default:
 		return fmt.Errorf("gitx: execution endpoint %s uses the %s scheme; a mailbox is reached over https, ssh or file",
-			redactEndpoint(endpoint), scheme)
+			RedactEndpoint(endpoint), scheme)
 	}
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
@@ -86,10 +86,10 @@ func requireTransportURL(endpoint, scheme string) error {
 	}
 	if isCredentialCarried(parsed, scheme) {
 		return fmt.Errorf("gitx: execution endpoint %s carries user information; a mailbox endpoint is credential free and its secret is named by secretEnv",
-			redactEndpoint(endpoint))
+			RedactEndpoint(endpoint))
 	}
 	if scheme != "file" && parsed.Host == "" {
-		return fmt.Errorf("gitx: execution endpoint %s names no host", redactEndpoint(endpoint))
+		return fmt.Errorf("gitx: execution endpoint %s names no host", RedactEndpoint(endpoint))
 	}
 	return nil
 }
@@ -129,19 +129,19 @@ func requireTransportPath(endpoint string) error {
 	host, path, isScpForm := strings.Cut(address, ":")
 	if !isScpForm || host == "" || path == "" {
 		return fmt.Errorf("gitx: execution endpoint %s is not a git remote; write an https, ssh or file URL, an absolute path, or host:path",
-			redactEndpoint(endpoint))
+			RedactEndpoint(endpoint))
 	}
 	return nil
 }
 
-// redactEndpoint renders an endpoint for a message, and it is the only way
-// one is written into an error here. RedactURL covers every form Go's URL
+// RedactEndpoint renders an endpoint for a message or a log line, and it is
+// the only way one is written into either. RedactURL covers every form Go's URL
 // parser recognises, but a refused endpoint is by definition one it may not
 // recognise: the scp-like form is not a URL at all, and a value carrying a
 // password is refused precisely because it carries one. So the user half, the
 // query and the fragment are taken off whatever survived, because those are
 // the three places a credential would sit.
-func redactEndpoint(endpoint string) string {
+func RedactEndpoint(endpoint string) string {
 	safe := RedactURL(endpoint)
 	if safe == endpoint {
 		if userinfo, address, hasUser := strings.Cut(endpoint, "@"); hasUser && strings.Contains(userinfo, ":") {

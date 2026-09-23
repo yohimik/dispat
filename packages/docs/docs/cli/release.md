@@ -99,8 +99,9 @@ count, so held, withheld, or unselected packages do not; see
 
 ### `--worker`
 
-Adds a worker node for this run, written `name=endpoint`, beside the ones
+Adds a worker node for this run, written `name` or `name=endpoint`, beside the ones
 [`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists, which is how a pipeline
-names a machine it created a minute before the release. You can repeat it. The link is held to every rule a configured
-one is, the file has to name `execution.secretEnv`, and a process running under a task's authority or a node whose
-file says `role: worker` refuses the flag with `E226`. See [Distributed execution](../distributed-execution.md).
+names a machine it created a minute before the release. A name alone reaches the repository being released, and an
+endpoint names another mailbox. You can repeat it. The link is held to every rule a configured one is, the file has
+to name `execution.secretEnv`, and a process running under a task's authority or a node whose file says
+`role: worker` refuses the flag with `E226`. See [Distributed execution](../distributed-execution.md).

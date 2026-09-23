@@ -45,10 +45,7 @@ type repositoryRecord struct {
 }
 
 func (r *repositoryRecord) remote() string {
-	if r.repo.Commit != nil && r.repo.Commit.Remote != "" {
-		return r.repo.Commit.Remote
-	}
-	return "origin"
+	return commitRemote(r.repo.Commit)
 }
 
 // workspaceRecorder records each package before its consumers may publish.

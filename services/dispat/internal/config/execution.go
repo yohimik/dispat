@@ -56,8 +56,8 @@ func LoadNode(path string, flags *pflag.FlagSet) (*File, error) {
 
 // DiagnosticExecution reports a configuration no distributed run could be
 // executed under. That is an `execution` object with an unknown role, a
-// capacity that is not a capacity, a worker link that names no node or no
-// reachable mailbox, or a missing signing secret; and it is a `buildOutputs`
+// capacity that is not a capacity, a worker link that names no node or an
+// endpoint no mailbox could be, or a missing signing secret; and it is a `buildOutputs`
 // or `buildPlatforms` list that does not describe a place a build product can
 // travel from, two packages that claimed one folder included. Every one of
 // them is refused as the configuration is read, so the code fires before any
@@ -229,8 +229,10 @@ func validateExecutionNode(x *ExecutionConfig) error {
 }
 
 // validateExecutionWorkers checks the worker links on their own: each names a
-// node, the names are distinct, and each mailbox is a remote git could be
-// pointed at.
+// node, the names are distinct, and each endpoint a link states is a remote
+// git could be pointed at. A link that states none reaches the repository
+// being released, whose remote is resolved and held to the same rules when a
+// run that dispatches starts.
 func validateExecutionWorkers(workers []ExecutionWorkerConfig) error {
 	namedBy := map[string]string{}
 	for i, worker := range workers {
@@ -258,7 +260,7 @@ func validateExecutionWorker(label string, worker ExecutionWorkerConfig, namedBy
 	}
 	namedBy[folded] = label
 	if worker.Endpoint == "" {
-		return fmt.Errorf("%s: endpoint is required: it is the mailbox this node's work is left in", label)
+		return nil
 	}
 	if err := gitx.RequireTransportEndpoint(worker.Endpoint); err != nil {
 		return fmt.Errorf("%s: endpoint: %w", label, err)
@@ -267,9 +269,11 @@ func validateExecutionWorker(label string, worker ExecutionWorkerConfig, namedBy
 }
 
 // WorkerFlag is the command-line flag that names a worker node for one
-// invocation, `--worker name=endpoint`, repeatable. It exists for the machine
-// a pipeline created a minute before the run: a link the committed file
-// cannot know about, stated where the pipeline knows it.
+// invocation, `--worker name` or `--worker name=endpoint`, repeatable. It
+// exists for the machine a pipeline created a minute before the run: a link
+// the committed file cannot know about, stated where the pipeline knows it. A
+// name alone reaches the repository being released, as a configured link with
+// no endpoint does.
 const WorkerFlag = "worker"
 
 // DiagnosticExecutionAuthority reports execution refused because of who asked
@@ -278,25 +282,34 @@ const WorkerFlag = "worker"
 // link it would dispatch to is written in a file or on a command line.
 const DiagnosticExecutionAuthority = "E226"
 
-// ParseWorkerLink reads one `--worker` value as the link it names. The value
-// is never echoed, because the half after the separator is an endpoint and a
-// malformed one is exactly the value that may be carrying a credential.
+// ParseWorkerLink reads one `--worker` value as the link it names: a node name
+// alone, or name=endpoint with both halves stated.
+//
+// The value is never echoed. The half after the separator is an endpoint, and
+// a malformed one is exactly the value that may be carrying a credential; a
+// value with no separator that is not a node name is refused here for the
+// same reason, because it is most likely an endpoint somebody wrote without
+// its name, and the rule that would otherwise refuse it quotes what it read.
 func ParseWorkerLink(value string) (ExecutionWorkerConfig, error) {
 	name, endpoint, isPaired := strings.Cut(value, "=")
-	if !isPaired || name == "" || endpoint == "" {
-		return ExecutionWorkerConfig{}, fmt.Errorf(
-			"--%s takes name=endpoint with both halves stated: the node's name, and the mailbox it is reached at",
-			WorkerFlag)
+	if isPaired && name != "" && endpoint != "" {
+		return ExecutionWorkerConfig{Name: name, Endpoint: endpoint}, nil
 	}
-	return ExecutionWorkerConfig{Name: name, Endpoint: endpoint}, nil
+	if !isPaired && isExecutionNodeName(name) {
+		return ExecutionWorkerConfig{Name: name}, nil
+	}
+	return ExecutionWorkerConfig{}, fmt.Errorf(
+		"--%s takes name or name=endpoint: the node's name, alone to reach the repository being released, or with both halves stated to reach another mailbox",
+		WorkerFlag)
 }
 
 // appendCommandLineWorkers adds the links the invocation named to the entry
 // configuration's own, before anything is validated.
 //
 // Before, so that a link stated on a command line is held to every rule a
-// link written in the file is: the name, the endpoint, the folded uniqueness
-// against the file's own links and the signing secret the file has to name.
+// link written in the file is: the name, the endpoint when it states one, the
+// folded uniqueness against the file's own links and the signing secret the
+// file has to name.
 // Each is checked here under the flag's own label first, so that a refusal
 // names the value the operator typed rather than an index into a list they
 // never wrote, and the whole list is validated again with everything else.

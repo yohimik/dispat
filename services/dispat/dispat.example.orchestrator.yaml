@@ -33,28 +33,29 @@ execution:
   # budget: the stage budgets of `concurrency` below bound the whole run and
   # are never multiplied by the number of workers.
   concurrency: 2
-  # The name of the environment variable holding the secret every message in
-  # a mailbox is signed with. The name goes in the file, the secret never
-  # does. Every worker reads the same secret from its own environment.
+  # The name of the environment variable holding the secret every message
+  # between the nodes is signed with. The name goes in the file, the secret
+  # never does. Every worker reads the same secret from its own environment.
   secretEnv: DISPAT_EXECUTION_SECRET
   # The worker nodes this run may delegate to. `name` is the node's identity:
   # coordination branches addressed to it are named
-  # dispat-worker-<name>-<date>-<kind>-<random>. `endpoint` is the Git
-  # repository used as that node's mailbox: an https, ssh or file URL, an
-  # absolute path, or host:path. It carries no credentials; Git's own
-  # credentials reach it. Several workers may share one mailbox. A mailbox
-  # holds full source, command text and build outputs, so give it the access
-  # control the source has, prefer a repository of its own, and protect
-  # release branches and tags from the credentials that can write to it.
+  # dispat-worker-<name>-<date>-<kind>-<random>. With no `endpoint` a link
+  # reaches the repository being released, at the push URL of the remote the
+  # release takes its lock on (`commit.remote`, or origin), and every worker
+  # names that same repository as its own endpoint. That push URL carries no
+  # credentials; Git's own credentials reach it. Whatever travels, source,
+  # command text and build outputs, is readable by whoever can read the
+  # repository, and the host's branch and tag rules keep the credentials that
+  # write dispat-worker-* branches away from release branches, release tags
+  # and the lock tag. A link may state an `endpoint` (an https, ssh or file
+  # URL, an absolute path, or host:path) for coordination that has to live
+  # somewhere else.
   # A pipeline that creates a worker for the run names it on the command
-  # line instead, `--worker name=endpoint`, held to the same rules.
+  # line instead, `--worker name`, held to the same rules.
   workers:
     - name: build-a
-      endpoint: git@github.com:acme/release-mailbox.git
     - name: build-b
-      endpoint: git@github.com:acme/release-mailbox.git
     - name: build-arm
-      endpoint: git@github.com:acme/release-mailbox.git
   # How long the run waits at the three points where a node can stop
   # answering, in seconds. 0 or absent keeps the default shown.
   timeouts:

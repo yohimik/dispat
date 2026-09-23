@@ -954,6 +954,10 @@ func TestModeExampleConfigsAreValid(t *testing.T) {
 			assert.True(t, cfg.Execution.IsDistributed())
 			assert.False(t, cfg.Execution.IsWorker())
 			assert.Equal(t, []string{"dist"}, cfg.BuildOutputs)
+			for _, worker := range cfg.Execution.Workers {
+				assert.Empty(t, worker.Endpoint,
+					"%s reaches the repository being released, as the example says", worker.Name)
+			}
 		}},
 		"a worker node": {"dispat.example.worker.yaml", LoadNode, func(t *testing.T, cfg *File) {
 			assert.True(t, cfg.Execution.IsWorker())

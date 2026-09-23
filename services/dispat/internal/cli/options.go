@@ -317,7 +317,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.requireRelease = fs.Bool("require-release", false,
 		"release and status: exit 1 when the plan releases nothing, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
 	o.workers = fs.StringArray(config.WorkerFlag, nil,
-		"release, run and status: add a worker node for this invocation, name=endpoint (repeatable); held to every rule a link in execution.workers is, and never part of the plan digest")
+		"release, run and status: add a worker node for this invocation, name[=endpoint] (repeatable); a name alone reaches the repository being released; held to every rule a link in execution.workers is, and never part of the plan digest")
 	o.workerStateDir = fs.String("state-dir", "",
 		"worker: the folder this node keeps its object cache and its record of answered work in; without it, dispat/worker under the user cache directory")
 	o.workerIdleTimeout = fs.Int("idle-timeout", 0,

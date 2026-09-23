@@ -19,7 +19,7 @@ settings are required here, and each is refused by name when it is missing:
 | Setting                | Why it is required                                                                   |
 |------------------------|--------------------------------------------------------------------------------------|
 | `execution.name`       | it is how this node recognises the work addressed to it                              |
-| `execution.endpoint`   | it is the mailbox repository this node reads that work from                          |
+| `execution.endpoint`   | it is the repository this node reads that work from: the repository being released, or the mailbox the orchestrator's link names |
 | `execution.secretEnv`  | it names the environment variable holding the secret every message is signed with    |
 
 `execution.concurrency` (default `1`) is how many assigned command tasks this node takes on at once, counted across

@@ -10,12 +10,13 @@ package models
 // checkout that travels to another machine would otherwise carry that
 // machine's role, capacity and worker list with it.
 //
-// An `endpoint` is a credential-free Git URL naming the node's mailbox
-// repository, which is the whole transport: there is no listener and no
-// second protocol. The secret that signs what travels through a mailbox is
-// named by `secretEnv` and read from the environment at run time, so the
-// secret itself never goes in the file, exactly as a webhook's signing secret
-// does not.
+// The transport is Git alone: there is no listener and no second protocol.
+// The mailbox is the repository being released, which a worker link with no
+// `endpoint` reaches at the push URL of the orchestrator's release remote; an
+// `endpoint` is a credential-free Git URL naming another mailbox repository.
+// The secret that signs what travels through a mailbox is named by
+// `secretEnv` and read from the environment at run time, so the secret itself
+// never goes in the file, exactly as a webhook's signing secret does not.
 
 // The two roles a node may play. Orchestrator is the default, so a
 // configuration that says nothing about execution is the node a release is
@@ -92,19 +93,22 @@ type ExecutionConfig struct {
 	// names an execution endpoint and never a repository peer.
 	Name string `json:"name,omitempty"`
 	// Endpoint is this node's own mailbox when it serves tasks: the
-	// credential-free Git URL an orchestrator pushes assignments to. https,
-	// ssh and file URLs, an absolute path and the scp-like host:path form are
-	// accepted; http and git are refused because they carry no authentication.
+	// credential-free Git URL an orchestrator pushes assignments to, which is
+	// the repository being released unless the orchestrator's link names
+	// another. https, ssh and file URLs, an absolute path and the scp-like
+	// host:path form are accepted; http and git are refused because they
+	// carry no authentication.
 	Endpoint string `json:"endpoint,omitempty"`
 	// SecretEnv names the environment variable holding the shared secret
 	// every mailbox message is signed with. Required of an orchestrator that
 	// states workers, and of a node serving tasks. The variable's name goes
 	// in the file, never the secret itself.
 	SecretEnv string `json:"secretEnv,omitempty"`
-	// Workers are this orchestrator's execution links, each a node name and
-	// the mailbox it is reached at. A list of objects rather than a map so
-	// that node names keep the case the file wrote them in: dispat folds
-	// every map key it decodes. An empty or absent list preserves local
+	// Workers are this orchestrator's execution links, each a node name and,
+	// optionally, the mailbox it is reached at; a link that states none
+	// reaches the repository being released. A list of objects rather than a
+	// map so that node names keep the case the file wrote them in: dispat
+	// folds every map key it decodes. An empty or absent list preserves local
 	// execution. A worker states none, because a worker delegates nothing.
 	//
 	// A present but empty list is the one state this field cannot round-trip:
@@ -121,16 +125,19 @@ type ExecutionConfig struct {
 
 // ExecutionWorkerConfig is one entry of `execution.workers`: a worker node an
 // orchestrator may delegate tasks to, and the mailbox repository it reads
-// them from. Both fields are required, because a link that names no node or
-// no mailbox reaches nothing.
+// them from. Name is required; an empty Endpoint reaches the orchestrator's
+// release remote (the push URL its lock is taken on; the entry repository's
+// in a composed workspace).
 type ExecutionWorkerConfig struct {
 	// Name is the node's identity, unique across the list after case folding
 	// and written as [A-Za-z0-9._-]+. It is a routing hint rather than an
 	// authority: what a node may act on is decided by the signature on the
 	// message, not by the name on the branch.
 	Name string `json:"name,omitempty"`
-	// Endpoint is the node's mailbox, under the same rules as
-	// ExecutionConfig.Endpoint.
+	// Endpoint is the node's mailbox when it is not the repository being
+	// released, under the same rules as ExecutionConfig.Endpoint. Empty
+	// reaches the release remote's push URL, which is held to those rules
+	// when a run that dispatches starts.
 	Endpoint string `json:"endpoint,omitempty"`
 }
 

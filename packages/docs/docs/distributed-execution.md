@@ -2,9 +2,9 @@
 
 A release can run its build and publish commands on other machines while one machine keeps the release locks, the
 plan and the records. The machine a release is started on is the orchestrator. The machines that execute the work it
-assigns are worker nodes. Everything travels over Git: an orchestrator pushes an assignment to a worker's mailbox
-repository, the worker answers on the same branch, and verified build outputs move between dependent tasks the same
-way.
+assigns are worker nodes. Everything travels over Git, through the repository being released: an orchestrator pushes
+an assignment to a coordination branch on the remote it releases to, the worker answers on the same branch, and
+verified build outputs move between dependent tasks the same way.
 
 With no `execution` object, or with an empty `workers` list, a release plans and executes exactly as it does on one
 machine. Distributed execution is an addition to a configuration rather than a different release engine. The same
@@ -26,7 +26,7 @@ larger half of the job.
 | Where publish commands run               | the machine the release was started on          | here, unless `runOnly` delegates the publish stage        |
 | Where the locks, the plan and the records live | one machine                               | the orchestrator alone                                    |
 | What a build product travels as          | a folder in the checkout                        | a verified manifest and its bytes, on a temporary branch  |
-| What has to exist beforehand             | the checkout                                    | a mailbox repository, a shared signing secret, the nodes  |
+| What has to exist beforehand             | the checkout                                    | a shared signing secret and the nodes                     |
 | What a lost machine costs                | the run                                         | the packages that node was working on                     |
 | Extra failure to read                    | none                                            | a publication whose outcome the run cannot establish      |
 
@@ -54,8 +54,8 @@ task's authority and never consults its own worker list.
 
 ## Configuring the nodes
 
-Three objects configure a distributed release: the orchestrator's `execution` object, each worker's own, and the
-mailbox repository both reach.
+Two objects configure a distributed release: the orchestrator's `execution` object and each worker's own. The
+repository being released is the mailbox both reach, so a link needs no more than the node's name.
 
 ```yaml title="dispat.yaml on the orchestrator"
 execution:
@@ -64,9 +64,7 @@ execution:
   secretEnv: DISPAT_EXECUTION_SECRET
   workers:
     - name: build-a
-      endpoint: git@github.com:acme/project.git
     - name: build-b
-      endpoint: git@github.com:acme/project.git
   timeouts:
     preflight: 60
     task: 3600
@@ -93,26 +91,42 @@ the object are worth knowing before the keys:
   worker's `execution.name` has to be the `name` of the orchestrator's link to it.
 - **An endpoint is credential free.** An `https`, `ssh` or `file` URL, an absolute path, or the scp-like `host:path`
   form. `http` and `git` are refused because they authenticate nobody, and user information is refused because the
-  configuration file is committed. Git's own credentials on each machine are what reach the mailbox.
+  configuration file is committed. Git's own credentials on each machine are what reach the mailbox. A link that
+  states no endpoint reaches the push URL of the remote the release takes its lock on, which is held to the same
+  rules, because an endpoint never carries a secret (CCME §28.2): a push URL carrying a token is refused with `E225`
+  before any lock, so keep that credential in a credential helper or in `http.extraheader`.
 
 ### The mailbox repository
 
-A mailbox is an ordinary Git repository holding coordination refs. When it is the source origin, it also holds the
-release branch and tags; when separate, nobody releases from it. Several workers may share one, and a worker may
-have one of its own; when two nodes read different mailboxes, the orchestrator relays a result from one to the other,
-so a node is never told about a machine it cannot reach.
+The mailbox is the repository being released. A worker link with no `endpoint` reaches the remote the release takes
+its lock on, at the push URL Git resolves for it: `commit.remote`, or `origin` when that names none, and in a composed
+workspace the entry repository's. Every worker names that same repository as its own `endpoint`. The
+coordination branches live on it beside the release branches, under `refs/heads/dispat-worker-*`, and a run deletes
+the ones it created when it ends. A remote that already holds the repository's objects receives only what a task
+changed.
 
-Use the source repository's origin as the mailbox when the workers share its trust boundary. This lets source and
-coordination refs share Git objects, so the first task does not copy the repository's full reachable history into a
-second remote. A separate mailbox is available when access control or trust boundaries require one:
+Using the repository itself has consequences worth knowing before the first run:
 
-- A mailbox holds full source snapshots, the command text of every delegated stage and the build outputs that travel
-  between tasks. Give its readers the same access restrictions as the source.
-- Protect the release branches and tags on an origin that serves as the mailbox. The credentials that write
-  `dispat-worker-*` branches then exist on every worker, and branch protection is what stops them reaching a release
-  branch or a release tag.
-- A separate mailbox receives the source's reachable history on its first task. [What to watch for](#what-to-watch-for)
-  explains that transfer cost.
+- **Whatever travels is readable by whoever can read the repository.** Source snapshots, build outputs, the values
+  scripts export and the command text of every delegated stage are pushed to it, so on a public repository they are
+  public. A snapshot is the working tree as the orchestrator had it, which includes files that are untracked and not
+  ignored and commits that were never pushed, and a host keeps an object fetchable by its id for a while after the
+  branch that carried it is deleted.
+- **The host's ref rules keep workers away from releases.** The credentials a worker writes `dispat-worker-*` branches
+  with can write any other ref their permissions reach. Protect the release branches, the release tags and the
+  `dispat-release-lock` tag with the host's branch and tag rules, so that worker credentials create and delete
+  coordination branches and nothing else, which is what CCME §28.4 requires of transport credentials.
+- **The host's size limits apply.** GitHub warns about a file over 50 MB, rejects a file over 100 MB and rejects a push
+  over 2 GB, and one task's output set travels in one push. `transfer.maxBytes` bounds what dispat sends; the host's
+  limits bound what it accepts.
+- **A composed workspace uses the entry repository.** The histories of the peers a task reads are pushed to the entry
+  repository's remote, because that is where the node reads them from.
+
+A link that states an `endpoint` reaches that repository instead, for coordination that has to live somewhere else
+than the repository being released. Several links may share one endpoint, and a worker names the same one as its own.
+When two nodes read different mailboxes, the orchestrator relays a result from one to the other, so a node is never
+told about a machine it cannot reach, and an endpoint that holds none of the repository's objects receives the source's
+reachable history on its first task ([what to watch for](#what-to-watch-for) has the cost).
 
 ### The signing secret
 
@@ -349,17 +363,19 @@ travels to every task inside the prepared input state.
 ### Naming a worker on the command line
 
 A pipeline that creates a worker machine a minute before the run cannot write it into the committed file.
-`--worker name=endpoint`, repeatable on `release`, `run` and `status`, adds a link beside the ones `execution.workers`
-lists:
+`--worker name`, repeatable on `release`, `run` and `status`, adds a link beside the ones `execution.workers` lists,
+and like a configured link with no endpoint it reaches the repository being released. `--worker name=endpoint` names
+another mailbox instead:
 
 ```sh
-dispat run tests --since all --worker ci-worker-1=git@github.com:acme/project.git
+dispat run tests --since all --worker ci-worker-1
 ```
 
-The link is held to every rule a configured one is: a node name, a credential-free endpoint, a name no other link
-folds to, and a `secretEnv` the file names. It is refused with `E226` under a task's authority and on a node whose
-file says `role: worker`, because a worker dispatches nothing. It is no part of the plan digest, and
-`dispat status --worker` prints the digest a distributed run would carry and reaches no node.
+The link is held to every rule a configured one is: a node name, a credential-free endpoint when it states one, a name
+no other link folds to, and a `secretEnv` the file names. A value that is not a node name alone, or leaves either half
+of `name=endpoint` empty, is a usage error. The link is refused with `E226` under a task's authority and on a node
+whose file says `role: worker`, because a worker dispatches nothing. It is no part of the plan digest, and
+`dispat status --worker` prints the digest a distributed run would carry, resolves no remote and reaches no node.
 
 ## Locks, failure and recovery
 
@@ -398,10 +414,12 @@ for its acknowledgement, fails the package at the authorization and gives the lo
 
 If the publisher never acknowledged, the release lock of the repository it was publishing into is **retained**. The
 uncertain publication's authorization ref is also retained, whether the node acknowledged after starting publish or
-never answered. Other owned coordination refs are cleaned up when their current tips still belong to this run. The error names the order of recovery, and it is the order
-to follow:
+never answered. Other owned coordination refs are cleaned up when their current tips still belong to this run. The
+error names the order of recovery, and it is the order to follow:
 
-1. list the run's coordination refs in the mailbox (`dispat-worker-*`);
+1. read the run id from the `run` line of the retained lock tag, and list the coordination refs of the repository
+   (`git ls-remote --heads origin 'dispat-worker-*'`); the run's own carry that id in the `run` field of their
+   messages;
 2. find the authorization that has no result beside it;
 3. confirm on that node that the publisher has stopped;
 4. check the registry for the version;
@@ -433,22 +451,25 @@ travel through a repository, a shared secret decides what a node will execute, a
 becomes what gets published. Each of the seven items below is a real exposure of that arrangement and what contains
 it.
 
-**1. The mailbox holds sensitive data.** Full source snapshots, the command text of every delegated stage, the
-computed `DISPAT_*` values of each stage, the values scripts exported through `DISPAT_OUTPUT` and the build outputs
-themselves all travel through the mailbox repository.
+**1. The repository holds everything that travels.** Full source snapshots, untracked files that are not ignored and
+unpushed commits included, the command text of every delegated stage, the computed `DISPAT_*` values of each stage,
+the values scripts exported through `DISPAT_OUTPUT` and the build outputs themselves are all pushed to the repository
+being released, or to the endpoint a link names instead, and a host keeps an object fetchable by its id for a while
+after its branch is deleted.
 
-Contain it by giving mailbox refs the access control the source has. When the source origin is the mailbox, protect
-release branches and tags from worker credentials. Never export a secret as a script output, and never write one
-literally in `env` or in a command: write `$NAME`, which travels as the reference and is expanded on the node that
-runs the command.
+Contain it by treating whatever travels as readable by everyone who can read that repository: on a public repository,
+delegate no work whose inputs or outputs must stay private, and keep the orchestrator's checkout free of untracked
+files that are not ignored. Protect release branches, release tags and the lock tag from worker credentials with the
+host's ref rules. Never export a secret as a script output, and never write one literally in `env` or in a command:
+write `$NAME`, which travels as the reference and is expanded on the node that runs the command.
 
 **2. The signing secret is shared and symmetric.** Every node holding the secret can sign any message. A compromised
-worker, or anyone holding the secret with push access to the mailbox, can forge an assignment, which is command
-execution on every other node sharing that secret, and can forge a result, which is a build output the orchestrator
-would admit.
+worker, or anyone holding the secret with push access to the repository the messages travel through, can forge an
+assignment, which is command execution on every other node sharing that secret, and can forge a result, which is a
+build output the orchestrator would admit.
 
 Contain it by treating every machine that holds one secret as one trust zone. Do not share a secret across trust
-levels: use a separate mailbox and a separate secret per zone. Keep the secret only in the CI secret store or an
+levels: use a separate secret per zone. Keep the secret only in the CI secret store or an
 equivalent, never in a file in the repository, and rotate it whenever a worker is decommissioned or suspected.
 Per-link secrets are not implemented, so the secret is as strong as the least trusted machine holding it.
 
@@ -457,8 +478,8 @@ environment and its own credentials. That is what a worker is for, and it means 
 node it reaches.
 
 Contain it by running workers on dedicated machines, preferably ephemeral ones, with least-privilege credentials:
-Git credentials limited to the mailbox and read access to the sources, and no release or registry credentials unless
-that worker must publish. Do not serve tasks on a shared machine or an untrusted runner.
+Git credentials that write `dispat-worker-*` branches and read the sources, and no release or registry credentials
+unless that worker must publish. Do not serve tasks on a shared machine or an untrusted runner.
 
 **4. A worker's build output becomes a published artefact.** Outputs are verified for integrity and origin, through
 the digest, the signature and the identity in the manifest, and not for honesty. A compromised worker can return a
@@ -485,17 +506,17 @@ above.
 
 A checklist an operator can follow:
 
-- The source origin is the mailbox when its workers share the source's trust boundary; otherwise the separate mailbox
-  has the access control the source needs.
-- When the origin is the mailbox, release branches and release tags are protected from worker credentials.
-- The signing secret comes from a secret store, is shared only inside one trust zone, and is rotated when a
-      worker leaves or is suspected.
-- Workers run on dedicated, preferably ephemeral machines, with no credentials beyond the mailbox, the sources
-      and what their own builds need.
+- Everything that travels may be read by everyone who can read the repository being released, and the orchestrator's
+  checkout holds no untracked file that is not ignored.
+- Release branches, release tags and the lock tag are protected from worker credentials by the host's ref rules.
+- The signing secret comes from a secret store, is shared only inside one trust zone, and is rotated when a worker
+  leaves or is suspected.
+- Workers run on dedicated, preferably ephemeral machines, with no credentials beyond the coordination branches, the
+  sources and what their own builds need.
 - No secret is written literally in `env` or in a command, and no script exports one.
 - Packages whose artefacts are signed or shipped to users are pinned with `runOnly: orchestrator`.
-- Publishing stays on the orchestrator except where a delegated publish is deliberate, and that worker holds
-      only the credentials it needs.
+- Publishing stays on the orchestrator except where a delegated publish is deliberate, and that worker holds only the
+  credentials it needs.
 - Worker logs are treated as CI logs.
 - Coordination branches of failed runs are deleted, and a retained lock is cleared only by the documented order.
 
@@ -601,7 +622,7 @@ switches on.
 
 | Code   | Category                    | Means                                                                            |
 |--------|-----------------------------|----------------------------------------------------------------------------------|
-| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, `commit.verify: false` beside workers on a release, an unsatisfiable `buildPlatforms`, `runOnly: worker` with no worker links, a node that failed preflight, overlapping `buildOutputs`, or a `runOutputs` root that is or holds a package folder or overlaps a build output root |
+| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, `commit.verify: false` beside workers on a release, a link with no endpoint whose release remote's push URL carries credentials or is not a Git remote a mailbox can use, an unsatisfiable `buildPlatforms`, `runOnly: worker` with no worker links, a node that failed preflight, overlapping `buildOutputs`, or a `runOutputs` root that is or holds a package folder or overlaps a build output root |
 | `E226` | `execution-authority`       | work refused because of who asked: a release or a distributed sweep initiated on a worker or under a task's authority, a `--worker` link stated there, an assignment that is not authentically this run's, or a write the task's authority does not extend to |
 | `E227` | `io-integrity`              | input or output data that is missing, changed, incomplete, incompatible or escaping its declared roots, or two tasks of one sweep writing one path with different bytes; it fails one prerequisite and blocks that prerequisite's consumers |
 | `E228` | `publication-unknown`       | an authorized publication that never reported back; the run is incomplete, makes no second attempt, and retains the lock of an unfenced publisher |
@@ -615,11 +636,11 @@ Three conditions dispat already had a code for keep it and join the specificatio
 
 ## What to watch for
 
-- **The first push to a fresh mailbox carries the repository's history.** A prepared input state descends from the
-  planned head, so the first push to a mailbox that shares no objects with the source sends everything reachable.
-  For a very large repository that is measured in gigabytes and in minutes. Normal completed-run cleanup deletes
-  the run's owned coordination refs, so nothing keeps those objects referenced and the next run pays it again. Use
-  the source's own origin as the mailbox so the history is already present.
+- **A mailbox elsewhere pays for the repository's history.** A prepared input state descends from the planned head, so
+  the repository being released, which already holds that history, receives only what a task changed. An `endpoint`
+  that names another repository shares no objects with the source, and its first push sends everything reachable
+  from the planned head: for a very large repository, gigabytes and minutes. Normal completed-run cleanup deletes the
+  run's owned coordination refs, so nothing keeps those objects referenced there and the next run pays it again.
 - **A heterogeneous pool waits for its slowest node.** Placement is first free, not fastest: one machine much slower
   than the others will be given work and the run will wait for it. Prefer a homogeneous pool, or separate the classes
   of machine with `runOnly` and `buildPlatforms`.

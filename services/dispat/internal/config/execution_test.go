@@ -98,6 +98,17 @@ func TestLoadExecutionAcceptedShapes(t *testing.T) {
 		}, func(t *testing.T, loaded *File) {
 			assert.Len(t, loaded.Execution.Workers, 7)
 		}},
+		// A link that states no endpoint reaches the repository being
+		// released, whose remote a run resolves and checks when it starts:
+		// the file has nothing to hold it to here.
+		"a link that states no endpoint": {&ExecutionConfig{
+			SecretEnv: "S",
+			Workers:   []ExecutionWorkerConfig{{Name: "build-a"}, {Name: "build-b", Endpoint: "/srv/b.git"}},
+		}, func(t *testing.T, loaded *File) {
+			assert.Equal(t, []ExecutionWorkerConfig{{Name: "build-a"}, {Name: "build-b", Endpoint: "/srv/b.git"}},
+				loaded.Execution.Workers)
+			assert.True(t, loaded.Execution.IsDistributed())
+		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			loaded, err := loadModel(t, executionConfig(tc.execution), "pkgs/core")
@@ -167,9 +178,6 @@ func TestLoadExecutionRejections(t *testing.T) {
 				{Name: "BUILD-A", Endpoint: "/srv/b.git"},
 			}},
 			`execution.workers[1]: name "BUILD-A" is already used by execution.workers[0]`},
-		"a link with no mailbox": {
-			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Name: "a"}}},
-			"execution.workers[0]: endpoint is required"},
 		"a mailbox with credentials": {
 			executionWithEndpoint("https://user:secret@git.example.test/a.git"),
 			"carries user information"},
@@ -304,12 +312,14 @@ func loadWithWorkerFlags(t *testing.T, cfg File, values ...string) (*File, error
 // file's own, held to every rule they are.
 func TestWorkerFlagAddsLinksBesideTheFilesOwn(t *testing.T) {
 	loaded, err := loadWithWorkerFlags(t, executionConfig(orchestratorWithWorkers()),
-		"build-c=file:///srv/mailbox", "build-d=git@git.example.test:mailbox-d.git")
+		"build-c=file:///srv/mailbox", "build-d=git@git.example.test:mailbox-d.git", "build-e")
 	require.NoError(t, err)
-	require.Len(t, loaded.Execution.Workers, 4)
+	require.Len(t, loaded.Execution.Workers, 5)
 	assert.Equal(t, ExecutionWorkerConfig{Name: "build-c", Endpoint: "file:///srv/mailbox"},
 		loaded.Execution.Workers[2])
 	assert.Equal(t, "build-d", loaded.Execution.Workers[3].Name)
+	assert.Equal(t, ExecutionWorkerConfig{Name: "build-e"}, loaded.Execution.Workers[4],
+		"a name alone is a link to the repository being released")
 
 	secretOnly := executionConfig(&ExecutionConfig{SecretEnv: "DISPAT_EXECUTION_SECRET",
 		Timeouts: &ExecutionTimeoutsConfig{Preflight: 120}})
@@ -333,9 +343,9 @@ func TestWorkerFlagRefusals(t *testing.T) {
 		want   string
 		code   string
 	}{
-		"a malformed value": {
-			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"build-c"},
-			want: "name=endpoint", code: DiagnosticExecution},
+		"a value with an empty endpoint": {
+			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"build-c="},
+			want: "name or name=endpoint", code: DiagnosticExecution},
 		"a name that is not a node name": {
 			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"build..c=file:///m"},
 			want: "--worker build..c: name", code: DiagnosticExecution},
@@ -382,4 +392,37 @@ func TestReadWorkerFlagAsksOnlyASetFlag(t *testing.T) {
 	scalar.String(WorkerFlag, "", "")
 	require.NoError(t, scalar.Set(WorkerFlag, "w=file:///m"))
 	assert.Nil(t, readWorkerFlag(scalar), "a flag of another shape is not a list of links")
+}
+
+// TestParseWorkerLinkShapes: a `--worker` value is a node name alone, which
+// reaches the repository being released, or name=endpoint with both halves
+// stated. Anything else is a usage mistake, refused without echoing what was
+// typed, because a value that is not a node name is most likely an endpoint
+// somebody wrote without its name.
+func TestParseWorkerLinkShapes(t *testing.T) {
+	for value, want := range map[string]ExecutionWorkerConfig{
+		"build-a":                 {Name: "build-a"},
+		"build-a=file:///srv/m":   {Name: "build-a", Endpoint: "file:///srv/m"},
+		"build-a=git@host:m.git":  {Name: "build-a", Endpoint: "git@host:m.git"},
+		"build-a=https://h/m.git": {Name: "build-a", Endpoint: "https://h/m.git"},
+	} {
+		link, err := ParseWorkerLink(value)
+		require.NoError(t, err, value)
+		assert.Equal(t, want, link, value)
+	}
+	for name, value := range map[string]string{
+		"an empty endpoint":        "build-a=",
+		"an empty name":            "=file:///srv/m",
+		"a bare separator":         "=",
+		"nothing at all":           "",
+		"a name git could not use": "build..a",
+		"an endpoint with no name": "https://user:hunter2@example.test/m.git",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseWorkerLink(value)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "name or name=endpoint")
+			assert.NotContains(t, err.Error(), "hunter2")
+		})
+	}
 }

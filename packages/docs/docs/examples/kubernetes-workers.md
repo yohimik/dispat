@@ -7,8 +7,9 @@ what an orchestrator and a worker are.
 
 ## What fits
 
-A worker asks nothing of the network it runs in. It polls its mailbox repository over Git and pushes its answers back,
-so a worker pod needs no Service, no Ingress and no inbound port. It runs behind NAT and in a private cluster.
+A worker asks nothing of the network it runs in. It polls the repository being released over Git and pushes its
+answers back, so a worker pod needs no Service, no Ingress and no inbound port. It runs behind NAT and in a private
+cluster.
 
 A worker is also a well-behaved batch process:
 
@@ -37,7 +38,7 @@ A HorizontalPodAutoscaler that watches worker CPU during a release adds nothing,
   `execution.timeouts.preflight` refuses the run before anything is dispatched. A pod that appears later is in no
   list, was never asked, and receives no work.
 - **CPU is the wrong signal.** A worker is at full CPU with one build running and at full CPU with ten more waiting.
-  Waiting work is visible in the mailbox as unclaimed coordination branches, and the orchestrator knows the amount
+  Waiting work is visible in the repository as unclaimed coordination branches, and the orchestrator knows the amount
   exactly before it dispatches anything, because it holds the plan.
 - **The reaction is slower than the work.** A metric window, a pod start, an image pull and often a new machine take
   minutes. Most releases are over by then.
@@ -48,7 +49,7 @@ A HorizontalPodAutoscaler that watches worker CPU during a release adds nothing,
   until a person has looked.
 
 A demand signal exists for anyone who wants to start workers from zero without a pipeline step: the number of
-branches under `refs/heads/dispat-worker-*` in the mailbox repository. It is never CPU.
+branches under `refs/heads/dispat-worker-*` in the repository being released. It is never CPU.
 
 ## How large a pool is worth having
 
@@ -80,17 +81,19 @@ execution:
     task: 3600
     cancel: 60
   workers:
-    - {name: w-0, endpoint: git@github.com:acme/project.git}
-    - {name: w-1, endpoint: git@github.com:acme/project.git}
-    - {name: w-2, endpoint: git@github.com:acme/project.git}
-    - {name: w-3, endpoint: git@github.com:acme/project.git}
+    - {name: w-0}
+    - {name: w-1}
+    - {name: w-2}
+    - {name: w-3}
 ```
 
-Here `project.git` is also the source origin. Protect its release branch and tags so the worker key can write
-`dispat-worker-*` coordination refs without gaining release-record authority.
+A link with no endpoint reaches the repository being released, `git@github.com:acme/project.git` here, and every worker
+names that repository as its own endpoint. Protect its release branches, its release tags and the `dispat-release-lock`
+tag with the host's rules, so the worker key can write `dispat-worker-*` coordination refs without gaining
+release-record authority.
 
-A pipeline that creates its workers for the run can name them on the command line instead, with
-`--worker name=endpoint` on the release, beside a file that states only the secret and the waits.
+A pipeline that creates its workers for the run can name them on the command line instead, with `--worker name` on
+the release, beside a file that states only the secret and the waits.
 
 A worker's name is read from its configuration file, so each pod writes its own file from its index before it starts
 serving:
@@ -156,7 +159,7 @@ spec:
         - name: state
           emptyDir: {}
         - name: git-ssh
-          secret: {secretName: mailbox-deploy-key, defaultMode: 0400}
+          secret: {secretName: worker-git-key, defaultMode: 0400}
 ```
 
 The image carries `dispat`, `git` and whatever the build commands call. The release pipeline applies the Job, then
@@ -181,17 +184,19 @@ zero after one. Use `--idle-timeout 0` there, because a StatefulSet restarts a c
 ## Secrets and isolation
 
 A worker pod runs the commands an assignment carries, and an assignment is accepted when it verifies under the signing
-secret. Whoever holds that secret, or can write to the mailbox repository with it, runs commands in these pods. Read
+secret. Whoever holds that secret, and can write to the repository the messages travel through, runs commands in
+these pods. Read
 [what distributed execution exposes](../distributed-execution.md#security-what-distributed-execution-exposes-and-how-to-contain-it)
 for the exposures that are not specific to a cluster, the trust-zone rule for the secret, and the operator checklist.
 What a cluster adds to that:
 
 - Give the workers a namespace of their own, no service account token, a non-root user, and a NetworkPolicy that
   allows egress to the Git host and the registries the builds read, and nothing else.
-- Keep the signing secret and the mailbox deploy key in Secrets that only this namespace mounts, and do not mount the
-  release job's credentials anywhere in it.
+- Keep the signing secret and the worker Git key in Secrets that only this namespace mounts, and do not mount the
+  release job's credentials anywhere in it. The Git key can create and delete `dispat-worker-*` branches and read the
+  sources; the host's ref rules keep it away from everything else.
 - A pool sharing one secret is one trust zone. Two namespaces that should not be able to run each other's commands
-  need two mailbox repositories and two secrets.
+  need two secrets.
 - Keep publishing credentials off the workers. A space with a `login` script always publishes on the orchestrator, and
   `runOnly: orchestrator` keeps a package's build and publish there.
 - Do not run a worker that publishes on preemptible machines. A publish that was authorized and never reported back

@@ -90,7 +90,9 @@ func (a *App) openSweepDispatch(ctx context.Context, work *scriptWork, covered [
 	if err := a.recordFixedPlan(ctx, work.pl, ReleaseOptions{}); err != nil {
 		return nil, err
 	}
-	coordinator, err := a.newCoordinator(execution.FormatSweepGeneration(a.runID), nil)
+	// A sweep takes no lock, so its links reach the release remote as it was
+	// resolved when the sweep started.
+	coordinator, err := a.newCoordinator(execution.FormatSweepGeneration(a.runID), nil, a.coordination)
 	if err != nil {
 		return nil, a.reportSweepRefusal(err)
 	}

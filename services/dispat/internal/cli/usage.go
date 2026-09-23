@@ -123,9 +123,11 @@ repositories with no remote to coordinate through.
 release lock and planning. The refusal exits 3, apart from exit 1's failures.
 Use "dispat status --require-release" for a lock-free CI plan gate.
 
---worker name=endpoint adds a worker node for this run beside the ones
+--worker name adds a worker node for this run beside the ones
 execution.workers lists, which is how a pipeline names a machine it has
-just created. It is held to every rule a configured link is.
+just created. A name alone reaches the repository being released, and
+--worker name=endpoint names another mailbox. It is held to every rule a
+configured link is.
 
 This is what a bare "dispat" does.`,
 		flags: append([]string{"strict", "require-release", "worker"}, selectionFlags...),
@@ -147,9 +149,9 @@ selection the plan cannot release, exits 1; --require-release with a correct
 plan that releases nothing exits 3, so a pipeline gating on it can tell
 "nothing to do" from "something is wrong".
 
-With worker links, from execution.workers or from --worker name=endpoint,
+With worker links, from execution.workers or from --worker name[=endpoint],
 it fixes and prints the plan digest a distributed run would carry, and
-still dispatches nothing and takes no lock.`,
+still resolves no remote, dispatches nothing and takes no lock.`,
 		flags: append([]string{"strict", "require-release", "worker"}, selectionFlags...),
 	},
 	{
@@ -170,10 +172,11 @@ Anything after "--" is appended to each package's command, so
 package the run covers. A bare word without the "--" is still a usage error:
 packages are selected with flags.
 
-With worker links, from execution.workers or from --worker name=endpoint,
+With worker links, from execution.workers or from --worker name[=endpoint],
 each package's task is placed on a worker node, or on this machine when
 none has room, and the folders runOutputs declares for the script are
 carried back and merged into this checkout once every task has answered.
+A link with no endpoint reaches the repository being released.
 
 "dispat <script>" is a shorthand when <script> is not a command name.`,
 		flags: append(append([]string{}, windowFlags...), "worker"),
@@ -375,10 +378,11 @@ what its assignment authorized, and reports back.
 
 The node is described by the execution object of the config file, and three
 of its settings are required here: execution.name, which is how this node
-recognises the work addressed to it; execution.endpoint, the mailbox
-repository it reads that work from; and execution.secretEnv, naming the
-environment variable holding the secret every message between the two nodes
-is signed with. execution.concurrency (default 1) is how many assigned
+recognises the work addressed to it; execution.endpoint, the repository it
+reads that work from, which is the repository being released unless the
+orchestrator's link names another mailbox; and execution.secretEnv, naming
+the environment variable holding the secret every message between the two
+nodes is signed with. execution.concurrency (default 1) is how many assigned
 command tasks this node takes on at once.
 
 Nothing else about the repository is needed: no packages, no spaces and no

@@ -227,8 +227,9 @@ func TestExecutionRunSweepWithoutLinksIsLocalAndLockless(t *testing.T) {
 // TestExecutionRunWorkerFlagNamesAMachineTheFileDoesNot: a pipeline names the
 // machine it created a minute ago on the command line, and the sweep places
 // its tasks there; `dispat status` with the same flag fixes and prints the
-// plan's name and reaches no node; and a link stated on the command line is
-// refused exactly where one stated in the file would be.
+// plan's name and reaches no node, and with the node's name alone it resolves
+// no remote, not even one whose push URL a run would refuse; and a link stated
+// on the command line is refused exactly where one stated in the file would be.
 func TestExecutionRunWorkerFlagNamesAMachineTheFileDoesNot(t *testing.T) {
 	secretOnly := func(cfg *models.File) {
 		cfg.Execution = &models.ExecutionConfig{SecretEnv: executionSecretEnv,
@@ -257,6 +258,15 @@ func TestExecutionRunWorkerFlagNamesAMachineTheFileDoesNot(t *testing.T) {
 	assert.Equal(t, fixed.Str("planDigest"), again.Str("planDigest"), "the links are no part of the digest")
 	assert.Empty(t, executionMailboxBranches(t, untouched), "status probes and assigns nothing")
 	assert.Empty(t, executionMailboxBranches(t, other))
+	rig.repo.Git("remote", "set-url", "--push", "origin",
+		"https://x-access-token:ghs_itFAKE@example.invalid/acme/project.git")
+	alone := rig.repo.CommandEnv(rig.env(), "status", "--worker", "fresh")
+	require.Equal(t, 0, alone.Code, "a name alone resolves no remote under status, not even one a run refuses"+
+		"\nstdout:\n%s\nstderr:\n%s", alone.Stdout, alone.Stderr)
+	aloneFixed, isAloneFixed := executionLine(alone, "plan fixed")
+	require.True(t, isAloneFixed, "status with a name alone names the plan\nstdout:\n%s", alone.Stdout)
+	assert.Equal(t, fixed.Str("planDigest"), aloneFixed.Str("planDigest"))
+	assert.NotContains(t, alone.Stdout+alone.Stderr, "ghs_itFAKE")
 	_, isFixedWithout := executionLine(rig.repo.CommandEnv(rig.env(), "status"), "plan fixed")
 	assert.False(t, isFixedWithout, "and without a link there is no plan to name")
 }
@@ -273,8 +283,10 @@ func TestExecutionRunWorkerFlagRefusals(t *testing.T) {
 		want      string
 		diagnosis string
 	}{
-		"a value that is not name=endpoint": {
-			flag: "build-a", code: 2, want: "name=endpoint"},
+		"an endpoint with no name": {
+			flag: "file:///srv/mailbox", code: 2, want: "name or name=endpoint"},
+		"a name with an empty endpoint": {
+			flag: "build-a=", code: 2, want: "name or name=endpoint"},
 		"a configured link spelled again": {
 			execution: &models.ExecutionConfig{SecretEnv: executionSecretEnv,
 				Workers: []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file:///srv/mailbox"}}},
