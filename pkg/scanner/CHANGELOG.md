@@ -1,5 +1,12 @@
 # Changelog
 
+## pkg/scanner/v1.2.2-rc.0 (2026-09-23)
+
+### Dependencies
+
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.2-rc.0): 1.2.1 -> 1.2.2-rc.0
+
+
 ## pkg/scanner/v1.2.1 (2026-09-20)
 
 ### Fixes
