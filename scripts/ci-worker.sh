@@ -295,21 +295,39 @@ git_ssh() {
   printf 'ssh %s\n' "$(ssh_options)"
 }
 
+# collect copies the worker's log; a job that never had a machine, or was
+# cancelled before one answered, has nothing to collect and says so.
 collect() {
   dest=${1:-}
   [ -n "$dest" ] || fail "collect needs a destination folder"
-  require_state
+  [ -f "$dir/ip" ] || { log "no worker state; nothing to collect"; return; }
   mkdir -p "$dest"
   worker_scp "$user@$(cat "$dir/ip"):worker.log" "$dest/worker.log" || log "no worker log to collect"
 }
 
 # delete_instance removes the instance and what the job knows about it,
 # keeping the ssh key pair for a replacement.
+# delete_instance removes the instance and what the job knows about it,
+# keeping the ssh key pair for a replacement. A job cancelled while create
+# was still running may hold no state at all although the instance exists,
+# so without state the instance is deleted by the name this run gives it,
+# asked of every zone the run could have chosen.
 delete_instance() {
-  [ -f "$dir/name" ] || { log "nothing to delete"; return; }
-  log "deleting instance $(cat "$dir/name") in $(zone_of_instance)"
-  run_gcloud compute instances delete "$(cat "$dir/name")" --zone "$(zone_of_instance)" --quiet \
-    || log "delete reported an error; the instance deletes itself after $lifetime in any case"
+  if [ -f "$dir/name" ]; then
+    target=$(cat "$dir/name")
+    candidate_zones=$(zone_of_instance)
+  else
+    log "no worker state; deleting $name by name wherever it exists, in case the job was cancelled mid-creation"
+    target=$name
+    candidate_zones=$(printf '%s' "$zones" | tr ',' ' ')
+  fi
+  for candidate_zone in $candidate_zones; do
+    if run_gcloud compute instances delete "$target" --zone "$candidate_zone" --quiet 2>/dev/null; then
+      log "deleted instance $target in $candidate_zone"
+    elif [ -f "$dir/name" ]; then
+      log "delete reported an error; the instance deletes itself after $lifetime in any case"
+    fi
+  done
   rm -f "$dir/name" "$dir/ip" "$dir/zone" "$dir/machine" "$dir/endpoint" "$dir/known_hosts"
 }
 
