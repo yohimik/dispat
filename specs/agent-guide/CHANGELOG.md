@@ -1,5 +1,22 @@
 # Changelog
 
+## specs/agent-guide/v1.11.0-rc.5 (2026-09-23)
+
+### Fixes
+
+- retain authenticated coordination ownership through cancellation races ([7dceee9](https://github.com/yohimik/dispat/commit/7dceee974ac2937c6d5d64e3cec5c76df0822ed7)) (by yohimik)
+
+- preserve uncertain publication and bound worker state ([e92ca16](https://github.com/yohimik/dispat/commit/e92ca16f0cbbee47a18a45b41f085f217e3e45da)) (by yohimik)
+
+- bound transports and fence worker state ownership ([792522e](https://github.com/yohimik/dispat/commit/792522e7a8ad723724dd53fbb967d492d2ceaad9)) (by yohimik)
+
+- harden fleet release recovery and shared version policies ([dbf10c7](https://github.com/yohimik/dispat/commit/dbf10c73478d0bb9f298d4b1ec19cd6c8b177005)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## specs/agent-guide/v1.11.0-rc.4 (2026-09-23)
 
 ### Fixes
