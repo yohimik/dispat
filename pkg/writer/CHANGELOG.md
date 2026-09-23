@@ -1,5 +1,24 @@
 # Changelog
 
+## pkg/writer/v1.2.2-rc.0 (2026-09-23)
+
+### Fixes
+
+- preserve complete writes and reconcile release identities and late claims ([7fb8a84](https://github.com/yohimik/dispat/commit/7fb8a84693d4472e31a73d1cdc10f5db64578b88)) (by yohimik)
+
+- isolate distributed outputs and preserve recovery state ([fe7c42f](https://github.com/yohimik/dispat/commit/fe7c42fa606781166be077e9322ff5e173295658)) (by yohimik)
+
+- harden fleet release recovery and shared version policies ([dbf10c7](https://github.com/yohimik/dispat/commit/dbf10c73478d0bb9f298d4b1ec19cd6c8b177005)) (by yohimik)
+
+### Dependencies
+
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.2-rc.0): 1.2.1 -> 1.2.2-rc.0
+
+### Authors
+
+- yohimik
+
+
 ## pkg/writer/v1.2.1 (2026-09-20)
 
 ### Fixes
