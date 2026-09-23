@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -512,10 +513,15 @@ const executionOrchestratorSecret = "orchestrator-only-secret-value"
 
 // executionMailboxSnapshot keeps every object a run writes into a mailbox,
 // because a finished run deletes the branches that named them.
+//
+// seen belongs to the watch goroutine until done is closed, and to whoever
+// reads it after that: objects stops the watch before it reads, so the two
+// never touch the map at once.
 type executionMailboxSnapshot struct {
 	t       *testing.T
 	mailbox string
 	stop    chan struct{}
+	halt    sync.Once
 	done    chan struct{}
 	seen    map[string]string
 }
@@ -527,11 +533,16 @@ func newExecutionMailboxSnapshot(t *testing.T, rig *executionRig) *executionMail
 	keep := &executionMailboxSnapshot{t: t, mailbox: rig.mailbox,
 		stop: make(chan struct{}), done: make(chan struct{}), seen: map[string]string{}}
 	go keep.watch()
-	t.Cleanup(func() {
-		close(keep.stop)
-		<-keep.done
-	})
+	t.Cleanup(keep.finish)
 	return keep
+}
+
+// finish stops the watch after its last collection and waits for it. It is
+// safe to call more than once: the scenario calls it through objects, and the
+// cleanup calls it again for a scenario that never asked.
+func (k *executionMailboxSnapshot) finish() {
+	k.halt.Do(func() { close(k.stop) })
+	<-k.done
 }
 
 // watch copies every blob reachable from a coordination branch until the
@@ -583,8 +594,11 @@ func executionReadMailbox(mailbox string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// objects is every blob body this watch kept.
+// objects is every blob body this watch kept. It ends the watch first, so the
+// answer includes a last look at the mailbox and nothing writes to the map
+// while it is read.
 func (k *executionMailboxSnapshot) objects() []string {
+	k.finish()
 	bodies := make([]string, 0, len(k.seen))
 	for _, body := range k.seen {
 		bodies = append(bodies, body)
