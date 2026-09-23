@@ -1,4 +1,4 @@
-> These recordings supply the Instagram cover story. The Instagram, LinkedIn and Discord photo posts use photos and changelog text.
+> These recordings score the sixteen-second cover clip that opens the Instagram feed post and the Instagram stories. Every post, on Instagram, LinkedIn and Discord alike, carries only the channel's card and its hand-written notes (`rc/notes.yaml` or `stable/notes.yaml`); nothing is generated from the changelog.
 
 # The anthems
 
