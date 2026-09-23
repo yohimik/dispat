@@ -1,5 +1,182 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.3 (2026-09-23)
+
+### Features
+
+- let a command sweep run on workers without a release lock ([d124d42](https://github.com/yohimik/dispat/commit/d124d429a08e1c6272c07114d25487d027fc9e7b)) (by yohimik, Claude Fable 5.1)
+  Section 28.2 lets the invocation state execution links under the same
+  validation and refusals as the configuration; section 28.3 lets read-only
+  planning with links fix the digest and probe, never assign; section 28.4
+  lists the run kind; the new section 28.10 defines command sweeps: no
+  record, no lock, a generation drawn from a fresh run identity, the task
+  frame, the sweep output roots with their merge rules, and vectors 31 to 34.
+
+- record distributed execution as implemented ([b83e259](https://github.com/yohimik/dispat/commit/b83e2595f189e8f12d19973b5cfa1b257533af58)) (by yohimik, Claude Fable 5.1)
+  Section 28 stops being an unimplemented profile: dispat implements it, and
+  the rules its implementation showed to be missing are stated (local
+  execution captured like a worker's, unclaimed work outside capacity, an
+  unreadable tip not counted as seen, outermost-first materialization, the
+  phase a cancelled attempt stopped in, revocation limited to unadmitted
+  branches, the summary shape of a prepared provider). No speedup is claimed.
+
+- name what a consumer's build waits for in its provider ([8212d9e](https://github.com/yohimik/dispat/commit/8212d9e95ee42e7c524f6d7c3d43ebc31c3d3295)) (by yohimik, Claude Fable 5.1)
+  §19.2a gives every edge between two packages that build a declared build
+  readiness relation, none, build or publish, ordered by what the consumer's
+  build waits for. Publication order and blocking are untouched under all
+  three, the relation is execution policy and never plan input, build order is
+  taken over the whole graph through packages that do not build, and under §28
+  a none edge carries no output into the consumer's build task. §13.11 states
+  the run durations the three values lead to and that no duration is promised:
+  under budgets a weaker relation can lengthen a greedy schedule. Vectors 80b
+  and 80c pin one edge under the three relations and the order through a
+  package that does not build.
+
+### Fixes
+
+- record the first end-to-end use of command sweeps on a machine the pipeline created ([0ced8c2](https://github.com/yohimik/dispat/commit/0ced8c28752606bcbcd4cc2886781ea96037a8ea)) (by yohimik, Claude Fable 5.1)
+
+- record the reference engine's command sweeps and their two departures ([89d3bb3](https://github.com/yohimik/dispat/commit/89d3bb37f6b054575fe9aff8ddadc0ca872eb9c6)) (by yohimik, Claude Fable 5.1)
+  The design history states what the engine does for a sweep on workers, from
+  the generation drawn from the run identity to the merge of sweep outputs, and
+  keeps two departures: a task placed on the orchestrator is not captured, so
+  its conflict with a delegated task goes undetected, and a node predating the
+  run kind is not refused at preflight. The README's section 28 bullet gains
+  the sweep clause.
+
+- record what the reaching-rule conformance row found in the reference engine ([a58bde3](https://github.com/yohimik/dispat/commit/a58bde384e5dae3e76641b6aaaa3fe097fd32825)) (by yohimik, Claude Fable 5.1)
+  The row written for the reaching set found the engine attributing a unit's
+  whole source set to every dependent its walk reached; the design history
+  says so, that the engine was corrected in the same candidate, and that the
+  row stays as its fence.
+
+- answer the report review of the delivery rule, the windows and the cost table ([a5ea5fe](https://github.com/yohimik/dispat/commit/a5ea5fef019745c78a09894c977990f9cb8f16e3)) (by yohimik, Claude Fable 5.1)
+  Owed windows are stated per reachable pair with the formula the prose now
+  matches; section 9.2 and section 13.7b agree on one reaching and owed set;
+  a package whose every cause is owed by a failed provider is not attempted;
+  an applicable exact Release-As is a cause of its own; owing is admission in
+  every respect but delivery; the stable branch takes a graduation's version
+  from section 11.5; the cost table's bound, anomaly order, window count and
+  cause test are stated as they are; vectors 80d, 82b1 and 80c and the
+  rendering, the fragment and the measurement entry's date and commit are
+  corrected.
+
+- record the LLVM measurement of the execution profile ([e383de0](https://github.com/yohimik/dispat/commit/e383de0e0426e003d681b818ec0b78b10d2b6550)) (by yohimik, Claude Fable 5.1)
+  The 2026-09-22 entry replaces its "discarded" clause with the matrix pair
+  measured today in the shape §28.7 asks for: fixture, nodes, both wall times
+  with the per-package times, bytes, warm sources and cold outputs, the product
+  comparison, what the pair shows and its caveats, the discarded attempts with
+  their causes, and the transport defect they exposed. No speedup of the
+  profile or of the engine is claimed beyond what the pairs measured.
+
+- record which parts of the delivery rule the engine implements ([a7bce48](https://github.com/yohimik/dispat/commit/a7bce48e68c47a3292c588f0a6564ffd5839a0d6)) (by yohimik, Claude Fable 5.1)
+  The delivery entry states that dispat implements the delivery admission and
+  the reconciliation of a proceeding consumer, that owed windows and E201 are
+  not yet implemented, and that a consumer sitting out the run in which its
+  provider releases the owed commit is therefore still stranded there, as its
+  release notes list.
+
+- keep an owed contribution visible and refuse a release that would strand it ([51d96af](https://github.com/yohimik/dispat/commit/51d96afeb9695495b5c92c118e2f35789644e49e)) (by yohimik, Claude Fable 5.1)
+  Section 13.3 gains owed windows, so a provider publishing a commit in a run
+  its consumer sat out leaves that commit visible to the next plan; section
+  19.3 gains E201, which refuses releasing a provider at the baseline commit
+  of a consumer it still owes unless that consumer publishes after it in the
+  same run, because two tags on one commit have no order and no later plan can
+  compute the debt. Section 13.4a states the limitation and the fleet position.
+
+- record the first same-hardware measurement of the execution profile ([b6928a6](https://github.com/yohimik/dispat/commit/b6928a6f79f44d18738075b75f6afcc32571bfaf)) (by yohimik, Claude Fable 5.1)
+  The 2026-09-22 entry replaces "no comparison has been made" with the kernel
+  farm pairs measured today (one node alone against the same node plus one
+  slower worker, same recipe), states their caveats, records the two discarded
+  LLVM attempts with their causes, and claims no speedup of the profile.
+
+- state what remains pending now that distributed execution is implemented ([b439e2c](https://github.com/yohimik/dispat/commit/b439e2cdedc0acfd336859663d58f62328220379)) (by yohimik, Claude Fable 5.1)
+  The status line named a protocol implementation as pending after both the
+  polyrepository and the distributed execution profiles were implemented; it
+  now names the adapter and rollback protocols. The 2026-09-21 entry points
+  at the record of the implementation, the category departure is narrowed
+  to the sites that still lack it, and the placement rules and the two field
+  observations of the implementation are recorded.
+
+- let delivery discharge a propagated contribution ([87a1be3](https://github.com/yohimik/dispat/commit/87a1be342a4bfe49d20f181aa233d5765dd76f91)) (by yohimik, Claude Fable 5.1)
+  A contribution propagated to a consumer is admitted until a release of the
+  provider that carries it is an ancestor of the consumer's baseline, not
+  merely while the consumer has not released past the commit: a consumer that
+  proceeded on its own past a failed or held provider is otherwise never
+  planned again and stays on the old version with no diagnostic.
+
+- allow either realisation of the whole-graph build order ([7918d1b](https://github.com/yohimik/dispat/commit/7918d1b88c1299c5d0d51fc1811fdf18195af28c)) (by yohimik, Claude Fable 5.1)
+  §19.2a named a pass-through node per package that does not build as the way
+  to keep the build order at O(P + E). A memoised index of the nearest building
+  packages each package reaches without a none edge costs the same and leaves a
+  scheduler's task set free of nodes that run nothing, so the sentence and the
+  §13.11 row now name both and rule out only a search per pair.
+
+- say what is a release record and what centre joining reduces to ([d1e0fc1](https://github.com/yohimik/dispat/commit/d1e0fc110bcd0a82f3e05a7c551b88dedb909c6b)) (by yohimik, Claude Fable 5.1)
+  The comparison under the lock reads only what parses as a release tag of a
+  workspace package, refuses an unreadable inventory as incomplete history, and
+  is skipped for a repository that owns no package and under a setting that
+  forgoes reads of the store, which the engine reports. Centre joining is stated
+  in the form an engine can observe: the entry's group plus unlinked identities,
+  with the composed member nearest a centre as the fallback, and vector 30 now
+  describes that shape.
+
+- plan from the store's release records as read under the lock ([8f0f7be](https://github.com/yohimik/dispat/commit/8f0f7be5621c623148b47df0f62b75d5b8f6b52e)) (by yohimik, Claude Fable 5.1)
+  A run that can write plans from the authoritative store's release records,
+  not from whatever its checkout happened to fetch. After it holds every lock
+  and before it fixes its planning input, the engine compares each
+  participating store's release records with the ones it is about to plan from:
+  a stored record on a commit reachable from the planned head that the input
+  lacks is E196, the same package and version at another commit is E191, and
+  neither is repaired by planning the package as unreleased or by a silent
+  refresh. A release tag is created and never replaced; an identical existing
+  tag is the retry of an uncertain write. The Git mapping of the VCS protocol
+  says how the built-in driver restores the lock's snapshot condition.
+
+  For distributed execution the text adds what a Git-only transport and remote
+  publishers need: recording a publication authorized before a lock was lost
+  still proceeds, the run's coordination refs are the evidence an operator
+  settles before removing a retained lock, an assignment may carry a deadline
+  the worker enforces and an authorization a validity bound, the cost rows and
+  the limits of what placement can buy join the complexity section, the minimal
+  topology joins groups at their centres to keep the longest route short, and
+  the plan function is written in words where its letters collided with the
+  package and incidence symbols.
+
+- name coordination branches dispat-worker-<id>-<workinfo> ([859a6bb](https://github.com/yohimik/dispat/commit/859a6bb592fb30dea8b2092d5b526b7f96bd45b3)) (by yohimik, Claude Opus 5)
+  The distributed execution profile addresses a coordination branch to the
+  node that must find it: the name carries the execution link's node name
+  and a diagnostic date and kind beside the random suffix. It is an
+  untrusted routing hint that lets a node list only the branches addressed
+  to it, while the authenticated manifest stays the authority on node, run,
+  task and attempt.
+
+  The section's remaining corrections state what a Git-only transport
+  requires. Both parties may advance an attempt's branch, each update under
+  the expected previous object ID and attempt ownership. A consumer may
+  fetch a ref that advertises a checkpoint and resolve the exact object ID
+  locally. Authorization to publish is an explicit single-use step, issued
+  after the package's beforePublish hook has completed on the executing
+  node, so the revalidation of 27.2 still brackets the publish command when
+  that hook runs on a worker. An attempt that was never authorized to
+  perform an external effect is fenced by revoking its coordination ref,
+  and lock release need not await its acknowledgement. A command
+  environment travels as secret references and resolves on the executing
+  node. The ownership generation is defined for the Git release-lock
+  convention. The six diagnostic categories carry stable identifiers. Every
+  reconciliation of a shared manifest or lockfile is an explicit task under
+  the orchestrator, and each build binds the prepared state it consumed.
+  Hooks that bracket a delegated stage run with it; run-level, recording
+  and failure hooks run under the orchestrator. Vectors that assume remote
+  publishers, execution-only edges, rollback or cross-run reuse state that
+  condition, and an inapplicable vector is neither satisfied nor violated.
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## specs/ccme-spec/v3.1.0-rc.2 (2026-09-21)
 
 ### Features
