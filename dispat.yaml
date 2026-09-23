@@ -137,7 +137,6 @@ scripts:
   coverage-badge:
     - >-
       docker buildx build --file Dockerfile.gotest --target badge-export
-      --build-arg COVERAGE_MINIMUM_INTEGRATION="${DISPAT_COVERAGE_MINIMUM_INTEGRATION:-95}"
       $(sh scripts/buildx-cache.sh badge) --output type=local,dest=coverage .
     - cat coverage/summary.md >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
   # The host-side report, from the profiles and logs in coverage/: what a

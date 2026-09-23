@@ -119,7 +119,6 @@ scripts:
     commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
     docker buildx build --file ../../Dockerfile.gotest --target measured-export \
       --build-arg COMMIT="$commit" \
-      --build-arg COVERAGE_MINIMUM_INTEGRATION="${DISPAT_COVERAGE_MINIMUM_INTEGRATION:-95}" \
       $(sh ../../scripts/buildx-cache.sh measured \
         gotest-ccme gotest-config gotest-manifest gotest-models \
         gotest-scanner gotest-writer gotest-tools gotest-dispat gotest-integration) \

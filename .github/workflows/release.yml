@@ -27,11 +27,6 @@ name: Release
 # courier's. What remains here is keeping their records as an artifact.
 on:
   workflow_dispatch:
-    inputs:
-      coverage_minimum_integration:
-        description: The integration coverage percentage the badge and report gates require
-        type: string
-        default: "95"
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -55,9 +50,6 @@ env:
   # so a tag ever recreated at different content (a rolled-back run) leaves
   # the proxy's first copy pinned for good and every checksum check failing.
   GOPRIVATE: github.com/yohimik/dispat
-  # The integration coverage minimum of the badge and report gates
-  # (Dockerfile.gotest); 95 unless the dispatch states another figure.
-  DISPAT_COVERAGE_MINIMUM_INTEGRATION: ${{ inputs.coverage_minimum_integration || '95' }}
 
 # A release pushes tags, a branch, gh-pages and four images. dispat's own
 # release lock would refuse the second run, but it would refuse it partway in;
