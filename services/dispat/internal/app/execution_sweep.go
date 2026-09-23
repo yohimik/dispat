@@ -146,6 +146,9 @@ func (a *App) finishSweepDispatch(ctx context.Context, coordinator *execution.Co
 	var mergeErr error
 	if ctx.Err() == nil {
 		mergeErr = coordinator.MergeSweepOutputs(ctx)
+		if mergeErr != nil {
+			a.logError(mergeErr).Msg("run outputs could not be merged")
+		}
 	} else {
 		a.log.Warn().Str("run", a.runID).Msg("run outputs not merged: the sweep was interrupted")
 	}

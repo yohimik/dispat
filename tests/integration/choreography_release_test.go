@@ -150,6 +150,42 @@ func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
 	assert.Contains(t, damaged.Stdout+damaged.Stderr, "records missing provider tag sdk-pkg@0.2.0")
 }
 
+// Retiring a package while keeping its source repository in the fleet leaves
+// old consumer tags with immutable receipts naming the removed provider.
+// Those receipts describe history, not a request to plan a deleted package or
+// release its former consumer again.
+func TestChoreographyRemovedProviderLeavesHistoricalReceiptInert(t *testing.T) {
+	fleet := crossRepositoryFleet(t)
+	api := fleet.peer("api")
+	api.ReleaseOK("--package", "*")
+	require.Equal(t, 1, api.TagCount("api-pkg@0.1.0"))
+	require.Contains(t, tagsIn(api.Repo, ".links/sdk"), "sdk-pkg@0.1.0")
+	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "feat(sdk-pkg)^: propagate the library")
+	api.Git("add", ".links/sdk")
+	api.Commit("chore: pin the library change")
+	fleet.workOnly("api", "feat(api-pkg): own work")
+	api.ReleaseOK("--package", "*")
+	require.Equal(t, 1, api.TagCount("api-pkg@0.2.0"), "the consumer has a provider receipt")
+
+	fleet.writeConfig("api", func(cfg *models.File) {
+		cfg.Dependencies = nil
+	})
+	api.Git("-C", ".links/sdk", "rm", "-r", "--", "packages/sdk-pkg")
+	api.WriteFile(".links/sdk/packages/.keep", "source remains in the fleet\n")
+	api.Git("-C", ".links/sdk", "add", "--", "packages/.keep")
+	api.Git("-C", ".links/sdk", "commit", "-q", "-m", "chore: retire the sdk package")
+	api.Git("add", ".links/sdk")
+	api.Commit("chore: remove the sdk dependency and pin its retirement")
+
+	status := api.Status("--package", "*")
+	require.Equal(t, 0, status.Code, "stdout:\n%s\nstderr:\n%s", status.Stdout, status.Stderr)
+	assert.NotContains(t, status.Stdout+status.Stderr, "unknown provider")
+	assert.NotContains(t, status.Stdout, `"name":"sdk-pkg"`)
+	assert.Contains(t, status.Stdout, `"releasing":0`)
+	assert.Equal(t, 1, api.TagCount("api-pkg@0.2.0"), "the old consumer tag remains authoritative")
+	assert.Zero(t, api.TagCount("api-pkg@0.2.1"), "the removed provider creates no new debt")
+}
+
 // TestChoreographySettlesTheProviderRevisionBeforePublishing: the evidence a
 // later plan reads is in the consumer's own tree, recorded before the release
 // commit the tag sits on.

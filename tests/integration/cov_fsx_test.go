@@ -17,6 +17,8 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -103,4 +105,37 @@ func TestCovAtomicWriteStopsWhenTheFolderTakesNoTemporaryFile(t *testing.T) {
 		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Contains(t, res.Stdout+res.Stderr, "permission denied")
 	})
+}
+
+// TestAtomicChangelogSurvivesPartialDiskWrite models a filesystem quota after
+// the temporary record exists. A partial write cannot truncate release history,
+// and the next attempt after removing the quota must add exactly one entry.
+func TestAtomicChangelogSurvivesPartialDiskWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the file-size limit fixture uses a POSIX shell")
+	}
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): first feature")
+	history := "# Changelog\n\n" + strings.Repeat("previous release notes\n", 150000)
+	r.WriteFile("packages/core/CHANGELOG.md", history)
+	path := r.Path("packages", "core", "CHANGELOG.md")
+	require.NoError(t, os.Chmod(path, 0o640))
+
+	failed := r.Shell("trap '' XFSZ; ulimit -f 2048; dispat changelog --package core")
+
+	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.Contains(t, failed.Stdout+failed.Stderr, "file too large")
+	assert.Equal(t, history, readRepoFile(t, r, "packages/core/CHANGELOG.md"))
+	partial, err := filepath.Glob(path + ".tmp-*")
+	require.NoError(t, err)
+	assert.Empty(t, partial, "the incomplete temporary record was removed")
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+
+	retried := r.Command("changelog", "--package", "core")
+	require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+	content := readRepoFile(t, r, "packages/core/CHANGELOG.md")
+	assert.Equal(t, 1, strings.Count(content, "## core@0.1.0 ("))
+	assert.Equal(t, 150000, strings.Count(content, "previous release notes\n"))
 }

@@ -772,6 +772,34 @@ func TestExecutionProducerRefusesNamedPipeOutput(t *testing.T) {
 	assert.Empty(t, rig.branches())
 }
 
+// A build output can contain a complete nested Git repository. Git records
+// that folder as a gitlink rather than its files, so accepting it as a build
+// artifact would silently omit the bytes the consumer expects. The producer
+// must refuse the capture before publication.
+func TestExecutionProducerRefusesNestedRepositoryOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the nested repository build fixture uses a POSIX shell script")
+	}
+	rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
+		cfg.Scripts["build"] = models.Script{`mkdir -p dist && if [ "$DISPAT_PACKAGE" = assets ]; then
+  git -C dist init -q nested
+  git -C dist/nested -c user.name=build -c user.email=build@example.test commit --allow-empty -q -m nested
+else printf 'ordinary\n' > dist/file; fi`}
+		executionOneWorker(cfg)
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+
+	res := rig.release()
+	reply := stopAll(t, []*executionWorker{worker})[0]
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, 0, reply.Code)
+	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
+	assert.Contains(t, reply.Stdout+reply.Stderr, "gitlink")
+	assert.NotContains(t, executionReleasedPackages(res), "assets")
+	assert.NotContains(t, rig.repo.TagList(), "assets@0.1.0")
+	assert.Empty(t, rig.branches())
+}
+
 // A successful hash-object exit is not enough to describe every captured
 // output. If Git answers fewer object IDs than the worker sent paths, no
 // incomplete tree may be offered to the release orchestrator.

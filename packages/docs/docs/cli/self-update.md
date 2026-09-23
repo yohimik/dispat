@@ -4,11 +4,15 @@ Run `dispat self-update` to replace your running binary with the latest stable r
 config file or a git repository. This command updates the tool itself, regardless of the directory you are in.
 
 dispat downloads the binary for your platform from the GitHub release, verifies the published size and checksum, and
-runs it once to prove it works. It keeps your old binary as `<name>.backup` and removes it during a future run a week
-later. Because nothing moves until every check passes, a failed update leaves your working binary exactly where it was.
+runs it once to prove it works. When it replaces an existing binary, it keeps that binary as `<name>.backup` and removes
+it during a future run a week later. Because nothing moves until every check passes, a failed update leaves your
+working binary exactly where it was. A first install with no previous backup offers no rollback and prints no rollback
+instructions. If the binary path is empty but a regular `<name>.backup` remains from an earlier update, dispat keeps and
+reports that copy and starts its one-week retention period again.
 On a later update, dispat keeps the existing rollback copy until the new binary is installed. If the final swap fails,
 it restores the working binary and that copy; a restoration failure reports their remaining paths. A cleanup warning
 after installation means the new binary and its immediate backup are ready, but an older copy needs manual cleanup.
+If a failed download cannot be removed, the warning names the staged file that remains for manual cleanup.
 
 After the new binary is in place, dispat prints the changes and links to the changelog for the installed tag. Run with
 `--check` to see this information before you download anything.

@@ -298,6 +298,9 @@ func TestIfIsReservedAndNeedsNoRepository(t *testing.T) {
 
 	res := r.Command("if")
 	assert.Equal(t, 2, res.Code, "a missing condition is a usage error, not a run script")
+	res = r.Command("if", "CI")
+	assert.Equal(t, 2, res.Code, "a condition without a branch is a usage error before config loading")
+	assert.Contains(t, res.Stdout+res.Stderr, "if needs at least one --then")
 
 	res = r.Command("if", "CI", "--then", "a", "--elif", "ENV")
 	assert.Equal(t, 2, res.Code, "every condition needs its own --then")

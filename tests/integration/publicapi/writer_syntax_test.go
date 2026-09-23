@@ -366,6 +366,7 @@ func TestPublicAPIWriterSurvivesPlistAndProjectShapes(t *testing.T) {
 			buildSettings = {
 				MARKETING_VERSION[sdk=iphoneos*] = 9.9.9;
 				MARKETING_VERSION = "1.0.0" ;
+				MARKETING_VERSION = 1.0.0   ;
 				INFOPLIST_KEY_CFBundleDisplayName = "Acme \"Pro\"";
 				UNTERMINATED = "no closing quote;
 				NO_SEMICOLON = 1
@@ -378,6 +379,9 @@ func TestPublicAPIWriterSurvivesPlistAndProjectShapes(t *testing.T) {
 		if !res.VersionWritten || !strings.Contains(out, `MARKETING_VERSION = "2.0.0" ;`) {
 			t.Errorf("rewritten project file:\n%s", out)
 		}
+		if !strings.Contains(out, "MARKETING_VERSION = 2.0.0   ;") {
+			t.Errorf("an unquoted build setting lost its spacing:\n%s", out)
+		}
 		if !strings.Contains(out, "MARKETING_VERSION[sdk=iphoneos*] = 9.9.9;") {
 			t.Error("a conditional assignment was rewritten")
 		}
@@ -388,6 +392,17 @@ func TestPublicAPIWriterSurvivesPlistAndProjectShapes(t *testing.T) {
 }
 
 func TestPublicAPIWriterSurvivesEngineDocumentShapes(t *testing.T) {
+	t.Run("Unity package manifest cannot express a dev dependency", func(t *testing.T) {
+		const body = `{"dependencies":{"com.acme.core":"1.0.0"}}`
+		path := writeFile(t, t.TempDir(), "Packages/manifest.json", body)
+		result, err := writer.Rewrite(path, "", []writer.Edit{{Name: "com.acme.core", Kind: manifest.KindDevDependencies, Range: "2.0.0"}})
+		if err != nil || len(result.Missing) != 1 || len(result.Applied) != 0 {
+			t.Fatalf("Unity dev dependency rewrite = %+v, %v", result, err)
+		}
+		if got := readFile(t, path); got != body {
+			t.Fatalf("unsupported dev dependency changed Unity manifest: %s", got)
+		}
+	})
 	t.Run("unity settings nested under the player block", func(t *testing.T) {
 		res, out, _ := rewriteFixture(t, "ProjectSettings/ProjectSettings.asset", `%YAML 1.1
 %TAG !u! tag:unity3d.com,2011:

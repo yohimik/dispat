@@ -34,6 +34,95 @@ func TestAnAuthorizedPublisherMayBeWithdrawn(t *testing.T) {
 		"and an attempt both parties have settled is not withdrawn again")
 }
 
+// A worker may finish just before a withdrawal's expected-old push. Re-reading
+// its signed terminal result or acknowledgement settles the attempt and also
+// supplies Close's exact lease. A terminal-looking message with a bad signature
+// or binding is neither evidence of stopped work nor a ref this run may delete.
+func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		kind           MessageKind
+		resultOf       string
+		badSignature   bool
+		badCancelBound bool
+		isOwn          bool
+	}{
+		{name: "own result", kind: MessageResult, resultOf: PreflightTask, isOwn: true},
+		{name: "another task result", kind: MessageResult, resultOf: "other:build"},
+		{name: "wrong signature result", kind: MessageResult, resultOf: PreflightTask, badSignature: true},
+		{name: "own acknowledgement", kind: MessageAck, isOwn: true},
+		{name: "another withdrawal acknowledgement", kind: MessageAck, badCancelBound: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			limits := TransferLimits{MaxManifestBytes: 1 << 20}
+			fixture := newCoordinatorFixture(t, limits, answeredPreflight)
+			fixture.coordinator.Timeouts.Cancel = 5 * time.Second
+			branch := FormatBranch("build-a", KindProbe, time.Now())
+			assignment := probeAssignment("build-a", branch)
+			offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+			require.NoError(t, err)
+			heads, err := fixture.node.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+			require.NoError(t, err)
+			require.Len(t, heads, 1)
+			claimed, err := fixture.node.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+				mustMarshalValue(Claim{Header: replyHeader(*assignment), Assignment: offered}), nil)
+			require.NoError(t, err)
+			observed, err := fixture.orchestrator.mailbox.Reread(t.Context(), branch)
+			require.NoError(t, err)
+			require.Equal(t, claimed, observed.OID)
+			fixture.coordinator.recordOwnedRef("build-a", branch, claimed)
+			writer := fixture.node.mailbox
+			if tc.badSignature {
+				otherSigner, err := NewSigner("another-secret")
+				require.NoError(t, err)
+				writer = NewGitMailbox(fixture.node.endpoint, fixture.node.git, otherSigner, zerolog.Nop())
+			}
+			previous := claimed
+			var document []byte
+			if tc.kind == MessageAck {
+				cancel, err := fixture.orchestrator.mailbox.Advance(t.Context(), branch, claimed,
+					MessageCancel, mustMarshalValue(Withdrawal{
+						Header: assignment.Header, Assignment: offered, Tip: claimed,
+					}), nil)
+				require.NoError(t, err)
+				_, err = fixture.node.mailbox.Reread(t.Context(), branch)
+				require.NoError(t, err)
+				previous = cancel
+				if tc.badCancelBound {
+					cancel = offered
+				}
+				document = mustMarshalValue(Ack{Header: replyHeader(*assignment),
+					Assignment: offered, Cancel: cancel})
+			} else {
+				result := Result{Header: replyHeader(*assignment), Assignment: offered, Status: StatusSucceeded}
+				result.Task = tc.resultOf
+				document = mustMarshalValue(result)
+			}
+			terminal, err := writer.Advance(t.Context(), branch, previous, tc.kind, document, nil)
+			require.NoError(t, err)
+
+			settled := fixture.coordinator.withdrawAttempt(t.Context(), "build-a", PreflightTask, 1,
+				KindProbe, taskOffer{branch: branch, offered: offered}, claimed)
+
+			if tc.isOwn {
+				assert.True(t, settled.isAcknowledged, "the node's own terminal result proves it stopped")
+				assert.Equal(t, terminal, fixture.coordinator.owned["build-a"][0].ExpectedOld)
+				require.NoError(t, fixture.coordinator.Close(t.Context()))
+				assert.Empty(t, fixture.orchestrator.remoteBranches(t))
+				return
+			}
+			assert.False(t, settled.isAcknowledged, "an unbound terminal message does not settle this attempt")
+			assert.False(t, isPublicationOutcomeKnown(settled),
+				"a publisher with this answer would retain its unknown-outcome lock")
+			assert.Equal(t, claimed, fixture.coordinator.owned["build-a"][0].ExpectedOld,
+				"a foreign terminal tip never becomes this run's cleanup lease")
+			require.Error(t, fixture.coordinator.Close(t.Context()),
+				"the foreign tip must remain available for investigation")
+			assert.Equal(t, []string{branch}, fixture.orchestrator.remoteBranches(t))
+		})
+	}
+}
+
 // TestWhatAnAcknowledgementSaysAboutAPublication: the decision table of
 // §28.6, as the one sentence it is. An authorized publisher leaves a knowable
 // outcome under exactly one condition, and every other row is a package that

@@ -136,12 +136,74 @@ func (c *Coordinator) writeWithdrawal(ctx context.Context, node, task string, at
 	}
 	tip, inspectErr := c.mailboxes[node].Inspect(ctx, head)
 	if inspectErr == nil && (tip.Kind == MessageResult || tip.Kind == MessageAck) {
+		if !c.isOwnTerminalAttempt(ctx, tip, terminalAttempt{
+			node:    node,
+			want:    c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
+			offered: offer.offered,
+		}) {
+			// An unauthenticated terminal-looking step proves nothing about
+			// whether this worker stopped. Keep the old cleanup lease, so a
+			// foreign writer's data is retained rather than deleted as ours.
+			return "", err
+		}
+		// The node won the lease race and has stopped. Close must use the
+		// terminal object it just read, not the earlier tip the withdrawal
+		// lost against, or its exact-lease delete leaves this ref behind.
+		c.recordOwnedRef(node, offer.branch, head.OID)
 		return "", nil
 	}
 	return c.advance(ctx, node, offer.branch, head.OID, MessageCancel, Withdrawal{
 		Header:     c.formatOrchestratorHeader(kind, task, attempt, node, offer.branch),
 		Assignment: offer.offered, Tip: head.OID,
 	})
+}
+
+type terminalAttempt struct {
+	node    string
+	want    Header
+	offered string
+}
+
+// isOwnTerminalAttempt accepts a terminal step only when the node signed it
+// for this exact assignment. A foreign writer may push a terminal-looking
+// object onto a mailbox; it must not turn a failed withdrawal into proof the
+// worker stopped or make that foreign tip eligible for cleanup.
+func (c *Coordinator) isOwnTerminalAttempt(ctx context.Context, tip ChainTip,
+	attempt terminalAttempt) bool {
+	if tip.Kind != MessageResult && tip.Kind != MessageAck {
+		return false
+	}
+	document, err := c.mailboxes[attempt.node].Read(ctx, tip, c.Limits.MaxManifestBytes)
+	if err != nil {
+		return false
+	}
+	var header Header
+	var assignment string
+	switch tip.Kind {
+	case MessageResult:
+		var result Result
+		if json.Unmarshal(document, &result) != nil {
+			return false
+		}
+		waiting := &attemptState{offered: attempt.offered, assignment: &Assignment{Header: attempt.want}}
+		return checkTaskResult(result, attempt.node, tip, waiting) == "" &&
+			result.Kind == attempt.want.Kind
+	case MessageAck:
+		var ack Ack
+		if json.Unmarshal(document, &ack) != nil ||
+			!IsTransitionLegal(tip.Previous, MessageAck, PartyWorker) ||
+			ack.Cancel != tip.PreviousOID {
+			return false
+		}
+		header, assignment = ack.Header, ack.Assignment
+	}
+	if CheckHeader(header, Binding{Node: attempt.node, Branch: tip.Branch}, time.Now()) != "" {
+		return false
+	}
+	return assignment == attempt.offered && header.Kind == attempt.want.Kind &&
+		header.Run == attempt.want.Run && header.PlanDigest == attempt.want.PlanDigest &&
+		header.Task == attempt.want.Task && header.Attempt == attempt.want.Attempt &&
+		header.Generation == attempt.want.Generation
 }
 
 // awaitAcknowledgement polls the attempt's branch until the node has answered

@@ -443,7 +443,8 @@ func TestPlanFailedProviderSkipsTrainConsumer(t *testing.T) {
 // TestPlanChannelOnlyReleaseAndEntryPatch: a release directive that only
 // moves the channel is still a release (§13.9) — W202 explains its presence
 // in the plan — and entering a prerelease channel with nothing pending takes
-// the §11.4 entry patch, reported as W204. Both are non-suppressible: a tag
+// the §11.4 entry patch, reported as W204. Graduating that otherwise empty
+// train carries the same patch to stable. Both are non-suppressible: a tag
 // appearing with no bump-worthy commit is exactly what a reader of the log
 // cannot otherwise account for.
 func TestPlanChannelOnlyReleaseAndEntryPatch(t *testing.T) {
@@ -461,4 +462,16 @@ func TestPlanChannelOnlyReleaseAndEntryPatch(t *testing.T) {
 	assert.True(t, r.IsTagged("core@0.1.1-beta.0"),
 		"channel entry with nothing pending takes the entry patch: %v", r.TagList())
 	assert.Equal(t, 2, buildRuns(r), "a channel-only release executes its scripts")
+
+	// The train entered through a patch but its window still has no direct
+	// bump. Graduation must carry that same patch back to the stable core
+	// rather than propose 0.1.0 behind the published beta.
+	r.CommitEmpty("release(core)%beta>stable: graduate the entry-patched train")
+	res = r.ReleaseOK()
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W204", "core"),
+		"the graduation patch is explained too")
+	assert.True(t, r.IsTagged("core@0.1.1"), "graduation preserves the train's core: %v", r.TagList())
+	assert.Equal(t, 3, buildRuns(r))
+	r.ReleaseOK()
+	assert.Equal(t, 3, r.TagCount("core@"), "the graduated train converges")
 }

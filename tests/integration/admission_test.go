@@ -66,7 +66,7 @@ type admissionShape struct {
 // manifests were written" the thing the run either did or could not do: opened
 // from the version script instead, the gate would be a race against dispat's
 // own reconciliation.
-func admissionRepo(t *testing.T, shape admissionShape) *harness.Repo {
+func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.File)) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
 	gate := r.Path("cli-versioned.gate")
@@ -112,6 +112,9 @@ func admissionRepo(t *testing.T, shape admissionShape) *harness.Repo {
 			}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "cli", Provider: "core"}}
+	for _, configure := range adjust {
+		configure(&cfg)
+	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages/libs", "core")
 	r.SeedPackage("packages/apps", "cli")
@@ -226,6 +229,53 @@ func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 		assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "cli"),
 			"every admitted cause of the catch-up comes from the failure; events:\n%s", res.Stdout)
 	})
+}
+
+// TestAdmissionFailedReconciliationWithholdsConsumerPublication: when a
+// provider fails after the consumer's version stage, reverting its planned
+// input version is a publication prerequisite. Both native and script failures
+// withhold the consumer's upload; repairing the fault lets each package publish
+// exactly once at the still-pending version.
+func TestAdmissionFailedReconciliationWithholdsConsumerPublication(t *testing.T) {
+	for _, failure := range []string{"native", "script"} {
+		t.Run(failure, func(t *testing.T) {
+			r := admissionRepo(t, admissionShape{hasVersionScript: true}, func(cfg *models.File) {
+				cfg.Scripts["core-publish"] = models.Script{
+					cfg.Scripts["core-publish"][0],
+					`if [ "$DISPAT_IT_RECONCILE_FAILURE" = native ]; then chmod 555 ../../apps/cli; fi`,
+					cfg.Scripts["core-publish"][1],
+				}
+				cfg.Scripts["cli-version"] = append(cfg.Scripts["cli-version"],
+					`if [ "$DISPAT_IT_RECONCILE_FAILURE" = script ] && [ -z "$DISPAT_UPDATED_PACKAGES" ]; then exit 12; fi`)
+			})
+			consumer := r.Path("packages", "apps", "cli")
+			t.Cleanup(func() { _ = os.Chmod(consumer, 0o755) })
+			if failure == "native" {
+				require.NoError(t, os.Chmod(consumer, 0o555))
+				probeErr := os.WriteFile(r.Path("packages", "apps", "cli", "probe"), []byte("x"), 0o600)
+				require.NoError(t, os.Chmod(consumer, 0o755))
+				if probeErr == nil {
+					t.Skip("this user can write into a 0555 directory")
+				}
+				require.True(t, os.IsPermission(probeErr), "fixture requires permission denial: %v", probeErr)
+			}
+			r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
+			require.NoError(t, os.Remove(r.Path("cli-versioned.gate")), "the failed publish must wait for this run’s version stage")
+			failed := r.CommandEnv([]string{"DISPAT_IT_RECONCILE_FAILURE=" + failure}, "release")
+			require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+			assert.Contains(t, failed.Stdout, "reconciling to the providers that published failed")
+			assert.NotContains(t, failed.Stdout, "publishing cli at 0.2.0")
+			assert.Zero(t, r.TagCount("core@0.2.0"))
+			assert.Zero(t, r.TagCount("cli@0.2.0"))
+
+			require.NoError(t, os.Chmod(consumer, 0o755))
+			retried := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+			require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+			assert.Equal(t, 1, r.TagCount("core@0.2.0"))
+			assert.Equal(t, 1, r.TagCount("cli@0.2.0"))
+			assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
+		})
+	}
 }
 
 // TestAdmissionCatchesUpAfterTheProviderShipsAlone keeps the consumer out of

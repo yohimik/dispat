@@ -329,10 +329,6 @@ func splitGitCommitArgs(args []string) ([]string, []string, bool, error) {
 			return nil, nil, false, fmt.Errorf("release-step flag %s cannot be combined with an authoring commit", arg)
 		}
 		gitArgs = append(gitArgs, arg)
-		if shortGitOptionTakesFollowingValue(arg) && i+1 < len(suffix) {
-			gitArgs = append(gitArgs, suffix[i+1])
-			i++
-		}
 	}
 	parsed := append([]string{}, args[:command+1]...)
 	parsed = append(parsed, globals...)
@@ -400,21 +396,6 @@ func gitAuthorOption(arg string) (selects, takesValue bool) {
 		}
 	}
 	return selects, false
-}
-
-func shortGitOptionTakesFollowingValue(arg string) bool {
-	if len(arg) < 2 || arg[0] != '-' || arg[1] == '-' {
-		return false
-	}
-	for i := 1; i < len(arg); i++ {
-		if strings.ContainsRune("mFCct", rune(arg[i])) {
-			return i == len(arg)-1
-		}
-		if arg[i] == 'S' || arg[i] == 'u' {
-			return false
-		}
-	}
-	return false
 }
 
 func globalFlagTakesValue(arg string) bool {

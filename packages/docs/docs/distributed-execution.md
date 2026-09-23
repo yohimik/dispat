@@ -335,6 +335,10 @@ every task of the sweep has answered:
 - **An interrupted sweep merges nothing.** A folder assembled from whichever tasks answered before the interrupt is a
   folder nobody asked for, so the sets already admitted are left where they are and the run says so.
 
+If the merge fails, for example because the checkout cannot accept a file, `dispat run` fails and logs
+`run outputs could not be merged` at error level with the underlying cause. The task summary still follows, so the
+failed merge is visible alongside the tasks that produced those outputs.
+
 A root may be neither a package folder nor a folder holding one, and may not overlap any package's `buildOutputs`
 root, because the two keys install differently: a build output root is replaced whole and a sweep's root is merged
 file by file. `dispat status` reports each of these with `E225`. The key is read from the configuration the sweep is

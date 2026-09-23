@@ -51,6 +51,9 @@ Here is what happens to your binary during an update:
 5. **Only then does it swap.** dispat keeps any previous rollback copy while it
    renames your existing binary to `dispat.backup` and puts the new one in its
    place. Once the replacement succeeds, it removes the older rollback copy.
+   If no binary occupies the destination, it installs with one rename. A
+   regular `dispat.backup` already there remains available for rollback and
+   gets a fresh one-week retention period; without one, no rollback is offered.
 
 No files move until every check passes. If the final replacement fails, dispat
 restores both the working binary and its previous backup. If restoration itself
@@ -58,6 +61,8 @@ fails, the error names where each recoverable binary remains. A warning that
 the older rollback copy could not be cleaned up means the new binary was
 installed and its immediate backup is available; the warning names the older
 copy or staging directory left behind.
+If a failed update cannot remove its staged download, a separate warning names
+that file for manual cleanup. The warning does not change directory permissions.
 
 Your binary path stays the same, so your `PATH` configuration remains valid.
 You do not need to re-link binaries or restart your shell.
@@ -161,7 +166,9 @@ after seven days. This gives you time to detect issues while preventing old
 binaries from accumulating on disk.
 
 The cleanup check inspects only the backup timestamp. If the backup has been
-purged, download an older release explicitly using `--release`:
+kept while an absent binary path was installed, its timestamp is renewed at
+that install. If the backup has been purged, download an older release
+explicitly using `--release`:
 
 ```sh
 dispat self-update --release 1.0.0

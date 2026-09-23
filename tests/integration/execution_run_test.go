@@ -18,6 +18,8 @@ package integration
 // in is removed the moment the task ends.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -587,6 +589,10 @@ func TestExecutionRunOutputsCraftedRefusals(t *testing.T) {
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			rejected, isRejected := executionLine(res, "outputs rejected")
 			require.True(t, isRejected, "stdout:\n%s", res.Stdout)
+			failure, isFailureLogged := executionLine(res, "run outputs could not be merged")
+			require.True(t, isFailureLogged, "the failed sweep must report its cause")
+			assert.Equal(t, "error", failure.Str("level"))
+			assert.NotEmpty(t, failure.Str("error"))
 			assert.Equal(t, tc.reason, rejected.Str("reason"))
 			assert.Equal(t, executionIntegrityCode, rejected.Code())
 			assert.NoDirExists(t, rig.repo.Path("coverage"), "nothing of the set was merged")
@@ -770,37 +776,100 @@ func TestExecutionRunInterruptedSweepMergesNothing(t *testing.T) {
 	stopAll(t, []*executionWorker{worker})
 }
 
-// TestExecutionRunOutputsMergeFailureFailsTheSweep: a set's second file cannot
-// replace a folder in the orchestrator's checkout. The first file had already
-// been moved, so the merge restores it and refuses the whole set with E227;
-// another package's set can still merge.
+// TestExecutionRunOutputsMergeFailureFailsTheSweep: a later destination can
+// neither redirect an output outside the checkout nor leave a partially
+// installed set. Independent sets still merge, and repairing the destination
+// allows the complete set to be installed on the next sweep.
 func TestExecutionRunOutputsMergeFailureFailsTheSweep(t *testing.T) {
-	script := `mkdir -p ../../coverage &&
+	for _, obstruction := range []string{"folder", "file-parent", "linked-parent", "read-only-new", "read-only-existing"} {
+		t.Run(obstruction, func(t *testing.T) {
+			script := `mkdir -p ../../coverage &&
 case "$DISPAT_PACKAGE" in
-  core) printf new > ../../coverage/a-core.out && printf new > ../../coverage/z-core.out ;;
+  core) mkdir -p ../../coverage/z-core && printf new > ../../coverage/a-core.out && printf new > ../../coverage/z-core/result.out ;;
   *) printf '%s\n' "$DISPAT_PACKAGE" > "../../coverage/$DISPAT_PACKAGE.out" ;;
 esac`
-	rig := newExecutionSweepRig(t, script, func(cfg *models.File) {
-		executionSweepOutputs(cfg)
-		cfg.Execution.Workers = cfg.Execution.Workers[:1]
-	})
-	rig.repo.WriteFile("coverage/a-core.out", "old\n")
-	rig.repo.WriteFile("coverage/z-core.out/keep.txt", "a folder where the file would go\n")
-	workers := rig.startWorkers([]string{executionNode}, 2)
+			rig := newExecutionSweepRig(t, script, func(cfg *models.File) {
+				executionSweepOutputs(cfg)
+				cfg.Execution.Workers = cfg.Execution.Workers[:1]
+			})
+			rig.repo.WriteFile("coverage/a-core.out", "old\n")
+			repair := obstructSweepDestination(t, rig.repo, obstruction)
+			workers := rig.startWorkers([]string{executionNode}, 2)
 
-	res := rig.sweep(nil)
+			res := rig.sweep(nil)
 
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	rejected, isRejected := executionLine(res, "outputs rejected")
-	require.True(t, isRejected, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, "destination-component", rejected.Str("reason"))
-	assert.Equal(t, "core:run", rejected.Str("task"))
-	assert.Equal(t, executionIntegrityCode, rejected.Code())
-	assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "coverage/a-core.out"),
-		"the earlier file was restored when the later destination failed")
-	assert.Equal(t, "a folder where the file would go\n", readRepoFile(t, rig.repo, "coverage/z-core.out/keep.txt"))
-	assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("coverage")))
-	assert.FileExists(t, rig.repo.Path("coverage", "api.out"), "the other sets are merged")
-	assert.Equal(t, "rejected", executionTaskOutcomes(res)["core"].Str("outputs"))
-	stopAll(t, workers)
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			rejected, isRejected := executionLine(res, "outputs rejected")
+			require.True(t, isRejected, "stdout:\n%s", res.Stdout)
+			if !strings.HasPrefix(obstruction, "read-only") {
+				assert.Equal(t, "destination-component", rejected.Str("reason"))
+			} else {
+				assert.Contains(t, res.Stdout+res.Stderr, "permission denied")
+			}
+			assert.Equal(t, "core:run", rejected.Str("task"))
+			assert.Equal(t, executionIntegrityCode, rejected.Code())
+			assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "coverage/a-core.out"),
+				"the earlier file was restored when the later destination failed")
+			assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("coverage")))
+			assert.FileExists(t, rig.repo.Path("coverage", "api.out"), "independent sets still merge")
+			assert.Equal(t, "rejected", executionTaskOutcomes(res)["core"].Str("outputs"))
+
+			repair()
+			retried := rig.sweep(nil)
+			require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+			assert.Equal(t, "new", readRepoFile(t, rig.repo, "coverage/a-core.out"))
+			assert.Equal(t, "new", readRepoFile(t, rig.repo, "coverage/z-core/result.out"))
+			assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("coverage", "z-core")))
+			stopAll(t, workers)
+		})
+	}
+}
+
+// obstructSweepDestination returns a repair that first checks the blocked
+// destination survived the failed merge unchanged.
+func obstructSweepDestination(t *testing.T, repo *harness.Repo, obstruction string) func() {
+	t.Helper()
+	parent := repo.Path("coverage", "z-core")
+	path := filepath.Join(parent, "result.out")
+	switch obstruction {
+	case "folder":
+		repo.WriteFile("coverage/z-core/result.out/keep.txt", "keep\n")
+		return func() {
+			assert.Equal(t, "keep\n", readRepoFile(t, repo, "coverage/z-core/result.out/keep.txt"))
+			require.NoError(t, os.RemoveAll(path))
+		}
+	case "file-parent":
+		repo.WriteFile("coverage/z-core", "keep\n")
+		return func() {
+			assert.Equal(t, "keep\n", readRepoFile(t, repo, "coverage/z-core"))
+			require.NoError(t, os.Remove(parent))
+		}
+	case "linked-parent":
+		outside := t.TempDir()
+		require.NoError(t, os.Symlink(outside, parent))
+		return func() {
+			assert.NoFileExists(t, filepath.Join(outside, "result.out"))
+			require.NoError(t, os.Remove(parent))
+		}
+	default:
+		require.NoError(t, os.MkdirAll(parent, 0o755))
+		if obstruction == "read-only-existing" {
+			repo.WriteFile("coverage/z-core/result.out", "keep\n")
+		}
+		require.NoError(t, os.Chmod(parent, 0o555))
+		t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+		probeErr := os.WriteFile(filepath.Join(parent, "probe"), []byte("x"), 0o600)
+		if probeErr == nil {
+			t.Skip("this user can write into a 0555 directory")
+		}
+		require.True(t, os.IsPermission(probeErr), "fixture requires directory permission denial: %v", probeErr)
+		return func() {
+			if obstruction == "read-only-existing" {
+				assert.Equal(t, "keep\n", readRepoFile(t, repo, "coverage/z-core/result.out"))
+			} else {
+				assert.NoFileExists(t, path)
+			}
+			require.NoError(t, os.Chmod(parent, 0o755))
+		}
+	}
 }

@@ -293,24 +293,45 @@ func TestReplacePreservesPreviousBackupWhenIncomingRenameFails(t *testing.T) {
 	}
 }
 
-// TestReplaceOverwritesAnOlderBackup: two updates in a row leave one backup,
-// the binary the second one replaced. The previous backup is parked until
-// the install succeeds, then discarded without renaming onto an existing file.
+// TestReplaceOverwritesAnOlderBackup: a second update keeps only the binary
+// it replaced, while an absent current executable leaves the older backup
+// untouched and available. Both cases use raw files so Windows tests the
+// rename and retention behavior too.
 func TestReplaceOverwritesAnOlderBackup(t *testing.T) {
-	dir := t.TempDir()
-	exe := filepath.Join(dir, "dispat.exe")
-	require.NoError(t, os.WriteFile(exe, []byte("current 1.1.0"), 0o755))
-	require.NoError(t, os.WriteFile(BackupPath(exe), []byte("ancient"), 0o755))
-	incoming := filepath.Join(dir, "incoming.exe")
-	require.NoError(t, os.WriteFile(incoming, []byte("incoming 1.2.0"), 0o755))
+	for _, tc := range []struct {
+		name           string
+		currentPresent bool
+		wantBackup     string
+	}{
+		{name: "current present", currentPresent: true, wantBackup: "current 1.1.0"},
+		{name: "current absent", wantBackup: "ancient"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			exe := filepath.Join(dir, "dispat.exe")
+			if tc.currentPresent {
+				require.NoError(t, os.WriteFile(exe, []byte("current 1.1.0"), 0o755))
+			}
+			wantPath := BackupPath(exe)
+			require.NoError(t, os.WriteFile(wantPath, []byte("ancient"), 0o755))
+			old := time.Now().Add(-48 * time.Hour)
+			require.NoError(t, os.Chtimes(wantPath, old, old))
+			incoming := filepath.Join(dir, "incoming.exe")
+			require.NoError(t, os.WriteFile(incoming, []byte("incoming 1.2.0"), 0o755))
 
-	backup, err := Replace(exe, incoming)
-	require.NoError(t, err)
-	assert.Equal(t, "incoming 1.2.0", string(read(t, exe)))
-	assert.Equal(t, "current 1.1.0", string(read(t, backup)), "the backup is the binary just replaced")
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	assert.Len(t, entries, 2, "the previous backup was discarded: %v", names(entries))
+			backup, err := Replace(exe, incoming)
+			require.NoError(t, err)
+			assert.Equal(t, wantPath, backup)
+			assert.Equal(t, "incoming 1.2.0", string(read(t, exe)))
+			assert.Equal(t, tc.wantBackup, string(read(t, backup)))
+			info, err := os.Stat(backup)
+			require.NoError(t, err)
+			assert.WithinDuration(t, time.Now(), info.ModTime(), time.Minute, "the retained backup starts a new retention period")
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			assert.Len(t, entries, 2, "only the installed binary and its backup remain: %v", names(entries))
+		})
+	}
 }
 
 // TestInstallerDefaultsToTheRunningBinary: an installer nobody configured
@@ -430,15 +451,15 @@ func TestRestoreReportsTheOneLegItCanLose(t *testing.T) {
 	assert.Equal(t, "current", string(read(t, exe)))
 }
 
-// TestReplaceReportsAnUnremovableBackup: the previous backup is removed first
-// because Windows will not rename onto a file that exists. A path that cannot
-// be cleared stops the swap before anything moves.
+// TestReplaceReportsAnUnremovableBackup: a path that cannot be a backup stops
+// the swap before anything moves, including on Windows where a rename cannot
+// replace an occupied destination.
 func TestReplaceReportsAnUnremovableBackup(t *testing.T) {
 	requireExec(t)
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "dispat")
 	fakeBinary(t, exe, "1.0.0")
-	// A non-empty directory where the backup belongs: Remove refuses it.
+	// A non-empty directory where the backup belongs is not a binary to park.
 	require.NoError(t, os.Mkdir(BackupPath(exe), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(BackupPath(exe), "x"), nil, 0o644))
 
