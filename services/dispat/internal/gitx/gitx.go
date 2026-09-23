@@ -827,11 +827,12 @@ func redactGitOutput(output string, args []string) string {
 var gitOutputURL = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"<>]+`)
 
 // RedactURL removes user information, query strings and fragments from a
-// remote URL before it is recorded. Named remotes are returned unchanged.
+// remote URL before it is recorded. Named remotes are returned unchanged, and
+// so is the scp-like host:path form unless its user half carries a password.
 func RedactURL(value string) string {
 	u, err := url.Parse(value)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return value
+		return redactScpPassword(value)
 	}
 	if u.User != nil {
 		u.User = url.User("REDACTED")
@@ -843,6 +844,23 @@ func RedactURL(value string) string {
 		u.Fragment = "REDACTED"
 	}
 	return u.String()
+}
+
+// redactScpPassword masks the user half of the scp-like user:password@host:path
+// form, which Go's URL parser does not read as a URL at all. A bare account,
+// git@host:path, is not a credential and stays as written, and so is anything
+// that is not that form: a user half holding a slash is a refspec or a path
+// with an @ in it, such as oid:refs/tags/pkg@1.0.0, and not an address.
+func redactScpPassword(value string) string {
+	if strings.Contains(value, "://") || strings.HasPrefix(value, "/") {
+		return value
+	}
+	userinfo, address, hasUser := strings.Cut(value, "@")
+	if !hasUser || !strings.Contains(userinfo, ":") || strings.Contains(userinfo, "/") ||
+		!strings.Contains(address, ":") {
+		return value
+	}
+	return "REDACTED@" + address
 }
 
 // redactGitArgs removes credentials from URL-shaped arguments before they

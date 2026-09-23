@@ -49,3 +49,20 @@ func TestRedactURLKeepsTheDestinationAndDropsTheSecret(t *testing.T) {
 	assert.Equal(t, "/srv/git/app.git", RedactURL("/srv/git/app.git"))
 	assert.Equal(t, "git@github.com:acme/app.git", RedactURL("git@github.com:acme/app.git"))
 }
+
+// TestRedactURLMasksAPasswordInTheScpForm: the scp-like form is not a URL to
+// Go's parser, so a password written into its user half would otherwise pass
+// through untouched. The address stays legible; a bare account and the refspecs
+// and paths that merely contain an @ are not credentials and stay as written.
+func TestRedactURLMasksAPasswordInTheScpForm(t *testing.T) {
+	assert.Equal(t, "REDACTED@git.example.com:acme/app.git", RedactURL("ci-bot:hunter2@git.example.com:acme/app.git"))
+	for _, unchanged := range []string{
+		"git@github.com:acme/app.git",
+		"0123abcd:refs/tags/core@1.0.0",
+		"HEAD@{1}",
+		"core@1.0.0",
+		"/srv/a:b@c:d",
+	} {
+		assert.Equal(t, unchanged, RedactURL(unchanged))
+	}
+}

@@ -203,10 +203,13 @@ func (x *exchange) run() {
 	}
 }
 
+// contextError is the error a request the context ended answers, in the shape
+// net/http's own errors take. The URL goes in with its password masked, as
+// net/http masks it, because the error's text reaches a log.
 func contextError(req *http.Request, err error) error {
 	urlText := ""
 	if req.URL != nil {
-		urlText = req.URL.String()
+		urlText = req.URL.Redacted()
 	}
 	return &url.Error{Op: op(req.Method), URL: urlText, Err: err}
 }

@@ -110,6 +110,24 @@ func TestDoReturnsWhenTheContextEndsUnderADeafTransport(t *testing.T) {
 	}
 }
 
+// A request the context already ended answers without the password its URL
+// carried: the error's text is written to a log.
+func TestDoContextErrorMasksThePassword(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://user:hunter2@example.invalid/api", nil)
+	require.NoError(t, err)
+
+	resp, err := Do(&http.Client{Transport: newDeaf()}, req)
+
+	assert.Nil(t, resp)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NotContains(t, err.Error(), "hunter2")
+	var urlErr *url.Error
+	require.ErrorAs(t, err, &urlErr)
+	assert.Equal(t, "https://user:xxxxx@example.invalid/api", urlErr.URL)
+}
+
 // The client's Timeout is a promise too, and the same transport ignores it.
 func TestDoHonoursTheClientTimeoutUnderADeafTransport(t *testing.T) {
 	transport := newDeaf()

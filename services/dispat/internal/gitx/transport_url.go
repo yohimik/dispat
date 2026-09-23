@@ -94,11 +94,6 @@ func requireTransportURL(endpoint, scheme string) error {
 	return nil
 }
 
-// requireTransportPath checks what is left once neither a scheme nor an
-// absolute path was written: the scp-like [user@]host:path form git accepts
-// for ssh. A password in the user half is refused, and so is anything that is
-// not that form at all, because a relative path would resolve against
-// whichever folder the node happened to start in.
 // isCredentialCarried reports whether the URL's user half could be a secret.
 // Over ssh a bare user name is an account rather than a credential, and it is
 // the only spelling a hosted remote accepts (ssh://git@host/path), exactly as
@@ -116,6 +111,11 @@ func isCredentialCarried(parsed *url.URL, scheme string) bool {
 	return isPasswordStated
 }
 
+// requireTransportPath checks what is left once neither a scheme nor an
+// absolute path was written: the scp-like [user@]host:path form git accepts
+// for ssh. A password in the user half is refused, and so is anything that is
+// not that form at all, because a relative path would resolve against
+// whichever folder the node happened to start in.
 func requireTransportPath(endpoint string) error {
 	address := endpoint
 	if userinfo, rest, hasUser := strings.Cut(endpoint, "@"); hasUser {
@@ -135,12 +135,12 @@ func requireTransportPath(endpoint string) error {
 }
 
 // RedactEndpoint renders an endpoint for a message or a log line, and it is
-// the only way one is written into either. RedactURL covers every form Go's URL
-// parser recognises, but a refused endpoint is by definition one it may not
-// recognise: the scp-like form is not a URL at all, and a value carrying a
-// password is refused precisely because it carries one. So the user half, the
-// query and the fragment are taken off whatever survived, because those are
-// the three places a credential would sit.
+// the only way one is written into either. RedactURL covers every form Go's
+// URL parser recognises and the password of the scp-like form, but a refused
+// endpoint is by definition one the parser may not recognise, and a value
+// carrying a password is refused precisely because it carries one. So the
+// user half, the query and the fragment are taken off whatever survived,
+// because those are the three places a credential would sit.
 func RedactEndpoint(endpoint string) string {
 	safe := RedactURL(endpoint)
 	if safe == endpoint {
