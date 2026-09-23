@@ -86,3 +86,26 @@ dependency_overrides:
 		t.Fatalf("Links after DropLinks = %+v, %v", links, err)
 	}
 }
+
+// TestPublicAPIWriterDoesNotInventALinkFromBrokenPubspecFlowSyntax keeps a
+// truncated inline override from being treated as a local folder. The
+// scanner may report an invalid manifest separately, but link inventory and
+// cleanup must not turn a half-written mapping into an actionable redirect.
+func TestPublicAPIWriterDoesNotInventALinkFromBrokenPubspecFlowSyntax(t *testing.T) {
+	const body = "name: acme\ndependency_overrides:\n  core: {path: ../core\n"
+	path := writeFile(t, t.TempDir(), "pubspec.yaml", body)
+	links, err := writer.Links(path)
+	if err != nil {
+		t.Fatalf("Links: %v", err)
+	}
+	if len(links) != 0 {
+		t.Fatalf("truncated flow mapping became local links: %+v", links)
+	}
+	res, err := writer.DropLinks(path)
+	if err != nil || len(res.Applied) != 0 {
+		t.Fatalf("DropLinks = %+v, %v", res, err)
+	}
+	if got := readFile(t, path); got != body {
+		t.Fatalf("cleanup changed malformed source bytes: %q", got)
+	}
+}

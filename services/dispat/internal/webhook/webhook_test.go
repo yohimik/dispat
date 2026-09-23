@@ -220,6 +220,24 @@ func TestDispatcherDoesNotRetryClientErrors(t *testing.T) {
 	assert.Len(t, c.all(), 1)
 }
 
+func TestAttemptDoesNotAcceptAStalledSuccessBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	d := NewDispatcher(nil, nil, zerolog.Nop())
+	defer d.Close(context.Background())
+
+	status, err := d.attempt(Endpoint{Name: "slow-success", URL: srv.URL, Method: "POST",
+		Timeout: 100 * time.Millisecond}, delivery{event: "started", id: "test", body: []byte("{}")})
+	assert.Equal(t, http.StatusOK, status)
+	require.ErrorIs(t, err, context.DeadlineExceeded,
+		"a 2xx header cannot make an incomplete response count as delivered")
+}
+
 func TestDispatcherExhaustsRetries(t *testing.T) {
 	// An endpoint that keeps failing costs exactly maxAttempts requests and
 	// a warning; the dispatcher and the following deliveries carry on.

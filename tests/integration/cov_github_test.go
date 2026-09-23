@@ -314,3 +314,30 @@ func TestGitHubRefusesToAttachWithoutAnUploadURL(t *testing.T) {
 	assert.True(t, r.IsTagged("core@0.1.0"),
 		"the release is out; only its attachment failed; tags: %v", r.TagList())
 }
+
+// The GitHub command reads JSON after receiving a successful status line.
+// A server that stops there must not keep the CLI alive past its API timeout.
+func TestGitHubHeadersWithoutBodyRespectTheRequestTimeout(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-hang
+	}))
+	t.Cleanup(func() { close(hang); srv.Close() })
+
+	r := harness.New(t)
+	cfg := githubConfig(srv.URL)
+	cfg.GitHub.AllPackages = models.Bool(true)
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	start := time.Now()
+	res := r.Command("github", "--package", "core")
+	assert.Less(t, time.Since(start), 45*time.Second)
+	assert.NotEqual(t, 0, res.Code, "a partial GitHub response cannot complete the command")
+	assert.Contains(t, res.Stdout+res.Stderr, "deadline exceeded")
+}

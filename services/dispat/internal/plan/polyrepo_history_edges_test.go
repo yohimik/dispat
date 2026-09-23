@@ -118,6 +118,12 @@ func TestComposedHistorySurfacesRepositoryReadFailures(t *testing.T) {
 		assert.ErrorContains(t, err, "reading repository source HEAD: HEAD unavailable")
 	})
 
+	t.Run("head capability absent", func(t *testing.T) {
+		pl, err := Compute(t.Context(), newFakeGit(), composedHistoryFailureOptions(&plainGit{inner: newFakeGit()}))
+		require.Nil(t, pl)
+		require.ErrorContains(t, err, "repository source cannot report its HEAD")
+	})
+
 	t.Run("source parser", func(t *testing.T) {
 		opts := composedHistoryFailureOptions(newFakeGit())
 		source := opts.Repositories["source"]

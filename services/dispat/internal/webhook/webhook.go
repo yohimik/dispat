@@ -314,8 +314,14 @@ func (d *Dispatcher) attempt(ep Endpoint, del delivery) (status int, err error) 
 	}
 	// Drained and closed whatever the status, so the shared client's
 	// connection goes back to the pool instead of leaking.
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainBody))
-	_ = resp.Body.Close()
+	_, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainBody))
+	closeErr := resp.Body.Close()
+	if drainErr != nil {
+		return resp.StatusCode, drainErr
+	}
+	if closeErr != nil {
+		return resp.StatusCode, closeErr
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return resp.StatusCode, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}

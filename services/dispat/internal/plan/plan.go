@@ -1753,7 +1753,7 @@ func Compute(ctx context.Context, git gitx.Gitx, opts Options) (*Plan, error) {
 				HeadSHA(context.Context) (string, error)
 			})
 			if !ok {
-				continue
+				return nil, fmt.Errorf("plan: repository %s cannot report its HEAD", history.Name)
 			}
 			sha, err := head.HeadSHA(ctx)
 			if err != nil {

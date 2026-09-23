@@ -110,6 +110,7 @@ func (g perBoundaryGit) IsAncestor(ctx context.Context, a, b string) (bool, erro
 	return g.inner.IsAncestor(ctx, a, b)
 }
 func (g perBoundaryGit) IsShallow(ctx context.Context) (bool, error) { return g.inner.IsShallow(ctx) }
+func (g perBoundaryGit) HeadSHA(ctx context.Context) (string, error) { return g.inner.HeadSHA(ctx) }
 func (g perBoundaryGit) ResolveCommit(ctx context.Context, rev string) (string, error) {
 	return g.inner.ResolveCommit(ctx, rev)
 }

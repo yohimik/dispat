@@ -604,7 +604,8 @@ Three conditions dispat already had a code for keep it and join the specificatio
 - **A worker's task deadline is enforced by the node itself.** The orchestrator's wait and the node's own are the
   same number, so a task that overruns is stopped on the machine rather than abandoned while it is still running.
 - **Two workers must not share one state folder for one node name.** The second one to start refuses. Give each node
-  its own `--state-dir`, and expect the folder to be disposable: everything in it is rebuilt.
+  its own `--state-dir`. A worker holds a kernel lock on a stable `worker.lock` file while it serves, so a crash
+  releases ownership without renaming or deleting the file; the cache and answered-work state remain reconstructible.
 - **Nested dispat commands on a worker are restricted.** Under a task's authority `release`, a bare `dispat`,
   `commit`, `github`, `changelog`, `autoversion`, `compute` and `worker` are refused with `E226`. Everything a build
   script legitimately uses stays allowed, including `exec`, `if`, `for`, `install`, `scanner`, `writer`, `replacer`,

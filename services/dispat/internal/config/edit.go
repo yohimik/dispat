@@ -1,11 +1,8 @@
 package config
 
-// Writing a key back into the config file that holds it.
-//
-// The splicing, the format-preserving round trips, the backup and the atomic
-// rename are pkg/config's; what is here is dispat's own shapes — a dependency
-// list written as the object keyed by consumer — and the names internal/app
-// has always called the writers by.
+// Preparing edits to the config file that holds each key. The rendering and
+// format-preserving round trips are pkg/config's; the caller owns the later
+// atomic write and backup.
 
 import (
 	"context"
@@ -40,45 +37,8 @@ type Edit = lib.Edit
 // PreparedEdit is one file's fully rendered replacement, ready to commit.
 type PreparedEdit = lib.PreparedEdit
 
-// ReplaceDependencies rewrites only the dependency list at keyPath of the
-// config file at path — ["dependencies"] for the file's own top-level list,
-// ["packages", <key>, "dependencies"] for a packages entry of the root
-// config — leaving every other byte of a JSON config (formatting, key order,
-// comments) untouched; a YAML config keeps its comments but is re-encoded, so
-// unrelated formatting may reflow. The previous bytes are saved at path +
-// BackupSuffix first, and the write itself is atomic (temp + rename). TOML
-// returns ErrTOMLEdit.
-//
-// deps is the Dependencies type rather than a bare slice so that the value
-// goes through that type's marshaller: the key is written as the object keyed
-// by consumer, which is the only shape the loader reads back.
-//
-// The file is re-read here: deps must be the caller's complete intended list,
-// and an edit made to the file by someone else between the caller's read and
-// this call is overwritten for that one key (every other key keeps the
-// concurrent edit).
-func ReplaceDependencies(path string, keyPath []string, deps Dependencies) error {
-	return ReplaceKeys(path, []Edit{{KeyPath: keyPath, Value: deps}})
-}
-
-// ReplaceStringList is ReplaceDependencies for the package-level dependency
-// shape: a plain list of provider names.
-func ReplaceStringList(path string, keyPath []string, items []string) error {
-	return ReplaceKeys(path, []Edit{{KeyPath: keyPath, Value: items}})
-}
-
-// ReplaceKeys applies every edit to one config file in a single pass: the file
-// is read once, each value spliced onto the result of the previous splice, one
-// backup written and one atomic rename performed. Two keys of the same file
-// must go through one call rather than two — a second call would read the
-// already-edited file and save that as the backup, so the pre-edit copy the
-// user reaches for would be gone.
-func ReplaceKeys(path string, edits []Edit) error {
-	return lib.ApplyEdits(context.Background(), path, edits)
-}
-
 // PrepareKeys renders every edit against the file's current bytes without
-// writing anything — the validating half of ReplaceKeys.
+// writing anything. The caller owns the later atomic write and backup.
 func PrepareKeys(path string, edits []Edit) (*PreparedEdit, error) {
 	return lib.PrepareEdits(context.Background(), path, edits)
 }

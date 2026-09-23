@@ -87,6 +87,7 @@ func TestComposeWorkspaceExcludesDeclarationsOwnedByADisabledRepository(t *testi
 	require.NoError(t, err)
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "sdk", pkgs[0].Name)
-	assert.NotNil(t, workspace.DisabledRepositoryForDir(filepath.Join(root, "sources", "app", "pkgs")),
-		"the excluded boundary stays reserved for its repository")
+	require.Len(t, workspace.DisabledRepositories(), 1)
+	assert.Equal(t, filepath.Join(root, "sources", "app"), workspace.DisabledRepositories()[0].Root,
+		"the excluded boundary remains reserved while discovery omits its packages")
 }

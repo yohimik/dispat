@@ -634,6 +634,11 @@ An unknown publication outcome is the one result that needs a person:
 
 Leftover `dispat-worker-*` branches in a mailbox repository are coordination state, not release records. A completed run deletes its own; an uncertain publication retains its authorization as evidence until the operator follows the recovery order above. They carry full source and command text, so report other leftovers for deletion rather than leaving them. Never push a branch of your own into a mailbox repository, and never run a release from a node whose `execution.role` is `worker`: both are refused, the second with `E226`.
 
+A worker state folder has one serving process. Its `worker.lock` remains at the same path across normal stops; a kernel
+lock, rather than the file's presence, owns it, and a crash releases that lock. The PID in the file helps diagnose a
+holder and protects an older worker still using the prior PID-only scheme. Do not delete or rename `worker.lock` to
+restart a worker; start it normally and investigate an `E225` refusal if another process still owns the folder.
+
 ## Respect the release lock
 
 `dispat release` and bare `dispat` use a remote `dispat-release-lock` tag to serialize releases for the repository. During normal work, do not start a second release, push unrelated commits to the release branch, move release tags, delete the lock, or disable locking while a run may be active. Urgent corrections follow the interruption procedure below; the lock is not a reason to let a known-invalid release finish.

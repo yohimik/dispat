@@ -162,6 +162,17 @@ func (f *fakeGit) CreateTag(context.Context, string, string, string) error { ret
 
 func (f *fakeGit) IsShallow(context.Context) (bool, error) { return f.shallow, nil }
 
+func (f *fakeGit) HeadSHA(context.Context) (string, error) {
+	if len(f.history) == 0 {
+		return "", nil
+	}
+	return f.history[len(f.history)-1].sha, nil
+}
+
+func (f *fakeGit) ControlGitlinkHistory(context.Context) ([]gitx.ControlHistoryCommit, error) {
+	return nil, nil
+}
+
 // countingGit records how many git queries planning makes per package. The
 // planner fetches tags concurrently, so the counters take a lock.
 type countingGit struct {

@@ -342,11 +342,3 @@ func TestEnvWeakValuesAgreeAcrossFormats(t *testing.T) {
 		})
 	}
 }
-
-// TestWeakEnvStringFallsBackForUnexpectedShapes: a value that is not a scalar
-// at all — a list, say — still has to become something rather than panic, so
-// the renderer ends in a plain fallback.
-func TestWeakEnvStringFallsBackForUnexpectedShapes(t *testing.T) {
-	assert.Equal(t, "[a b]", weakEnvString([]any{"a", "b"}))
-	assert.Equal(t, "", weakEnvString(nil))
-}

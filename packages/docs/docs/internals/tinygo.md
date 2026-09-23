@@ -264,10 +264,11 @@ names.
 Carried rather than fixed, because none of them blocks the matrix or the suite, and all of them change what a reader
 should expect:
 
-- **`http.Client.Timeout` arms nothing.** The fork's `net/http` keeps the field and decorates an error with it, but no
-  clock is started from it, so a server that accepts a connection and then says nothing can block a download for as
-  long as it likes. dispat sets that timeout on its self-update and install clients, and under a fork build it is
-  inert.
+- **`http.Client.Timeout` alone arms nothing.** The fork's `net/http` keeps the field without enforcing it. Current
+  dispat wraps its GitHub, webhook and self-update calls with a deadline that covers response-body reads and `Close`,
+  so a stalled call returns at that deadline. TinyGo may still leave the underlying network operation blocked after
+  the caller returns; dispat caps those outstanding exchanges at 64 per process and a new call waiting for a slot
+  answers at its own deadline.
 - **Socket deadlines stretch.** The netdev `Recv` path restarts `SO_RCVTIMEO` after `EINTR`, so a read deadline is
   measured per uninterrupted attempt rather than once. Under garbage collection pressure a deadline can outlast the
   duration it was set to.

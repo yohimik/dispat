@@ -115,6 +115,8 @@ const (
 	// MaxTreeEntryBytes bounds one entry of a streamed tree listing, so a
 	// reply with no separator in it cannot be accumulated without end.
 	MaxTreeEntryBytes = 1 << 16
+	// MaxObjectHeaderBytes bounds the batch protocol's object id, type and size.
+	MaxObjectHeaderBytes = 1024
 )
 
 // The identity every transport object is written under. A worker's cache
@@ -247,24 +249,19 @@ func (c *LocalGitx) DeleteRemoteBranchesLease(ctx context.Context, remote string
 // and a reply naming a million refs would otherwise be read into memory
 // before anything had a chance to refuse it.
 func (c *LocalGitx) ListRemoteHeads(ctx context.Context, remote, pattern string) ([]RemoteHead, error) {
-	out, err := c.run(ctx, "ls-remote", "--heads", "--", remote, pattern)
+	scanner := &remoteHeadScanner{}
+	_, err := c.runStream(ctx, gitStream{stdout: scanner}, "ls-remote", "--heads", "--", remote, pattern)
+	if scanner.err != nil {
+		return nil, transportError(scanner.err, remote, "listing %s", pattern)
+	}
 	if err != nil {
 		return nil, transportError(err, remote, "listing %s", pattern)
 	}
-	heads := make([]RemoteHead, 0, 8)
-	for line := range strings.Lines(out) {
-		oid, ref, isEntry := strings.Cut(strings.TrimSpace(line), "\t")
-		if !isEntry {
-			continue
-		}
-		if len(heads) == MaxRemoteHeads {
-			return nil, fmt.Errorf("gitx: %s advertises more than %d refs matching %s: %w",
-				RedactURL(remote), MaxRemoteHeads, pattern, ErrTransportLimit)
-		}
-		heads = append(heads, RemoteHead{Name: strings.TrimPrefix(ref, "refs/heads/"), OID: oid})
+	if scanner.pending.Len() != 0 {
+		return nil, transportError(errors.New("the remote ref listing ended mid-entry"), remote, "listing %s", pattern)
 	}
-	sort.Slice(heads, func(i, j int) bool { return heads[i].Name < heads[j].Name })
-	return heads, nil
+	sort.Slice(scanner.heads, func(i, j int) bool { return scanner.heads[i].Name < scanner.heads[j].Name })
+	return scanner.heads, nil
 }
 
 // FetchRefs brings coordination branches into this checkout's private
@@ -915,14 +912,39 @@ func (p *Plumbing) ReadBlob(ctx context.Context, oid string, to io.Writer, maxBy
 		p.fail(fmt.Errorf("gitx: the size of the transport blob %s is not a number: %w", oid, err))
 		return
 	}
+	if size < 0 {
+		p.fail(fmt.Errorf("gitx: the size of the transport blob %s is negative", oid))
+		return
+	}
 	if size > maxBytes {
 		p.fail(fmt.Errorf("gitx: the transport blob %s is %d bytes, at most %d: %w",
 			oid, size, maxBytes, ErrTransportLimit))
 		return
 	}
-	if _, err := p.git.runStream(ctx, gitStream{stdout: to}, "cat-file", "blob", oid); err != nil {
+	bounded := &blobWriter{to: to, remaining: size}
+	if _, err := p.git.runStream(ctx, gitStream{stdout: bounded}, "cat-file", "blob", oid); err != nil {
 		p.fail(fmt.Errorf("gitx: reading the transport blob %s: %w", oid, err))
+		return
 	}
+	if bounded.remaining != 0 {
+		p.fail(fmt.Errorf("gitx: the transport blob %s ended before its declared size", oid))
+	}
+}
+
+// blobWriter enforces a measured blob's size while it arrives. A corrupt
+// size reply must not permit an unbounded document to fill the caller's buffer.
+type blobWriter struct {
+	to        io.Writer
+	remaining int64
+}
+
+func (w *blobWriter) Write(content []byte) (int, error) {
+	if int64(len(content)) > w.remaining {
+		return 0, ErrTransportLimit
+	}
+	n, err := w.to.Write(content)
+	w.remaining -= int64(n)
+	return n, err
 }
 
 // ObjectReader is one long-running `git cat-file --batch`, asked for objects
@@ -1012,9 +1034,14 @@ func (r *ObjectReader) ReadBlob(oid string, to io.Writer, maxBytes int64) (int64
 	}
 	// Every answer ends with one newline the caller never sees; leaving it in
 	// the pipe would make the next header unreadable.
-	if _, err := r.stdout.ReadByte(); err != nil {
+	ending, err := r.stdout.ReadByte()
+	if err != nil {
 		r.isBroken = true
 		return 0, fmt.Errorf("gitx: reading the end of %s: %w", oid, err)
+	}
+	if ending != '\n' {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the object %s has no terminating newline", oid)
 	}
 	return size, nil
 }
@@ -1025,24 +1052,36 @@ func (r *ObjectReader) request(oid string) (int64, error) {
 		r.isBroken = true
 		return 0, fmt.Errorf("gitx: asking the object reader for %s: %w", oid, err)
 	}
-	header, err := r.stdout.ReadString('\n')
+	header, err := r.stdout.ReadSlice('\n')
+	if errors.Is(err, bufio.ErrBufferFull) || len(header) > MaxObjectHeaderBytes {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the object header exceeds %d bytes: %w", MaxObjectHeaderBytes, ErrTransportLimit)
+	}
 	if err != nil {
 		r.isBroken = true
 		return 0, fmt.Errorf("gitx: the object reader did not answer about %s: %w", oid, err)
 	}
-	fields := strings.Fields(header)
+	fields := strings.Fields(string(header))
+	if len(fields) > 0 && fields[0] != oid {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the object reader answered about %s instead of %s", fields[0], oid)
+	}
 	if len(fields) == 2 && fields[1] == "missing" {
 		return 0, fmt.Errorf("gitx: %s: %w", oid, ErrObjectMissing)
 	}
 	if len(fields) != 3 || fields[1] != "blob" {
 		r.isBroken = true
 		return 0, fmt.Errorf("gitx: the object reader answered %q about %s, which is not a blob header",
-			strings.TrimSpace(header), oid)
+			strings.TrimSpace(string(header)), oid)
 	}
 	size, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil {
 		r.isBroken = true
 		return 0, fmt.Errorf("gitx: the length of %s is not a number: %w", oid, err)
+	}
+	if size < 0 {
+		r.isBroken = true
+		return 0, fmt.Errorf("gitx: the length of %s is negative", oid)
 	}
 	return size, nil
 }
@@ -1170,6 +1209,10 @@ func (s *treeScanner) Write(p []byte) (int, error) {
 	for s.err == nil {
 		index := bytes.IndexByte(p, 0)
 		if index < 0 {
+			break
+		}
+		if s.pending.Len()+index > MaxTreeEntryBytes {
+			s.err = fmt.Errorf("gitx: a tree listing entry exceeds %d bytes: %w", MaxTreeEntryBytes, ErrTransportLimit)
 			break
 		}
 		s.pending.Write(p[:index])

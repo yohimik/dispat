@@ -58,13 +58,11 @@ func TestControlCheckpointIndexRejectsUnavailableOrDisconnectedHistory(t *testin
 		cp := &computation{
 			ctx: context.Background(), controlRepo: "control",
 			histories: map[string]RepositoryHistory{
-				"control": {Name: "control", Control: true, Git: newFakeGit()},
+				"control": {Name: "control", Control: true, Git: &plainGit{inner: newFakeGit()}},
 			},
 		}
-		snapshots, ambiguous, err := cp.controlCheckpoints()
-		require.NoError(t, err)
-		assert.Empty(t, snapshots)
-		assert.Empty(t, ambiguous)
+		_, _, err := cp.controlCheckpoints()
+		require.ErrorContains(t, err, "cannot report release checkpoint history")
 		assert.False(t, cp.controlIndexed)
 	})
 }

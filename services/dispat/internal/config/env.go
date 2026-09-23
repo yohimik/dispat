@@ -50,8 +50,3 @@ func MergeEnv(base, over map[string]string) map[string]string { return lib.Merge
 func validateEnv(label string, env map[string]string) error {
 	return lib.ValidateEnv(label, env, reservedEnvPrefix)
 }
-
-// weakEnvString renders a scalar the way the weakly typed decode would, which
-// is also what a generic map's key becomes on the way into the tree, so the
-// two renderings can never disagree.
-func weakEnvString(v any) string { return lib.WeakScalarString(v) }

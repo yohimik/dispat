@@ -344,6 +344,31 @@ func TestAdmissionReceiptKeepsTheExactProviderTag(t *testing.T) {
 	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "provider is never republished")
 }
 
+// TestAdmissionRefusesDamagedDeliveryEvidence prevents a damaged immutable
+// receipt from silently turning a three-run catch-up back into the old
+// ancestry-only interpretation.
+func TestAdmissionRefusesDamagedDeliveryEvidence(t *testing.T) {
+	t.Run("malformed receipt", func(t *testing.T) {
+		r := admissionRepo(t, admissionShape{})
+		commit := r.Git("rev-list", "-n1", "cli@0.1.0")
+		r.Git("tag", "-d", "cli@0.1.0")
+		r.Git("tag", "-a", "cli@0.1.0", commit, "-m", "release cli@0.1.0 dispat-seen-v1:!")
+		status := r.Status()
+		assert.NotEqual(t, 0, status.Code)
+		assert.Contains(t, status.Stdout+status.Stderr, "invalid provider receipt")
+	})
+	t.Run("named provider tag missing", func(t *testing.T) {
+		r := admissionRepo(t, admissionShape{})
+		r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
+		require.NotEqual(t, 0, r.Release().Code)
+		require.Equal(t, 1, r.TagCount("cli@0.2.0"))
+		r.Git("tag", "-d", "core@0.1.0")
+		status := r.Status()
+		assert.NotEqual(t, 0, status.Code)
+		assert.Contains(t, status.Stdout+status.Stderr, "records missing provider tag core@0.1.0")
+	})
+}
+
 // TestAdmissionFinalTagFailureCannotForgeDelivery covers deferred tagging:
 // all publish scripts have succeeded, but a concurrent tag collision makes
 // the provider's final record fail. The consumer must not receive a tag whose

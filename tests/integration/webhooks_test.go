@@ -265,6 +265,33 @@ func TestWebhookSlowEndpointIsBounded(t *testing.T) {
 	assert.True(t, harness.IsCodePresent(res.Events, "W239"))
 }
 
+// A successful status line is not a completed delivery. The body and its
+// cleanup remain under the endpoint timeout even if the receiver stalls after
+// sending headers.
+func TestWebhookHeadersWithoutBodyAreBounded(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-hang
+	}))
+	t.Cleanup(func() { close(hang); srv.Close() })
+
+	r := harness.New(t)
+	r.WriteConfigModel(webhooksConfig(echoBuild,
+		models.WebhookConfig{URL: srv.URL, Events: []string{"release.started"}, Timeout: 1}))
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	start := time.Now()
+	res := r.ReleaseOK()
+	assert.Less(t, time.Since(start), 30*time.Second)
+	assert.True(t, r.IsTagged("core@0.1.0"))
+	assert.True(t, harness.IsCodePresent(res.Events, "W239"),
+		"a header-only 200 response is an incomplete delivery")
+}
+
 func TestWebhookSignature(t *testing.T) {
 	// With secretEnv set, every delivery carries the standard sha256= HMAC
 	// over its exact body bytes — recomputed here from the captured body and

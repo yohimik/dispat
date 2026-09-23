@@ -424,6 +424,17 @@ What its tasks declare they write under `runOutputs` is admitted through the sam
 merged into the orchestrator's checkout once the drain is over, because a merge that ran as each task answered would
 let arrival order decide a path two tasks disagree about.
 
+The worker's answered-work record has one serving process. It holds a kernel lock on a stable `worker.lock` file for
+its whole lifetime; release clears the diagnostic PID and unlocks the file without removing or renaming it. A crash
+releases the kernel lock, while a live PID left by an older worker is still respected. Keeping one inode at one path
+closes the takeover window in which two processes could each claim a different replacement file.
+
+The HTTP calls used for GitHub records, webhooks and self-update keep their request deadline through response-body
+reads and `Close`, not just through the response headers. TinyGo's transport can ignore cancellation; a timed-out
+call returns to its caller, but its underlying network operation may remain blocked. A process-wide limit of 64 such
+exchanges holds a slot until each operation actually ends, bounding stranded work and refusing new work at its own
+deadline when no slot is available.
+
 ### Propagation: bounded BFS, three phases
 
 Propagation (§9.2) walks the dependency graph outward from each unit's source packages. It moves along kind-filtered

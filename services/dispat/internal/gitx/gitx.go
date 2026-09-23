@@ -979,7 +979,10 @@ func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 	}
 	peeled, subject, hasSubject := strings.Cut(remainder, "\t")
 	if !hasSubject {
-		peeled = remainder // old inventory readers and test doubles
+		// Every production listing requests the subject. Treating a truncated
+		// row as an old format would erase a delivery receipt and silently
+		// fall back to ancestry for releases at the same commit.
+		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
 	}
 	entry := tagInventoryEntry{name: strings.TrimSpace(name), commit: strings.TrimSpace(object), subject: subject}
 	if entry.name == "" || !fullObjectID(entry.commit) {

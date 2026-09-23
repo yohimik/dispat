@@ -83,7 +83,7 @@ func TestWeakScalarStringRendersEveryScalar(t *testing.T) {
 		{7, "7"}, {int64(-3), "-3"}, {1.5, "1.5"},
 		{1e21, "1000000000000000000000"},
 		{nil, ""},
-		{[]string{"a"}, "[a]"},
+		{[]string{"a"}, "[a]"}, {[]any{"a", "b"}, "[a b]"},
 	} {
 		if got := WeakScalarString(tc.in); got != tc.want {
 			t.Errorf("WeakScalarString(%#v) = %q, want %q", tc.in, got, tc.want)

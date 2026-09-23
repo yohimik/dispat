@@ -64,6 +64,9 @@ one again and pays a fetch, so a container may use an empty volume for it.
 
 Two processes must not serve one node name from one state folder. The second one to start refuses, because two
 nodes sharing a folder would each hold half the record of what has been answered.
+The worker holds an operating-system lock on `worker.lock` while it serves. The file stays at the same path after a
+normal stop; its PID is diagnostic, and a crash releases the lock without a stale-file cleanup step. Leave the file
+in place when restarting a worker.
 
 ### `--idle-timeout`
 

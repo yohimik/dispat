@@ -59,27 +59,6 @@ func (w *Workspace) DisabledRepositoryNames() []string {
 	return names
 }
 
-// DisabledRepositoryForDir returns the excluded repository whose reserved
-// boundary contains dir, or nil. The deepest boundary wins, as it does for
-// participating repositories.
-func (w *Workspace) DisabledRepositoryForDir(dir string) *DisabledRepository {
-	if w == nil || len(w.disabled) == 0 {
-		return nil
-	}
-	dir, _ = filepath.Abs(dir)
-	if canonical, err := filepath.EvalSymlinks(dir); err == nil {
-		dir = canonical
-	}
-	var best *DisabledRepository
-	for i := range w.disabled {
-		repo := &w.disabled[i]
-		if within(repo.Root, dir) && (best == nil || len(repo.Root) > len(best.Root)) {
-			best = repo
-		}
-	}
-	return best
-}
-
 // ExcludedPackageRepository reports the excluded repository that would have
 // supplied a package of this name. The lookup is best effort: it answers for
 // a name the control configuration declared inside an excluded boundary, or a

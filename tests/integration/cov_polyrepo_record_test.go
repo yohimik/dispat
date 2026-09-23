@@ -347,6 +347,50 @@ func TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush(t *testing.T) 
 	})
 }
 
+// TestCovPolyrepoBeforeCommitHookCannotReplaceThePlannedSource proves the
+// post-publication record checks the source HEAD after user hooks. If a hook
+// commits there, the recorder must not tag that unplanned revision or advance
+// the control gitlink. Once the stray commit and generated record are repaired,
+// the unchanged source work can be released normally.
+func TestCovPolyrepoBeforeCommitHookCannotReplaceThePlannedSource(t *testing.T) {
+	control, sourceBare, _ := covPolyrepoPushableFleet(t)
+	cfg := covPolyrepoFile()
+	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(false)}
+	cfg.Scripts["sneak"] = models.Script{"git commit -q --allow-empty -m 'chore: a hook moved source HEAD'"}
+	cfg.Run = &models.RunConfig{BeforeCommit: []string{"sneak"}}
+	cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
+		"lib-source": {Commit: &models.CommitConfig{
+			Enabled: models.Bool(true), Push: true, Remote: "origin",
+			Branch: harness.DefaultBranch,
+		}},
+	}
+	control.WriteConfigModel(cfg)
+	control.Commit("chore: configure a source record hook that commits")
+	sourceBefore := control.Git("-C", "sources/lib", "rev-parse", "HEAD")
+	controlBefore := control.Git("rev-parse", "HEAD")
+
+	res := control.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E335"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, covPolyrepoOutput(res), "repository changed after planning")
+	assert.Empty(t, polyrepoTags(control, "sources/lib"))
+	assert.Equal(t, sourceBefore, control.Git("-C", sourceBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
+	assert.Equal(t, sourceBefore, control.Git("rev-parse", "HEAD:sources/lib"))
+	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
+	assert.Equal(t, sourceBefore, control.Git("-C", "sources/lib", "rev-parse", "HEAD~1"),
+		"the hook's commit occurred, so the record refusal is the HEAD guard")
+
+	control.Git("-C", "sources/lib", "reset", "--hard", sourceBefore)
+	require.NoError(t, os.Remove(control.Path("sources/lib/packages/lib/CHANGELOG.md")))
+	cfg.Run = nil
+	control.WriteConfigModel(cfg)
+	control.Commit("chore: remove the source record hook after repair")
+	control.ReleaseOK()
+	assert.Equal(t, []string{"lib@0.1.0"}, polyrepoTags(control, "sources/lib"))
+}
+
 // TestCovPolyrepoAliasTagsFollowTheirOwnForcePolicy: a moving alias must
 // replace the ref it already occupies and a fixed alias must not, so the push
 // separates them: the release tag and the fixed aliases go as ordinary refs

@@ -340,9 +340,11 @@ func TestExecutionRelevantNativeChangeWithholdsPublication(t *testing.T) {
 
 // A consumer's own folder can stay untouched while its provider changes.
 // The late provider commit still invalidates the artefact the worker built.
+// The hook waits until app's build finishes before committing, which also
+// proves ui and docs finished: app's build waits for both of their builds.
 func TestExecutionChangedProviderWithholdsDependentPublications(t *testing.T) {
 	rig := newExecutionPublishRig(t, executionCommitDuringTheRun(
-		filepath.Join("packages", "assets", "late-input.txt")))
+		filepath.Join("packages", "assets", "late-input.txt"), "app"))
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
 
 	res := rig.release()
@@ -391,17 +393,30 @@ func TestExecutionUnrelatedNativeChangeKeepsResult(t *testing.T) {
 // folder first: a stage script runs in its package's folder, and a relative
 // path that meant one thing to the reader and another to the shell would make
 // every claim here a claim about the wrong folder.
-func executionCommitDuringTheRun(path string) func(*models.File) {
+// A named build is awaited before the commit when the claim needs a definite
+// old input snapshot; without that barrier it may legitimately build later.
+func executionCommitDuringTheRun(path string, waitForBuild ...string) func(*models.File) {
 	return func(cfg *models.File) {
+		wait := ""
+		for _, name := range waitForBuild {
+			marker := "probe-inputs " + name + " "
+			wait += fmt.Sprintf(`for attempt in $(seq 1 300); do
+  grep -Fq %q "$DISPAT_IT_EXECUTION_LOG" && break
+  sleep 0.1
+done
+grep -Fq %q "$DISPAT_IT_EXECUTION_LOG" || exit 9
+`, marker, marker)
+		}
 		cfg.Scripts["postpublish"] = models.Script{
 			executionPostPublishProbe,
 			fmt.Sprintf(`[ "$DISPAT_PACKAGE" != assets ] || {
 cd "$(git rev-parse --show-toplevel)" &&
+%s
 mkdir -p "$(dirname %q)" &&
 printf 'changed\n' > %q &&
 git add -- %q &&
 git -c user.name=fixture -c user.email=fixture@example.com commit -q -m "chore: a change made during the run" -- %q
-}`, path, path, path, path),
+}`, wait, path, path, path, path),
 		}
 	}
 }

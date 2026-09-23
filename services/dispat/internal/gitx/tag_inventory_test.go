@@ -14,14 +14,14 @@ import (
 )
 
 func TestParseTagsForPackagesMatchesIndependentPerPackageSemantics(t *testing.T) {
-	const raw = "core@2.0.0\t1111111111111111111111111111111111111111\t\n" +
-		"services/api/v1.4.0\t2222222222222222222222222222222222222222\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
-		"1.3.0-release-tail\t3333333333333333333333333333333333333333\t\n" +
-		"core-utils@9.9.9\t4444444444444444444444444444444444444444\t\n" +
-		"core@not-semver\t5555555555555555555555555555555555555555\t\n" +
-		"  core@2.2.0  \t  8888888888888888888888888888888888888888  \t   \n" +
-		LockTagName + "\t6666666666666666666666666666666666666666\t\n" +
-		LockAttemptTagPrefix + "123\t7777777777777777777777777777777777777777\t\n"
+	const raw = "core@2.0.0\t1111111111111111111111111111111111111111\t\t\n" +
+		"services/api/v1.4.0\t2222222222222222222222222222222222222222\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\n" +
+		"1.3.0-release-tail\t3333333333333333333333333333333333333333\t\t\n" +
+		"core-utils@9.9.9\t4444444444444444444444444444444444444444\t\t\n" +
+		"core@not-semver\t5555555555555555555555555555555555555555\t\t\n" +
+		"  core@2.2.0  \t  8888888888888888888888888888888888888888  \t   \t\n" +
+		LockTagName + "\t6666666666666666666666666666666666666666\t\t\n" +
+		LockAttemptTagPrefix + "123\t7777777777777777777777777777777777777777\t\t\n"
 	formats := map[string]TagFormat{
 		"core":       DefaultTagFormat,
 		"core-utils": DefaultTagFormat,
@@ -48,9 +48,10 @@ func TestParseTagsForPackagesMatchesIndependentPerPackageSemantics(t *testing.T)
 func TestParseTagInventoryRefusesMalformedNonemptyRecords(t *testing.T) {
 	for _, raw := range []string{
 		"missing-fields\n",
-		"core@1.0.0\t\t\n",
-		"core@1.0.0\tnot-an-object-id\t\n",
-		"core@1.0.0\t1111111111111111111111111111111111111111\tnot-an-object-id\n",
+		"core@1.0.0\t1111111111111111111111111111111111111111\t\n", // truncated subject
+		"core@1.0.0\t\t\t\n",
+		"core@1.0.0\tnot-an-object-id\t\t\n",
+		"core@1.0.0\t1111111111111111111111111111111111111111\tnot-an-object-id\t\n",
 	} {
 		_, err := parseTagsForPackages(raw, map[string]TagFormat{"core": DefaultTagFormat})
 		assert.ErrorContains(t, err, "malformed")
@@ -59,8 +60,8 @@ func TestParseTagInventoryRefusesMalformedNonemptyRecords(t *testing.T) {
 
 func TestMatchedTagsDetachFromRawInventory(t *testing.T) {
 	const commit = "1111111111111111111111111111111111111111"
-	raw := LockAttemptTagPrefix + strings.Repeat("padding", 1<<13) + "\t2222222222222222222222222222222222222222\t\n" +
-		"core@1.2.3\t" + commit + "\t\n"
+	raw := LockAttemptTagPrefix + strings.Repeat("padding", 1<<13) + "\t2222222222222222222222222222222222222222\t\t\n" +
+		"core@1.2.3\t" + commit + "\t\t\n"
 
 	bulk, err := parseTagsForPackages(raw, map[string]TagFormat{
 		"core": DefaultTagFormat,
@@ -178,7 +179,7 @@ func benchmarkTagInventory(packages, versions int, overlap bool) (string, map[st
 			if overlap {
 				name = fmt.Sprintf("1.%d.0-release-%s", version, pkg)
 			}
-			fmt.Fprintf(&raw, "%s\t%040x\t\n", name, p*versions+version+1)
+			fmt.Fprintf(&raw, "%s\t%040x\t\t\n", name, p*versions+version+1)
 		}
 	}
 	return raw.String(), formats

@@ -19,11 +19,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -62,11 +64,9 @@ type NodeState struct {
 // OpenNodeState takes ownership of one node's state folder and answers the
 // paths inside it together with the release that gives the ownership back.
 //
-// The lock is a file holding the owning process id. A lock whose process is
-// gone is taken over, because the alternative is a node that cannot be
-// restarted after a crash without somebody deleting a file by hand; a lock
-// whose process is alive is refused, because the record of answered work has
-// exactly one owner.
+// The lock is held by the kernel on a stable file inode; its PID is diagnostic
+// and preserves refusal of an older PID-only worker. A crashed holder releases
+// the kernel lock automatically, so restart needs no file deletion.
 func OpenNodeState(root, node, endpoint string) (*NodeState, func() error, error) {
 	dir := filepath.Join(root, node)
 	state := &NodeState{
@@ -93,137 +93,129 @@ func formatEndpointKey(endpoint string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// lockNodeState claims the folder for this process, or reports who has it.
+// lockNodeState holds a kernel lock on one stable worker.lock inode for the
+// entire serving lifetime. A PID in the file is a diagnostic and a bridge from
+// older workers that only wrote a PID; it is not the exclusion primitive.
+// Neither acquisition nor release renames or removes the file, so contenders
+// can never acquire different inodes through an absent-path window.
 func lockNodeState(path string) (func() error, error) {
-	owner, err := claimNodeLock(path)
+	file, created, err := openNodeLock(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("execution: opening the worker state lock %s: %w", path, err)
 	}
-	if owner != 0 {
-		return nil, NewDiagnostic(CodeConfiguration, CategoryConfiguration,
-			"the worker state folder %s is served by process %d already: two workers sharing one state folder would each hold half the record of what has been answered",
-			filepath.Dir(path), owner)
+	locked, err := tryNodeFileLock(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("execution: acquiring the worker state lock %s: %w", path, err)
 	}
-	return func() error {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("execution: releasing the worker state lock %s: %w", path, err)
+	if !locked {
+		_ = file.Close()
+		owner, readErr := readNodeLockOwner(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("execution: reading the worker state lock %s: %w", path, readErr)
 		}
-		return nil
+		return nil, nodeLockOccupied(path, owner)
+	}
+	giveUp := func() {
+		_ = unlockNodeFile(file)
+		_ = file.Close()
+	}
+	// Refuse a symlink or a file replaced between open and acquisition.
+	// Cooperative workers never replace this path, and this check prevents
+	// an accidental alias from making two different lock inodes look equal.
+	opened, err := file.Stat()
+	if err != nil {
+		giveUp()
+		return nil, fmt.Errorf("execution: inspecting the worker state lock %s: %w", path, err)
+	}
+	named, err := os.Lstat(path)
+	if err != nil || !os.SameFile(opened, named) {
+		giveUp()
+		return nil, fmt.Errorf("execution: worker state lock %s was replaced or is a symbolic link", path)
+	}
+	if !created {
+		owner, readErr := readNodeLockOwner(path)
+		if readErr != nil {
+			giveUp()
+			return nil, fmt.Errorf("execution: reading the worker state lock %s: %w", path, readErr)
+		}
+		// A legacy worker may hold no kernel lock. Respect its live PID;
+		// modern workers are refused above by the kernel before this read.
+		if owner != 0 && IsProcessRunning(owner) {
+			giveUp()
+			return nil, nodeLockOccupied(path, owner)
+		}
+	}
+	if err := writeNodeLockOwner(file, os.Getpid()); err != nil {
+		giveUp()
+		return nil, fmt.Errorf("execution: writing the worker state lock %s: %w", path, err)
+	}
+	var once sync.Once
+	var releaseErr error
+	return func() error {
+		once.Do(func() {
+			// Zero clears the owner without making the file empty. A fresh
+			// claimant need not wait the grace reserved for an old worker
+			// caught between creating a file and writing its PID.
+			clearErr := writeNodeLockOwner(file, 0)
+			unlockErr := unlockNodeFile(file)
+			closeErr := file.Close()
+			releaseErr = errors.Join(clearErr, unlockErr, closeErr)
+			if releaseErr != nil {
+				releaseErr = fmt.Errorf("execution: releasing the worker state lock %s: %w", path, releaseErr)
+			}
+		})
+		return releaseErr
 	}, nil
 }
 
-// claimNodeLock writes this process id into an unheld lock and answers the
-// process id of a live holder instead.
-//
-// Taking over a stale lock is the part worth reading. Removing the file and
-// creating a new one is two operations, and two processes that both read the
-// same stale content can interleave them: the second one removes the lock the
-// first has just written and claims the folder, so both believe they own it
-// and each holds half the record of what has been answered. That is the one
-// thing this lock exists to prevent.
-//
-// So the stale lock is taken over by renaming it aside and then looking at
-// what was actually renamed. A process that finds its own stale content took
-// over the lock it meant to; one that finds a live process's content has taken
-// a fresh claim away from its owner, puts it straight back and reports that
-// owner. Renaming is the primitive rather than removing because it is what
-// makes the second half possible at all: a removed file cannot be examined and
-// cannot be put back.
-//
-// The window this leaves is the instant the path is absent between the rename
-// aside and a restore, in which a third process could create a lock of its
-// own. That is why the restore looks before it writes: a path somebody else
-// has claimed in the meantime belongs to them, and this process reports it
-// rather than replacing it.
-func claimNodeLock(path string) (int, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err == nil {
-		defer func() { _ = file.Close() }()
-		if _, err := file.WriteString(strconv.Itoa(os.Getpid())); err != nil {
-			return 0, fmt.Errorf("execution: writing the worker state lock %s: %w", path, err)
+func openNodeLock(path string) (*os.File, bool, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
+		if err == nil {
+			return file, true, nil
 		}
-		return 0, nil
-	}
-	if !os.IsExist(err) {
-		return 0, fmt.Errorf("execution: opening the worker state lock %s: %w", path, err)
-	}
-	owner, err := readNodeLockOwner(path)
-	if err != nil {
-		return 0, fmt.Errorf("execution: reading the worker state lock %s: %w", path, err)
-	}
-	if owner != 0 && IsProcessRunning(owner) {
-		return owner, nil
-	}
-	return takeOverNodeLock(path, owner)
-}
-
-// takeOverNodeLock renames a stale lock aside, verifies what it renamed, and
-// claims the folder only if the lock it took away really was the stale one.
-func takeOverNodeLock(path string, stale int) (int, error) {
-	aside := path + ".taken." + strconv.Itoa(os.Getpid())
-	if err := os.Rename(path, aside); err != nil {
+		if !os.IsExist(err) {
+			return nil, false, err
+		}
+		file, err = os.OpenFile(path, os.O_RDWR, 0)
 		if os.IsNotExist(err) {
-			// Somebody else took the same stale lock over first; the folder is
-			// theirs unless they have not written their claim yet, which the
-			// second attempt below finds out.
-			return claimNodeLockAfterTakeover(path)
+			// An older worker may have removed its PID file on exit.
+			continue
 		}
-		return 0, fmt.Errorf("execution: taking over the worker state lock %s: %w", path, err)
+		return file, false, err
 	}
-	if taken := readTakenNodeLockOwner(aside); taken != 0 && taken != stale && IsProcessRunning(taken) {
-		// A fresh claim, written between the read above and the rename: it is
-		// put back and its owner is reported, which is what the doc comment of
-		// the refusal has always promised and what a plain remove could not
-		// deliver.
-		return restoreNodeLock(path, aside, taken)
-	}
-	if err := os.Remove(aside); err != nil && !os.IsNotExist(err) {
-		return 0, fmt.Errorf("execution: removing the stale worker state lock %s: %w", aside, err)
-	}
-	return claimNodeLockAfterTakeover(path)
+	return nil, false, fmt.Errorf("worker state lock %s kept disappearing", path)
 }
 
-// readTakenNodeLockOwner is the process id a renamed lock names, and zero for
-// one that names nobody. It never waits: the file is no longer where a writer
-// would be writing it, so there is nothing to wait for.
-func readTakenNodeLockOwner(path string) int {
-	held, err := os.ReadFile(path)
-	if err != nil {
-		return 0
+func nodeLockOccupied(path string, owner int) error {
+	if owner != 0 {
+		return NewDiagnostic(CodeConfiguration, CategoryConfiguration,
+			"the worker state folder %s is served by process %d already: two workers sharing one state folder would each hold half the record of what has been answered",
+			filepath.Dir(path), owner)
 	}
-	return parseNodeLockOwner(strings.TrimSpace(string(held)))
+	return NewDiagnostic(CodeConfiguration, CategoryConfiguration,
+		"the worker state folder %s is served by another process already: two workers sharing one state folder would each hold half the record of what has been answered",
+		filepath.Dir(path))
 }
 
-// restoreNodeLock puts a live owner's lock back and answers that owner.
-//
-// It looks before it writes: a path a third process has claimed in the
-// meantime belongs to that process, so the renamed file is simply dropped and
-// the owner this process took away is still the one it reports, since both
-// answers refuse this process the folder.
-func restoreNodeLock(path, aside string, owner int) (int, error) {
-	if _, err := os.Stat(path); err == nil {
-		if err := os.Remove(aside); err != nil && !os.IsNotExist(err) {
-			return 0, fmt.Errorf("execution: removing the worker state lock copy %s: %w", aside, err)
-		}
-		return owner, nil
+func writeNodeLockOwner(file *os.File, owner int) error {
+	if err := file.Truncate(0); err != nil {
+		return err
 	}
-	if err := os.Rename(aside, path); err != nil {
-		return 0, fmt.Errorf("execution: restoring the worker state lock %s: %w", path, err)
+	if _, err := file.Seek(0, 0); err != nil {
+		return err
 	}
-	return owner, nil
+	if _, err := file.WriteString(strconv.Itoa(owner)); err != nil {
+		return err
+	}
+	return file.Sync()
 }
 
 // readNodeLockOwner answers the process id a lock names, and zero when it
 // names nobody: content that is no process id, or a file that stayed empty
-// past the grace.
-//
-// The wait is what keeps a live owner's claim. Creating the lock and writing
-// the process id into it are two operations, so a second process can open the
-// file in the instant between them; reading that instant as a stale lock would
-// remove the claim of a process that is starting up and leave two processes
-// serving one folder, each holding half the record of answered work. A file
-// that is still empty after the grace belongs to a writer that died between
-// the two steps, and is taken over like any other stale lock.
+// past the grace. The grace preserves compatibility with older workers that
+// created the file and only then wrote their PID without a kernel lock.
 func readNodeLockOwner(path string) (int, error) {
 	deadline := time.Now().Add(stateLockWriteGrace)
 	for {
@@ -243,29 +235,14 @@ func readNodeLockOwner(path string) (int, error) {
 }
 
 // parseNodeLockOwner reads a lock's content as a process id. Anything else
-// names nobody, which makes the lock stale rather than an error: the file is
-// this engine's own, and content it never writes is a leftover to replace.
+// names nobody; such stale legacy content can be overwritten under the
+// kernel lock without removing the inode.
 func parseNodeLockOwner(content string) int {
 	owner, err := strconv.Atoi(content)
 	if err != nil || owner < 0 {
 		return 0
 	}
 	return owner
-}
-
-// claimNodeLockAfterTakeover is the second and last attempt, after a stale
-// lock was removed. A folder claimed in the meantime belongs to whoever
-// claimed it.
-func claimNodeLockAfterTakeover(path string) (int, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return 0, fmt.Errorf("execution: claiming the worker state lock %s: %w", path, err)
-	}
-	defer func() { _ = file.Close() }()
-	if _, err := file.WriteString(strconv.Itoa(os.Getpid())); err != nil {
-		return 0, fmt.Errorf("execution: writing the worker state lock %s: %w", path, err)
-	}
-	return 0, nil
 }
 
 // SeenSet is the record of the work this node has already answered, kept as

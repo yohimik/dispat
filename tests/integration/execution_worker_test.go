@@ -327,7 +327,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 	t.Run("a lock its writer never filled is taken over after the grace", func(t *testing.T) {
 		// Creating the lock and writing the process id are two steps, so an
 		// empty lock is either an owner that is starting or one that died in
-		// between. It is waited for, then replaced, and the node starts.
+		// between. It is waited for, then filled under the kernel lock.
 		root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
 		state := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
@@ -374,6 +374,44 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		assert.NotContains(t, string(record), "old-run",
 			"a triple older than the replay window is refused by the window anyway")
 	})
+}
+
+// A stale PID file must not create an absent-path takeover window. All of
+// these workers start against the same inode at once; exactly one can serve
+// the state folder while the others are refused.
+func TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner(t *testing.T) {
+	rig := newExecutionRig(t)
+	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
+	state := t.TempDir()
+	dir := filepath.Join(state, executionNode)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	lock := filepath.Join(dir, "worker.lock")
+	require.NoError(t, os.WriteFile(lock, []byte("4194304"), 0o644))
+	original, err := os.Stat(lock)
+	require.NoError(t, err)
+
+	const contenders = 4
+	workers := make([]*harness.Proc, contenders)
+	for i := range workers {
+		workers[i] = rig.repo.StartCommandEnv(
+			[]string{executionSecretEnv + "=" + executionSecret},
+			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "3")
+	}
+	started := 0
+	for _, worker := range workers {
+		res := worker.Wait()
+		if res.Code == 0 {
+			_, ok := executionLine(res, "worker started")
+			require.True(t, ok, "a successful worker actually served: %s", res.Stdout)
+			started++
+			continue
+		}
+		requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
+	}
+	assert.Equal(t, 1, started, "only one process served the shared state")
+	final, err := os.Stat(lock)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(original, final), "the lock inode was never removed or replaced")
 }
 
 // TestExecutionWorkerStopsOnSignal: a node asked to stop stops, cleanly and

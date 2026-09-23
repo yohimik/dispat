@@ -349,13 +349,10 @@ func TestExecutionLockLossStopsNewEffects(t *testing.T) {
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionLockCode),
 		"the run reports the lock it no longer holds\nstdout:\n%s", res.Stdout)
-	// Which of the two ownership checks notices first is timing: the check
-	// before a new assignment is cached for a few seconds so a fan-out does
-	// not multiply it, and the one immediately before an authorization is
-	// never cached. What the claim is about is that no effect started.
-	withheld, isWithheld := executionLine(res, "publication not authorized")
-	require.True(t, isWithheld, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, "core", withheld.Str("package"))
+	// The run revalidates ownership before placing the next task. Since the
+	// build deleted the lock, no publish assignment can be offered at all.
+	assert.Empty(t, executionPlacements(res, "core:publish"),
+		"no publish assignment was offered after the lock disappeared")
 	assert.Empty(t, rig.repo.TagList(), "no version was recorded")
 	assert.False(t, remoteHoldsLock(t, rig.origin),
 		"the lock this run lost is not re-created by it")

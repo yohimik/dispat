@@ -138,6 +138,16 @@ func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
 		"provider is never republished")
 	assert.True(t, harness.IsCodePresentForPackage(catchUp.Events, "W193", "api-pkg"),
 		"the app's only new cause is delivered provider propagation: %s", catchUp.Stdout)
+	settled := api.Status("--require-release", "--package", "*")
+	assert.NotEqual(t, 0, settled.Code, "the catch-up converges")
+	assert.Contains(t, settled.Stdout, `"releasing":0`)
+
+	// A later deletion of the exact foreign tag named by the app's receipt
+	// is damaged fleet history, never permission to infer an old boundary.
+	api.Git("-C", ".links/sdk", "tag", "-d", "sdk-pkg@0.2.0")
+	damaged := api.Status("--package", "*")
+	assert.NotEqual(t, 0, damaged.Code)
+	assert.Contains(t, damaged.Stdout+damaged.Stderr, "records missing provider tag sdk-pkg@0.2.0")
 }
 
 // TestChoreographySettlesTheProviderRevisionBeforePublishing: the evidence a

@@ -826,7 +826,7 @@ func (cp *computation) controlCheckpoints() (map[string]controlSnapshot, map[str
 	control := cp.histories[strings.ToLower(cp.controlRepo)]
 	reader, ok := control.Git.(controlHistoryReader)
 	if !ok {
-		return out, ambiguous, nil
+		return nil, nil, fmt.Errorf("plan: control repository %s cannot report release checkpoint history", control.Name)
 	}
 	history, err := reader.ControlGitlinkHistory(cp.ctx)
 	if err != nil {

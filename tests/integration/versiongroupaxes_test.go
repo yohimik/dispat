@@ -275,6 +275,39 @@ func TestVersionGroupRefusesASharedCounterWithIndependentChannels(t *testing.T) 
 	assert.Contains(t, loadError(res), "one shared counter cannot span two channels")
 }
 
+// TestVersionGroupRefusesUnknownSharingAxes keeps a misspelled axis from
+// silently reverting to the shared default, and requires the semver axis
+// that makes a group meaningful. All three mistakes would otherwise change
+// which packages ride a train.
+func TestVersionGroupRefusesUnknownSharingAxes(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		rule       models.VersionGroupConfig
+	}{
+		{name: "counter", want: "versioning.counter", rule: models.VersionGroupConfig{
+			Versioning: models.VersioningFixedMajorMinor, Counter: "sometimes",
+		}},
+		{name: "channels", want: "versioning.channels", rule: models.VersionGroupConfig{
+			Versioning: models.VersioningFixedMajorMinor, Channels: "maybe",
+		}},
+		{name: "counter without semver", want: "semver is required beside counter and channels", rule: models.VersionGroupConfig{
+			Counter: models.SharingIndependent,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := seedAxesRepo(t, tc.rule)
+			r.Commit("feat(lib1): first release")
+			res := r.Status()
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, loadError(res), tc.want)
+			if tc.rule.Versioning != "" {
+				assert.Contains(t, loadError(res), tc.rule.Counter+tc.rule.Channels)
+			}
+			assert.Empty(t, r.TagList())
+		})
+	}
+}
+
 // TestVersionGroupRestingMemberDoesNotDecideTheGroupsChannel: under the
 // defaults, a member that never joined the train rests on stable, and a
 // resting channel is not a request to end anybody's train.
