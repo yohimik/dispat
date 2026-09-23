@@ -1,23 +1,23 @@
 {
   "checksums": [
     {
-      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-darwin-amd64",
-      "checksum": "B739FB1802D5D6DC7A928C13C168735FD33A694B6F623C2F6D7130260DD116D9",
+      "id": "github_release/github.com/yohimik/crier/v1.1.1/crier-darwin-amd64",
+      "checksum": "ACF8662685A49B097582B8AEA144239898D8BB4FDD52FEDE9B369F9FD2F80530",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-darwin-arm64",
-      "checksum": "2BBE4E398E64645C494A07350F676A274D96298C0C482178CDB23EEC3CD704AE",
+      "id": "github_release/github.com/yohimik/crier/v1.1.1/crier-darwin-arm64",
+      "checksum": "7A0CBF9D60C94973659A8D8F2B51ED72841439228CFDE8839F118FB6693EA105",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-linux-amd64",
-      "checksum": "3ACD85F549CBA70E515293BB9DE2EF041FD55EDCFB6289ABEB9F3F46949F817C",
+      "id": "github_release/github.com/yohimik/crier/v1.1.1/crier-linux-amd64",
+      "checksum": "ABBF9CE00D7302DC9C684ADE29FC0083E43DC63407709CDE0B0FB50EFA162DC1",
       "algorithm": "sha256"
     },
     {
-      "id": "github_release/github.com/yohimik/crier/v1.1.0/crier-linux-arm64",
-      "checksum": "89C62C2DB3617256393C4C87708947E51A4DC9E4F01A60A10A2DC860574BDF60",
+      "id": "github_release/github.com/yohimik/crier/v1.1.1/crier-linux-arm64",
+      "checksum": "898AEFA0EBB2DBC5C812A0CFF33366FD8907708CC51B5BF7132BFC82A0376DDD",
       "algorithm": "sha256"
     },
     {
