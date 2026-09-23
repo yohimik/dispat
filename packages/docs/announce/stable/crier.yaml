@@ -1,0 +1,68 @@
+# The card dispat posts about a stable release.
+#
+# The announce stage in packages/docs/dispat.yaml names its configuration by
+# the channel of the dispat version the docs release picks up, so a stable
+# release lands here and a release candidate in rc/crier.yaml. `ANNOUNCE_NEW_VERSION=1.11.0 crier render
+# --config packages/docs/announce/stable/crier.yaml` renders it without
+# posting.
+#
+# Discord and LinkedIn get the card as it is: a cover, then the notes.
+# Instagram gets the same pages in the feed and in the stories, the cover as a
+# clip with this channel's music (the announce stage's crier calls). Everything a stable
+# release says is written by hand, exactly as a candidate's is, and not in this
+# file: the caption is notes.yaml and the same words are on the card,
+# template.html. Edit those two together before a stable release ships.
+render:
+  # The release's face: the candidate's card seen as print. A radial pine wash
+  # with the light in one corner, a thin frame ruled around the page, and the
+  # section labels set as filled tags. It shares every load-bearing rule with
+  # the candidate's card (the page geometry, the margin boxes that carry the
+  # version badge and the page counter, the pinned install block) and differs
+  # in how it looks. The accents vary with the run's seed, and one run renders
+  # once, so every destination receives the same design.
+  template: template.html
+  # The only thing the card and the caption take from the release is dispat's
+  # version: the announce stage in packages/docs/dispat.yaml sets
+  # ANNOUNCE_NEW_VERSION from the dispat version the docs release picks up, and
+  # this prefix turns it into {{ .new_version }}. ANNOUNCE_NOCOVER becomes
+  # {{ .nocover }}, which the Instagram passes set to lay the card out without
+  # its cover. Nothing generated is posted, on either channel.
+  data: "env:ANNOUNCE_"
+  width: 1080
+  height: 1080
+  background: "#101713"
+  format: jpeg
+  # Instagram will not fetch a PNG, and the card is flat colour, so quality
+  # costs little.
+  jpeg-quality: 92
+  # Only the fonts the two channels share: a release must not render differently
+  # because a runner has different fonts installed than a laptop. Poppins and
+  # Space Mono live under packages/docs/announce/fonts with their OFL
+  # licences, one folder up, which is why the base URL points there.
+  hermetic-fonts: true
+  base-url: ..
+  # The card paginates: page one is the cover and the notes follow it. Notes
+  # past ten pages fail the render rather than posting a truncated version of
+  # themselves, and ten pictures is also what one post holds.
+  pages-max: 10
+  video:
+    # The pages are stills. The one clip is the cover held under the channel's
+    # music, which the announce stage encodes from the rendered cover and
+    # posts first on Instagram, in the feed and in the stories.
+    enabled: false
+    # The release's music is the arrival: the bells-and-brass finale and the
+    # grandioso strain. The chase that leads up to it belongs to the candidate.
+    audio-pool:
+      - anthem.mp3
+      - anthem-stars-and-stripes.mp3
+
+# The same cross-posting as the rc channel, from the one file both share.
+# The caption is the stable release's own and is written beside the reference,
+# which replaces that one key and leaves the destinations alone.
+publish:
+  $ref: ../publish.yaml
+  # Human-written, with every link to this release, and no generated notes.
+  # The words live in notes.yaml so that announcing a release never means
+  # editing this file.
+  caption:
+    $ref: notes.yaml

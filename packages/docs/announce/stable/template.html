@@ -19,11 +19,20 @@
      the same card seen as print: a deep pine wash with the light in one corner,
      a thin frame ruled around the page, and the labels set as filled tags.
 
+     A stable release's announcement is written by a person, exactly as a
+     candidate's is, and is the same words in two places: the caption in
+     notes.yaml beside this file, and this card. The first line of the notes is
+     the cover's lede, the links to this release sit on the cover above the
+     install commands, and the rest of the notes fill the pages that follow.
+     Nothing generated is printed. The only thing the card takes from the
+     release is {{ .new_version }}. Edit the words here and in notes.yaml
+     together.
+
      Everything that carries meaning is shared with rc/template.html letter for
      letter: the page box and its margins, the running header and footer, the
-     string that feeds the small badge, the cover height that pins the install
-     block and pushes the changelog onto page two, and the wrapping rules that
-     decide how a long release subject behaves. Those are not decoration: a
+     string that feeds the small badge, the cover height that pins the links
+     and install block and pushes the notes onto page two, and the rule that a
+     paragraph moves to the next page whole. Those are not decoration: a
      release has to paginate the same way whichever face it is wearing. What
      differs here is only what it looks like. */
   @font-face { font-family: "Poppins"; font-weight: 400; src: url("fonts/poppins/Poppins-Regular.ttf") }
@@ -42,8 +51,11 @@
     background: #101713;
     margin: 56px 60px 78px 60px;
 
+    /* The same version as the big badge on the cover, printed rather than
+       read from it, because the Instagram passes lay the card out without
+       the cover. */
     @top-left {
-      content: string(ver);
+      content: "v{{ .new_version }}";
       font-family: "Space Mono", monospace;
       font-size: 22px; font-weight: 700; color: #6fae8a;
       letter-spacing: 2px;
@@ -65,10 +77,15 @@
 
   /* The cover carries its own badge, so it needs neither the small one nor
      the page counter, exactly as on rc/template.html. */
-  @page :first {
+  {{ if not .nocover }}@page :first {
     @top-left { content: none }
     @bottom-right { content: none }
-  }
+  }{{ end }}
+  /* Without the cover (the Instagram passes, where the cover goes out as the
+     clip with music ahead of these pages), the first page is a notes page and
+     keeps its header. The counter is left off: Instagram shows the reader's
+     place itself, and these pages would count from one behind the clip. */
+  {{ if .nocover }}@page { @bottom-right { content: none } }{{ end }}
 
   /* Where this card parts company with the other one.
 
@@ -103,7 +120,7 @@
 
   /* Exactly one page of content, to the pixel: 1080 less the page margins
      (56 + 78) and the body padding (40 + 40). This is what pins the install
-     block to the bottom edge and pushes the changelog onto page two. */
+     block to the bottom edge and pushes the notes onto page two. */
   .cover {
     position: relative;
     height: 866px;
@@ -129,10 +146,8 @@
 
 
   /* The version badge, ruled rather than filled: the other card stamps it,
-     this one frames it. Same string-set, because the small badge in the page
-     margin reads from here on both. */
+     this one frames it. */
   .badge {
-    string-set: ver content();
     display: inline-block; margin: 12px 0 0 0;
     background: none; color: {{ $accent }};
     border: 4px solid {{ $accent }};
@@ -149,40 +164,29 @@
     padding-left: 22px;
   }
 
-  .section { margin-top: 26px }
-  /* Filled tags rather than spaced capitals: the one place the two cards read
-     most differently at a glance. */
-  .section h2 {
+  /* The notes, as written: one paragraph each, in the order the caption
+     prints them. A paragraph moves to the next page whole rather than
+     splitting across two pictures. Filled tags rather than spaced capitals for
+     the heading: the one place the two cards read most differently at a
+     glance. */
+  /* Padding rather than a margin: a margin at the top of a page is dropped at
+     the break, and the tag would touch the ruled frame. */
+  .notes { padding-top: 24px }
+  .notes h2 {
     display: inline-block;
-    font-size: 21px; font-weight: 700; margin: 0 0 12px 0;
+    font-size: 21px; font-weight: 700; margin: 0 0 14px 0;
     letter-spacing: 3px;
     background: {{ $accent }}; color: #101713;
     padding: 3px 14px;
-    /* A heading alone at the foot of a page, with its list overleaf, is the
-       one break this layout must not take. */
     break-after: avoid;
   }
-  /* A group arrives as dispat wrote it: one entry per line in one variable,
-     because the card's data is the release's own environment. pre-line gives
-     each entry a line of its own and wraps a long one, and an unbroken run
-     breaks anywhere rather than escaping the card. A group flows across pages
-     between its lines. */
-  .section .items {
-    font-size: 25px; line-height: 1.5; color: {{ $tint }};
-    white-space: pre-line;
+  .notes p {
+    font-size: 21px; line-height: 1.42; color: {{ $tint }};
+    margin: 0 0 12px 0;
     overflow-wrap: break-word;
+    break-inside: avoid;
     border-left: 3px solid {{ $accent }}; padding-left: 16px;
   }
-
-  /* Breaking changes are the one section worth a warm colour, here too. */
-  .breaking h2 { background: #e8a06a; color: #2a1608 }
-  .breaking .items { color: #f3d5bb; border-left-color: #e8a06a }
-
-  /* What the release picked up from its own providers: the run's bookkeeping,
-     worth stating and not worth shouting. */
-  .picks h2 { background: #557f68; color: #e6f0ea }
-  .picks .items { color: #b6cdc0; border-left-color: #557f68 }
-  .picks li:before { color: #557f68 }
 
   /* Pinned to the bottom of the cover. */
   .install {
@@ -207,10 +211,16 @@
   }
   .install .cmd + .cmd { margin-top: 2px }
   .install .cmd span { color: {{ $accent }} }
+  /* The links to this release, printed where a reader can copy them: a
+     picture cannot be clicked. They share the install block's type and sit
+     above it, so the cover ends with where this release is and how to get it.
+     An address breaks anywhere rather than escaping the card. */
+  .install .link { overflow-wrap: anywhere }
+  .install .cmd + h2 { margin-top: 22px }
 </style>
 </head>
 <body>
-  <div class="cover">
+  {{ if not .nocover }}<div class="cover">
     <svg class="mark" viewBox="0 0 9 9" width="76" height="76" xmlns="http://www.w3.org/2000/svg">
       <path fill="{{ $accent }}" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
       <path fill="{{ $tint }}" d="M3 3h6v6H3Z"/>
@@ -219,22 +229,29 @@
     <div class="prompt">$ dispat release</div>
     <div class="badge">v{{ .new_version }}</div>
 
-    <div class="lede">
-      Release packages across languages. Versions, changelogs and publishing,
-      in dependency order.
-    </div>
+    <div class="lede">Worker nodes. One release, builds on several machines.</div>
 
     <div class="install">
+      <h2>LINKS</h2>
+      <div class="cmd link"><span>Release notes</span> https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}</div>
+      <div class="cmd link"><span>Worker nodes guide</span> https://dispat.dev/distributed-execution/</div>
+      <div class="cmd link"><span>Linked repositories guide</span> https://dispat.dev/choreographed-repositories/</div>
+      <div class="cmd link"><span>Get started</span> https://dispat.dev/</div>
       <h2>INSTALL</h2>
       <div class="cmd"><span>$</span> curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v{{ .new_version }}/install.sh | DISPAT_VERSION={{ .new_version }} sh</div>
       <div class="cmd"><span>$</span> dispat self-update --release {{ .new_version }}</div>
-      <div class="cmd"><span>-</span> {uses: yohimik/dispat@v1, with: {version: {{ .new_version }}}}</div>
     </div>
-  </div>
+  </div>{{ end }}
 
-  {{ if .breaking_changes }}<div class="section breaking"><h2>BREAKING</h2><div class="items">{{ .breaking_changes }}</div></div>{{ end }}
-  {{ if .features }}<div class="section"><h2>FEATURES</h2><div class="items">{{ .features }}</div></div>{{ end }}
-  {{ if .fixes }}<div class="section"><h2>FIXES</h2><div class="items">{{ .fixes }}</div></div>{{ end }}
-  {{ if .dependencies }}<div class="section picks"><h2>PICKS UP</h2><div class="items">{{ .dependencies }}</div></div>{{ end }}
+  <div class="notes">
+    <h2>NOTES</h2>
+    <p>Start a release on one machine and let others do the building. The machine you started on keeps the locks, the plan and the records.</p>
+    <p>Everything travels over Git. The orchestrator leaves work in a mailbox repository and workers pick it up, so there are no open ports and nothing to install but dispat.</p>
+    <p>What one machine builds, the next one can use, checked before it is used.</p>
+    <p>Publishing and credentials stay on one machine. Without a workers section, nothing changes.</p>
+    <p>If a library ships and an app using it fails, nothing is repeated: the next run finishes what is left.</p>
+    <p>Autistic stability for ADHD projects. Mathematical planning. Saga recovery.</p>
+    <p>Preview with `dispat status`; it publishes nothing.</p>
+  </div>
 </body>
 </html>

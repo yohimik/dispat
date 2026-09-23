@@ -1,0 +1,39 @@
+# What a stable release says, written by a person: the headline, every link to
+# this release, then the notes. stable/crier.yaml pulls this file in as its
+# caption, so a release is announced by editing this file and the same words on
+# template.html, and never the configuration.
+#
+# Drafted for 1.11.0 from the candidate's notes in rc/notes.yaml, without what
+# only a candidate says. Read it again before the stable release ships.
+#
+# The only value it takes from the release is {{ .new_version }}. The links come
+# first so they survive a platform's caption limit. Discord refuses a message
+# over 2000 characters and Instagram a caption over 2200, and crier posts a
+# caption whole. Every platform gets the whole text; Discord gets it without
+# the hashtags, which mean nothing there and would push it past its limit.
+# `crier publish --dry-run --json` prints each platform's caption, which is how
+# to check a rewrite against those limits.
+--- |-
+  {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is out.
+  Release notes: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
+  Worker nodes guide: https://dispat.dev/distributed-execution/
+  Linked repositories guide: https://dispat.dev/choreographed-repositories/
+  Get started: https://dispat.dev/
+
+  Worker nodes. One release, builds on several machines.
+
+  Start a release on one machine and let others do the building. The machine you started on keeps the locks, the plan and the records.
+
+  Everything travels over Git. The orchestrator leaves work in a mailbox repository and workers pick it up, so there are no open ports and nothing to install but dispat.
+
+  What one machine builds, the next one can use, checked before it is used.
+
+  Publishing and credentials stay on one machine. Without a workers section, nothing changes.
+
+  If a library ships and an app using it fails, nothing is repeated: the next run finishes what is left.
+
+  Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
+
+  Preview with `dispat status`; it publishes nothing.{{ if ne .Platform "discord" }}
+
+  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #distributedbuilds #releasemanagement #buildtools #orchestration #sagapattern #distributedsystems #platformengineering{{ end }}

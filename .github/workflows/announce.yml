@@ -3,12 +3,13 @@
 # refused a post for reasons of its own: the tags exist, the release cannot run
 # again, and one post still has to be said.
 #
-# The replay scripts under services/dispat/announce/{rc,stable}/ are written when a post has to be said
-# again, and each one is a record of what went out and why: a few lines that set
-# the version, switch off the destinations that already have the post
-# (CRIER_PUBLISH_<NAME>_ENABLED=false) and call `crier publish` with the
-# channel's crier.yaml. This workflow is what makes saying it again a dispatch
-# rather than a laptop holding the repository's secrets.
+# The replay scripts under packages/docs/announce/{rc,stable}/ are written when
+# a post has to be said again, and each one is a record of what went out and
+# why: a few lines that set ANNOUNCE_NEW_VERSION, switch off the destinations
+# that already have the post (CRIER_PUBLISH_<NAME>_ENABLED=false) and call
+# `crier publish` with the channel's crier.yaml. This workflow is what makes
+# saying it again a dispatch rather than a laptop holding the repository's
+# secrets.
 name: announce
 
 on:
@@ -62,4 +63,4 @@ jobs:
           case "$SCRIPT" in
             *[!A-Za-z0-9._-]*|'') echo "script names are a single file name" >&2; exit 2 ;;
           esac
-          PATH="$PWD/replay-bin:$PATH" sh "services/dispat/announce/$CHANNEL/$SCRIPT"
+          PATH="$PWD/replay-bin:$PATH" sh "packages/docs/announce/$CHANNEL/$SCRIPT"

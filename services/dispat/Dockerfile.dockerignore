@@ -22,9 +22,6 @@ services/*
 # context would grow with every build.
 services/dispat/dist
 
-# Announcement media belongs to the package, but never to CLI build inputs.
-services/dispat/announce
-
 # Shared Aqua registry, version/checksum manifests, and bootstrap helper.
 !.aqua
 !scripts

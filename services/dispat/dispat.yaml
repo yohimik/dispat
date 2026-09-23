@@ -111,30 +111,13 @@ scripts:
   # it, leaves cli-released unset, and the workflow's `== 'true'` reads that as
   # no new CLI to install. It is apart from the announcement on purpose: the
   # post-release job's condition must not depend on whether a social network
-  # answered. Outside Actions there is no $GITHUB_OUTPUT, and /dev/null takes
-  # the lines a human does not need.
+  # answered, and the announcement is the docs package's, posted once the site
+  # it links to is live (packages/docs/dispat.yaml). Outside Actions there is
+  # no $GITHUB_OUTPUT, and /dev/null takes the lines a human does not need.
   released: |
     echo "cli-released=true" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "cli-version=$DISPAT_NEW_VERSION" >> "${GITHUB_OUTPUT:-/dev/null}"
     echo "released dispat $DISPAT_NEW_VERSION"
-  # One crier command posts to Instagram, LinkedIn and Discord, including the
-  # Instagram music story, and the channel names its configuration. crier takes
-  # its data from this stage's environment, so nothing is built first: a
-  # release candidate reads only the version and says what a person wrote in
-  # announce/rc/notes.yaml, links included, and a stable release adds the
-  # release-notes groups dispat generated. A channel with no folder has no
-  # announcement, and crier says which file it looked for.
-  #
-  # Nothing is posted unless the run asks for it with ANNOUNCE, which the
-  # release workflow sets when it has the platforms' secrets; a release or
-  # `dispat run announce` on a laptop stays quiet. An incomplete announcement
-  # returns failure; inspect the reported destinations before replaying. The
-  # announcement belongs to this package; Docker build contexts exclude its
-  # fonts and audio.
-  announce: >-
-    dispat if ANNOUNCE
-    --then 'crier publish --config "announce/$DISPAT_CHANNEL/crier.yaml"'
-    --else 'echo "announce: announcements are off for this run"'
 # onFail is the net for the paths the build script never finishes:
 # unlink is idempotent, so closing an already-closed bracket is a
 # no-op. It matters because beforePublish runs `dispat commit`, which
@@ -143,7 +126,6 @@ scripts:
 flow:
   build: build
   postPublish: released
-  announce: announce
   onFail: unlink
 
 # Package-specific release footer. A nearer footer replaces the shared list,

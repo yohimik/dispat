@@ -44,6 +44,10 @@ packages/docs/build
 packages/docs/.docusaurus
 packages/docs/.cache-loader
 
+# The release announcement's cards, fonts and music: posted by this package's
+# announce stage from the checkout, and nothing the site is built from.
+packages/docs/announce
+
 # The browser demo imports its fixtures and shared illustration components at
 # typecheck and build time. Keep those two source trees, but leave the separate
 # Remotion workspace, its 600MB dependency tree and rendered output outside the

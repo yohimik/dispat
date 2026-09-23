@@ -161,6 +161,78 @@ scripts:
     echo "recorded $cells cells on dispat $EXPERIMENTS_DISPAT_VERSION"
     exit "$rc"
 
+  # The release announcement, posted by this package because every link in it
+  # leads into the site: the announce stage runs after deploy-docs, so the
+  # pages a post points at are live before anybody reads the post, and a site
+  # that failed to deploy leaves nothing announced. The folder is announce/
+  # beside this file.
+  #
+  # What is announced is dispat, not the docs: the post names the dispat
+  # version this site release picks up, which the updated-provider listing
+  # carries whether dispat shipped in this run or in an earlier one whose docs
+  # leg failed. A docs release that picks up no new dispat has nothing to
+  # announce. dispat's channel names the folder, and every word posted is
+  # written in that channel's notes.yaml and template.html; crier reads the
+  # version as ANNOUNCE_NEW_VERSION (render.data: env:ANNOUNCE_).
+  #
+  # Discord and LinkedIn get the card as it is, cover first. Instagram gets the
+  # same pages in the feed and in the stories, and the first of them is the
+  # cover held for sixteen seconds under the channel's music: the one way a
+  # soundtrack reaches Instagram. That is four crier calls, all with one seed
+  # (the version's cksum), so every picture and the clip draw the same accents
+  # and the same anthem. The card renders once to find its cover; the clip is
+  # that page encoded with the music; the feed post opens with the clip and
+  # the story pass posts it first; the pages behind them are the card laid out
+  # without its cover (ANNOUNCE_NOCOVER), because the clip already is the
+  # cover. Every call runs whatever the one before it did, so one refused post
+  # does not keep the others from going out, and the stage fails at the end if
+  # any of them did.
+  #
+  # Nothing is posted unless the run asks for it with ANNOUNCE, which the
+  # release workflow sets when it has the platforms' secrets; a release or
+  # `dispat run announce` on a laptop stays quiet. An incomplete announcement
+  # returns failure; inspect the reported destinations before replaying.
+  announce: |
+    set -eu
+    if [ -z "${ANNOUNCE:-}" ]; then
+      echo "announce: announcements are off for this run"; exit 0
+    fi
+    if [ -z "${DISPAT_UPDATED_DISPAT_NEW_VERSION:-}" ]; then
+      echo "announce: this release picks up no new dispat version"; exit 0
+    fi
+    config=announce/$DISPAT_UPDATED_DISPAT_CHANNEL/crier.yaml
+    if [ ! -f "$config" ]; then
+      echo "announce: the $DISPAT_UPDATED_DISPAT_CHANNEL channel has no announcement ($config)"; exit 0
+    fi
+    ANNOUNCE_NEW_VERSION=$DISPAT_UPDATED_DISPAT_NEW_VERSION ANNOUNCE_NOCOVER=
+    export ANNOUNCE_NEW_VERSION ANNOUNCE_NOCOVER
+    seed=$(printf '%s' "$ANNOUNCE_NEW_VERSION" | cksum | cut -d' ' -f1)
+    work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+    run() { verb=$1; shift; crier "$verb" --config "$config" --render-seed "$seed" "$@" </dev/null; }
+    feed() { run publish --publish-discord-enabled=false --publish-linkedin-enabled=false "$@"; }
+    stories() {
+      feed --publish-instagram-story --publish-instagram-width 1080 --publish-instagram-height 1920 \
+        --publish-instagram-fit contain --publish-instagram-fit-background '#101713' "$@"
+    }
+    failed=0
+    run publish --publish-instagram-enabled=false || failed=1
+    mkdir "$work/pages" "$work/frames"
+    if run render --render-format png --render-output "$work/pages/page.png"; then
+      cover=$work/pages/page-1.png; [ -f "$cover" ] || cover=$work/pages/page.png
+      i=0; while [ "$i" -lt 384 ]; do i=$((i + 1)); cp "$cover" "$work/frames/$(printf 'f%03d' "$i").png"; done
+      if run render --render-video-enabled=true --render-video-fps 24 \
+          --render-video-frames-input "$work/frames" --render-output "$work/cover.mp4"; then
+        (ANNOUNCE_NOCOVER=true; feed --publish-instagram-lead-video "$work/cover.mp4") || failed=1
+        stories --publish-input "$work/cover.mp4" || failed=1
+        (ANNOUNCE_NOCOVER=true; stories) || failed=1
+      else
+        echo "announce: the cover clip did not encode, so Instagram gets nothing" >&2; failed=1
+      fi
+    else
+      echo "announce: the card did not render, so Instagram gets nothing" >&2; failed=1
+    fi
+    exit "$failed"
+
   # The site, and the version snapshot that goes in it, from one build.
   #
   # `docs` and `dispat` share the major and minor of the `cli` version
@@ -234,6 +306,7 @@ flow:
   beforeBuild: [binary-sizes, experiments, test-report]
   build: build
   publish: deploy-docs
+  announce: announce
 
 # The docs release points at the site deployed by this package.
 github:

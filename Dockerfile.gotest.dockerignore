@@ -64,7 +64,7 @@ coverage/covdata
 !scripts
 scripts/*
 !scripts/*.sh
-services/dispat/announce
+packages/docs/announce
 
 # Bootstrap integration fixture and pinned tool policy.
 !.aqua

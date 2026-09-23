@@ -6,10 +6,10 @@
 # The only value it takes from the release is {{ .new_version }}. The links come
 # first so they survive a platform's caption limit. Discord refuses a message
 # over 2000 characters and Instagram a caption over 2200, and crier posts a
-# caption whole, so Discord gets the links and the lede and leaves the long
-# paragraphs to the pictures attached to the same message, which carry them in
-# full. `crier publish --dry-run --json` prints each platform's caption, which
-# is how to check a rewrite against those limits.
+# caption whole. Every platform gets the whole text; Discord gets it without
+# the hashtags, which mean nothing there and would push it past its limit.
+# `crier publish --dry-run --json` prints each platform's caption, which is how
+# to check a rewrite against those limits.
 --- |-
   {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is ready for testing.
   This release candidate: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
@@ -18,8 +18,7 @@
   Report a problem: https://github.com/yohimik/dispat/issues
 
   Worker nodes. One release, builds on several machines.
-  {{ if eq .Platform "discord" }}
-  The full notes are on the pictures.{{ else }}
+
   Start a release on one machine and let others do the building. The machine you started on keeps the locks, the plan and the records.
 
   Everything travels over Git. The orchestrator leaves work in a mailbox repository and workers pick it up, so there are no open ports and nothing to install but dispat.
@@ -34,6 +33,6 @@
 
   Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
 
-  Preview with `dispat status`; it publishes nothing.{{ end }}
+  Preview with `dispat status`; it publishes nothing.{{ if ne .Platform "discord" }}
 
-  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #distributedbuilds #releasemanagement #buildtools #orchestration #sagapattern #linux #linuxkernel #llvm #compilers #distributedsystems #terraform #docker #platformengineering
+  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #distributedbuilds #releasemanagement #buildtools #orchestration #sagapattern #linux #linuxkernel #llvm #compilers #distributedsystems #terraform #docker #platformengineering{{ end }}

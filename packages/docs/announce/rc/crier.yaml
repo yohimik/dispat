@@ -1,12 +1,15 @@
 # The card dispat posts about a release candidate.
 #
-# The announce script in services/dispat/dispat.yaml picks this file when
-# DISPAT_CHANNEL is rc; stable/crier.yaml is its counterpart for a stable
-# version. `DISPAT_NEW_VERSION=1.11.0-rc.1 crier render --config
-# services/dispat/announce/rc/crier.yaml` is how the previews beside this file
+# The announce stage in packages/docs/dispat.yaml picks this file when the
+# dispat version the docs release picks up is on the rc channel;
+# stable/crier.yaml is its counterpart for a stable version.
+# `ANNOUNCE_NEW_VERSION=1.11.0-rc.4 crier render --config
+# packages/docs/announce/rc/crier.yaml` is how the previews beside this file
 # were made.
 #
-# One image post per platform: a cover, then the notes. Everything a candidate
+# Discord and LinkedIn get the card as it is: a cover, then the notes.
+# Instagram gets the same pages in the feed and in the stories, the cover as a
+# clip with this channel's music (the announce stage's crier calls). Everything a candidate
 # says is written by hand, and not in this file: the caption is notes.yaml and
 # the same words are on the card, template.html. Edit those two together
 # before a candidate ships.
@@ -16,16 +19,18 @@ render:
   # capitals. It reads as the drawing of a release rather than the print of
   # one, which is what a candidate is. The stable card shares every
   # load-bearing rule with it (the page geometry, the margin boxes that carry
-  # the version badge and the page counter, the wrapping of a changelog entry)
+  # the version badge and the page counter, the pinned install block)
   # and differs in how it looks. The accents vary with the run's seed, and one
   # run renders once, so every destination receives the same design.
   template: template.html
   # A candidate's announcement is written by a person, in notes.yaml and on the
-  # card, so the only thing it takes from the release is the version. dispat
-  # hands every stage DISPAT_NEW_VERSION, which this prefix turns into
-  # {{ .new_version }} for the card and the caption alike. There is no
-  # generated changelog here: that belongs to the stable release.
-  data: "env:DISPAT_"
+  # card, so the only thing it takes from the release is dispat's version: the
+  # announce stage in packages/docs/dispat.yaml sets ANNOUNCE_NEW_VERSION from
+  # the dispat version the docs release picks up, and this prefix turns it into
+  # {{ .new_version }} for the card and the caption alike. ANNOUNCE_NOCOVER
+  # becomes {{ .nocover }}, which the Instagram passes set to lay the card out
+  # without its cover. Nothing generated is posted, on either channel.
+  data: "env:ANNOUNCE_"
   width: 1080
   height: 1080
   background: "#101713"
@@ -35,7 +40,7 @@ render:
   jpeg-quality: 92
   # Only the fonts the two channels share: a release must not render differently
   # because a runner has different fonts installed than a laptop. Poppins and
-  # Space Mono live under services/dispat/announce/fonts with their OFL
+  # Space Mono live under packages/docs/announce/fonts with their OFL
   # licences, one folder up, which is why the base URL points there.
   hermetic-fonts: true
   base-url: ..
@@ -44,7 +49,9 @@ render:
   # themselves, and ten pictures is also what one post holds.
   pages-max: 10
   video:
-    # Only the cover-story render enables video. Photo posts remain stills.
+    # The pages are stills. The one clip is the cover held under the channel's
+    # music, which the announce stage encodes from the rendered cover and
+    # posts first on Instagram, in the feed and in the stories.
     enabled: false
     # The candidate's music is the chase: a galop and an accelerando, both
     # still on their way somewhere. The arrival belongs to the stable release.

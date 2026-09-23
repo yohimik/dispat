@@ -21,9 +21,9 @@
      two places: the caption in notes.yaml beside this file, and this card. The
      first line of the notes is the cover's lede, the links to this candidate
      sit on the cover above the install commands, and the rest of the notes fill
-     the pages that follow. There is no generated changelog here; that belongs
-     to the stable card. The only thing the card takes from the release is
-     {{ .new_version }}, which crier builds from DISPAT_NEW_VERSION.
+     the pages that follow. Nothing generated is printed, on either channel.
+     The only thing the card takes from the release is {{ .new_version }},
+     which crier builds from ANNOUNCE_NEW_VERSION.
 
      Edit the words here and in notes.yaml together.
 
@@ -48,10 +48,11 @@
     margin: 56px 60px 78px 60px;
 
     /* The small badge that says which release this is, on every page after
-       the cover. It reads its text from the big badge below, so the two can
-       never disagree. */
+       the cover. It prints the same version as the big badge below rather
+       than reading it from there, because the Instagram passes lay the card
+       out without the cover. */
     @top-left {
-      content: string(ver);
+      content: "v{{ .new_version }}";
       font-family: "Space Mono", monospace;
       font-size: 22px; font-weight: 700; color: #6fae8a;
       letter-spacing: 2px;
@@ -75,10 +76,15 @@
      also skips the page counter: a release that fits on one page would
      otherwise announce itself as "1 / 1", which says nothing and looks like a
      mistake. The domain stays. */
-  @page :first {
+  {{ if not .nocover }}@page :first {
     @top-left { content: none }
     @bottom-right { content: none }
-  }
+  }{{ end }}
+  /* Without the cover (the Instagram passes, where the cover goes out as the
+     clip with music ahead of these pages), the first page is a notes page and
+     keeps its header. The counter is left off: Instagram shows the reader's
+     place itself, and these pages would count from one behind the clip. */
+  {{ if .nocover }}@page { @bottom-right { content: none } }{{ end }}
 
   /* No height here. A fixed body height clips whatever will not fit instead of
      flowing it onto the next page, which is the one thing this layout must
@@ -142,10 +148,8 @@
   }
 
 
-  /* The version badge: the one thing a thumbnail has to carry, and the source
-     of the small one in the page margin. */
+  /* The version badge: the one thing a thumbnail has to carry. */
   .badge {
-    string-set: ver content();
     display: inline-block; margin: 12px 0 0 0;
     background: {{ $accent }}; color: #101713;
     font-family: "Space Mono", monospace;
@@ -205,7 +209,7 @@
 </style>
 </head>
 <body>
-  <div class="cover">
+  {{ if not .nocover }}<div class="cover">
     <svg class="mark" viewBox="0 0 9 9" width="76" height="76" xmlns="http://www.w3.org/2000/svg">
       <path fill="{{ $accent }}" fill-rule="evenodd" d="M0 0h6v6H0Z M1 1v4h4V1Z"/>
       <path fill="{{ $tint }}" d="M3 3h6v6H3Z"/>
@@ -226,7 +230,7 @@
       <div class="cmd"><span>$</span> curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/v{{ .new_version }}/install.sh | DISPAT_VERSION={{ .new_version }} sh</div>
       <div class="cmd"><span>$</span> dispat self-update --release {{ .new_version }}</div>
     </div>
-  </div>
+  </div>{{ end }}
 
   <div class="notes">
     <h2>NOTES</h2>

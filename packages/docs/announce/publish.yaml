@@ -14,13 +14,16 @@ instagram:
   enabled: true
   api-base-url: https://graph.instagram.com/v25.0
   poll-timeout: 5m
+  # Instagram gets the same pages in the feed and in the stories, and the first
+  # of them is the cover as a clip with the channel's music. That takes more
+  # than one crier call, so it is the announce stage's work
+  # (packages/docs/dispat.yaml): this file is the feed post, and the stage
+  # adds the clip in front of it and posts the stories with flags.
   story: false
-  # The cover again as a sixteen-second story, with music from the channel's
-  # audio pool. The feed post stays a photo carousel.
-  cover-story: true
-  # Ten rendered photos fit in one carousel, and render.pages-max holds a
-  # render to the same number, so crier cannot split an announcement into more
-  # posts.
+  cover-story: false
+  # Ten items fit in one carousel: the clip and at most nine pages behind it.
+  # render.pages-max holds a render to ten pages, the cover included, and the
+  # cover is the clip, so crier cannot split an announcement into more posts.
   max-attachments: 10
 
 linkedin:

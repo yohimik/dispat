@@ -154,9 +154,9 @@ jobs:
     # before its own `env`.
     #
     # ANNOUNCE is the one switch: set when the repository holds any of the
-    # announcement's secrets. It gates
-    # the steps here and, in the release job, the announce script in
-    # services/dispat/dispat.yaml, which is one crier command behind it. Without it this job still succeeds, so the
+    # announcement's secrets. It gates the steps here and, in the release job,
+    # the docs package's announce stage (packages/docs/dispat.yaml), which
+    # posts once the site is live. Without it this job still succeeds, so the
     # release keeps its normal dependencies.
     env:
       ANNOUNCE: ${{ (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
@@ -200,7 +200,7 @@ jobs:
           # missing or revoked credential stops the release here.
           for channel in rc stable; do
             echo "::group::$channel"
-            ./ping-bin/crier ping --config "services/dispat/announce/$channel/crier.yaml" </dev/null
+            ./ping-bin/crier ping --config "packages/docs/announce/$channel/crier.yaml" </dev/null
             echo "::endgroup::"
           done
 
@@ -546,9 +546,11 @@ jobs:
         # spaces), the release commit, tags, the push, and the GitHub release
         # with the cross-compiled binaries its containerised build stage
         # exported. The dispat package's postPublish hook writes this step's
-        # cli-released / cli-version outputs, its announce stage then posts
-        # the announcement, and both fire only when that package published;
-        # see services/dispat/dispat.yaml.
+        # cli-released / cli-version outputs, and fires only when that package
+        # published (services/dispat/dispat.yaml). The announcement is the
+        # docs package's announce stage, which posts after the site deploy and
+        # only for a docs release that picks up a new dispat
+        # (packages/docs/dispat.yaml).
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
