@@ -114,7 +114,7 @@ write_startup_script() {
 set -eu
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q docker.io docker-buildx git
+apt-get install -y -q docker.io docker-buildx docker-compose-v2 git
 touch /var/lib/dispat-worker-ready
 EOF
 }
