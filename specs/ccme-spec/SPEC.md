@@ -6841,19 +6841,9 @@ treats a relevant head or release-tag change as `E330`. Commit identity remains 
 **Composition.** Each peer's own configuration file establishes that repository's ordinary repository-local root,
 space and package layering, exactly as an explicitly imported configuration does under §27.3. Every participant of a
 linked peer fleet, the entry included, is such a root. The combined workspace, the single package-name namespace,
-repository-local space paths and operational settings, and the ownership rules of §27.3 apply unchanged. A peer's
-checkout lies inside the repository that links it, so scope containment is compared within one repository rather than
-across the fleet. Two repositories declaring the same package name remain `E332`.
-
-Active linked peers share one case-insensitive version-group namespace. Explicit `versionGroups` declarations and
-spaces with effective shared versioning contribute their groups; folder configuration is resolved before an implicit
-space group is collected. Matching names MUST have equal effective semver, counter and channel policies, with omitted
-sharing axes interpreted as their defaults. Conflicting declarations MUST fail before publication, independent of the
-entry repository. A member MAY reference a group declared by another active peer. Disabled peers contribute no groups.
-An independent space in another peer contributes no group and does not reserve a group name. Package-level overrides
-retain the ordinary deepest-member convergence and `W237` semantics. Each owner's scripts, environment, paths, flow,
-parser, records and lock policy remain local; group composition MUST NOT copy them between repositories. The ordinary
-control-import topology retains §27.3's repository-local group identities.
+the repository-local spaces and version groups, and the ownership rules of §27.3 apply unchanged, with one
+adjustment: a peer's checkout lies inside the repository that links it, so scope containment is compared within one
+repository rather than across the fleet. Two repositories declaring the same package name remain `E332`.
 
 The keys only a control repository can own are refused rather than ignored. `configs` and `--configs`,
 `repositoryOverrides.<name>.commit`, and a `repositoryBaselines` entry whose `repository` is `control` are each `E332`
