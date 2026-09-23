@@ -203,7 +203,9 @@ COPY packages/cli/dispat.yaml /src/packages/cli/dispat.yaml
 COPY packages/docs/dispat.yaml /src/packages/docs/dispat.yaml
 COPY packages/docs/demo/fixtures /src/packages/docs/demo/fixtures
 COPY go.work /src/go.work
-RUN mkdir -p /gate && chown -R gopher:gopher /src /gate
+RUN cd /src/tools && GOWORK=off go build -o /usr/local/bin/testreport ./testreport \
+ && cd /src && go work edit -dropuse=./tools go.work \
+ && mkdir -p /gate && chown -R gopher:gopher /src /gate
 USER gopher
 ENV GOWORK=/src/go.work GOPATH=/home/gopher/go GOMAXPROCS=2 GOMEMLIMIT=6GiB
 ENV DISPAT_TEST_COMPILER=/usr/local/tinygo/bin/tinygo
@@ -215,7 +217,7 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
     DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
-      go run /src/tools/testreport test tiny-integration -- \
+      testreport test tiny-integration -- \
         -C /src/tests/integration -count=1 -timeout 120m \
         -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./...; \
     cp /src/coverage/testlog/tiny-integration.json /gate/integration.json; \
