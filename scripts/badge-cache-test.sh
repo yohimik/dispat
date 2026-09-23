@@ -23,9 +23,13 @@ git ls-files -z | tar --null -T - -cf - | tar -xf - -C "$work"
 mkdir -p "$work/coverage"
 cp coverage/*.out coverage/*.commit "$work/coverage/"
 fixture_stamp=$work/coverage/ccme.commit
+# The integration floor the release was dispatched with, exactly as the
+# coverage-badge script passes it; the default is the gate's own.
 build() {
   docker buildx build --file "$work/Dockerfile.gotest" --target badge-export \
-    --build-arg "TEST_COMMIT=$commit" --output type=cacheonly "$work"
+    --build-arg "TEST_COMMIT=$commit" \
+    --build-arg "COVERAGE_MINIMUM_INTEGRATION=${DISPAT_COVERAGE_MINIMUM_INTEGRATION:-95}" \
+    --output type=cacheonly "$work"
 }
 
 build
