@@ -1,5 +1,12 @@
 # Changelog
 
+## docker/dispat-dind/v1.11.0-rc.4 (2026-09-23)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.4): 1.11.0-rc.3 -> 1.11.0-rc.4
+
+
 ## docker/dispat-dind/v1.11.0-rc.3 (2026-09-20)
 
 ### Dependencies
