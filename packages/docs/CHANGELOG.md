@@ -1,5 +1,135 @@
 # Changelog
 
+## packages/docs/v1.11.0-rc.4 (2026-09-23)
+
+### Features
+
+- document distributed execution across worker nodes ([8f9cf6a](https://github.com/yohimik/dispat/commit/8f9cf6a05276834a34229931cec25eb4cf0ef03d)) (by yohimik, Claude Opus 5)
+  The orchestrator and worker roles, the Git mailbox transport, build outputs
+  as inputs, publishing under an authorization, the locks a run may retain, and
+  what the arrangement exposes and how to contain it.
+
+- say that a none relation carries no build outputs to another machine ([bf82653](https://github.com/yohimik/dispat/commit/bf82653a3b064f80a64f2988a004edb94696edb0)) (by yohimik, Claude Opus 5)
+
+- document the three provider relations ([4bb7d2c](https://github.com/yohimik/dispat/commit/4bb7d2c29d456ccf619a614da096a38fc2813603)) (by yohimik, Claude Opus 5)
+
+- describe worker nodes on kubernetes and why cpu autoscaling does not fit ([4d1d438](https://github.com/yohimik/dispat/commit/4d1d438f301256c22f08c5b42e740f14e4c19d29)) (by yohimik, Claude Fable 5.1)
+  A worker polls Git, exits when idle and finishes its claimed tasks on
+  SIGTERM, so it runs as an Indexed Job for the length of one release, and the
+  cluster adds machines for its pending pods. The page says why an autoscaler
+  on worker CPU adds nothing: the pool is fixed at the preflight, CPU does not
+  show waiting work, the reaction is slower than a release, and scaling down
+  kills tasks. It gives the manifest, how large a pool is worth having, the
+  isolation a pool that runs assigned commands needs, and what dispat does not
+  do yet.
+
+### Fixes
+
+- say the integration passes run in six shards ([15904c9](https://github.com/yohimik/dispat/commit/15904c97b960e272fe33bbe7d8cf2df5af8fc52a)) (by yohimik, Claude Opus 5.5)
+  The test results page describes how CI runs the integration suite, and it
+  now says that each pass is six processes over an exact split of the
+  suite's tests, kept as one log and one row, and that the time the row
+  shows for each package is the longest shard's rather than the sum of six.
+
+- describe the machine the release's full-suite job creates for itself ([dcfe0f1](https://github.com/yohimik/dispat/commit/dcfe0f1c631ea4e3d291046686b0bbdadcedbe98)) (by yohimik, Claude Fable 5.1)
+
+- document script sweeps on worker nodes and the --worker flag ([7d23ac1](https://github.com/yohimik/dispat/commit/7d23ac1619bf6d1ea68429006dbc623d650477f6)) (by yohimik, Claude Opus 5.5)
+  Distributed execution gains a section on running scripts on workers: what
+  a sweep task carries and what it leaves behind, that placement follows
+  `runOnly`, that a sweep takes no release lock and so neither waits for nor
+  excludes a release, and how `runOutputs` folders come back merged, with a
+  disagreeing path leaving neither file. `--worker` is documented beside
+  `execution.workers` and on the release, run and status pages; `runOutputs`
+  joins the root options and the where-a-setting-lives matrix; the error
+  codes, the environment table, the architecture's out-of-scope table, the
+  CI pipeline and the Kubernetes example say what changed.
+
+- say how a consumer that proceeded past its provider is caught up ([475f3d4](https://github.com/yohimik/dispat/commit/475f3d443070e11ffba380422c2968bca83ae87b)) (by yohimik)
+  Admission by delivery in concepts.md, the recovery walkthrough for a
+  failed provider, and the provider relation's manifest rule, which the
+  table also had backwards for `none` after the default flipped.
+
+- say which provider publication is a release reason ([23d269a](https://github.com/yohimik/dispat/commit/23d269ac6eb952a75d2823705bd68c46ec39c004)) (by yohimik, Claude Opus 5)
+
+- say that publish order and blocking hold through packages that are not releasing ([320160d](https://github.com/yohimik/dispat/commit/320160d9e620303db94fcf63cf813645ba0741f5)) (by yohimik, Claude Opus 5)
+
+- say where a non-blocking relation can publish a version nobody published ([7d89713](https://github.com/yohimik/dispat/commit/7d89713431b6ed80a8a0edc2242443297e982a38)) (by yohimik, Claude Opus 5)
+
+- say how the minimal topology chooses its links ([36ed709](https://github.com/yohimik/dispat/commit/36ed709344efaf60d779397ee36dae2a3dd5756f)) (by yohimik, Claude Opus 5)
+  Among the proposals of fewest links the computation joins the groups at their
+  centres, so the longest route between two repositories stays as short as the
+  existing links allow. Evidence and settlement work grow with that route.
+
+- say that commit.verify leaves the records uncompared ([274f8a2](https://github.com/yohimik/dispat/commit/274f8a2f7e2160e0bfa3357282346a3b5000c236)) (by yohimik, Claude Opus 5)
+
+- document the release record comparison and the create-only tag push ([228c57d](https://github.com/yohimik/dispat/commit/228c57d6b3dd429ad2c7f260964ab22a79d4db30)) (by yohimik, Claude Opus 5)
+  The lock page gains the step it was missing: the remote's release tags are
+  read under the lock and compared with the checkout's, so a clone that is
+  level with the branch and missing a record is refused rather than planning
+  that version again. E196 and E191 gain that second condition with the fetch
+  that resolves it, the CI pages say a checkout made without tags is refused
+  and how to bring them, and the recovery page stops explaining the old force
+  push. What commit.force means is restated where it is described: permission
+  not to fail on a ref that is already there, never permission to replace a
+  published record, with the remote's answer stated in full beside it.
+
+- keep the single-package example sections whole ([e7bc2bd](https://github.com/yohimik/dispat/commit/e7bc2bda61cb6b917ff3a9a166ebed17f148b144)) (by yohimik, Claude Opus 5)
+  The repository-as-the-package section landed inside the subfolder layout it
+  follows, splitting that section from its own example.
+
+- say what a repository rooted package is in a fleet ([b969420](https://github.com/yohimik/dispat/commit/b9694203178d141e2bab7315b13e04fbb25a81ef)) (by yohimik, Claude Opus 5)
+
+- document the repository root as a space and a package folder ([5f2b7ec](https://github.com/yohimik/dispat/commit/5f2b7ece12ed2137a5511eca129c45f2fe00b224)) (by yohimik, Claude Opus 5)
+  A space may be rooted at the repository, and a standalone entry may name it
+  too, so the pages that said a package path cannot be "." now describe what
+  such a package owns and the two settings its folder cannot honour.
+
+- say that no axis excuses falling behind the shared part ([b2b5b14](https://github.com/yohimik/dispat/commit/b2b5b14fceb8f553c6099106c0d294da8a30e3d7)) (by yohimik, Claude Opus 5)
+
+- document a versioning group's counter and channel axes ([e1b83ab](https://github.com/yohimik/dispat/commit/e1b83ab6e4235ae18e5992c2fb20f05345385c84)) (by yohimik)
+  Shared versions explained the depth and said nothing about the other two
+  parts of a group's rule, so the page's statements about a train ("later work
+  takes all of them to beta.1", "a graduation on any one member ends the train
+  for all") read as the only behaviour there is rather than as what a shared
+  counter and a shared channel do. A new section works through each setting
+  with the retry and the graduation it changes, and the two safety rules a ride
+  always obeys.
+
+  Space options gains the object form, the axis table and the combination that
+  is refused. The architecture note rewrites the engagement rule around "a
+  shared part moves" and adds the member target floor, the resting-channel rule
+  and alignment under an independent counter. The `none` bullet names
+  autoreplacer beside auto-versioning and `autowriter --set-local`, which now
+  leave a never-released provider's declaration alone as well.
+
+- admit settlement heads and tighten fleet cost bounds ([a7b35ab](https://github.com/yohimik/dispat/commit/a7b35abcbbabca01fef68fbc22418f9099460f64)) (by yohimik, Claude Fable 5.1)
+  A settlement moves heads before the revalidation point of §27.2, the
+  consumer's own included, and §27.2 admitted only a native record step, so a
+  literal reading refused every settled consumer with E330. The exact
+  revision a settlement wrote is now an admitted transition, which is what the
+  engine already does; vector 28 of §27.12 and the docs page say so.
+
+  The cost model is corrected where it was loose or silent. The publication
+  input closure is one condensation and one bitset union per edge, not one
+  traversal per repository. A fresh window is the meet of two single-boundary
+  windows, so reachability classes count distinct boundary commits and never
+  (stable, fresh) pairs, and a window is keyed by the repository it ranges over
+  and not by the owner of the package reading it (vector 29). The linked peer
+  topology gains the rows it never had: link evidence and settlement, with a
+  star bounding every settlement at two commits.
+
+  No release plan changes.
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.4): 1.11.0-rc.3 -> 1.11.0-rc.4
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## packages/docs/v1.11.0-rc.3 (2026-09-20)
 
 ### Fixes
