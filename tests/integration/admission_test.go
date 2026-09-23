@@ -549,7 +549,10 @@ func TestAdmissionReadsTagsCarryingAReceiptAsOrdinaryReleases(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			r.Git("tag", "-d", "cli@0.2.0")
 			r.Git("tag", "-a", "cli@0.2.0", commit, "-m", "release cli@0.2.0 dispat-seen-v1:"+row.payload)
-			status := r.StatusOK()
+			// The fixture belongs to the parent test, so the row asserts the
+			// exit code itself: one failing row must not stop the others.
+			status := r.Status()
+			require.Equal(t, 0, status.Code, "stdout:\n%s\nstderr:\n%s", status.Stdout, status.Stderr)
 			assert.Equal(t, "0.2.0 -> 0.2.1", harness.GraphLine(status.Events, "cli").Str("version"),
 				"stdout:\n%s", status.Stdout)
 			assert.True(t, harness.IsCodePresentForPackage(status.Events, "W193", "cli"))
