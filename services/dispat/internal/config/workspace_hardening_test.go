@@ -89,6 +89,11 @@ func TestComposeWorkspaceExcludesDeclarationsOwnedByADisabledRepository(t *testi
 	require.Len(t, pkgs, 1)
 	assert.Equal(t, "sdk", pkgs[0].Name)
 	require.Len(t, workspace.DisabledRepositories(), 1)
-	assert.Equal(t, filepath.Join(root, "sources", "app"), workspace.DisabledRepositories()[0].Root,
+	// Composition answers repository roots through the filesystem, so the
+	// expectation is the canonical spelling: on macOS the temporary folder
+	// sits behind the /var -> /private/var link.
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(canonicalRoot, "sources", "app"), workspace.DisabledRepositories()[0].Root,
 		"the excluded boundary remains reserved while discovery omits its packages")
 }
