@@ -1,5 +1,16 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.4 (2026-09-23)
+
+### Fixes
+
+- harden fleet release recovery and shared version policies ([dbf10c7](https://github.com/yohimik/dispat/commit/dbf10c73478d0bb9f298d4b1ec19cd6c8b177005)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## specs/ccme-spec/v3.1.0-rc.3 (2026-09-23)
 
 ### Features
