@@ -49,8 +49,16 @@ const DefaultAPIURL = "https://api.github.com"
 
 const (
 	// maxErrorBody bounds how much of a response body is read back — enough
-	// for any error message and the created release's asset endpoint.
+	// for any error message.
 	maxErrorBody = 64 << 10
+	// releaseMaxBody bounds the response that carries one release, which
+	// echoes the notes it was created with: GitHub accepts notes of 125,000
+	// characters, escaped in the JSON on the way back and followed by the
+	// release's metadata, so the bound is well above that. The candidate with
+	// eighty own commits had 63,627 bytes of notes, and reading its created
+	// release back under the error bound failed a publication the server had
+	// already performed.
+	releaseMaxBody = 1 << 20
 	// defaultTimeout is the request timeout of the default HTTP client.
 	defaultTimeout = 30 * time.Second
 	// uploadTimeoutFloor and uploadTimeoutPer scale an asset upload's own
@@ -440,6 +448,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 		Body:        bytes.NewReader(payload),
 		ContentType: "application/json",
 		WantStatus:  http.StatusCreated,
+		MaxBody:     releaseMaxBody,
 		What:        "creating release " + tag,
 	})
 	if err != nil {
@@ -489,6 +498,7 @@ func (r *Releaser) lookup(ctx context.Context, tag string) (*existingRelease, er
 	data, status, err := r.do(ctx, apiCall{
 		Method:         http.MethodGet,
 		URL:            r.endpoint("/repos/" + r.Owner + "/" + r.Repo + "/releases/tags/" + neturl.PathEscape(tag)),
+		MaxBody:        releaseMaxBody,
 		WantStatus:     http.StatusOK,
 		TolerateStatus: http.StatusNotFound,
 		What:           "looking up release " + tag,
