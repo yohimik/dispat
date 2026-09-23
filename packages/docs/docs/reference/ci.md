@@ -164,22 +164,42 @@ cluster that adds and removes machines for the pool.
 A job can also be its own pool: create a machine, start a worker on it, run, and delete the machine before the job
 ends. dispat's own release does this for its full suite. The job that runs `dispat run tests --since all` before a
 release creates one Compute Engine instance, starts `dispat worker` on it with a signing secret generated for that run
-alone, and names the machine on the command line:
+alone, and names the machine on the command line by name alone:
 
 ```sh
-dispat run tests --since all --worker "ci-worker=ssh://dispat@203.0.113.7/home/dispat/mailbox.git"
+dispat run tests --since all --worker "ci-worker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 ```
 
-`--worker name=endpoint` states an execution link exactly as an entry in `execution.workers` would, with the same
-validation, so a committed file never carries the address of a machine that exists for one run. The script that does
-the rest is [`scripts/ci-worker.sh`](https://github.com/yohimik/dispat/blob/main/scripts/ci-worker.sh): it keeps an
-ephemeral ssh key pair, learns the instance's host keys from the cloud API rather than from the network, seeds the
-mailbox with the repository's public history so the run's first push carries only its working tree, sends the secret
-over ssh rather than through instance metadata, and deletes the instance in an `always()` step, with a lifetime on
-the instance itself as the backstop for a job that never reaches that step. The machine shares the job's build cache:
-the script hands it the job's Actions cache credentials over ssh and gives it a `docker-container` builder, so a gate
-placed there replays the layers the runner cached instead of rebuilding them. The sweep's test profiles come back to
-the job through `runOutputs`, so the coverage gate that follows reads them where a local run would have left them.
+The link states no endpoint, so the machine's coordination branches go to the repository itself: the job reaches it
+with the credential its checkout persisted, which the job's `contents: write` already covers. The worker needs a
+credential of its own, and it is not the job's `GITHUB_TOKEN`, which can push the release branch and its tags. The job
+mints an installation token of a GitHub App for the run with
+[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token), once the machine exists so
+that the token's hour covers the suite, and the action revokes it when the job ends. The App is configured by a
+repository variable, `CI_WORKER_APP_CLIENT_ID`, and a secret, `CI_WORKER_APP_PRIVATE_KEY`; without them the suite runs
+on the runner alone and the job says so with a warning. The host's rules are what confine that token: give the App's
+identity the right to create and delete `dispat-worker-*` branches and keep it out of the rules' bypass list for the
+release branch, the release tags and the lock tag.
+
+The script that does the rest is
+[`scripts/ci-worker.sh`](https://github.com/yohimik/dispat/blob/main/scripts/ci-worker.sh): it keeps an ephemeral ssh
+key pair, learns the instance's host keys from the cloud API rather than from the network, sends the signing secret,
+the token, the repository URL and the commit over ssh into files only the worker's user reads rather than through
+instance metadata, and starts the worker from a launcher that hands Git the token as an `http.<url>.extraheader` scoped
+to this repository's https URL, so the header is sent to no other URL of the host. It deletes the instance in an
+`always()` step, with a lifetime on the instance itself as the backstop for a job that never reaches that step, and
+then deletes any coordination branch of the run's node the sweep could not close, with the job's own credential. The
+machine shares the job's build cache: the script hands it the job's Actions cache credentials over ssh and gives it a
+`docker-container` builder, so a gate placed there replays the layers the runner cached instead of rebuilding them. The
+sweep's test profiles come back to the job through `runOutputs`, so the coverage gate that follows reads them where a
+local run would have left them.
+
+A snapshot of the checkout travels through the repository, and a snapshot carries every untracked file Git does not
+ignore, so the job refuses to start the suite while `git status` shows one, and the credential file the Google Cloud
+authentication step writes into the workspace is ignored. Two risks remain, and both are accepted rather than
+closed. A task's commands inherit the worker's environment, so a test on the machine can read the token as it can
+already read the Actions cache credentials. And `contents: write` also lets the token edit GitHub Releases, which
+branch and tag rules do not cover.
 
 What that release measures on every run, and what it asks of the account it runs as, is in
 [the release workflow](https://github.com/yohimik/dispat/blob/main/.github/workflows/release.yml) and
