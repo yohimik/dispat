@@ -61,6 +61,14 @@ The rule follows the whole dependency chain. If `app` depends on `web` and `web`
 A provider only holds a package back when that provider is releasing in this run. A provider with nothing pending is
 nothing to wait for. A provider held by a `Release-As: none` directive also lets you select the consumer alone.
 
+A provider can go alone in the other direction, with one exception: the commit a consumer it still owes was itself
+released on. A consumer is owed its provider's version when it released a change of its own while the provider's
+publish failed or was held. Releasing the provider alone on that same commit would put both tags on one commit, and
+nothing could later tell that the consumer came first, so dispat refuses the run before anything builds
+([`E201`](../plan-errors.md#after-the-plan-before-any-releasing)). Select both, as in `dispat release -p core,web`, or
+commit first and then release the provider alone; the consumer picks the provider up as a catch-up (`W193`) on the next
+run.
+
 ## Shared version groups get a warning instead
 
 Packages in a [shared version group](./versioning.md) (`fixed` and its relatives) all move to one version together.

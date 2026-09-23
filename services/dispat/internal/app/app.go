@@ -104,6 +104,11 @@ type App struct {
 	// reads them, rather than asked of git again later.
 	plannedHeads map[string]string
 
+	// owedAtHead are the pairs E201 refuses in the plan this invocation
+	// selected: a provider it would release at the baseline commit of a
+	// consumer it still owes. Written by selectedPlan, read by releaseBlocked.
+	owedAtHead []plan.OwedPair
+
 	// plannedOptions are the planner inputs the last plan was computed from,
 	// kept for the one consumer that needs the input rather than the result:
 	// a distributed run digests the plan together with what it was planned
@@ -218,6 +223,11 @@ func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan
 		return nil, err
 	}
 	a.printGraph(pl)
+	// The pairs §19.3 refuses are read off the narrowed plan, because the
+	// selection is what decides whether a consumer releases after its provider.
+	if err := a.reportOwedAtHead(ctx, pl); err != nil {
+		return nil, err
+	}
 	if opts.Strict && !narrowing.IsClean() {
 		err := errors.New("the selection cannot be released as it stands and --strict is set")
 		a.log.Error().Err(err).Msg("refusing to release")
@@ -446,17 +456,23 @@ func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
 
 // releaseBlocked reports why the run must not release, or "" when it may.
 //
-// Two rules, and the split is §16's. A *repository-scoped* error — a tag that
-// cannot be read, a version that goes backwards, a dependency cycle — means no
-// correct plan exists, so no partial release may be emitted and no
-// configuration may say otherwise. Everything else is an authoring mistake
-// whose blast radius is the offending unit, and whether that stops the run is
-// a judgement about which failure is worse: releasing without a package whose
-// scope was mistyped, or not releasing at all. `commitErrors` is where a
-// repository states its answer.
+// Three rules. A *repository-scoped* error (a tag that cannot be read, a
+// version that goes backwards, a dependency cycle) means no correct plan
+// exists, so no partial release may be emitted and no configuration may say
+// otherwise (§16). A provider released at the baseline commit of a consumer it
+// still owes, without that consumer after it, would leave two releases on one
+// commit that nothing can order afterwards, so the run is refused whatever
+// the configuration says (E201, §19.3). Everything else is an authoring
+// mistake whose blast radius is the offending unit, and whether that stops the
+// run is a judgement about which failure is worse: releasing without a
+// package whose scope was mistyped, or not releasing at all. `commitErrors` is
+// where a repository states its answer.
 func (a *App) releaseBlocked(pl *plan.Plan) string {
 	if pl.IsFatal() {
 		return "the repository cannot produce a correct plan (§16 repository-scoped error)"
+	}
+	if len(a.owedAtHead) > 0 {
+		return "a provider would be released at the baseline commit of a consumer it still owes (E201)"
 	}
 	if a.cfg.CommitErrors == config.CommitErrorsError && pl.IsInvalid() {
 		return `a commit message has errors and commitErrors is "error"`

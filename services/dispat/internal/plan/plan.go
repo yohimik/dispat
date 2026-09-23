@@ -294,6 +294,21 @@ const (
 	// dependency failed to publish (§19.3). Non-suppressible.
 	CodeBlocked = "W194"
 
+	// --- delivery across one commit (§13.4a, §19.3) ---
+
+	// CodeOwedAtBaseline marks a provider released, or about to be released,
+	// at the baseline commit of a consumer it still owes, without that
+	// consumer releasing after it in the same run. Two releases on one commit
+	// have no ancestry order, so the consumer would read as served and stay on
+	// the provider's old version with nothing left to detect it (§19.3). A run
+	// that would do it is refused before anything publishes; a consumer that
+	// failed after its provider published there is reported with the remedy
+	// no later plan can compute.
+	//
+	// Run-scoped and not repository-scoped: it names one pair, and the plan is
+	// correct. It is never one of a plan's Diagnostics, so the plan digest and
+	// the commitErrors policy read the plan unchanged.
+	CodeOwedAtBaseline = "E201"
 	// --- manifests (§9.4, §12.4; emitted by the executor and by compute) ---
 
 	// CodeManifestVersionDrift marks a manifest whose declared own version
@@ -680,6 +695,13 @@ type Release struct {
 
 	DueTo   []string      // providers that forced (at least) part of the bump
 	Sources []StaleSource // the same, with commit and depth detail
+	// owedBoundaries is, per provider in Sources, the raw commit this
+	// package's newest release sits on in that provider's repository: the
+	// boundary delivery is measured against (§13.4a). A provider released on
+	// it, or behind it, would read as having delivered what it still owes, so
+	// E201 compares the provider's release commit with it (§19.3). Absent for
+	// a package that has never released.
+	owedBoundaries map[string]string
 	// Updates is every provider whose version this release picks up:
 	//
 	//	Updates = DueTo ∪ { configured providers releasing this run }
@@ -3269,6 +3291,7 @@ func (cp *computation) finalise() {
 			continue
 		}
 		rel.Updates = cp.providerUpdates(rel, name)
+		rel.owedBoundaries = cp.collectOwedBoundaries(rel)
 	}
 
 	cp.reportCatchUp()

@@ -224,7 +224,10 @@ the commit, so it was never planned again and kept the provider's previous versi
 when the provider publishes, and bumped for the delivery.
 
 When the provider publishes in a run the consumer sits out, dispat still reads the history after the provider's last
-release that the consumer reached, so the next run finds the debt.
+release that the consumer reached, so the next run finds the debt. The one state ancestry cannot order, the provider
+released alone on the very commit its owed consumer released on, is refused before anything publishes
+([`E201`](./reference/plan-errors.md#after-the-plan-before-any-releasing)): release the consumer in the same run, or the
+provider after a new commit.
 
 Four properties explain safe [failure recovery](#failure-and-recovery):
 

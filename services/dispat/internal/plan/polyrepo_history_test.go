@@ -285,6 +285,7 @@ func TestComposedOwedWindowOverTheProvidersRepository(t *testing.T) {
 	require.Len(t, app.Sources, 1)
 	assert.Equal(t, "lib", app.Sources[0].Provider)
 	assert.Equal(t, "l2", app.Sources[0].Commit, "public provenance keeps the raw source SHA")
+	assert.Equal(t, "l2", app.OwedBoundary("lib"), "app's boundary in lib's repository")
 	assert.EqualValues(t, 4, stats.CommitWindows.Load(),
 		"three ordinary windows (lib's and app's in lib's repository, app's own) and one owed")
 

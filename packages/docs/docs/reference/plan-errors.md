@@ -62,6 +62,25 @@ anywhere.
 **`the checkout is behind <remote>/<branch>; pull before releasing`**. Another clone pushed since you fetched. Your
 tags are stale and the plan would use an outdated view. Run `git pull --rebase` and try again.
 
+**`E201` a provider would be released at the baseline commit of a consumer it still owes**. A consumer that released
+on a change of its own while its provider's publish failed, or while the provider was held, is still owed the
+provider's version, and the run that publishes the provider catches it up. That run must not release the provider
+alone on the consumer's own release commit: both tags would sit on one commit, ancestry could no longer tell that the
+consumer came first, and the consumer would read as served with nothing left to find the debt. dispat refuses such a
+release before any hook, build or publish runs, and the error names the consumer (`package`), the `provider` and the
+`commit`. Either release the consumer after the provider in the same run (`--package <provider>,<consumer>`), or
+commit first and release the provider alone, which leaves the provider's tag past the consumer's release so the next
+run still plans the consumer's catch-up (`W193`). `dispat status` prints the same lines, warns that a release would be
+refused, and still exits `0`. The refusal is conservative in commit mode: the release commit usually moves the
+provider's tag past the consumer's commit, but a run cannot know before it publishes whether that commit will be
+empty, and an empty one leaves the tag on the head.
+
+The same state can arise after publication, when the run releases the provider and then the consumer on the
+consumer's own release commit and the consumer fails. dispat then reports `E201` as a critical failure, exits `1`, and
+names the one remedy no later plan can compute: an empty commit `release(<consumer>)` with the footer
+`Release-As: <version>`, the version the failed run planned for the consumer. The next release ships the consumer at
+that version and picks the provider up.
+
 ## Polyrepository snapshot and recording diagnostics
 
 These codes apply only when [source-history mode](../control-repository.md#source-history-mode) or a

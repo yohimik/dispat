@@ -129,6 +129,21 @@ it has still not been delivered by any release of `core`, and its `0.2.1` releas
 manifest moves to `^0.2.0` and the two packages are in step again. If `core` fails a second time, `app` is skipped with
 `W194` instead, because by then the failure is the only reason it is in the plan at all.
 
+The provider's successful run need not include the consumer, but it must not release the provider alone on the
+consumer's own release commit. If `app` published its own fix at the commit where `core` failed, and you now run
+`dispat release --package core` on that same commit, dispat refuses before anything runs
+([`E201`](../plan-errors.md#after-the-plan-before-any-releasing)): both tags would sit on one commit, and nothing could
+later tell that `app` came first. Release both in one run with `dispat release --package core,app`, or commit first and
+then release `core` alone. The provider's tag then lands past `app`'s release, and the next full run's `dispat status`
+shows `app` as a `W193` catch-up from the newly published `core`, even though `app`'s earlier tag already contains the
+original propagation commit. Run the full release through CI to deliver that catch-up; no new release-intent commit is
+needed.
+
+The same state can arise without a selection: the run releases `core` and then `app` on `app`'s own release commit,
+and `app` fails after `core` published. dispat reports that as `E201` as well, because no later plan can find the
+debt, and names the remedy: an empty commit `release(app)` with the footer `Release-As: <version>`, the version the
+failed run planned for `app`. The next release ships `app` at that version and picks `core` up.
+
 One shape cannot be repaired in place. If the consumer's build had already run over the manifests naming the provider's
 planned version, whatever it produced may carry that version inside it, and rewriting a manifest does not reach a built
 artefact. dispat blocks that consumer with `W194` naming the provider rather than rebuilding it silently, and the next

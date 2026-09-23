@@ -358,3 +358,83 @@ func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
 	cp.indexRepositoryAncestry()
 	return nil
 }
+
+// collectOwedBoundaries is the release's owedBoundaries: per provider in its
+// Sources, the raw commit of its newest release in that provider's repository.
+func (cp *computation) collectOwedBoundaries(rel *Release) map[string]string {
+	if len(rel.Sources) == 0 {
+		return nil
+	}
+	boundaries := make(map[string]string)
+	for _, source := range rel.Sources {
+		if _, isRecorded := boundaries[source.Provider]; isRecorded {
+			continue
+		}
+		repository := ""
+		if provider := cp.byName[source.Provider]; provider != nil {
+			repository = provider.Repository
+		}
+		if boundary := rawHistoryKey(cp.baselineBoundary(rel.Pkg.Name, historyKey(repository, ""))); boundary != "" {
+			boundaries[source.Provider] = boundary
+		}
+	}
+	return boundaries
+}
+
+// OwedBoundary is the raw commit this package's newest release sits on in the
+// provider's repository, when the provider is one of the sources it is owed:
+// the commit a release of that provider must not land on or behind while the
+// package has not released after it (§19.3). Empty otherwise.
+func (r *Release) OwedBoundary(provider string) string { return r.owedBoundaries[provider] }
+
+// OwedPair is one provider a run would release at the baseline commit of a
+// consumer it still owes, without releasing the consumer after it (E201).
+type OwedPair struct {
+	// Provider releases in the run; Consumer is owed its contribution and does
+	// not release; Commit is the consumer's baseline, where the provider's tag
+	// would land.
+	Provider, Consumer, Commit string
+}
+
+// OwedAtHead lists, in plan order, the pairs §19.3 refuses before anything is
+// published: the provider releases after Narrow, the consumer has it among
+// the sources it is owed and does not release, and the consumer's newest
+// release in the provider's repository is that repository's head, which is
+// where the provider's tag would land. Two releases on one commit have no
+// ancestry order, so the consumer would then read as served and stay on the
+// provider's old version with nothing left to detect it. head answers a
+// repository's head commit, "" naming the single history.
+//
+// The test is conservative where a release commit moves the provider's tag
+// off the head: a run cannot know before it publishes whether that commit will
+// be empty, and an empty one leaves the tag on the head.
+func (p *Plan) OwedAtHead(head func(repository string) string) []OwedPair {
+	position := make(map[string]int, len(p.Order))
+	for i, name := range p.Order {
+		position[name] = i
+	}
+	var pairs []OwedPair
+	for _, consumerName := range p.Order {
+		consumer := p.Releases[consumerName]
+		if consumer == nil || consumer.IsReleasing() || len(consumer.owedBoundaries) == 0 {
+			continue
+		}
+		providers := make([]string, 0, len(consumer.owedBoundaries))
+		for provider := range consumer.owedBoundaries {
+			providers = append(providers, provider)
+		}
+		sort.Slice(providers, func(i, j int) bool { return position[providers[i]] < position[providers[j]] })
+		for _, providerName := range providers {
+			provider := p.Releases[providerName]
+			if provider == nil || !provider.IsReleasing() {
+				continue
+			}
+			boundary := consumer.owedBoundaries[providerName]
+			if boundary != head(provider.Pkg.Repository) {
+				continue
+			}
+			pairs = append(pairs, OwedPair{Provider: providerName, Consumer: consumerName, Commit: boundary})
+		}
+	}
+	return pairs
+}

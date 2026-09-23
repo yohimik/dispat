@@ -149,6 +149,16 @@ run_deferred() {
   fi
   allow core
   step provider-plan dispat status --package core,ui,api --log-format json
+  if [ "$SCENARIO" = deferred ]; then
+    # cli released its own fix at the head this run starts from. The provider
+    # released alone there would share cli's commit, which ancestry cannot
+    # order, so the plan reports E201 and a release would be refused. One
+    # empty commit, dated by the fixture's clock like every commit of the
+    # fixture, moves the head past cli's release.
+    retry_date="$(( ${EXPERIMENT_EPOCH:-1735689600} + 60 * 4 )) +0000"
+    step provider-commit env GIT_AUTHOR_DATE="$retry_date" GIT_COMMITTER_DATE="$retry_date" \
+      git commit --allow-empty -qm "chore(core): retry the provider"
+  fi
   step release2 dispat release --package core,ui,api --log-format json
   keep_publish_logs after-provider-success
   observe after-provider-success
@@ -177,6 +187,11 @@ run_deferred() {
   assert "the provider's failed version was rolled back" \
     observed after-provider-failure '.packages.core.manifest.version == "1.0.0"'
   assert "the skipped consumers' generated manifests were restored" [ "${STEP_RC[cleanup]}" = 0 ]
+  if [ "$SCENARIO" = deferred ]; then
+    assert "the provider-only plan at cli's release commit reports E201 for cli" \
+      jq -se 'any(.[]; .package == "cli" and .code == "E201")' "$OUT/step-provider-plan.log"
+    assert "one empty commit moved the head past cli's release" [ "${STEP_RC[provider-commit]}" = 0 ]
+  fi
   if [ "$SCENARIO" = deferred-build ]; then
     assert "the provider and other consumers released while cli waited" \
       bash -c '[ "$1" = 0 ] && jq -e '\''.packages.core.registry == "1.0.1" and .packages.core.state == "consistent" and .packages.cli.registry == "1.0.0"'\'' "$2" >/dev/null' \

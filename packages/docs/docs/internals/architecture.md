@@ -162,7 +162,10 @@ reached it. Once the provider has published in a run the consumer sat out, no or
 planner also reads the *owed window* of each provider and consumer pair (§13.3): the history after the newest provider
 release the consumer's baseline reaches. It is taken for every consumer the provider reaches, not only the direct ones,
 and read only where it reaches further back than the union of the ordinary windows; it admits nothing by itself. dispat
-uses no repair pass, no second traversal, and no timestamp comparison anywhere in the package.
+uses no repair pass, no second traversal, and no timestamp comparison anywhere in the package. Two releases on one
+commit are the one state ancestry cannot order, so a run that would release a provider on the baseline commit of a
+consumer it still owes, without releasing that consumer after it, is refused before any hook runs (`E201`), and a
+consumer that failed after its provider was released there is reported with the exact `Release-As` that delivers it.
 
 On a prerelease train, the window deliberately spans commits the train's prereleases already published. This lets §11.4
 recompute the train's target and a graduation's version over the whole train. But published work remains published. A
@@ -634,10 +637,12 @@ registry-aware and audit-aware features. Errors like `E197` (publish-order viola
 unverifiable), and `E199` (convergence check failed) assume an engine that queries registries and audits its own runs.
 Warnings like `W195` (staleness audit) and `W196` (published version adopted from the registry) belong to the same
 features. dispat implements and emits every other code of the registry, including the repository-scoped bucket (`E182`,
-`E185`, `E191`, `E195`, `E196`, `E200`). This includes the codes the registry leaves to the engine rather than to the
-parser. dispat raises `E210`-`E213` and `W209`-`W215` here. These resolve an `Edits` or `Deletes` target against
-history and report what the correction did (see [Correcting a record](../reference/corrections.md)). Read
-[Diagnostic codes](../reference/plan-errors.md) to see what each of those six means and what to do about it.
+`E185`, `E191`, `E195`, `E196`, `E200`) and the run-scoped `E201`, which refuses a run that would release a provider at
+the baseline commit of a consumer it still owes and reports a consumer that failed after its provider was released
+there. This includes the codes the registry leaves to the engine rather than to the parser. dispat raises `E210`-`E213`
+and `W209`-`W215` here. These resolve an `Edits` or `Deletes` target against history and report what the correction did
+(see [Correcting a record](../reference/corrections.md)). Read [Diagnostic codes](../reference/plan-errors.md) to see
+what each of those six means and what to do about it.
 
 The optional polyrepository Git profile adds its own implemented diagnostic family. `E330` rejects an invalid or
 changed fleet repository snapshot, `E331` rejects ownership crossings and unlisted nested repositories, and `E332`

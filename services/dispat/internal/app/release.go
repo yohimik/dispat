@@ -575,6 +575,9 @@ func (a *App) completeRelease(ctx context.Context, pl *plan.Plan, results map[st
 		a.finalize(finCtx, finalizer{gh: gh, remote: a.pushRemote(), hooks: hooks, crit: crit,
 			skipHooks: interrupted}, pl, results)
 	}
+	// Every tag this run wrote exists now, in every repository, so a consumer
+	// its provider overtook on one commit can be named before the locks go.
+	a.reportOwedAfterPublication(finCtx, publicationOutcome{plan: pl, results: results, fleet: fleet}, crit)
 	finCancel()
 	if interrupted && errors.Is(finCtx.Err(), context.DeadlineExceeded) {
 		crit.record(a.log, plan.CodeCommitFailed, finCtx.Err(),

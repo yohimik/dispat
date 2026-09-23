@@ -15,7 +15,10 @@ package integration
 //
 // Delivery is read from tags and ancestry alone. When the provider publishes
 // in a run the consumer sat out, the owed window of SPEC 13.3 keeps the commit
-// visible.
+// visible; when the provider would publish on the consumer's own release
+// commit, where ancestry could not order the two tags, the run is refused
+// before anything publishes, and a consumer that failed after its provider
+// published there is reported with the one remedy left (E201, SPEC 19.3).
 //
 // Ordering is gated rather than slept. The provider's publish waits for a file
 // the consumer's postVersion hook writes, so "the provider died after the
@@ -24,7 +27,9 @@ package integration
 
 import (
 	"encoding/base64"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,7 +73,8 @@ type admissionShape struct {
 // planned version. That is what makes "the provider died after the consumer's
 // manifests were written" the thing the run either did or could not do: opened
 // from the version script instead, the gate would be a race against dispat's
-// own reconciliation.
+// own reconciliation. Every publication the provider makes is appended to a
+// log inside the repository's Git directory, where no commit can pick it up.
 func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.File)) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
@@ -77,7 +83,8 @@ func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.Fi
 	cfg.Scripts = map[string]models.Script{
 		"build": {"echo building $DISPAT_PACKAGE"},
 		"core-publish": {stageRelationGateWait(gate),
-			`if [ -n "$` + admissionProviderOK + `" ]; then echo published; else exit 1; fi`},
+			`if [ -n "$` + admissionProviderOK + `" ]; then echo published; echo "$DISPAT_NEW_VERSION" >> '` +
+				admissionPublicationLog(r) + `'; else exit 1; fi`},
 		"cli-version":      {"echo versioning $DISPAT_PACKAGE against ${DISPAT_UPDATED_PACKAGES:-nothing}"},
 		"cli-post-version": {"touch '" + gate + "'"},
 		"cli-publish": {`if [ -n "$` + admissionConsumerFails + `" ]; then exit 1; fi`,
@@ -135,6 +142,24 @@ func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.Fi
 	return r
 }
 
+// admissionPublicationLog is where the fixture's provider publish records the
+// versions it published.
+func admissionPublicationLog(r *harness.Repo) string {
+	return r.Path(".git", "core-published.log")
+}
+
+// admissionPublications lists the provider versions published so far, oldest
+// first.
+func admissionPublications(t *testing.T, r *harness.Repo) []string {
+	t.Helper()
+	data, err := os.ReadFile(admissionPublicationLog(r))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	require.NoError(t, err)
+	return strings.Fields(string(data))
+}
+
 // admissionManifest reads the consumer's manifest as the working tree holds it
 // after a run.
 func admissionManifest(t *testing.T, r *harness.Repo) string {
@@ -153,6 +178,17 @@ func admissionProceeded(t *testing.T, shape admissionShape, adjust ...func(*mode
 	require.NotEqual(t, 0, r.Release().Code, "the provider's publish failed, so the run failed")
 	require.Equal(t, 1, r.TagCount("cli@0.2.0"), "the consumer proceeded on its own work; tags: %v", r.TagList())
 	return r
+}
+
+// admissionEvent is the first event carrying the diagnostic code for the
+// package, or nil.
+func admissionEvent(events []harness.Event, code, pkg string) harness.Event {
+	for _, e := range events {
+		if e.Code() == code && e.Package() == pkg {
+			return e
+		}
+	}
+	return nil
 }
 
 // assertAdmissionSettled asserts that a failure-free plan releases nothing:
@@ -282,6 +318,93 @@ func TestAdmissionFailedReconciliationWithholdsConsumerPublication(t *testing.T)
 	}
 }
 
+// TestAdmissionRefusesAProviderReleasedAloneAtItsConsumersCommit is §19.3's
+// refusal. The consumer proceeded at the commit its provider failed on; a
+// provider-only retry at that same commit would tag the provider where the
+// consumer's tag already sits, and ancestry could then never tell that the
+// consumer came first. The run is refused before anything publishes, status
+// shows the refusal and still exits 0, and each of the two remedies it names
+// works.
+func TestAdmissionRefusesAProviderReleasedAloneAtItsConsumersCommit(t *testing.T) {
+	env := []string{admissionProviderOK + "=1"}
+
+	t.Run("the provider alone is refused before it publishes", func(t *testing.T) {
+		r := admissionProceeded(t, admissionShape{})
+		refused := r.CommandEnv(env, "--package", "core")
+		require.Equal(t, 1, refused.Code, "stdout:\n%s\nstderr:\n%s", refused.Stdout, refused.Stderr)
+		report := admissionEvent(refused.Events, "E201", "cli")
+		require.NotNil(t, report, "E201 names the consumer; stdout:\n%s", refused.Stdout)
+		assert.Equal(t, "core", report.Str("provider"))
+		assert.Equal(t, r.Git("rev-list", "-n1", "cli@0.2.0"), report.Str("commit"))
+		assert.Equal(t, "release cli in the same run (--package core,cli), or release core after a new commit",
+			report.Str("remedy"))
+		assert.Zero(t, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, []string{"0.1.0"}, admissionPublications(t, r), "the provider published nothing")
+
+		status := r.Status("--package", "core")
+		require.Equal(t, 0, status.Code, "seeing the refusal is what status is for; stdout:\n%s", status.Stdout)
+		assert.True(t, harness.IsCodePresentForPackage(status.Events, "E201", "cli"))
+		assert.Contains(t, status.Stdout, "a release would be refused")
+	})
+
+	t.Run("the consumer released after it in the same run", func(t *testing.T) {
+		r := admissionProceeded(t, admissionShape{})
+		res := r.CommandEnv(env, "--package", "core,cli")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.False(t, harness.IsCodePresent(res.Events, "E201"))
+		assert.Equal(t, 1, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
+		assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
+		assertAdmissionSettled(t, r)
+	})
+
+	t.Run("the provider released alone after a new commit", func(t *testing.T) {
+		r := admissionProceeded(t, admissionShape{})
+		r.CommitEmpty("chore(core): retry the provider")
+		provider := r.CommandEnv(env, "--package", "core")
+		require.Equal(t, 0, provider.Code, "stdout:\n%s\nstderr:\n%s", provider.Stdout, provider.Stderr)
+		assert.False(t, harness.IsCodePresent(provider.Events, "E201"))
+		require.Equal(t, 1, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Zero(t, r.TagCount("cli@0.2.1"), "the consumer sat the run out")
+
+		status := r.StatusOK()
+		assert.Equal(t, "0.2.0 -> 0.2.1", harness.GraphLine(status.Events, "cli").Str("version"),
+			"the debt stays visible; stdout:\n%s", status.Stdout)
+		assert.True(t, harness.IsCodePresentForPackage(status.Events, "W193", "cli"))
+	})
+}
+
+// TestAdmissionReportsAConsumerThatFailedAfterItsProviderAtItsCommit is the
+// same state reached by a failure rather than a selection: the retry releases
+// both at the consumer's own commit, the provider publishes and the consumer
+// fails. Both tags now sit on one commit, so no later plan can find the debt,
+// and the run reports E201 with the one remedy left, an exact Release-As on
+// the consumer at the version this run planned.
+func TestAdmissionReportsAConsumerThatFailedAfterItsProviderAtItsCommit(t *testing.T) {
+	r := admissionProceeded(t, admissionShape{})
+	failed := r.CommandEnv([]string{admissionProviderOK + "=1", admissionConsumerFails + "=1"}, "release")
+	require.NotEqual(t, 0, failed.Code, "stdout:\n%s", failed.Stdout)
+	require.Equal(t, 1, r.TagCount("core@0.2.0"), "the provider published; tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
+	report := admissionEvent(failed.Events, "E201", "cli")
+	require.NotNil(t, report, "stdout:\n%s", failed.Stdout)
+	assert.Equal(t, "error", report.Str("level"))
+	assert.Equal(t, "core", report.Str("provider"))
+	assert.Equal(t, "commit release(cli) with the footer Release-As: 0.2.1", report.Str("remedy"))
+
+	stranded := r.Status("--require-release")
+	assert.NotEqual(t, 0, stranded.Code, "ancestry now reads the consumer as served")
+	assert.Contains(t, stranded.Stdout, `"releasing":0`)
+
+	r.CommitEmpty("release(cli): pick up core\n\nRelease-As: 0.2.1")
+	fixed := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+	require.Equal(t, 0, fixed.Code, "stdout:\n%s\nstderr:\n%s", fixed.Stdout, fixed.Stderr)
+	assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "the provider is never republished")
+	assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
+	assertAdmissionSettled(t, r)
+}
+
 // TestAdmissionCatchesUpAfterTheProviderShipsAlone keeps the consumer out of
 // the provider's successful retry at a later commit. The consumer's baseline
 // reaches no release of the provider carrying the commit it is owed, so the
@@ -332,6 +455,7 @@ func TestAdmissionCatchesUpAHeldConsumerAfterItsProviderShipped(t *testing.T) {
 	assert.Zero(t, r.TagCount("cli@0.2.1"), "the held consumer does not")
 	assert.True(t, harness.IsCodePresentForPackage(held.Events, "W154", "cli"),
 		"the hold reports the version it withholds; stdout:\n%s", held.Stdout)
+	assert.False(t, harness.IsCodePresent(held.Events, "E201"))
 
 	r.CommitEmpty("release(cli): resume\n\nRelease-As: auto")
 	resumed := r.CommandEnv(env, "release")
@@ -355,6 +479,7 @@ func TestAdmissionCatchesUpAConsumerThatFailedAfterItsProviderShipped(t *testing
 	require.NotEqual(t, 0, failed.Code, "stdout:\n%s", failed.Stdout)
 	require.Equal(t, 1, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("cli@0.2.1"))
+	assert.False(t, harness.IsCodePresent(failed.Events, "E201"), "the provider's tag is past the consumer's release")
 
 	status := r.StatusOK()
 	assert.Equal(t, "0.2.0 -> 0.2.1", harness.GraphLine(status.Events, "cli").Str("version"),
@@ -434,23 +559,46 @@ func TestAdmissionReadsTagsCarryingAReceiptAsOrdinaryReleases(t *testing.T) {
 
 // TestAdmissionNestedTagCatchesUpAfterTheProviderShipsAlone exercises a publish
 // flow that calls the native step command in commit mode: the consumer's
-// nested `dispat commit --tag` writes its release commit and tags it, and the
-// outer run records a changelog in a commit of its own, which moves the head
-// past the consumer's tag. The provider then ships alone, and the consumer
-// catches up once.
+// nested `dispat commit --tag` writes its release commit and tags it. Where the
+// outer run then records a changelog in a commit of its own, the head has moved
+// past the consumer's tag and the provider may go alone at once. Where it has
+// nothing to record, the consumer's tagged commit is the head a provider-only
+// retry starts from, and that retry is refused (E201): a release commit might
+// move the provider's tag off the head, but a run cannot know before it
+// publishes whether that commit will be empty. Either way the provider ships
+// alone, and the consumer catches up once.
 func TestAdmissionNestedTagCatchesUpAfterTheProviderShipsAlone(t *testing.T) {
 	env := []string{admissionProviderOK + "=1"}
-	r := admissionProceeded(t, admissionShape{nestedTag: true})
-	require.NotEqual(t, r.Git("rev-parse", "HEAD"), r.Git("rev-list", "-n1", "cli@0.2.0"),
-		"history:\n%s", r.Git("log", "--oneline", "--decorate", "-4"))
+	for name, isChangelogKept := range map[string]bool{
+		"the outer changelog commit moves the head past the consumer's tag": true,
+		"the consumer's tagged commit is the head":                          false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := admissionProceeded(t, admissionShape{nestedTag: true}, func(cfg *models.File) {
+				if !isChangelogKept {
+					cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(false)}
+				}
+			})
+			isAtHead := r.Git("rev-parse", "HEAD") == r.Git("rev-list", "-n1", "cli@0.2.0")
+			require.Equal(t, !isChangelogKept, isAtHead, "history:\n%s", r.Git("log", "--oneline", "--decorate", "-4"))
+			if isAtHead {
+				refused := r.CommandEnv(env, "--package", "core")
+				require.Equal(t, 1, refused.Code, "stdout:\n%s\nstderr:\n%s", refused.Stdout, refused.Stderr)
+				assert.True(t, harness.IsCodePresentForPackage(refused.Events, "E201", "cli"))
+				assert.Zero(t, r.TagCount("core@0.2.0"))
+				r.CommitEmpty("chore(core): retry the provider")
+			}
 
-	provider := r.CommandEnv(env, "--package", "core")
-	require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
-	catchUp := r.CommandEnv(env, "release")
-	require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
-	assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
-	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "the provider is never republished")
-	assertAdmissionSettled(t, r)
+			provider := r.CommandEnv(env, "--package", "core")
+			require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
+			assert.False(t, harness.IsCodePresent(provider.Events, "E201"))
+			catchUp := r.CommandEnv(env, "release")
+			require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
+			assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
+			assert.Equal(t, 1, r.TagCount("core@0.2.0"), "the provider is never republished")
+			assertAdmissionSettled(t, r)
+		})
+	}
 }
 
 // TestAdmissionCatchesUpFromAnUnreleasedProvider: the consumer released before
