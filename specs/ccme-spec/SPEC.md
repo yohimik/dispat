@@ -7096,8 +7096,9 @@ belong to the transport and are documented with it. Execution links MAY also be 
 a pipeline names a machine it created a moment earlier: such links are validated as the configuration's are, refused
 under worker authority as the configuration's are, and are no part of `plan` or its digest.
 
-Example, with the Git mailbox transport of §28.4, where an endpoint is a Git repository the nodes share and
-`secretEnv` names the variable holding the secret the mailbox's messages are authenticated with:
+Example, with the Git mailbox transport of §28.4, where an endpoint is a Git repository the nodes share, here the
+project's own repository, and `secretEnv` names the variable holding the secret the mailbox's messages are
+authenticated with:
 
 ```yaml
 execution:
@@ -7106,9 +7107,10 @@ execution:
   secretEnv: CCME_EXECUTION_SECRET
   workers:
     - name: build-a
-      endpoint: https://git.example.invalid/acme/release-mailbox.git
+      endpoint: https://git.example.invalid/acme/project.git
     - name: build-b
-      endpoint: https://git.example.invalid/acme/release-mailbox.git
+      # No endpoint: accepted where the implementation documents the
+      # repository's own remote as the endpoint of a link that states none.
 ```
 
 The corresponding worker uses the same schema with `execution.role: worker`, its own name, the endpoint it polls, its

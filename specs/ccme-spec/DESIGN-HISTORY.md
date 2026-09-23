@@ -210,3 +210,22 @@ provider's tag usually lands on a release commit past that head, but a run canno
 commit will be empty. The same work found that a member of a shared-version group that got ahead of its provider was
 masked out of the group's freshness test, so the member caught up alone while the rest of its group stayed behind; the
 group now moves as one.
+
+## 2026-09-24: The repository is the mailbox
+
+The dispat engine now states the choice section 28.4 leaves to an implementation: the mailbox is the repository's own
+remote by default. A worker link with no endpoint, in `execution.workers` or as `--worker name` on the invocation,
+reaches the push URL of the remote the release takes its lock on, which in a composed workspace is the entry
+repository's, and the worker names that repository as its own endpoint. A snapshot that descends from the planned head
+therefore carries no history the remote does not already hold, and cleanup that removes every ref of a run costs the
+next run nothing. An endpoint a link states remains an override for coordination that has to live elsewhere, and the
+relay between mailboxes is unchanged. The push URL is held to the endpoint rules of section 28.2 when a run that
+dispatches starts, before any lock: one that carries a credential is refused under `execution-configuration`, and a
+release checks it again at the destination its lock was taken on. With the repository as the mailbox, the transport
+credentials of section 28.4 are credentials that can write the repository; the engine does not narrow them itself, and
+its documentation requires the host's branch and tag rules to keep them from release branches, release tags and the lock
+tag. The engine's own release gives its worker machine an installation token of a GitHub App minted for the run, an
+identity those rules can tell apart from the release job's. The same candidate records the run identity on a `run` line
+of the release lock tag, the place section 28.6 requires; verifies ownership before the first worker probe, as section
+28.3 requires before dispatch; bounds each read of a lock and retries a failed one before a run stops for it; and reads
+the lock back before every publication of a release that delegates nothing as well.
