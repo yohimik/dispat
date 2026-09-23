@@ -85,6 +85,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err != nil {
 		return nil, err
 	}
+	a.openOwnershipGate(fleet)
 	// Idempotence lets the normal completion path release before its summary
 	// and closing webhook while this defer still protects every earlier return.
 	// Cleanup detaches from cancellation inside: an interrupted run has more
@@ -497,9 +498,8 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		executor.PublishGroup = publishByRepository
 	}
 	if fleet == nil {
-		// A single history composes nothing here unless the run delegates:
-		// the check exists for the questions a distributed publication has to
-		// ask again, and a local release has always asked none of them.
+		// A single history asks whether it still holds its lock before every
+		// publication, and a distributed run adds its relevant-input check.
 		executor.BeforePublish = a.resolvePrePublishCheck(pl, nil, coordinator)
 		return executor
 	}

@@ -92,8 +92,9 @@ type Coordinator struct {
 	// repositories may have their locks released.
 	unknownPublications []unknownPublication
 	// ownership is what this run asks before every new assignment, and the
-	// cancellations a lost lock has to reach.
-	ownership ownership
+	// cancellations a lost lock has to reach. It is the release's own gate,
+	// borrowed through UseOwnership, and nil for a run that holds no lock.
+	ownership *OwnershipGate
 	// taskRecords and timings are what the run summary is printed from: what
 	// every placed task came to, and what each of them spent queueing and
 	// working. They are accumulated here because the coordinator is the one

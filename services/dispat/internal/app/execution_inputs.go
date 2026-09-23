@@ -3,8 +3,8 @@
 
 package app
 
-// What a distributed run checks in the moment between a package's
-// beforePublish hook and its publish command (CCME §27.2, §28.6).
+// What a release checks in the moment between a package's beforePublish hook
+// and its publish command (CCME §27.2, §28.6).
 //
 // The check exists because that moment is the last one in which a publication
 // can still be withheld for free, and because everything it rests on was
@@ -16,9 +16,11 @@ package app
 //
 // Does this run still own the repository it is about to publish into? A run
 // that lost its lock may start no new effect, whatever it was allowed to do a
-// minute ago. Is the fleet still the fleet the plan was computed over, which
-// is the check a composed workspace has always made. And has anything this
-// package's artefact was built from changed since the build consumed it?
+// minute ago, and that holds for every release that took a lock, local or
+// distributed. Is the fleet still the fleet the plan was computed over, which
+// is the check a composed workspace has always made. And, for a run that
+// delegates work, has anything this package's artefact was built from changed
+// since the build consumed it?
 //
 // The last one is the one worth stating precisely, because it has to be
 // narrow. A release moves the repository constantly and almost none of it is
@@ -28,8 +30,8 @@ package app
 // against, and the changelog files of exactly those packages are excluded
 // because writing them is what a release does on its way past.
 //
-// With no worker links none of this is composed and the callback is the one it
-// has always been.
+// With no worker links the relevant-input check is not composed, and a run
+// that also holds no lock and composes no fleet gets no callback at all.
 
 import (
 	"context"
@@ -58,27 +60,37 @@ const defaultChangelogFile = "CHANGELOG.md"
 // resolvePrePublishCheck is the callback the executor runs after a package's
 // beforePublish hook and immediately before its publish command.
 //
-// A run that delegates nothing gets exactly what it always got: the composed
-// workspace's own revalidation, or nothing at all. A run with worker links
-// gets that same check wrapped in the two a distributed publication needs,
-// and it gets them on both paths: a publication this run kept and one it
-// delegated are authorized by the same sentence, so the two cannot come to
-// different answers about the same release.
+// Every run that holds a lock asks first whether it still does, through the
+// run's one ownership gate, local or distributed: the lock was taken before
+// the plan was fixed, and a publication is a new effect started on the
+// strength of that check. A composed workspace then makes the revalidation it
+// has always made, and a run with worker links adds the relevant-input check a
+// distributed publication needs. The checks run on both paths of a distributed
+// run: a publication this run kept and one it delegated are authorized by the
+// same sentence, so the two cannot come to different answers about the same
+// release. A run that holds no lock, composes nothing and delegates nothing
+// gets no callback at all, which is what it always got.
 func (a *App) resolvePrePublishCheck(pl *plan.Plan, fleet *workspaceRecorder,
 	coordinator *execution.Coordinator) func(context.Context, *plan.Release) error {
 	verifyFleet := resolveFleetPublishCheck(fleet)
-	if coordinator == nil {
-		return verifyFleet
+	var inputs *relevantInputs
+	if coordinator != nil {
+		inputs = a.newRelevantInputs(pl, fleet, coordinator)
 	}
-	inputs := a.newRelevantInputs(pl, fleet, coordinator)
+	if a.ownership == nil && verifyFleet == nil && inputs == nil {
+		return nil
+	}
 	return func(ctx context.Context, rel *plan.Release) error {
-		if err := a.checkLockOwnership(ctx, coordinator, rel); err != nil {
+		if err := a.checkLockOwnership(ctx, rel); err != nil {
 			return err
 		}
 		if verifyFleet != nil {
 			if err := verifyFleet(ctx, rel); err != nil {
 				return err
 			}
+		}
+		if inputs == nil {
+			return nil
 		}
 		return inputs.checkRelevantInputs(ctx, rel)
 	}
@@ -102,11 +114,20 @@ func resolveFleetPublishCheck(fleet *workspaceRecorder) func(context.Context, *p
 // checkLockOwnership refuses publication if any repository in this run's
 // complete lock set is no longer owned.
 //
-// The coordinator uses the same remote verification for assignments and
-// authorizations. A loss here therefore halts every other attempt in flight,
-// including work in another repository of the same fleet.
-func (a *App) checkLockOwnership(ctx context.Context, coordinator *execution.Coordinator, rel *plan.Release) error {
-	if err := coordinator.VerifyOwnership(ctx); err != nil {
+// It asks the run's own gate, which a distributed run's coordinator borrows
+// for its assignments and authorizations too. A loss here therefore halts
+// every other attempt in flight, including work in another repository of the
+// same fleet. A run that holds no lock has no gate and is not asked. A caller
+// that was interrupted gets its context's error rather than a refusal: an
+// interrupted lookup is not a lost lock.
+func (a *App) checkLockOwnership(ctx context.Context, rel *plan.Release) error {
+	if a.ownership == nil {
+		return nil
+	}
+	if err := a.ownership.Check(ctx); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return a.refusePublication(rel, err)
 	}
 	a.log.Trace().Str("package", rel.Pkg.Name).Msg("the release lock is still held")

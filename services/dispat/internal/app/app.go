@@ -77,6 +77,11 @@ type App struct {
 	// repository) and nil under a bypass. It is kept because ownership is a
 	// question a distributed run asks again later, not only once.
 	releaseLock *release.Lock
+	// ownership is the gate every new effect of this release passes: each
+	// publication, local or delegated, and each assignment of a distributed
+	// run. It is opened once the locks are held and is nil for a run that
+	// holds none, which then asks nothing (CCME §28.6).
+	ownership *execution.OwnershipGate
 	// retention is the distributed run's answer to the one question the unlock
 	// path has to ask it: which repositories' exclusion must survive this run
 	// because a publication it authorized cannot be accounted for. It is nil

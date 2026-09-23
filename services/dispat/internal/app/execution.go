@@ -44,6 +44,9 @@ func (a *App) checkExecutionEntry(started runKind) error {
 	if err := a.refuseDispatchWithoutLock(started); err != nil {
 		return err
 	}
+	if err := a.refuseDispatchWithoutLockRead(started); err != nil {
+		return err
+	}
 	return a.refuseDispatchWithoutSecret(started)
 }
 
@@ -114,6 +117,53 @@ func (a *App) refuseDispatchWithoutLock(started runKind) error {
 		execution.CodeConfiguration, execution.CategoryConfiguration,
 		"execution.workers dispatches work to other machines, and %s would release without the remote release lock (%s): a release nothing coordinates cannot be delegated",
 		strings.Join(repositories, ", "), strings.Join(settings, ", ")), repositories, settings)
+}
+
+// refuseDispatchWithoutLockRead refuses a distributed release that could not
+// read its release lock back.
+//
+// `commit.verify: false` is the setting for a remote that rejects `ls-remote`
+// and accepts pushes, and a release that runs everything here honours it by
+// skipping that read, with a warning. A release that delegates work cannot:
+// it reads every lock back before each assignment and each authorization,
+// because a worker it reaches may publish, and a remote it may not read cannot
+// show that this run still owns what it took. A sweep takes no lock and reads
+// none back, so it is not refused here.
+func (a *App) refuseDispatchWithoutLockRead(started runKind) error {
+	if started != runRelease {
+		return nil
+	}
+	repositories := a.calculateUnverifiedLocks()
+	if len(repositories) == 0 {
+		return nil
+	}
+	return a.reportExecutionRefusal(started, execution.NewDiagnostic(
+		execution.CodeConfiguration, execution.CategoryConfiguration,
+		"execution.workers dispatches work to other machines, and commit.verify is off for %s: a release that delegates work reads its release lock back before every assignment and publication, and a remote it may not read cannot show that this run still owns the lock",
+		strings.Join(repositories, ", ")), repositories, []string{"commit.verify"})
+}
+
+// calculateUnverifiedLocks answers which participating repositories switch
+// `commit.verify` off, named as the lock refusal names them: the root the run
+// was given for a single history, and the `.gitmodules` identities of a
+// composed workspace, sorted.
+func (a *App) calculateUnverifiedLocks() []string {
+	if a.workspace == nil {
+		if a.cfg.Commit.IsVerifyEnabled() {
+			return nil
+		}
+		return []string{a.root}
+	}
+	var repositories []string
+	for i := range a.workspace.Repositories {
+		repository := &a.workspace.Repositories[i]
+		if repository.Commit.IsVerifyEnabled() {
+			continue
+		}
+		repositories = append(repositories, repository.Name)
+	}
+	sort.Strings(repositories)
+	return repositories
 }
 
 // refuseDispatchWithoutSecret refuses to dispatch work nothing could sign.

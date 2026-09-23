@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -17,28 +18,100 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // TestPrePublishChecksTheCompleteLockSet: a publication into owner must be
 // withheld when the run lost a different participating repository's lock.
-// The same coordinator also remembers the loss for every later effect.
+// The run's gate also remembers the loss for every later effect, and a
+// coordinator that borrows the gate reads the same decision.
 func TestPrePublishChecksTheCompleteLockSet(t *testing.T) {
 	checks := 0
-	coordinator := &execution.Coordinator{Run: "run-1", Log: zerolog.Nop()}
-	coordinator.VerifyOwnershipWith(func(context.Context) error {
+	application := &App{log: zerolog.Nop(), runID: "run-1"}
+	application.ownership = execution.NewOwnershipGate("run-1", func(context.Context) error {
 		checks++
 		return errors.New("peer repository lock disappeared")
-	})
-	application := &App{log: zerolog.Nop(), runID: "run-1"}
+	}, zerolog.Nop())
 	release := &plan.Release{Pkg: &model.Package{Name: "pkg", Repository: "owner"}}
 
-	err := application.checkLockOwnership(t.Context(), coordinator, release)
+	err := application.checkLockOwnership(t.Context(), release)
 	require.ErrorContains(t, err, "peer repository lock disappeared")
 	assert.Equal(t, execution.CodeLockLost, err.(interface{ DiagnosticCode() string }).DiagnosticCode())
+	assert.Equal(t, execution.CategoryNativeRecordingOrLock, execution.DiagnosticCategory(err))
 	assert.Equal(t, 1, checks)
 
-	require.Error(t, application.checkLockOwnership(t.Context(), coordinator, release))
+	require.Error(t, application.checkLockOwnership(t.Context(), release))
 	assert.Equal(t, 1, checks, "the observed loss is final for this run")
+}
+
+// TestPrePublishWithoutALockAsksNothing: a run that holds no lock, a bypassed
+// one, has no gate, and a single history that composes nothing and delegates
+// nothing gets no callback at all, which is what it always got.
+func TestPrePublishWithoutALockAsksNothing(t *testing.T) {
+	application := &App{log: zerolog.Nop()}
+	release := &plan.Release{Pkg: &model.Package{Name: "pkg"}}
+
+	require.NoError(t, application.checkLockOwnership(t.Context(), release))
+	assert.Nil(t, application.resolvePrePublishCheck(&plan.Plan{}, nil, nil))
+}
+
+// TestLocalFleetReleaseChecksTheWholeLockSet: a fleet that delegates nothing
+// still asks, before each publication, whether it holds every lock it took,
+// and it asks the remote of every participating repository rather than only
+// the one the package publishes into. Real repositories, real remotes: the
+// peer's lock going missing withholds a publication into the other repository
+// with E336.
+func TestLocalFleetReleaseChecksTheWholeLockSet(t *testing.T) {
+	t.Setenv(lockDisableEnv, "")
+	require.NoError(t, os.Unsetenv(lockDisableEnv))
+	w, _ := recordFixture(t, false, false)
+	control := w.byName[config.ControlRepository]
+	w.app.cfg.UnsafeDisableLock = false
+	control.repo.Config.UnsafeDisableLock = false
+	w.byName["source"].repo.Config.UnsafeDisableLock = false
+	controlRemote := t.TempDir()
+	recordGit(t, controlRemote, "init", "-q", "--bare")
+	recordGit(t, control.repo.Root, "remote", "add", "origin", controlRemote)
+	unlock, err := w.acquire(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = unlock() })
+	require.Len(t, w.held, 2, "both repositories are locked")
+
+	w.app.openOwnershipGate(w)
+	rel := &plan.Release{Pkg: &model.Package{Name: "lib", Repository: "source"}}
+	require.NoError(t, w.app.checkLockOwnership(t.Context(), rel), "every lock is still held")
+
+	recordGit(t, controlRemote, "tag", "-d", release.LockTagName)
+	err = w.app.checkLockOwnership(t.Context(), rel)
+	require.Error(t, err, "a publication into source is withheld for the control repository's lock")
+	assert.Equal(t, execution.CodeLockLost, config.DiagnosticCode(err))
+	assert.ErrorIs(t, err, release.ErrLockLost)
+}
+
+// TestOwnershipGateSkipsARemoteWithVerifyOff: commit.verify switches off every
+// ls-remote a release makes of its remote, and reading the lock back is one.
+// A single history with the setting off opens no gate and says so once, at
+// warn level, because a run that forgoes the read must not read as though its
+// ownership had been checked.
+func TestOwnershipGateSkipsARemoteWithVerifyOff(t *testing.T) {
+	t.Setenv(lockDisableEnv, "")
+	require.NoError(t, os.Unsetenv(lockDisableEnv))
+	root, a := guardRepo(t, &config.File{Run: &config.RunConfig{},
+		Commit: &config.CommitConfig{Verify: public.Bool(false)}})
+	origin := t.TempDir()
+	recordGit(t, origin, "init", "-q", "--bare")
+	recordGit(t, root, "remote", "add", "origin", origin)
+	var logs bytes.Buffer
+	a.log = zerolog.New(&logs)
+	_, unlock, err := a.acquireReleaseLocks(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = unlock() })
+
+	a.openOwnershipGate(nil)
+
+	assert.Nil(t, a.ownership, "no lock is read back, so there is no gate")
+	assert.Equal(t, 1, strings.Count(logs.String(), "the release lock is not read back before each publication"))
+	assert.Contains(t, logs.String(), `"level":"warn"`)
 }
 
 // What a release refuses before it takes a lock is decided here; what the
@@ -71,14 +144,15 @@ func executionWorkers() *public.ExecutionConfig {
 // row every other one is measured against.
 func TestCheckExecutionEntryRefusals(t *testing.T) {
 	for name, tc := range map[string]struct {
-		execution *public.ExecutionConfig
-		bypass    bool
-		authority string
-		secret    string
-		noSecret  bool
-		code      string
-		category  string
-		want      string
+		execution   *public.ExecutionConfig
+		bypass      bool
+		isVerifyOff bool
+		authority   string
+		secret      string
+		noSecret    bool
+		code        string
+		category    string
+		want        string
 	}{
 		"no execution settings at all": {},
 		"an orchestrator with no workers": {
@@ -132,6 +206,15 @@ func TestCheckExecutionEntryRefusals(t *testing.T) {
 			execution: executionWorkers(),
 			secret:    "hunter2",
 		},
+		"workers and a remote whose lock is never read back": {
+			execution: executionWorkers(), isVerifyOff: true,
+			secret: "hunter2",
+			code:   execution.CodeConfiguration, category: execution.CategoryConfiguration,
+			want: "commit.verify is off",
+		},
+		"no workers and a remote whose lock is never read back": {
+			isVerifyOff: true,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(execution.AuthorityEnv, tc.authority)
@@ -148,8 +231,11 @@ func TestCheckExecutionEntryRefusals(t *testing.T) {
 			// happened to be started in.
 			t.Setenv(lockDisableEnv, "")
 			require.NoError(t, os.Unsetenv(lockDisableEnv))
-			a, logs := executionEntry(t, &config.File{
-				Execution: tc.execution, UnsafeDisableLock: tc.bypass})
+			cfg := &config.File{Execution: tc.execution, UnsafeDisableLock: tc.bypass}
+			if tc.isVerifyOff {
+				cfg.Commit = &config.CommitConfig{Verify: public.Bool(false)}
+			}
+			a, logs := executionEntry(t, cfg)
 
 			err := a.checkExecutionEntry(runRelease)
 
@@ -266,4 +352,20 @@ func TestCheckExecutionEntryRefusesASweepByTheSameRules(t *testing.T) {
 			assert.Contains(t, logs.String(), `"message":"cannot start sweep"`)
 		})
 	}
+}
+
+// TestCheckExecutionEntryLetsASweepSkipTheLockRead: a sweep takes no release
+// lock and reads none back, so a remote with commit.verify off refuses a
+// distributed release and leaves a distributed sweep alone.
+func TestCheckExecutionEntryLetsASweepSkipTheLockRead(t *testing.T) {
+	t.Setenv(execution.AuthorityEnv, "")
+	require.NoError(t, os.Unsetenv(execution.AuthorityEnv))
+	t.Setenv(executionSecretEnv, "hunter2")
+	t.Setenv(lockDisableEnv, "")
+	require.NoError(t, os.Unsetenv(lockDisableEnv))
+	a, _ := executionEntry(t, &config.File{Execution: executionWorkers(),
+		Commit: &config.CommitConfig{Verify: public.Bool(false)}})
+
+	require.NoError(t, a.checkExecutionEntry(runSweep))
+	require.Error(t, a.checkExecutionEntry(runRelease))
 }

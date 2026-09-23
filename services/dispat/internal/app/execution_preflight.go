@@ -36,7 +36,7 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 	if !a.cfg.Execution.IsDistributed() {
 		return nil, nil
 	}
-	coordinator, err := a.newCoordinator(a.resolveOwnershipGeneration(fleet), a.resolveOwnershipCheck(fleet))
+	coordinator, err := a.newCoordinator(a.resolveOwnershipGeneration(fleet), a.ownership)
 	if err != nil {
 		return nil, a.reportPreflightFailure(err)
 	}
@@ -53,19 +53,21 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 }
 
 // newCoordinator assembles this run's coordinator: who it is, what plan it
-// executes, which ownership it holds and how that ownership is verified again,
-// and one mailbox per configured link.
+// executes, which ownership it holds and the gate that ownership is verified
+// through again, and one mailbox per configured link.
 //
 // The ownership is the caller's, because the two runs that dispatch hold
-// different things: a release holds the locks it acquired and asks the remote
-// about them before every new effect, and a sweep holds no lock and binds its
-// messages to a generation drawn from its own run identity (§28.10).
+// different things: a release holds the locks it acquired, and the coordinator
+// borrows the release's own gate, the one every publication of the run passes,
+// so that a loss decided on either path is the loss both read. A sweep holds no
+// lock, hands in no gate, and binds its messages to a generation drawn from its
+// own run identity (§28.10).
 //
 // The local object store of every mailbox is the repository being released.
 // Transport objects are unreachable there the moment their refs are deleted,
 // so they cost a `git gc` and nothing else, and using the checkout that is
 // already open is what keeps a release from needing a second store of its own.
-func (a *App) newCoordinator(generation string, ownership func(context.Context) error) (*execution.Coordinator, error) {
+func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGate) (*execution.Coordinator, error) {
 	settings := a.cfg.Execution
 	signer, err := execution.NewSigner(os.Getenv(settings.SecretEnv))
 	if err != nil {
@@ -90,7 +92,7 @@ func (a *App) newCoordinator(generation string, ownership func(context.Context) 
 			Task:      time.Duration(timeouts.Task) * time.Second,
 			Cancel:    time.Duration(timeouts.Cancel) * time.Second,
 		}, formatTransferLimits(settings), a.log)
-	coordinator.VerifyOwnershipWith(ownership)
+	coordinator.UseOwnership(ownership)
 	return coordinator, nil
 }
 

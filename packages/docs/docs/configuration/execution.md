@@ -183,6 +183,8 @@ a lock, a plan or a command:
   run that would dispatch;
 - `workers` beside any release-lock bypass: `unsafeDisableLock`, a per-repository bypass, or
   `DISPAT_UNSAFE_DISABLE_LOCK`;
+- `workers` on a release where any participating repository sets `commit.verify: false`, because such a release
+  reads its lock back before every assignment and publication (a sweep, which takes no lock, is not refused for it);
 - a package whose `runOnly` pins a stage to `worker` while the run has no worker links;
 - a package whose `buildPlatforms` no configured worker satisfies;
 - two packages whose `buildOutputs` claim one folder, or a declared root holding another package's folder, which

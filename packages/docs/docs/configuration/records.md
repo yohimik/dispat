@@ -676,7 +676,7 @@ by the version itself and is not configurable. A `1.3.0-beta.0` that gets a rele
 | `force`         | `true`                   | Write a tag this repository already carries at the release's own commit, instead of failing on it. The branch is never force pushed, a release tag found at a different commit is left as it is, and a release tag on the remote is never replaced at all. See [Force](#force) below. `dispat commit --no-force` turns it off for one invocation.                                                                     |
 | `remote`        | `origin`                 | Remote to push to.                                                                                                                                                                                                                                                                                                                                                                                |
 | `name`, `email` | unset                    | The git identity every commit and annotated tag dispat creates is authored under, so a CI run needs no `git config` step. Unset values fall back to git's own configuration.  |
-| `verify`        | `true`                   | Verify remote access (`git ls-remote`) before any release work when `push` is enabled, and read the remote's release tags for the same check. Set `false` to skip both, e.g. for a remote that rejects ls-remote but accepts pushes. The run then warns that it did not compare the records, because a checkout missing one the remote holds can publish that version a second time.                                                                                                                                                                                                                |
+| `verify`        | `true`                   | Verify remote access (`git ls-remote`) before any release work when `push` is enabled, read the remote's release tags for the same check, and read the release lock back before each publication. Set `false` to skip all three, e.g. for a remote that rejects ls-remote but accepts pushes. The run then warns that it did not compare the records, because a checkout missing one the remote holds can publish that version a second time, and that it cannot withhold a publication from a run that took its lock over. A release with worker links refuses `false` with `E225`. |
 | `include`       | none                     | Extra repo-relative paths the release commit stages on top of the published packages' folders. This includes the shared artifacts a version stage or an [`autoVersion.syncLock`](./autoversion.md) regenerates outside every package folder, a workspace-level lock file (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`) first among them. Paths must stay inside the repository. One that does not exist at commit time is simply not staged. |
 
 **Disabled** (the default), dispat creates no commit at all. Each package's annotated tag is created right after its
@@ -703,10 +703,13 @@ Pushing pushes the branch first and the run's tags after it. A single-repository
 pinned checkout while naming the branch that receives its release commit. When `push` is enabled, remote access is **verified before any release work starts**
 (`git ls-remote`, switched off by `verify: false`), so a misconfigured remote fails the run before anything is built.
 The same run also reads the remote's release tags once, under the release lock and before it plans, and refuses a
-checkout the remote has records for that it does not hold (`E196`) or names at another commit (`E191`). `verify: false`
-excuses that read with the others, and the run warns that its records were not compared: a checkout missing one the
-remote holds can then publish that version again. An enabled GitHub configuration is likewise verified up front, push or not (see
-[`github`](#github)). A failure during
+checkout the remote has records for that it does not hold (`E196`) or names at another commit (`E191`). Before each
+publication it reads the [release lock](../reference/releasing/release-lock.md) back and withholds the publication
+(`E336`) when another run has taken it over. `verify: false` excuses those reads with the others, and the run warns
+that its records were not compared, since a checkout missing one the remote holds can then publish that version again,
+and that its lock is not read back. A release that delegates work to worker nodes refuses `verify: false` with `E225`,
+because it reads its lock back before every assignment as well. An enabled GitHub configuration is likewise verified
+up front, push or not (see [`github`](#github)). A failure during
 the finalize phase itself (commit, tag, push, GitHub release) exits 1 with everything else in the phase still done, and
 already-published registry artifacts stay published. See
 [After the point of no return](../internals/architecture.md#after-the-point-of-no-return).

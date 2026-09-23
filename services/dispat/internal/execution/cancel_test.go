@@ -256,6 +256,43 @@ func TestOwnershipLossNamesItsReason(t *testing.T) {
 	}
 }
 
+// TestABorrowedGateSharesOneLoss: a release's publications and its dispatch
+// ask one gate. A loss the publication path decided is the loss the next
+// assignment reads, without asking the remote again, and it ends the attempts
+// the dispatch already has in flight.
+func TestABorrowedGateSharesOneLoss(t *testing.T) {
+	asked := 0
+	gate := NewOwnershipGate("run-1", func(context.Context) error {
+		asked++
+		return fmt.Errorf("verifying: %w", release.ErrLockLost)
+	}, zerolog.Nop())
+	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop()}
+	coordinator.UseOwnership(gate)
+	inFlight, settled := coordinator.watchOwnership(t.Context())
+	defer settled()
+
+	require.Error(t, gate.Check(t.Context()), "the publication path decides the loss")
+
+	assert.Error(t, inFlight.Err(), "the loss reaches the attempt the dispatch registered")
+	require.Error(t, coordinator.checkOwnership(t.Context()))
+	assert.Equal(t, 1, asked, "the dispatch reads the decision instead of asking again")
+}
+
+// TestANilGateAsksNothing: a run that holds no lock carries no gate, as a sweep
+// does, and every question put to the missing gate is answered without asking
+// anybody.
+func TestANilGateAsksNothing(t *testing.T) {
+	coordinator := &Coordinator{Run: "sweep", Log: zerolog.Nop()}
+	coordinator.UseOwnership(nil)
+
+	require.NoError(t, coordinator.checkOwnership(t.Context()))
+	attempt, done := coordinator.watchOwnership(t.Context())
+	require.NoError(t, attempt.Err())
+	done()
+	var gate *OwnershipGate
+	require.NoError(t, gate.Check(t.Context()))
+}
+
 func TestCancelledOwnershipLookupDoesNotReportLockLoss(t *testing.T) {
 	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop()}
 	coordinator.VerifyOwnershipWith(func(ctx context.Context) error { return ctx.Err() })

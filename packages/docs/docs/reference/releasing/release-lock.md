@@ -30,7 +30,12 @@ A release happens in five steps:
    this checkout does not have is `E196`; the same version named at two commits is `E191`. Both stop the run before
    anything is planned, and the remedy is `git fetch --tags`, because a run that refreshed its records after reading
    them would be planning from something nothing checked.
-4. Do everything else: plan, build, publish, record, tag, push.
+4. Do everything else: plan, build, publish, record, tag, push. Before each publish command, read the lock back from
+   the remote. A remote that carries another object under the name, or none, belongs to another run now: the
+   publication is refused with `E336` before its command starts, and no later publication of the run starts either.
+   A read that fails is tried again, three reads in all, each bounded, and a remote that answers none of them is
+   refused the same way, because the run cannot show that it still owns the repository. `commit.verify: false`
+   skips this read with a warning, for a remote that rejects `ls-remote` and accepts pushes.
 5. Delete the remote tag only if it still points to this run's object, then remove the local attempt tag.
 
 The last step happens no matter what the ones before it did. A failed package, a guard refusing the run, or an empty

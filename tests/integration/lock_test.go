@@ -562,3 +562,81 @@ func TestReleaseLockIsNotAReleaseTag(t *testing.T) {
 	assert.True(t, r.IsTagged("0.2.0"), "tags: %v", r.TagList())
 	assertLockCleared(t, r, bare)
 }
+
+// TestReleaseLockReplacedBeforePublishWithholdsThePublication: a release asks
+// again, before every publish command, whether it still holds its lock, and
+// it asks the remote. A beforePublish hook that replaces the lock, exactly as
+// a second machine's release would leave it, makes that question answer no:
+// the publication is refused with E336 before its command starts, nothing is
+// tagged, and the replacement is somebody else's lock, so this run's cleanup
+// leaves it where it is.
+func TestReleaseLockReplacedBeforePublishWithholdsThePublication(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(markerBuild, 1)
+	cfg.Scripts["publish"] = models.Script{"echo published > ../../publish.marker"}
+	r.SeedPackage("packages", "core")
+	r.WriteConfigModel(cfg)
+	r.Commit("feat(core): first")
+	bare := r.AddBareRemote()
+	r.Git("push", "-q", "origin", "HEAD")
+	cfg.Scripts["replace"] = models.Script{
+		"git -C " + bare + " tag -d " + lockTag,
+		"git -C " + bare + " -c user.email=other@dispat.test -c 'user.name=other clone'" +
+			" tag -a " + lockTag + " -m 'held by another release' " + harness.DefaultBranch,
+	}
+	cfg.Spaces["libs"].Flow.BeforePublish = []string{"replace"}
+	r.WriteConfigModel(cfg)
+
+	res := releaseLocked(r)
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	refused, isRefused := executionLine(res, "publication not authorized")
+	require.True(t, isRefused, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, executionLockCode, refused.Code())
+	assert.Equal(t, "native-recording-or-lock", refused.Str("category"))
+	lost, isLost := executionLine(res, "the release lock was lost, so no new effect may start")
+	require.True(t, isLost, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, "lost", lost.Str("reason"))
+	assert.NoFileExists(t, r.Path("publish.marker"), "the publish command never started")
+	assert.Zero(t, r.TagCount("core@"), "nothing was tagged")
+	assert.True(t, remoteHoldsLock(t, bare), "the replacement survives this run's cleanup")
+	assert.Contains(t, bareGit(t, bare, "cat-file", "tag", lockTag), "held by another release")
+}
+
+// TestReleaseLockVerifyOffSkipsTheLockRead: `commit.verify: false` is the
+// setting for a remote that rejects `ls-remote` and accepts pushes, and reading
+// the lock back before a publication is another `ls-remote`. With the setting
+// on, a remote no read reaches withholds the publication after three reads;
+// with it off the lock is never read back, the run says so once at warn level,
+// and the release publishes and gives its lock back.
+func TestReleaseLockVerifyOffSkipsTheLockRead(t *testing.T) {
+	for name, isVerified := range map[string]bool{"verify on": true, "verify off": false} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(markerBuild, 1)
+			cfg.Commit = &models.CommitConfig{Verify: models.Bool(isVerified)}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
+			bare := r.AddBareRemote()
+			fault := harness.NewGitFault(t, harness.GitFault{Pattern: executionLockReadPattern})
+
+			res := r.CommandEnv(append(fault.Env(), harness.LockEnabled...))
+
+			assertLockCleared(t, r, bare)
+			if isVerified {
+				require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+				assert.Equal(t, 3, fault.Matches(), "the lock is read back, three times, before the publication")
+				assert.True(t, harness.IsCodePresent(res.Events, executionLockCode), "stdout:\n%s", res.Stdout)
+				assert.Zero(t, r.TagCount("core@"))
+				return
+			}
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Zero(t, fault.Matches(), "the lock is never read back")
+			assert.Equal(t, 1, executionLineCount(res,
+				"the release lock is not read back before each publication: commit.verify is off for this remote, "+
+					"so a publication cannot be withheld when another run has taken the lock over"))
+			assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+		})
+	}
+}
