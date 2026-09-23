@@ -32,7 +32,18 @@ type coordinatorFixture struct {
 	coordinator  *Coordinator
 }
 
-func newCoordinatorFixture(t *testing.T, limits TransferLimits) *coordinatorFixture {
+// The preflight bounds the fixtures give a run. An answered probe returns the
+// moment the node's report arrives, so its bound only has to outlast the
+// answer: several git subprocesses, which a loaded runner has been seen to
+// take past two seconds over, and it matches the fake node's own patience in
+// answer. A probe nothing valid answers is waited out in full, so its bound
+// stays short.
+const (
+	answeredPreflight = 20 * time.Second
+	silentPreflight   = 2 * time.Second
+)
+
+func newCoordinatorFixture(t *testing.T, limits TransferLimits, preflight time.Duration) *coordinatorFixture {
 	t.Helper()
 	orchestrator := newMailboxFixture(t)
 	node := orchestrator.second(t)
@@ -40,7 +51,7 @@ func newCoordinatorFixture(t *testing.T, limits TransferLimits) *coordinatorFixt
 	coordinator := NewCoordinator("run-1", "digest", "generation",
 		LocalNode{Name: "here", Capacity: 1}, links,
 		map[string]*GitMailbox{"build-a": orchestrator.mailbox}, orchestrator.signer,
-		Timeouts{Preflight: 2 * time.Second}, limits, zerolog.Nop())
+		Timeouts{Preflight: preflight}, limits, zerolog.Nop())
 	return &coordinatorFixture{orchestrator: orchestrator, node: node, coordinator: coordinator}
 }
 
@@ -113,7 +124,7 @@ func replyHeader(assignment Assignment) Header {
 // to close.
 func TestPreflightAcceptsANodeThatCanTakeTheWork(t *testing.T) {
 	limits := TransferLimits{MaxFiles: 10, MaxBytes: 20, MaxManifestBytes: 1 << 20}
-	fixture := newCoordinatorFixture(t, limits)
+	fixture := newCoordinatorFixture(t, limits, answeredPreflight)
 	fixture.answer(t, fixture.node.signer, healthyReport(limits))
 
 	err := fixture.coordinator.Preflight(t.Context(),
@@ -173,7 +184,13 @@ func TestPreflightRefusesBeforeAnythingIsDispatched(t *testing.T) {
 			says:     "buildPlatforms"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			fixture := newCoordinatorFixture(t, limits)
+			// A report signed with the run's secret is answered; no report,
+			// or one the run cannot verify, is waited out.
+			preflight := silentPreflight
+			if tc.report != nil && tc.secret == "" {
+				preflight = answeredPreflight
+			}
+			fixture := newCoordinatorFixture(t, limits, preflight)
 			if tc.report != nil {
 				signer := fixture.node.signer
 				if tc.secret != "" {
@@ -210,7 +227,7 @@ func identityOf(err error) Identity {
 // cannot be closed by this run, and that is a warning rather than a failed
 // release, because a coordination branch carries no release record.
 func TestPreflightReportsARetainedBranch(t *testing.T) {
-	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20})
+	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, silentPreflight)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
 	_, err := fixture.orchestrator.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
 	require.NoError(t, err)
