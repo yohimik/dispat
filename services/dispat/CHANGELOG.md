@@ -1,5 +1,880 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.4 (2026-09-23)
+
+### Features
+
+- carry a sweep's declared outputs back to the orchestrator ([204ba42](https://github.com/yohimik/dispat/commit/204ba42f3b1a13bd3f50eabc7bfc8f55a699c3bb)) (by yohimik, Claude Opus 5.5)
+  A sweep task that ran on another machine left what it wrote there.
+  `runOutputs`, read from the entry configuration alone, now names the
+  folders a script's tasks write, relative to the root of each package's
+  repository. After a delegated task succeeds, the node captures those roots
+  under the manifest and the transfer ceilings every output set is held to;
+  a root the script did not write is admitted as empty, a deliberate
+  difference from a build output root. The orchestrator verifies each set
+  through the one validator and records it beside the sets already admitted.
+
+  Every task of a sweep writes into one root, so the orchestrator merges
+  instead of replacing: each file is staged and verified, then moved into
+  place file by file, replacing the file of its own path and keeping every
+  other file of the root. A set is installed all or nothing, and a move that
+  fails puts back what it already moved. The merge waits until every task has
+  answered: two tasks writing one path with different bytes fail the sweep
+  with E227 naming the path and both tasks, and neither task's set is merged,
+  so the root holds neither file. Identical bytes are merged once. A task
+  placed on the orchestrator writes into the checkout directly and captures
+  nothing.
+
+- run script sweeps on worker nodes ([9d74ac8](https://github.com/yohimik/dispat/commit/9d74ac870487dbb6045990ee1a096c0127474230)) (by yohimik, Claude Opus 5.5)
+  `dispat run` had no distributed path: a sweep ran every package's script
+  in this checkout whatever `execution.workers` said. With worker links,
+  from the file or from `--worker`, a sweep now runs the way a distributed
+  release runs its task graph. The refusals come first and are a release's:
+  a worker, or a process under worker authority, may not start one, and a
+  lock bypass beside worker links is refused with E225. The plan is fixed
+  and named, every link is probed, and each package's task goes through the
+  coordinator with the new kind `run`, placed by the package's own `runOnly`
+  as its build would be, the orchestrator last under `both`.
+
+  A sweep task carries the script's commands and nothing around them, the
+  computed environment with the static pairs unresolved, and the package's
+  input closure; it installs nothing from other tasks. The node runs it
+  with DISPAT_STAGE=run:<script> and returns its exports, which are merged
+  onto the release so a consumer on another machine reads its providers'.
+
+  A sweep takes no release lock: it records nothing and authorizes no effect,
+  so its messages are bound to a generation drawn from its own run identity,
+  and a release of the same repositories may run beside it. A distributed
+  sweep ends with the summary a distributed release prints, one line per
+  task with its node, its computation and its exports count. Without links
+  nothing changes, except that a package whose `runOnly` pins its build to a
+  worker is refused with E225 instead of being run on this machine.
+
+- name a worker on the command line ([4de5d48](https://github.com/yohimik/dispat/commit/4de5d480c45ecb3e1fef20cb3edd389413f48401)) (by yohimik, Claude Opus 5.5)
+  A pipeline that creates a worker machine a minute before the run cannot
+  write it into the committed file. `--worker name=endpoint`, repeatable on
+  release, run and status, adds one link to the entry configuration's
+  `execution.workers` before anything is validated, so a link stated on the
+  command line is held to every rule a configured one is: the node name, the
+  credential-free endpoint, the folded uniqueness against the file's own
+  links and the signing secret the file has to name. A refusal names the
+  value the operator typed, never its endpoint.
+
+  A malformed value is a usage error. Under worker authority, or on a node
+  whose file says `role: worker`, the flag is refused with E226: a worker
+  never dispatches to a pool. The links are no part of the plan digest.
+
+- read and check the run outputs a configuration declares ([235bd00](https://github.com/yohimik/dispat/commit/235bd00006ea5008b3257b8b1719ca63a39f7040)) (by yohimik, Claude Opus 5.5)
+  `runOutputs` is read from the root file and refused anywhere else as an
+  unknown key. Every root is held where the file loads to the shape a build
+  output root is held to, worded for a path relative to the repository root,
+  and one script's list holds no root twice or one inside another. Once every
+  package is known, a root that is or holds a package folder, or that overlaps
+  a package's declared build output root, is refused at discovery, so `dispat
+  status` reports it. In a composed workspace the entry's roots are resolved
+  against the repository of every swept package. Every refusal carries E225.
+
+  The path rules the two keys share are one function now; the build outputs'
+  own refusals read exactly as before.
+
+- report computed, admitted, published and recorded outcomes apart ([71eb3e7](https://github.com/yohimik/dispat/commit/71eb3e78dc7b11b1f72ddd18d931a5f3661157ff)) (by yohimik, Claude Opus 5)
+  A completed task is not a released package, so a distributed run now prints one
+  line per task in plan order with the four outcomes in four columns, the
+  machine each frame ran on including this one, the providers it prepared without
+  releasing them, the dependents it never attempted and the publications it
+  cannot account for. A totals line counts each of them separately, and an
+  execution metrics line states what the run cost without comparing it to
+  anything.
+
+- start no new effect after the lock is lost, and retain the one exclusion that has to survive ([93b4038](https://github.com/yohimik/dispat/commit/93b4038d02b4cf68b911bd17a3b5807cae8dd18e)) (by yohimik, Claude Opus 5)
+  Ownership was verified before the plan was fixed and never again, so every
+  assignment written afterwards was a new effect started on a check that was
+  minutes old. It is asked again of the remote before each one, cached for a few
+  seconds so a fan-out costs one query per owning repository, and a loss ends the
+  attempts already in flight as an interrupt does. A run that authorized a
+  publication it cannot account for now leaves that repository locked, with the
+  order of recovery named instead of an instruction to delete a tag.
+
+- hold capacity until acknowledged cancellation ([2875bf6](https://github.com/yohimik/dispat/commit/2875bf6d603bc947634951209403f9479d61a72f)) (by yohimik)
+  A wait that elapsed says what the run stopped expecting and nothing about the
+  machine at the other end, so a node slot now comes back only on a result, on
+  an acknowledged withdrawal, or on a coordination ref this run revoked before
+  anybody claimed it. An assignment that merely queued behind another run is
+  revoked and placed again under an attempt of its own, so queue time is no
+  longer charged as run time, and every assignment carries the deadline its node
+  enforces on its own clock.
+
+- withhold reauthorization while a publication outcome is unknown ([2875bf6](https://github.com/yohimik/dispat/commit/2875bf6d603bc947634951209403f9479d61a72f)) (by yohimik, Claude Opus 5)
+  An authorized publisher that never reported is withdrawn and asked what it had
+  got to. A node that stopped before its publish command began leaves an outcome
+  the run knows; one that stopped inside it, or never answered, leaves one nobody
+  here can establish, so the package fails at publish with no tag, no record and
+  no second attempt under that authorization, and the repository it was
+  publishing into is remembered as one whose exclusion has to survive the run.
+
+- revalidate relevant inputs and lock ownership before authorizing a publication ([6c0b32a](https://github.com/yohimik/dispat/commit/6c0b32a81a057a1458c7ae3f2cc2650d54cff9d6)) (by yohimik, Claude Opus 5)
+  A distributed run asks three things in the moment between a packages
+  beforePublish hook and its publish command: whether it still holds the
+  owning repositorys lock, whether the fleet is still the one the plan was
+  computed over, and whether anything the artefact was built from moved
+  after the build consumed it.
+
+- publish from workers under orchestrator authorization ([b2db70c](https://github.com/yohimik/dispat/commit/b2db70cb96a8b1a074b0925f6fe62489ccecb4d2)) (by yohimik, Claude Opus 5)
+  A publish stage of a space with no login script and an explicit runOnly
+  worker value now runs on a node, behind the ready and go handshake: the
+  node installs the packages own admitted outputs, runs the beforePublish
+  hook and waits, and the run authorizes the command once, after it has
+  revalidated what only it can revalidate.
+
+- prepare unreleased providers without adding releases ([a2544c6](https://github.com/yohimik/dispat/commit/a2544c699272710d0e9b0aa7f43d53efd675ee97)) (by yohimik, Claude Opus 5)
+  A consumer compiles against the folder its provider builds whether or not
+  this run releases the provider, so a run that delegates builds now builds
+  such a provider once, under the environment dispat run gives the same
+  package, and admits its outputs through the path every other build output
+  takes. Nothing about a release is invented for it: no version, no tag, no
+  changelog, no record, no event and no plan entry.
+
+- place each stage on the orchestrator or a worker as runOnly says ([779a2a9](https://github.com/yohimik/dispat/commit/779a2a93670f3ec4e9e4da725635efacfe13e414)) (by yohimik, Claude Opus 5)
+  The orchestrator joins its own pool as a node of last resort: a build it
+  takes captures, describes and admits its outputs through the path a
+  worker's result travels, so a consumer cannot tell the two apart.
+
+- let consumers build beside a provider and publish after it ([33ebac3](https://github.com/yohimik/dispat/commit/33ebac351b3b5c2f9d3fc147eeb427c70bc16388)) (by yohimik, Claude Opus 5)
+  The provider relation resolves onto two questions rather than one flag:
+  what a consumer's version and build stage waits for, and whether a
+  provider that failed outranks a consumer reason of its own. A deploy-order
+  provider states `none` and its consumers build beside it while their
+  publications still follow.
+
+- transport dependent build outputs between workers ([ef07597](https://github.com/yohimik/dispat/commit/ef07597002caba1ee824c59e2162a5ffcbe12206)) (by yohimik, Claude Opus 5)
+  A node that finished a build captures its declared outputs into the same
+  compare-and-swap push that reports the task, so the report and the bytes
+  it describes travel together. The orchestrator admits the set against the
+  roots the plan declares, installs it into its own checkout so that the
+  stages which stay here still see the files, and names the admitted
+  manifest to every consumer in the closure; when a consumer reads a
+  different mailbox the object is relayed onto it as an immutable branch.
+  A consuming node verifies the manifest it fetched against the digest it
+  was assigned and installs every root of every input before its first
+  command, so a prerequisite that cannot be retrieved and verified fails
+  the task rather than becoming a build against whatever was there.
+
+- bind declared build outputs to a verified manifest ([117911e](https://github.com/yohimik/dispat/commit/117911e16b5a55e9efafb7346b07effa1e8697ce)) (by yohimik, Claude Opus 5)
+  Source synchronization alone does not make a provider's ignored dist
+  folder available to a consumer on another machine, so a declared output
+  set is captured into a tree of its own and described by a manifest bound
+  to the run, the plan, the task attempt and the states the build
+  consumed. One validator holds that description to every rule, so the
+  orchestrator that admits a set and the node that consumes it cannot
+  disagree about what a usable set is, and installation assembles the whole
+  set before it replaces a declared root.
+
+- let a task raise webhook events from its worker ([086db23](https://github.com/yohimik/dispat/commit/086db23f2d98d1f79218e1fdda7d358c1036c97b)) (by yohimik, Claude Opus 5)
+  Reporting progress writes no release ref and starts no release, so a build
+  script may raise its own events wherever the build was placed. Refusing the
+  word under worker authority made moving a build to another machine a change
+  in what a repository's receivers hear, which a placement decision may not be.
+
+- name the node on every log line and webhook event of a distributed run ([52b1d78](https://github.com/yohimik/dispat/commit/52b1d780109535cfbbc46b96c12e3c16cedba91c)) (by yohimik, Claude Opus 5)
+  A release spread over several machines is read from several logs at once, so
+  every process taking part says who it is: the run logger is derived once,
+  where the configuration is first known, and the dispatcher stamps the same
+  two names on every event that leaves it. A line or event about another node
+  names that node in a field of its own, which is what the orchestrator side of
+  gates 6 and 7 now uses. A repository that states no execution object writes
+  and delivers what it always did.
+
+- let a standalone package live at the repository root ([95f7660](https://github.com/yohimik/dispat/commit/95f76602f44f40d41d8635e94eb5cdfb0e01c7a1)) (by yohimik, Claude Opus 5)
+  A `packages` entry may name "." so a single-package repository declares its
+  one package as the repository itself. The root configuration file is not
+  merged in as that package's own folder layer, the invocation folder no
+  longer infers it as a selection, and revertOnFail is refused on it.
+
+- delegate build stages to workers from a prepared snapshot ([4223a57](https://github.com/yohimik/dispat/commit/4223a5745eb9d707887165d37ed9c08266a8b8a5)) (by yohimik, Claude Opus 5)
+  Every build frame of a distributed run is executed on a worker node, from
+  a commit whose parent is the planned head and whose tree is the working
+  state as it stands. The version and syncLock frames stay here, bracketed
+  by the guard that keeps their writes out of a snapshot somebody is taking.
+
+- preflight every worker before dispatch ([9a3ebce](https://github.com/yohimik/dispat/commit/9a3ebcea17d33388330dc02bc16981ca7bd7348d)) (by yohimik, Claude Opus 5)
+  A release that delegates work asks every configured node what it is once the
+  plan is fixed and before the first hook: the protocol version, the platform,
+  the capacity and the transfer ceilings have to admit the work this plan would
+  place on the pool, and a node that cannot answer fails the run with nothing
+  published and nothing tagged. The coordinator owns every ref the run creates
+  and closes them before the locks go back.
+
+- add the worker command and its signed git mailbox ([c1620b1](https://github.com/yohimik/dispat/commit/c1620b16d0341b2294b8836faa95fd3a6452ef87)) (by yohimik, Claude Opus 5)
+  A serving node is started with `dispat worker`: it reads the work addressed
+  to it from a git repository used as a mailbox, answers a probe with what it
+  is, and refuses everything else with a stable reason and no echo of what it
+  refused. One goroutine owns the poll, the memo, the object cache and the
+  record of what has already been answered.
+
+  Every message is authenticated by an HMAC over the kind of message and the
+  exact document bytes. The kind has to be inside the code, because which
+  message a document is comes from the name of the file it travels under:
+  without it, anybody able to push to the mailbox could publish an authentic
+  withdrawal as an authorization without ever holding the secret. Every message
+  after the first also names the commit it answers, so an authentic message
+  cannot be replayed at another position of its branch.
+
+- derive an ownership generation from the held release locks ([187456f](https://github.com/yohimik/dispat/commit/187456fe59bbc3e4a3d4e1bd08a1bfc9cb07b75d)) (by yohimik, Claude Opus 5)
+  Publication is authorized under the ownership the orchestrator still holds
+  (CCME 28.6), so ownership has to be a question with a remote answer and a name
+  of its own. IsHeld compares the tag object the run pushed with the one the
+  remote advertises, the generation is a sha256 over the sorted locks, and the
+  acquired locks are kept so both can be asked later.
+
+- add compare-and-swap transport plumbing ([1c916c6](https://github.com/yohimik/dispat/commit/1c916c6322af2cbdde08db64c1b6511d327f6681)) (by yohimik, Claude Opus 5)
+  A coordination branch moves by one leased push, so the remote decides who won
+  and no reader has to trust a check it made a moment earlier. A rejection is
+  told from a transport failure by the porcelain status flags rather than by
+  git's wording. git prints those flags on standard output and still exits
+  non-zero, so the leased pushes read a failed command's output through the
+  streaming runner. Every other caller keeps the contract it was written
+  against: a failed invocation returns nothing beside its error, which matters
+  because rev-parse echoes an unknown argument on its way to failing.
+
+- fix a plan digest over semantic input ([1a914e9](https://github.com/yohimik/dispat/commit/1a914e9be4b5362c4c716763d4266a03c2daa1e0)) (by yohimik, Claude Opus 5)
+  The orchestrator of a distributed run has to name the plan it fixed so every
+  node can tell which release it is taking part in (CCME 28.3), and the name has
+  to follow what is released rather than where the release runs (17.2). The
+  digest is a sha256 over a canonical document that serializes no map, and it is
+  computed and reported only where workers are configured.
+
+- refuse a release under worker authority or a lock bypass with workers ([731782c](https://github.com/yohimik/dispat/commit/731782c77d378eb41ed17051486aaee44bc0ebdf)) (by yohimik, Claude Opus 5)
+  A release is started by an orchestrator, so the two states that are not one
+  refuse before the first lock is pushed: a node whose configured role is worker,
+  and a process executing somebody else's task, which is a marker the worker's
+  task runner puts in the environment of every command it starts. The marker
+  reaches a build script the way every other variable does, so the command line
+  refuses the release and the commands that write a native release ref however
+  deeply they are nested, and leaves the helpers a build legitimately runs alone.
+
+  A run that delegates work is held to two further rules, and both are answered
+  before anything is dispatched. The unsafe lock bypass exists for a repository
+  with no remote to coordinate through, and a run reaching other machines is the
+  opposite situation, so the configured switch, the environment switch and a peer
+  that states one for itself each refuse the run rather than warn it, naming the
+  repositories and the setting the warning would have named. The variable naming
+  the signing secret has to hold something, and the refusal names the variable
+  rather than reading it.
+
+  Every refusal carries the numbered code dispat has always printed and, beside
+  it, the machine-readable outcome class the specification requires, so a CI job
+  can switch on the class without learning the numbers. The six classes and the
+  codes this profile owns are declared together for that reason. Execution
+  settings an imported or linked peer states are reported ignored once per run
+  and are never read: any peer may be another run's entry, and a checkout that
+  travels to another machine does not get to say what that machine may do.
+
+- resolve build outputs and platforms through the ladder ([8385235](https://github.com/yohimik/dispat/commit/8385235bdb801f2f0818008ce855fdd42c049bc9)) (by yohimik, Claude Opus 5)
+  The two keys have a line in all four field tables and fold through the same
+  merge every space-shaped key does, so a package folder's own file outranks
+  the space folder's file, which outranks the root file's space entry, and a
+  stated list replaces the inherited one rather than adding to it. What a
+  package ended up with lands on its resolved space, and `dispat status
+  --log-level debug` names both lists on the package's resolved line when it
+  has them, which is the one place a reader can check the ladder without
+  starting a release.
+
+  Every rule is one E225 refusal naming the key path. An entry has to be a
+  relative slash-separated path inside the package folder, with no `..`, no
+  `.git`, no backslash, no colon and no NUL, and no entry may be another
+  entry's folder, because a root travels whole. A platform is os/arch and may
+  not be stated twice.
+
+  The last rule needs every package to be known: folders may nest, so two
+  packages can come to claim one folder, and its contents would then be
+  attributed to whichever build finished last. Discovery resolves every
+  declared root against its own package folder and refuses an equal, a
+  containing or a contained pair, naming both packages and both paths. The
+  comparison folds case, because a checkout on a case-insensitive filesystem
+  would merge the two.
+
+  A root is installed by replacing the folder it names, so two more shapes are
+  refused for what installing them would destroy: the package folder itself as a
+  root, and a root that holds another package folder, whether or not that nested
+  package declares anything.
+
+- validate execution settings at load ([1a06f66](https://github.com/yohimik/dispat/commit/1a06f6664568c5738d0870f31a4360c6b6caa382)) (by yohimik, Claude Opus 5)
+  The key has a line in the root object table alone, so a space, a package or a
+  folder file refuses it as an unknown key: a checkout that travels to another
+  machine must not be able to tell that machine what role it plays. Every rule
+  it is held to is one E225 refusal naming the key path, before any lock, plan
+  or command: the role vocabulary, a capacity below one, the node names, the
+  credential-free mailbox addresses, the variable naming the signing secret,
+  and the bounds a distributed run waits and transfers under. A refused address
+  is named with its user half, query and fragment taken off, because those are
+  the three places a credential would sit and the refusal is the one place the
+  value would otherwise be written into a log.
+
+  The settings are read from the entry configuration alone. An imported or
+  linked peer may state its own object, because any peer may be another run
+  entry, and it is validated with that file and never consulted. Nothing reads
+  the settings yet.
+
+- share a version prefix without sharing counter and channel ([3d65177](https://github.com/yohimik/dispat/commit/3d65177421bbbb31b329df714afb87935b9e1020)) (by yohimik, Claude Opus 5)
+  A versioning group held its members to one prerelease counter and one
+  channel, which is right when the version is a badge of the release itself
+  and wrong when the group shares only a prefix: a retry after a partial
+  publication burned a counter for members that had nothing to add, and
+  ending one member's train ended everybody's.
+
+  The two axes are now selectable per group, and the rule is one sentence: the
+  group engages when a part of the version it shares moves. With a counter of
+  its own each member continues from its own baseline, so a retry plans the
+  failed run's versions for the legs that failed and nothing for the ones that
+  published; with a channel of its own only the packages a directive names
+  enter or leave a train, while a movement of the shared prefix still takes
+  every member, each on its own line. Both axes default to the behaviour they
+  replace, so no group's plan changes until it opts in.
+
+### Fixes
+
+- read back a created release whose notes are longer than an error message ([18dc54f](https://github.com/yohimik/dispat/commit/18dc54f9a4d6dae884611e89fae4bb6628924793)) (by yohimik, Claude Fable 5.1)
+  GitHub created the candidate's release and echoed its 63,627 bytes of notes,
+  and the client refused the answer as larger than the 64 KiB bound sized for
+  an error message, failing a publication the server had already performed
+  and leaving the release without its binaries. Reading one release, created
+  or looked up, is now bounded at 1 MiB, above the 125,000 characters of notes
+  GitHub accepts plus their escaping and the release's metadata.
+
+- carry the exit status of a command that failed on a node into the run's message ([ff002eb](https://github.com/yohimik/dispat/commit/ff002eb7f97eb3a4955e0cb5eaa806b9a1e32345)) (by yohimik, Claude Fable 5.1)
+  A node reported a failed frame with an exit field nobody filled, so the run
+  said "exit 0" of every script that failed on a worker, and the operator had
+  to open the node's log to learn the status. The node now reads the status
+  off the command's error, through whatever wrapping the sequence added, and
+  the run names it; a failure that was not a command's, an input, a deadline
+  or a refusal, names none.
+
+- show a sweep's run outputs and a named worker in the example files ([1de3ede](https://github.com/yohimik/dispat/commit/1de3edec4c32b54da09ff276cbb56ecd4713377e)) (by yohimik, Claude Opus 5.5)
+  The main example pair declares a `test` script whose reports land under
+  the repository's `coverage/`, and `runOutputs` naming that folder, with a
+  comment saying what a distributed sweep does with it. The orchestrator
+  example says that a pipeline can name a worker it created with `--worker`.
+
+- admit a build's outputs under the attempt that produced them ([f096061](https://github.com/yohimik/dispat/commit/f096061da8068d2a68de196a141e5746772e15c5)) (by yohimik, Claude Opus 5.5)
+  A task whose assignment queued unclaimed is revoked and placed again as
+  its second or third attempt, and the node binds the outputs it captures to
+  that attempt. The orchestrator held every admitted set to attempt 1, so the
+  build that finally ran was refused as `output-identity` and its package
+  failed although nothing about it was wrong; a prepared provider placed
+  again failed its consumers the same way. The admission now expects the
+  attempt that answered.
+
+- attribute a unit's sources to a dependent within the unit's depth of it ([e461d7d](https://github.com/yohimik/dispat/commit/e461d7d9b7869b7f7d231ae21625e95382edafc1)) (by yohimik, Claude Fable 5.1)
+  The bump axis credited the unit's whole source set to every dependent the
+  walk reached, so a consumer two edges from one source and one from another
+  was owed by both, and one that consumes only one of the packages a unit was
+  written over was told it releases because of the other. §9.2 attributes
+  from(d) = {P in sources : dist(P, d) <= depth}, §13.4a's reaching(u, D), and
+  draws the owed set from it; a source the target does not depend on within the
+  unit's depth owes it nothing, whatever delivered says of the pair. A consumer
+  that ui had delivered a shared commit to was released again on core's
+  account, two edges away.
+
+  The reaching set is read off the cached per-source walks the composed walk is
+  built from; a unit over one package reaches every target from it and pays
+  nothing. owedSources takes the set in name order and answers a subset in that
+  order. TestMultiScopeSourceOutsideTheManifestsStaysOutOfUpdates pinned the
+  old attribution and now expects the provenance the specification states.
+
+- say in the candidate notes how a proceeding consumer is caught up and where it is not ([e8ce18b](https://github.com/yohimik/dispat/commit/e8ce18b38833ca0e6ca425f58d40e56a0e94aeed)) (by yohimik, Claude Fable 5.1)
+  The caption gains the card's catch-up paragraph, which fits its limit, and
+  both gain the departure the specification's history entry names: an app that
+  released past a failed library is caught up only when it is in the run where
+  the library publishes, until owed windows and E201 land.
+
+- capture build outputs as the build wrote them, whatever the checkout's attributes say ([9f649f8](https://github.com/yohimik/dispat/commit/9f649f88172d02fe4031b5be6bf5b9591e9c031f)) (by yohimik, Claude Fable 5.1)
+  Build outputs were captured with `git add`, which applies the checkout's
+  `.gitattributes` to whatever it stages: a `text` attribute rewrote every
+  CRLF pair inside three libraries of a project that marks its whole tree as
+  text, and the consumers installed corrupted binaries that the project's own
+  integrity check refused. A build output is not source. The forced capture
+  now hashes every file with no filter or conversion, records links and
+  nested repositories as git would, and fills the temporary index by hand;
+  the source snapshot keeps git's conversion, which is what a checkout of it
+  expects.
+
+- let a publishing node answer what it refused and read a withdrawal of an unread authorization ([80e9aab](https://github.com/yohimik/dispat/commit/80e9aabe6e290e488c43b18bda0430e0c03efc95)) (by yohimik, Claude Fable 5.1)
+  A node that refused an authorization, a withdrawal or a stray message
+  leased its failed result over the ready commit although the branch had
+  moved past it, so the result could never be written and the run waited out
+  its task deadline; for an authorization the run had written itself, such as
+  one the node read after its expiry, the run then reported an outcome it
+  could not establish and retained the release lock for a command that never
+  started. The refusal is now reported on top of the message it refused.
+
+  A withdrawal the run wrote on top of an authorization the node had not read
+  yet was refused as a replay, because the node compared it with the ready
+  commit it was waiting at. That is the ordinary shape of a run interrupted
+  within one poll interval of authorizing. The authorization beneath the
+  withdrawal is now read and verified, expired or not, and the withdrawal is
+  acknowledged; the fence before the command reads a withdrawal that landed
+  after the authorization the same way.
+
+- qualify a tag commit without a branch that nothing can take ([729ef32](https://github.com/yohimik/dispat/commit/729ef327826c53c9163c8c309af241ae75b37456)) (by yohimik, Claude Opus 5)
+
+- name the dead-pickup lookup apart from the field it fills ([773f9dc](https://github.com/yohimik/dispat/commit/773f9dceea8db2dd1aea4a95ca5b62bfd5fb4774)) (by yohimik, Claude Opus 5)
+  A field on the task context and a method promoted onto it from the run
+  shared one name, so which of the two a reader sees depended on the
+  receiver they were looking at.
+
+- write this change's comments and rows without em dashes ([e786124](https://github.com/yohimik/dispat/commit/e78612479c41366d56162b4061fddfb9834e8217)) (by yohimik)
+
+- reconcile a proceeding consumer to what its providers published ([e598046](https://github.com/yohimik/dispat/commit/e598046519a7cd7488d82c9d14737ab2faebaf51)) (by yohimik, Claude Opus 5)
+  A consumer that proceeds past a provider which died after its version
+  stage had manifests naming a version nobody will ever publish. Its
+  reconciliation is redone before its publish, against the providers that
+  are still alive, and a consumer whose build already embedded the planned
+  version is blocked with W194 rather than silently rebuilt. The blocking
+  rule itself is read as the specification writes it: every admitted cause
+  of the release, not any own reason.
+
+- admit a provider's unit for a consumer until a release of the provider delivered it ([47c2cb2](https://github.com/yohimik/dispat/commit/47c2cb2e367496aa5d4ace1b63b32558f75bcd16)) (by yohimik, Claude Opus 5)
+  The bump axis asked only whether the dependent had released past the
+  commit, so a consumer that proceeded on a reason of its own while a
+  provider failed or was held was never planned again: it kept the
+  provider's previous version for ever and reported nothing. Admission now
+  follows delivery, for the sources that still owe the dependent a version.
+
+- describe the execution keys in the example configuration ([a38be82](https://github.com/yohimik/dispat/commit/a38be821ed3c3a0c7900cf4f450196c74ac5e5c5)) (by yohimik, Claude Opus 5)
+  The orchestrator and worker examples were written while the profile was being
+  built. Publication is delegated only by an explicit runOnly, a build under
+  `both` may run on either machine, and the transfer window and the task
+  deadline bound what the finished code bounds.
+
+- re-read the branch when a withdrawal loses its lease ([8eeaad4](https://github.com/yohimik/dispat/commit/8eeaad4e8300fbe6acee01dbed6e24494fa218bb)) (by yohimik)
+  Both parties advance one branch under expected-old checks, so a withdrawal
+  written against the object the run last saw loses to a node that moved the
+  branch meanwhile, and that is the ordinary case: a claim reaches the poller up
+  to one poll interval after the node wrote it, and an interrupt inside that
+  window was leased against the assignment and wrote nothing at all. The branch
+  is asked where it is, once, and the withdrawal is written against that; an
+  attempt already at its terminal message needs none.
+
+- read the branch before calling a publication outcome unknown ([75d0d5b](https://github.com/yohimik/dispat/commit/75d0d5b26beb260360c87e7ec491ae66d82dc664)) (by yohimik)
+  An authorization this run could not write was classed by the shape of the
+  push failure, so a push that never left the machine was treated as one whose
+  answer was lost: the package became an unknown outcome and its repository was
+  left locked although no node could have been told anything. The branch is
+  asked instead, which is what answers the question: a tip still carrying the
+  ready commit carries no authorization, and only a branch that moved or cannot
+  be read is the case the mark before the push exists for.
+
+- write a withdrawal on a context the interrupt did not cancel ([349ddb2](https://github.com/yohimik/dispat/commit/349ddb2eb8887db2121c4f72056fc3da10091d70)) (by yohimik)
+  The withdrawal of an in-flight attempt went out on the caller context, which
+  for the commonest reason to withdraw one is already cancelled: an interrupted
+  run wrote no cancellation at all, so the node kept building, its slot was held
+  for nothing and a publisher was left with no answer to the one question that
+  has to be answered before a lock goes back. Both the withdrawal and the wait
+  for its acknowledgement are now bounded by the run cancel wait and detached.
+
+- take over a stale node lock without taking a fresh one ([178bc01](https://github.com/yohimik/dispat/commit/178bc01e4f1d7db73ce9700b2110b2d7cb74c26c)) (by yohimik)
+  Two processes that read the same stale worker state lock could interleave a
+  remove and a create, so the second removed the first fresh claim and both
+  believed they owned the folder, each holding half the record of what had been
+  answered. The stale lock is renamed aside and what was renamed is examined: a
+  live claim is put straight back and its owner reported, which is what the
+  refusal always promised and what a plain remove could not deliver.
+
+- keep the orchestrator own capacity and retry a raced capture ([22aa718](https://github.com/yohimik/dispat/commit/22aa718768c237f5856024e7fe998355500988dc)) (by yohimik, Claude Opus 5)
+  Two conditions on the machine that owns the run. A frame placed here held a
+  lease that could be leaked, so a local frame that ended in anything but a
+  reported result took this node out of its own pool and with it every frame
+  only this node may run. And the capture of a prepared input state stages the
+  repository and then hashes it, so a changelog the recorder renames into place
+  while another package is dispatched failed the capture and the innocent
+  package with it.
+
+- authenticate a cancellation and find a result below the tip ([d337838](https://github.com/yohimik/dispat/commit/d3378382c22f43b537989fd859082fba4939a832)) (by yohimik, Claude Opus 5)
+  Two messages of a coordination branch were believed for the word in their
+  commit tree rather than for their signature. An attempt whose result was
+  buried under one foreign commit waited out the whole task deadline and took
+  its node out of the pool, and a publisher acted on any tip that said cancel,
+  so whoever could write into a mailbox could refuse every publication of every
+  run. The chain under a tip is read for the step that answers the attempt, and
+  a withdrawal is held to the rules an authorization is held to.
+
+- keep a node polling past an unreadable branch and a long task ([4092628](https://github.com/yohimik/dispat/commit/40926281a93283389babe41c554306baa7fe06d1)) (by yohimik, Claude Opus 5)
+  A serving node stopped seeing its work in three ways. One ref that lists and
+  does not fetch failed the whole batched fetch and with it every other branch of
+  that tick. A prepared input state or a relayed result in the node own namespace
+  was read as work and reported as an assignment nobody could read. And the idle
+  clock was a timer reset on progress, so a task that outlasted the timeout was
+  followed by an immediate stop and a node that had just started could stop
+  before it had served anything.
+
+- give a result that carries build outputs the transfer window to report ([f0c9e95](https://github.com/yohimik/dispat/commit/f0c9e9594fc87dda325aa323a1a82de53bd23cca)) (by yohimik, Claude Fable 5.1)
+  A finished task reported on a context bounded by the thirty seconds a small
+  document needs, and a result carrying a build's outputs is the push of those
+  outputs: a 1.7 GB install tree was killed mid-push on a real run and the task
+  never reported. Such a result now travels under the configured
+  transfer.timeout; a result carrying nothing keeps the short bound, so a node
+  asked to stop is not held for the transfer window by a report with nothing
+  to transfer.
+
+- let a consumer with work of its own proceed under a none relation ([ae635e5](https://github.com/yohimik/dispat/commit/ae635e5a4fb5a1ce6cbf5a5b09e5bb5ee68f0142)) (by yohimik, Claude Fable 5.1)
+  The repository owner's rule: a consumer with a change of its own proceeds
+  past a provider that failed or was skipped. isBlocking was true unless
+  stated under a none relation, which skipped such a consumer; it is now
+  false unless stated there as under build, an explicit opt-in to the
+  unconditional skip, and stays true under publish, where the consumer's build
+  takes the provider's publish as its input and no work of the consumer's own
+  can stand in for an input that never existed.
+
+- read a coordination branch again when reading it failed ([c8fec92](https://github.com/yohimik/dispat/commit/c8fec924f1350e688e1fe2fefd54051182bcdc3f)) (by yohimik, Claude Opus 5)
+  A poll remembers every branch whose objects it fetched, so that an
+  unchanged branch is not read twice. The memo was recorded before the
+  caller had made anything of those objects, so a local git failure while
+  resolving the chain or reading the message counted as having dealt with
+  the branch: a tip that never moved again was never offered a second
+  time, and one failed read cost the whole task deadline on either side.
+  Such a branch is now reconsidered, while a message this protocol refuses
+  still is not, because reading it again reaches the same decision.
+
+- materialize a task's repositories outside in ([7c0d2be](https://github.com/yohimik/dispat/commit/7c0d2be05b185e951e64da081d5ba07291e72879)) (by yohimik, Claude Opus 5)
+  A composed workspace hands a node one worktree per repository of the
+  package's input closure, and the closure named the repository that owns
+  the package first. In a linked fleet the peer holding the entry's own
+  checkout is not that repository, so the nested checkout was created
+  first and the entry's worktree was then refused the folder the nested
+  one had just made: every delegated build of a package a peer owns failed
+  with E227. The order is the layout's now, shallowest path first.
+
+- admit no output set from a publication ([12869b0](https://github.com/yohimik/dispat/commit/12869b0d2dd955bb7e2cc3b50d410e041cf02f40)) (by yohimik, Claude Opus 5)
+  A publish task describes no outputs of its own, so running its result
+  through the build admission asked a publisher for a set this run had
+  already admitted from the build and refused the publication for not
+  having one. An authorization is also never issued twice, and the second
+  request is refused without a second withdrawal.
+
+- report a preparation once it has an outcome ([f5348ed](https://github.com/yohimik/dispat/commit/f5348edf6cfecec8c5f2c60cabc6ddf99f34006d)) (by yohimik, Claude Opus 5)
+  The line that opened a preparation said the provider had been built before
+  its first command ran, and the record it leaves is a decision with two
+  branches, which belongs in a function that returns from each of them.
+
+- count only declared providers as a release reason ([7bec6e5](https://github.com/yohimik/dispat/commit/7bec6e525ad542ff4b1ccfd30079d6888435e641)) (by yohimik, Claude Opus 5)
+  A provider reached through a package this run does not release hands
+  the consumer no version to pick up, so its publication must not stand
+  in for a declared provider that failed (SPEC 19.3, 19.5).
+
+- order publications through packages that are not in the plan ([8b76917](https://github.com/yohimik/dispat/commit/8b769178295c6c9e0fdb3540317c1ca4743df619)) (by yohimik)
+  The publish order was taken over the subgraph the plan induces, so a
+  consumer and a provider it reaches only through a package with nothing
+  to release were mutually unordered and the consumer could publish
+  first, against a version nobody had published (SPEC 19.2).
+
+- block a consumer behind a failed provider it reaches through an unreleasing package ([8b76917](https://github.com/yohimik/dispat/commit/8b769178295c6c9e0fdb3540317c1ca4743df619)) (by yohimik, Claude Opus 5)
+  The skip cascade read the direct providers alone, so a provider that
+  failed left the consumers behind an unreleasing package unblocked
+  (SPEC 19.3). Both halves are one walk over the whole graph, and
+  ordering without blocking would publish the consumer after a provider
+  that failed.
+
+- run a build placed on the orchestrator outside the snapshot guard ([5db2c43](https://github.com/yohimik/dispat/commit/5db2c4362673c5b4303e08445b1b95a98417ee0a)) (by yohimik, Claude Fable 5.1)
+  A build frame the orchestrator kept held the shared side of the snapshot
+  guard for as long as the build ran, so every dispatch that needed a fresh
+  snapshot waited for the longest local build, and a waiting capture held
+  every other reader off behind it. The orchestrator takes a build exactly
+  when the workers are busy, which is when the next dispatch is about to be
+  needed, so the run serialised where it was meant to overlap. The guard
+  exists for frames that write the tracked files snapshots are made of; a
+  build writes outputs no snapshot carries, and now holds its pool slot alone.
+
+- carry no build outputs to a consumer across a none relation ([1f70e72](https://github.com/yohimik/dispat/commit/1f70e72dca49ff8dacccb70cffadc437a9b06a06)) (by yohimik, Claude Fable 5.1)
+  A build task's inputs were the declared outputs of its whole provider
+  closure. A provider whose relation is none declares that its consumers'
+  builds read nothing it builds, and such a consumer may be building while the
+  provider still is, so the closure now ends at that provider and at whatever
+  lies behind it on that path. A provider another path still reaches stays an
+  input.
+
+- name the resolved relation in the comment that pointed at the old field ([43ea5ad](https://github.com/yohimik/dispat/commit/43ea5add342e9906bf35ca2bb4575a48b990e1af)) (by yohimik, Claude Opus 5)
+
+- order builds through packages that do not build ([e49d3c6](https://github.com/yohimik/dispat/commit/e49d3c6d2a659b1f65334b37f9558fd23c9b2542)) (by yohimik, Claude Opus 5)
+  Build order was taken over the subgraph the plan induces, so a provider
+  reached only through a package with nothing to release was unordered
+  against its consumer. It is now taken over the whole dependency graph and
+  restricted to the packages that build, as the publish order is, and a
+  `none` hop ends the constraint of every path through it.
+
+- refuse an output link whose target climbs after it descended ([d4e49eb](https://github.com/yohimik/dispat/commit/d4e49ebd5dbae90cb1fe70004a9aa13b1b4f7496)) (by yohimik, Claude Fable 5.1)
+  A link target was held to its root lexically, and `sub/../x` reads as `x`
+  beside the link. When `sub` is itself a link to a folder higher up, the same
+  target resolves above the root the set travelled in, so the lexical answer
+  and the file system's differ. A target may now step up only before it steps
+  into a name, which is the shape every tool that writes relative links
+  produces, and the refusal is the existing link-escape one.
+
+- refuse an output manifest larger than the run allows ([d4e2f18](https://github.com/yohimik/dispat/commit/d4e2f18a59a0a5673473d1933302621c7a46cd53)) (by yohimik, Claude Opus 5)
+  A description a reader could not read looks exactly like a node that
+  never answered, so the ceiling is applied where the manifest is written
+  and the run is told which rule was broken instead of waiting out the task
+  deadline. The label a refused frame carries names the two parts of a
+  delegated stage that are not commands, so an operator reads what failed
+  rather than that something did.
+
+- wait for a starting worker to write its state lock before reading it as stale ([134bf12](https://github.com/yohimik/dispat/commit/134bf129b6af06c69edf0a0882a25606e0fd79df)) (by yohimik, Claude Fable 5.1)
+  The lock file is created and then filled with the owning process id, which
+  are two operations. A second worker arriving between them read the empty
+  file as a lock nobody holds, removed it and claimed the folder, so two nodes
+  could serve one state folder with half the record of answered work each. An
+  empty lock is now polled for up to a second, and only one that stays empty,
+  or that names no process, is replaced.
+
+- read the fleet shape once for the groups and the union-find ([3259267](https://github.com/yohimik/dispat/commit/32592673148a78f4a57a505b83dfe94748fc5c9e)) (by yohimik, Claude Opus 5)
+  Both were derived from the links separately, so the centre pass needed a
+  guard against a pair the union-find had already joined and no black-box test
+  could reach it. One reading of the pairs makes a group and a set the same
+  thing.
+
+- keep only the centre fallbacks a composed fleet can reach ([b23c441](https://github.com/yohimik/dispat/commit/b23c441998ecd2b834d89fbc0cc9b1deae78ffd5)) (by yohimik, Claude Opus 5)
+  Measure a centre by eccentricity from the two ends of a longest route rather
+  than by reading that route back, and drop the join fallback that would need
+  two groups with links, which one entry can never compose. Both were branches
+  no black-box test could reach.
+
+- join linked groups at their centres in the minimal topology ([83e912f](https://github.com/yohimik/dispat/commit/83e912f5c88b3c1a5c7b53a71425c061c439b0dd)) (by yohimik, Claude Opus 5)
+  Every completion of the fleet forest adds the same number of links, so the
+  count cannot choose between two proposals. The longest route can, and section
+  27.9 charges link evidence and settlement by it. Join each group at its
+  centre, hanging every other centre off the centre of the group with the
+  greatest radius.
+
+- drop two guards the comparison cannot reach ([623c61b](https://github.com/yohimik/dispat/commit/623c61b0c2699fcce5e55c05c6dd2d23ec83c436)) (by yohimik)
+  A release-tag format map is never empty where the records are read, and a
+  commit id that is no commit is absent from the head's history for the same
+  reason every other absent one is. Neither arm changed an answer, and an arm no
+  run can reach is an arm no test can hold to anything.
+
+- compare only the records a release could plan again ([fa4f298](https://github.com/yohimik/dispat/commit/fa4f298e876402346fb1d30461072a982f7d733d)) (by yohimik)
+  A name with a release tag's shape and no version in it records no release,
+  and the planner already reads neither a baseline nor a duplicate out of one,
+  so the comparison skips it rather than refusing a checkout that lacks it.
+
+- let the planner report a workspace it cannot discover ([fa4f298](https://github.com/yohimik/dispat/commit/fa4f298e876402346fb1d30461072a982f7d733d)) (by yohimik)
+  The comparison was the first thing on the release path to ask for the
+  workspace, so a configuration error arrived as a refusal to release instead
+  of the discovery failure it is. It now settles which stores it would read
+  before discovering anything, which also spares a run that records nowhere the
+  walk, and leaves a discovery error to the planner that reports it.
+
+- warn when commit.verify leaves the records uncompared ([fa4f298](https://github.com/yohimik/dispat/commit/fa4f298e876402346fb1d30461072a982f7d733d)) (by yohimik, Claude Opus 5)
+  The setting excuses the read; it cannot make the run read as though the
+  records had been compared, because a checkout missing one the remote holds
+  can then publish that version a second time.
+
+- create a release tag on the remote and never replace one ([0f3b14e](https://github.com/yohimik/dispat/commit/0f3b14ef7487f1c95943946aa665a34349fb6823)) (by yohimik, Claude Opus 5)
+  A release tag travelled with the rest of the push under commit.force, so a
+  tag the remote already carried was overwritten: a published record moved onto
+  whatever commit the pushing clone had planned. Each record now travels leased
+  against its own absence, which is one operation rather than a read and a
+  write, and the remote decides. A name it already holds at this release's
+  commit is the retry of a write whose answer was lost and is reported as
+  already recorded; a name it holds elsewhere is left exactly where it is and
+  reported as E221, beside the local tag case it has always been. Only an alias
+  declared moving is still forced, which is what it is for.
+
+- plan a release from the remote's records as read under the lock ([8638567](https://github.com/yohimik/dispat/commit/8638567c86475c6e2679e573f2beee2b7d89fdab)) (by yohimik, Claude Opus 5)
+  The lock is taken before the plan, but the plan reads its release tags from
+  the local clone, so a checkout made before another run recorded, or made with
+  no tags at all, plans a version that is already published and publishes it a
+  second time. Under the locks and before the plan is computed, the engine now
+  compares the release records of every store this run writes to with the ones
+  it is about to plan from: a record on a commit the planned head reaches that
+  the checkout lacks is E196, the same name at another commit is E191, and a
+  record off that history cannot change this plan. Nothing is repaired and
+  nothing is fetched, in the single repository and in every participating
+  repository of a composed workspace alike.
+
+- say in the orchestrator example where a publish runs ([223eed8](https://github.com/yohimik/dispat/commit/223eed82b6b1c1154ecbf5c5791c98ee69919d1e)) (by yohimik, Claude Fable 5.1)
+  A space that logs in publishes on the node a release was started on, so the
+  login and the credentials it uses never leave that machine and nothing about
+  them reaches a mailbox. The example claimed the login ran on the worker that
+  published. It now states the rule, and that a publish runs on a worker only
+  where a package asks for it.
+
+- show every way of running a release in a full example file ([b959f45](https://github.com/yohimik/dispat/commit/b959f45b8610eaa3a1f88f8688f0abefe65097d3)) (by yohimik, Claude Fable 5.1)
+  The annotated example pair describes one repository released on one machine,
+  and the ways of running a release that cannot share a file with it had no
+  example to copy. Each now has one that loads as written: a control repository
+  over several source repositories, one peer of a linked fleet, a node that
+  delegates its builds and publishes to worker nodes, and a worker node. A test
+  loads each under the loader its command uses, so an example cannot drift away
+  from the configuration language.
+
+  The main pair gains the keys it never showed: the build outputs and platforms
+  a package declares, the update check, the changelog's entry spacing,
+  dependency links and commit references, the release commit's force, the
+  GitHub recorder's allPackages, a webhook's method, and the parser's quiet
+  flag and trailer lists. The YAML and JSON files still load to one
+  configuration.
+
+- offer queued work again and tell an input state from a message ([c31f16d](https://github.com/yohimik/dispat/commit/c31f16d41e975777ac0d6fa2666c485b1b8decc1)) (by yohimik, Claude Opus 5)
+  A node that was full left the assignment where it was and remembered the
+  branch as seen, so the work waited for a push nobody was going to make.
+  The branch is forgotten instead, and a commit carrying nothing of the
+  protocol is the prepared input state it is rather than a rejected message.
+
+- index ancestry, scope globs and propagation walks once per plan ([c68d8bd](https://github.com/yohimik/dispat/commit/c68d8bdefbc59159449c12198453ae7dbdb2c365)) (by yohimik)
+  Planning asked the same questions again for every commit, every unit and
+  every package, and each of them now has an index. Ancestry among the
+  union's commits is one marker pass, a bit per boundary, so a cancel
+  barrier or a correction target costs a bit test rather than a walk of
+  the history. A glob term is resolved once per pattern and ownership
+  class, and a glob ending in a star reads a contiguous run of the folded
+  names. File ownership probes the prefixes of a path instead of comparing
+  it against every package. A propagation walk is computed once per source
+  set and edge kinds, and a bounded walk is a prefix of the unbounded one.
+  The repository inputs of a release are closed over the condensed
+  components of the dependency and version-group graph. A unit's
+  propagation scope is resolved once for both axes.
+
+  The pending windows are read as a single union walk where the Git
+  implementation offers it, and every window is recovered from it by
+  ancestry. Three fault tests are re-aimed at the calls that still happen,
+  because ancestry inside a window is now read off the parent lists the
+  window already carries, and only a commit behind the baseline still puts
+  the question to the repository graph.
+
+- graduate a train entered by the channel-entry patch ([c68d8bd](https://github.com/yohimik/dispat/commit/c68d8bdefbc59159449c12198453ae7dbdb2c365)) (by yohimik, Claude Fable 5.1)
+  A train entered by that patch carries no bump of its own, so graduation
+  computed the stable baseline itself, below the core the train was
+  published under, and the run aborted with E185. The same patch that let
+  the train in lets it out, at the core it carried. A train a whole minor
+  above its stable baseline is still not what one patch explains.
+
+- read every pending window in one history walk ([7f21e0c](https://github.com/yohimik/dispat/commit/7f21e0cdf8308bd9a6d794d771c57c79088676ad)) (by yohimik, Claude Fable 5.1)
+  A plan needs one window per distinct baseline. Read one at a time, the
+  messages and changed paths of the commits those windows share are read
+  and parsed once per window, and the windows are nested or overlapping
+  views of one history. CommitsSinceAny is the optional capability that
+  reads their union in a single walk, bounded by the merge bases of the
+  boundaries, and declines a boundary the head does not descend from
+  rather than answering an unrecoverable listing.
+
+  Ancestry is indexed with it. The commit graph now gives every commit a
+  dense index and keeps a boundary's ancestor set as a bitset, so the
+  questions planning asks thousands of times cost a bit test rather than a
+  walk of the ancestry each time.
+
+  The alias formats of a workspace are indexed by the literal text they
+  open with, so an unparsed tag is tried against the aliases that could
+  have written it rather than against every package's.
+
+- match globs in linear time ([f7b90a1](https://github.com/yohimik/dispat/commit/f7b90a1b2e57bb88817be2474032ef35a082022a)) (by yohimik, Claude Fable 5.1)
+  The two-pointer walk restarted one byte after its last star, so a
+  pattern such as a star followed by a long run cost the product of the
+  pattern and the subject. Since a star is the only metacharacter, the
+  pattern is its literal segments: a prefix test, a suffix test, and the
+  leftmost occurrence of each segment between them, found by
+  Knuth-Morris-Pratt so the bound holds on hostile input too. That is the
+  linear cost 18.3 asks for.
+
+- bring a releasing laggard to the prefix under its own counter ([b2b5b14](https://github.com/yohimik/dispat/commit/b2b5b14fceb8f553c6099106c0d294da8a30e3d7)) (by yohimik)
+  The floor lifts a member's target to the part the group shares, except for
+  one member: a member on stable takes no floor while the group's line is a
+  prerelease, because it must not be the first to publish that core as stable.
+  That member's own release therefore stayed on its old line, a whole shared
+  minor below the rest of the group, which is the invariant a versioning group
+  exists for. The alignment pass now brings it to the prefix instead, on the
+  line's channel and at its own counter, the same way a laggard with nothing
+  pending joins.
+
+  Two functions the new code replaced are gone with it: the group rule's floor
+  accessor, superseded by the per-member one, and nextPrerelease, whose one
+  caller now names the target core itself.
+
+- write the pin rule's comment without em dashes ([bdf7e47](https://github.com/yohimik/dispat/commit/bdf7e47e239601e1d0ed4aff06640bdebabb7d1d)) (by yohimik, Claude Opus 5)
+
+- keep a member's own pin from breaking a moving group ([d13ccd2](https://github.com/yohimik/dispat/commit/d13ccd2a9b33aee59dc47b0ff3304db247e021bb)) (by yohimik, Claude Opus 5)
+  A pin naming a version inside the prefix the group is leaving is the one the
+  group deliberately did not take: fixedGroupPin leaves such a pin to the
+  member, because it asks for nothing of the group's. Versioning that member
+  by its own computation therefore applied the pin and left it on the old
+  prefix while every other member moved, which is the one thing a versioning
+  group exists to prevent. A pinned member now takes the group's version
+  whatever the channel axis says, exactly as it always has where the channel
+  is shared.
+
+- describe the versioning-group file by the rule it now carries ([cdfbaf8](https://github.com/yohimik/dispat/commit/cdfbaf8274a130c84630838950ee432a1b99343b)) (by yohimik, Claude Opus 5)
+  The file's own narrative still said a group engages when the shared prefix
+  moves and that assignment is the same either way, which is the default and
+  no longer the whole rule. It now names the two further axes, points at the
+  value object that owns the decision, and says what an assigned member takes
+  when its channel is its own.
+
+- show the versioning object in the annotated example configs ([e1b83ab](https://github.com/yohimik/dispat/commit/e1b83ab6e4235ae18e5992c2fb20f05345385c84)) (by yohimik)
+  The annotated configs are where an operator reads what a key accepts, and
+  `versionGroups` accepted only the scalar there. Both now carry a second group
+  stating all three axes.
+
+- preview no entry for a package that never releases ([b41ea23](https://github.com/yohimik/dispat/commit/b41ea23e3e0dedd2ffce21820e2e7ccbb9a134a7)) (by yohimik)
+  A changed `versioning: none` package was previewed as `## name@0.0.0
+  (stable)`, a header built from the placeholder it carries in the plan and a
+  body of notes no changelog will ever receive. It reads as a release that is
+  about to happen. The preview now takes the early-out the plan graph already
+  takes for the same package.
+
+- keep a never-released provider out of the replacer's fan-out ([5a0f007](https://github.com/yohimik/dispat/commit/5a0f0075653b5985785594d1f2af3ee2345e17b4)) (by yohimik)
+  The manifest-derived fan-out expanded a rule over every workspace package a
+  manifest named, a `versioning: none` one included. Such a package has no
+  version, and the 0.0.0 it carries in the plan is a placeholder, so a pattern
+  rendered over it rewrote a real pinned coordinate down to that placeholder
+  and then reported a catch-up (W197) from a provider that is never released.
+  The parsing strategy and `autowriter --set-local` already refuse it; this is
+  the third place that has to.
+
+  The same function read a provider's version from one answer and its channel
+  from another, so a held provider's withheld prerelease raised W203 against a
+  consumer picking up the provider's published stable version. Both now come
+  from the version the rules actually render.
+
+- record the version a withheld provider actually carries ([f34f1fd](https://github.com/yohimik/dispat/commit/f34f1fd75d6ade8b5b93e6c4c68a81ebdb9989a4)) (by yohimik, Claude Opus 5)
+  A provider's entry in a consumer's Updates named the version the provider
+  computed rather than the one it ends the run with. For a held provider those
+  differ: the plan reports the withheld version so an operator can see what
+  lifting the hold would release, and no tag ever carries it. The consumer's
+  changelog dependency line, its GitHub release body, DISPAT_UPDATED_* and
+  DISPAT_DEPENDENCIES all named it, with a tag link that leads nowhere, while
+  native auto-versioning wrote the published version into the same run's
+  manifests. One release cannot have two answers.
+
+  A provider that is not releasing now carries its published version, which
+  collapses the entry onto the catch-up shape the record already knows how to
+  reconstruct a From for.
+
+- floor a versioning group member at its group's line ([5f6712c](https://github.com/yohimik/dispat/commit/5f6712c6576d5c3d8438b390d2ea662cf4b659fc)) (by yohimik, Claude Opus 5)
+  A member's own window need not carry the work that set its group's core. A
+  rider carries none of it, and a leg that failed after its neighbours
+  published carries only part of it, so the member's own computation lands
+  below a position the group already holds: a half-finished graduation retried
+  E185 instead of finishing the train, and a rider versioned on its own hit
+  E195 on a core the group had already reached.
+
+  The group now hands each member the core of its line before the member is
+  versioned, and the computation is raised to it before the guards read the
+  result. Both guards keep their meaning, because the floor never reaches past
+  the line: a tag nothing in the group explains still fails, and so does a
+  channel switch that would go backwards.
+
+- read a versioning group's channel from its movers only ([fb94226](https://github.com/yohimik/dispat/commit/fb942263a10ad07191c967fbe5d019aae74ad4e1)) (by yohimik, Claude Opus 5)
+  A member resting where its own tags put it proposed that channel to its
+  group's aggregate, so a sparse member that never joined a train graduated
+  the whole group, and a rider left behind by a failed graduation dragged the
+  group back onto the train it had already left. A channel is derived from a
+  baseline (§11.1) and a proposal is a directive, so only a member that is
+  itself moving between channels now contributes one.
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## services/dispat/v1.11.0-rc.3 (2026-09-20)
 
 ### Features
