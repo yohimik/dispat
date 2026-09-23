@@ -258,6 +258,34 @@ start() {
            echo 'mailbox seeded from $seed_url'; else rm -rf $mailbox_path; git init -q --bare $mailbox_path; \
            echo 'mailbox empty (no seed)'; fi; fi"
   printf '%s' "$DISPAT_EXECUTION_SECRET" | worker_ssh "umask 077 && cat > ~/node/secret"
+  # The job's build cache, for this machine as well as the runner. Every gate
+  # is a buildx build that scripts/buildx-cache.sh gives the Actions cache
+  # flags when GITHUB_ACTIONS is true, and the gha backend authenticates with
+  # the ACTIONS_* values the runtime action exported into this job. Without
+  # them a task placed here rebuilt and retested everything cold, whatever the
+  # runner had cached. The backend also needs a docker-container builder, which
+  # the default docker driver is not, so one is created first, in a login of
+  # its own after the docker group change above. The values travel like the
+  # signing secret, over ssh into a file only this user reads. A machine that
+  # cannot create the builder, or a job with no Actions runtime, serves with no
+  # cache rather than not at all.
+  cache_env=""
+  if [ -n "${ACTIONS_RUNTIME_TOKEN:-}" ]; then
+    if worker_ssh "docker buildx inspect dispat-cache >/dev/null 2>&1 \
+        || docker buildx create --name dispat-cache --driver docker-container --bootstrap >/dev/null" \
+      && worker_ssh "docker buildx use dispat-cache"; then
+      cache_env="GITHUB_ACTIONS='true'"
+      for name in ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL ACTIONS_CACHE_URL ACTIONS_CACHE_SERVICE_V2; do
+        value=$(printenv "$name" || true)
+        [ -z "$value" ] || cache_env="$cache_env
+$name='$value'"
+      done
+      log "the worker shares the job's build cache"
+    else
+      log "no docker-container builder on the worker; it serves without the build cache"
+    fi
+  fi
+  printf '%s\n' "$cache_env" | worker_ssh "umask 077 && cat > ~/node/cache.env"
   cat <<EOF | worker_ssh "cat > ~/node/dispat.json"
 {
   "execution": {
@@ -278,7 +306,7 @@ EOF
   # variable the profiles it sends back would name a commit the job's own
   # profiles do not, and the coverage freshness gate would refuse the set.
   commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
-  worker_ssh "setsid -f sh -c 'GITHUB_SHA=$commit DISPAT_EXECUTION_SECRET=\$(cat ~/node/secret) exec dispat worker --root ~/node --state-dir ~/state --idle-timeout 0 --log-level debug' > ~/worker.log 2>&1 < /dev/null"
+  worker_ssh "setsid -f sh -c 'set -a; . ~/node/cache.env; set +a; GITHUB_SHA=$commit DISPAT_EXECUTION_SECRET=\$(cat ~/node/secret) exec dispat worker --root ~/node --state-dir ~/state --idle-timeout 0 --log-level debug' > ~/worker.log 2>&1 < /dev/null"
   sleep 3
   worker_ssh "pgrep -x dispat >/dev/null && tail -n 3 ~/worker.log" \
     || fail "the worker did not stay up; its log follows: $(worker_ssh 'cat ~/worker.log' 2>/dev/null)"

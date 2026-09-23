@@ -171,8 +171,10 @@ the rest is [`scripts/ci-worker.sh`](https://github.com/yohimik/dispat/blob/main
 ephemeral ssh key pair, learns the instance's host keys from the cloud API rather than from the network, seeds the
 mailbox with the repository's public history so the run's first push carries only its working tree, sends the secret
 over ssh rather than through instance metadata, and deletes the instance in an `always()` step, with a lifetime on
-the instance itself as the backstop for a job that never reaches that step. The sweep's test profiles come back to the
-job through `runOutputs`, so the coverage gate that follows reads them where a local run would have left them.
+the instance itself as the backstop for a job that never reaches that step. The machine shares the job's build cache:
+the script hands it the job's Actions cache credentials over ssh and gives it a `docker-container` builder, so a gate
+placed there replays the layers the runner cached instead of rebuilding them. The sweep's test profiles come back to
+the job through `runOutputs`, so the coverage gate that follows reads them where a local run would have left them.
 
 What that release measures on every run, and what it asks of the account it runs as, is in
 [the release workflow](https://github.com/yohimik/dispat/blob/main/.github/workflows/release.yml) and
