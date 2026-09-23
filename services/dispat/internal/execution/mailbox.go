@@ -279,11 +279,21 @@ func (m *GitMailbox) Observe(ctx context.Context, pattern string) ([]gitx.Remote
 // one warning each rather than one per tick.
 func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHead,
 	batch error) ([]gitx.RemoteHead, error) {
+	if err := ctx.Err(); err != nil {
+		// The batch was cut short because the poll is stopping: that says
+		// nothing about any branch, so none is quarantined or reported.
+		return nil, err
+	}
 	m.log.Debug().Err(batch).Int("branches", len(moved)).
 		Msg("the batched fetch failed, so the branches are fetched one at a time")
 	fetched := make([]gitx.RemoteHead, 0, len(moved))
 	for _, head := range moved {
 		if err := m.remote.FetchRefs(ctx, m.endpoint, []string{head.Name}); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// Likewise for one branch: a fetch the stopping poll
+				// interrupted leaves the branch to be read next time.
+				return fetched, ctxErr
+			}
 			m.quarantineBranch(head, err)
 			continue
 		}

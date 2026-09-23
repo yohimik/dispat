@@ -104,6 +104,47 @@ func TestMailboxPollFailsWhenTheOnlyBranchIsUnreadable(t *testing.T) {
 	require.Error(t, err)
 }
 
+// cancellingTransport lists its heads and then cancels the poll during the
+// fetch, the way a signal stops a node while a fetch is in flight.
+type cancellingTransport struct {
+	transportx
+	heads  []gitx.RemoteHead
+	cancel context.CancelFunc
+}
+
+func (t *cancellingTransport) ListRemoteHeads(context.Context, string, string) ([]gitx.RemoteHead, error) {
+	return t.heads, nil
+}
+
+func (t *cancellingTransport) FetchRefs(context.Context, string, []string) error {
+	t.cancel()
+	return errors.New("signal: interrupt")
+}
+
+// TestMailboxPollInterruptedByAStopQuarantinesNothing: a fetch cut short
+// because the node is stopping says nothing about the branches it was
+// fetching. They are neither quarantined nor reported as unreadable (W244),
+// and the next poll reads them again.
+func TestMailboxPollInterruptedByAStopQuarantinesNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	transport := &cancellingTransport{
+		heads: []gitx.RemoteHead{
+			{Name: "dispat-worker-build-a-20260922-build-aa", OID: "oid-a"},
+			{Name: "dispat-worker-build-a-20260922-build-bb", OID: "oid-b"},
+		},
+		cancel: cancel,
+	}
+	mailbox := NewGitMailbox("file:///srv/mailbox.git", nil, nil, zerolog.Nop())
+	mailbox.remote = transport
+
+	_, err := mailbox.Observe(ctx, FormatBranchPattern("build-a"))
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, mailbox.quarantined, "a stopping poll quarantines nothing")
+	assert.Empty(t, mailbox.observed, "nothing was read, so nothing counts as seen")
+}
+
 // TestBranchKindHintTellsTransportBranchesApart: the name is a hint and is
 // used for exactly one decision, which is to skip reading a branch that could
 // not be work. A node name holding hyphens must not confuse it.
