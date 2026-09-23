@@ -8,8 +8,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode"
 
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -26,15 +26,7 @@ type fleetGroups map[string]fleetGroup
 // foldGroupName uses the same Unicode equivalence as EqualFold references.
 // Lowercasing alone leaves the two Greek lowercase sigmas in different groups.
 func foldGroupName(name string) string {
-	return strings.Map(func(r rune) rune {
-		smallest := r
-		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
-			if next < smallest {
-				smallest = next
-			}
-		}
-		return unicode.ToLower(smallest)
-	}, name)
+	return globx.Fold(name)
 }
 
 func normalizeGroupRule(rule VersionGroupConfig) VersionGroupConfig {

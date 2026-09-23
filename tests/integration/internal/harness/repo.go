@@ -338,6 +338,13 @@ func (r *Repo) CommandEnv(env []string, args ...string) RunResult {
 	return r.runAtEnv(r.Root, env, "", args...)
 }
 
+// CommandRootEnv runs this fixture's binary against another checkout of the
+// same repository, such as a linked worktree on another filesystem.
+func (r *Repo) CommandRootEnv(root string, env []string, args ...string) RunResult {
+	r.T.Helper()
+	return r.runAtEnv(root, env, "", args...)
+}
+
 // CommandInput runs an arbitrary dispat invocation with stdin already holding
 // the answers — how a scenario drives an interactive prompt (`compute
 // --interactive`) through the process boundary rather than through the option

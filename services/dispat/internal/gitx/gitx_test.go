@@ -219,6 +219,8 @@ func TestTagFormatRenderParseGlob(t *testing.T) {
 
 func TestTagFormatRejectsForeignTags(t *testing.T) {
 	f := TagFormat("{name}@v{version}")
+	matcher, matched := newPackageTagMatcher("core", f)
+	require.True(t, matched)
 
 	// A plain "core@1.2.3" does not carry the "v", so it belongs to a
 	// different convention and must not be read as this package's baseline.
@@ -226,12 +228,12 @@ func TestTagFormatRejectsForeignTags(t *testing.T) {
 	assert.False(t, ok, "a tag missing the format's literal text is not ours")
 
 	// A tag for a different package never matches the shape at all.
-	assert.False(t, f.IsMatch("core", "other@v1.2.3"))
+	assert.False(t, matcher.matches("other@v1.2.3"))
 
 	// Matching the shape and carrying a readable version are separate
 	// questions: this is the tag that puts a package on the initials fallback
 	// rather than out of the listing entirely.
-	assert.True(t, f.IsMatch("core", "core@v0.0.1.0"), "the shape matches")
+	assert.True(t, matcher.matches("core@v0.0.1.0"), "the shape matches")
 	_, ok = f.ParseVersion("core", "core@v0.0.1.0")
 	assert.False(t, ok, "but the version does not parse")
 }
@@ -1089,7 +1091,8 @@ func TestPathspecInsideAndOutside(t *testing.T) {
 func TestGlobAndMatchesUnsplittableFormat(t *testing.T) {
 	f := TagFormat("no placeholders")
 	assert.Equal(t, "core*", f.Glob("core"), "an uncompilable format degrades to a name prefix")
-	assert.False(t, f.IsMatch("core", "core@1.0.0"))
+	_, matched := newPackageTagMatcher("core", f)
+	assert.False(t, matched)
 	if _, ok := f.ParseVersion("core", "core@1.0.0"); ok {
 		t.Error("an uncompilable format parses nothing")
 	}

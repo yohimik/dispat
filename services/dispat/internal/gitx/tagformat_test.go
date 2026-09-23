@@ -57,8 +57,10 @@ func TestTagFormatPrereleasePlaceholders(t *testing.T) {
 		// One glob must cover both shapes: baseline(P) is a selection over a
 		// single listing, and a pattern that misses the prerelease tags would
 		// silently restart every train at .0.
-		assert.True(t, tc.format.IsMatch(tc.pkg, tc.preTag), "matches %q", tc.preTag)
-		assert.True(t, tc.format.IsMatch(tc.pkg, tc.stableTag), "matches %q", tc.stableTag)
+		matcher, matched := newPackageTagMatcher(tc.pkg, tc.format)
+		require.True(t, matched)
+		assert.True(t, matcher.matches(tc.preTag), "matches %q", tc.preTag)
+		assert.True(t, matcher.matches(tc.stableTag), "matches %q", tc.stableTag)
 	}
 }
 

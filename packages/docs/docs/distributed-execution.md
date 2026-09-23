@@ -215,6 +215,13 @@ assignment names before it installs a single file.
 are written, then each declared root replaces its destination by a rename. No command of a task starts before every
 one of its inputs is installed.
 
+Staging stays in private Git storage when that storage shares the output destination's filesystem. A linked worktree
+on another filesystem uses a private (`0700`) staging folder beside the outermost checkout instead, so the final
+rename remains atomic and temporary files stay outside Git status and release records. Normal completion removes the
+folder. If a process is killed during installation, a `dispat-outputs-` folder can remain in Git storage or as a
+hidden sibling of the checkout. After confirming that no release using that checkout is active, an operator may
+remove that run's leftover folder; dispat does not guess that another run's staging is abandoned.
+
 **What is refused.** The prerequisite fails with `E227`, and the consumers of that prerequisite are blocked, when a
 declared root is absent, when the manifest and the tree disagree, when the totals do not match the entries, when an
 entry is not a file or a symlink, when a path is absolute or holds `..`, a `.git` component, a backslash, a colon or
@@ -564,6 +571,9 @@ transfer ceilings.
 release ref, and any policy a node would have to rediscover. A node accepts a message only when the signature
 verifies, the node name is its own, the branch is the ref it was found on, the protocol version matches exactly, the
 issue time is within 24 hours, and the attempt is not in its own record of already-answered work.
+The node retains an accepted attempt for 48 hours: an issue time 24 hours in the future is valid when first accepted
+and can remain valid for another 24 hours. The record is pruned after that full acceptance horizon, including while a
+node keeps serving without restarting.
 
 The bounds come from `execution.transfer`: `maxFiles` (default 20000), `maxBytes` (default 2 GiB),
 `maxManifestBytes` (default 8 MiB) and `timeout` (default 1800 seconds). `maxManifestBytes` bounds every document of

@@ -538,7 +538,7 @@ func sortedKeys[V any](m map[string]V) []string {
 
 func join(names []string) string { return strings.Join(names, ", ") }
 
-func fold(s string) string { return strings.ToLower(s) }
+func fold(s string) string { return globx.Fold(s) }
 
 // absClean brings a path to the one shape comparisons happen in. Both sides go
 // through it and neither through filepath.EvalSymlinks: resolving one side of

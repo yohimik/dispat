@@ -96,12 +96,16 @@ const suBody = "### Features\n\n- read a release's notes after an update\n\n" +
 	"[Documentation](https://example.invalid/docs)\n"
 
 func newSURepo(t *testing.T) *suRepo {
+	return newSURepoVersions(t, map[string]string{suNew: harness.BuildVersioned(t, suNew)})
+}
+
+func newSURepoVersions(t *testing.T, versions map[string]string) *suRepo {
 	t.Helper()
 	r := &suRepo{Repo: harness.New(t), assets: map[string][]byte{}, body: suBody}
 	r.exe = filepath.Join(t.TempDir(), "dispat"+exeSuffix())
 	copyFile(t, harness.BuildVersioned(t, suOld), r.exe)
 	r.backup = backupPath(r.exe)
-	r.serve(t, map[string]string{suNew: harness.BuildVersioned(t, suNew)})
+	r.serve(t, versions)
 	return r
 }
 
@@ -393,6 +397,189 @@ func TestSelfUpdateReplacesTheRunningBinary(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, suNew, r.version(r.exe))
 	assert.Equal(t, suNew, r.version(r.backup))
+}
+
+// A second real update has to replace the rollback copy only after the new
+// executable is installed. These distinct versions prove which file became
+// the backup and that the older copy was not left parked in the directory.
+func TestSelfUpdateSecondInstallKeepsOnlyTheVersionItReplaced(t *testing.T) {
+	const next = "1.2.0"
+	r := newSURepoVersions(t, map[string]string{
+		suNew: harness.BuildVersioned(t, suNew),
+		next:  harness.BuildVersioned(t, next),
+	})
+	require.Equal(t, 0, r.update("--release", suNew).Code)
+	require.Equal(t, suOld, r.version(r.backup))
+
+	res := r.update("--release", next)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, next, r.version(r.exe))
+	assert.Equal(t, suNew, r.version(r.backup))
+	entries, err := os.ReadDir(filepath.Dir(r.exe))
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "the superseded backup was removed: %v", entries)
+}
+
+// A checksum-valid candidate can disappear after its smoke test. That forces
+// the second rename to fail after the previous backup was parked, through the
+// real CLI and download path rather than an injected filesystem error.
+func TestSelfUpdateFailedSecondInstallPreservesBothBinaries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the self-removing candidate is a POSIX shell script; the swap regression runs on Windows in internal/selfupdate")
+	}
+	const next = "1.2.0"
+	vanishing := filepath.Join(t.TempDir(), "vanishing")
+	require.NoError(t, os.WriteFile(vanishing, []byte("#!/bin/sh\nrm -- \"$0\"\nprintf 'dispat "+next+" (test)\\n'\n"), 0o755))
+	r := newSURepoVersions(t, map[string]string{
+		suNew: harness.BuildVersioned(t, suNew),
+		next:  vanishing,
+	})
+	require.Equal(t, 0, r.update("--release", suNew).Code)
+	current, err := os.ReadFile(r.exe)
+	require.NoError(t, err)
+	previous, err := os.ReadFile(r.backup)
+	require.NoError(t, err)
+
+	res := r.update("--release", next)
+	assert.NotEqual(t, 0, res.Code, "the missing candidate cannot commit")
+	assert.Contains(t, res.Stdout+res.Stderr, "installing")
+	gotCurrent, err := os.ReadFile(r.exe)
+	require.NoError(t, err)
+	gotPrevious, err := os.ReadFile(r.backup)
+	require.NoError(t, err)
+	assert.Equal(t, current, gotCurrent, "the current binary was restored")
+	assert.Equal(t, previous, gotPrevious, "the previous rollback copy was restored")
+	entries, err := os.ReadDir(filepath.Dir(r.exe))
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "no staged binary or parked backup was left behind: %v", entries)
+}
+
+// An occupied backup path is not ours to overwrite. The CLI must report the
+// obstruction while retaining the current release byte for byte.
+func TestSelfUpdateRefusesAnUnsafePreviousBackup(t *testing.T) {
+	const next = "1.2.0"
+	r := newSURepoVersions(t, map[string]string{
+		suNew: harness.BuildVersioned(t, suNew),
+		next:  harness.BuildVersioned(t, next),
+	})
+	require.Equal(t, 0, r.update("--release", suNew).Code)
+	current, err := os.ReadFile(r.exe)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(r.backup))
+	require.NoError(t, os.Mkdir(r.backup, 0o700))
+	marker := filepath.Join(r.backup, "owned-by-another-process")
+	require.NoError(t, os.WriteFile(marker, []byte("do not replace"), 0o600))
+
+	res := r.update("--release", next)
+	assert.NotEqual(t, 0, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "previous backup")
+	assert.Contains(t, res.Stdout+res.Stderr, "not a regular file")
+	got, err := os.ReadFile(r.exe)
+	require.NoError(t, err)
+	assert.Equal(t, current, got)
+	markerBytes, err := os.ReadFile(marker)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("do not replace"), markerBytes)
+}
+
+// The downloaded candidate makes the executable directory unwritable during
+// its smoke test. Parking the existing backup must fail before either live
+// version moves, even though the download and validation already succeeded.
+func TestSelfUpdateCannotParkPreviousBackup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the candidate uses a POSIX shell script and directory permissions")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can write into an unwritable directory")
+	}
+	const next = "1.2.0"
+	locked := filepath.Join(t.TempDir(), "lock-directory")
+	require.NoError(t, os.WriteFile(locked, []byte("#!/bin/sh\nchmod 0555 \"$(dirname \"$0\")\"\nprintf 'dispat "+next+" (test)\\n'\n"), 0o755))
+	r := newSURepoVersions(t, map[string]string{
+		suNew: harness.BuildVersioned(t, suNew),
+		next:  locked,
+	})
+	require.Equal(t, 0, r.update("--release", suNew).Code)
+	current, err := os.ReadFile(r.exe)
+	require.NoError(t, err)
+	previous, err := os.ReadFile(r.backup)
+	require.NoError(t, err)
+	dir := filepath.Dir(r.exe)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	res := r.update("--release", next)
+	require.NoError(t, os.Chmod(dir, 0o700))
+	assert.NotEqual(t, 0, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "parking the previous backup")
+	assert.Contains(t, res.Stdout+res.Stderr, "could not remove staged download")
+	gotCurrent, err := os.ReadFile(r.exe)
+	require.NoError(t, err)
+	gotPrevious, err := os.ReadFile(r.backup)
+	require.NoError(t, err)
+	assert.Equal(t, current, gotCurrent)
+	assert.Equal(t, previous, gotPrevious)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	var staged []string
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "dispat-download-") {
+			staged = append(staged, filepath.Join(dir, entry.Name()))
+		}
+	}
+	require.Len(t, staged, 1, "the failed cleanup names one retained candidate")
+	assert.Contains(t, res.Stdout+res.Stderr, staged[0])
+	require.NoError(t, os.Remove(staged[0]))
+}
+
+// A running POSIX binary can disappear from its path during the candidate's
+// smoke test. If a rollback copy was already present, that is the only known
+// working alternative and must survive the first-install branch.
+func TestSelfUpdateKeepsPreviousBackupWhenCurrentDisappears(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows keeps the running executable path occupied")
+	}
+	const next = "1.2.0"
+	removeCurrent := filepath.Join(t.TempDir(), "remove-current")
+	require.NoError(t, os.WriteFile(removeCurrent, []byte("#!/bin/sh\nset -e\ncase \"$(basename \"$0\")\" in\n  dispat-download-*)\n    rm -- \"$(dirname \"$0\")/dispat\"\n    touch -t 200001010000 \"$(dirname \"$0\")/dispat.backup\"\n    ;;\nesac\nprintf 'dispat "+next+" (test)\\n'\n"), 0o755))
+	r := newSURepoVersions(t, map[string]string{
+		suNew: harness.BuildVersioned(t, suNew),
+		next:  removeCurrent,
+	})
+	require.Equal(t, 0, r.update("--release", suNew).Code)
+	previous, err := os.ReadFile(r.backup)
+	require.NoError(t, err)
+
+	res := r.update("--release", next)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "installed dispat "+next)
+	assert.Contains(t, res.Stdout, r.backup)
+	assert.Equal(t, next, r.version(r.exe))
+	gotPrevious, err := os.ReadFile(r.backup)
+	require.NoError(t, err)
+	assert.Equal(t, previous, gotPrevious, "the only rollback binary remains intact")
+	assert.Equal(t, suOld, r.version(r.backup), "the rollback copy remains runnable")
+	info, err := os.Stat(r.backup)
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now(), info.ModTime(), time.Minute, "the retained backup gets a fresh pruning clock")
+}
+
+// A disappearing executable without an older rollback copy is a genuine
+// first install. The CLI must not advertise a backup path or rollback action
+// that does not exist after it installs the validated candidate.
+func TestSelfUpdateWithoutPreviousBackupReportsNoRollback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows keeps the running executable path occupied")
+	}
+	removeCurrent := filepath.Join(t.TempDir(), "remove-current")
+	require.NoError(t, os.WriteFile(removeCurrent, []byte("#!/bin/sh\nset -e\ncase \"$(basename \"$0\")\" in\n  dispat-download-*) rm -- \"$(dirname \"$0\")/dispat\";;\nesac\nprintf 'dispat "+suNew+" (test)\\n'\n"), 0o755))
+	r := newSURepoVersions(t, map[string]string{suNew: removeCurrent})
+
+	res := r.update("--release", suNew)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "installed dispat "+suNew)
+	assert.NotContains(t, res.Stdout, "the previous binary is at")
+	assert.NotContains(t, res.Stdout, "put it back")
+	assert.Equal(t, suNew, r.version(r.exe))
+	assert.NoFileExists(t, r.backup)
 }
 
 // updateEnv is update with extra environment pairs, which is how a scenario

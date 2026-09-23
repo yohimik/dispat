@@ -279,21 +279,26 @@ func (c *Coordinator) MergeSweepOutputs(ctx context.Context) error {
 
 // mergeSweepSet merges one admitted set into the repository it belongs to.
 //
-// The staging folder is inside that repository's own git directory, for the
-// reasons a build output's is: nothing a run stages or reverts can see it,
-// and it is on the file system the files are moved onto.
+// Staging follows the same private, destination-filesystem choice as build
+// outputs, including when a linked worktree's Git directory is elsewhere.
 func (c *Coordinator) mergeSweepSet(ctx context.Context, set *sweepSet) error {
 	index, err := set.repository.IndexPath(ctx)
 	if err != nil {
 		return c.refuseSweepOutputs(set.task, set.node, "",
 			fmt.Errorf("execution: locating the private folder of %s: %w", set.repository.Dir, err))
 	}
+	staging, err := resolveOutputStagingPath(outputStagingSpec{
+		indexPath: index, ownerDir: set.repository.Dir, destination: set.repository.Dir,
+		run: c.Run, packageName: set.task,
+	})
+	if err != nil {
+		return c.refuseSweepOutputs(set.task, set.node, "", err)
+	}
 	c.guard.RLock()
 	err = MergeInstallOutputs(ctx, InstallRequest{
 		Git: c.dispatch.Store, Manifest: set.manifest, Dir: set.repository.Dir,
-		Staging: filepath.Join(filepath.Dir(index),
-			"dispat-outputs-"+formatPathWord(c.Run)+"-"+formatPathWord(set.task)),
-		Log: c.Log,
+		Staging: staging,
+		Log:     c.Log,
 	})
 	c.guard.RUnlock()
 	if err != nil {

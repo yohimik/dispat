@@ -208,6 +208,35 @@ func executionRecordedTasks(rig *executionRig, marker string) []string {
 	return recorded
 }
 
+// A coordinator can disappear after receiving ready. The worker must bound
+// its own wait and report a failed attempt without ever starting publish.
+func TestExecutionPublisherWithoutGoEndsAtItsOwnDeadline(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	state := orchestrator.prepareInputState("no-go")
+	branch := executionCraftedBranchName("publish", "no-go")
+	wait := 3
+	idle := 5
+	if harness.IsTinyGo() {
+		wait, idle = 8, 10
+	}
+	orchestrator.offer(branch, orchestrator.publication(branch, "no-go", state,
+		func(message map[string]any) { message["deadlineSeconds"] = wait }))
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), idle)
+
+	executionAwaitMessage(t, rig.mailbox, branch, "ready")
+	result := executionAwaitMessage(t, rig.mailbox, branch, "result")
+	reply := worker.proc.Wait()
+	require.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
+	assert.Equal(t, "failed", result["status"])
+	assert.Equal(t, "deadline", result["failedPart"])
+	assert.Equal(t, "authorization", result["reason"])
+	assert.Equal(t, []string{"assignment", "claim", "ready", "result"},
+		executionChain(t, rig.mailbox, branch), "the absent Go granted nothing")
+	assert.Equal(t, []string{"no-go"}, executionRecordedTasks(rig, "hook"))
+	assert.Empty(t, executionRecordedTasks(rig, "published"))
+}
+
 // TestExecutionCraftedPublicationAuthorizations: every rule a publishing node
 // holds its authorization to, offered as a message by hand.
 //

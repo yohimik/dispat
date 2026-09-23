@@ -98,6 +98,10 @@ func assertDetachedFromInventory(t *testing.T, value, inventory string) {
 // makes the parity test protect ordering, peeling and malformed-ref behavior.
 func referenceTagsForPackage(out, pkg string, format TagFormat) Tags {
 	format = format.WithDefault()
+	prefix, suffix, hasShape := format.split(pkg)
+	if !hasShape {
+		return nil
+	}
 	var tags Tags
 	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -108,7 +112,9 @@ func referenceTagsForPackage(out, pkg string, format TagFormat) Tags {
 			continue
 		}
 		name := strings.TrimSpace(fields[0])
-		if name == LockTagName || strings.HasPrefix(name, LockAttemptTagPrefix) || !format.IsMatch(pkg, name) {
+		if name == LockTagName || strings.HasPrefix(name, LockAttemptTagPrefix) ||
+			len(name) <= len(prefix)+len(suffix) || !strings.HasPrefix(name, prefix) ||
+			!strings.HasSuffix(name, suffix) {
 			continue
 		}
 		tag := Tag{Name: name, Commit: strings.TrimSpace(fields[1])}

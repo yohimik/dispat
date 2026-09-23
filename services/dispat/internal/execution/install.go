@@ -107,7 +107,7 @@ func InstallOutputs(ctx context.Context, request InstallRequest) error {
 // something other than itself: creating them after every file exists means no
 // file was ever written through one.
 func stageOutputs(ctx context.Context, request InstallRequest) error {
-	if err := os.MkdirAll(request.Staging, 0o755); err != nil {
+	if err := os.MkdirAll(request.Staging, 0o700); err != nil {
 		return fmt.Errorf("execution: preparing the staging folder %s: %w", request.Staging, err)
 	}
 	if err := stageDeclaredRoots(request); err != nil {

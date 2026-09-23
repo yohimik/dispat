@@ -54,6 +54,11 @@ var ErrNotWritable = errors.New("the install directory is not writable")
 // caveat rather than a failure.
 var ErrBackupNotKept = errors.New("the replaced binary was not kept as the new backup")
 
+// ErrPreviousBackupCleanup reports an install that completed but could not
+// discard the older rollback copy it superseded. Callers should report the
+// installed version as successful and surface the retained path as a warning.
+var ErrPreviousBackupCleanup = errors.New("previous backup cleanup incomplete")
+
 // Origin is how the running binary was produced, which decides how it is
 // updated: a release binary is replaced in place, a `go install` build is
 // replaced by another `go install`, and a local build is not replaced at all.

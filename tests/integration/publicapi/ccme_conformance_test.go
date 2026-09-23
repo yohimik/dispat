@@ -1357,10 +1357,25 @@ func TestPublicAPICCMEFooterRegistryConformance(t *testing.T) {
 // splitting and message-scoped bounds through both exported entry points.
 func TestPublicAPICCMEMessageStructureConformance(t *testing.T) {
 	twoUnits := ccme.Config{Limits: ccme.Limits{UnitsPerMessage: 2}}
+	oneScope := ccme.Config{Limits: ccme.Limits{ScopeTermsPerUnit: 1}}
 	smallMessage := ccme.Config{Limits: ccme.Limits{MessageBytes: 32}}
 	mailSeparator := ccme.Config{Separator: "%%%"}
 
 	runCCMEVectors(t, []ccmeVector{
+		{
+			name:    "propagation footer cannot bypass the scope limit",
+			cfg:     &oneScope,
+			message: "fix(app): bounded propagation\n\nPropagate-Scope: core,utils",
+			want:    []string{ccme.CodeE158},
+			invalid: true,
+		},
+		{
+			name:    "channel propagation footer cannot bypass the scope limit",
+			cfg:     &oneScope,
+			message: "fix(app): bounded channel propagation\n\nPropagate-Channel-Scope: core,utils",
+			want:    []string{ccme.CodeE158},
+			invalid: true,
+		},
 		{
 			name:    "an empty message is E002",
 			message: "",

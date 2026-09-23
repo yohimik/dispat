@@ -102,6 +102,48 @@ func TestExecutionWorkerRefusesWorkWhenItsReplayRecordCannotBeSaved(t *testing.T
 	assert.Contains(t, reply.Stdout, "the mailbox could not be served")
 }
 
+// A correctly signed assignment can still describe no executable frame.
+// The worker claims it, reports failure, and never reaches a hook or publish
+// command; a malformed assignment must not stop it serving unrelated work.
+func TestExecutionWorkerFailsIncompletePublicationFrames(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	state := orchestrator.prepareInputState("incomplete-frames")
+	for label, change := range map[string]func(map[string]any){
+		"missing-package":     func(message map[string]any) { delete(message, "package") },
+		"missing-frame":       func(message map[string]any) { delete(message, "frame") },
+		"empty-input-closure": func(message map[string]any) { message["repositories"] = []any{} },
+	} {
+		branch := executionCraftedBranchName("publish", label)
+		orchestrator.offer(branch, orchestrator.publication(branch, label, state, change))
+	}
+	noPermit := executionCraftedBranchName("publish", "no-permit")
+	orchestrator.offer(noPermit, orchestrator.publication(noPermit, "no-permit", state,
+		func(message map[string]any) { message["permits"] = map[string]any{} }))
+	control := executionCraftedBranchName("probe", "incomplete-control")
+	orchestrator.offer(control, orchestrator.probe(control, "incomplete-control"))
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
+		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 4)
+
+	for _, label := range []string{"missing-package", "missing-frame", "empty-input-closure"} {
+		branch := executionCraftedBranchName("publish", label)
+		result := executionAwaitMessage(t, rig.mailbox, branch, "result")
+		assert.Equal(t, "failed", result["status"], label)
+		assert.Equal(t, []string{"assignment", "claim", "result"},
+			executionChain(t, rig.mailbox, branch), label)
+	}
+	executionAwaitMessage(t, rig.mailbox, control, "result")
+	reply := worker.proc.Wait()
+	require.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
+	assert.Empty(t, rig.runs(), "neither hooks nor publication commands may run")
+	assert.Contains(t, reply.Stdout, "the assignment describes no frame to run")
+	assert.Contains(t, executionRejections(reply), "permit")
+	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, noPermit),
+		"a signed assignment without a publish permit is refused before claim")
+	assert.Equal(t, []string{"assignment", "claim", "result"},
+		executionChain(t, rig.mailbox, control), "the worker kept serving")
+}
+
 // TestExecutionWorkerRejectsAssignments: every acceptance rule, through the
 // binary. None of these is claimed, each is refused with a reason the log can
 // be filtered on and nothing of what it said, and a valid probe offered
@@ -225,7 +267,7 @@ func TestExecutionWorkerRejectsAssignments(t *testing.T) {
 }
 
 // TestExecutionWorkerPrunesAnsweredWorkWhileServing: a node can stay up past
-// the replay window. An old answer still blocks a replay while live, then a
+// the full acceptance horizon. An old answer still blocks a replay while live, then a
 // later answer removes it from the durable record without restarting the node.
 func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
 	rig := newExecutionRig(t)
@@ -236,16 +278,19 @@ func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
 	require.NoError(t, os.MkdirAll(nodeState, 0o755))
 	seenPath := filepath.Join(nodeState, "seen.json")
 	oldKey := orchestrator.run + " preflight 1"
-	// The protocol's replay window is 24 hours. Seed just inside it so the
-	// boundary passes during this test without a private clock override.
+	// A header may be issued 24 hours ahead of acceptance and remain valid
+	// for 24 hours after issuance. Seed just inside that 48-hour boundary.
 	expires := time.Now().Add(15 * time.Second)
-	oldAt := expires.Add(-24 * time.Hour)
+	oldAt := expires.Add(-48 * time.Hour)
 	seed, err := json.Marshal(map[string]time.Time{oldKey: oldAt})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(seenPath, seed, 0o644))
 
 	replay := executionBranchName("aaa-seen-prune-replay")
-	orchestrator.offer(replay, orchestrator.probe(replay, "preflight"))
+	orchestrator.offer(replay, orchestrator.probe(replay, "preflight",
+		func(message map[string]any) {
+			message["issuedAt"] = oldAt.Add(24 * time.Hour).Format(time.RFC3339)
+		}))
 	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret},
 		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "30")
 	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
@@ -277,6 +322,51 @@ func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
 	require.NoError(t, json.Unmarshal(content, &stored))
 	assert.NotContains(t, stored, oldKey, "the fresh answer must prune the expired one from disk")
 	assert.Contains(t, stored, orchestrator.run+" fresh 1")
+}
+
+// A future-issued assignment accepted 25 hours ago can still pass the
+// 24-hour header window today. Its durable accepted-work tuple must survive a
+// worker restart and reject that replay; a tuple older than 48 hours need not.
+func TestExecutionWorkerKeepsFutureIssuedReplayKnowledge(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
+	state := t.TempDir()
+	nodeState := filepath.Join(state, executionNode)
+	require.NoError(t, os.MkdirAll(nodeState, 0o755))
+	seenPath := filepath.Join(nodeState, "seen.json")
+	now := time.Now()
+	accepted := now.Add(-25 * time.Hour)
+	liveKey := orchestrator.run + " future-issued 1"
+	expiredKey := orchestrator.run + " expired 1"
+	seed, err := json.Marshal(map[string]time.Time{
+		liveKey: accepted, expiredKey: now.Add(-49 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(seenPath, seed, 0o644))
+
+	replay := executionBranchName("aaa-future-issued-replay")
+	orchestrator.offer(replay, orchestrator.probe(replay, "future-issued",
+		func(message map[string]any) {
+			message["issuedAt"] = accepted.Add(24*time.Hour - time.Second).Format(time.RFC3339)
+		}))
+	control := executionBranchName("zzz-future-issued-control")
+	orchestrator.offer(control, orchestrator.probe(control, "control"))
+	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret},
+		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "10")
+	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
+	executionAwaitMessage(t, rig.mailbox, control, "result")
+	reply := worker.stop(t)
+
+	assert.Contains(t, executionRejections(reply), "replay")
+	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, replay),
+		"the still-valid assignment did not run a second time")
+	content, err := os.ReadFile(seenPath)
+	require.NoError(t, err)
+	stored := map[string]time.Time{}
+	require.NoError(t, json.Unmarshal(content, &stored))
+	assert.Contains(t, stored, liveKey)
+	assert.NotContains(t, stored, expiredKey)
 }
 
 // executionLabel is a branch-safe label for one table row's name.

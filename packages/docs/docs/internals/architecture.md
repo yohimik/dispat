@@ -434,6 +434,8 @@ The worker's answered-work record has one serving process. It holds a kernel loc
 its whole lifetime; release clears the diagnostic PID and unlocks the file without removing or renaming it. A crash
 releases the kernel lock, while a live PID left by an older worker is still respected. Keeping one inode at one path
 closes the takeover window in which two processes could each claim a different replacement file.
+Its answered-work tuples remain for 48 hours after acceptance, covering the full validity of a message accepted
+with an issue time up to 24 hours ahead of the worker's clock. Loading and recording both prune only older tuples.
 Older PID-only workers must be stopped before upgrading a shared state folder; their rename-based implementation
 cannot participate safely in the new kernel-lock protocol.
 

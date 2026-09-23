@@ -20,9 +20,11 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -123,7 +125,7 @@ func (c *Coordinator) PreparedSnapshot(packageName string) string {
 // every path, including the ones that fail, because an index left behind in a
 // temporary folder is a copy of somebody's working state.
 func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Source, log zerolog.Logger) (string, error) {
-	index, done, err := copyRepositoryIndex(ctx, git)
+	index, done, err := copyRepositoryIndex(ctx, git, source.Head)
 	if err != nil {
 		return "", err
 	}
@@ -219,29 +221,51 @@ func (s *snapshots) remember(dir, tree, commit string) {
 // copyRepositoryIndex copies a repository's real index to a temporary file and
 // answers its path together with the removal of it.
 //
-// A repository whose index does not exist yet (nothing has ever been staged)
-// starts from an empty file, which is what git does with a missing index
-// anyway. The removal is answered rather than deferred here so that the caller
-// holds it for exactly as long as it uses the copy.
-func copyRepositoryIndex(ctx context.Context, git *gitx.LocalGitx) (string, func(), error) {
+// Only a genuinely unborn repository may start with no index. Git treats a
+// missing GIT_INDEX_FILE as empty, but an existing zero-byte file as corrupt;
+// a committed repository with a missing index must fail rather than silently
+// omit tracked files that are now ignored. The removal is answered rather than
+// deferred here so the caller holds it exactly as long as it uses the copy.
+func copyRepositoryIndex(ctx context.Context, git *gitx.LocalGitx, plannedHead string) (string, func(), error) {
 	real, err := git.IndexPath(ctx)
 	if err != nil {
 		return "", nil, fmt.Errorf("execution: locating the index of %s: %w", git.Dir, err)
 	}
-	copied, err := os.CreateTemp("", "dispat-snapshot-index-*")
+	folder, err := os.MkdirTemp("", "dispat-snapshot-index-")
 	if err != nil {
 		return "", nil, fmt.Errorf("execution: preparing a temporary index: %w", err)
 	}
-	path := copied.Name()
+	path := filepath.Join(folder, "index")
 	done := func() {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := os.RemoveAll(folder); err != nil {
 			// A copy of somebody's working state left in a temporary folder is
 			// worth a line, and it is never worth failing a release over.
 			git.Log.Warn().Err(err).Str("code", CodeTransportRetained).
 				Str("category", CategoryTransportCleanup).Msg("a temporary index was not removed")
 		}
 	}
+	copied, err := os.Create(path)
+	if err != nil {
+		done()
+		return "", nil, fmt.Errorf("execution: preparing a temporary index: %w", err)
+	}
 	if err := writeIndexCopy(real, copied); err != nil {
+		if errors.Is(err, os.ErrNotExist) && plannedHead == "" {
+			hasHead, probeErr := git.IsCommitPresent(ctx, "HEAD")
+			if probeErr != nil {
+				done()
+				return "", nil, fmt.Errorf("execution: checking the unborn repository %s: %w", git.Dir, probeErr)
+			}
+			if !hasHead {
+				// Git needs an absent index path, held inside this private
+				// temporary folder so another process cannot substitute it.
+				if removeErr := os.Remove(path); removeErr != nil {
+					done()
+					return "", nil, fmt.Errorf("execution: preparing an empty index for %s: %w", git.Dir, removeErr)
+				}
+				return path, done, nil
+			}
+		}
 		done()
 		return "", nil, err
 	}
@@ -255,9 +279,7 @@ func writeIndexCopy(real string, copied *os.File) error {
 	defer func() { _ = copied.Close() }()
 	source, err := os.Open(real)
 	if os.IsNotExist(err) {
-		// Nothing has ever been staged here; an empty index is what git would
-		// have read anyway.
-		return nil
+		return fmt.Errorf("execution: the repository has a missing index %s: %w", real, os.ErrNotExist)
 	}
 	if err != nil {
 		return fmt.Errorf("execution: reading the index %s: %w", real, err)

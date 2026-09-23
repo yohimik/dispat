@@ -447,6 +447,70 @@ func TestExecutionOutputInstallRollsBackEarlierRoots(t *testing.T) {
 	}
 }
 
+// TestExecutionOutputInstallPermissionFailureCanRetry: a write-denied second
+// destination fails at the real final rename, after the first root has been
+// replaced. The old first root must be restored, another independent package
+// must still release, and repairing the directory must permit one publication
+// of the failed package on the next run.
+func TestExecutionOutputInstallPermissionFailureCanRetry(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "published.log")
+	rig := newExecutionPlacementRig(t, []string{"assets", "spare"},
+		func(*harness.Repo) string {
+			return `mkdir -p a-dist z-assets/nested && ` +
+				`printf new > a-dist/new.txt && printf new > z-assets/nested/new.txt`
+		}, func(cfg *models.File) {
+			cfg.BuildOutputs = []string{"a-dist", "z-assets/nested"}
+			cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+			cfg.Scripts["publish"] = models.Script{fmt.Sprintf(
+				"printf '%%s\\n' \"$DISPAT_PACKAGE\" >> %q", marker)}
+			cfg.Execution.Concurrency = models.Int(2)
+		})
+	rig.repo.WriteFile(".gitignore", "a-dist/\nz-assets/\n")
+	rig.repo.Commit("chore(assets,spare): ignore build outputs")
+	rig.repo.WriteFile("packages/assets/a-dist/old.txt", "old\n")
+	blocked := rig.repo.Path("packages", "assets", "z-assets")
+	require.NoError(t, os.MkdirAll(blocked, 0o755))
+	require.NoError(t, os.Chmod(blocked, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+	probeErr := os.WriteFile(filepath.Join(blocked, "permission-probe"), []byte("x"), 0o600)
+	if probeErr == nil {
+		t.Skip("this user can write into a 0555 directory")
+	}
+	require.True(t, os.IsPermission(probeErr), "fixture must fail due to directory permissions: %v", probeErr)
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
+		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(2) }), 0)
+
+	failed := rig.release()
+
+	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.True(t, harness.IsCodePresentForPackage(executionEvents(failed), executionIntegrityCode, "assets"),
+		"the write-denied root fails its own prerequisite")
+	assert.Contains(t, failed.Stdout+failed.Stderr, "permission denied",
+		"the refused install reached the destination filesystem")
+	assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "packages/assets/a-dist/old.txt"))
+	assert.NoFileExists(t, rig.repo.Path("packages", "assets", "a-dist", "new.txt"))
+	assert.NoDirExists(t, filepath.Join(blocked, "nested"))
+	assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("packages", "assets")))
+	assert.False(t, rig.repo.IsTagged("assets@0.1.0"), "no partial installation can publish")
+	assert.True(t, rig.repo.IsTagged("spare@0.1.0"), "independent work still releases")
+	firstPublications, err := os.ReadFile(marker)
+	require.NoError(t, err)
+	assert.Equal(t, "spare\n", string(firstPublications))
+
+	require.NoError(t, os.Chmod(blocked, 0o755))
+	retried := rig.release()
+
+	require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+	assert.Equal(t, "new", readRepoFile(t, rig.repo, "packages/assets/a-dist/new.txt"))
+	assert.Equal(t, "new", readRepoFile(t, rig.repo, "packages/assets/z-assets/nested/new.txt"))
+	assert.ElementsMatch(t, []string{"assets@0.1.0", "spare@0.1.0"}, rig.repo.TagList())
+	content, err := os.ReadFile(marker)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"spare", "assets"}, strings.Fields(string(content)),
+		"each package published exactly once across the failed run and retry")
+	stopAll(t, []*executionWorker{worker})
+}
+
 // asideLeftoverNames is every folder an interrupted installation would have
 // left beside a declared root.
 func asideLeftoverNames(t *testing.T, dir string) []string {
@@ -683,6 +747,53 @@ func TestExecutionOutputGitFaults(t *testing.T) {
 	}
 }
 
+// A named pipe in a declared output root cannot be copied as a regular file:
+// reading it would hang until another process opened the other end. Refuse the
+// producer's result before a consumer or publish stage can use that output.
+func TestExecutionProducerRefusesNamedPipeOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the build fixture uses the POSIX mkfifo command")
+	}
+	rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
+		cfg.Scripts["build"] = models.Script{`mkdir -p dist && if [ "$DISPAT_PACKAGE" = assets ]; then mkfifo dist/pipe; else printf 'ordinary\n' > dist/file; fi`}
+		executionOneWorker(cfg)
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+
+	res := rig.release()
+	reply := stopAll(t, []*executionWorker{worker})[0]
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, 0, reply.Code, "the worker remains available after refusing the output")
+	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
+	assert.Contains(t, reply.Stdout+reply.Stderr, "neither a file, a link nor a folder")
+	assert.NotContains(t, executionReleasedPackages(res), "assets",
+		"the rejected producer output cannot be published")
+	assert.NotContains(t, rig.repo.TagList(), "assets@0.1.0")
+	assert.Empty(t, rig.branches())
+}
+
+// A successful hash-object exit is not enough to describe every captured
+// output. If Git answers fewer object IDs than the worker sent paths, no
+// incomplete tree may be offered to the release orchestrator.
+func TestExecutionIncompleteHashReplyCannotPublish(t *testing.T) {
+	rig := newExecutionOutputWorkspace(t, executionOneWorker)
+	fault := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*hash-object -w --no-filters --stdin-paths*", Output: "\n",
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
+
+	res := rig.release()
+	reply := stopAll(t, []*executionWorker{worker})[0]
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, 0, reply.Code)
+	assert.Positive(t, fault.Matches())
+	assert.Contains(t, reply.Stdout+reply.Stderr, "answered 0 objects")
+	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
+	assert.NotContains(t, executionReleasedPackages(res), "assets")
+	assert.NotContains(t, rig.repo.TagList(), "assets@0.1.0")
+	assert.Empty(t, rig.branches())
+}
+
 // executionFakeWorker plays a node: it answers the probe a preflight sends and
 // then pushes whatever result a scenario wants for the build it is offered.
 //
@@ -710,6 +821,16 @@ type executionFakeWorker struct {
 	// to pass preflight: a probe answered with the wrong secret is a run that
 	// never dispatches anything, which is a scenario about preflight instead.
 	resultSecret string
+	// Claim-only scenarios vary the first worker reply and stop before a
+	// result, so the coordinator must decide that claim on its own merits.
+	claimMangle func(executionOrderedJSON) executionOrderedJSON
+	claimSecret string
+	isClaimOnly bool
+	// Ready-only scenarios report a publisher's proposed irreversible work,
+	// then wait to see whether the coordinator authorizes that exact proposal.
+	readyMangle func(executionOrderedJSON) executionOrderedJSON
+	readySecret string
+	isReadyOnly bool
 	// answered is closed once a build has been answered, so a scenario can
 	// wait for the thing it is about.
 	answered chan struct{}
@@ -803,8 +924,17 @@ func (w *executionFakeWorker) answer(branch string) {
 	assignment := executionMessage(w.t, w.mailbox, branch, "assignment")
 	tip := strings.TrimSpace(bareGit(w.t, w.mailbox, "rev-parse", "refs/heads/"+branch))
 	header := executionReplyHeader(assignment, w.node)
-	claim := w.push(branch, tip, "claim", executionOrderedJSON{}.
-		with(header...).with(executionField{"assignment", tip}), "", true)
+	claimDocument := executionOrderedJSON{}.with(header...).with(executionField{"assignment", tip})
+	claimSecret := executionSecret
+	if assignment["kind"] != "probe" {
+		if w.claimMangle != nil {
+			claimDocument = w.claimMangle(claimDocument)
+		}
+		if w.claimSecret != "" {
+			claimSecret = w.claimSecret
+		}
+	}
+	claim := w.pushSigned(branch, tip, "claim", claimDocument, "", true, claimSecret)
 	if assignment["kind"] == "probe" {
 		w.push(branch, claim, "result", executionOrderedJSON{}.with(header...).with(
 			executionField{"assignment", tip},
@@ -812,6 +942,24 @@ func (w *executionFakeWorker) answer(branch string) {
 			executionField{"platform", executionPlatform()},
 			executionField{"report", executionNodeReport(assignment)},
 		), "", true)
+		return
+	}
+	if w.isClaimOnly {
+		w.once.Do(func() { close(w.answered) })
+		return
+	}
+	if w.isReadyOnly {
+		ready := executionOrderedJSON{}.with(header...).with(
+			executionField{"assignment", tip}, executionField{"claim", claim})
+		if w.readyMangle != nil {
+			ready = w.readyMangle(ready)
+		}
+		secret := executionSecret
+		if w.readySecret != "" {
+			secret = w.readySecret
+		}
+		w.pushSigned(branch, claim, "ready", ready, "", true, secret)
+		w.once.Do(func() { close(w.answered) })
 		return
 	}
 	crafted := w.buildOutputs(assignment)

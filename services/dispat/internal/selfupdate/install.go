@@ -114,7 +114,7 @@ func (i *Installer) Fetch(ctx context.Context, a Asset, dir, target string) (pat
 	tmpName := tmp.Name()
 	defer func() {
 		if err != nil {
-			_ = os.Remove(tmpName)
+			i.removeFailedDownload(tmpName)
 		}
 	}()
 
@@ -134,8 +134,10 @@ func (i *Installer) Fetch(ctx context.Context, a Asset, dir, target string) (pat
 // binary it asked for, and puts it in place. It answers where the outgoing
 // binary was kept, which is empty when the path held nothing to keep.
 //
-// Nothing is moved until every check has passed, so a failed update leaves the
-// working binary exactly where it was.
+// Nothing is moved until every download and validation check has passed. A
+// replacement failure then restores the working binary; the typed
+// ErrPreviousBackupCleanup is the exception that reports an installed binary
+// whose older rollback copy could not be discarded.
 func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err error) {
 	exe, err := i.exe()
 	if err != nil {
@@ -151,10 +153,10 @@ func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err er
 		return "", err
 	}
 	defer func() {
-		// On every failure path below the download is removed; on success it
-		// has been renamed away and this finds nothing.
+		// Remove a failed download; if permissions changed after Fetch, the
+		// warning names the retained file so the operator can remove it.
 		if err != nil {
-			_ = os.Remove(tmpName)
+			i.removeFailedDownload(tmpName)
 		}
 	}()
 
@@ -177,6 +179,13 @@ func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err er
 		}
 	}
 	return Replace(exe, tmpName)
+}
+
+func (i *Installer) removeFailedDownload(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		i.Log.Warn().Err(err).Str("staged", path).
+			Msg(i.what() + ": could not remove staged download after failure")
+	}
 }
 
 // download streams the asset into f, checking as it goes that what arrives is

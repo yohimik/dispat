@@ -9,6 +9,7 @@ package execution
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -88,15 +89,19 @@ func TestOwnerPathOfTheTaskPackage(t *testing.T) {
 	assert.Equal(t, ".", ownerPathOf(assignment), "a single history owns the root")
 }
 
-// TestTaskFolderIsAName: a task is "<package>:<stage>" and a package is
-// whatever a workspace calls one, so the folder an attempt owns is mapped onto
-// an alphabet a path cannot be smuggled through.
+// TestTaskFolderIsAName: distinct exact task identities have distinct bounded
+// folders, including names a lossy path sanitizer would have conflated.
 func TestTaskFolderIsAName(t *testing.T) {
-	assert.Equal(t, "run1-core-build-1", formatTaskFolder("run1", "core:build", 1))
+	first := formatTaskFolder("run1", "α:build", 1)
+	assert.Equal(t, first, formatTaskFolder("run1", "α:build", 1),
+		"the same attempt always cleans the same folder")
+	assert.NotEqual(t, first, formatTaskFolder("run1", "β:build", 1))
+	assert.NotEqual(t, first, formatTaskFolder("run2", "α:build", 1))
+	assert.NotEqual(t, first, formatTaskFolder("run1", "α:build", 2))
 	escaping := formatTaskFolder("run1", "../../etc/passwd:build", 2)
-	assert.Equal(t, "run1-..-..-etc-passwd-build-2", escaping)
 	assert.Equal(t, escaping, filepath.Base(escaping),
 		"whatever a package is called, the folder it produces is one path segment")
+	assert.Less(t, len(formatTaskFolder("run1", strings.Repeat("α", 300)+":build", 1)), 255)
 }
 
 // TestStageTitleMatchesTheHookNames: the DISPAT_STAGE a node's hook reads is

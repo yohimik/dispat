@@ -85,7 +85,8 @@ func tomlEntryValueSpan(lines []string, table, key string) (idx, start, end int,
 	if !ok {
 		return 0, 0, 0, false
 	}
-	body := stripTOMLComment(lines[idx])
+	var lineState tomlLineState
+	body := lineState.maskStringContents(lines[idx])
 	start = afterEq
 	for start < len(body) && (body[start] == ' ' || body[start] == '\t') {
 		start++
@@ -104,8 +105,9 @@ func tomlEntryValueSpan(lines []string, table, key string) (idx, start, end int,
 // entry, which is where the next header starts or the file ends.
 func tomlTableBounds(lines []string, table string) (header, end int, ok bool) {
 	header = -1
+	var state tomlLineState
 	for i, raw := range lines {
-		trimmed := strings.TrimSpace(stripTOMLComment(raw))
+		trimmed := strings.TrimSpace(state.maskStringContents(raw))
 		if !strings.HasPrefix(trimmed, "[") {
 			continue
 		}

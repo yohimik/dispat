@@ -191,6 +191,99 @@ func TestExecutionStaleReceiptIsRejected(t *testing.T) {
 	}
 }
 
+// A claim is the point where queue time becomes task time. A party able to
+// write the mailbox must not make the run believe work started by putting an
+// invalid claim on its branch.
+func TestExecutionForgedClaimsAreRejectedBeforeWork(t *testing.T) {
+	for name, row := range map[string]struct {
+		mangle func(executionOrderedJSON) executionOrderedJSON
+		secret string
+		reason string
+	}{
+		"signed with another secret": {
+			secret: "not-the-runs-secret", reason: "signature",
+		},
+		"unparseable header": {
+			mangle: executionRebind("issuedAt", []any{"not a time"}), reason: "unreadable",
+		},
+		"expired issue time": {
+			mangle: executionRebind("issuedAt", "2026-09-01T00:00:00Z"), reason: "issued-at",
+		},
+		"answers another assignment": {
+			mangle: executionRebind("assignment", strings.Repeat("0", 40)), reason: "replay",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newExecutionSaboteurRig(t)
+			worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, nil)
+			worker.claimMangle, worker.claimSecret, worker.isClaimOnly = row.mangle, row.secret, true
+			worker.serve()
+			t.Cleanup(worker.close)
+
+			res := rig.release()
+			executionAwaitAnswered(t, worker.answered)
+
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, executionRefusedReplies(res), row.reason,
+				"the forged claim cannot satisfy the attempt")
+			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
+			assert.Empty(t, rig.repo.TagList(), "no invalid claim can lead to publication")
+			assert.Empty(t, rig.runs(), "no build ran on the strength of a forged claim")
+		})
+	}
+}
+
+// A ready message is the last worker reply before a publish authorization.
+// Invalid ready messages must not let a mailbox writer start an irreversible
+// command, even when the worker's earlier claim was valid.
+func TestExecutionForgedReadyCannotAuthorizePublication(t *testing.T) {
+	for name, row := range map[string]struct {
+		mangle func(executionOrderedJSON) executionOrderedJSON
+		secret string
+		reason string
+	}{
+		"signed with another secret": {
+			secret: "not-the-runs-secret", reason: "signature",
+		},
+		"unparseable header": {
+			mangle: executionRebind("issuedAt", []any{"not a time"}), reason: "unreadable",
+		},
+		"names another claim": {
+			mangle: executionRebind("claim", strings.Repeat("0", 40)), reason: "replay",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newExecutionRig(t, func(cfg *models.File) {
+				cfg.RunOnly = placedOn(models.RunOnlyOrchestrator, models.RunOnlyWorker)
+				cfg.Scripts["build"] = models.Script{executionRecordingScript}
+				cfg.Scripts["publish"] = models.Script{executionRecordingScript}
+				wait := 6
+				if harness.IsTinyGo() {
+					wait = 30
+				}
+				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{
+					Preflight: 30, Task: wait, Cancel: 5}
+			})
+			worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, nil)
+			worker.readyMangle, worker.readySecret, worker.isReadyOnly = row.mangle, row.secret, true
+			worker.serve()
+			t.Cleanup(worker.close)
+
+			res := rig.release()
+			executionAwaitAnswered(t, worker.answered)
+
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, executionRefusedReplies(res), row.reason,
+				"the forged ready cannot authorize publication")
+			assert.Len(t, rig.runs(), 1, "only the local build ran: %v", rig.runs())
+			assert.Equal(t, executionOrchestratorLabel, rig.runs()[0].Node)
+			assert.Empty(t, rig.repo.TagList(), "no publication was recorded")
+			_, authorized := executionLine(res, "publication authorized")
+			assert.False(t, authorized, "the coordinator never sent Go")
+		})
+	}
+}
+
 // TestExecutionOldRunReceiptGrantsNothing (spec vector 20): a receipt of an
 // earlier run, complete and correctly signed, replayed onto this run's branch.
 //

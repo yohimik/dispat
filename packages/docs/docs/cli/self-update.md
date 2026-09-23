@@ -6,6 +6,9 @@ config file or a git repository. This command updates the tool itself, regardles
 dispat downloads the binary for your platform from the GitHub release, verifies the published size and checksum, and
 runs it once to prove it works. It keeps your old binary as `<name>.backup` and removes it during a future run a week
 later. Because nothing moves until every check passes, a failed update leaves your working binary exactly where it was.
+On a later update, dispat keeps the existing rollback copy until the new binary is installed. If the final swap fails,
+it restores the working binary and that copy; a restoration failure reports their remaining paths. A cleanup warning
+after installation means the new binary and its immediate backup are ready, but an older copy needs manual cleanup.
 
 After the new binary is in place, dispat prints the changes and links to the changelog for the installed tag. Run with
 `--check` to see this information before you download anything.

@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"strconv"
 
 	"github.com/rs/zerolog"
 
@@ -123,29 +123,10 @@ func (c *Checkout) CountStrayWrites(ctx context.Context, path string, declared [
 	return changed
 }
 
-// formatTaskFolder names the folder one attempt owns: the run, the task and
-// the attempt, with everything a folder name cannot carry replaced.
-//
-// A task name is "<package>:<stage>", and a package name is whatever a
-// workspace calls its packages, so the name is mapped rather than trusted: a
-// folder is created from it, and a path is the one thing a name must never
-// become on its own.
+// formatTaskFolder names the folder one attempt owns from its exact run and
+// task identities. Hashing each identity separately keeps the path bounded
+// and stops two distinct package names from collapsing onto one checkout.
+// The answer is deterministic so cleanup can find the same attempt's folder.
 func formatTaskFolder(run, task string, attempt int) string {
-	return formatPathWord(run) + "-" + formatPathWord(task) + "-" + formatPathWord(fmt.Sprint(attempt))
-}
-
-// formatPathWord maps one word onto the alphabet a folder name is made of.
-func formatPathWord(word string) string {
-	var mapped strings.Builder
-	for _, letter := range word {
-		isPlain := letter == '.' || letter == '_' || letter == '-' ||
-			(letter >= '0' && letter <= '9') ||
-			(letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z')
-		if isPlain {
-			mapped.WriteRune(letter)
-			continue
-		}
-		mapped.WriteByte('-')
-	}
-	return mapped.String()
+	return "task-" + formatIdentityHash(run) + "-" + formatIdentityHash(task) + "-" + strconv.Itoa(attempt)
 }

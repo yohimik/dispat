@@ -164,12 +164,20 @@ func TestSeenSetRemembersAcrossProcesses(t *testing.T) {
 	assert.True(t, reopened.IsSeen("run-1", "core", 1), "the record outlives the process")
 	assert.NoFileExists(t, path+".tmp", "the file is replaced rather than written in place")
 
-	t.Run("entries older than the replay window are dropped", func(t *testing.T) {
+	t.Run("a valid future-issued message stays remembered past 24 hours", func(t *testing.T) {
 		later, err := LoadSeenSet(path, now.Add(replayWindow+time.Hour))
 
 		require.NoError(t, err)
+		assert.True(t, later.IsSeen("run-1", "core", 1),
+			"a message issued 24 hours ahead at acceptance could still be valid")
+	})
+
+	t.Run("entries older than the full acceptance horizon are dropped", func(t *testing.T) {
+		later, err := LoadSeenSet(path, now.Add(seenRetentionWindow+time.Hour))
+
+		require.NoError(t, err)
 		assert.False(t, later.IsSeen("run-1", "core", 1),
-			"a message that old is refused by the window itself, so keeping it would only grow the file")
+			"even a future-issued message that old is refused by the header window")
 	})
 
 	t.Run("a record that cannot be read is reported rather than ignored", func(t *testing.T) {
@@ -183,7 +191,7 @@ func TestSeenSetRemembersAcrossProcesses(t *testing.T) {
 }
 
 // TestSeenSetRecordPrunesWithoutRestart: a serving worker can remain alive
-// longer than the replay window, so each new answer must bound both its
+// longer than the full acceptance horizon, so each new answer must bound both its
 // in-memory record and the file without losing a tuple still on the boundary.
 func TestSeenSetRecordPrunesWithoutRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "seen.json")
@@ -192,7 +200,7 @@ func TestSeenSetRecordPrunesWithoutRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, set.Record("run-old", "probe", 1, first))
 	require.NoError(t, set.Record("run-boundary", "probe", 1, first.Add(time.Second)))
-	latest := first.Add(replayWindow + time.Second)
+	latest := first.Add(seenRetentionWindow + time.Second)
 	require.NoError(t, set.Record("run-new", "probe", 1, latest))
 
 	assert.False(t, set.IsSeen("run-old", "probe", 1))

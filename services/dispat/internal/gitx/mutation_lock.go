@@ -143,7 +143,7 @@ func (c *LocalGitx) mutationCommonDir(ctx context.Context) (string, error) {
 		return "", errors.New("Git returned an empty common directory")
 	}
 	if !filepath.IsAbs(common) {
-		common = filepath.Join(c.Dir, common)
+		return "", fmt.Errorf("Git did not return an absolute Git common directory: %q", common)
 	}
 	common, err = filepath.EvalSymlinks(common)
 	if err != nil {

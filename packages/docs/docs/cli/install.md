@@ -9,6 +9,9 @@ dispat reads the repository's releases, picks the highest stable version, downlo
 published size and checksum, and only then moves it into place. Anything already at the destination is kept beside it
 as `<name>.backup` and removed during a later run a week afterwards. Because nothing moves until every check passes, a
 failed download leaves the folder exactly as it found it.
+On a later replacement, dispat holds the existing backup until the new file is installed. If the final swap fails, it
+restores the previous tool and backup, or reports their remaining paths if restoration also fails. A cleanup warning
+after installation means the new tool and its immediate backup are ready, but an older copy needs manual cleanup.
 
 ```console
 $ dispat install https://github.com/acme/tool --asset 'tool-{os}-{arch}'

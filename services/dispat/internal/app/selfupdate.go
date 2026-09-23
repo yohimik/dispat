@@ -140,6 +140,11 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		Log:       opts.Log,
 	}
 	backup, err := installer.Install(ctx, asset)
+	if errors.Is(err, selfupdate.ErrPreviousBackupCleanup) {
+		opts.Log.Warn().Err(err).Str("backup", backup).
+			Msg("update installed, but the older rollback copy could not be cleaned up")
+		err = nil
+	}
 	if err != nil {
 		opts.Log.Error().Err(err).Msg("self-update failed")
 		return false, err
@@ -166,8 +171,10 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 	} else {
 		fmt.Fprintf(opts.Out, "installed dispat %s\n", rel.Version.String())
 	}
-	fmt.Fprintf(opts.Out, "the previous binary is at %s, removed on its own after a week\n", backup)
-	fmt.Fprintf(opts.Out, "put it back with \"dispat self-update --rollback\"\n")
+	if backup != "" {
+		fmt.Fprintf(opts.Out, "the previous binary is at %s, removed on its own after a week\n", backup)
+		fmt.Fprintf(opts.Out, "put it back with \"dispat self-update --rollback\"\n")
+	}
 	writeNotes(opts, rel, notes)
 	// The macOS warning stays last. It is the one line that asks the reader to
 	// go and do something, and burying it under the changelog would be the

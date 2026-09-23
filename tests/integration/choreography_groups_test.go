@@ -6,6 +6,7 @@ package integration
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -281,7 +282,8 @@ func TestLinkedGroupsUseTheReferenceUnicodeEquivalence(t *testing.T) {
 			fleet.push("sdk")
 			fleet.link("api", "sdk")
 			for _, name := range fleet.names {
-				result := fleet.enter(name).Status("--package", "*")
+				entry := fleet.enter(name)
+				result := entry.Status("--package", "*")
 				if conflict {
 					require.NotZero(t, result.Code)
 					requireDiagnostic(t, result, "E332")
@@ -289,6 +291,14 @@ func TestLinkedGroupsUseTheReferenceUnicodeEquivalence(t *testing.T) {
 				} else {
 					require.Zero(t, result.Code, "%s\n%s", result.Stdout, result.Stderr)
 					assert.Equal(t, "major", harness.GraphLine(result.Events, "api-pkg").Str("bump"))
+					for _, spelling := range []string{"Σ", "σ", "ς"} {
+						selected := entry.Status("--group", spelling)
+						require.Zero(t, selected.Code, "group %q: %s\n%s", spelling, selected.Stdout, selected.Stderr)
+						assert.Equal(t, "major", harness.GraphLine(selected.Events, "api-pkg").Str("bump"))
+						loop := entry.Command("for", "-g", spelling, "--do", `echo "GROUP:$DISPAT_GROUP"`)
+						require.Zero(t, loop.Code, "group %q: %s\n%s", spelling, loop.Stdout, loop.Stderr)
+						assert.Equal(t, 1, strings.Count(loop.Stdout, "GROUP:"))
+					}
 				}
 			}
 		})

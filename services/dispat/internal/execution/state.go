@@ -260,15 +260,21 @@ func parseNodeLockOwner(content string) int {
 // It is what makes duplicate delivery recognisable (§28.3): a mailbox may
 // hold the same assignment twice, an orchestrator may re-offer one on a new
 // branch, and neither may make this node run the same attempt again. Entries
-// older than the replay window are dropped when the file is read, because a
-// message that old is refused by the window anyway and keeping it would make
-// the file grow for the life of the node.
+// older than the longest time an accepted message can remain valid are
+// dropped. A message issued one replay window in the future can be accepted
+// now and remain valid for another window; retaining only one window would
+// let the same attempt run again after a restart or ref rewind.
 type SeenSet struct {
 	path    string
 	entries map[string]time.Time
 }
 
-// LoadSeenSet reads one node's record, pruned to the replay window, and
+// seenRetentionWindow is measured from acceptance, not issuance. CheckHeader
+// admits an issuedAt up to one replayWindow in the future, and that message
+// remains admissible until one replayWindow after its issuedAt.
+const seenRetentionWindow = 2 * replayWindow
+
+// LoadSeenSet reads one node's record, pruned to the acceptance horizon, and
 // answers an empty one for a node that has answered nothing yet.
 func LoadSeenSet(path string, now time.Time) (*SeenSet, error) {
 	set := &SeenSet{path: path, entries: map[string]time.Time{}}
@@ -283,8 +289,9 @@ func LoadSeenSet(path string, now time.Time) (*SeenSet, error) {
 	if err := json.Unmarshal(content, &stored); err != nil {
 		return nil, fmt.Errorf("execution: reading the answered-work record %s: %w", path, err)
 	}
+	cutoff := now.Add(-seenRetentionWindow)
 	for triple, at := range stored {
-		if at.Before(now.Add(-replayWindow)) {
+		if at.Before(cutoff) {
 			continue
 		}
 		set.entries[triple] = at
@@ -308,9 +315,9 @@ func (s *SeenSet) IsSeen(run, task string, attempt int) bool {
 // there.
 func (s *SeenSet) Record(run, task string, attempt int, now time.Time) error {
 	// A worker may serve for days without reloading this file. Prune at each
-	// write so both its memory and the durable record stay within the replay
-	// window, while retaining newer knowledge of a repeated tuple.
-	cutoff := now.Add(-replayWindow)
+	// write so both its memory and the durable record stay within the full
+	// acceptance horizon, while retaining newer knowledge of a repeated tuple.
+	cutoff := now.Add(-seenRetentionWindow)
 	for triple, at := range s.entries {
 		if at.Before(cutoff) {
 			delete(s.entries, triple)

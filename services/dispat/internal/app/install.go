@@ -223,6 +223,11 @@ func installAsset(ctx context.Context, opts InstallOptions, target install.Targe
 	rel selfupdate.Release, asset selfupdate.Asset) error {
 	installer := install.NewInstaller(target.Path(), opts.Source.Client, opts.Source.Token, opts.Log)
 	backup, err := installer.Install(ctx, asset)
+	if errors.Is(err, selfupdate.ErrPreviousBackupCleanup) {
+		opts.Log.Warn().Err(err).Str("path", target.Path()).
+			Msg("tool installed, but the older rollback copy could not be cleaned up")
+		err = nil
+	}
 	if err != nil {
 		opts.Log.Error().Err(err).Msg("install failed")
 		return err

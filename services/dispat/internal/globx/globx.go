@@ -5,7 +5,25 @@
 // three.
 package globx
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
+
+// Fold uses the canonical representative of each Unicode SimpleFold cycle.
+// This keeps glob terms and the registry's EqualFold-equivalent names in the
+// same namespace, including the Greek final sigma.
+func Fold(name string) string {
+	return strings.Map(func(r rune) rune {
+		smallest := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < smallest {
+				smallest = next
+			}
+		}
+		return unicode.ToLower(smallest)
+	}, name)
+}
 
 // IsMatch reports whether s matches pattern, where "*" matches any run of
 // bytes, path separators included ("@acme/*" reaches "@acme/ui"). Only the

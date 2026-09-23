@@ -70,10 +70,11 @@ func rewritePyproject(path, version string, edits []Edit) (Result, error) {
 		arrayKind      manifest.Kind
 		projectVersion *pyLocation
 		poetryVersion  *pyLocation
+		lineState      tomlLineState
 	)
 
 	for li, raw := range lines {
-		body := stripTOMLComment(raw)
+		body := lineState.maskStringContents(raw)
 
 		// Inside a multi-line requirement array, every quoted entry is a
 		// candidate until the brackets balance again.

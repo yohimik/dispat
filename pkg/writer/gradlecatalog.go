@@ -187,7 +187,8 @@ func catalogVersionSpan(index tomlIndex, lines []string, slot catalogSlot) (idx,
 	if !ok {
 		return 0, 0, 0, false
 	}
-	body := stripTOMLComment(lines[idx])
+	var lineState tomlLineState
+	body := lineState.maskStringContents(lines[idx])
 
 	i := afterEq
 	for i < len(body) && (body[i] == ' ' || body[i] == '\t') {

@@ -259,23 +259,6 @@ func (f TagFormat) ParseVersion(pkg, tag string) (ccme.Version, bool) {
 	return tpl.parseVersion(pkg, tag)
 }
 
-// IsMatch reports whether a tag belongs to a package under this format: the
-// literal prefix and suffix check, and deliberately not ParseVersion.
-//
-// A tag can match the shape and still carry an unparseable version, which is
-// the case the initials fallback exists for. It is also what a moving alias
-// looks like: "v1" beside a "v{version}" tagFormat has the shape and no
-// version in it. Telling those two apart is AliasFormat.IsMatch's job, not
-// this one's.
-func (f TagFormat) IsMatch(pkg, tag string) bool {
-	prefix, suffix, ok := f.split(pkg)
-	if !ok {
-		return false
-	}
-	return len(tag) > len(prefix)+len(suffix) &&
-		strings.HasPrefix(tag, prefix) && strings.HasSuffix(tag, suffix)
-}
-
 // Reader compiles this format for one package, so that a caller asking the
 // same format about many names pays for the compile once. It is TagFormat's
 // half of the pair AliasFormat.Matcher is the other half of.

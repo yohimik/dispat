@@ -14,6 +14,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -30,6 +31,66 @@ func (f *outputFixture) install(t *testing.T, manifest *OutputManifest, into str
 		Staging: filepath.Join(t.TempDir(), stagingDirName, manifest.Package),
 		Log:     zerolog.Nop(),
 	})
+}
+
+// Two package names that collapse to the same path word must never share a
+// staging directory. The files are installed simultaneously to exercise the
+// cleanup of one install while the other is still reading its bytes.
+func TestOutputStagingSeparatesCollidingPackageNames(t *testing.T) {
+	fixture := newOutputFixture(t, "packages/core")
+	fixture.write(t, "dist/value.txt", "kept\n", 0o644)
+	manifest, err := fixture.capture(t, []string{"dist"}, testLimits)
+	require.NoError(t, err)
+	index, err := fixture.git.IndexPath(context.Background())
+	require.NoError(t, err)
+	// Both Unicode names became "-" under the old lossy path mapper.
+	destinations := []string{t.TempDir(), t.TempDir()}
+	staging := make([]string, 2)
+	for i, name := range []string{"α", "β"} {
+		staging[i], err = resolveOutputStagingPath(outputStagingSpec{
+			indexPath: index, ownerDir: fixture.dir, destination: destinations[i],
+			run: "same-run", packageName: name,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Dir(index), filepath.Dir(staging[i]),
+			"same-device checkouts keep their private Git staging")
+	}
+	assert.NotEqual(t, staging[0], staging[1])
+	start := make(chan struct{})
+	finished := make(chan error, 2)
+	for i := range staging {
+		request := InstallRequest{Git: fixture.git, Manifest: manifest,
+			Dir: destinations[i], Staging: staging[i], Log: zerolog.Nop()}
+		go func() {
+			<-start
+			finished <- InstallOutputs(context.Background(), request)
+		}()
+	}
+	close(start)
+	for range staging {
+		require.NoError(t, <-finished)
+	}
+	for i := range staging {
+		assert.Equal(t, "kept\n", readInstalled(t, destinations[i], "dist/value.txt"))
+		assert.NoDirExists(t, staging[i])
+	}
+	long, err := resolveOutputStagingPath(outputStagingSpec{
+		indexPath: index, ownerDir: fixture.dir, destination: destinations[0],
+		run: "same-run", packageName: strings.Repeat("α", 300),
+	})
+	require.NoError(t, err)
+	assert.Less(t, len(filepath.Base(long)), 255, "one path component stays bounded")
+	require.NoError(t, stageOutputs(context.Background(), InstallRequest{
+		Git: fixture.git, Manifest: manifest, Dir: destinations[0],
+		Staging: long, Log: zerolog.Nop(),
+	}))
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(long)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm(),
+			"staged bytes stay private even under a shared sibling directory")
+	}
+	require.NoError(t, os.RemoveAll(long))
 }
 
 // TestInstallPutsBackWhatWasCaptured: every kind of entry survives the round

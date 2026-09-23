@@ -3,6 +3,7 @@ package writer
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/yohimik/dispat/pkg/manifest"
@@ -177,21 +178,101 @@ func cargoDependencyName(key string, value any) (name string, writable bool) {
 // Both are ordinary in real crates, so both are searched: the entry first,
 // then a `version` key under `[<table>.<key>]`.
 func cargoVersionSpan(index tomlIndex, lines []string, table, key string) (idx, start, end int, ok bool) {
-	idx, afterEq, ok := index.entry(table, key)
-	if !ok {
-		return catalogEntryValueSpan(index, lines, table+"."+key, "version")
+	// A dependency literally named "core.version" can coexist with a dotted
+	// core.version assignment. The flat index cannot distinguish their text,
+	// so resolve names containing a dot from the authored key segments.
+	if strings.Contains(key, ".") {
+		if idx, start, end, ok = findCargoKeyVersionSpan(lines, []string{table}, []string{key}); ok {
+			return idx, start, end, true
+		}
+	} else {
+		idx, afterEq, found := index.entry(table, key)
+		if found {
+			var lineState tomlLineState
+			body := lineState.maskStringContents(lines[idx])
+			i := afterEq
+			for i < len(body) && (body[i] == ' ' || body[i] == '\t') {
+				i++
+			}
+			if i < len(body) && body[i] == '{' {
+				start, end, ok = tomlInlineValueSpan(body, i, "version")
+				return idx, start, end, ok
+			}
+			start, end, ok = tomlQuotedSpan(body, afterEq)
+			return idx, start, end, ok
+		}
+		// An ordinary unquoted subtable has an exact entry in the line
+		// index. Quoted literal dots cannot collide with this lookup: the
+		// index retains quote marks from their table headers.
+		if idx, start, end, ok = catalogEntryValueSpan(index, lines, table+"."+key, "version"); ok {
+			return idx, start, end, true
+		}
+		// A quoted table header is decoded by go-toml but kept verbatim by
+		// the ordinary line index, so locate its authored segments instead.
+		if idx, start, end, ok = findCargoKeyVersionSpan(lines, []string{table}, []string{key}); ok {
+			return idx, start, end, true
+		}
 	}
-	body := stripTOMLComment(lines[idx])
-	i := afterEq
-	for i < len(body) && (body[i] == ' ' || body[i] == '\t') {
-		i++
+	// TOML also permits dotted keys under the parent table:
+	// [dependencies] followed by core.version = "1.0". The decoder
+	// presents this as the same nested map as [dependencies.core], so
+	// locate the literal where the author actually wrote it.
+	if idx, start, end, ok = findCargoKeyVersionSpan(lines, []string{table}, []string{key, "version"}); ok {
+		return idx, start, end, true
 	}
-	if i < len(body) && body[i] == '{' {
-		start, end, ok = tomlInlineValueSpan(body, i, "version")
-		return idx, start, end, ok
+	return findCargoKeyVersionSpan(lines, []string{table, key}, []string{"version"})
+}
+
+// findCargoKeyVersionSpan locates a scalar by its parsed key segments. A literal
+// quoted key such as "core.version" has one segment; core.version has two.
+func findCargoKeyVersionSpan(lines []string, tableParts, keyParts []string) (idx, start, end int, ok bool) {
+	var current []string
+	var state tomlLineState
+	for li, raw := range lines {
+		body := state.maskStringContents(raw)
+		if trimmed := strings.TrimSpace(body); strings.HasPrefix(trimmed, "[") {
+			if strings.HasSuffix(trimmed, "]") {
+				current, _ = parseTOMLDottedKeyParts(strings.TrimSpace(trimmed[1 : len(trimmed)-1]))
+			} else {
+				current = nil
+			}
+			continue
+		}
+		if !areCargoKeyPartsEqual(current, tableParts) {
+			continue
+		}
+		_, afterEq, entry := tomlKeyValue(body)
+		if !entry {
+			continue
+		}
+		parts, valid := parseTOMLDottedKeyParts(body[:afterEq-1])
+		if !valid || !areCargoKeyPartsEqual(parts, keyParts) {
+			continue
+		}
+		value := afterEq
+		for value < len(body) && (body[value] == ' ' || body[value] == '\t') {
+			value++
+		}
+		if value < len(body) && body[value] == '{' {
+			start, end, ok = tomlInlineValueSpan(body, value, "version")
+		} else {
+			start, end, ok = tomlQuotedSpan(body, afterEq)
+		}
+		return li, start, end, ok
 	}
-	start, end, ok = tomlQuotedSpan(body, afterEq)
-	return idx, start, end, ok
+	return 0, 0, 0, false
+}
+
+func areCargoKeyPartsEqual(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // cargoPatchTable is where Cargo keeps redirects for crates.io dependencies.

@@ -260,22 +260,57 @@ func TestReplaceRestoresTheBinaryWhenTheSecondRenameFails(t *testing.T) {
 	assert.Contains(t, string(read(t, exe)), "1.0.0")
 }
 
+// A failed second update must leave both recoverable versions at their
+// original paths. Deleting the prior backup before the swap loses it even
+// though the current executable is successfully restored.
+func TestReplacePreservesPreviousBackupWhenIncomingRenameFails(t *testing.T) {
+	for _, currentExists := range []bool{true, false} {
+		t.Run(fmt.Sprint("current=", currentExists), func(t *testing.T) {
+			dir := t.TempDir()
+			exe := filepath.Join(dir, "dispat.exe")
+			backup := BackupPath(exe)
+			if currentExists {
+				require.NoError(t, os.WriteFile(exe, []byte("current bytes"), 0o755))
+			}
+			require.NoError(t, os.WriteFile(backup, []byte("prior backup bytes"), 0o755))
+
+			_, err := Replace(exe, filepath.Join(dir, "vanished.exe"))
+			require.Error(t, err)
+			if currentExists {
+				assert.Equal(t, "current bytes", string(read(t, exe)))
+			} else {
+				assert.NoFileExists(t, exe)
+			}
+			assert.Equal(t, "prior backup bytes", string(read(t, backup)))
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			want := 1
+			if currentExists {
+				want = 2
+			}
+			assert.Len(t, entries, want, "failed install left no parked copy: %v", names(entries))
+		})
+	}
+}
+
 // TestReplaceOverwritesAnOlderBackup: two updates in a row leave one backup,
-// the binary the second one replaced. Windows will not rename onto a file
-// that exists, so the old one is removed rather than renamed over.
+// the binary the second one replaced. The previous backup is parked until
+// the install succeeds, then discarded without renaming onto an existing file.
 func TestReplaceOverwritesAnOlderBackup(t *testing.T) {
-	requireExec(t)
 	dir := t.TempDir()
-	exe := filepath.Join(dir, "dispat")
-	fakeBinary(t, exe, "1.1.0")
+	exe := filepath.Join(dir, "dispat.exe")
+	require.NoError(t, os.WriteFile(exe, []byte("current 1.1.0"), 0o755))
 	require.NoError(t, os.WriteFile(BackupPath(exe), []byte("ancient"), 0o755))
-	incoming := filepath.Join(dir, "incoming")
-	fakeBinary(t, incoming, "1.2.0")
+	incoming := filepath.Join(dir, "incoming.exe")
+	require.NoError(t, os.WriteFile(incoming, []byte("incoming 1.2.0"), 0o755))
 
 	backup, err := Replace(exe, incoming)
 	require.NoError(t, err)
-	assert.Contains(t, string(read(t, exe)), "1.2.0")
-	assert.Contains(t, string(read(t, backup)), "1.1.0", "the backup is the binary just replaced")
+	assert.Equal(t, "incoming 1.2.0", string(read(t, exe)))
+	assert.Equal(t, "current 1.1.0", string(read(t, backup)), "the backup is the binary just replaced")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "the previous backup was discarded: %v", names(entries))
 }
 
 // TestInstallerDefaultsToTheRunningBinary: an installer nobody configured
@@ -409,7 +444,7 @@ func TestReplaceReportsAnUnremovableBackup(t *testing.T) {
 
 	_, err := Replace(exe, filepath.Join(dir, "incoming"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "removing the previous backup")
+	assert.Contains(t, err.Error(), "previous backup")
 	assert.FileExists(t, exe, "the working binary never moved")
 }
 

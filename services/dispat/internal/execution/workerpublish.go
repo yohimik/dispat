@@ -96,19 +96,20 @@ func (w *Worker) awaitAuthorization(ctx context.Context, task *claimedTask,
 func (w *Worker) watchAuthorization(ctx context.Context, task *claimedTask, ready string,
 	log zerolog.Logger) taskOutcome {
 	assignment, tip := task.assignment, task.tip
-	deadline := time.NewTimer(resolveAuthorizationWait(assignment.DeadlineSeconds))
-	defer deadline.Stop()
+	ctx, stop := resolveAuthorizationContext(ctx, assignment.DeadlineSeconds)
+	defer stop()
 	interval := minimumPollInterval
 	next := time.NewTimer(interval)
 	defer next.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			log.Warn().Err(ctx.Err()).Msg("the wait for a publication authorization was interrupted")
-			return withheldPublication(ready)
-		case <-deadline.C:
-			log.Warn().Str("code", CodeAuthority).Str("category", CategoryAuthority).
-				Msg("no publication authorization arrived within the run's own wait")
+			if ctx.Err() == context.DeadlineExceeded {
+				log.Warn().Str("code", CodeAuthority).Str("category", CategoryAuthority).
+					Msg("no publication authorization arrived within the run's own wait")
+			} else {
+				log.Warn().Err(ctx.Err()).Msg("the wait for a publication authorization was interrupted")
+			}
 			return withheldPublication(ready)
 		case <-next.C:
 		}
@@ -385,12 +386,13 @@ func withheldPublication(expectedTip string) taskOutcome {
 		reason: ReasonAuthorization, expectedTip: expectedTip}
 }
 
-// resolveAuthorizationWait is how long this node waits to be authorized: the
-// run's own wait, as the assignment states it, and a bound of this node's own
-// for an assignment that states none.
-func resolveAuthorizationWait(seconds int) time.Duration {
-	if seconds <= 0 {
-		return defaultAuthorizationWait
+// resolveAuthorizationContext reuses the task's already-running deadline. Only a
+// task that stated no deadline needs a fallback bound at the publication gate.
+// Starting the same deadline again here would let a slow beforePublish hook
+// extend the run's wait after the task's own deadline had already begun.
+func resolveAuthorizationContext(ctx context.Context, seconds int) (context.Context, context.CancelFunc) {
+	if seconds > 0 {
+		return ctx, func() {}
 	}
-	return time.Duration(seconds) * time.Second
+	return context.WithTimeout(ctx, defaultAuthorizationWait)
 }

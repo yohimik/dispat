@@ -52,7 +52,7 @@ func (w *Worker) installTaskInputs(ctx context.Context, assignment Assignment, c
 		}
 		if err := InstallOutputs(ctx, InstallRequest{
 			Git: w.Cache, Manifest: manifest, Dir: checkout.Dir(input.Path),
-			Staging: filepath.Join(dir, stagingDirName, formatPathWord(input.Package)), Log: log,
+			Staging: filepath.Join(dir, stagingDirName, formatIdentityHash(input.Package)), Log: log,
 		}); err != nil {
 			return nil, OutputFaultReason(err), err
 		}

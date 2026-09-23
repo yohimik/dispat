@@ -48,11 +48,16 @@ Here is what happens to your binary during an update:
 4. **It runs the new binary once.** It invokes the new binary to check its
    version before committing the change. This prevents broken or mismatched
    binaries from replacing your working tool.
-5. **Only then does it swap.** dispat renames your existing binary to
-   `dispat.backup` and puts the new one in its place.
+5. **Only then does it swap.** dispat keeps any previous rollback copy while it
+   renames your existing binary to `dispat.backup` and puts the new one in its
+   place. Once the replacement succeeds, it removes the older rollback copy.
 
-No files move until every check passes. If an error occurs, your existing
-binary stays intact and ready to run.
+No files move until every check passes. If the final replacement fails, dispat
+restores both the working binary and its previous backup. If restoration itself
+fails, the error names where each recoverable binary remains. A warning that
+the older rollback copy could not be cleaned up means the new binary was
+installed and its immediate backup is available; the warning names the older
+copy or staging directory left behind.
 
 Your binary path stays the same, so your `PATH` configuration remains valid.
 You do not need to re-link binaries or restart your shell.

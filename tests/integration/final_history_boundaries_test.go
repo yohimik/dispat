@@ -106,35 +106,58 @@ func TestFinalHistoryRefusesMalformedMergeBaseBeforePublishing(t *testing.T) {
 // of HEAD. In that case the union ancestry shortcut must give way to the
 // individual windows, which still see the new branch's pending commit.
 func TestFinalHistoryRetainsWorkWhenBoundariesLeaveHEAD(t *testing.T) {
-	f := finalFreshPrereleaseHistory(t)
-	oldInventory := f.control.Git("-C", "sources/lib", "tag", "--list", "--merged", "HEAD",
-		"--sort=-v:refname", "--sort=-creatordate",
-		"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)") + "\n"
-	stable := f.control.Git("-C", "sources/lib", "rev-list", "-n", "1", "core@0.1.0")
-	fresh := f.control.Git("-C", "sources/lib", "rev-list", "-n", "1", "core@0.2.0-beta.0")
-
-	f.control.Git("-C", "sources/lib", "checkout", "-q", "--orphan", "rewritten")
-	f.control.WriteFile("sources/lib/packages/core/rewritten.txt", "new lineage\n")
-	commitPolyrepoSource(t, f.control, "sources/lib", "feat(core)%beta!: breaking work after the rewrite")
-	checkpointPolyrepoSource(t, f.control, "sources/lib")
-	assert.Empty(t, f.control.Git("-C", "sources/lib", "tag", "--list", "--merged", "HEAD"),
-		"the old boundaries really are off HEAD")
-
-	// The inventory is the real Git reply captured before the rewrite. The
-	// fault stand-in delivers only that stale reply; history inquiries still
-	// run against the real, newly rooted repository.
-	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*-C */sources/lib tag --list --merged HEAD *",
-		Output:  oldInventory,
+	t.Run("single repository", func(t *testing.T) {
+		r := correctionsRepo(t)
+		r.Commit("feat(core,utils): initial features")
+		r.Git("tag", "-a", "core@1.0.0", "-m", "core released")
+		r.WriteFile("packages/utils/shipped.txt", "utils release\n")
+		r.Commit("feat(utils): released utility feature")
+		r.Git("tag", "-a", "utils@1.1.0", "-m", "utils released")
+		inventory := r.Git("tag", "--list", "--merged", "HEAD", "--sort=-v:refname", "--sort=-creatordate",
+			"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)") + "\n"
+		r.Git("checkout", "-q", "--orphan", "rewritten")
+		r.WriteFile("packages/core/rewritten.txt", "new root\n")
+		r.Commit("fix(core,utils): pending after rewritten history")
+		fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*tag --list --merged HEAD *", Output: inventory})
+		res := r.CommandEnv(fault.Env(), "status", "--log-level", "trace")
+		require.Zero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Positive(t, fault.Matches())
+		assert.Equal(t, "1.0.0 -> 1.0.1", harness.GraphLine(res.Events, "core").Str("version"))
+		assert.Equal(t, "1.1.0 -> 1.1.1", harness.GraphLine(res.Events, "utils").Str("version"))
+		assert.Contains(t, res.Stdout, "core@1.0.0..HEAD")
+		assert.Contains(t, res.Stdout, "utils@1.1.0..HEAD")
 	})
-	res := f.control.CommandEnv(fault.Env(), "status", "--log-level", "trace")
-	require.Zero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Positive(t, fault.Matches(), "planning read the stale but valid inventory")
-	assert.Contains(t, res.Stdout, stable+"..HEAD", "the stable window was read separately")
-	assert.Contains(t, res.Stdout, fresh+"..HEAD", "the prerelease window was read separately")
-	core := harness.GraphLine(res.Events, "core")
-	assert.Equal(t, "0.2.0-beta.0 -> 1.0.0-beta.0", core.Str("version"))
-	assert.Equal(t, "major", core.Str("bump"), "work on the new root remains pending")
+	t.Run("composed source", func(t *testing.T) {
+		f := finalFreshPrereleaseHistory(t)
+		oldInventory := f.control.Git("-C", "sources/lib", "tag", "--list", "--merged", "HEAD",
+			"--sort=-v:refname", "--sort=-creatordate",
+			"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)") + "\n"
+		stable := f.control.Git("-C", "sources/lib", "rev-list", "-n", "1", "core@0.1.0")
+		fresh := f.control.Git("-C", "sources/lib", "rev-list", "-n", "1", "core@0.2.0-beta.0")
+
+		f.control.Git("-C", "sources/lib", "checkout", "-q", "--orphan", "rewritten")
+		f.control.WriteFile("sources/lib/packages/core/rewritten.txt", "new lineage\n")
+		commitPolyrepoSource(t, f.control, "sources/lib", "feat(core)%beta!: breaking work after the rewrite")
+		checkpointPolyrepoSource(t, f.control, "sources/lib")
+		assert.Empty(t, f.control.Git("-C", "sources/lib", "tag", "--list", "--merged", "HEAD"),
+			"the old boundaries really are off HEAD")
+
+		// The inventory is the real Git reply captured before the rewrite. The
+		// fault stand-in delivers only that stale reply; history inquiries still
+		// run against the real, newly rooted repository.
+		fault := harness.NewGitFault(t, harness.GitFault{
+			Pattern: "*-C */sources/lib tag --list --merged HEAD *",
+			Output:  oldInventory,
+		})
+		res := f.control.CommandEnv(fault.Env(), "status", "--log-level", "trace")
+		require.Zero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Positive(t, fault.Matches(), "planning read the stale but valid inventory")
+		assert.Contains(t, res.Stdout, stable+"..HEAD", "the stable window was read separately")
+		assert.Contains(t, res.Stdout, fresh+"..HEAD", "the prerelease window was read separately")
+		core := harness.GraphLine(res.Events, "core")
+		assert.Equal(t, "0.2.0-beta.0 -> 1.0.0-beta.0", core.Str("version"))
+		assert.Equal(t, "major", core.Str("bump"), "work on the new root remains pending")
+	})
 }
 
 // TestFinalHistoryRequiresTheLatestPrereleaseBoundarySeparately gives a

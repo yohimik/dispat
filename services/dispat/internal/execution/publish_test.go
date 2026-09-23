@@ -9,6 +9,7 @@ package execution
 // node a publisher would rather run on.
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -67,14 +68,22 @@ func TestAnAuthorizationExpires(t *testing.T) {
 	}
 }
 
-// TestTheAuthorizationWaitIsTheRunsOwn: the node waits as long as the run
-// says it will, and falls back to a bound of its own for an assignment that
-// states none, because a node holding a checkout for ever is a node nobody
-// can reuse.
+// TestTheAuthorizationWaitIsTheRunsOwn: a publication shares the deadline
+// that started when its assignment was claimed, including time spent in the
+// hook. Only an assignment with no deadline needs a publication-gate fallback.
 func TestTheAuthorizationWaitIsTheRunsOwn(t *testing.T) {
-	assert.Equal(t, 90*time.Second, resolveAuthorizationWait(90))
-	assert.Equal(t, defaultAuthorizationWait, resolveAuthorizationWait(0))
-	assert.Equal(t, defaultAuthorizationWait, resolveAuthorizationWait(-1))
+	parent, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	waiting, stop := resolveAuthorizationContext(parent, 90)
+	defer stop()
+	assert.True(t, waiting == parent, "a stated wait must not start a second timer")
+	for _, seconds := range []int{0, -1} {
+		waiting, stop := resolveAuthorizationContext(context.Background(), seconds)
+		deadline, bounded := waiting.Deadline()
+		require.True(t, bounded, "an unbounded assignment needs a fallback")
+		assert.InDelta(t, defaultAuthorizationWait.Seconds(), time.Until(deadline).Seconds(), 2)
+		stop()
+	}
 }
 
 // TestTheResultLeaseFollowsTheHandshake: a task that moved its branch no

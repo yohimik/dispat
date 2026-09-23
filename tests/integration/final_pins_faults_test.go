@@ -250,6 +250,45 @@ func TestFinalSourceRecordPreflightGitFaultsRefuseBeforePublication(t *testing.T
 	}
 }
 
+// The fixed fleet snapshot must lock the real Git common directory before it
+// plans or publishes. A successful but malformed rev-parse reply must not
+// redirect that lock to the worktree or turn an absent directory into an
+// apparently valid publication boundary.
+func TestFinalMutationCommonDirectoryRepliesRefuseBeforePublication(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply, want string
+	}{
+		{name: "empty reply", reply: "\n", want: "empty common directory"},
+		{name: "missing absolute directory", reply: filepath.Join(t.TempDir(), "missing-git-common"), want: "resolving Git common directory path"},
+		{name: "relative worktree directory", reply: ".", want: "absolute Git common directory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fleet := newFinalFaultFleet(t)
+			control := fleet.control
+			sourceRoot := filepath.Join(canonicalRoot(t, control), "sources", "lib")
+			controlBefore := control.Git("rev-parse", "HEAD")
+			fault := harness.NewGitFault(t, harness.GitFault{
+				Pattern: "*-C " + sourceRoot + " *rev-parse --path-format=absolute --git-common-dir*",
+				Output:  tc.reply,
+			})
+
+			failed := control.CommandEnv(fault.Env())
+			require.NotZero(t, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+			combined := failed.Stdout + failed.Stderr
+			assert.Contains(t, combined, tc.want)
+			assert.Equal(t, 1, fault.Matches())
+			assert.NoFileExists(t, control.Path("sources", "lib", "publish-count"))
+			assert.Empty(t, polyrepoTags(control, "sources/lib"))
+			assert.Equal(t, fleet.sourceBefore, control.Git("rev-parse", "HEAD:sources/lib"))
+			assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
+
+			retry := control.Release()
+			require.Equal(t, 0, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+			assert.Equal(t, 1, finalPublishCount(t, control))
+		})
+	}
+}
+
 // TestFinalMutationLockBreakAfterPublicationLeavesNoFalseRecord: the fixed
 // snapshot was valid when package work began, but the advisory lock path is
 // replaced after upload and before native recording. The package is already
