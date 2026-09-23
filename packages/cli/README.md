@@ -438,4 +438,4 @@ Uninstall globally with `npm uninstall -g @dispat/bin`, or remove the local deve
 - [Configuration](https://dispat.dev/configuration/): packages, spaces, scripts, and release records.
 - [Discord](https://discord.gg/83PwVSCCmk): questions, integration help, and projects using dispat.
 - [GitHub issues](https://github.com/yohimik/dispat/issues): bugs and feature requests.
-- [Building, testing, and publication recovery](https://github.com/yohimik/dispat/blob/main/packages/cli/TESTING.md): maintenance of this npm distribution.
+- [Building, testing, and publication recovery](https://github.com/yohimik/dispat/blob/main/CONTRIBUTING.md#npm-distribution): maintenance of this npm distribution.

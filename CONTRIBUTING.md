@@ -310,6 +310,44 @@ go run ./tools/testreport coverage -coverage coverage -commit "$(git rev-parse H
 
 Run targeted tests while editing, then the full required gates before declaring a candidate ready. The [script guide](scripts/README.md) describes the Docker-based test, race, formatting, vet, coverage, and report pipeline. The npm distribution and documentation have their own package tests. Do not publish stale reports or describe untested platform artifacts as verified.
 
+### npm distribution
+
+The `@dispat/bin` package in [`packages/cli`](packages/cli) has a suite of its own. It uses local files, processes,
+HTTP servers, proxies and a disposable npm registry, and never publishes to the public registry, creates a Git tag or
+pushes. After `pnpm install --frozen-lockfile --ignore-scripts` at the repository root, run it with:
+
+```sh
+pnpm --filter @dispat/bin test
+```
+
+The suite holds the package to 95% line and branch coverage, with no coverage-ignore directives in production code.
+CI runs it in the package's Docker gate on the supported Node baseline, and the packed global install again on npm 12.
+It must cover:
+
+- **Release metadata**: the exact native version and tag, all six platform assets with their sizes and SHA-256
+  digests, the GitHub token sent to `api.github.com` alone, bounded retries of a rate limit, refused and oversized
+  responses, and a request deadline.
+- **Installer**: existing valid and invalid binaries, corrupt, truncated and oversized downloads, wrong versions,
+  symlinks, directories, concurrent installs, cleanup, the executable mode, HTTPS redirects, proxies, custom
+  certificate authorities and timeouts.
+- **Launcher**: literal arguments and flag values, environment, working directory, streams, exit status and signals,
+  spawn failures, npm-managed self-update and listener cleanup.
+- **Artifact**: npm 11 and npm 12 pack output, one artifact record with the exact name, version and streamed SHA-512
+  digest, and that same tarball installed globally with scripts disabled and then repaired, locally, through
+  `npm exec` and through pnpm, then run against a disposable repository.
+- **Publication**: exactly one `npm publish` with the channel's tag, access and provenance, npm failures propagated,
+  and success when npm accepts the upload while registry metadata is not yet readable.
+- **Workspace**: a release build that cannot trigger an implicit pnpm reinstall or lifecycle script.
+- **Post-release readiness**: the wait for exact-version metadata, with bounded retries over 404, 429, server and
+  network errors and stalled responses, an immediate stop on a permanent failure, and a run from the TypeScript source
+  without installed dependencies.
+
+The publish command is the last external action of the publish stage, as the
+[agent work guide](specs/agent-guide/README.md#test-before-and-during-release) requires. An upload npm accepted
+without a release tag is recovered as the
+[recovery guide](packages/docs/docs/reference/releasing/recovery.md#recover-an-npm-publication-without-a-release-tag)
+describes.
+
 ### Performance evidence
 
 A performance claim needs a measurement. Add a Go benchmark that reports the counter the claim is about, not only
