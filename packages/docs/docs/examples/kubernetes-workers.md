@@ -80,11 +80,14 @@ execution:
     task: 3600
     cancel: 60
   workers:
-    - {name: w-0, endpoint: git@github.com:acme/release-mailbox.git}
-    - {name: w-1, endpoint: git@github.com:acme/release-mailbox.git}
-    - {name: w-2, endpoint: git@github.com:acme/release-mailbox.git}
-    - {name: w-3, endpoint: git@github.com:acme/release-mailbox.git}
+    - {name: w-0, endpoint: git@github.com:acme/project.git}
+    - {name: w-1, endpoint: git@github.com:acme/project.git}
+    - {name: w-2, endpoint: git@github.com:acme/project.git}
+    - {name: w-3, endpoint: git@github.com:acme/project.git}
 ```
+
+Here `project.git` is also the source origin. Protect its release branch and tags so the worker key can write
+`dispat-worker-*` coordination refs without gaining release-record authority.
 
 A pipeline that creates its workers for the run can name them on the command line instead, with
 `--worker name=endpoint` on the release, beside a file that states only the secret and the waits.
@@ -128,7 +131,7 @@ spec:
                 "execution": {
                   "role": "worker",
                   "name": "w-${JOB_COMPLETION_INDEX}",
-                  "endpoint": "git@github.com:acme/release-mailbox.git",
+                  "endpoint": "git@github.com:acme/project.git",
                   "secretEnv": "DISPAT_EXECUTION_SECRET",
                   "concurrency": 1
                 },

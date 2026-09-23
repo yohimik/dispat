@@ -114,7 +114,11 @@ func referenceTagsForPackage(out, pkg string, format TagFormat) Tags {
 		if len(fields) > 2 {
 			if peeled := strings.TrimSpace(fields[2]); peeled != "" {
 				tag.Commit = peeled
+				tag.Annotated = true
 			}
+		}
+		if len(fields) > 3 {
+			tag.Subject = fields[3]
 		}
 		if version, ok := format.ParseVersion(pkg, name); ok {
 			tag.Version, tag.Parsed = version, true

@@ -128,6 +128,25 @@ it has still not been delivered by any release of `core`, and its `0.2.1` releas
 manifest moves to `^0.2.0` and the two packages are in step again. If `core` fails a second time, `app` is skipped with
 `W194` instead, because by then the failure is the only reason it is in the plan at all.
 
+The provider's successful run need not include the consumer. For example, if `app` published its own fix against
+`core@0.1.0` after `core` failed, an operator can later release just `core` with `dispat release --package core`.
+When the next full run starts, `dispat status` should show `app` as a `W193` catch-up from the newly published core,
+even though `app`'s earlier tag already contains the original propagation commit. Run the full release through CI to
+deliver that catch-up; no new release-intent commit is needed. A successful consumer release records the exact
+provider tag it saw in its own release tag, so later planning can distinguish a provider published before that
+consumer from one published after it.
+
+The receipt is written only when the provider's final tag is available. If that tag cannot be recorded in the same
+run, dispat blocks the consumer tag rather than recording a provider observation it cannot prove. In a
+polyrepository run, a provider source-record failure likewise withholds a dependent consumer with `W194` until the
+source record is repaired.
+
+This delivery evidence is written by releases made with the new tag format. An older consumer tag without it cannot
+establish the order of two releases whose tags point at the same commit. In that legacy case, a clean status result
+does not prove the consumer received a provider version published later. Check the consumer's shipped manifest and
+registry version against the provider's record; if it missed the provider, make an explicit consumer release through
+the normal CI workflow. The new format does not reconstruct publication order that was never recorded.
+
 One shape cannot be repaired in place. If the consumer's build had already run over the manifests naming the provider's
 planned version, whatever it produced may carry that version inside it, and rewriting a manifest does not reach a built
 artefact. dispat blocks that consumer with `W194` naming the provider rather than rebuilding it silently, and the next

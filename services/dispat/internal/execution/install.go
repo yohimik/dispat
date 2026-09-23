@@ -81,9 +81,9 @@ type InstallRequest struct {
 // declared roots of the destination with it.
 //
 // The set is assembled, then moved: a failure before the first rename leaves
-// the destination exactly as it was, and a failure between two renames puts
-// back the root it was in the middle of. That is as atomic as a file system
-// gives without a transaction, and it is the boundary §28.5 asks for.
+// the destination exactly as it was, and a failure during replacement puts
+// back every root already moved. That is as atomic as a file system gives
+// without a transaction, and it is the boundary §28.5 asks for.
 func InstallOutputs(ctx context.Context, request InstallRequest) error {
 	if err := os.RemoveAll(request.Staging); err != nil {
 		return fmt.Errorf("execution: clearing the staging folder %s: %w", request.Staging, err)
@@ -289,9 +289,22 @@ func describeReadFailure(err error) error {
 // fail; and it is removed after the new one is in place rather than left, so
 // the checkout a build sees holds one copy of its inputs.
 func replaceOutputRoots(request InstallRequest) error {
+	replaced := make([]replacedRoot, 0, len(request.Manifest.Roots))
 	for _, root := range request.Manifest.Roots {
-		if err := replaceOneRoot(request, root); err != nil {
+		moved, err := replaceOneRoot(request, root)
+		if err != nil {
+			restoreReplacedRoots(request, replaced)
 			return err
+		}
+		replaced = append(replaced, moved)
+	}
+	for _, moved := range replaced {
+		if moved.aside == "" {
+			continue
+		}
+		if err := os.RemoveAll(moved.aside); err != nil {
+			request.Log.Warn().Err(err).Str("code", CodeTransportRetained).
+				Str("category", CategoryTransportCleanup).Msg("a replaced build output root was not removed")
 		}
 	}
 	request.Log.Debug().Str("package", request.Manifest.Package).
@@ -300,29 +313,65 @@ func replaceOutputRoots(request InstallRequest) error {
 	return nil
 }
 
+type replacedRoot struct {
+	destination string
+	aside       string
+}
+
 // replaceOneRoot puts one staged root where the consuming package reads it.
-func replaceOneRoot(request InstallRequest, root string) error {
+func replaceOneRoot(request InstallRequest, root string) (replacedRoot, error) {
 	staged := filepath.Join(request.Staging, filepath.FromSlash(root))
-	destination := filepath.Join(request.Dir, filepath.FromSlash(root))
+	destination, err := resolveInstallDestination(request.Dir, root)
+	if err != nil {
+		return replacedRoot{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-		return fmt.Errorf("execution: preparing the folder of the build output root %s: %w", root, err)
+		return replacedRoot{}, fmt.Errorf("execution: preparing the folder of the build output root %s: %w", root, err)
 	}
 	aside, err := moveRootAside(destination)
 	if err != nil {
-		return err
+		return replacedRoot{}, err
 	}
 	if err := os.Rename(staged, destination); err != nil {
 		restoreRootAside(request, destination, aside)
-		return fmt.Errorf("execution: installing the build output root %s: %w", root, err)
+		return replacedRoot{}, fmt.Errorf("execution: installing the build output root %s: %w", root, err)
 	}
-	if aside == "" {
-		return nil
+	return replacedRoot{destination: destination, aside: aside}, nil
+}
+
+// resolveInstallDestination refuses parent links and files before MkdirAll can
+// follow them outside the package checkout. The root itself may be replaced.
+func resolveInstallDestination(dir, root string) (string, error) {
+	walked := dir
+	components := strings.Split(root, "/")
+	for _, component := range components[:len(components)-1] {
+		walked = filepath.Join(walked, component)
+		info, err := os.Lstat(walked)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("execution: inspecting the folder of the build output root %s: %w", root, err)
+		}
+		if !info.IsDir() {
+			return "", refuseOutputs(ReasonDestinationComponent)
+		}
 	}
-	if err := os.RemoveAll(aside); err != nil {
-		request.Log.Warn().Err(err).Str("code", CodeTransportRetained).
-			Str("category", CategoryTransportCleanup).Msg("a replaced build output root was not removed")
+	return filepath.Join(walked, components[len(components)-1]), nil
+}
+
+// restoreReplacedRoots rolls back all earlier roots when a later move fails.
+func restoreReplacedRoots(request InstallRequest, replaced []replacedRoot) {
+	for index := len(replaced) - 1; index >= 0; index-- {
+		moved := replaced[index]
+		if err := os.RemoveAll(moved.destination); err != nil {
+			request.Log.Warn().Err(err).Str("code", CodeTransportRetained).
+				Str("category", CategoryTransportCleanup).
+				Msg("an installed build output root was not taken back")
+			continue
+		}
+		restoreRootAside(request, moved.destination, moved.aside)
 	}
-	return nil
 }
 
 // moveRootAside renames whatever is at the destination out of the way and

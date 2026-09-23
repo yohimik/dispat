@@ -65,24 +65,25 @@ func linkNpm(path string, links []Link) (LinkResult, error) {
 		if err := json.Unmarshal(data, &doc); err != nil {
 			return res, fmt.Errorf("%s: %w", path, err)
 		}
-		field := npmOverrideField(doc)
-		if r.Path == "" {
-			// A removal aims at the directive wherever a hand-edited file
-			// keeps it, not at the field a write would choose: the verify
-			// below proves the name gone from every field, so removing it
-			// from only the chosen one could never commit.
-			if holder, ok := npmFieldHolding(doc, r.Name); ok {
-				field = holder
-			}
+		// A hand-edited manifest can carry the same redirect under several
+		// package managers. Repoint or remove every local directive, while a
+		// registry-version override of the same name remains untouched.
+		fields := npmLocalFields(doc, r.Name)
+		if len(fields) == 0 && r.Path != "" {
+			fields = [][]string{npmOverrideField(doc)}
 		}
-		next, applied, err := npmApplyLink(data, field, r)
-		if err != nil {
-			return res, fmt.Errorf("%s: %w", path, err)
+		applied := false
+		for _, field := range fields {
+			next, changed, err := npmApplyLink(data, field, r)
+			if err != nil {
+				return res, fmt.Errorf("%s: %w", path, err)
+			}
+			data = next
+			applied = applied || changed
 		}
 		switch {
 		case applied:
 			res.Applied = append(res.Applied, r)
-			data = next
 		case r.Path == "":
 			res.Missing = append(res.Missing, r)
 		}
@@ -131,9 +132,10 @@ func npmApplyLink(data []byte, field []string, r Link) ([]byte, bool, error) {
 	}
 }
 
-// npmFieldHolding finds the override field that declares the name, in the
-// same order the lister reads them.
-func npmFieldHolding(doc map[string]any, name string) ([]string, bool) {
+// npmLocalFields finds every field carrying a local redirect for name. A
+// registry override of the same name is not a link and must survive DropLinks.
+func npmLocalFields(doc map[string]any, name string) [][]string {
+	var fields [][]string
 	for _, field := range npmOverrideFields {
 		obj := doc
 		for _, key := range field {
@@ -145,11 +147,12 @@ func npmFieldHolding(doc map[string]any, name string) ([]string, bool) {
 		if obj == nil {
 			continue
 		}
-		if _, ok := obj[name]; ok {
-			return field, true
+		if spec, ok := obj[name].(string); ok &&
+			(strings.HasPrefix(spec, "file:") || strings.HasPrefix(spec, "link:")) {
+			fields = append(fields, field)
 		}
 	}
-	return nil, false
+	return fields
 }
 
 // npmCreateField writes the override map itself, and the pnpm object around it
@@ -204,32 +207,25 @@ func npmVerifyLinks(out []byte, applied []Link) error {
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return fmt.Errorf("rewrite produced invalid JSON: %w", err)
 	}
-	entries := map[string]any{}
-	for _, field := range [][]string{{"overrides"}, {"resolutions"}, {"pnpm", "overrides"}} {
-		cur := doc
-		for i, key := range field {
-			next, ok := cur[key].(map[string]any)
-			if !ok {
-				break
-			}
-			if i == len(field)-1 {
-				for k, v := range next {
-					entries[k] = v
-				}
-			}
-			cur = next
-		}
-	}
 	for _, r := range applied {
-		value, declared := entries[r.Name]
+		fields := npmLocalFields(doc, r.Name)
 		if r.Path == "" {
-			if declared {
-				return fmt.Errorf("rewrite left %s still overridden", r.Name)
+			if len(fields) > 0 {
+				return fmt.Errorf("rewrite left %s still linked", r.Name)
 			}
 			continue
 		}
-		if got, _ := value.(string); got != npmSpec(r.Path) {
-			return fmt.Errorf("rewrite left %s pointing at %q, want %q", r.Name, got, npmSpec(r.Path))
+		if len(fields) == 0 {
+			return fmt.Errorf("rewrite left %s without a local link", r.Name)
+		}
+		for _, field := range fields {
+			obj := doc
+			for _, key := range field {
+				obj, _ = obj[key].(map[string]any)
+			}
+			if got, _ := obj[r.Name].(string); got != npmSpec(r.Path) {
+				return fmt.Errorf("rewrite left %s pointing at %q, want %q", r.Name, got, npmSpec(r.Path))
+			}
 		}
 	}
 	return nil

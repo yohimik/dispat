@@ -42,7 +42,6 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
-	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // codeLockLost is the code dispat already reports a lost or unusable release
@@ -73,7 +72,7 @@ func (a *App) resolvePrePublishCheck(pl *plan.Plan, fleet *workspaceRecorder,
 	}
 	inputs := a.newRelevantInputs(pl, fleet, coordinator)
 	return func(ctx context.Context, rel *plan.Release) error {
-		if err := a.checkLockOwnership(ctx, fleet, rel); err != nil {
+		if err := a.checkLockOwnership(ctx, coordinator, rel); err != nil {
 			return err
 		}
 		if verifyFleet != nil {
@@ -100,47 +99,17 @@ func resolveFleetPublishCheck(fleet *workspaceRecorder) func(context.Context, *p
 	}
 }
 
-// checkLockOwnership refuses a publication of a repository this run no longer
-// owns.
+// checkLockOwnership refuses publication if any repository in this run's
+// complete lock set is no longer owned.
 //
-// It is asked of the remote rather than of the memory of having acquired the
-// lock, because that is the whole difference between the two: a lock somebody
-// else took over is a lock this run still remembers taking. A run that has
-// lost it may finish what it has already done and must start nothing new,
-// which is what publishing one more package would be.
-func (a *App) checkLockOwnership(ctx context.Context, fleet *workspaceRecorder, rel *plan.Release) error {
-	lock := a.resolveOwningLock(fleet, rel)
-	if lock == nil {
-		return a.refusePublication(rel, fmt.Errorf(
-			"%s: this run holds no release lock for repository %q, so no publication of it can be authorized",
-			codeLockLost, rel.Pkg.Repository))
-	}
-	isHeld, err := lock.IsHeld(ctx)
-	if err != nil {
-		return a.refusePublication(rel, fmt.Errorf(
-			"%s: the release lock of %s could not be read before authorizing a publication: %w",
-			codeLockLost, rel.Pkg.Name, err))
-	}
-	if !isHeld {
-		return a.refusePublication(rel, fmt.Errorf(
-			"%s: the release lock this run acquired is no longer on the remote, so no new effect may start: %s was not authorized to publish",
-			codeLockLost, rel.Pkg.Name))
+// The coordinator uses the same remote verification for assignments and
+// authorizations. A loss here therefore halts every other attempt in flight,
+// including work in another repository of the same fleet.
+func (a *App) checkLockOwnership(ctx context.Context, coordinator *execution.Coordinator, rel *plan.Release) error {
+	if err := coordinator.VerifyOwnership(ctx); err != nil {
+		return a.refusePublication(rel, err)
 	}
 	a.log.Trace().Str("package", rel.Pkg.Name).Msg("the release lock is still held")
-	return nil
-}
-
-// resolveOwningLock is the remote release lock of the repository one package
-// publishes into: the single history's own, or the owner's in a fleet.
-func (a *App) resolveOwningLock(fleet *workspaceRecorder, rel *plan.Release) *release.Lock {
-	if fleet == nil {
-		return a.releaseLock
-	}
-	for _, held := range fleet.held {
-		if held.repository.repo.Name == rel.Pkg.Repository {
-			return held.lock
-		}
-	}
 	return nil
 }
 

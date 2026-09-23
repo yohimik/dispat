@@ -213,9 +213,10 @@ type Space struct {
 	// Empty is the legacy single-repository identity.
 	Repository string
 	RepoRoot   string
-	// GroupIdentity is the repository-qualified identity used internally by
-	// the planner for an imported repository's local version group. The
-	// authored VersionGroup stays unchanged for selectors, scripts and output.
+	// GroupIdentity is the composed identity used internally by
+	// the planner: linked peers share a folded group name; ordinary imported
+	// repositories qualify local groups by owner. VersionGroup preserves the
+	// declaration's spelling for selectors, scripts and output.
 	// Empty means VersionGroupName is already the planner identity.
 	GroupIdentity string
 	// Path of the space's primary folder — the first configured path —

@@ -13,6 +13,8 @@ package integration
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -30,16 +32,23 @@ import (
 // the check, and the same five absences after each of them.
 func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 	for name, tc := range map[string]struct {
-		adjust  func(*models.File)
-		node    func(*models.ExecutionConfig)
-		secret  string
-		isAlive bool
-		says    string
+		adjust       func(*models.File)
+		node         func(*models.ExecutionConfig)
+		prepareState func(*testing.T, *executionWorker)
+		secret       string
+		isAlive      bool
+		says         string
 	}{
 		"no node is listening at all": {
 			says: "did not pass preflight"},
 		"a node signing with another secret": {
 			isAlive: true, secret: "another-secret", says: "did not pass preflight"},
+		"a node whose answered-work record cannot be persisted": {
+			isAlive: true, says: "did not pass preflight",
+			prepareState: func(t *testing.T, worker *executionWorker) {
+				require.NoError(t, os.MkdirAll(filepath.Join(worker.stateDir, executionNode, "seen.json.tmp"), 0o755))
+			},
+		},
 		"a node that would move fewer bytes than this run transfers": {
 			isAlive: true,
 			node: func(settings *models.ExecutionConfig) {
@@ -73,6 +82,9 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 				}
 				worker = startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox, orNothing(tc.node)), 0,
 					executionSecretEnv+"="+secret)
+				if tc.prepareState != nil {
+					tc.prepareState(t, worker)
+				}
 			}
 
 			res := rig.release()
@@ -87,7 +99,12 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 
 			if worker != nil {
 				worker.proc.Signal(syscall.SIGINT)
-				require.Equal(t, 0, worker.proc.Wait().Code)
+				stopped := worker.proc.Wait()
+				require.Equal(t, 0, stopped.Code)
+				if tc.prepareState != nil {
+					assert.Contains(t, stopped.Stdout+stopped.Stderr, "seen.json.tmp",
+						"the worker refused to answer because its replay record could not be saved")
+				}
 			}
 
 			// The proof that nothing was left half done: the same repository

@@ -88,10 +88,9 @@ func TestOnlyAnUnfencedPublisherRetainsItsLock(t *testing.T) {
 		"every unknown outcome is still reported, whatever it does to a lock")
 }
 
-// TestOwnershipIsAskedAgainAndRememberedOnce: the check before every new
-// assignment is cached for a few seconds, so a fan-out costs one query rather
-// than one per task; a loss is remembered, because ownership is not something
-// a run gets back; and a loss ends the attempts already in flight.
+// TestOwnershipIsAskedAgainAndRememberedOnce: every new effect checks the
+// remote, even immediately after a success; a loss is remembered, because
+// ownership is not something a run gets back; and it ends in-flight attempts.
 func TestOwnershipIsAskedAgainAndRememberedOnce(t *testing.T) {
 	asked := 0
 	lost := false
@@ -109,28 +108,69 @@ func TestOwnershipIsAskedAgainAndRememberedOnce(t *testing.T) {
 
 	require.NoError(t, coordinator.checkOwnership(t.Context()))
 	require.NoError(t, coordinator.checkOwnership(t.Context()))
-	assert.Equal(t, 1, asked, "the answer is cached, so a fan-out asks once")
+	assert.Equal(t, 2, asked, "a successful answer cannot authorize a later effect")
 	require.NoError(t, inFlight.Err())
 
 	lost = true
-	coordinator.ownership.checked = time.Now().Add(-2 * ownershipCacheLifetime)
 	err := coordinator.checkOwnership(t.Context())
 
 	require.Error(t, err)
 	assert.Equal(t, CodeLockLost, err.(interface{ DiagnosticCode() string }).DiagnosticCode())
 	assert.Equal(t, CategoryNativeRecordingOrLock, DiagnosticCategory(err))
 	assert.Error(t, inFlight.Err(), "the attempts already in flight are ended by the loss")
-	assert.Equal(t, 2, asked)
+	assert.Equal(t, 3, asked)
 
 	assert.Equal(t, err, coordinator.checkOwnership(t.Context()),
 		"a lost lock is not asked about again: ownership is not something a run gets back")
-	assert.Equal(t, 2, asked)
+	assert.Equal(t, 3, asked)
 
 	// An attempt that asks for a context after the loss gets one that is
 	// already ended, so nothing is placed under an exclusion this run lost.
 	after, done := coordinator.watchOwnership(t.Context())
 	defer done()
 	assert.Error(t, after.Err())
+}
+
+func TestCancelledOwnershipLookupDoesNotReportLockLoss(t *testing.T) {
+	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop()}
+	coordinator.VerifyOwnershipWith(func(ctx context.Context) error { return ctx.Err() })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.ErrorIs(t, coordinator.checkOwnership(ctx), context.Canceled)
+	require.NoError(t, coordinator.checkOwnership(t.Context()),
+		"an interrupted lookup did not establish that the remote lock was lost")
+}
+
+func TestOwnershipVerificationWaitCanBeCancelled(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	checks := 0
+	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop()}
+	coordinator.VerifyOwnershipWith(func(context.Context) error {
+		checks++
+		if checks == 1 {
+			close(entered)
+			<-release
+		}
+		return nil
+	})
+	first := make(chan error, 1)
+	go func() { first <- coordinator.checkOwnership(t.Context()) }()
+	<-entered
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	second := make(chan error, 1)
+	go func() { second <- coordinator.checkOwnership(ctx) }()
+	select {
+	case err := <-second:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Error("cancelled verification remained blocked behind a remote lookup")
+	}
+	close(release)
+	require.NoError(t, <-first)
+	assert.Equal(t, 1, checks, "the cancelled waiter never queried the remote")
 }
 
 // TestACancelledTaskReportsWhatItHadReached: the progress a node carries

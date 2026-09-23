@@ -349,11 +349,14 @@ func (c *Coordinator) reportLostAuthorization(ctx context.Context, lease *Lease,
 	if !c.isAuthorizationReachable(ctx, lease.Node, offer.branch, reply.commit) {
 		return c.refuseTask(task, lease.Node, attempt, err)
 	}
-	c.Log.Error().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
+	c.Log.Debug().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Int("attempt", attempt).Str("code", CodePublicationUnknown).
 		Str("category", CategoryPublicationUnknown).
-		Msg("the publication authorization could not be written and may still have reached the node")
-	return c.reportUnknownPublication(task, attempt, lease.Node, repository, cancellation{})
+		Msg("the publication authorization push returned no usable answer")
+	return c.reportUnknownPublication(unknownPublication{
+		Task: task, Attempt: attempt, Node: lease.Node, Repository: repository,
+		Branch: offer.branch,
+	}, cancellation{})
 }
 
 // isAuthorizationReachable reports whether an authorization this run failed to
@@ -472,7 +475,10 @@ func (c *Coordinator) resolveUnansweredPublication(ctx context.Context, lease *L
 			"the node was authorized to publish and stopped in the %s phase without starting the publish command, so nothing was published",
 			settled.phase))
 	}
-	return c.reportUnknownPublication(task, attempt, lease.Node, repository, settled)
+	return c.reportUnknownPublication(unknownPublication{
+		Task: task, Attempt: attempt, Node: lease.Node, Repository: repository,
+		Branch: offer.branch,
+	}, settled)
 }
 
 // isPublicationOutcomeKnown is the decision of §28.6, as one sentence.
@@ -496,19 +502,18 @@ func isPublicationOutcomeKnown(settled cancellation) bool {
 // run id is what makes it followable: the evidence for the one question an
 // operator has to answer lives in this run's own coordination refs, as an
 // authorization with no result beside it.
-func (c *Coordinator) reportUnknownPublication(task string, attempt int, node, repository string,
-	settled cancellation) error {
-	c.rememberUnknownPublication(unknownPublication{Task: task, Attempt: attempt, Node: node,
-		Repository: repository, IsQuiesced: settled.isAcknowledged})
-	event := c.Log.Error().Str("run", c.Run).Str("task", task).Str("worker", node).
-		Int("attempt", attempt).Bool("quiesced", settled.isAcknowledged).
+func (c *Coordinator) reportUnknownPublication(unknown unknownPublication, settled cancellation) error {
+	unknown.IsQuiesced = settled.isAcknowledged
+	c.rememberUnknownPublication(unknown)
+	event := c.Log.Error().Str("run", c.Run).Str("task", unknown.Task).Str("worker", unknown.Node).
+		Int("attempt", unknown.Attempt).Str("branch", unknown.Branch).Bool("quiesced", settled.isAcknowledged).
 		Str("code", CodePublicationUnknown).Str("category", CategoryPublicationUnknown)
 	if settled.phase != "" {
 		event = event.Str("phase", settled.phase)
 	}
 	event.Msg("the outcome of an authorized publication cannot be established")
-	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: node, Task: task, Attempt: attempt},
+	return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: unknown.Node, Task: unknown.Task, Attempt: unknown.Attempt},
 		CodePublicationUnknown, CategoryPublicationUnknown,
-		"%s was authorized to publish on %s and this run cannot establish whether the publication happened, so it makes no second attempt under that authorization: list the coordination refs of run %s (dispat-worker-*), find the authorization with no result beside it and confirm on %s that the publisher has stopped, check the registry for the version, delete the run's refs, and only then clear any lock this run retained",
-		task, node, c.Run, node)
+		"%s was authorized to publish on %s and this run cannot establish whether the publication happened, so it makes no second attempt under that authorization: inspect coordination ref %s, confirm on %s that the publisher has stopped, check the registry for the version, delete the run's refs, and only then clear any lock this run retained",
+		unknown.Task, unknown.Node, unknown.Branch, unknown.Node)
 }

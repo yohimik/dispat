@@ -34,6 +34,7 @@ type unknownPublication struct {
 	Task       string
 	Attempt    int
 	Node       string
+	Branch     string
 	Repository string
 	// IsQuiesced says the node acknowledged the withdrawal, so nothing of the
 	// attempt is running any more. It is the whole difference between a lock

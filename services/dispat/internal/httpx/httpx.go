@@ -37,23 +37,25 @@ func Do(client *http.Client, req *http.Request) (*http.Response, error) {
 		resp *http.Response
 		err  error
 	}
-	// Buffered, so the round trip can always deliver and end, even when
-	// nobody is left to receive.
-	done := make(chan result, 1)
+	// An unbuffered handoff gives the response exactly one owner. If the
+	// caller has left on cancellation, this same goroutine closes a late
+	// response instead of leaving a second goroutine waiting for it.
+	done := make(chan result)
 	go func() {
 		resp, err := client.Do(req)
-		done <- result{resp, err}
+		select {
+		case done <- result{resp, err}:
+		case <-ctx.Done():
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+		}
 	}()
 
 	select {
 	case r := <-done:
 		return r.resp, r.err
 	case <-ctx.Done():
-		go func() {
-			if r := <-done; r.resp != nil {
-				_ = r.resp.Body.Close()
-			}
-		}()
 		return nil, &url.Error{Op: op(req.Method), URL: req.URL.String(), Err: ctx.Err()}
 	}
 }

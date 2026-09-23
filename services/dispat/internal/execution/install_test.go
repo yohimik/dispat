@@ -181,6 +181,47 @@ func TestInstallPutsBackTheRootItReplaced(t *testing.T) {
 	assert.Empty(t, asideLeftovers(t, into))
 }
 
+// TestInstallRestoresEarlierRootsWhenALaterRootFails: one output set is one
+// prerequisite. If the second root cannot be installed after the first moved,
+// the consumer must still see its original complete set.
+func TestInstallRestoresEarlierRootsWhenALaterRootFails(t *testing.T) {
+	into := t.TempDir()
+	staging := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(into, "a-dist"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(into, "a-dist", "old.txt"), []byte("old\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(staging, "a-dist"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(staging, "a-dist", "new.txt"), []byte("new\n"), 0o644))
+	// z-assets is declared but its staged root has disappeared between
+	// verification and installation, as a concurrent filesystem change can.
+	request := InstallRequest{Dir: into, Staging: staging,
+		Manifest: &OutputManifest{Roots: []string{"a-dist", "z-assets"}}, Log: zerolog.Nop()}
+
+	err := replaceOutputRoots(request)
+
+	require.ErrorContains(t, err, "z-assets")
+	assert.Equal(t, "old\n", readInstalled(t, into, "a-dist/old.txt"))
+	assert.NoFileExists(t, filepath.Join(into, "a-dist", "new.txt"))
+	assert.Empty(t, asideLeftovers(t, into), "rollback removed all temporary root names")
+}
+
+// A nested declared root must stay under the consuming checkout even when a
+// previous run left a link at one of its parent components.
+func TestInstallRefusesLinkedDestinationParent(t *testing.T) {
+	fixture := newOutputFixture(t, "packages/core")
+	fixture.write(t, "assets/nested/new.txt", "new\n", 0o644)
+	manifest, err := fixture.capture(t, []string{"assets/nested"}, testLimits)
+	require.NoError(t, err)
+	into := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(into, "assets")))
+
+	err = fixture.install(t, manifest, into)
+
+	assert.Equal(t, ReasonDestinationComponent, OutputFaultReason(err), "%v", err)
+	assert.NoDirExists(t, filepath.Join(outside, "nested"))
+	assert.Empty(t, asideLeftovers(t, into))
+}
+
 // asideLeftovers is every folder an interrupted installation would have left
 // beside a declared root.
 func asideLeftovers(t *testing.T, into string) []string {

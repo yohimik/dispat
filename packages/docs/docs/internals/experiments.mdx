@@ -19,9 +19,10 @@ All six start at version 1.0.0, tagged and published. The original publication a
 change to `core` with tilde dependency ranges. The propagation protocol uses a patch-compatible correction so it can
 separate explicit propagation intent from a dependency range that needs updating.
 
-Every package carries one `build` script. The propagation cells run that same script as dispat's build stage and as
-Lerna's `lerna run build`, so a build failure there is one fault seen through both tools rather than a different fault
-per tool. The baseline tags are annotated, because `git describe` ignores a lightweight tag and a tool that reads its
+The base fixture gives every package one `build` script. The `build` and `publish` propagation cells run that same
+script as dispat's build stage and as Lerna's `lerna run build`; the Changesets cells run it explicitly. The
+`deferred` cell removes `cli`'s build command to isolate delivery after an own release, while `deferred-build` keeps
+the actual build. The baseline tags are annotated, because `git describe` ignores a lightweight tag and a tool that reads its
 previous release that way would otherwise find no release at all and treat every package as changed.
 
 By default, each cell runs the binary from `yohimik/dispat-alpine:<version>`. A prepublication run can supply a candidate
@@ -63,17 +64,20 @@ Each reading also records the manifest the checkout holds at that moment, its ve
 registry says what shipped and the tags say what was recorded; a range a release reconciled, or a version rewrite it
 rolled back, appears in neither.
 
-The propagation experiment starts with a patch to `core` that remains inside the consumers' `~1.0.0` dependency
+The `build` and `publish` propagation cells start with a patch to `core` that remains inside the consumers' `~1.0.0` dependency
 range, so semver alone asks for no consumer release. Dispat receives `fix(core)^: correct reader`, whose caret is
 explicit propagation intent. Lerna receives the plain `fix(core): correct reader` and decides for itself: nothing is
-forced on its side, and what its version command selects is part of the record.
+forced on its side, and what its version command selects is part of the record. Changesets receives explicit patch
+entries for `core` and its three direct consumers, the closest way to request the same release set with that tool.
 
-The two answers differ. Dispat releases `core` and its three declared consumers, writing each consumer's range up to
+The release sets differ. Dispat releases `core` and its three declared consumers, writing each consumer's range up to
 the provider it shipped with. Lerna releases all six, because it bumps every transitive dependent of a changed
 package, `theme` and `docs` included, although `~1.0.0` already accepted `core@1.0.1`.
 
-The provider is published, tagged and observed before the consumer's fault is injected. Under Lerna the protocol
-publishes `core` and reads the registry before arming the fault. Under dispat one command runs the whole release, so
+The provider is published and observed before the consumer's fault is injected. Under Lerna the protocol
+publishes `core` and reads the registry before arming the fault. Under Changesets the operator runs `core`'s build and
+`npm publish` from that package's folder; `changeset publish` does not provide a provider-first build stage. Under
+dispat one command runs the whole release, so
 the fixture sets `isBuildWaitingPublish: true` on `core`, which holds every consumer's build until the provider is
 published; the protocol reads that ordering back out of the run's own log.
 
@@ -86,7 +90,19 @@ After the fault is removed, no commit is made and no new release intent is suppl
 owed `cli` catch-up alone, its recovery publishes `cli` without republishing `core`, and the plan after it is empty.
 Lerna's tag-based `lerna changed` is already empty, because its version command tagged every package before any was
 published; `lerna publish from-package` then queries the registry and republishes the five packages it finds missing,
-rather than the one that failed.
+rather than the one that failed. Changesets' status is empty after its `version` command consumes the changeset file;
+`changeset publish` queries the registry and publishes the remaining `cli`, `ui` and `api`. It does not tag `core`,
+which the operator published separately before the fault, so that provider is still unrecorded in this protocol.
+
+The Dispat-only `deferred` cell tests a further edge: `cli` has no build command and publishes its own fix after `core` fails, then an operator
+releases `core`, `ui` and `api` on the next run while leaving `cli` out. With no new source commit, the next full plan must catch up `cli` from the
+provider's durable publication, and the run after that must be empty. The earlier `cli` tag already contains the
+propagation commit, so the pending commit window alone cannot reveal this debt.
+
+The `deferred-build` companion keeps `cli`'s actual build script. When it has already built over the planned provider
+version, Dispat withholds it with `W194` after the provider fails; the next run rebuilds and publishes the consumer's
+own pending fix against the version that really shipped. It tests the artifact safety boundary beside the no-build
+delivery-receipt case.
 
 The colleague's push lands at a point in the tool's own sequence rather than on a timer. A shim placed first on `PATH`
 for the duration of the release command records every git call the tool makes and fires the colleague's commit and push

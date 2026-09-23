@@ -30,7 +30,7 @@ own ceilings are higher than a node's is refused before it dispatches anything.
 execution:
   role: worker
   name: build-a
-  endpoint: git@github.com:acme/release-mailbox.git
+  endpoint: git@github.com:acme/project.git
   secretEnv: DISPAT_EXECUTION_SECRET
   concurrency: 2
 

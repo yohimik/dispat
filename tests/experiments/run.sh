@@ -5,7 +5,8 @@
 #
 # experiments: orphan, midrelease, propagation
 # scenarios: midrelease takes clean (default) or conflict; propagation takes
-# build (default) or publish; orphan records no scenario.
+# build (default), publish, deferred or deferred-build; orphan records no
+# scenario. The two deferred scenarios are dispat-only.
 #
 # Everything the run leaves behind goes under /results/<experiment>[-<scenario>]-<tool>/:
 # the transcript, every step's output, one observation per step, the git
@@ -48,13 +49,10 @@ elif [ "$EXPERIMENT" = midrelease ]; then
   OUT=/results/$EXPERIMENT-$SCENARIO-$TOOL
 else
   SCENARIO=${3:-build}
-  case "$TOOL" in
-    dispat|lerna) ;;
-    *) echo "propagation supports dispat and lerna" >&2; exit 2 ;;
-  esac
   case "$SCENARIO" in
     build|publish) ;;
-    *) echo "no such scenario: $SCENARIO (build, publish)" >&2; exit 2 ;;
+    deferred|deferred-build) [ "$TOOL" = dispat ] || { echo "deferred propagation supports dispat only" >&2; exit 2; } ;;
+    *) echo "no such scenario: $SCENARIO (build, publish, deferred, deferred-build)" >&2; exit 2 ;;
   esac
   OUT=/results/$EXPERIMENT-$SCENARIO-$TOOL
 fi

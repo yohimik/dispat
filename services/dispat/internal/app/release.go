@@ -312,6 +312,7 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 	if fleet != nil {
 		packages, err := a.packages()
 		if err != nil {
+			a.logError(err).Msg("package discovery failed")
 			return nil, err
 		}
 		if err := fleet.captureSnapshot(ctx, packages); err != nil {

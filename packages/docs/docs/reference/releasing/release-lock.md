@@ -166,7 +166,9 @@ The log line says so, names the run and points here:
 ERR release lock retained code=E228 category=publication-unknown run=6f1a9f0d2b90c8f9 tag=dispat-release-lock
 ```
 
-The evidence is in the run's own coordination refs, and the order of the steps matters:
+The uncertain publication's authorization ref is retained even when its node acknowledged after starting publish.
+Other coordination refs may already have been cleaned up. The evidence is in the remaining run refs, and the order of
+the steps matters:
 
 ```sh
 git ls-remote --heads <mailbox> 'dispat-worker-*'   # the run's coordination refs

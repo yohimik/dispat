@@ -122,6 +122,12 @@ error rather than an implicitly discovered source.
 Package names form one graph. Spaces and groups from an imported configuration stay repository-local. A shared space
 or group declared centrally keeps ordinary monorepository semantics and can span sources. An unqualified CLI space or
 group selector can match local declarations in several sources.
+In an identity-linked fleet, the active peers instead share one case-insensitive version-group namespace. Matching
+explicit declarations and implicit groups from shared spaces join across repositories only when their effective
+semver, counter and channel policies agree; conflicting policies are a configuration error. A peer may reference a
+group declared by another active peer, while a disabled peer contributes no declaration. Keep scripts, environment,
+paths, flow, parser, commit and lock policy with each package's owner. Read `execution`, `runOutputs` and participation
+from the entry peer alone. Do not apply this group-merging rule to ordinary centrally imported sources.
 
 Read source commits as local direct intent. A source commit can name only its repository's packages directly; its
 propagation may cross the combined dependency graph. An explicit control commit can address packages across the fleet
@@ -621,12 +627,12 @@ An unknown publication outcome is the one result that needs a person:
 
 1. `E228` with the category `publication-unknown` means the run authorized a publication on a node and cannot establish what became of it. The package failed at its publish stage, its dependents are blocked, and no second attempt is made in that run.
 2. Report it as unknown. Never describe it as published or as failed, and never retry the publish by hand.
-3. The run may also retain that repository's release lock. Do not delete a retained lock. Clearing it is an operator's decision and needs the documented order: list the run's `dispat-worker-*` refs in the mailbox, find the authorization with no result beside it, confirm on that node that the publisher has stopped, check the registry for the version, delete the run's refs, and only then delete the lock tag.
+3. The run retains the uncertain publication's authorization ref, even if the node acknowledged after starting publish. It may also retain that repository's release lock when the node never acknowledged. Do not delete a retained lock. Clearing it is an operator's decision and needs the documented order: list the run's `dispat-worker-*` refs in the mailbox, find the authorization with no result beside it, confirm on that node that the publisher has stopped, check the registry for the version, delete the run's refs, and only then delete the lock tag.
 4. A run may end with a lock retained and no release record at all, so check the registry rather than the tags.
 
 `dispat run` uses the same pool when the invocation has links: each package's task runs where its `runOnly` places a build, and the folders the entry configuration's `runOutputs` names for the script are carried back and merged into the orchestrator's checkout. A sweep takes no release lock and records nothing, so it neither waits for a release nor stops one; a sweep with no link runs every task locally, as it always has.
 
-Leftover `dispat-worker-*` branches in a mailbox repository are coordination state, not release records, and a completed run deletes its own. They carry full source and command text, so report them for deletion rather than leaving them. Never push a branch of your own into a mailbox repository, and never run a release from a node whose `execution.role` is `worker`: both are refused, the second with `E226`.
+Leftover `dispat-worker-*` branches in a mailbox repository are coordination state, not release records. A completed run deletes its own; an uncertain publication retains its authorization as evidence until the operator follows the recovery order above. They carry full source and command text, so report other leftovers for deletion rather than leaving them. Never push a branch of your own into a mailbox repository, and never run a release from a node whose `execution.role` is `worker`: both are refused, the second with `E226`.
 
 ## Respect the release lock
 

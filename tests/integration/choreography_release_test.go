@@ -70,6 +70,76 @@ func TestChoreographyRecordsEveryPeerLocallyAndConverges(t *testing.T) {
 	}
 }
 
+// TestChoreographyMissingProviderTagBlocksConsumerReceipt makes the source
+// record fail after its publish script. The consumer cannot be tagged with a
+// receipt naming a provider version that never acquired its release record.
+func TestChoreographyMissingProviderTagBlocksConsumerReceipt(t *testing.T) {
+	fleet := crossRepositoryFleet(t)
+	fleet.writeConfig("sdk", func(cfg *models.File) {
+		cfg.Scripts["tag-collision"] = models.Script{
+			"git tag -a sdk-pkg@0.1.0 HEAD^ -m injected",
+		}
+		cfg.Run = &models.RunConfig{BeforeCommit: []string{"tag-collision"}}
+	})
+	fleet.peer("sdk").Commit("chore: inject a late source tag collision")
+	fleet.push("sdk")
+	fleet.follow("api", "sdk")
+	api := fleet.peer("api")
+
+	res := api.Release("--package", "*")
+	require.NotEqual(t, 0, res.Code, "a source tag collision is critical")
+	assert.Equal(t, 0, api.TagCount("api-pkg@0.1.0"), "consumer cannot record absent provider tag")
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "api-pkg"),
+		"consumer is blocked by the failed source record: %s", res.Stdout)
+}
+
+// TestChoreographyCatchesUpAfterProviderOnlyRetry exercises the composed
+// history and fleet-link boundary: an app publishes its own work while its
+// library fails, misses the successful library-only retry, and later receives
+// the owed propagation without another library release or new source commit.
+func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
+	fleet := crossRepositoryFleet(t)
+	fleet.writeConfig("api", func(cfg *models.File) {
+		cfg.Dependencies = models.Dependencies{{Consumer: "api-pkg", Provider: "sdk-pkg"}}
+		cfg.Flow = &models.SpaceFlowConfig{Publish: []string{"publish"}}
+	})
+	api := fleet.peer("api")
+	api.Commit("chore: keep app build free of unpublished provider versions")
+	fleet.push("api")
+	api.ReleaseOK("--package", "*")
+
+	fleet.configureIn(api.Repo, "sdk", "chore: gate provider publication", func(cfg *models.File) {
+		cfg.Scripts["publish"] = models.Script{
+			`if [ -n "$DISPAT_IT_SDK_OK" ]; then echo published; else exit 1; fi`,
+		}
+	})
+	api.Git("add", ".links/sdk")
+	api.Commit("chore: pin provider publication policy")
+	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "feat(sdk-pkg)^: streaming")
+	api.Git("add", ".links/sdk")
+	api.Commit("chore: pin provider feature")
+	fleet.workOnly("api", "feat(api-pkg): own flag")
+
+	failed := api.Release("--package", "*")
+	require.NotEqual(t, 0, failed.Code, "provider publish failed")
+	require.Equal(t, 1, api.TagCount("api-pkg@0.2.0"), "app should ship its own work: %s", failed.Stdout)
+	assert.Equal(t, []string{"sdk-pkg@0.1.0"}, tagsIn(api.Repo, ".links/sdk"),
+		"provider should keep only its bootstrap tag")
+
+	provider := api.CommandEnv([]string{"DISPAT_IT_SDK_OK=1"}, "--package", "sdk-pkg")
+	require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
+	require.Contains(t, tagsIn(api.Repo, ".links/sdk"), "sdk-pkg@0.2.0")
+	assert.Equal(t, 0, api.TagCount("api-pkg@0.2.1"), "app was excluded from provider retry")
+
+	catchUp := api.CommandEnv([]string{"DISPAT_IT_SDK_OK=1"}, "--package", "*")
+	require.Equal(t, 0, catchUp.Code, "fleet catch-up: %s", catchUp.Stdout)
+	assert.Equal(t, 1, api.TagCount("api-pkg@0.2.1"))
+	assert.Equal(t, []string{"sdk-pkg@0.1.0", "sdk-pkg@0.2.0"}, tagsIn(api.Repo, ".links/sdk"),
+		"provider is never republished")
+	assert.True(t, harness.IsCodePresentForPackage(catchUp.Events, "W193", "api-pkg"),
+		"the app's only new cause is delivered provider propagation: %s", catchUp.Stdout)
+}
+
 // TestChoreographySettlesTheProviderRevisionBeforePublishing: the evidence a
 // later plan reads is in the consumer's own tree, recorded before the release
 // commit the tag sits on.

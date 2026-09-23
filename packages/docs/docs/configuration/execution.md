@@ -9,11 +9,11 @@ execution:
   role: orchestrator
   concurrency: 2
   name: build-a
-  endpoint: git@github.com:acme/release-mailbox.git
+  endpoint: git@github.com:acme/project.git
   secretEnv: DISPAT_EXECUTION_SECRET
   workers:
     - name: build-a
-      endpoint: git@github.com:acme/release-mailbox.git
+      endpoint: git@github.com:acme/project.git
   timeouts:
     preflight: 60
     task: 3600
@@ -124,7 +124,7 @@ for one invocation, after the ones the file states. It exists for the machine a 
 run, which a committed file cannot know about:
 
 ```sh
-dispat release --worker ci-worker-1=git@github.com:acme/release-mailbox.git
+dispat release --worker ci-worker-1=git@github.com:acme/project.git
 ```
 
 A file that states only `secretEnv` and the waits is enough for it. The link is added before the file is validated, so

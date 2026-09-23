@@ -11,12 +11,14 @@ every tool has a reason to release them.
 Every package carries one `build` script. dispat's build stage runs it through
 the flavour's `dispat.yaml`, and the propagation protocol runs the same script
 under Lerna with `lerna run build`, so a build failure is one fault seen
-through two tools rather than two faults sharing a name. The nx and changesets
-protocols run no build of their own and the script is inert for them.
+through two tools rather than two faults sharing a name. The Changesets
+propagation protocol runs it explicitly; the other Changesets protocols and
+the nx protocols do not run it.
 
     fixture.py <root> lerna|nx|changesets|dispat
     fixture.py <root> <flavour> --feature      also commit the minor to core
     fixture.py <root> <flavour> --propagation  also commit the patch to core
+    fixture.py <root> dispat --deferred       also commit own cli and provider fixes
     fixture.py <root> <flavour> --colleague    also clone the origin a second time
 
 Every commit is made at a pinned date, so two runs of the same cell produce
@@ -86,8 +88,17 @@ def dispat_packages():
             options.append(f"    dependencies: [{', '.join(DEPS[p])}]")
         if p == "cli" and experiment in ("orphan", "propagation"):
             options.append("    revertOnFail: true")
+        if p == "cli" and experiment == "propagation" and os.environ.get("SCENARIO") == "deferred":
+            # With no build, its own release may reconcile from the provider's
+            # planned version to the actually published baseline after a
+            # provider failure. A built artifact could already embed the
+            # planned version and must be skipped instead.
+            options.append("    flow: {build: []}")
         if p == "core" and experiment == "propagation":
-            options.append("    isBuildWaitingPublish: true")
+            if os.environ.get("SCENARIO") in ("deferred", "deferred-build"):
+                options.append("    revertOnFail: true")
+            else:
+                options.append("    isBuildWaitingPublish: true")
         if options:
             block += f"  {p}:\n" + "".join(line + "\n" for line in options)
     return block
@@ -259,9 +270,34 @@ def propagation(root, flavour):
     """
     with open(os.path.join(root, "packages", "core", "index.js"), "a") as f:
         f.write("// corrected reader\n")
+    if flavour == "changesets":
+        # Changesets has no CCME caret. Give it the same requested direct
+        # consumer releases as explicit changeset entries.
+        with open(os.path.join(root, ".changeset", "correct-reader.md"), "w") as f:
+            f.write('---\n"core": patch\n"cli": patch\n"ui": patch\n"api": patch\n---\n\ncorrect reader and rebuild direct consumers\n')
     sh(["git", "add", "-A"], root)
     commit(root, "fix(core)^: correct reader" if flavour == "dispat"
            else "fix(core): correct reader")
+    sh(["git", "push", "-q", "origin", "main"], root)
+
+
+def deferred(root, flavour):
+    """The consumer has its own pending work when its provider first fails.
+
+    It publishes that work at the old provider baseline. The later protocol
+    releases the provider alone and asks whether the next full run remembers
+    the consumer that missed the provider's release.
+    """
+    if flavour != "dispat":
+        raise SystemExit("deferred propagation is a dispat-only protocol")
+    with open(os.path.join(root, "packages", "cli", "index.js"), "a") as f:
+        f.write("// own fix\n")
+    sh(["git", "add", "-A"], root)
+    commit(root, "fix(cli): repair command")
+    with open(os.path.join(root, "packages", "core", "index.js"), "a") as f:
+        f.write("// corrected reader\n")
+    sh(["git", "add", "-A"], root)
+    commit(root, "fix(core)^: correct reader")
     sh(["git", "push", "-q", "origin", "main"], root)
 
 
@@ -280,6 +316,8 @@ if __name__ == "__main__":
         feature(root, flavour)
     if "--propagation" in sys.argv[3:]:
         propagation(root, flavour)
+    if "--deferred" in sys.argv[3:]:
+        deferred(root, flavour)
     if "--colleague" in sys.argv[3:]:
         colleague(root)
     print("fixture ready:", root, flavour)

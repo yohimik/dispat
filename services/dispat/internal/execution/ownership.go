@@ -13,9 +13,8 @@ package execution
 // that is the whole difference between the two: a lock somebody else took over
 // is a lock this run still remembers taking.
 //
-// Two things keep the cost of asking down. The answer is cached for a few
-// seconds, so a run that fans twenty tasks out at once pays one query per
-// owning repository rather than twenty; and a loss, once seen, is remembered,
+// A successful answer is not reused for a later effect: the remote lock may
+// disappear between two assignments. A loss, once seen, is remembered,
 // because ownership is not something a run gets back.
 //
 // What a loss does is not only to refuse the next assignment. Every attempt
@@ -28,14 +27,7 @@ package execution
 import (
 	"context"
 	"sync"
-	"time"
 )
-
-// ownershipCacheLifetime is how long a verified ownership is believed without
-// asking again. It is short enough that a run notices a lost lock within a
-// stage and long enough that a fan-out of twenty tasks is one query per owning
-// repository rather than twenty.
-const ownershipCacheLifetime = 5 * time.Second
 
 // ownership is the run's memory of the last answer, and of the cancellations
 // that a loss has to reach.
@@ -44,12 +36,14 @@ type ownership struct {
 	// locks: this package knows nothing about a release lock and must not.
 	verify func(context.Context) error
 
-	mu       sync.Mutex
-	checked  time.Time
-	failure  error
-	isLost   bool
-	haltings map[int]context.CancelFunc
-	nextHalt int
+	// verifyGate orders remote checks so a successful check cannot return
+	// after another found a loss. A waiter can still leave on cancellation.
+	verifyGate chan struct{}
+	mu         sync.Mutex
+	failure    error
+	isLost     bool
+	haltings   map[int]context.CancelFunc
+	nextHalt   int
 }
 
 // VerifyOwnershipWith gives the run the question it asks before every new
@@ -61,7 +55,15 @@ type ownership struct {
 // nothing is then asked or cached.
 func (c *Coordinator) VerifyOwnershipWith(verify func(context.Context) error) {
 	c.ownership.verify = verify
+	c.ownership.verifyGate = make(chan struct{}, 1)
 	c.ownership.haltings = map[int]context.CancelFunc{}
+}
+
+// VerifyOwnership checks the complete lock set before a publication is
+// authorized. It shares the dispatch check's remembered loss and cancellation
+// of in-flight attempts.
+func (c *Coordinator) VerifyOwnership(ctx context.Context) error {
+	return c.checkOwnership(ctx)
 }
 
 // checkOwnership answers whether a new effect may start, and remembers a loss.
@@ -69,26 +71,36 @@ func (c *Coordinator) checkOwnership(ctx context.Context) error {
 	if c.ownership.verify == nil {
 		return nil
 	}
+	select {
+	case c.ownership.verifyGate <- struct{}{}:
+		defer func() { <-c.ownership.verifyGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	c.ownership.mu.Lock()
 	if c.ownership.isLost {
 		failure := c.ownership.failure
 		c.ownership.mu.Unlock()
 		return failure
 	}
-	if time.Since(c.ownership.checked) < ownershipCacheLifetime {
-		c.ownership.mu.Unlock()
-		return nil
-	}
 	c.ownership.mu.Unlock()
 	err := c.ownership.verify(ctx)
 	c.ownership.mu.Lock()
 	defer c.ownership.mu.Unlock()
 	if err == nil {
-		c.ownership.checked = time.Now()
 		return nil
 	}
 	if c.ownership.isLost {
 		return c.ownership.failure
+	}
+	if ctx.Err() != nil {
+		// An interrupted lookup establishes nothing about the remote lock.
+		// The run is stopping already; leave ownership available to detached
+		// record and cleanup paths rather than reporting a false lock loss.
+		return ctx.Err()
 	}
 	c.ownership.isLost = true
 	c.ownership.failure = NewIdentifiedDiagnostic(Identity{Run: c.Run},

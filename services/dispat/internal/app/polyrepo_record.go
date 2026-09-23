@@ -59,6 +59,11 @@ type workspaceRecorder struct {
 	// the repositories its release has to record fleet links for. Empty for
 	// a workspace with centrally owned configuration.
 	linkPlan map[string][]string
+	// The planned provider tags and those actually written are separate:
+	// a failed source record must not appear in a consumer's immutable receipt.
+	releasePlan  map[string]*plan.Release
+	recordedMu   sync.RWMutex
+	recordedTags map[string]string
 	// routes memoises each release's settlement route tree. Packages publish
 	// concurrently, so the map is guarded; it is emptied when a new plan
 	// arrives and goes with the recorder at the end of the run.
@@ -393,6 +398,7 @@ func (w *workspaceRecorder) releaseCommitNeeded(ctx context.Context, r *reposito
 }
 
 func (w *workspaceRecorder) prepare(ctx context.Context, pl *plan.Plan) error {
+	w.releasePlan = pl.Releases
 	protected := make(map[string][]string)
 	selected := w.selectedRepositories(pl)
 	env := release.WorkspaceEnv(pl, w.app.log)
@@ -635,6 +641,12 @@ func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *
 	if err := validateRecordPath(r, rel); err != nil {
 		return err
 	}
+	w.recordedMu.RLock()
+	receiptErr := requireSameRunProviderTags(rel, w.releasePlan, w.recordedTags)
+	w.recordedMu.RUnlock()
+	if receiptErr != nil {
+		return receiptErr
+	}
 	var failures []error
 	if err := (&changelog.Dispatcher{Log: r.git.Log}).Record(ctx, rel); err != nil {
 		r.git.Log.Warn().Err(err).Str("package", rel.Pkg.Name).
@@ -656,6 +668,12 @@ func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *
 		failures = append(failures, err)
 		return fmt.Errorf("repository %s tag %s: %w", r.repo.Name, rel.TagName(), errors.Join(failures...))
 	}
+	w.recordedMu.Lock()
+	if w.recordedTags == nil {
+		w.recordedTags = make(map[string]string)
+	}
+	w.recordedTags[rel.Pkg.Name] = rel.TagName()
+	w.recordedMu.Unlock()
 	r.admitRecordedRelease(pinned)
 	if r.repo.Commit.IsPushEnabled() {
 		hooks.run(r.hooks, "beforePush", r.repo.Config.Run.BeforePush)

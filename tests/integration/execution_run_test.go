@@ -770,16 +770,22 @@ func TestExecutionRunInterruptedSweepMergesNothing(t *testing.T) {
 	stopAll(t, []*executionWorker{worker})
 }
 
-// TestExecutionRunOutputsMergeFailureFailsTheSweep: a set whose file cannot
-// be written as a file in the orchestrator's checkout, because a folder sits
-// at its path, is refused with E227 and merged not at all, the sweep exits 1,
-// and every other set is still merged.
+// TestExecutionRunOutputsMergeFailureFailsTheSweep: a set's second file cannot
+// replace a folder in the orchestrator's checkout. The first file had already
+// been moved, so the merge restores it and refuses the whole set with E227;
+// another package's set can still merge.
 func TestExecutionRunOutputsMergeFailureFailsTheSweep(t *testing.T) {
-	rig := newExecutionSweepRig(t, executionCoverageScript, func(cfg *models.File) {
+	script := `mkdir -p ../../coverage &&
+case "$DISPAT_PACKAGE" in
+  core) printf new > ../../coverage/a-core.out && printf new > ../../coverage/z-core.out ;;
+  *) printf '%s\n' "$DISPAT_PACKAGE" > "../../coverage/$DISPAT_PACKAGE.out" ;;
+esac`
+	rig := newExecutionSweepRig(t, script, func(cfg *models.File) {
 		executionSweepOutputs(cfg)
 		cfg.Execution.Workers = cfg.Execution.Workers[:1]
 	})
-	rig.repo.WriteFile("coverage/core.out/keep.txt", "a folder where the file would go\n")
+	rig.repo.WriteFile("coverage/a-core.out", "old\n")
+	rig.repo.WriteFile("coverage/z-core.out/keep.txt", "a folder where the file would go\n")
 	workers := rig.startWorkers([]string{executionNode}, 2)
 
 	res := rig.sweep(nil)
@@ -790,7 +796,10 @@ func TestExecutionRunOutputsMergeFailureFailsTheSweep(t *testing.T) {
 	assert.Equal(t, "destination-component", rejected.Str("reason"))
 	assert.Equal(t, "core:run", rejected.Str("task"))
 	assert.Equal(t, executionIntegrityCode, rejected.Code())
-	assert.Equal(t, "a folder where the file would go\n", readRepoFile(t, rig.repo, "coverage/core.out/keep.txt"))
+	assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "coverage/a-core.out"),
+		"the earlier file was restored when the later destination failed")
+	assert.Equal(t, "a folder where the file would go\n", readRepoFile(t, rig.repo, "coverage/z-core.out/keep.txt"))
+	assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("coverage")))
 	assert.FileExists(t, rig.repo.Path("coverage", "api.out"), "the other sets are merged")
 	assert.Equal(t, "rejected", executionTaskOutcomes(res)["core"].Str("outputs"))
 	stopAll(t, workers)

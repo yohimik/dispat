@@ -83,7 +83,7 @@ cfg := models.File{
 		Role:      models.ExecutionRoleOrchestrator,
 		SecretEnv: "DISPAT_EXECUTION_SECRET",
 		Workers: []models.ExecutionWorkerConfig{
-			{Name: "build-a", Endpoint: "git@github.com:acme/release-mailbox.git"},
+			{Name: "build-a", Endpoint: "git@github.com:acme/project.git"},
 		},
 		Timeouts: &models.ExecutionTimeoutsConfig{Preflight: 600},
 	},

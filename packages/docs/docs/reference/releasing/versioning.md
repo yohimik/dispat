@@ -155,9 +155,13 @@ Keep three rules in mind when joining groups:
 
 * The declaration owns the mode. That is why `versionGroup` and `versioning` cannot both be set on the same space or
   package: a member is not allowed to contradict the group it joined.
-* A `versionGroup` may also name another space, which joins that space's own implicit group. Group names and space
-  names share one namespace, so a declaration cannot shadow a space, and an unknown name is an error rather than a
-  silent no-op.
+* A `versionGroup` may also name another space, which joins that space's own implicit group. Within one repository,
+  group names and space names share one namespace, so a declaration cannot shadow a space; an unknown name is an error
+  rather than a silent no-op. Across linked peers, an independent space with the same name as another peer's group
+  remains an independent space.
+  In an [identity-linked fleet](../../choreographed-repositories.md#which-settings-combine), active peers share that
+  group namespace: matching names join across repositories only when their effective semver, counter and channel
+  policies agree. An ordinary source imported by a control repository retains its local group namespace.
 * Setting `versioning` on a single package overrides its space's without leaving the space's group. That is how you opt
   one package out entirely (`"versioning": "independent"`), and also how a group can end up with members asking to
   share different amounts. When that happens the group uses the deepest sharing any member asked for, because sharing

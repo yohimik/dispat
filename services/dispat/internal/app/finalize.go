@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,30 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
+
+// requireSameRunProviderTags rejects a receipt that would name a provider's
+// planned tag when that tag was not actually recorded. Baseline tags were
+// fixed by planning under the release lock; only this run's records can fail
+// between publication and tagging.
+func requireSameRunProviderTags(rel *plan.Release, releases map[string]*plan.Release, recorded map[string]string) error {
+	providers := make([]string, 0, len(rel.SeenProviders))
+	for provider := range rel.SeenProviders {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+	for _, provider := range providers {
+		seen := rel.SeenProviders[provider]
+		planned := releases[provider]
+		if planned == nil || !planned.IsReleasing() || seen != planned.TagName() {
+			continue
+		}
+		if recorded[provider] != seen {
+			return fmt.Errorf("consumer %s cannot record provider %s tag %s: the provider's tag is missing",
+				rel.Pkg.Name, provider, seen)
+		}
+	}
+	return nil
+}
 
 // runHooks executes the run-level hook sequences (beforeAll, postAll, the
 // commit and push hooks) in the monorepo root with a shared environment: the
@@ -173,7 +198,18 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	default:
 		fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
 	}
+	recordedTags := make(map[string]string, len(rels))
 	for _, rel := range rels {
+		// In release-commit mode every package was published before any tag
+		// existed. A provider's final tag can fail independently. Do not write
+		// a consumer receipt claiming it observed that missing record.
+		if err := requireSameRunProviderTags(rel, pl.Releases, recordedTags); err != nil {
+			fin.crit.record(a.log, plan.CodeTagFailed, err, "tagging blocked by missing provider record",
+				func(e *zerolog.Event) *zerolog.Event {
+					return e.Str("package", rel.Pkg.Name).Str("tag", rel.TagName())
+				})
+			continue
+		}
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
 		if err := release.CreateReleaseTag(ctx, a.git, rel, a.cfg.Commit.IsForceEnabled(), a.log); err != nil {
@@ -182,6 +218,8 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 				func(e *zerolog.Event) *zerolog.Event {
 					return e.Str("package", rel.Pkg.Name).Str("tag", rel.TagName())
 				})
+		} else {
+			recordedTags[rel.Pkg.Name] = rel.TagName()
 		}
 	}
 	fin.run(ctx, "postCommit", a.cfg.Run.PostCommit)

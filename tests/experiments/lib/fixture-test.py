@@ -30,6 +30,7 @@ class PropagationFixtureTest(unittest.TestCase):
         for flavour, subject in (
             ("dispat", "fix(core)^: correct reader"),
             ("lerna", "fix(core): correct reader"),
+            ("changesets", "fix(core): correct reader"),
         ):
             with self.subTest(flavour=flavour):
                 root = self.build(flavour)
@@ -39,6 +40,14 @@ class PropagationFixtureTest(unittest.TestCase):
                     check=True, capture_output=True, text=True,
                 ).stdout.strip()
                 self.assertEqual(got, subject)
+
+    def test_changesets_explicitly_selects_direct_consumers(self):
+        root = self.build("changesets")
+        changeset = (root / ".changeset" / "correct-reader.md").read_text()
+        for package in ("core", "cli", "ui", "api"):
+            self.assertIn(f'"{package}": patch', changeset)
+        for package in ("theme", "docs"):
+            self.assertNotIn(f'"{package}": patch', changeset)
 
     def test_the_fault_is_in_the_consumer_build_script(self):
         """The fault fires from the build script and from nothing else.
@@ -78,6 +87,40 @@ class PropagationFixtureTest(unittest.TestCase):
         config = (self.build("dispat") / "dispat.yaml").read_text()
         self.assertIn("core:\n    isBuildWaitingPublish: true\n", config)
         self.assertNotIn("cli:\n    dependencies: [core]\n    revertOnFail: true\n    isBuildWaitingPublish", config)
+
+    def test_deferred_fixture_lets_consumer_publish_own_work(self):
+        previous = os.environ.get("SCENARIO")
+        os.environ["SCENARIO"] = "deferred"
+        try:
+            root = self.build("dispat", flag="--deferred")
+        finally:
+            if previous is None:
+                os.environ.pop("SCENARIO", None)
+            else:
+                os.environ["SCENARIO"] = previous
+        config = (root / "dispat.yaml").read_text()
+        self.assertNotIn("isBuildWaitingPublish: true", config)
+        self.assertIn("cli:\n    dependencies: [core]\n    revertOnFail: true\n    flow: {build: []}\n", config)
+        self.assertIn("core:\n    revertOnFail: true\n", config)
+        subjects = subprocess.run(
+            ["git", "log", "-2", "--format=%s"], cwd=root,
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        self.assertEqual(subjects, ["fix(core)^: correct reader", "fix(cli): repair command"])
+
+    def test_deferred_build_fixture_keeps_consumer_build(self):
+        previous = os.environ.get("SCENARIO")
+        os.environ["SCENARIO"] = "deferred-build"
+        try:
+            root = self.build("dispat", flag="--deferred")
+        finally:
+            if previous is None:
+                os.environ.pop("SCENARIO", None)
+            else:
+                os.environ["SCENARIO"] = previous
+        config = (root / "dispat.yaml").read_text()
+        self.assertNotIn("flow: {build: []}", config)
+        self.assertIn("build: npm run --silent build", config)
 
     def test_the_baseline_tags_are_annotated(self):
         """`git describe` ignores a lightweight tag, and lerna reads its

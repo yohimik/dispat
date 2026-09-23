@@ -44,6 +44,18 @@ func TestTransportFailureDoesNotLogWebhookCredentials(t *testing.T) {
 	assert.NotContains(t, logs.String(), "secret-query")
 }
 
+func TestMalformedWebhookURLDoesNotReachTraceLogs(t *testing.T) {
+	var logs bytes.Buffer
+	d := NewDispatcher(nil, nil, zerolog.New(&logs).Level(zerolog.TraceLevel))
+	defer d.Close(context.Background())
+	ep := Endpoint{Name: "notifications", URL: "https://host.test/private-hook-token?key=secret-query\n", Method: "POST"}
+	_, err := d.attempt(ep, delivery{body: []byte("{}")})
+	require.ErrorContains(t, err, "invalid webhook request")
+	assert.Contains(t, logs.String(), "webhook request could not be built")
+	assert.NotContains(t, logs.String(), "private-hook-token")
+	assert.NotContains(t, logs.String(), "secret-query")
+}
+
 func TestCloseCancelsRequestsAndDiscardsQueuedDeliveries(t *testing.T) {
 	started := make(chan struct{}, 1)
 	var requests atomic.Int32

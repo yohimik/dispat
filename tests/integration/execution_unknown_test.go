@@ -95,6 +95,9 @@ func TestExecutionInterruptedPublisherIsQuiescedAndGivesTheLockBack(t *testing.T
 	assert.False(t, isRetained, "a quiesced publisher retains no exclusion")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "so the lock went back")
 	assert.Empty(t, executionReleaseTags(rig), "and nothing was recorded")
+	branches := rig.branches()
+	require.Len(t, branches, 1, "the unknown publication's branch remains for reconciliation")
+	assert.Contains(t, branches[0], "-publish-", "the unrelated preflight branch was cleaned")
 	stopAll(t, []*executionWorker{worker})
 }
 
@@ -141,6 +144,9 @@ func TestExecutionUnansweredPublisherRetainsTheLock(t *testing.T) {
 	assert.True(t, remoteHoldsLock(t, rig.origin),
 		"and the lock is still on the remote for an operator")
 	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
+	branches := rig.branches()
+	require.Len(t, branches, 1, "the unanswered publisher's branch remains for reconciliation")
+	assert.Contains(t, branches[0], "-publish-", "the unrelated preflight branch was cleaned")
 	stopAll(t, []*executionWorker{worker})
 }
 

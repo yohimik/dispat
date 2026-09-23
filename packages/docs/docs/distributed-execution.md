@@ -64,9 +64,9 @@ execution:
   secretEnv: DISPAT_EXECUTION_SECRET
   workers:
     - name: build-a
-      endpoint: git@github.com:acme/release-mailbox.git
+      endpoint: git@github.com:acme/project.git
     - name: build-b
-      endpoint: git@github.com:acme/release-mailbox.git
+      endpoint: git@github.com:acme/project.git
   timeouts:
     preflight: 60
     task: 3600
@@ -77,7 +77,7 @@ execution:
 execution:
   role: worker
   name: build-a
-  endpoint: git@github.com:acme/release-mailbox.git
+  endpoint: git@github.com:acme/project.git
   secretEnv: DISPAT_EXECUTION_SECRET
   concurrency: 2
 ```
@@ -97,20 +97,22 @@ the object are worth knowing before the keys:
 
 ### The mailbox repository
 
-A mailbox is an ordinary Git repository that nobody releases from. Several workers may share one, and a worker may
+A mailbox is an ordinary Git repository holding coordination refs. When it is the source origin, it also holds the
+release branch and tags; when separate, nobody releases from it. Several workers may share one, and a worker may
 have one of its own; when two nodes read different mailboxes, the orchestrator relays a result from one to the other,
 so a node is never told about a machine it cannot reach.
 
-It may be the source repository's own origin, or a repository created for the purpose. A dedicated repository is the
-better default:
+Use the source repository's origin as the mailbox when the workers share its trust boundary. This lets source and
+coordination refs share Git objects, so the first task does not copy the repository's full reachable history into a
+second remote. A separate mailbox is available when access control or trust boundaries require one:
 
 - A mailbox holds full source snapshots, the command text of every delegated stage and the build outputs that travel
-  between tasks. It needs the access control the source has, and a separate repository is the simplest way to say so.
-- If the origin is the mailbox, protect the release branches and the tags. The credentials that write
+  between tasks. Give its readers the same access restrictions as the source.
+- Protect the release branches and tags on an origin that serves as the mailbox. The credentials that write
   `dispat-worker-*` branches then exist on every worker, and branch protection is what stops them reaching a release
   branch or a release tag.
-- A mailbox the source shares objects with makes the first push of a run cheap. This is the one argument for using
-  the origin, and [what to watch for](#what-to-watch-for) explains the cost it avoids.
+- A separate mailbox receives the source's reachable history on its first task. [What to watch for](#what-to-watch-for)
+  explains that transfer cost.
 
 ### The signing secret
 
@@ -339,7 +341,7 @@ A pipeline that creates a worker machine a minute before the run cannot write it
 lists:
 
 ```sh
-dispat run tests --since all --worker ci-worker-1=git@github.com:acme/release-mailbox.git
+dispat run tests --since all --worker ci-worker-1=git@github.com:acme/project.git
 ```
 
 The link is held to every rule a configured one is: a node name, a credential-free endpoint, a name no other link
@@ -375,7 +377,9 @@ started, or no acknowledgement at all, is `E228`: the package failed at its publ
 in this run, its dependents are blocked, and the run exits non-zero.
 
 If the publisher never acknowledged, the release lock of the repository it was publishing into is **retained**. The
-error names the order of recovery, and it is the order to follow:
+uncertain publication's authorization ref is also retained, whether the node acknowledged after starting publish or
+never answered. Unrelated coordination refs are cleaned up. The error names the order of recovery, and it is the order
+to follow:
 
 1. list the run's coordination refs in the mailbox (`dispat-worker-*`);
 2. find the authorization that has no result beside it;
@@ -391,10 +395,10 @@ may end with a lock retained and no release record at all, so the registry is th
 ordinary run plans what is still owed and publishes it, exactly as it does after an interrupted local publish. Read
 [recovering from a failed run](./reference/releasing/recovery.md) for the general shape of that.
 
-**Leftover coordination branches are safe to delete.** A completed run deletes its own refs and reports `W244` when
-one survives, with exit code `0`, because a coordination branch carries no release record. The branches of a crashed
-run are safe to delete once no process is still using them, and they hold the same data live ones do, so deleting
-them is also the tidy thing to do.
+**Leftover coordination branches need classification before deletion.** A completed run deletes its own refs and
+reports `W244` when one survives, with exit code `0`, because a coordination branch carries no release record. An
+`E228` run retains the uncertain publication's authorization as evidence; follow the recovery order above before
+deleting it. Other branches of a crashed run are safe to delete once no process is still using them.
 
 ## Security: what distributed execution exposes and how to contain it
 
@@ -408,11 +412,10 @@ it.
 computed `DISPAT_*` values of each stage, the values scripts exported through `DISPAT_OUTPUT` and the build outputs
 themselves all travel through the mailbox repository.
 
-Contain it by giving the mailbox the access control the source has, and prefer a repository created for the purpose
-over the source origin. Never export a secret as a script output, and never write one literally in `env` or in a
-command: write `$NAME`, which travels as the reference and is expanded on the node that runs the command. If the
-origin is the mailbox, protect the release branches and the tags, so that the credentials that can write
-`dispat-worker-*` branches cannot write them.
+Contain it by giving mailbox refs the access control the source has. When the source origin is the mailbox, protect
+release branches and tags from worker credentials. Never export a secret as a script output, and never write one
+literally in `env` or in a command: write `$NAME`, which travels as the reference and is expanded on the node that
+runs the command.
 
 **2. The signing secret is shared and symmetric.** Every node holding the secret can sign any message. A compromised
 worker, or anyone holding the secret with push access to the mailbox, can forge an assignment, which is command
@@ -457,8 +460,9 @@ above.
 
 A checklist an operator can follow:
 
-- The mailbox is a repository of its own, with the access control the source has.
-- If the origin is the mailbox, release branches and release tags are protected.
+- The source origin is the mailbox when its workers share the source's trust boundary; otherwise the separate mailbox
+  has the access control the source needs.
+- When the origin is the mailbox, release branches and release tags are protected from worker credentials.
 - The signing secret comes from a secret store, is shared only inside one trust zone, and is rotated when a
       worker leaves or is suspected.
 - Workers run on dedicated, preferably ephemeral machines, with no credentials beyond the mailbox, the sources

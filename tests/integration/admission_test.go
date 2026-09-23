@@ -20,6 +20,7 @@ package integration
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,8 +45,12 @@ const admissionProviderOK = "DISPAT_IT_ADMISSION_CORE_OK"
 // reconciling strategy the re-reconciliation has to redo: the native one
 // alone, or the native one and the space's own `flow.version` scripts.
 type admissionShape struct {
-	hasBuild         bool
-	hasVersionScript bool
+	hasBuild              bool
+	hasVersionScript      bool
+	nestedTag             bool
+	bootstrapConsumerOnly bool
+	bootstrapBuildTag     bool
+	lateTagCollision      bool
 }
 
 // admissionRepo is the two-package workspace of vector 80d: `core` in a space
@@ -70,6 +75,20 @@ func admissionRepo(t *testing.T, shape admissionShape) *harness.Repo {
 		"cli-version":      {"echo versioning $DISPAT_PACKAGE against ${DISPAT_UPDATED_PACKAGES:-nothing}"},
 		"cli-post-version": {"touch '" + gate + "'"},
 		"cli-publish":      {"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
+	}
+	if shape.nestedTag {
+		bin, _ := harness.Build(t)
+		cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true),
+			Name: "admission-test", Email: "admission@example.com"}
+		cfg.Scripts["cli-publish"] = models.Script{bin + " commit --tag"}
+	}
+	if shape.lateTagCollision {
+		cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true),
+			Name: "admission-test", Email: "admission@example.com"}
+		cfg.Scripts["tag-collision"] = models.Script{
+			`if [ -n "$DISPAT_IT_ADMISSION_COLLIDE" ]; then git tag -a core@0.2.0 HEAD^ -m injected; fi`,
+		}
+		cfg.Run = &models.RunConfig{BeforeCommit: []string{"tag-collision"}}
 	}
 	consumerFlow := &models.SpaceFlowConfig{
 		PostVersion: []string{"cli-post-version"}, Publish: []string{"cli-publish"}}
@@ -101,9 +120,27 @@ func admissionRepo(t *testing.T, shape admissionShape) *harness.Repo {
 }`)
 	// The bootstrap release, which gives both packages a baseline: without one
 	// every window is the whole history and nothing can overtake anything.
-	r.Commit("feat(core,cli): bootstrap")
-	r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
-	require.Contains(t, r.TagList(), "core@0.1.0")
+	if shape.bootstrapBuildTag {
+		r.Commit("feat(core): bootstrap")
+		require.NoError(t, os.WriteFile(gate, nil, 0o600))
+		provider := r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core")
+		require.Equal(t, 0, provider.Code, "provider bootstrap: %s", provider.Stdout)
+		require.NoError(t, os.Remove(gate))
+		r.Git("tag", "-d", "core@0.1.0")
+		r.Git("tag", "-a", "core@0.1.0+build.7", "-m", "baseline with build metadata")
+		r.Commit("feat(cli): bootstrap")
+	} else if shape.bootstrapConsumerOnly {
+		r.Commit("feat(cli): bootstrap")
+	} else {
+		r.Commit("feat(core,cli): bootstrap")
+	}
+	if shape.bootstrapConsumerOnly || shape.bootstrapBuildTag {
+		res := r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "cli")
+		require.Equal(t, 0, res.Code, "consumer bootstrap: %s\n%s", res.Stdout, res.Stderr)
+	} else {
+		r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+		require.Contains(t, r.TagList(), "core@0.1.0")
+	}
 	require.Contains(t, r.TagList(), "cli@0.1.0")
 	return r
 }
@@ -186,6 +223,169 @@ func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 		assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "cli"),
 			"every admitted cause of the catch-up comes from the failure; events:\n%s", res.Stdout)
 	})
+}
+
+// TestAdmissionCatchesUpAfterTheProviderShipsAlone keeps the consumer out of
+// the provider's successful retry. Both tags can then point at the same
+// commit, so a later invocation must remember which provider version the
+// consumer actually shipped with rather than infer delivery from ancestry.
+func TestAdmissionCatchesUpAfterTheProviderShipsAlone(t *testing.T) {
+	r := admissionRepo(t, admissionShape{})
+	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
+	require.NotEqual(t, 0, r.Release().Code)
+	require.Equal(t, 1, r.TagCount("cli@0.2.0"), "the app shipped its own work")
+	assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.1.0"`)
+
+	provider := r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core")
+	require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
+	require.Equal(t, 1, r.TagCount("core@0.2.0"))
+	assert.Zero(t, r.TagCount("cli@0.2.1"), "consumer was absent from this run")
+
+	catchUp := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+	require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
+	require.Equal(t, 1, r.TagCount("cli@0.2.1"), "consumer must pick up core without a new commit")
+	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "core is never republished")
+	assert.True(t, harness.IsCodePresentForPackage(catchUp.Events, "W193", "cli"))
+	assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
+
+	settled := r.Status("--require-release")
+	assert.NotEqual(t, 0, settled.Code, "the catch-up must converge")
+	assert.Contains(t, settled.Stdout, `"releasing":0`)
+}
+
+// TestAdmissionNestedTagRetainsProviderReceipt exercises a publish flow that
+// calls the native step command. That command replans with the provider tag
+// masked by its outer run; its immutable tag must still record what the outer
+// run actually observed when the consumer shipped.
+func TestAdmissionNestedTagRetainsProviderReceipt(t *testing.T) {
+	r := admissionRepo(t, admissionShape{nestedTag: true})
+	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
+	require.NotEqual(t, 0, r.Release().Code)
+	require.Equal(t, 1, r.TagCount("cli@0.2.0"), "the app shipped its own work")
+
+	provider := r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core")
+	require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
+	catchUp := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+	require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
+	assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "the nested tag must retain delivery evidence")
+	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "provider is never republished")
+}
+
+// TestAdmissionNestedOtherPackageKeepsItsOwnReceipt exercises an explicit
+// --package target inside another package's publish script. The outer
+// consumer's provider receipt must not be copied onto the unrelated tag.
+func TestAdmissionNestedOtherPackageKeepsItsOwnReceipt(t *testing.T) {
+	r := harness.New(t)
+	bin, _ := harness.Build(t)
+	cfg := harness.BaseFile(2)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true),
+		Name: "admission-test", Email: "admission@example.com"}
+	cfg.Scripts = map[string]models.Script{
+		"publish":      {"echo publishing $DISPAT_PACKAGE"},
+		"nested-other": {`if [ -n "$DISPAT_IT_NEST_OTHER" ]; then ` + bin + ` commit --tag --package util; fi`},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages/libs"},
+			Flow: &models.SpaceFlowConfig{Publish: []string{"publish"}}},
+		"apps": {Path: models.PathList{"packages/apps"},
+			Flow: &models.SpaceFlowConfig{Publish: []string{"nested-other"}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "cli", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages/libs", "core")
+	r.SeedPackage("packages/apps", "cli")
+	r.SeedPackage("packages/apps", "util")
+	r.Commit("feat(core,cli,util): bootstrap")
+	r.ReleaseOK()
+	r.WriteFile("packages/libs/core/change.txt", "provider")
+	r.WriteFile("packages/apps/cli/change.txt", "consumer")
+	r.WriteFile("packages/apps/util/change.txt", "unrelated")
+	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag\n\n---\n\nfeat(util): own flag")
+	provider := r.CommandEnv(nil, "--package", "core")
+	require.Equal(t, 0, provider.Code, "provider release: %s", provider.Stdout)
+
+	res := r.CommandEnv([]string{"DISPAT_IT_NEST_OTHER=1"}, "--package", "cli")
+	require.Equal(t, 0, res.Code, "nested cross-package commit: %s\n%s", res.Stdout, res.Stderr)
+	require.Equal(t, 1, r.TagCount("util@0.2.0"), "the explicit nested target must tag util; tags: %v\n%s", r.TagList(), res.Stdout)
+	subject := strings.TrimSpace(r.Git("for-each-ref", "--format=%(contents:subject)", "refs/tags/util@0.2.0"))
+	assert.Equal(t, "release util@0.2.0 dispat-seen-v1:e30", subject,
+		"util has no provider sources and must not inherit cli's core observation")
+}
+
+// TestAdmissionCatchesUpFromAnUnreleasedProvider proves an empty observed tag
+// is a real root boundary. The first provider release must not be mistaken
+// for one the consumer could have picked up in its earlier own release.
+func TestAdmissionCatchesUpFromAnUnreleasedProvider(t *testing.T) {
+	r := admissionRepo(t, admissionShape{bootstrapConsumerOnly: true})
+	r.Commit("feat(core)^: first published core\n\n---\n\nfeat(cli): own flag")
+	require.NotEqual(t, 0, r.Release().Code)
+	require.Equal(t, 1, r.TagCount("cli@0.2.0"))
+	provider := r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core")
+	require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
+	catchUp := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+	require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
+	assert.Equal(t, 1, r.TagCount("cli@0.2.1"))
+	assert.Equal(t, 1, r.TagCount("core@0.1.0"), "provider is never republished")
+}
+
+// TestAdmissionReceiptKeepsTheExactProviderTag proves that a parseable tag
+// with SemVer build metadata is recorded by its actual ref name. Rendering
+// the parsed Version would drop +build.7 and cite a tag that never existed.
+func TestAdmissionReceiptKeepsTheExactProviderTag(t *testing.T) {
+	r := admissionRepo(t, admissionShape{bootstrapBuildTag: true})
+	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
+	require.NotEqual(t, 0, r.Release().Code)
+	require.Equal(t, 1, r.TagCount("cli@0.2.0"))
+	provider := r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core")
+	require.Equal(t, 0, provider.Code, "provider-only retry: %s", provider.Stdout)
+	catchUp := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+	require.Equal(t, 0, catchUp.Code, "exact-tag catch-up: %s", catchUp.Stdout)
+	assert.Equal(t, 1, r.TagCount("cli@0.2.1"))
+	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "provider is never republished")
+}
+
+// TestAdmissionFinalTagFailureCannotForgeDelivery covers deferred tagging:
+// all publish scripts have succeeded, but a concurrent tag collision makes
+// the provider's final record fail. The consumer must not receive a tag whose
+// receipt claims that missing provider record was observed.
+func TestAdmissionFinalTagFailureCannotForgeDelivery(t *testing.T) {
+	r := admissionRepo(t, admissionShape{lateTagCollision: true})
+	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
+	res := r.CommandEnv([]string{admissionProviderOK + "=1", "DISPAT_IT_ADMISSION_COLLIDE=1"}, "release")
+	require.NotEqual(t, 0, res.Code, "a final tag collision is critical")
+	assert.Contains(t, res.Stdout, "provider's tag is missing")
+	assert.Equal(t, 0, r.TagCount("cli@0.2.0"), "consumer tag cannot carry false receipt")
+	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "collision fixture wrote the wrong tag")
+}
+
+// TestAdmissionCancelAfterProviderShipsAlone proves a consumer can discard
+// the delayed pickup before it has published it, even though its own earlier
+// release tag already contains the original source commit.
+func TestAdmissionCancelAfterProviderShipsAlone(t *testing.T) {
+	r := admissionRepo(t, admissionShape{})
+	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
+	require.NotEqual(t, 0, r.Release().Code)
+	require.Equal(t, 0, r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core").Code)
+	r.CommitEmpty("cancel(cli): drop the delayed pickup")
+
+	status := r.Status("--require-release")
+	assert.NotEqual(t, 0, status.Code, "the cancel discards the owed release")
+	assert.Contains(t, status.Stdout, `"releasing":0`)
+	assert.Zero(t, r.TagCount("cli@0.2.1"))
+}
+
+// TestAdmissionProviderAloneDoesNotCreateAConsumerRelease covers the control:
+// a provider's own version advancing without a propagation directive gives
+// the consumer no automatic bump, even across the same three run sequence.
+func TestAdmissionProviderAloneDoesNotCreateAConsumerRelease(t *testing.T) {
+	r := admissionRepo(t, admissionShape{})
+	r.Commit("feat(core): streaming\n\n---\n\nfeat(cli): own flag")
+	require.NotEqual(t, 0, r.Release().Code)
+	require.Equal(t, 0, r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core").Code)
+	status := r.Status("--require-release")
+	assert.NotEqual(t, 0, status.Code)
+	assert.Contains(t, status.Stdout, `"releasing":0`)
+	assert.Zero(t, r.TagCount("cli@0.2.1"))
 }
 
 // TestAdmissionBlocksAProceedingConsumerWhoseBuildEmbeddedThePlannedVersion is

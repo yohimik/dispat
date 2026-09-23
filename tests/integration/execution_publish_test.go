@@ -338,6 +338,27 @@ func TestExecutionRelevantNativeChangeWithholdsPublication(t *testing.T) {
 	stopAll(t, workers)
 }
 
+// A consumer's own folder can stay untouched while its provider changes.
+// The late provider commit still invalidates the artefact the worker built.
+func TestExecutionChangedProviderWithholdsDependentPublications(t *testing.T) {
+	rig := newExecutionPublishRig(t, executionCommitDuringTheRun(
+		filepath.Join("packages", "assets", "late-input.txt")))
+	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
+
+	res := rig.release()
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, rig.repo.IsTagged("assets@0.1.0"), "the provider published before its hook changed the checkout")
+	for _, name := range []string{"ui", "docs", "app"} {
+		assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, name),
+			"%s cannot publish an artefact built against the earlier provider inputs", name)
+		assert.NotContains(t, executionProbeValues(rig, "publish"), name,
+			"%s's publish command never ran", name)
+		assert.False(t, rig.repo.IsTagged(name+"@0.1.0"))
+	}
+	stopAll(t, workers)
+}
+
 // TestExecutionUnrelatedNativeChangeKeepsResult: the same commit outside every
 // folder the package was built from changes nothing. A release moves the
 // repository constantly — every changelog it writes is a change to a package

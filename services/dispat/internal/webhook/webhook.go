@@ -284,9 +284,9 @@ func (d *Dispatcher) attempt(ep Endpoint, del delivery) (status int, err error) 
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, ep.Method, ep.URL, bytes.NewReader(del.body))
 	if err != nil {
-		// The cause carries the endpoint URL, which frequently carries
-		// credentials, so it is traced rather than returned.
-		d.log.Trace().Str("webhook", ep.Name).Err(err).Msg("webhook request could not be built")
+		// The cause may contain the endpoint URL, whose path or query can
+		// carry credentials. Even trace logs must not include it.
+		d.log.Trace().Str("webhook", ep.Name).Msg("webhook request could not be built")
 		return 0, errors.New("invalid webhook request")
 	}
 	// The defaults first, then the configured headers — which may override

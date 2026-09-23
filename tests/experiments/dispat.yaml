@@ -77,10 +77,12 @@ scripts:
       done
     done
     for scenario in build publish; do
-      for tool in dispat lerna; do
+      for tool in dispat lerna changesets; do
         echo "propagation $tool $scenario"
       done
     done
+    echo "propagation dispat deferred"
+    echo "propagation dispat deferred-build"
   # Every cell of the campaign, four at a time. A completed campaign can be
   # reused when it names this exact native image (which includes the released
   # dispat binary, pinned tools and harness) and every expected record still

@@ -69,7 +69,7 @@ takes no release lock, so it neither waits for nor excludes a release of the sam
 before the usual `run finished` line.
 
 ```sh
-dispat run tests --since all --worker ci-worker-1=git@github.com:acme/release-mailbox.git
+dispat run tests --since all --worker ci-worker-1=git@github.com:acme/project.git
 ```
 
 What a delegated task writes stays on its node unless the script declares it.

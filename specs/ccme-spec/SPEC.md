@@ -2192,7 +2192,8 @@ baseline the two windows coincide. These roles MUST NOT be conflated:
 |-------------------------------------------|----------------------------------|-------------|
 | Compute `P`'s aggregate train bump/target | `W(P)`, the unit's own package   | §11.4, §11.5, §13.9 |
 | Admit a fresh direct bump or channel      | `Wfresh(P)`                      | §13.6, §13.8 |
-| Admit a bump or channel for dependent `D` | `Wfresh(D)`, the **dependent's** | §13.7       |
+| Admit a channel for dependent `D` | `Wfresh(D)`, the **dependent's** | §13.7 |
+| Admit a bump for dependent `D` | Delivery evidence from `D`'s release record; `Wfresh(D)` is the cheap pending case | §13.4a, §13.7 |
 
 Reading the dependent-admission row against the source's window silently loses releases; §13.7a is about exactly that.
 
@@ -2227,9 +2228,10 @@ sourcePackages(u) =
 **Delivery.** On the bump axis a source's contribution is admitted for a target until the source has **delivered** it:
 
 ```
-delivered(P, C, D) =  some release tag of P sits on a commit t
-                      with C in reach(t) and t in reach(baselineCommit(D))
-                      # D released at or after P's release carrying C; false for an unreleased D
+delivered(P, C, D) =  D's latest release record states that it observed a
+                      release tag of P whose commit carries C, and the
+                      observed commit is within D's recorded boundary for P
+                      # false for an unreleased D
 
 reaching(u, D)     =  { P in sourcePackages(u) : dist(P, D) <= u.depth }   # the sources D depends on
                                                                             # within the unit's depth
@@ -2248,12 +2250,19 @@ source's release, and receives it as a catch-up when it comes (§13.7a). Releasi
 the source's release, followed by the target's, is. The channel axis keeps `C ∈ Wfresh(D)` as its admission, because a
 channel is carried by the units and needs no release of the source (G7).
 
-Two releases on one commit have no order (§13.7b), so `delivered` cannot tell a target that released at commit `t` after
-its source from one that released there in an earlier run whose source then released at `t` too. §19.3 keeps the second
-state from arising unseen: a source is released at the baseline commit of a target it still owes only in a run that
-releases the target after it (`E201`). Under §27, `baselineCommit(D)` and the release commits of `P` are compared in
-`P`'s repository, `D`'s position there being its consumer boundary (§§27.6, 27.11), and the owed window of §13.3 is a
-window over that repository.
+Two releases on one commit have no Git ancestry order (§13.7b). Every new consumer release record therefore MUST
+durably name the exact release tag of each propagation source it observed when it published, or an empty value if that
+source had not published. A source's later tag on the same commit cannot retroactively discharge the consumer's debt.
+The evidence belongs to the consumer's ordinary immutable release record, not to a worker mailbox or
+wall-clock timestamp. A record written before this evidence was introduced retains the ancestry-only interpretation;
+an implementation MUST NOT invent an observation for it. A malformed or missing named provider tag makes the new
+record unusable for planning and is an error, while a provider removed from the active workspace is ignored until it
+participates again. Under §27, the observed provider tag and `D`'s boundary are compared in `P`'s repository
+(§§27.6, 27.11). The historical units between the observed tag and the provider's current tag remain available to
+propagation even when every ordinary pending window has moved beyond them.
+If tagging is deferred until after publish, a consumer tag MUST NOT be written with a receipt naming a same-run
+provider tag whose creation failed. The failure is critical and requires record repair; planned version alone is not
+proof that the provider's immutable record exists.
 
 **Suppression applies only to undischarged work, and this is normative.** Once `P` has published the version that
 carries `u`, the artefact its consumers are owed is public. Nothing landing afterwards can retract that obligation:
@@ -2271,8 +2280,10 @@ destroy an obligation the stronger one leaves intact.
 
 Suppressing a catch-up that is genuinely unwanted is done where the pending contribution actually lives, in the
 consumer's ledger, with `cancel(<consumer>)` or a hold on the consumer. §13.7d is the operator-facing summary.
+When a consumer released past `C` before `P` published, that consumer release does not protect the owed pickup from
+a later `cancel(<consumer>)`; only a consumer release that observed a provider tag carrying `C` does.
 
-Every operand is computed from tags and ancestry at `HEAD`, so the rule is deterministic for a fixed tag state
+Every operand is computed from release records, tags and ancestry at `HEAD`, so the rule is deterministic for a fixed tag state
 (§17.2). A later source release can change `sourcePackages(u)` by discharging a previously suppressed source; that
 state transition is intentional and is not replay independence.
 
@@ -2472,6 +2483,12 @@ bolted onto the algorithm, it is what the algorithm does when the ordinary rule 
 A "catch-up release" is therefore only a *label*: a release whose entire cause is a propagation from a package that is
 not itself in this run's plan. Implementations MUST report it as such (`W193`), because a package appearing in a plan
 with no commits of its own and no releasing dependency is otherwise baffling to whoever reviews the plan.
+
+The receipt is also needed when a consumer with its own work publishes while its provider fails, the provider later
+publishes in a run that excludes the consumer, and a third run has no new commits. Both release tags may point at the
+same source commit. The consumer's first release record says which provider tag it actually saw; the third run reads
+the source units since that tag and admits only the contribution still owed. After the catch-up, the consumer's new
+record names the provider's published tag and the obligation is discharged. No provider republish is needed.
 
 **What catch-up does not do.** It does not re-run, re-time, or re-scope anything:
 
@@ -3620,7 +3637,8 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 88  | The same, five runs later, with no new commits                           | Still released at the same version while the §13.7c retry invariant holds. Admission depends on the consumer's unchanged `Wfresh` (G2).                                                                                   |
 | 88a | Scheduled staleness audit over a workspace that has never run the engine | Reports every package behind a dependency as `W195` (§13.7b). Reporting only; it never blocks and never releases.                                                                                  |
 | 89  | Provider published, consumer succeeded, run re-run                       | Empty plan. The contribution is discharged once in the tag ledger (G4).                                                                                                                                       |
-| 90  | Consumer released in the interim for its own `feat`                      | No catch-up: its window no longer contains the commit, and its own release already picked up the dependency. Its range for that dependency is reconciled at publish time and reports `W197` (§9.4). |
+| 90  | Consumer released in the interim for its own `feat` after the provider published | No catch-up: its release record names the provider tag it picked up. Its range for that dependency is reconciled at publish time and reports `W197` (§9.4). |
+| 90a | Consumer released for its own work before a failed provider; provider shipped alone next run | The consumer's tag records the older provider tag it observed. A later run at the same source commit catches up the consumer once (`W193`) without republishing the provider. |
 | 91  | Mid-chain failure under `^^` (`core`→`ui`→`theme`, `ui` fails)           | `theme` is **blocked**, not published (`W194`). On resume, `ui` then `theme`, both at their originally planned versions.                                                                            |
 | 92  | The same, but with `+1` instead of `^^`                                  | `theme` was never in the plan and never enters it. Catch-up cannot widen depth (G5).                                                                                                                |
 | 93  | Consumer would be published before its provider in one run               | Impossible: §19.2 orders dependencies first. An implementation that emits this order fails conformance (`E197`).                                                                                    |
@@ -6823,9 +6841,19 @@ treats a relevant head or release-tag change as `E330`. Commit identity remains 
 **Composition.** Each peer's own configuration file establishes that repository's ordinary repository-local root,
 space and package layering, exactly as an explicitly imported configuration does under §27.3. Every participant of a
 linked peer fleet, the entry included, is such a root. The combined workspace, the single package-name namespace,
-the repository-local spaces and version groups, and the ownership rules of §27.3 apply unchanged, with one
-adjustment: a peer's checkout lies inside the repository that links it, so scope containment is compared within one
-repository rather than across the fleet. Two repositories declaring the same package name remain `E332`.
+repository-local space paths and operational settings, and the ownership rules of §27.3 apply unchanged. A peer's
+checkout lies inside the repository that links it, so scope containment is compared within one repository rather than
+across the fleet. Two repositories declaring the same package name remain `E332`.
+
+Active linked peers share one case-insensitive version-group namespace. Explicit `versionGroups` declarations and
+spaces with effective shared versioning contribute their groups; folder configuration is resolved before an implicit
+space group is collected. Matching names MUST have equal effective semver, counter and channel policies, with omitted
+sharing axes interpreted as their defaults. Conflicting declarations MUST fail before publication, independent of the
+entry repository. A member MAY reference a group declared by another active peer. Disabled peers contribute no groups.
+An independent space in another peer contributes no group and does not reserve a group name. Package-level overrides
+retain the ordinary deepest-member convergence and `W237` semantics. Each owner's scripts, environment, paths, flow,
+parser, records and lock policy remain local; group composition MUST NOT copy them between repositories. The ordinary
+control-import topology retains §27.3's repository-local group identities.
 
 The keys only a control repository can own are refused rather than ignored. `configs` and `--configs`,
 `repositoryOverrides.<name>.commit`, and a `repositoryBaselines` entry whose `repository` is `control` are each `E332`

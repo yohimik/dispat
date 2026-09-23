@@ -105,6 +105,29 @@ nothing. No flags, no cleanup, no registry query.
 release-please was not part of this run. It has no publish step to deny, because publication is delegated to CI. Its
 versioning decisions were instead checked against real history, below.
 
+### A patch that asks direct consumers to release
+
+The propagation cells use `fix(core)^` for dispat: `core@1.0.1` remains inside every direct consumer's `~1.0.0`
+range, but the caret requests a consumer release. Dispat releases `core`, `cli`, `ui` and `api`. Lerna receives an
+ordinary `fix(core)` and chooses all six packages, including indirect consumers `theme` and `docs`. Changesets
+receives explicit patch entries for `core` and its three direct consumers; it does not read the caret syntax.
+
+The fault comes after `core` has published. In Dispat's build and upload failure cells, a retry with no new commit
+plans only the owed `cli` catch-up. Lerna's tag-based `changed` is already empty because `version` tagged all six;
+`publish from-package` queries the registry and uploads the five missing packages. In the Changesets cell the
+operator publishes `core` separately to establish that ordering, then the failed `cli` build or upload is retried
+with `changeset publish`. That command uploads missing `cli`, `ui` and `api`; it leaves the separately published
+`core` without a Changesets tag. The resulting unrecorded provider is a consequence of the operator-orchestrated
+partial protocol, visible in the recorded registry and Git state.
+
+A further Dispat cell tests when a consumer with no build command has already published its own fix against the old
+provider. A later selected release publishes the provider and the other direct consumers while leaving this one out. The next full
+plan must still carry the missed consumer delivery, with no new commit or release instruction. The
+[experiment record](./internals/experiments.mdx) shows the commands and states used to check that recovery.
+Its companion cell keeps a real consumer build: if it finished against the planned provider before the provider
+failed, Dispat withholds that artifact with `W194`; the next run builds the still-pending own fix against the
+published provider.
+
 ### Replay against real history
 
 For the last five releases of two repositories that follow the commit convention, the experiment checked out each
@@ -136,7 +159,8 @@ at their originally planned versions.
 ## Two runs at once
 
 One more difference does not need an experiment to state. dispat's mutual exclusion between concurrent runs needs no
-lock service. A run pushes a single reserved annotated tag to the git remote before planning and deletes it on the
-way out. The remote's compare-and-swap on tag creation makes the loser's push fail before it reads a single tag. The
+lock service. A run pushes a reserved annotated tag to each participating git remote before planning. Normal cleanup
+deletes the owned locks; an uncertain authorized worker publication can retain one for operator recovery. The remote's
+compare-and-swap on tag creation makes the loser's push fail before it plans against the same records. The
 [release lock](./reference/releasing/release-lock.md) page describes it. The failure model behind all of this is the
 subject of [Recovering from a failed run](./reference/releasing/recovery.md).

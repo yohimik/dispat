@@ -703,7 +703,13 @@ func (cp *computation) propagateBumps() {
 						continue
 					}
 				}
-				if cp.cancelledFor(rec.key, t.name) { // §13.5a
+				isCancelled := cp.cancelledFor(rec.key, t.name)
+				if !isPending {
+					// The consumer's baseline can contain the source commit
+					// while the provider has not delivered its version yet.
+					isCancelled = cp.cancelledForOwed(rec.key, t.name)
+				}
+				if isCancelled { // §13.5a
 					continue
 				}
 				// A contribution the target's baseline prerelease already

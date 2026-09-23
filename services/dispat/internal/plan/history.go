@@ -275,10 +275,14 @@ func (cp *computation) resolveTagBaselines() error {
 		newest, hasNewest := tags.Baseline()
 		if hasNewest {
 			latestTags[p.Name] = newest
+			if err := cp.loadReceipt(p.Name, newest); err != nil {
+				return fmt.Errorf("plan: %w", err)
+			}
 		}
 		if hasNewest && newest.Parsed {
 			rel.Baseline, rel.HasBaseline = newest.Version, true
 			rel.BaselineCommit = newest.Commit
+			rel.BaselineTagName = newest.Name
 			rel.baselineCommitKey = historyKey(p.Repository, newest.Commit)
 		}
 		rel.BaselineChannel = channelOf(rel.Baseline, rel.HasBaseline)
@@ -457,6 +461,35 @@ func (cp *computation) readRepositoryUnions(idx *windowIndex) error {
 			}
 		}
 	}
+	for _, receipt := range cp.listProviderReceipts() {
+		consumer, provider, seenTag := receipt.consumer, receipt.provider, receipt.tag
+		if !cp.hasReceiptProvider(provider) {
+			continue
+		}
+		seen, err := cp.resolveReceiptBoundary(consumer, provider, seenTag)
+		if err != nil {
+			return fmt.Errorf("plan: %w", err)
+		}
+		if !cp.needsReceiptHistory(provider, seenTag) {
+			continue
+		}
+		packageOwner := cp.byName[provider]
+		folded := strings.ToLower(packageOwner.Repository)
+		history := cp.histories[folded]
+		if history.Control && cp.controlIndexed {
+			continue
+		}
+		rb := byRepository[folded]
+		if rb == nil {
+			rb = &repositoryBoundaries{history: history, seen: make(map[string]bool), pkg: consumer}
+			byRepository[folded] = rb
+			order = append(order, folded)
+		}
+		if !rb.seen[seen.Commit] {
+			rb.seen[seen.Commit] = true
+			rb.raw = append(rb.raw, seen.Commit)
+		}
+	}
 	for _, folded := range order {
 		rb := byRepository[folded]
 		union, ok := rb.history.Git.(gitx.UnionHistoryx)
@@ -598,6 +631,23 @@ func (cp *computation) loadRepositoryWindows() error {
 				cp.windowRefs[p.Name] = append(cp.windowRefs[p.Name], freshWindow)
 				cp.windowKeys[p.Name] = append(cp.windowKeys[p.Name], freshKey)
 			}
+		}
+	}
+	for _, receipt := range cp.listProviderReceipts() {
+		consumer, provider, seenTag := receipt.consumer, receipt.provider, receipt.tag
+		if !cp.hasReceiptProvider(provider) {
+			continue
+		}
+		seen, err := cp.resolveReceiptBoundary(consumer, provider, seenTag)
+		if err != nil {
+			return fmt.Errorf("plan: %w", err)
+		}
+		if !cp.needsReceiptHistory(provider, seenTag) {
+			continue
+		}
+		history := cp.histories[strings.ToLower(cp.byName[provider].Repository)]
+		if _, _, err := cp.load(idx, history, historyKey(history.Name, seen.Commit), consumer); err != nil {
+			return err
 		}
 	}
 	if cp.controlIndexed {

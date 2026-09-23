@@ -37,6 +37,11 @@ type Tag struct {
 	Name    string
 	Version ccme.Version
 	Parsed  bool
+	// Subject is the first line of an annotated tag's message. Release tags
+	// use it for durable delivery evidence; lightweight tags have no such
+	// evidence and retain the ordinary ancestry-only interpretation.
+	Subject   string
+	Annotated bool
 	// Commit is the commit the tag points at, annotated tags peeled. For a
 	// stable tag this is stableCommit(P) of §12.3, which is the origin of the
 	// package's pending window (§13.3) and the operand of the ancestry screen
@@ -885,7 +890,7 @@ func (c *LocalGitx) Tags(ctx context.Context, pkg string, format TagFormat) (Tag
 	// space, and %(*objectname) is empty for a lightweight tag.
 	out, err := c.run(ctx, "tag", "--list", "--merged", "HEAD",
 		"--sort=-v:refname", "--sort=-creatordate",
-		"--format=%(refname:short)\t%(objectname)\t%(*objectname)",
+		"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)",
 		format.Glob(pkg))
 	if err != nil {
 		return nil, err
@@ -908,7 +913,7 @@ func (c *LocalGitx) TagsForPackages(ctx context.Context, formats map[string]TagF
 	}
 	out, err := c.run(ctx, "tag", "--list", "--merged", "HEAD",
 		"--sort=-v:refname", "--sort=-creatordate",
-		"--format=%(refname:short)\t%(objectname)\t%(*objectname)")
+		"--format=%(refname:short)\t%(objectname)\t%(*objectname)\t%(contents:subject)")
 	if err != nil {
 		return nil, err
 	}
@@ -949,8 +954,10 @@ func (m packageTagMatcher) matches(tag string) bool {
 }
 
 type tagInventoryEntry struct {
-	name   string
-	commit string
+	name      string
+	commit    string
+	subject   string
+	annotated bool
 }
 
 func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
@@ -966,11 +973,15 @@ func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 	if !ok {
 		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
 	}
-	object, peeled, ok := strings.Cut(rest, "\t")
-	if !ok || strings.Contains(peeled, "\t") {
+	object, remainder, ok := strings.Cut(rest, "\t")
+	if !ok {
 		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory record")
 	}
-	entry := tagInventoryEntry{name: strings.TrimSpace(name), commit: strings.TrimSpace(object)}
+	peeled, subject, hasSubject := strings.Cut(remainder, "\t")
+	if !hasSubject {
+		peeled = remainder // old inventory readers and test doubles
+	}
+	entry := tagInventoryEntry{name: strings.TrimSpace(name), commit: strings.TrimSpace(object), subject: subject}
 	if entry.name == "" || !fullObjectID(entry.commit) {
 		return tagInventoryEntry{}, fmt.Errorf("gitx: malformed tag inventory identity")
 	}
@@ -979,6 +990,7 @@ func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 			return tagInventoryEntry{}, fmt.Errorf("gitx: malformed peeled tag object id")
 		}
 		entry.commit = peeled
+		entry.annotated = true
 	}
 	return entry, nil
 }
@@ -987,11 +999,11 @@ func parseTagInventoryLine(line string) (tagInventoryEntry, error) {
 // A Tag can outlive planning, so keeping a small matching slice must not retain
 // the potentially very large inventory string that surrounded it.
 func (e tagInventoryEntry) detach() tagInventoryEntry {
-	return tagInventoryEntry{name: strings.Clone(e.name), commit: strings.Clone(e.commit)}
+	return tagInventoryEntry{name: strings.Clone(e.name), commit: strings.Clone(e.commit), subject: strings.Clone(e.subject), annotated: e.annotated}
 }
 
 func (m packageTagMatcher) read(entry tagInventoryEntry) Tag {
-	tag := Tag{Name: entry.name, Commit: entry.commit}
+	tag := Tag{Name: entry.name, Commit: entry.commit, Subject: entry.subject, Annotated: entry.annotated}
 	if version, ok := m.reader.ParseVersion(entry.name); ok {
 		tag.Version, tag.Parsed = version, true
 	}

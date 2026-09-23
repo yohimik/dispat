@@ -23,15 +23,16 @@ run.sh <experiment> <tool> [scenario]
 |--------------|-------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
 | `orphan`     | The registry answers 502 to `cli`'s upload while `core`, `ui` and `api` publish.                            | none                                                                       |
 | `midrelease` | A colleague's commit lands on `origin/main` right before the tool's own first push of the branch.           | `clean` (touches `api`, no overlap); `conflict` (edits `core/package.json` next to the version line) |
-| `propagation` | `core` publishes, then `cli` fails; the fault is removed without another source change before retry.       | `build` (`cli`'s build script fails); `publish` (the registry rejects `cli`'s upload)                           |
+| `propagation` | `core` publishes, then `cli` fails; the fault is removed without another source change before retry.       | `build` (`cli`'s build script fails); `publish` (the registry rejects `cli`'s upload); Dispat only: `deferred` (a consumer publishes its own fix after `core` fails, then misses a selected provider release), `deferred-build` (the consumer had already built against the planned provider and is withheld) |
 
 Tools: `lerna` 10.0.1, `nx` 23.1.2, `changesets` 3.0.1, `dispat` at the version the image was built from.
 
 The fixture is six packages: `cli`, `ui` and `api` depend on `core`; `theme` and `docs` depend on `ui`. All start at
 1.0.0, tagged
 `<name>@1.0.0`, published to a registry that starts inside the container, and pushed to a bare origin beside the clone.
-One pending change, a minor to `core`, is committed the way each tool reads it: a conventional commit, or a changeset
-file for changesets. Dependencies are tilde ranges, so the minor reaches `core`'s consumers under every tool. Every
+The orphan and midrelease fixtures begin with one pending minor change to `core`, committed the way each tool reads
+it: a conventional commit, or a changeset file for changesets. Dependencies are tilde ranges, so this minor reaches
+`core`'s consumers under every tool. The propagation fixtures instead use a patch, described below. Every
 commit is dated from a fixed clock, so two runs of one cell produce the same shas and two transcripts diff against
 each other.
 
@@ -42,35 +43,56 @@ release, assumes every package changed, and the fixture rather than the tool dec
 Every package carries one `build` script, which writes its `dist` output from its source. dispat's build stage runs it
 through the fixture's `dispat.yaml`, and the propagation protocol runs the same script under Lerna with `lerna run
 build`, so a build failure there is one fault observed through two tools rather than two faults that happen to share a
-name. The nx and changesets protocols run no build of their own, and the script is inert for them.
+name. The Changesets propagation protocol explicitly runs the same script before publication. The other Changesets
+protocols and the nx protocols run no build stage.
 
 ### The propagation cells
 
-The propagation cells use a patch to `core` that remains inside the consumers' `~1.0.0` range, so semver alone asks
-for no consumer release at all. Dispat receives `fix(core)^: correct reader`, whose caret is explicit propagation
-intent; Lerna receives the plain `fix(core): correct reader` and decides for itself. Nothing is forced on Lerna's
-side, and what its version command selects is part of the record.
+The `build` and `publish` propagation cells use a patch to `core` that remains inside the consumers' `~1.0.0` range,
+so semver alone asks for no consumer release at all. Dispat receives `fix(core)^: correct reader`, whose caret is
+explicit propagation intent; Lerna receives the plain `fix(core): correct reader` and decides for itself. Nothing is
+forced on Lerna's side. Changesets receives explicit patch entries for `core`, `cli`, `ui` and `api`, which request the
+same direct-consumer release set without pretending it reads the caret syntax.
 
-What the two record is different. Dispat releases `core` and its three declared consumers, and writes each consumer's
+What Dispat and Lerna record is different. Dispat releases `core` and its three declared consumers, and writes each consumer's
 range up to the provider it was released with. Lerna releases all six: it bumps every transitive dependent of a
 changed package, `theme` and `docs` included, although `~1.0.0` already accepted `core@1.0.1`.
 
-The provider is published, tagged and observed before the fault is injected. Under Lerna the protocol does this
-directly, publishing `core` through `lerna exec` and observing the registry before it arms the fault. Under dispat one
-command runs the whole release, so the fixture sets `isBuildWaitingPublish: true` on `core`: that setting belongs to
-the provider, and it holds every consumer's build until `core` has been published. The protocol then reads the
-ordering back out of the run's own log rather than assuming it.
+The provider is published and observed before the fault is injected. Under Lerna the protocol publishes `core`
+through `lerna exec`. Under Changesets the operator runs the package build and `npm publish` from `core`'s folder;
+Changesets has no provider-first or build stage in `changeset publish`, so this manual step is part of the protocol,
+not a native Changesets guarantee. Under Dispat one command runs the whole release, so the fixture sets
+`isBuildWaitingPublish: true` on `core`: that setting belongs to the provider, and it holds every consumer's build
+until `core` has been published. The protocol reads the ordering back out of the run's own log.
 
 The `build` scenario fails `cli`'s build script, and the protocol records that `cli` never reached a publication
-attempt at all. The `publish` scenario lets the build succeed and has the registry refuse `cli`'s upload. A fault in
-an npm publish lifecycle hook would fail the publication under both names, which is why the fault lives in the build
-script and the assertions name the stage.
+attempt at all. The `publish` scenario lets the build succeed and has the registry refuse `cli`'s upload. The
+Changesets protocol runs the same script explicitly. A fault in an npm publish lifecycle hook would fail the
+publication under both names, which is why the fault lives in the build script and the assertions name the stage.
 
 After the fault is removed, the protocol adds no commit and supplies no new release intent. Dispat's next plan
 contains the owed `cli` catch-up alone, its recovery publishes `cli` without republishing `core`, and the plan after
 it is empty. Lerna's tag-based `lerna changed` is already empty, because its version command tagged every package
 before any of them was published; `lerna publish from-package` then queries the registry and republishes the five
-packages the registry is missing, not the one that failed.
+packages the registry is missing, not the one that failed. Changesets' `status` is empty once `version` consumes the
+changeset file. On retry `changeset publish` queries the registry and publishes missing `cli`, `ui` and `api`;
+because `core` was published manually before that command, Changesets does not create a `core@1.0.1` tag, leaving
+that provider publication unrecorded in this operator-orchestrated protocol.
+
+The `deferred` Dispat cell covers a separate recovery edge. Two committed fixes give `cli` work of its own and give
+`core` a `^` propagation instruction. The registry refuses `core` on run 1, while `cli` has no build command and
+publishes its own fix against
+the old provider. On run 2 the fault is gone and the operator selects `core`, `ui` and `api`, so the provider and its
+other direct consumers publish while `cli`
+is absent from the release. A full run with no new source commit must then plan a `W193` catch-up for `cli`, publish
+only that consumer, reconcile its provider range, and leave an empty final plan. This records the harder case where
+the consumer's own earlier tag already contains the propagation commit.
+
+The companion `deferred-build` cell keeps `cli`'s real build script. With the default nonblocking relation, that
+build can finish against the provider's planned version before the registry rejects the provider. Dispat reports
+`W194` and withholds the built `cli` artifact, even though it has its own fix; publishing that artifact would embed
+a version that never shipped. After the provider publishes, the next full run rebuilds and publishes `cli` at its
+still-pending own version. This is a distinct recovery path from a `W193` catch-up of an already published consumer.
 
 ### The colleague's push
 
@@ -196,5 +218,5 @@ lib/git-shim       the recording, injecting git
 lib/failproxy.py   the 502-injecting reverse proxy in front of verdaccio
 orphan/<tool>.sh   the orphan protocol per tool
 midrelease/<tool>.sh
-propagation/{dispat,lerna}.sh
+propagation/{dispat,lerna,changesets}.sh
 ```

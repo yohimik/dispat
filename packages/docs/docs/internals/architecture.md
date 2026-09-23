@@ -16,13 +16,15 @@ Steps 1 and 2 run in the command-line controller, located in `internal/cli` behi
 binary. Everything from discovery onward runs in the `app` package's `Status` (steps 3 to 6) and `Release` (all steps).
 You can call these same operations without a command line.
 
-The `Release` function brackets step 3 onward with the [release lock](../reference/releasing/release-lock.md). It
-pushes an annotated `dispat-release-lock` tag unforced to `commit.remote` before discovery, and deletes it from the
-remote and the clone on the way out. This deletion runs under a detached context, so an interrupt still gives the lock
-back. If the push is rejected, a release is already running against this repository. The run stops there with exit `1`
-before reading a single tag. Set `unsafeDisableLock: true` in the config or `DISPAT_UNSAFE_DISABLE_LOCK=true` in the
-environment to skip this bracket entirely. The tag name is reserved in `internal/gitx`, so no tag format can read it
-back as a release tag.
+The `Release` function brackets planning and execution with the [release lock](../reference/releasing/release-lock.md).
+After checking the Git repository and execution role, it pushes an annotated `dispat-release-lock` tag unforced to
+`commit.remote` before planning. In a composed workspace it acquires every participating repository's lock before
+planning. Normal cleanup deletes the owned locks from the remotes and clones under a detached context, so an interrupt
+can still give them back. An authorized worker publication whose outcome cannot be established may instead retain its
+repository's lock for operator recovery. If lock acquisition fails, the release stops before planning. Set
+`unsafeDisableLock: true` in the config or `DISPAT_UNSAFE_DISABLE_LOCK=true` in the environment to skip the lock in a
+local release; a distributed run refuses that bypass. The tag name is reserved in `internal/gitx`, so no tag format can
+read it back as a release tag.
 
 1. Parse the command line using pflag and dispatch one of the commands in the [CLI reference](../cli/README.md). An
    unknown command word acts as shorthand for `run`, like `dispat lint`.
@@ -153,8 +155,11 @@ on the purpose. Conflating the two is the bug that loses releases:
 
 Reading the last two questions against the *source's* window silently orphans consumers after a partial publish. The
 commit leaves the provider's window when it releases, making the unit lose its source packages. The consumer then never
-releases on this or any future run. Reading them against the target's window is all that catch-up is. dispat uses no
-repair pass, no second traversal, and no timestamp comparison anywhere in the package.
+releases on this or any future run. The target's window handles the ordinary catch-up. When a consumer has itself
+released past the propagating commit, its annotated tag also records the provider tag it saw. If the provider later
+publishes a release the consumer did not see, planning reads the earlier provider boundary and admits that still-owed
+contribution. This orders releases even when both tags point at the same source commit, without comparing tag dates.
+Tags written before provider receipts existed cannot supply this evidence; ancestry alone may miss that legacy case.
 
 On a prerelease train, the window deliberately spans commits the train's prereleases already published. This lets §11.4
 recompute the train's target and a graduation's version over the whole train. But published work remains published. A
@@ -179,15 +184,16 @@ cancels only.
    dependency.
 
 There is no circularity in the other direction. Phase 1 reads only the units and the packages' *baselines*, never a
-value computed in this run. Both axes admit a contribution only while its commit remains in the dependant's fresh
-window. After a successful baseline tag it is no longer fresh. The channel check also rejects a proposal when the
-package is already on that channel.
+value computed in this run. Normally both axes admit a contribution only while its commit remains in the
+dependant's fresh window. On the bump axis, a provider receipt can additionally keep a propagated contribution owed when the consumer
+published its own work before the provider did. After a successful consumer tag records seeing that provider release,
+the contribution is spent. The channel check also rejects a proposal when the package is already on that channel.
 
 Both axes share the traversal. It runs breadth-first from the unit's source packages with a single-visit, shortest-path
 depth. dispat measures this from the originating source set and never re-bases on an intermediate. A package
 republishing as a catch-up does not propagate onward. Across a retry, targets only shrink while the corrected sources,
-traversal, and channel eligibility remain unchanged. If those inputs move, dispat surfaces any newly eligible targets
-for review before publishing.
+traversal, channel eligibility, and provider delivery boundaries remain unchanged. A provider publication after the
+consumer's recorded boundary can expose a newly owed delivery; dispat surfaces it in the next plan for review.
 
 **Versioning groups.** Packages with shared versioning are grouped by their resolved group key. This key is the space's
 own name for a space with its own mode, or the declared `versionGroups` entry the space or package joined. A group may
@@ -669,7 +675,7 @@ in-memory fakes. Every internal package and every `pkg/` module has its own suit
 
 The integration suite is catalogued claim by claim in the
 [test plan](https://github.com/yohimik/dispat/blob/main/tests/integration/docs/test-plan.md). Its coverage matrix maps
-each of its forty-eight goals onto the tests that prove it. The results are summarised per area in
+each of its requirements onto the tests that prove it. The results are summarised per area in
 [test results](./test-results.mdx). The unit suites have no equivalent catalogue. What they assert is stated in each
 test's own name and doc comment. You can see what the whole suite reaches per package in [coverage](./coverage.mdx).
 

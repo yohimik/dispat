@@ -138,14 +138,14 @@ func (a *App) reportPreflightFailure(err error) error {
 	return err
 }
 
-// closeCoordinator deletes every coordination ref this run created.
+// closeCoordinator deletes settled coordination refs this run created and
+// preserves an unknown publisher's branch for reconciliation.
 //
 // It runs on a context detached from cancellation, like every other
 // finalization in the release path: an interrupted run has more reason to
-// clean its mailboxes than a finished one. A ref that survives is a warning
-// and never a failed release, because a coordination branch carries no
-// release record: whatever it says about this run, the tags and the records
-// are what a release is.
+// clean its mailboxes than a finished one. An unexpected ref that survives is
+// a warning; an unknown publisher's branch is retained on purpose for
+// reconciliation and a possible late result. Neither is a release record.
 func (a *App) closeCoordinator(ctx context.Context, coordinator *execution.Coordinator) {
 	if err := coordinator.Close(context.WithoutCancel(ctx)); err != nil {
 		event := a.log.Warn().Err(err).Str("code", execution.CodeTransportRetained).

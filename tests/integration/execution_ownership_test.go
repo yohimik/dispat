@@ -7,10 +7,9 @@ package integration
 //
 // "After lock loss, no new effect may start" is a rule about moments rather
 // than about a run, so the question is asked again before every assignment.
-// The answer is cached for a few seconds, because a run fanning twenty tasks
-// out at once should pay one query per owning repository rather than twenty;
-// and a loss, once seen, is not cached but remembered, because a run does not
-// get its exclusion back. Both halves are visible from outside: the loss is
+// Every new effect checks the remote because a lock can disappear between two
+// assignments. A loss, once seen, is remembered because a run does not get
+// its exclusion back. Both halves are visible from outside: the loss is
 // decided once however many tasks it stops, and every task after it is refused
 // without anybody asking a remote again.
 
@@ -31,8 +30,8 @@ import (
 var executionOwnershipPackages = []string{"alpha", "beta", "gamma"}
 
 // TestExecutionLostLockIsRememberedForEveryLaterTask: the first build to run
-// takes the release lock off the remote and then holds the node for longer
-// than the ownership answer is cached.
+// takes the release lock off the remote and then holds the node while other
+// tasks become ready for assignment.
 //
 // The next task therefore asks the remote, finds the lock gone and decides the
 // loss; the one after it is refused from that decision. The loss is reported
@@ -73,10 +72,9 @@ func TestExecutionLostLockIsRememberedForEveryLaterTask(t *testing.T) {
 	assert.NotContains(t, served.Stdout, `"message":"publication authorized"`)
 }
 
-// executionOwnershipHold is how long the first build holds the only node: long
-// enough that the ownership answer cached before it has expired by the time
-// the next task asks. The answer is believed for five seconds.
-const executionOwnershipHold = "7"
+// executionOwnershipHold keeps the first build on the only node while the
+// orchestrator handles the lock loss and cancels later work.
+const executionOwnershipHold = "1"
 
 // executionOriginRef is how a fixture script names the bare remote it writes
 // to, expanded by the shell that runs the script on the node.

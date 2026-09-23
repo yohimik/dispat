@@ -1066,36 +1066,8 @@ func (r *runner) runConfigured() int {
 		}
 	}
 	log := sender.Attach(newLogger(cfg.LogLevel, cfg.LogFormat, r.stdout))
-	// The first thing worth knowing about any run is which file it read and
-	// which folder it decided was the monorepo root, because both are inferred
-	// when no flag names them and "it ran with the wrong config" looks exactly
-	// like a configuration bug until you can see them. Logged here rather than
-	// at resolution because this is the first moment the configured level is
-	// known.
-	//
-	// The counts are the second thing worth knowing, for the same reason: they
-	// say what the loader made of the file, and a configuration that read as
-	// nothing — a `$ref` that resolved to an empty fragment, a `spaces` object
-	// under a key nobody meant — is otherwise a run that finds no work and
-	// explains itself no further.
-	scale := configScaleOf(cfg)
-	log.Debug().
-		Str("config", cfgPath).
-		Str("root", resolvedRoot).
-		Bool("explicitConfig", r.fs.Changed("config")).
-		Int("configFiles", len(cfg.SourceFiles)).
-		Int("spaces", len(cfg.Spaces)).
-		Int("packageEntries", scale.packageEntries).
-		Int("scripts", scale.scripts).
-		Int("webhooks", scale.webhooks).
-		Msg("configuration loaded")
-	// Which files a configuration was actually made of is only interesting
-	// once it is made of more than one, and then it is the first question:
-	// a `$ref` naming the wrong fragment looks exactly like a key nobody
-	// wrote.
-	for _, file := range cfg.SourceFiles {
-		log.Trace().Str("file", file).Msg("configuration file read")
-	}
+	command := configuredCommand{config: cfg, root: resolvedRoot, path: cfgPath, log: log}
+	r.logConfiguration(command)
 	if standalone {
 		// The escape hatch, said out loud: the fleet this repository belongs to
 		// is not composed, so nothing outside it is planned, locked or recorded.
@@ -1104,102 +1076,28 @@ func (r *runner) runConfigured() int {
 	}
 	logWorkspaceComposition(log, r.workspace)
 
-	if r.inv.cmd == cmdExec {
-		// Straight after the config, which is all it needs: no plan unless
-		// --env asked for one, and no update check, for the same reason as if.
-		code, err := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log).Exec(ctx, r.execOpts)
-		if err != nil {
-			return 1
-		}
-		return code
+	switch r.inv.cmd {
+	case cmdExec:
+		return r.runConfiguredExec(ctx, command)
+	case cmdIf:
+		return r.runConfiguredIf(ctx, command)
+	case cmdFor:
+		return r.runConfiguredFor(ctx, command)
 	}
-	if r.inv.cmd == cmdIf {
-		// Only --changed, or an --in naming a package, a space or the root,
-		// gets this far; every other `if` already ran without reading any of
-		// this. The block must stay above the update check below: no `if` path
-		// may cost a GitHub request, however much else it asked for.
-		a := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log)
-		dir := *r.o.root
-		if r.ifIn != nil {
-			var err error
-			if dir, err = a.ResolveDir(*r.ifIn, *r.o.root); err != nil {
-				log.Error().Err(err).Msg("invalid --in")
-				return 1
-			}
-		}
-		if *r.o.ifChanged {
-			// The gate expands the window with consumers and then asks "is the
-			// selection among it" — so with everything selected, --consumers
-			// cannot change the answer: expanding a set never empties it and
-			// never fills an empty one. Refused only here, because whether the
-			// invocation folder narrows the selection needs the resolved root.
-			if *r.o.consumers && len(*r.o.pkgFilter)+len(*r.o.spaceFilter)+len(*r.o.groupFilter) == 0 &&
-				sameDir(*r.o.root, resolvedRoot) {
-				log.Error().Msg("--consumers expands what the changes reach and cannot change the answer when everything is selected; add --package, --space or --group, or run from inside a package folder")
-				r.usage(cmdIf)
-				return 2
-			}
-			sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
-				Groups: *r.o.groupFilter, Dir: *r.o.root}
-			names, err := a.ChangedSelection(ctx, app.WindowOptions{
-				Filter: sel, Since: *r.o.since, Consumers: *r.o.consumers})
-			if err != nil {
-				log.Error().Err(err).Msg("cannot evaluate --changed")
-				return 1
-			}
-			r.ifBranches[0].Cond = app.ResolvedCondition("--changed", len(names) > 0)
-			log.Debug().Strs("packages", names).Bool("held", len(names) > 0).
-				Msg("changed selection resolved")
-		}
-		return r.runIfIn(dir)
-	}
-	if r.inv.cmd == cmdFor {
-		// Only a domain source, or an --in naming a package, a space or the
-		// root, gets this far; a literal list already ran without reading any of
-		// this. Above the update check for the same reason `if` is: no loop path
-		// may cost a GitHub request, however much else it asked for.
-		a := app.NewWorkspace(resolvedRoot, cfg, r.workspace, log)
-		dir := *r.o.root
-		if r.forIn != nil {
-			var err error
-			if dir, err = a.ResolveDir(*r.forIn, *r.o.root); err != nil {
-				log.Error().Err(err).Msg("invalid --in")
-				return 1
-			}
-		}
-		items := literalItems(r.inv.items)
-		if r.forDomain != "" {
-			// Dir is --root as the user spelled it, so a loop invoked inside a
-			// package folder narrows its window to that package exactly as every
-			// other command does. It is inert for the three domains whose terms
-			// are the source, since explicit terms beat the inference.
-			sel := filter.Filter{Packages: *r.o.pkgFilter, Spaces: *r.o.spaceFilter,
-				Groups: *r.o.groupFilter, Dir: *r.o.root}
-			var err error
-			if items, err = a.ForItems(ctx, app.ForSelection{Domain: r.forDomain,
-				Window: app.WindowOptions{Filter: sel, Since: *r.o.since, Consumers: *r.o.consumers},
-			}); err != nil {
-				log.Error().Err(err).Msg("cannot resolve what to iterate over")
-				return 1
-			}
-		}
-		// The configured shell, which is the whole point of the command: a loop
-		// spelled here runs its body through the same shell every other script
-		// of this repository runs through.
-		return r.runForItems(ctx, dir, items, &script.ShellRunner{Shell: cfg.Shell, Log: log}, log)
-	}
+
 	// Now that the configuration has spoken, the check can start: a run that
 	// switched it off must make no request at all, which means not making one
 	// before the option has been read.
 	*r.update = startUpdateCheck(r.checkCtx, r.o, r.fs, cfg.LogFormat, cfg.IsUpdateCheckEnabled())
 
-	return r.dispatch(ctx, cfg, resolvedRoot, cfgPath, log)
+	return r.dispatch(ctx, command)
 }
 
 // dispatch runs the selected package-selecting command. The application does
 // the work and logs its own findings; the controller only maps the outcome
 // onto an exit code.
-func (r *runner) dispatch(ctx context.Context, cfg *config.File, root, cfgPath string, log zerolog.Logger) int {
+func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
+	cfg, root, cfgPath, log := command.config, command.root, command.path, command.log
 	// A process executing somebody else's task may not start a release or
 	// write a release record of its own, however it was invoked. This is the
 	// one point every such command passes.

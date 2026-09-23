@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -13,7 +15,31 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
+
+// TestPrePublishChecksTheCompleteLockSet: a publication into owner must be
+// withheld when the run lost a different participating repository's lock.
+// The same coordinator also remembers the loss for every later effect.
+func TestPrePublishChecksTheCompleteLockSet(t *testing.T) {
+	checks := 0
+	coordinator := &execution.Coordinator{Run: "run-1", Log: zerolog.Nop()}
+	coordinator.VerifyOwnershipWith(func(context.Context) error {
+		checks++
+		return errors.New("peer repository lock disappeared")
+	})
+	application := &App{log: zerolog.Nop(), runID: "run-1"}
+	release := &plan.Release{Pkg: &model.Package{Name: "pkg", Repository: "owner"}}
+
+	err := application.checkLockOwnership(t.Context(), coordinator, release)
+	require.ErrorContains(t, err, "peer repository lock disappeared")
+	assert.Equal(t, execution.CodeLockLost, err.(interface{ DiagnosticCode() string }).DiagnosticCode())
+	assert.Equal(t, 1, checks)
+
+	require.Error(t, application.checkLockOwnership(t.Context(), coordinator, release))
+	assert.Equal(t, 1, checks, "the observed loss is final for this run")
+}
 
 // What a release refuses before it takes a lock is decided here; what the
 // refusal costs a real run is in tests/integration/execution_authority_test.go.

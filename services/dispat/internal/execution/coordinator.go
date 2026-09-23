@@ -422,13 +422,13 @@ func (c *Coordinator) recordOwnedRef(node, branch, oid string) {
 	c.owned[node] = append(c.owned[node], gitx.BranchLease{Branch: branch, ExpectedOld: oid})
 }
 
-// Close deletes every ref this run created, in one push per node, and
-// answers what could not be removed.
+// Close deletes settled refs this run created, in one push per node, and
+// answers what could not be removed. An unknown publication's branch remains
+// available for reconciliation, including a late result from its node.
 //
-// A ref left behind is untidy rather than unsafe: the branches this run owns
-// carry coordination messages and nothing a release depends on, so a failed
-// close is a warning with the retained code and never a failed release. The
-// run's own error, when it has one, stays the run's error.
+// An unknown publication's branch is evidence the operator needs and is kept
+// deliberately. A different ref left behind by failed cleanup is reported as
+// a warning with the retained code; the run's own error stays its error.
 func (c *Coordinator) Close(ctx context.Context) error {
 	if c.stopWatching != nil {
 		// The pollers go first: a poll that ran while the refs were being
@@ -439,7 +439,30 @@ func (c *Coordinator) Close(ctx context.Context) error {
 	c.mu.Lock()
 	owned := c.owned
 	c.owned = map[string][]gitx.BranchLease{}
+	unknownBranches := map[string]unknownPublication{}
+	for _, unknown := range c.unknownPublications {
+		if unknown.Branch != "" {
+			unknownBranches[unknown.Branch] = unknown
+		}
+	}
+	var preserved []unknownPublication
+	for node, leases := range owned {
+		cleanable := make([]gitx.BranchLease, 0, len(leases))
+		for _, lease := range leases {
+			unknown, isUnknown := unknownBranches[lease.Branch]
+			if isUnknown && unknown.Node == node {
+				preserved = append(preserved, unknown)
+				continue
+			}
+			cleanable = append(cleanable, lease)
+		}
+		owned[node] = cleanable
+	}
 	c.mu.Unlock()
+	for _, unknown := range preserved {
+		c.Log.Info().Str("run", c.Run).Str("task", unknown.Task).Str("worker", unknown.Node).
+			Str("branch", unknown.Branch).Msg("coordination ref retained for an unknown publication")
+	}
 	var retained []string
 	var failures []error
 	for _, node := range sortedNodes(owned) {

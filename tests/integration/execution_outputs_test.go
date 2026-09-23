@@ -285,7 +285,14 @@ func (w *executionRelayWatch) seen() []string {
 func TestExecutionBranchTransportCarriesEveryDeclaredOutput(t *testing.T) {
 	rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
 		cfg.BuildOutputs = []string{"dist", "assets-out"}
-		cfg.Scripts["build"] = models.Script{executionEveryOutputBuild}
+		build := executionEveryOutputBuild
+		if runtime.GOOS != "windows" {
+			build += ` && if [ "$DISPAT_PACKAGE" = assets ]; then
+  printf 'newline\n' > "dist/line
+break.txt"
+fi`
+		}
+		cfg.Scripts["build"] = models.Script{build}
 		cfg.Scripts["publish"] = models.Script{executionEveryOutputCheck}
 		executionOneWorker(cfg)
 	})
@@ -310,6 +317,11 @@ func TestExecutionBranchTransportCarriesEveryDeclaredOutput(t *testing.T) {
 		"an empty file is a file")
 	assert.Equal(t, "wide\n",
 		readRepoFile(t, rig.repo, filepath.Join("packages", "assets", "dist", "ünï name.txt")))
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, "newline\n",
+			readRepoFile(t, rig.repo, filepath.Join("packages", "assets", "dist", "line\nbreak.txt")),
+			"a path that cannot go through git's newline-delimited hash list still carries exact bytes")
+	}
 	runnable, err := os.Stat(filepath.Join(root, "dist", "run.sh"))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o755), runnable.Mode().Perm(), "the executable bit survived the journey")
@@ -333,6 +345,61 @@ func TestExecutionBranchTransportCarriesEveryDeclaredOutput(t *testing.T) {
 		"a tracked file inside a declared root is carried on purpose, not a stray write\nstdout:\n%s",
 		res.Stdout)
 	stopAll(t, []*executionWorker{worker})
+}
+
+// TestExecutionOutputInstallRollsBackEarlierRoots: a node produced a complete
+// two-root set, but the orchestrator's destination gained an ignored file or
+// a link at the parent of the second root. Installing that root must fail
+// after the first was replaced, restore the first root, write nothing through
+// a link outside the checkout, and publish nothing.
+func TestExecutionOutputInstallRollsBackEarlierRoots(t *testing.T) {
+	for _, linkedParent := range []bool{false, true} {
+		name := "file parent"
+		if linkedParent {
+			name = "linked parent"
+		}
+		t.Run(name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "published")
+			rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
+				cfg.BuildOutputs = []string{"a-dist", "z-assets/nested"}
+				cfg.Scripts["build"] = models.Script{
+					"mkdir -p a-dist z-assets/nested && printf new > a-dist/new.txt && printf new > z-assets/nested/new.txt",
+				}
+				cfg.Scripts["publish"] = models.Script{
+					`[ "$DISPAT_PACKAGE" != assets ] || ` + fmt.Sprintf("printf published > %q", marker),
+				}
+				executionOneWorker(cfg)
+			})
+			rig.repo.WriteFile(".gitignore", "a-dist/\npackages/assets/z-assets\n")
+			rig.repo.Commit("chore(assets,ui,docs,app): ignore the output roots")
+			rig.repo.WriteFile("packages/assets/a-dist/old.txt", "old\n")
+			var outside string
+			if linkedParent {
+				outside = t.TempDir()
+				require.NoError(t, os.Symlink(outside, rig.repo.Path("packages", "assets", "z-assets")))
+			} else {
+				rig.repo.WriteFile("packages/assets/z-assets", "blocking parent\n")
+			}
+			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+
+			res := rig.release()
+
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "assets"),
+				"the output installation failed as an integrity prerequisite")
+			assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "packages/assets/a-dist/old.txt"))
+			assert.NoFileExists(t, rig.repo.Path("packages", "assets", "a-dist", "new.txt"))
+			if linkedParent {
+				assert.NoDirExists(t, filepath.Join(outside, "nested"), "the output stayed within the checkout")
+			} else {
+				assert.Equal(t, "blocking parent\n", readRepoFile(t, rig.repo, "packages/assets/z-assets"))
+			}
+			assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("packages", "assets")))
+			assert.NoFileExists(t, marker, "assets cannot publish a partially installed output set")
+			assert.NotContains(t, executionReleaseTags(rig), "assets@0.1.0", "assets was not recorded")
+			stopAll(t, []*executionWorker{worker})
+		})
+	}
 }
 
 // asideLeftoverNames is every folder an interrupted installation would have
