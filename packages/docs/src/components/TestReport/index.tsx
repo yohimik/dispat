@@ -543,6 +543,21 @@ export function ExperimentsSummary(): React.ReactElement | null {
   );
 }
 
+interface KeptWholeOptions {
+  entries: string[];
+}
+
+/** A code cell's entries, each kept whole, so a line breaks only between two of them. */
+function keptWhole(options: KeptWholeOptions): React.ReactNode {
+  const {entries} = options;
+  return entries.map((entry, index) => (
+    <React.Fragment key={index}>
+      {index > 0 && ' '}
+      <span className={styles.whole}>{entry}</span>
+    </React.Fragment>
+  ));
+}
+
 /** The cells of one experiment and scenario, as a heading a reader can name. */
 function experimentTitle(cell: ExperimentCell): string {
   return cell.scenario ? `${cell.experiment} (${cell.scenario})` : cell.experiment;
@@ -611,10 +626,10 @@ export function ExperimentsTable(): React.ReactElement | null {
               {group.cells.map((cell) => (
                 <tr key={cell.id}>
                   <td>
-                    <code>{cell.tool}</code>
+                    <code className={styles.whole}>{cell.tool}</code>
                   </td>
                   <td>
-                    <code>{cell.steps.map((step) => `${step.step}=${step.exit}`).join(' ')}</code>
+                    <code>{keptWhole({entries: cell.steps.map((step) => `${step.step}=${step.exit}`)})}</code>
                   </td>
                   <td className={styles.number}>
                     {count(cell.checks.filter((check) => check.ok).length)}/{count(cell.checks.length)}
@@ -623,7 +638,7 @@ export function ExperimentsTable(): React.ReactElement | null {
                   <td>{cellOutcome(cell)}</td>
                   <td>
                     <code>
-                      {cell.final.packages.map((pkg) => `${pkg.name}=${pkg.registry}/${pkg.state}`).join(' ')}
+                      {keptWhole({entries: cell.final.packages.map((pkg) => `${pkg.name}=${pkg.registry}/${pkg.state}`)})}
                     </code>
                   </td>
                 </tr>

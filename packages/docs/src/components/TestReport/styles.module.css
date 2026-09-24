@@ -11,3 +11,11 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* One entry of an experiment's code cell: a tool, a step, a package's final
+   state. Inline code otherwise breaks anywhere, and a column its neighbours
+   squeeze would split `consistent` across two lines; kept whole, a line
+   breaks only between two entries. */
+.whole {
+  white-space: nowrap;
+}
