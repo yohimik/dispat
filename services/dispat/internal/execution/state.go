@@ -239,7 +239,10 @@ func claimNodeLock(path string) (int, error) {
 func takeOverNodeLock(path string, stale int) (int, error) {
 	aside := path + ".taken." + strconv.Itoa(os.Getpid())
 	if err := os.Rename(path, aside); err != nil {
-		if os.IsNotExist(err) {
+		// errors.Is rather than os.IsNotExist: a rename fails with an
+		// *os.LinkError, which the TinyGo runtime's os.IsNotExist does not
+		// look into, so the lost race below would read as a failure there.
+		if errors.Is(err, fs.ErrNotExist) {
 			// Somebody else took the same stale lock over first; the folder is
 			// theirs unless they have not written their claim yet, which the
 			// second attempt below finds out.
