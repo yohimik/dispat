@@ -1,3 +1,8 @@
+# shellcheck shell=bash disable=SC2016,SC2034
+# Sourced by run.sh after lib/common.sh: the single-quoted strings below are
+# jq filters and bash -c programs that expand their own variables, and the
+# COLLEAGUE and RELEASE marks set here are read by common.sh.
+#
 # A colleague pushes to origin/main while a changesets release is under
 # way. changesets has no push of its own: version, commit, publish and tag,
 # then the operator pushes the branch and the tags; the colleague's push
@@ -22,24 +27,24 @@ run_experiment() {
   baseline_publish
   observe before
 
-  step version changeset version
-  step commit git commit -qam "chore: version packages"
+  step release:version changeset version
+  step manual:commit git commit -qam "chore: version packages"
   RELEASE=$(git rev-parse HEAD)
-  step publish changeset publish
+  step release:publish changeset publish
   observe_marked after-publish
 
   # The push is the operator's: changesets makes none of its own, so the
   # injection fires on the command the protocol runs here rather than on
   # anything the tool does.
-  step push with_shim git push --follow-tags origin main
+  step manual:push with_shim git push --follow-tags origin main
   COLLEAGUE=$(colleague_sha)
   observe_marked after-push
 
   recover_by_rebase
-  step push2 git push --follow-tags origin main
+  step manual:push2 git push --follow-tags origin main
   observe_marked after-recovery
 
-  step status changeset status --verbose
+  step query:status changeset status --verbose
   echo "   next plan: $(grep -E '^\s+- [a-z]+ -> ' "$OUT/step-status.log" | sed -E 's/^\s+- //' | sort -u | tr '\n' ';')"
 
   assert "publish exited 0" [ "${STEP_RC[publish]}" = 0 ]

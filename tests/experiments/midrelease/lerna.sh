@@ -1,3 +1,8 @@
+# shellcheck shell=bash disable=SC2016,SC2034
+# Sourced by run.sh after lib/common.sh: the single-quoted strings below are
+# jq filters and bash -c programs that expand their own variables, and the
+# COLLEAGUE and RELEASE marks set here are read by common.sh.
+#
 # A colleague pushes to origin/main while lerna is releasing. lerna commits
 # and tags before it publishes, and pushes the branch and the tags in one
 # step; the colleague's push lands right before that. What follows is the
@@ -22,23 +27,23 @@ run_experiment() {
   baseline_publish
   observe before
 
-  step version with_shim lerna version --conventional-commits --yes
+  step release:version with_shim lerna version --conventional-commits --yes
   COLLEAGUE=$(colleague_sha)
   RELEASE=$(release_sha core@1.1.0)
   observe_marked after-version
 
   # The versions are tagged whether or not the branch went out, and
   # from-git publishes what the tags name.
-  step publish lerna publish from-git --yes
+  step release:publish lerna publish from-git --yes
   observe_marked after-publish
 
   # Recovery by hand: take the colleague's commit under the release, push
   # the branch and every tag the run made.
   recover_by_rebase
-  step push git push --follow-tags origin main
+  step manual:push git push --follow-tags origin main
   observe_marked after-recovery
 
-  step changed lerna changed --all --long
+  step query:changed lerna changed --all --long
   echo "   next plan: $(grep -v '^lerna' "$OUT/step-changed.log" | tr '\n' ';')"
 
   assert "version exited 0" [ "${STEP_RC[version]}" = 0 ]

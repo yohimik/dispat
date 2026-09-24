@@ -8,18 +8,23 @@ told about the change and what they do about it. Dependencies are declared
 as tilde ranges, so a minor of core is outside its consumers' ranges and
 every tool has a reason to release them.
 
-Every package carries one `build` script. dispat's build stage runs it through
-the flavour's `dispat.yaml`, and the propagation protocol runs the same script
-under Lerna with `lerna run build`, so a build failure is one fault seen
-through two tools rather than two faults sharing a name. The Changesets
-propagation protocol runs it explicitly; the other Changesets protocols and
-the nx protocols do not run it.
+Every package carries one `build` script, and the propagation experiment runs
+it where each tool documents a build: dispat's build stage through the
+flavour's `dispat.yaml`, nx's `release.version.preVersionCommand`, and the
+`prepack` lifecycle script that `lerna publish` and `changeset publish` run
+for every package they publish. A build failure is therefore one fault seen
+through four tools rather than four faults sharing a name. The orphan and
+midrelease fixtures run no build under lerna, nx or changesets.
 
     fixture.py <root> lerna|nx|changesets|dispat
     fixture.py <root> <flavour> --feature      also commit the minor to core
+    fixture.py <root> dispat --held           also hold cli's release first
     fixture.py <root> <flavour> --propagation  also commit the patch to core
     fixture.py <root> dispat --deferred       also commit own cli and provider fixes
     fixture.py <root> <flavour> --colleague    also clone the origin a second time
+
+EXPERIMENT and SCENARIO are read from the environment, as the harness exports
+them.
 
 Every commit is made at a pinned date, so two runs of the same cell produce
 the same commit shas and two transcripts can be diffed against each other.
@@ -46,27 +51,58 @@ COMMITS = 0
 
 # The build every package carries. It is a stage rather than a name: it reads
 # the package's source and writes an artifact, so a build that did not run
-# leaves nothing behind. dispat's build stage and the propagation protocol's
-# `lerna run build` are the same script, which is what makes a build failure
-# one fault observed through two tools rather than two faults.
+# leaves nothing behind. Every tool's propagation run reaches this same script,
+# which is what makes a build failure one fault observed through four tools
+# rather than four faults.
 BUILD = ('node -e \'const fs=require("fs");fs.mkdirSync("dist",{recursive:true});'
          'fs.writeFileSync("dist/index.js",fs.readFileSync("index.js"))\'')
 
-# The propagation experiment's fault, armed by a sentinel file the protocol
-# creates once the provider has published. It is the first statement of the
-# consumer's build script, so a run that reaches it has reached the build
-# stage: a publish-time hook would have failed the publication instead and
-# the two scenarios would have been one fault under two names.
+# The propagation experiment's build fault, armed by a sentinel file the
+# protocol creates before the first run. It is the first statement of the
+# consumer's build script, so a run that reaches it has reached the build: a
+# fault anywhere else would fail some other step and the build and publish
+# scenarios would be one fault under two names. When it fires it leaves
+# /fault-fired behind, which is how the harness knows the run it records met
+# the fault at all.
 BUILD_FAULT = ('test ! -f /fault-consumer-build || '
-               '{ echo "injected cli build failure" >&2; exit 42; }')
+               '{ touch /fault-fired; echo "injected cli build failure" >&2; exit 42; }')
+
+# The scenarios whose fault is the consumer's build. The others leave the
+# build script as every other package has it.
+BUILD_FAULT_SCENARIOS = ("build", "build-distributed")
+
+# Where lerna and changesets document a build: `lerna publish` and
+# `changeset publish` pack every package they publish, and packing runs the
+# package's `prepack` script.
+PREPACK = "npm run --silent build"
+
+# Where nx documents a build: a command nx release runs before it versions.
+PRE_VERSION = "npx nx run-many -t build"
+
+
+def experiment():
+    return os.environ.get("EXPERIMENT")
+
+
+def scenario():
+    return os.environ.get("SCENARIO")
 
 
 def build_script(package):
-    """The package's build, with the propagation experiment's fault in the
+    """The package's build, with the build scenarios' fault in the
     consumer's."""
-    if package == "cli" and os.environ.get("EXPERIMENT") == "propagation":
+    if package == "cli" and experiment() == "propagation" and scenario() in BUILD_FAULT_SCENARIOS:
         return f"{BUILD_FAULT}; {BUILD}"
     return BUILD
+
+
+def package_scripts(package, flavour):
+    """The package's scripts: the build, and in the propagation experiment the
+    lifecycle hook through which lerna and changesets run it."""
+    scripts = {"build": build_script(package)}
+    if experiment() == "propagation" and flavour in ("lerna", "changesets"):
+        scripts["prepack"] = PREPACK
+    return scripts
 
 
 def dispat_packages():
@@ -80,28 +116,45 @@ def dispat_packages():
     publication rather than beside it, and a consumer failure is one that
     followed a provider success rather than one that raced it.
     """
-    experiment = os.environ.get("EXPERIMENT")
     block = ""
     for p in PKGS:
         options = []
         if DEPS.get(p):
             options.append(f"    dependencies: [{', '.join(DEPS[p])}]")
-        if p == "cli" and experiment in ("orphan", "propagation"):
+        if p == "cli" and experiment() in ("orphan", "propagation"):
             options.append("    revertOnFail: true")
-        if p == "cli" and experiment == "propagation" and os.environ.get("SCENARIO") == "deferred":
+        if p == "cli" and experiment() == "propagation" and scenario() == "deferred":
             # With no build, its own release may reconcile from the provider's
             # planned version to the actually published baseline after a
             # provider failure. A built artifact could already embed the
             # planned version and must be skipped instead.
             options.append("    flow: {build: []}")
-        if p == "core" and experiment == "propagation":
-            if os.environ.get("SCENARIO") in ("deferred", "deferred-build"):
+        if p == "core" and experiment() == "propagation":
+            if scenario() in ("deferred", "deferred-build"):
                 options.append("    revertOnFail: true")
             else:
                 options.append("    isBuildWaitingPublish: true")
         if options:
             block += f"  {p}:\n" + "".join(line + "\n" for line in options)
     return block
+
+
+def dispat_execution():
+    """The root keys a distributed release adds: the name of the variable the
+    signing secret is read from, never the secret itself, a preflight wait
+    sized for a worker started beside the run, and every build placed on a
+    worker while every publication stays here. The link to the worker is
+    named on the command line, and with no endpoint it reaches the fixture's
+    own origin."""
+    if experiment() != "propagation" or scenario() != "build-distributed":
+        return ""
+    return """\
+execution:
+  secretEnv: EXPERIMENT_EXECUTION_SECRET
+  timeouts:
+    preflight: 60
+runOnly: [worker, orchestrator]
+"""
 
 
 def git_env():
@@ -120,10 +173,17 @@ def sh(args, cwd):
     return r.stdout
 
 
-def commit(root, message):
+def commit(root, message, *paragraphs, empty=False):
+    """One commit at the fixture's clock. Each paragraph is a message
+    paragraph of its own, which is where a footer such as Release-As goes."""
     global COMMITS
     COMMITS += 1
-    sh(["git", "commit", "-qm", message], root)
+    args = ["git", "commit", "-q", "-m", message]
+    for paragraph in paragraphs:
+        args += ["-m", paragraph]
+    if empty:
+        args.append("--allow-empty")
+    sh(args, root)
 
 
 def npmrc(path):
@@ -147,14 +207,16 @@ def base(root, flavour):
     with open(os.path.join(root, ".gitignore"), "w") as f:
         # dist is the build's output. A build stage that dirtied the worktree
         # would be a release safety check firing on the harness rather than on
-        # anything the experiment is about.
-        f.write("node_modules\ndist\n")
+        # anything the experiment is about. .nx is where nx keeps its cache
+        # and workspace data, which an nx workspace ignores the way `nx init`
+        # sets one up; without it every nx run leaves the clone dirty.
+        f.write("node_modules\ndist\n" + (".nx\n" if flavour == "nx" else ""))
     for p in PKGS:
         d = os.path.join(root, "packages", p)
         os.makedirs(d, exist_ok=True)
         write_json(os.path.join(d, "package.json"),
                    {"name": p, "version": BASELINE,
-                    "scripts": {"build": build_script(p)},
+                    "scripts": package_scripts(p, flavour),
                     "dependencies": {q: f"~{BASELINE}" for q in DEPS.get(p, [])}})
         with open(os.path.join(d, "index.js"), "w") as f:
             f.write("// v1\n")
@@ -177,12 +239,15 @@ def base(root, flavour):
         write_json(os.path.join(root, "package.json"),
                    {"name": "fixture", "private": True,
                     "workspaces": ["packages/*"]})
+        version = {"conventionalCommits": True,
+                   "preserveMatchingDependencyRanges": False}
+        if experiment() == "propagation":
+            version["preVersionCommand"] = PRE_VERSION
         write_json(os.path.join(root, "nx.json"),
                    {"release": {
                         "projects": ["*"],
                         "projectsRelationship": "independent",
-                        "version": {"conventionalCommits": True,
-                                    "preserveMatchingDependencyRanges": False},
+                        "version": version,
                         "changelog": {"workspaceChangelog": False,
                                       "projectChangelogs": False},
                         "git": {"commit": True, "tag": True, "push": True}},
@@ -216,7 +281,7 @@ spaces:
       build: build
       publish: publish
 packages:
-""" + dispat_packages() + """\
+""" + dispat_packages() + dispat_execution() + """\
 autoVersion:
   enabled: true
 commit:
@@ -262,10 +327,21 @@ def feature(root, flavour):
     sh(["git", "push", "-q", "origin", "main"], root)
 
 
+def held(root, flavour):
+    """cli's release held before the provider's fix: an empty commit
+    `release(cli): hold` with the footer `Release-As: none`, which is how an
+    operator withholds one package. The provider's release then ships without
+    the consumer, as a release its consumer sat out."""
+    if flavour != "dispat":
+        raise SystemExit("a held consumer is a dispat-only protocol")
+    commit(root, "release(cli): hold", "Release-As: none", empty=True)
+    sh(["git", "push", "-q", "origin", "main"], root)
+
+
 def propagation(root, flavour):
     """A patch to core whose ~1.0.0 consumer range remains compatible.
 
-    Dispat's caret marks propagation intent; Lerna receives the closest
+    dispat's caret marks propagation intent; lerna and nx receive the closest
     conventional-commit equivalent without an invented propagation syntax.
     """
     with open(os.path.join(root, "packages", "core", "index.js"), "a") as f:
@@ -314,6 +390,8 @@ if __name__ == "__main__":
     base(root, flavour)
     if "--feature" in sys.argv[3:]:
         feature(root, flavour)
+    if "--held" in sys.argv[3:]:
+        held(root, flavour)
     if "--propagation" in sys.argv[3:]:
         propagation(root, flavour)
     if "--deferred" in sys.argv[3:]:

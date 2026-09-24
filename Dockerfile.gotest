@@ -608,14 +608,13 @@ COPY --from=experiments-summary /src/coverage/experiments.md /
 # there fails the build, and there is no arrangement of this repository in
 # which every one of these folders exists at once during a bisect.
 FROM alpine:3.22 AS shellcheck
-RUN apk add --no-cache shellcheck python3 jq
+RUN apk add --no-cache shellcheck python3 jq git
 WORKDIR /src
 COPY install.sh ./
 COPY script[s] ./scripts
 COPY specs/ccme-spec/*.sh ./specs/ccme-spec/
 COPY specs/agent-guide/*.sh ./specs/agent-guide/
-COPY tests/experiments/run.sh tests/experiments/
-COPY tests/experiments/lib/common.sh tests/experiments/lib/cache*.sh tests/experiments/lib/
+COPY tests/experiments ./tests/experiments
 COPY Dockerfile.gotest ./
 RUN <<'EOF'
 set -eu
@@ -640,13 +639,30 @@ if [ -f scripts/tinygo-spike-darwin.sh ]; then
   shellcheck -s sh --exclude=SC2129 scripts/tinygo-spike-darwin.sh
 fi
 
-# The two that are bash on purpose: the harness entrypoint and its library
-# use arrays and [[ ]], which is why they carry a bash shebang.
-echo "shellcheck (bash): tests/experiments/run.sh tests/experiments/lib/common.sh"
-shellcheck -s bash tests/experiments/run.sh tests/experiments/lib/common.sh
-sh tests/experiments/lib/cache-test.sh
+# The experiments harness is bash on purpose: the entrypoint, its library,
+# the git shim and every protocol use arrays and [[ ]]. The protocols carry no
+# shebang because run.sh sources them, so the shell is stated here. The three
+# library scripts the campaign's own POSIX scripts run are checked as sh.
+cd tests/experiments
+set -- run.sh lib/common.sh lib/git-shim orphan/*.sh midrelease/*.sh propagation/*.sh
+echo "shellcheck (bash): $*"
+shellcheck -s bash "$@"
+echo "shellcheck (sh): lib/cache.sh lib/cache-test.sh lib/recovery-test.sh"
+shellcheck -x -P SCRIPTDIR -s sh lib/cache.sh lib/cache-test.sh lib/recovery-test.sh
+sh lib/cache-test.sh
+sh lib/recovery-test.sh
+cd /src
 sh scripts/cache-test.sh /src
 EOF
+
+# The harness's own tests beyond the shell: the fixture each protocol builds
+# on and the fault proxy's decisions. The fixture commits, so git needs the
+# identity and the default branch the experiments image gives it.
+RUN git config --global user.email experiments@dispat.dev \
+ && git config --global user.name experiments \
+ && git config --global init.defaultBranch main \
+ && python3 tests/experiments/lib/fixture-test.py \
+ && python3 tests/experiments/lib/failproxy-test.py
 
 # The shell inside the configuration, swept the same way. Every `scripts`
 # entry of a dispat config is a shell command — the tool bootstrap, the image

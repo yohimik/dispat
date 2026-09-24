@@ -1,3 +1,8 @@
+# shellcheck shell=bash disable=SC2016,SC2034
+# Sourced by run.sh after lib/common.sh: the single-quoted strings below are
+# jq filters and bash -c programs that expand their own variables, and the
+# COLLEAGUE and RELEASE marks set here are read by common.sh.
+#
 # A colleague pushes to origin/main while nx is releasing. Under the git
 # settings nx documents for a release run (release.git with commit, tag and
 # push), nx stages the version bumps and pushes before it commits or tags;
@@ -24,7 +29,7 @@ run_experiment() {
   baseline_publish
   observe before
 
-  step release with_shim nx release --skip-publish
+  step release:release with_shim nx release --skip-publish
   COLLEAGUE=$(colleague_sha)
   observe_marked after-release
   echo "   staged, uncommitted: $(git diff --cached --name-only | tr '\n' ' ')"
@@ -32,18 +37,18 @@ run_experiment() {
   # Recovery by hand. The rebase refuses a dirty index, and the staged bumps
   # hold nothing nx does not recompute from git history, so they are
   # dropped and nx runs again on the joined branch.
-  step recover bash -c 'git reset -q --hard && git pull --rebase origin main'
-  step release2 nx release --skip-publish
+  step manual:recover bash -c 'git reset -q --hard && git pull --rebase origin main'
+  step release:release2 nx release --skip-publish
   RELEASE=$(release_sha core@1.1.0)
   observe_marked after-release2
 
-  step publish nx release publish --registry "$REGISTRY"
+  step release:publish nx release publish --registry "$REGISTRY"
   observe_marked after-publish
 
-  step push git push --follow-tags origin main
+  step manual:push git push --follow-tags origin main
   observe_marked after-push
 
-  step next nx release --dry-run --skip-publish
+  step query:next nx release --dry-run --skip-publish
   echo "   next plan: $(grep -E '^[a-z]+ .*New version [0-9.]+ written' "$OUT/step-next.log" | sed -E 's/^([a-z]+) .*New version ([0-9.]+) written.*/\1 \2/' | sort -u | tr '\n' ';')"
 
   assert "release exited 0" [ "${STEP_RC[release]}" = 0 ]

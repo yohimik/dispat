@@ -1,3 +1,8 @@
+# shellcheck shell=bash disable=SC2016,SC2034
+# Sourced by run.sh after lib/common.sh: the single-quoted strings below are
+# jq filters and bash -c programs that expand their own variables, and the
+# COLLEAGUE and RELEASE marks set here are read by common.sh.
+#
 # A colleague pushes to origin/main while dispat is releasing. The push lands
 # right before dispat's own push of the release commit, after every package
 # has published, so the release exists on the registry and only in this
@@ -20,7 +25,7 @@ run_experiment() {
   baseline_publish
   observe before
 
-  step release with_shim dispat release --log-format json
+  step release:release with_shim dispat release --log-format json
   keep_publish_logs after-release
   COLLEAGUE=$(colleague_sha)
   RELEASE=$(release_sha core@1.1.0)
@@ -32,9 +37,9 @@ run_experiment() {
   # What the next run would do: the colleague's change, and nothing that
   # this run already released. Then that run, for what it does with the
   # clone the first one left.
-  step status dispat status --log-format json
-  echo "   next plan: $(jq -r 'select(.package and .version and (.message | test("● changed|catch-up"))) | .package + " " + .version + " (" + .reason + ")"' "$OUT/step-status.log" | tr '\n' ';')"
-  step rerun dispat release --log-format json
+  step query:status dispat status --log-format json
+  echo "   next plan: $(json_lines "$OUT/step-status.log" | jq -r 'select(has("bump")) | .package + " " + .version + " (" + .reason + ")"' | tr '\n' ';')"
+  step release:rerun dispat release --log-format json
   keep_publish_logs after-rerun
   echo "   codes reported: $(jq -r 'select(.code) | .code' "$OUT/step-rerun.log" 2>/dev/null | sort | uniq -c | tr -s ' \n' ' ')"
   observe_marked after-rerun
@@ -81,8 +86,7 @@ run_experiment() {
       ;;
   esac
   assert "the next plan is the colleague's change and its dependents alone" \
-    bash -c '[ "$(jq -r "select(.package and .version and (.message | test(\"● changed|catch-up\"))) | .package" "$1" | sort | tr "\n" " ")" = "$2" ]' \
-    _ "$OUT/step-status.log" "$(next_plan)"
+    [ "$(planned status)" = "$(next_plan)" ]
   local rerun_state
   case "$SCENARIO" in
     conflict) rerun_state='.packages.core.registry == "1.1.1" and .packages.core.state == "consistent"' ;;

@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+# shellcheck source=cache.sh
 . "$(dirname "$0")/cache.sh"
 
 work=$(mktemp -d)

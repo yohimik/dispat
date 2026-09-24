@@ -9,6 +9,13 @@ path: `core` in the deny folder must refuse an upload of `core` and not one of
 `core-utils`, and a scoped name arrives percent-encoded in one segment, so the
 segment is decoded before it is compared.
 
+A deny file may name a gate: a path the refusal waits for. The proxy then holds
+the refused upload until that path exists and answers 502 only then, which
+turns "the provider is refused after the consumer has built" from a race into
+an order, because the gate is the file the consumer's build writes. A gate that
+never appears still ends in the refusal, after GATE_TIMEOUT seconds, and the
+log line says which of the two happened.
+
 Every request is logged, with the decision and the status it ended in. A proxy
 that silently drops something is a fault the experiment did not inject.
 """
@@ -16,11 +23,14 @@ import http.client
 import http.server
 import os
 import sys
+import time
 import urllib.parse
 
 UPSTREAM = os.environ.get("UPSTREAM", "127.0.0.1:4874")
 DENY_DIR = os.environ.get("DENY_DIR", "/deny")
 PORT = int(os.environ.get("PORT", "4873"))
+GATE_TIMEOUT = float(os.environ.get("GATE_TIMEOUT", "120"))
+GATE_POLL = 0.1
 
 # Hop-by-hop headers, which belong to one connection rather than to the
 # message, plus the length this proxy recomputes for the body it holds.
@@ -41,6 +51,37 @@ def package_of(path):
     return urllib.parse.unquote(segments[0])
 
 
+def deny_rule(deny_dir, name):
+    """What the deny folder says about a package's uploads: None when they
+    pass, otherwise the gate path the refusal waits for, empty for none.
+
+    The file is read only after the name was found in the listing, so a
+    decoded name holding a separator or `..` can never reach a path outside
+    the folder."""
+    if not name or not os.path.isdir(deny_dir) or name not in set(os.listdir(deny_dir)):
+        return None
+    try:
+        with open(os.path.join(deny_dir, name)) as f:
+            return f.read().strip()
+    except OSError:
+        # Listed and gone again: the decision was already a refusal.
+        return ""
+
+
+def wait_for_gate(path, timeout, poll=GATE_POLL, clock=time.monotonic, sleep=time.sleep):
+    """Hold until the gate path exists or the timeout passes, and say which.
+
+    The phrase is what the decision log carries between the package and the
+    status, so the record states whether the refusal was ordered after the
+    gate or merely came late."""
+    deadline = clock() + timeout
+    while not os.path.exists(path):
+        if clock() >= deadline:
+            return f"gate {path} timed out after {timeout:g}s"
+        sleep(poll)
+    return f"after {path}"
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -48,10 +89,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         sys.stderr.write(f"failproxy: {message}\n")
         sys.stderr.flush()
 
-    def _denied(self):
-        if self.command != "PUT" or not os.path.isdir(DENY_DIR):
-            return False
-        return package_of(self.path) in set(os.listdir(DENY_DIR))
+    def _deny_rule(self):
+        if self.command != "PUT":
+            return None
+        return deny_rule(DENY_DIR, package_of(self.path))
 
     def _read_body(self):
         """The request body, whether it arrived with a length or in chunks.
@@ -104,10 +145,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
             return
 
-        if self._denied():
+        gate = self._deny_rule()
+        if gate is not None:
             # The upload is read and dropped, so the refusal is what the tool
-            # sees and not a broken next request on the kept connection.
-            self.log(f"DENY {self.command} {self.path} (package {name}) -> 502")
+            # sees and not a broken next request on the kept connection. A
+            # gated refusal waits here, on this request's own thread, while
+            # every other request is still answered.
+            ordered = f" {wait_for_gate(gate, GATE_TIMEOUT)}" if gate else ""
+            self.log(f"DENY {self.command} {self.path} (package {name}){ordered} -> 502")
             self._respond(502, b'{"error":"injected fault"}', [("Connection", "close")])
             self.close_connection = True
             return
