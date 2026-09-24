@@ -115,10 +115,36 @@ export interface Benchmarks {
   groups: BenchGroup[];
 }
 
-/** One step of a protocol and the code it exited with. */
+/**
+ * One step of a protocol and the code it exited with. `kind` and `phase` are
+ * absent from records written before the harness typed its steps.
+ */
 export interface ExperimentStep {
   step: string;
   exit: number;
+  /** `release`: the tool's own command; `manual`: done by hand; `query`: a read-only question. */
+  kind?: ExperimentStepKind;
+  /** `initial`: the run the fault was injected into; `catch-up`: what finishing it took. */
+  phase?: ExperimentStepPhase;
+}
+
+export type ExperimentStepKind = 'release' | 'manual' | 'query';
+
+export type ExperimentStepPhase = 'initial' | 'catch-up';
+
+/**
+ * What finishing a release took once its fault was removed, as the harness's
+ * lib/recovery.jq counts it. A run is an uninterrupted pass of the tool's own
+ * commands, ended by a manual step or by a command that failed; a query is
+ * never counted. `converged` means every package ended consistent or at its
+ * baseline, the clone clean and level with its origin, and the tool's own next
+ * plan empty.
+ */
+export interface ExperimentRecovery {
+  runs: number;
+  releaseCommands: number;
+  manualCommands: number;
+  converged: boolean;
 }
 
 /** One expectation about the state a run left behind, and whether it held. */
@@ -163,6 +189,8 @@ export interface ExperimentCell {
   checks: ExperimentCheck[];
   passed: boolean;
   final: ExperimentState;
+  /** Absent for a protocol that measures no catch-up, and in every older record. */
+  recovery?: ExperimentRecovery;
 }
 
 /**

@@ -9,9 +9,12 @@ import type {
   ExperimentCell,
   ExperimentCheck,
   ExperimentPackage,
+  ExperimentRecovery,
   Experiments,
   ExperimentState,
   ExperimentStep,
+  ExperimentStepKind,
+  ExperimentStepPhase,
   FuzzTarget,
   Group,
   Report,
@@ -192,9 +195,71 @@ function suite(value: unknown, at: string): Suite {
   };
 }
 
+interface OptionalWordOptions<T extends string> {
+  value: unknown;
+  at: string;
+  words: readonly T[];
+}
+
+/**
+ * An optional field holding one of a fixed set of words: absent in a record
+ * written before the field existed, and refused when it holds anything else,
+ * so a renamed value stops the build instead of rendering as an unknown one.
+ */
+function optionalWord<T extends string>(options: OptionalWordOptions<T>): T | undefined {
+  const {value, at, words} = options;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string' || !(words as readonly string[]).includes(value)) {
+    throw new ReportError(at, `one of ${words.join(', ')}`, value);
+  }
+  return value as T;
+}
+
+const STEP_KINDS: readonly ExperimentStepKind[] = ['release', 'manual', 'query'];
+const STEP_PHASES: readonly ExperimentStepPhase[] = ['initial', 'catch-up'];
+
 function experimentStep(value: unknown, at: string): ExperimentStep {
   const o = object(value, at);
-  return {step: string(o.step, `${at}.step`), exit: number(o.exit, `${at}.exit`)};
+  const kind = optionalWord({value: o.kind, at: `${at}.kind`, words: STEP_KINDS});
+  const phase = optionalWord({value: o.phase, at: `${at}.phase`, words: STEP_PHASES});
+  return {
+    step: string(o.step, `${at}.step`),
+    exit: number(o.exit, `${at}.exit`),
+    ...(kind === undefined ? {} : {kind}),
+    ...(phase === undefined ? {} : {phase}),
+  };
+}
+
+interface ExperimentRecoveryOptions {
+  value: unknown;
+  at: string;
+}
+
+/**
+ * A cell's catch-up summary. A count below zero, or more runs than release
+ * commands when every run starts at one, is refused like any other field of
+ * the wrong shape: no catch-up could have been counted that way.
+ */
+function experimentRecovery(options: ExperimentRecoveryOptions): ExperimentRecovery {
+  const {value, at} = options;
+  const o = object(value, at);
+  const recovery = {
+    runs: number(o.runs, `${at}.runs`),
+    releaseCommands: number(o.releaseCommands, `${at}.releaseCommands`),
+    manualCommands: number(o.manualCommands, `${at}.manualCommands`),
+    converged: boolean(o.converged, `${at}.converged`),
+  };
+  for (const [field, count] of Object.entries(recovery)) {
+    if (typeof count === 'number' && (count < 0 || !Number.isInteger(count))) {
+      throw new ReportError(`${at}.${field}`, 'a count', count);
+    }
+  }
+  if (recovery.runs > recovery.releaseCommands) {
+    throw new ReportError(`${at}.runs`, `at most ${recovery.releaseCommands} runs`, recovery.runs);
+  }
+  return recovery;
 }
 
 function experimentCheck(value: unknown, at: string): ExperimentCheck {
@@ -236,6 +301,9 @@ function experimentCell(value: unknown, at: string): ExperimentCell {
     checks: optionalArray(o.checks, `${at}.checks`).map((c, i) => experimentCheck(c, `${at}.checks[${i}]`)),
     passed: boolean(o.passed, `${at}.passed`),
     final: experimentState(o.final, `${at}.final`),
+    // Absent from every record written before the harness measured a
+    // catch-up, which is why the frozen archives still validate.
+    ...(o.recovery === undefined ? {} : {recovery: experimentRecovery({value: o.recovery, at: `${at}.recovery`})}),
   };
 }
 

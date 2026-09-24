@@ -14,6 +14,7 @@ import type {
 } from '@site/plugins/test-report/types';
 import {validateArchivedReport} from '@site/plugins/test-report/validate';
 import {resolveArchivedState, type ArchivedState} from '@site/plugins/test-report/state';
+import {catchUpText, isSingleCommandCatchUp} from '@site/plugins/test-report/catchup';
 import Admonition from '@theme/Admonition';
 import React, {useEffect, useState} from 'react';
 
@@ -478,13 +479,37 @@ export function FuzzTable(): React.ReactElement | null {
   );
 }
 
+interface CountedOptions {
+  total: number;
+  noun: string;
+}
+
+/** A count and its noun, plural unless the count is one: `1 experiment`, `4 release tools`. */
+function counted(options: CountedOptions): string {
+  const {total, noun} = options;
+  return total === 1 ? `1 ${noun}` : `${count(total)} ${noun}s`;
+}
+
+interface DistinctOptions {
+  cells: ExperimentCell[];
+  field: 'experiment' | 'tool';
+}
+
+/** How many different values one field takes across the cells. */
+function distinct(options: DistinctOptions): number {
+  const {cells, field} = options;
+  return new Set(cells.map((cell) => cell[field])).size;
+}
+
 /**
  * How many cells a campaign ran, against which image, and how many hold.
  *
  * The image tag is the point of the sentence. Every cell copies its binary out
  * of a published `yohimik/dispat-alpine:<version>`, so the page is about bytes
  * somebody can pull rather than about a build of a checkout, and a reader who
- * wants to disbelieve it has the tag to run it against.
+ * wants to disbelieve it has the tag to run it against. The experiments and
+ * tools are counted from the cells, so an archive of an older campaign reads
+ * as the campaign it was.
  */
 export function ExperimentsSummary(): React.ReactElement | null {
   const {report, evidence} = useReportState();
@@ -496,13 +521,24 @@ export function ExperimentsSummary(): React.ReactElement | null {
   }
   const own = cells.filter((cell) => cell.tool === 'dispat');
   const holding = own.filter((cell) => cell.passed).length;
+  const measured = own.filter((cell) => cell.recovery !== undefined);
+  const single = measured.filter((cell) => isSingleCommandCatchUp(cell)).length;
   return (
     <p>
       This release ran <strong>{count(cells.length)} cells</strong> against{' '}
-      {version ? <code>yohimik/dispat-alpine:{version}</code> : <em>more than one published image</em>}: two faults,
-      four release tools, the same fixture each time. Of dispat&apos;s{' '}
-      <strong>{count(own.length)} cells</strong>, <strong>{count(holding)}</strong> hold every expectation. The other
-      tools&apos; cells are records rather than expectations, and their counts describe those tools.
+      {version ? <code>yohimik/dispat-alpine:{version}</code> : <em>more than one published image</em>}:{' '}
+      {counted({total: distinct({cells, field: 'experiment'}), noun: 'experiment'})} and{' '}
+      {counted({total: distinct({cells, field: 'tool'}), noun: 'release tool'})}, the same fixture each time. Of
+      dispat&apos;s <strong>{count(own.length)} cells</strong>, <strong>{count(holding)}</strong> hold every
+      expectation. The other tools&apos; cells are records rather than expectations, and their counts describe those
+      tools.
+      {measured.length > 0 && (
+        <>
+          {' '}
+          Of dispat&apos;s {count(measured.length)} measured catch-ups, <strong>{count(single)}</strong> finish in one
+          run of one command with no manual step.
+        </>
+      )}
     </p>
   );
 }
@@ -530,6 +566,10 @@ function cellOutcome(cell: ExperimentCell): string {
  * Grouped by the fault rather than by the tool, because what the page is about
  * is what four tools do with one fault, and a table sorted by tool puts the
  * four answers to one question in four different places.
+ *
+ * The Catch-up column appears only when the campaign measured one: an archive
+ * of an earlier campaign has no such column rather than a column of cells
+ * reading "not measured".
  */
 export function ExperimentsTable(): React.ReactElement | null {
   const {report, evidence} = useReportState();
@@ -537,6 +577,7 @@ export function ExperimentsTable(): React.ReactElement | null {
   if (cells.length === 0) {
     return null;
   }
+  const isCatchUpMeasured = cells.some((cell) => cell.recovery !== undefined);
   // Insertion order over the report's already-sorted cells, so the groups
   // appear in the order the ids do and two builds of one report render
   // identically.
@@ -561,6 +602,7 @@ export function ExperimentsTable(): React.ReactElement | null {
                 <th>Tool</th>
                 <th>Steps</th>
                 <th className={styles.number}>Expectations</th>
+                {isCatchUpMeasured && <th>Catch-up</th>}
                 <th>Outcome</th>
                 <th>Final state</th>
               </tr>
@@ -577,6 +619,7 @@ export function ExperimentsTable(): React.ReactElement | null {
                   <td className={styles.number}>
                     {count(cell.checks.filter((check) => check.ok).length)}/{count(cell.checks.length)}
                   </td>
+                  {isCatchUpMeasured && <td>{catchUpText(cell)}</td>}
                   <td>{cellOutcome(cell)}</td>
                   <td>
                     <code>
