@@ -375,7 +375,7 @@ func TestWriteExperimentsMarkdown(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		"1 cell on dispat 1.7.1",
-		"| cell | tool | dispat | steps | checks | outcome | final state |",
+		"| cell | tool | dispat | steps | checks | catch-up | outcome | final state |",
 		"`release1=1 release2=0`",
 		"| 1/2 |",
 		`a \| b`,
@@ -547,6 +547,153 @@ func TestBuildFailsOnAMalformedCampaign(t *testing.T) {
 	err := build([]string{"-coverage", coverage, "-out", filepath.Join(dir, "report.json"), "-commit", "abc"})
 	if err == nil {
 		t.Fatal("want an error rather than a report with the section quietly missing")
+	}
+}
+
+// A typed record carries each step's kind and phase and the catch-up summary,
+// and they reach the report as the harness wrote them.
+func TestReadCellDecodesTypedStepsAndTheCatchUp(t *testing.T) {
+	dir := t.TempDir()
+	writeCell(t, dir, "propagation-build-lerna", `{
+		"experiment": "propagation", "tool": "lerna", "scenario": "build",
+		"dispat": "dispat 1.11.0-rc.6 (linux_amd64)", "passed": false,
+		"steps": [
+			{"step": "publish", "exit": 42, "kind": "release", "phase": "initial", "seconds": 2.5},
+			{"step": "retry-plan", "exit": 1, "kind": "query", "phase": "catch-up", "seconds": 0.8},
+			{"step": "cleanup", "exit": 0, "kind": "manual", "phase": "catch-up", "seconds": 0}
+		],
+		"checks": [{"check": "the catch-up took one run", "ok": false}],
+		"recovery": {"runs": 2, "releaseCommands": 2, "manualCommands": 1, "converged": true}
+	}`, "")
+	cell, err := readCell(dir, "propagation-build-lerna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cell.Steps[0]; got.Kind != "release" || got.Phase != "initial" || got.Exit != 42 {
+		t.Errorf("first step = %+v, want the release of the initial phase", got)
+	}
+	if got := cell.Steps[2]; got.Kind != "manual" || got.Phase != "catch-up" {
+		t.Errorf("third step = %+v, want the manual step of the catch-up", got)
+	}
+	want := Recovery{Runs: 2, ReleaseCommands: 2, ManualCommands: 1, Converged: true}
+	if cell.Recovery == nil || *cell.Recovery != want {
+		t.Fatalf("recovery = %+v, want %+v", cell.Recovery, want)
+	}
+}
+
+// The records every campaign before the catch-up wrote have untyped steps and
+// no summary. They still read, and read as not measured rather than as a
+// catch-up that took nothing.
+func TestReadExperimentsReadsRecordsWrittenBeforeTheCatchUp(t *testing.T) {
+	campaign, err := readExperiments(fixtures)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cell := range campaign.Cells {
+		if cell.Recovery != nil {
+			t.Errorf("%s: recovery = %+v, want none", cell.ID, *cell.Recovery)
+		}
+		for _, step := range cell.Steps {
+			if step.Kind != "" || step.Phase != "" {
+				t.Errorf("%s: step %+v carries a kind or a phase its record never had", cell.ID, step)
+			}
+		}
+		if got := catchUpOf(cell); got != "not measured" {
+			t.Errorf("%s: catch-up = %q, want not measured", cell.ID, got)
+		}
+	}
+	// And the report leaves the fields out rather than writing empty ones, so
+	// a report of old records has the shape it always had.
+	body, err := json.Marshal(campaign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"recovery":`, `"kind":`, `"phase":`} {
+		if strings.Contains(string(body), field) {
+			t.Errorf("the report of old records carries %s:\n%s", field, body)
+		}
+	}
+}
+
+// A summary no count could have produced is not a record of a catch-up, and
+// neither is one whose fields are not numbers. Either stops the report and
+// names the file.
+func TestReadExperimentsRefusesAMalformedCatchUp(t *testing.T) {
+	for name, recovery := range map[string]string{
+		"not an object":             `"one run"`,
+		"a count that is text":      `{"runs": "one", "releaseCommands": 1, "manualCommands": 0, "converged": true}`,
+		"a negative count":          `{"runs": 1, "releaseCommands": 1, "manualCommands": -1, "converged": true}`,
+		"more runs than commands":   `{"runs": 2, "releaseCommands": 1, "manualCommands": 0, "converged": true}`,
+		"a convergence that is not": `{"runs": 1, "releaseCommands": 1, "manualCommands": 0, "converged": "yes"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeCell(t, dir, "propagation-build-dispat", `{"tool":"dispat","recovery":`+recovery+`}`, "")
+			_, err := readExperiments(dir)
+			if err == nil || !strings.Contains(err.Error(), "verdict.json") {
+				t.Fatalf("err = %v, want one naming verdict.json", err)
+			}
+		})
+	}
+}
+
+// The Catch-up column's wording, which the site's catchup.ts repeats string
+// for string.
+func TestCatchUpOf(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		recovery *Recovery
+		want     string
+	}{
+		{"no catch-up measured", nil, "not measured"},
+		{"nothing to do", &Recovery{Converged: true}, "none needed"},
+		{"nothing done and not settled", &Recovery{}, "0 runs, 0 commands, did not converge"},
+		{"one command", &Recovery{Runs: 1, ReleaseCommands: 1, Converged: true}, "1 run, 1 command"},
+		{"a push by hand", &Recovery{Runs: 1, ReleaseCommands: 1, ManualCommands: 1, Converged: true},
+			"1 run, 2 commands, 1 manual"},
+		{"a failed recovery and a cleanup", &Recovery{Runs: 2, ReleaseCommands: 2, ManualCommands: 1, Converged: true},
+			"2 runs, 3 commands, 1 manual"},
+		{"two commands in one run", &Recovery{Runs: 1, ReleaseCommands: 2, Converged: true}, "1 run, 2 commands"},
+		{"unsettled", &Recovery{Runs: 1, ReleaseCommands: 1, ManualCommands: 2}, "1 run, 3 commands, 2 manual, did not converge"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := catchUpOf(Cell{Recovery: tc.recovery}); got != tc.want {
+				t.Fatalf("catchUpOf = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Both renderings carry the catch-up: the job summary as a column of its own,
+// the terminal as a line of its own.
+func TestRenderingsCarryTheCatchUp(t *testing.T) {
+	campaign := Experiments{Version: "1.11.0-rc.6", Cells: []Cell{
+		{ID: "orphan-dispat", Tool: "dispat", Dispat: "1.11.0-rc.6", Passed: true,
+			Recovery: &Recovery{Runs: 1, ReleaseCommands: 1, Converged: true}},
+		{ID: "midrelease-clean-dispat", Tool: "dispat", Dispat: "1.11.0-rc.6", Passed: true},
+	}}
+	var markdown strings.Builder
+	if err := writeExperimentsMarkdown(&markdown, campaign); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"| cell | tool | dispat | steps | checks | catch-up | outcome | final state |",
+		"|---|---|---|---|---|---|---|---|",
+		"| 0/0 | 1 run, 1 command | holds |",
+		"| 0/0 | not measured | holds |",
+	} {
+		if !strings.Contains(markdown.String(), want) {
+			t.Errorf("the table does not carry %q:\n%s", want, markdown.String())
+		}
+	}
+	var plain strings.Builder
+	if err := writeExperimentsPlain(&plain, campaign); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"  catch-up: 1 run, 1 command\n", "  catch-up: not measured\n"} {
+		if !strings.Contains(plain.String(), want) {
+			t.Errorf("the summary does not carry %q:\n%s", want, plain.String())
+		}
 	}
 }
 

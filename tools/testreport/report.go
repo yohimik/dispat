@@ -191,6 +191,10 @@ type Cell struct {
 	Passed bool `json:"passed"`
 	// Final is the state the run ended in, from the last observation it took.
 	Final State `json:"final"`
+	// Recovery is what finishing the release took once the fault was gone.
+	// Nil for a protocol that measures no catch-up, and for every record
+	// written before the harness measured one.
+	Recovery *Recovery `json:"recovery,omitempty"`
 }
 
 // Step is one step of a protocol and the code it exited with. The field names
@@ -198,6 +202,31 @@ type Cell struct {
 type Step struct {
 	Name string `json:"step"`
 	Exit int    `json:"exit"`
+	// Kind is `release` for one of the tool's own release commands, `manual`
+	// for anything done by hand, and `query` for a read-only question. Empty
+	// in a record written before the harness typed its steps.
+	Kind string `json:"kind,omitempty"`
+	// Phase is `initial` for the run the fault was injected into and anything
+	// done before the fault was removed, and `catch-up` for what finishing the
+	// release took afterwards.
+	Phase string `json:"phase,omitempty"`
+}
+
+// Recovery is a cell's catch-up phase in four numbers, as the harness's
+// lib/recovery.jq counts them.
+type Recovery struct {
+	// Runs is the uninterrupted passes of the tool's own commands: a pass
+	// starts at a release command and ends at a manual step or at a release
+	// command that failed.
+	Runs int `json:"runs"`
+	// ReleaseCommands and ManualCommands count the catch-up's steps by kind.
+	// A query is never counted.
+	ReleaseCommands int `json:"releaseCommands"`
+	ManualCommands  int `json:"manualCommands"`
+	// Converged is whether the release ended settled: every package
+	// consistent or at its baseline, the clone clean and level with its
+	// origin, and the tool's own next plan empty.
+	Converged bool `json:"converged"`
 }
 
 // Check is one expectation about the state, and whether it held.

@@ -38,17 +38,18 @@ const experimentsDirName = "experiments"
 // release moved four says nothing about the four.
 const baselineState = "baseline"
 
-// verdict is verdict.json as the harness writes it. Steps and Checks decode
-// straight into the report's own types, because the harness's field names are
-// where those names came from.
+// verdict is verdict.json as the harness writes it. Steps, Checks and Recovery
+// decode straight into the report's own types, because the harness's field
+// names are where those names came from.
 type verdict struct {
-	Experiment string  `json:"experiment"`
-	Tool       string  `json:"tool"`
-	Scenario   string  `json:"scenario"`
-	Dispat     string  `json:"dispat"`
-	Steps      []Step  `json:"steps"`
-	Checks     []Check `json:"checks"`
-	Passed     bool    `json:"passed"`
+	Experiment string    `json:"experiment"`
+	Tool       string    `json:"tool"`
+	Scenario   string    `json:"scenario"`
+	Dispat     string    `json:"dispat"`
+	Steps      []Step    `json:"steps"`
+	Checks     []Check   `json:"checks"`
+	Passed     bool      `json:"passed"`
+	Recovery   *Recovery `json:"recovery"`
 }
 
 // observation is one line of observations.jsonl, reduced to the part a report
@@ -131,11 +132,14 @@ func readCell(dir, id string) (*Cell, error) {
 	if err := json.Unmarshal(body, &v); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := validateRecovery(v.Recovery); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	version, platform := parseDispatVersion(v.Dispat)
 	cell := &Cell{
 		ID: id, Experiment: v.Experiment, Scenario: v.Scenario, Tool: v.Tool,
 		Dispat: version, Platform: platform,
-		Steps: v.Steps, Checks: v.Checks, Passed: v.Passed,
+		Steps: v.Steps, Checks: v.Checks, Passed: v.Passed, Recovery: v.Recovery,
 	}
 	last, err := readLastObservation(filepath.Join(dir, id, "observations.jsonl"))
 	if err != nil {
@@ -182,6 +186,23 @@ func readLastObservation(path string) (*observation, error) {
 		last = &copied
 	}
 	return last, nil
+}
+
+// validateRecovery refuses a catch-up summary no count could have produced: a
+// negative number, or more runs than release commands, since every run starts
+// at one. A record that says either is not a record of a catch-up, and the
+// page would print it as one.
+func validateRecovery(r *Recovery) error {
+	if r == nil {
+		return nil
+	}
+	if r.Runs < 0 || r.ReleaseCommands < 0 || r.ManualCommands < 0 {
+		return fmt.Errorf("recovery counts a negative number: %+v", *r)
+	}
+	if r.Runs > r.ReleaseCommands {
+		return fmt.Errorf("recovery counts %d runs from %d release commands", r.Runs, r.ReleaseCommands)
+	}
+	return nil
 }
 
 // finalState turns one observation into the state a table shows: the packages
@@ -299,6 +320,45 @@ func stateOf(cell Cell) string {
 	return strings.Join(parts, " ")
 }
 
+// catchUpOf renders what finishing the release took once the fault was gone,
+// the way the site's Catch-up column shows it (packages/docs's catchup.ts
+// writes the same strings):
+//
+//	not measured                  the protocol measured no catch-up
+//	none needed                   the catch-up ran nothing and the release had converged
+//	1 run, 1 command              one pass of the tool's own commands
+//	2 runs, 3 commands, 1 manual  two passes and one step by hand between them
+//
+// and `, did not converge` after any of the counted forms whose release did
+// not end settled. Commands are the release and manual steps together; a
+// question asked of the tool is never one.
+func catchUpOf(cell Cell) string {
+	r := cell.Recovery
+	if r == nil {
+		return "not measured"
+	}
+	commands := r.ReleaseCommands + r.ManualCommands
+	if commands == 0 && r.Converged {
+		return "none needed"
+	}
+	parts := []string{counted(r.Runs, "run"), counted(commands, "command")}
+	if r.ManualCommands > 0 {
+		parts = append(parts, fmt.Sprintf("%d manual", r.ManualCommands))
+	}
+	if !r.Converged {
+		parts = append(parts, "did not converge")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// counted is a count and its noun, plural unless the count is one.
+func counted(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // outcomeOf is the cell's verdict as a phrase: what held, or what did not.
 func outcomeOf(cell Cell) string {
 	if cell.Passed {
@@ -346,13 +406,13 @@ func headline(e Experiments) string {
 func writeExperimentsMarkdown(w io.Writer, e Experiments) error {
 	out := bufio.NewWriter(w)
 	fmt.Fprintf(out, "%s\n\n", headline(e))
-	fmt.Fprintln(out, "| cell | tool | dispat | steps | checks | outcome | final state |")
-	fmt.Fprintln(out, "|---|---|---|---|---|---|---|")
+	fmt.Fprintln(out, "| cell | tool | dispat | steps | checks | catch-up | outcome | final state |")
+	fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|")
 	for _, cell := range e.Cells {
-		fmt.Fprintf(out, "| %s | %s | %s | `%s` | %d/%d | %s | `%s` |\n",
+		fmt.Fprintf(out, "| %s | %s | %s | `%s` | %d/%d | %s | %s | `%s` |\n",
 			escapePipes(cell.ID), escapePipes(cell.Tool), escapePipes(cell.Dispat),
 			escapePipes(stepsOf(cell)), held(cell.Checks), len(cell.Checks),
-			escapePipes(outcomeOf(cell)), escapePipes(stateOf(cell)))
+			catchUpOf(cell), escapePipes(outcomeOf(cell)), escapePipes(stateOf(cell)))
 	}
 	return out.Flush()
 }
@@ -367,6 +427,7 @@ func writeExperimentsPlain(w io.Writer, e Experiments) error {
 		fmt.Fprintf(out, "  %s  %s\n", cell.Tool, strings.TrimSpace(cell.Dispat+" "+cell.Platform))
 		fmt.Fprintf(out, "  steps: %s\n", stepsOf(cell))
 		fmt.Fprintf(out, "  checks: %d/%d  %s\n", held(cell.Checks), len(cell.Checks), outcomeOf(cell))
+		fmt.Fprintf(out, "  catch-up: %s\n", catchUpOf(cell))
 		fmt.Fprintf(out, "  state: %s\n", stateOf(cell))
 	}
 	return out.Flush()
