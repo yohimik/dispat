@@ -315,7 +315,7 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.strict = fs.Bool("strict", false,
 		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a replacement that matched nothing; for autowriter, an edit that matched no manifest anywhere")
 	o.requireRelease = fs.Bool("require-release", false,
-		"release and status: exit 1 when the plan releases nothing, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
+		"release and status: exit 3 when the plan releases nothing, apart from exit 1's failures, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
 	o.workers = fs.StringArray(config.WorkerFlag, nil,
 		"release, run and status: add a worker node for this invocation, name[=endpoint] (repeatable); a name alone reaches the repository being released; held to every rule a link in execution.workers is, and never part of the plan digest")
 	o.workerStateDir = fs.String("state-dir", "",
