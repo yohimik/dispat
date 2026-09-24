@@ -108,25 +108,38 @@ versioning decisions were instead checked against real history, below.
 ### A patch that asks direct consumers to release
 
 The propagation cells use `fix(core)^` for dispat: `core@1.0.1` remains inside every direct consumer's `~1.0.0`
-range, but the caret requests a consumer release. dispat releases `core`, `cli`, `ui` and `api`. Lerna receives an
-ordinary `fix(core)` and chooses all six packages, including indirect consumers `theme` and `docs`. Changesets
+range, but the caret requests a consumer release. dispat releases `core`, `cli`, `ui` and `api`. lerna and nx receive
+an ordinary `fix(core)` and choose all six packages, including the indirect consumers `theme` and `docs`. changesets
 receives explicit patch entries for `core` and its three direct consumers; it does not read the caret syntax.
 
-The fault comes after `core` has published. In dispat's build and upload failure cells, a retry with no new commit
-plans only the owed `cli` catch-up. Lerna's tag-based `changed` is already empty because `version` tagged all six;
-`publish from-package` queries the registry and uploads the five missing packages. In the Changesets cell the
-operator publishes `core` separately to establish that ordering, then the failed `cli` build or upload is retried
-with `changeset publish`. That command uploads missing `cli`, `ui` and `api`; it leaves the separately published
-`core` without a Changesets tag. The resulting unrecorded provider is a consequence of the operator-orchestrated
-partial protocol, visible in the recorded registry and Git state.
+The consumer's build or upload then fails in the first run, and every tool meets that fault the same way: its own
+documented release, with the fault armed before it and nothing published by hand, then its own documented recovery
+once the fault is gone, with no new commit. Where each tool builds decides what the first run leaves. dispat builds
+`cli` only after `core` has published, so `core`, `ui` and `api` ship and `cli` does not. changesets publishes side by
+side and leaves the same three published and tagged in the clone. lerna runs every `prepack` before it publishes
+anything, and nx runs its build before it versions, so under the build fault neither publishes at all; under the
+refused upload both publish the five packages the registry accepts and leave `cli` tagged without a publication.
 
-A further dispat cell tests when a consumer with no build command has already published its own fix against the old
-provider. A later selected release publishes the provider and the other direct consumers while leaving this one out.
-The next full plan must still carry the missed consumer delivery, with no new commit or release instruction. The
-[experiment record](./internals/experiments.mdx) shows the commands and states used to check that recovery. Its
-companion cell keeps a real consumer build: if it finished against the planned provider before the provider failed,
-dispat withholds that artifact with `W194`; the next run builds the still-pending own fix against the published
-provider.
+The recorded catch-ups differ. dispat's is one `dispat release`, which plans `cli` alone as a `W193` catch-up at the
+version it was owed, publishes it without publishing `core` again, and leaves an empty plan: one run of one command.
+lerna's `changed` is empty because `version` tagged all six; `lerna publish from-package` first refuses the working
+tree its own failed publish left rewritten, and after a checkout by hand it publishes what the registry is missing:
+two runs and three commands, one of them manual. nx finishes the publication with `nx release publish`, or with
+`nx release` when its first run versioned nothing, and the release commit it leaves on the clone is pushed by hand:
+one run and two commands, one of them manual. changesets' `status` is empty once `version` has consumed the changeset
+file; `changeset publish` uploads the missing `cli` and tags it, and the tags leave the clone with the push changesets
+never makes: one run and two commands, one of them manual. Every one of these catch-ups converged, and every tool
+published `core` exactly once.
+
+Further dispat cells take the same catch-up through the other ways a consumer comes to be owed its provider: with
+every build on a worker node reached through the repository being released, after the consumer sat out its provider's
+selected release, and after an operator held the consumer while the provider shipped and then resumed it. Two more
+cells test a consumer that published its own fix against the old provider after the provider failed and then sat out
+the provider's release. With no build command, the next full plan carries the missed delivery although the consumer's
+own tag already contains the propagation commit. With a real build that finished against the planned provider, dispat
+withholds that artifact with `W194`, and the next run builds the still-pending fix against the published provider.
+Each of these catch-ups is one run of one command. The [experiment record](./internals/experiments.mdx) shows the
+commands and states used to check them.
 
 ### Replay against real history
 
