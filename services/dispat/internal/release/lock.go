@@ -74,7 +74,10 @@ const (
 //
 // Note what is missing: nothing here can force a push. Taking the lock has to
 // be able to fail, so the one operation that would make it always succeed is
-// deliberately out of reach.
+// deliberately out of reach. What is present is reading the object a remote
+// advertises for a tag, because every answer the remote gave and lost (a
+// push, a delete) and every check that the lock is still this run's is
+// settled by that read.
 type LockGitx interface {
 	CreateTag(ctx context.Context, name, message, target string) error
 	TagObject(ctx context.Context, name string) (string, error)
@@ -82,6 +85,7 @@ type LockGitx interface {
 	DeleteTag(ctx context.Context, name string) error
 	TagExists(ctx context.Context, name string) (bool, error)
 	DeleteRemoteTagLease(ctx context.Context, remote, name, expectedOID string) error
+	RemoteTagObject(ctx context.Context, remote, tag string) (string, error)
 }
 
 // Lock is one run's claim on the repository. Acquire it before anything the
@@ -180,13 +184,8 @@ func (l *Lock) Acquire(ctx context.Context) error {
 //
 // Every read runs on a context this run's cancellation cannot take away: "did
 // the push land" is exactly the question an interrupted acquisition has to
-// answer, and a read that inherits the interrupt answers nothing. A git that
-// cannot read a remote tag object falls back to the tag message, which is
-// what settled the question before objects could be read.
+// answer, and a read that inherits the interrupt answers nothing.
 func (l *Lock) settleFailedPush(ctx context.Context, pushErr error) error {
-	if _, isReadable := l.Git.(lockReader); !isReadable {
-		return l.settleFailedPushByMessage(ctx, pushErr)
-	}
 	readCtx, cancelRead := detachedDeadline(ctx, lockPushReadTimeout)
 	object, readErr := l.readRemoteObject(readCtx)
 	cancelRead()
@@ -202,24 +201,6 @@ func (l *Lock) settleFailedPush(ctx context.Context, pushErr error) error {
 		return fmt.Errorf("pushing the release lock tag to %s: %w", gitx.RedactURL(l.Remote), pushErr)
 	}
 	return l.formatRefusal(ctx, pushErr)
-}
-
-// settleFailedPushByMessage is settleFailedPush for a git that can only read
-// the remote tag's message. The attempt id in the message is unique to this
-// Acquire call, so finding it there proves this run owns the lock.
-func (l *Lock) settleFailedPushByMessage(ctx context.Context, pushErr error) error {
-	probeCtx, cancelProbe := detachedDeadline(ctx, lockMessageReadTimeout)
-	message := l.remoteLockMessage(probeCtx)
-	cancelProbe()
-	if carriesAttempt(message, l.localTag) {
-		l.adoptLandedPush(pushErr)
-		return nil
-	}
-	l.dropAttempt(ctx)
-	if holder := describeHolder(message); holder != "" {
-		return fmt.Errorf("pushing the release lock tag to %s (%s): %w", gitx.RedactURL(l.Remote), holder, pushErr)
-	}
-	return fmt.Errorf("pushing the release lock tag to %s: %w", gitx.RedactURL(l.Remote), pushErr)
 }
 
 // adoptLandedPush takes ownership of a lock whose push reported a failure and
@@ -358,16 +339,11 @@ func (l *Lock) deleteRemoteLock(ctx context.Context) error {
 }
 
 // readRemoteObjectOnce reads the remote lock's object once, on a bounded
-// context of its own. A git that cannot read one answers ErrLockUnreadable,
-// which the caller treats as a read that failed.
+// context of its own.
 func (l *Lock) readRemoteObjectOnce(ctx context.Context) (string, error) {
-	reader, isReadable := l.Git.(lockReader)
-	if !isReadable {
-		return "", ErrLockUnreadable
-	}
 	readCtx, cancelRead := detachedDeadline(ctx, lockReleaseReadTimeout)
 	defer cancelRead()
-	return reader.RemoteTagObject(readCtx, l.Remote, LockTagName)
+	return l.Git.RemoteTagObject(readCtx, l.Remote, LockTagName)
 }
 
 func detachedDeadline(ctx context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {
@@ -407,24 +383,6 @@ func (l *Lock) remoteLockMessage(ctx context.Context) string {
 		return ""
 	}
 	return msg
-}
-
-// carriesAttempt reports whether a remote lock message is the one this attempt
-// wrote. It compares the attempt id rather than object ids, so it answers the
-// same question a person would ask of `git show`.
-//
-// The attempt id is random per Acquire call and appears in no other message,
-// which is what makes a match proof of ownership rather than of coincidence.
-func carriesAttempt(message, attempt string) bool {
-	if message == "" || attempt == "" {
-		return false
-	}
-	for _, line := range strings.Split(message, "\n") {
-		if strings.TrimSpace(line) == "attempt "+attempt {
-			return true
-		}
-	}
-	return false
 }
 
 // describeHolder turns the remote lock tag's message into "held for 3h12m by

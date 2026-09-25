@@ -243,9 +243,8 @@ func TestOwnershipLossNamesItsReason(t *testing.T) {
 		answer error
 		reason string
 	}{
-		"a lock read as gone":       {answer: fmt.Errorf("verifying: %w", release.ErrLockLost), reason: "lost"},
-		"a lock that was not read":  {answer: fmt.Errorf("verifying: %w", release.ErrLockUnverified), reason: "unverified"},
-		"a git that cannot read it": {answer: release.ErrLockUnreadable, reason: "unverified"},
+		"a lock read as gone":      {answer: fmt.Errorf("verifying: %w", release.ErrLockLost), reason: "lost"},
+		"a lock that was not read": {answer: fmt.Errorf("verifying: %w", release.ErrLockUnverified), reason: "unverified"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var logs bytes.Buffer

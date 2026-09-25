@@ -30,25 +30,6 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
-// lockReader is the optional capability behind VerifyHeld: reading the object
-// id a remote advertises for a tag.
-//
-// It is a capability interface rather than a method on LockGitx for the
-// reason lockInspector is one: the fakes that stand in for git in tests
-// implement the lock's own six operations, and widening the interface every
-// one of them satisfies would make a new question a compilation error in code
-// that has no opinion about it. *gitx.LocalGitx has it.
-type lockReader interface {
-	RemoteTagObject(ctx context.Context, remote, tag string) (string, error)
-}
-
-// ErrLockUnreadable is a Lock that cannot be checked because the Git behind
-// it cannot read a remote tag. It is a capability statement rather than a
-// verdict: answering "not held" would stop a release that is fine, and
-// answering "held" would authorize a publication nobody owns, so neither is
-// offered.
-var ErrLockUnreadable = errors.New("release: this git cannot read the remote release lock")
-
 // ErrLockLost is a verification that read the remote and found another lock
 // object under the lock's name, or none at all: the exclusion this run took
 // belongs to nobody or to somebody else now, and no answer read later can
@@ -94,9 +75,7 @@ var (
 // A caller that cancels its context gets the context's error, which is not a
 // loss: an interrupted lookup establishes nothing about the remote. A Lock
 // that never acquired anything, a bypassed repository or an acquisition that
-// failed, owns nothing and says so without touching the network, and a git
-// that cannot read tags at all is ErrLockUnreadable at once, since no retry
-// gives it the capability.
+// failed, owns nothing and says so without touching the network.
 func (l *Lock) VerifyHeld(ctx context.Context) error {
 	if !l.held {
 		return fmt.Errorf("%w: this run holds no lock on %s", ErrLockLost, gitx.RedactURL(l.Remote))
@@ -111,17 +90,13 @@ func (l *Lock) VerifyHeld(ctx context.Context) error {
 // readRemoteObject reads the object the remote advertises for the lock tag,
 // empty when it carries none. A read that fails is read again, up to
 // lockVerifyReads times with the pauses between them, each read bounded on its
-// own and every retry logged at warn level. It answers ErrLockUnreadable at
-// once for a git that cannot read a remote tag, the caller's context error
-// when the caller stops asking, and ErrLockUnverified when every read failed.
+// own and every retry logged at warn level. It answers the caller's context
+// error when the caller stops asking, and ErrLockUnverified when every read
+// failed.
 //
 // It asks nothing about ownership, which is why an acquisition whose push
 // answer was lost can use it before it holds anything.
 func (l *Lock) readRemoteObject(ctx context.Context) (string, error) {
-	reader, isReadable := l.Git.(lockReader)
-	if !isReadable {
-		return "", ErrLockUnreadable
-	}
 	var failure error
 	for read := 1; read <= lockVerifyReads; read++ {
 		if read > 1 {
@@ -130,7 +105,7 @@ func (l *Lock) readRemoteObject(ctx context.Context) (string, error) {
 			}
 		}
 		readCtx, cancelRead := context.WithTimeout(ctx, lockVerifyReadTimeout)
-		remote, err := reader.RemoteTagObject(readCtx, l.Remote, LockTagName)
+		remote, err := l.Git.RemoteTagObject(readCtx, l.Remote, LockTagName)
 		cancelRead()
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", ctxErr

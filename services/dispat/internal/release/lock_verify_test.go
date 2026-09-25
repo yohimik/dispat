@@ -18,10 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// readingLockGit answers the remote tag object, which is the one capability
-// VerifyHeld needs and the plain fake deliberately does not have. Each read
-// takes the next answer in reads, and the last one repeats: a remote that
-// fails twice and then answers is a list of three.
+// readingLockGit answers the remote tag object from a script of reads and
+// records each one. Each read takes the next answer in reads, and the last one
+// repeats: a remote that fails twice and then answers is a list of three.
 type readingLockGit struct {
 	fakeLockGit
 	reads []lockRead
@@ -220,15 +219,6 @@ func TestLockVerifyHeldWithoutAnAcquisition(t *testing.T) {
 	require.ErrorIs(t, err, ErrLockLost)
 	assert.Empty(t, git.calls, "an unheld lock asks the remote nothing")
 	assert.Empty(t, lock.LockObject())
-}
-
-// TestLockVerifyHeldWithAGitThatCannotRead: a git with no way to read a remote
-// tag is answered at once and never guessed at, because both guesses are
-// dangerous: one stops a healthy release and the other authorizes a
-// publication nobody owns. No retry gives it the capability.
-func TestLockVerifyHeldWithAGitThatCannotRead(t *testing.T) {
-	narrow := acquiredLock(t, &fakeLockGit{})
-	assert.ErrorIs(t, narrow.VerifyHeld(context.Background()), ErrLockUnreadable)
 }
 
 // TestResolveGenerationNamesTheOwnership: the generation is a function of

@@ -34,6 +34,9 @@ type fakeLockGit struct {
 	deleteDeadline bool
 	cancelResolve  context.CancelFunc
 	deleteLive     bool
+	// remote is what the fake remote advertises for the lock when it is read
+	// back. Nil is a read that fails, the one answer that decides nothing.
+	remote *lockRead
 }
 
 func (f *fakeLockGit) record(call string) error {
@@ -71,6 +74,17 @@ func (f *fakeLockGit) DeleteRemoteTagLease(ctx context.Context, _, _, oid string
 	return f.record("deleteRemote")
 }
 
+func (f *fakeLockGit) RemoteTagObject(context.Context, string, string) (string, error) {
+	if f.remote == nil {
+		return "", errors.New("the fake remote answers no read")
+	}
+	return f.remote.object, f.remote.err
+}
+
+// anotherRunsLock is the remote read that makes a refused push what it
+// usually is: another run's lock, under an object that is not this attempt's.
+var anotherRunsLock = &lockRead{object: "another-object"}
+
 // newLock builds a lock over a fake, with its log captured for the tests that
 // assert on what it said.
 func newLock(git *fakeLockGit, out *bytes.Buffer) *Lock {
@@ -98,7 +112,7 @@ func TestLockRoundTrip(t *testing.T) {
 // up owning nothing — including the local tag it just wrote, which anyone
 // reading `git tag` would take for a lock this clone holds.
 func TestLockRejectedPushLeavesNothingBehind(t *testing.T) {
-	git := &fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}}
+	git := &fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}, remote: anotherRunsLock}
 	lock := newLock(git, &bytes.Buffer{})
 
 	err := lock.Acquire(context.Background())
@@ -122,7 +136,7 @@ func TestLockRejectedPushWithAStuckLocalTag(t *testing.T) {
 	git := &fakeLockGit{failures: map[string]error{
 		"push":   errors.New("already exists"),
 		"delete": errors.New("still there"),
-	}}
+	}, remote: anotherRunsLock}
 	lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&out).Level(zerolog.DebugLevel)}
 
 	err := lock.Acquire(context.Background())
@@ -213,7 +227,7 @@ func TestLockMessageNamesADistributedRun(t *testing.T) {
 // coordination branches it left before the lock may be removed.
 func TestLockRefusalNamesTheHoldingRun(t *testing.T) {
 	git := &inspectingLockGit{
-		fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}},
+		fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}, remote: anotherRunsLock},
 		message: "dispat release lock\n\nhost ci-7\npid 4242\nat " +
 			time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano) +
 			"\nattempt dispat-release-lock-attempt-someone-else\nrun 0123456789abcdef0123456789abcdef\n",
@@ -301,7 +315,7 @@ func (f *inspectingLockGit) RemoteTagMessage(context.Context, string, string) (s
 // "come back later" and knowing the holder died an hour ago.
 func TestLockRefusalNamesTheHolder(t *testing.T) {
 	git := &inspectingLockGit{
-		fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}},
+		fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("already exists")}, remote: anotherRunsLock},
 		message: "dispat release lock\n\nhost ci-7\npid 4242\nat " +
 			time.Now().UTC().Add(-3*time.Hour).Format(time.RFC3339Nano) + "\n",
 	}
@@ -319,9 +333,9 @@ func TestLockRefusalNamesTheHolder(t *testing.T) {
 // message costs nothing but the holder line.
 func TestLockRefusalDegradesWithoutAMessage(t *testing.T) {
 	for name, git := range map[string]LockGitx{
-		"no capability": &fakeLockGit{failures: map[string]error{"push": errors.New("refused")}},
-		"read fails":    &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}}, msgErr: errors.New("no fetch")},
-		"not dispat's":  &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}}, message: "some other tag"},
+		"no capability": &fakeLockGit{failures: map[string]error{"push": errors.New("refused")}, remote: anotherRunsLock},
+		"read fails":    &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}, remote: anotherRunsLock}, msgErr: errors.New("no fetch")},
+		"not dispat's":  &inspectingLockGit{fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("refused")}, remote: anotherRunsLock}, message: "some other tag"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&bytes.Buffer{})}
@@ -333,74 +347,26 @@ func TestLockRefusalDegradesWithoutAMessage(t *testing.T) {
 	}
 }
 
-// inspectableLockGit is a fake that can also answer what the remote's lock tag
-// says, which is how an interrupted or unanswered push is told apart from a
-// lock somebody else holds.
-type inspectableLockGit struct {
-	*fakeLockGit
-	remoteMessage func() string
-	probeLive     bool
-}
-
-func (f *inspectableLockGit) RemoteTagMessage(ctx context.Context, _, _ string) (string, error) {
-	f.probeLive = ctx.Err() == nil
-	if f.remoteMessage == nil {
-		return "", errors.New("no remote tag")
-	}
-	return f.remoteMessage(), nil
-}
-
 // TestLockAcquireRecoversALostPushResponse: a push whose answer never came
-// back still put the tag on the remote. The attempt id in the tag's message is
-// this call's alone, so finding it there proves this run owns the lock — and
-// owning it is what lets Release give it back instead of stranding it.
-//
-// The probe runs on a context of its own, so the one case that produces a lost
-// response most often — a cancelled run — is also the one it can answer.
+// back still put the tag on the remote. The object the remote advertises is
+// this attempt's own, which no other run can have written, so this run owns
+// the lock, and owning it is what lets Release give it back instead of
+// stranding it, under a lease on that same object.
 func TestLockAcquireRecoversALostPushResponse(t *testing.T) {
 	var out bytes.Buffer
-	git := &inspectableLockGit{fakeLockGit: &fakeLockGit{
-		failures: map[string]error{"push": errors.New("connection reset")},
-	}}
-	lock := newLock(git.fakeLockGit, &out)
-	lock.Git = git
-	git.remoteMessage = func() string { return git.messages[0] }
+	git := &readingLockGit{
+		fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("connection reset")}},
+		reads:       []lockRead{{object: "object-id"}},
+	}
+	lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&out)}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	require.NoError(t, lock.Acquire(ctx), "the tag is on the remote and carries this attempt")
-	assert.True(t, git.probeLive, "the ownership probe must outlive the run's cancellation")
+	require.NoError(t, lock.Acquire(context.Background()), "the tag is on the remote and is this attempt's")
 	assert.NotContains(t, git.calls, "delete", "an owned attempt keeps its local tag")
 	assert.Contains(t, out.String(), "this run owns the lock")
 
 	lock.Release(context.Background())
 	assert.Contains(t, git.calls, "deleteRemote", "the recovered lock is given back")
 	assert.Equal(t, "object-id", git.deleteOID, "and only while it still names this run's object")
-}
-
-// TestLockAcquireKeepsAnotherRunsLock: the same failed push against a remote
-// whose lock belongs to somebody else is a refusal, and the refusal names the
-// holder rather than adopting the tag.
-func TestLockAcquireKeepsAnotherRunsLock(t *testing.T) {
-	var out bytes.Buffer
-	git := &inspectableLockGit{fakeLockGit: &fakeLockGit{
-		failures: map[string]error{"push": errors.New("rejected")},
-	}}
-	lock := newLock(git.fakeLockGit, &out)
-	lock.Git = git
-	git.remoteMessage = func() string {
-		return "dispat release lock\n\nhost ci-7\npid 4242\nat " +
-			time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano) +
-			"\nattempt dispat-release-lock-attempt-someone-else\n"
-	}
-
-	err := lock.Acquire(context.Background())
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "host ci-7")
-	assert.Contains(t, git.calls, "delete", "a refused attempt removes its own local tag")
-
-	lock.Release(context.Background())
-	assert.NotContains(t, git.calls, "deleteRemote", "another run's lock is never deleted")
 }
 
 // TestLockAcquireSettlesAFailedPushFromTheRemote: a push that reports a failure
