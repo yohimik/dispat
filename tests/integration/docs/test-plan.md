@@ -22,9 +22,8 @@ integration suite itself.
    hold only a prefix in common. Rides and their "no changes" changelog entries, sparse alignment, versions diverging
    again below the shared part, the single shared prerelease train against a train that stays local, failed-ride
    catch-up on the stable line and mid-train, holds and pins under a shared version, mixed shared depths in one group,
-   and no bleed between modes.
-   `TestPlanKeepsIndependentReleaseWindowsAfterMerge` verifies incomparable branch release baselines after a merge:
-   each package excludes its own shipped features, releases only pending fixes, and converges on the next run.
+   and no bleed between modes. Incomparable branch release baselines survive a merge: each package excludes its own
+   shipped features, releases only pending fixes, and converges on the next run.
 3. **Repository-scoped fatal errors** (`fatal_test.go`): the §16 bucket that aborts a run whatever `commitErrors` says,
    each constructed for real: a dependency cycle (E200), duplicate version tags (E191), and a shallow clone (E196).
    These are the cases where a partial release would be worst, so each asserts the non-zero exit, the code in the
@@ -43,6 +42,10 @@ integration suite itself.
    which is what makes them worth a file of their own.
    `TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted` owns the dirty-tree boundary: existing work is preserved
    for a package whose effective `revertOnFail` is false and refused only where rollback could overwrite it.
+   that outranks the group's; and the boundary where `revertOnFail` stops. Each one fails by producing a *plausible*
+   release rather than an error, which is what makes them worth a file of their own. The dirty-tree boundary sits here
+   too: existing work is preserved for a package whose effective `revertOnFail` is false and refused only where
+   rollback could overwrite it.
 
 34. **Versioning `none`** (`versioning_none_test.go`): the mode that leaves the release flow entirely. A `none` package
     is never versioned, tagged, changelogged or published, runs scripts from the default `dispat run` window whenever
@@ -205,9 +208,9 @@ integration suite itself.
     which is what makes the boolean options three-state rather than plain.
 13. **Per-package overrides, versioning groups and `.dispatexclude`** (`overrides_test.go`): the layered configuration
     through the binary: a `packages` entry replacing one flow entry while the sibling keeps the space's, the in-folder
-    config file beating the entry, `.dispatexclude` exclusions, a declared `versionGroups` group spanning two spaces to
-    one version and its convergence, per-package changelog/GitHub record policies, the concurrency weight, the config
-    ascent, and `scripts` defined at each of the three levels.
+    config file beating the entry, `.dispatexclude` exclusions, per-package changelog/GitHub record policies, the
+    concurrency weight, the config ascent, and `scripts` defined at each of the three levels. A declared `versionGroups`
+    group spanning spaces is goal 36.
 14. **The top-level `packages` section** (`packages_test.go`): a `packages` entry with a `path` releasing as a full
     package outside every space, the standalone path config errors, provider lists declared in an entry or an in-folder
     config file ordering the graph like top-level edges, `src` narrowing change detection, and `dispat compute` editing
@@ -236,9 +239,8 @@ integration suite itself.
     push (E224) each failing there, plus the alias tag (W232) that deliberately is not one of them. None of them fails
     the package, which stays `published`, and none of them abandons the work the run still owed: the packages after it
     carry on and their records are written. Each one does fail the *run*. A critical recording failure exits non-zero
-    and the completion webhook reports `release.finished` as `failed` with the published count preserved
-    (`TestWebhookReportsMonorepoFinalizeFailure`), because a publication nobody recorded is the state the next run
-    cannot recover from on its own. The alias tag is the exception that proves the split: W232 counts no critical and
+    and the completion webhook reports `release.finished` as `failed` with the published count preserved (goal 42),
+    because a publication nobody recorded is the state the next run cannot recover from on its own. The alias tag is the exception that proves the split: W232 counts no critical and
     the run exits green.
 46. **Draft GitHub releases** (`draft_test.go`): `github.draft` and the `--draft` flag that overrides it either way.
     What is pinned here is the half a draft makes hard: a draft carries no tag ref, so GitHub's by-tag lookup cannot
@@ -261,11 +263,9 @@ integration suite itself.
 18. **The `dispat run` command** (`run_test.go`): a script executed inside changed packages over the dependency graph
     with the full environment, resolved per package through the three `scripts` levels, the `dispat <script>`
     shorthand, the `--package`/`--space` selection, the `--since` window and the `--consumers` expansion and how they
-    compose, the `--on-error` policies, the concurrency budget, and cross-package output carrying.
-    `TestSelectionWindowsFromHEAD1ThroughHEAD9` holds the revision-depth regression across `HEAD~1` through `HEAD~9`,
-    `all`, and a transitive `--consumers` expansion ending at a web package. `TestRunSceneFixtureSelection` binds the
-    checked-in demo graph to the real CLI, while `TestCITestModuleSelectionRunsAffectedOnceAndAllRunsEveryModule`
-    owns the module-selection contract used by the repository's CI sweep.
+    compose, the `--on-error` policies, the concurrency budget, and cross-package output carrying. The revision-depth
+    windows from `HEAD~1` through `HEAD~9` and `all`, the checked-in demo graph and the module selection the
+    repository's CI sweep relies on are held here too.
 19. **The standalone step commands** (`standalone_test.go`): `dispat changelog`, `dispat autoversion`, `dispat commit`
     and `dispat github` through the binary: the shared package selection, changelog idempotence (W226), the in-flow
     scenario where nested step commands land the changelog inside the tagged commit, the `--tag`/`--push` committer
@@ -337,10 +337,6 @@ integration suite itself.
     arbitrary-name package list, scanner reports literal and dynamic entries without evaluation, writer reaches the
     imported file through `--manifest-format aqua`, malformed YAML preserves healthy partial results, and
     compute/autoversion share the registry-qualified ownership while writing an exact pin.
-    `TestAquaDemoFixtureThroughManifestCommands` owns scanner/writer composition,
-    `TestAquaComputeAndAutoversionUseQualifiedOwnership` owns qualified compute/autoversion identity, and
-    `TestAquaWriterBatchKeepsCompletedWriteWhenSymlinkRefuses` owns partial-write reporting and preservation when a
-    later dot-named Aqua symlink is refused.
 26. **The `autowriter` command** (`autowriter_test.go`): `dispat writer`'s edits applied to the packages the plan
     selects, including the edits derived from the workspace itself (`--set-local`, `--link-local`).
 27. **The `autoreplacer` command** (`autoreplacer_test.go`): a replacement fanned out across the packages the plan
@@ -355,11 +351,9 @@ integration suite itself.
     at the other end. `run.allowBranch` turns a branch list into a precondition; the push-mode behind-remote check
     compares the checkout against the branch it would push to and refuses a stale one. The pair is also proven to be
     off unless asked for. The guard closes before the plan exists, so a commit pushed while the run is working reaches
-    the finalize push instead, where the release merges itself with what landed or says why it cannot.
-    `TestReleaseReconcilesGithubCreateWhoseResponseWasLost` in `release_lost_response_test.go` covers the external-write
-    ambiguity after publication: GitHub persists a create,
-    its response is lost, independent work continues, the run reports E222 and exits non-zero, and durable tags make
-    the rerun a no-op without another POST.
+    the finalize push instead, where the release merges itself with what landed or says why it cannot. The goal also
+    owns the external-write ambiguity after publication, a GitHub create whose response was lost
+    (`release_lost_response_test.go`).
 30. **The release lock** (`lock_test.go`): one tag on the remote decides who releases. Two runs against one repository
     is not a race dispat can win by being careful, so it refuses to enter it: the first to push the lock tag releases,
     the second is told to come back later, and the tag is gone by the time either exits.
@@ -404,12 +398,20 @@ integration suite itself.
     differing only in a line's channels do not share a releaser, the skip is an info event naming the channel, and
     `dispat preview --changelog/--github` shows each body under its own entry format before anything is released.
 
+### The published modules
+
+61. **The public modules through their exported API** (`publicapi/*_test.go`): `pkg/ccme`, `pkg/config`,
+    `pkg/manifest`, `pkg/models`, `pkg/scanner` and `pkg/writer` driven the way a program outside this repository
+    drives them: the cross-component contracts, the conformance of each module's exported surface on realistic
+    inputs, and the refusals each one owes a caller whose input is hostile, truncated or changed underneath it, with
+    the caller's bytes left as they were.
+
 ### Where areas deliberately meet
 
 Five subjects are asserted from more than one goal, on purpose, because a property and the feature that carries it are
 different claims:
 
-- **Versioning groups** appear in goal 2 (the modes themselves, per space) and goal 13 (a declared group spanning
+- **Versioning groups** appear in goal 2 (the modes themselves, per space) and goal 36 (a declared group spanning
   spaces). Goal 5 adds what happens when a package *joins* one, and goal 20 what happens when a selection splits one.
 - **The configuration ladder** appears in goal 12 (the root as the bottom layer) and goal 13 (the six layers decided by
   the nearest). The first is about the fold, the second about who wins.
@@ -452,6 +454,7 @@ boundaries.
 tests/integration/
   go.mod                    separate module: github.com/yohimik/dispat/tests/integration
   cmd/tsmark/               the timing probe (see below)
+  publicapi/                goal 61 (the published modules through their exported API)
   internal/harness/
     binary.go               builds dispat + tsmark once per test run (sync.Once
                             cache); with DISPAT_COVERDIR set, dispat is built
@@ -620,7 +623,7 @@ repeated runs under `-count` and `-race`.
 
 ## Coverage matrix
 
-### Goal 1: plan logic (`plan_test.go`, `admission_test.go`)
+### Goal 1: plan logic (`plan_test.go`, `admission_test.go`, `admission_removed_provider_test.go`, `final_history_boundaries_test.go`, `final_planning_logs_test.go`, `history_unrelated_roots_test.go`, `unicode_identity_test.go`)
 
 | Test                                                      | Claims proven                                                                                                                                                                                                                                               |
 |-----------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -673,6 +676,9 @@ repeated runs under `-count` and `-race`.
 | `TestPlanTwoReleaseAsDirectivesInOneWindow` | A hold and a later resume are both in force until one of them is released: the newest wins, the pair is reported, and a resume that did lift a hold is not the redundant kind. |
 | `TestPlanScopeTermsReachTheirPackages` | Every shape a scope term takes in one history: a glob reaching what it matches and reported when it matches none, `.` for the commit's own files, `*` for the workspace, an exclusion naming nothing as a warning and an inclusion naming nothing as an error. |
 | `TestPlanBaselineIgnoresARefShorterThanTheTagPrefix` | The listing is dispatched to package matchers through a trie over their literal prefixes, so a ref shorter than the prefix it shares characters with runs the walk off the end of the name, belongs to no package, and leaves the real release tag as the baseline. |
+| `TestFinalHistoryRetainsWorkWhenBoundariesLeaveHEAD` | After an external branch rewrite leaves previously observed release tags off HEAD, the real history fallback keeps new work pending rather than silently treating it as shipped. |
+| `TestFinalPlanningWorkloadIsDebugOnlyAndPreservesThePlan` | Debug reports actual history workload counts for one repository and a source-history fleet while preserving versions, reasons and selected packages; info output remains quiet. |
+| `TestMergedIndependentHistoriesKeepTheirReleaseBoundaries` | Projects merged from unrelated Git roots retain their independent tagged baselines and pending bumps; a failed common-ancestor query refuses release before a healthy retry. |
 
 ### Goal 54: the edges a propagation walks (`propagation_kinds_test.go`)
 
@@ -680,7 +686,7 @@ repeated runs under `-count` and `-race`.
 |---------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestPropagationKindsSelectTheEdgesTraversed`     | The three states of `parser.propagation.kinds` over one graph holding a runtime consumer and a development one: an absent key walks the §8.4 default and leaves the `devDependencies` edge alone, `[]` walks no edge at all while the changed package still releases, `["*"]` walks both, and a list naming `devDependencies` walks that edge alone. |
 
-### Goal 2: space versioning modes (`versioning_test.go`)
+### Goal 2: space versioning modes (`versioning_test.go`, `history_parallel_releases_test.go`)
 
 | Test                                                 | Claim proven                                                                                                                                                                                                                                                              |
 |------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -702,14 +708,18 @@ repeated runs under `-count` and `-race`.
 | `TestVersioningPartialPinScope`                      | An exact `Release-As` crossing the shared major advances the whole group. A pin inside the major releases only its target package, sets no group guard (no E153), and moves no siblings. |
 | `TestVersioningFixedMajorRideFailureThenAlignment`   | When a partial-mode ride fails, the next run brings the laggard up to the shared major (W234) at the start of its line without re-releasing siblings. A subsequent run converges. |
 | `TestVersioningMixedDepthGroupUsesTheDeepest`        | When a package overrides space `versioning`, it remains in the space group at a different depth. The group uses the deepest declaration (sharing the minor), and W237 documents the shared behavior that the shallower member did not request. |
+| `TestPlanKeepsIndependentReleaseWindowsAfterMerge` | Incomparable branch release baselines survive a merge: each package excludes its own shipped features, releases only pending fixes, and converges on the next run. |
 
-### Goal 3: repository-scoped fatal errors (`fatal_test.go`)
+### Goal 3: repository-scoped fatal errors (`fatal_test.go`, `final_plan_boundaries_test.go`, `final_plan_faults_test.go`)
 
 | Test                            | Claim proven                                                                                                                                                                                                  |
 |---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestFatalDependencyCycle`      | A cyclic dependency graph passes config validation but fails during planning. dispat exits 1, logs E200 events, writes no tags or scripts, and aborts `status` and `dispat run`. |
 | `TestFatalDuplicateVersionTags` | Two reachable tags on different commits resolving to the same package version (`core@0.1.0` alongside a manual `core@0.1.0+dup`) create an ambiguous baseline: dispat exits 1 with E191 and leaves pending work unreleased. |
 | `TestFatalShallowRepository` | Running against a `git clone --depth 1` shallow clone aborts release with exit 1 and E196 events naming the shallow history rather than planning against it: nothing is planned, built or tagged. |
+| `TestFinalPlanRefusesTwoRefsForOnePublishedVersion` | Equal-precedence version tags on different commits are fatal ambiguity. |
+| `TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot` | Completeness, tag inventory, and pending history Git failures abort a monorepo status without a plan or release record. |
+| `TestFatalErrorsIgnoreCommitErrors` | The fatal bucket aborts whatever `commitErrors` says: a dependency cycle (E200) and two tags naming one version (E191) each exit 1 with the code in the events, nothing built and nothing tagged, under `commitErrors: warn` and `commitErrors: error` alike. |
 
 ### Goal 4: change-scope ignore (`ignorescope_test.go`)
 
@@ -730,7 +740,7 @@ package.
 | `TestIgnoreScopeEscapedBangNamesALiteralCharacter` | A pattern beginning with an escaped bang names a file whose name begins with one rather than re-including anything. |
 | `TestIgnoreScopeCommentsAloneSayNothing` | A pattern list of nothing but comments and blank lines compiles to no rules, so the level is dropped and every file keeps counting. |
 
-### Goal 5: release edge cases (`edgecases_test.go`)
+### Goal 5: release edge cases (`edgecases_test.go`, `final_execution_boundaries_test.go`)
 
 Each test checks an *interaction* between two features that work on their own. When an interaction fails, it produces a
 plausible release instead of an error, so dispat tracks them together in one suite.
@@ -755,6 +765,8 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestEdgeReleaseCommitLockOmitsAFailedWriter` | The same lock file after a package fails its build past its version stage: its tracked files return to HEAD before the regeneration, so the release commit's lock lists only published versions, and its untracked build output stays for inspection. |
 | `TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted` | An interrupt while the regeneration runs half-writes the lock file; dispat restores it to HEAD, reports `E223`, leaves it out of the release commit that still records and tags the published package, and the documented `dispat run <script> --since all` remedy regenerates it from what published. |
 | `TestEdgeDirtyGuardReadsARenameAsOneEntry` | Machine-readable status writes a rename as the destination followed by the source, and only the first carries a status prefix; reading the second as an entry of its own would name a file nobody has in a refusal telling somebody to go and commit it. |
+| `TestFinalRollbackGitFailureLeavesVisibleRepairState` | If Git refuses a failing build's `revertOnFail` restore, the run reports the cleanup failure, retains tracked and untracked residue for review, creates no release tag, and succeeds only after explicit repair. |
+| `TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted` | The dirty-tree guard preserves existing work for a package whose effective `revertOnFail` is false and refuses only where a rollback could overwrite it. |
 
 ### Goal 6: concurrency (`concurrency_test.go`)
 
@@ -764,7 +776,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConcurrencyPublishBudgetIsIndependentOfBuild`               | Build and publish stages maintain separate concurrency budgets. In one run, builds reach an overlap of 5 while publishes stay capped at 2. |
 | `TestConcurrencyIndependentPickedUpConcurrentlyDependantAwaited` | Three independent provider builds run in parallel. Their shared consumer build starts only after all three provider builds finish. |
 
-### Goal 7: execution order by dependency graph (`order_test.go`)
+### Goal 7: execution order by dependency graph (`order_test.go`, `publish_order_test.go`)
 
 | Test                                                      | Claim proven                                                                                                                                                                              |
 |-----------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -778,7 +790,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestPublishOrderBlocksAConsumerBehindAFailedProviderItDoesNotNameDirectly` | A `core` whose publish failed skips an `app` that reaches it only through the unreleasing `ui`: `W194` with `blockedBy` naming `core`, and nothing tagged, when `app` rides a fixed group with no release reason of its own. An `app` with a fresh bump of its own proceeds under the default relation, exactly as it does behind a provider it declares, and so does one with no work of its own whose other *declared* provider published: that is a version it picks up, which a publication behind an unreleasing package is not. |
 | `TestOrderSignStageWaitsForProviders`                     | A consumer's sign stage is its first task, so it is the task that waits for a provider: under `isBuildWaitingPublish: true` the consumer signs only after the provider's publish finished, and builds after it signs. |
 
-### Goal 8: interruption (`interrupt_test.go`)
+### Goal 8: interruption (`interrupt_test.go`, `cancel_resources_test.go`, `cancel_workspace_test.go`, `final_execution_boundaries_test.go`)
 
 | Test                            | Claim proven                                                                                                                                                                                                                                                                                                                                                                                |
 |---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -789,6 +801,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestCancelledRunsLeaveNoTemporaryFiles` | Three interrupted runs in a row, each with its own `TMPDIR`, leave no `dispat-*` working file behind: the output staging file of every hook and stage sequence is removed on the cancellation path as well as the successful one. |
 | `TestCancelDoesNotDisturbAConcurrentRun` | An interruption reaches its own run's script tree and nothing else: of two `dispat run` sweeps covering the same repository at the same moment, the one not interrupted finishes its script and exits zero. |
 | `TestCancelWorkspaceCompositionStopsOnInterrupt` | A nested command whose source checkout no live pin admits yet reads it again for a bounded few seconds, and the wait is the invocation's own rather than a detached one: a SIGINT during it ends the command at once instead of sitting out the bounded reads, and the refusal names the wait and reports `context canceled` rather than the `E330` checkout refusal the bound ends in. |
+| `TestFinalInterruptedBuildRevertsBeforeExitAndRetriesCleanly` | Ctrl-C after a build has changed tracked and untracked package files marks the package cancelled, suppresses failure hooks and tags, completes `revertOnFail` cleanup on a detached context before process exit, and leaves the same release safely retryable. |
 
 ### Goal 9: the script frames (`hooks_test.go`)
 
@@ -816,7 +829,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not skipped when its provider fails, but its version stage then has nothing to sync manifests to, so the stage's scripts and their hooks do not run; the same fixture with the provider alive runs both. |
 | `TestHooksStageOutputTruncatesAnOverlongLine` | A stage that writes a megabyte with no newline in it has its line cut with a marker, the rest of that line dropped rather than logged as a line of its own, and the stage's later output still arrives; a line that never ends is dropped on the flush. |
 
-### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_preflight_reply_faults_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`, `execution_placement_test.go`, `execution_task_identity_test.go`, `execution_crossdevice_linux_test.go`, `execution_prepare_test.go`, `execution_publish_test.go`, `execution_publish_preparation_faults_test.go`, `execution_authorization_test.go`, `execution_unknown_test.go`, `execution_admission_rules_test.go`, `execution_capacity_test.go`, `execution_inputs_test.go`, `execution_nodestate_test.go`, `execution_ownership_test.go`, `execution_fleet_locks_test.go`, `execution_modes_test.go`, `execution_pickup_parity_test.go`, `execution_faults_test.go`, `execution_transport_protocol_test.go`, `execution_recovery_test.go`, `execution_cancel_lease_race_test.go`, `execution_authorized_cancel_ack_test.go`, `execution_result_cancel_race_test.go`, `execution_result_foreign_cancel_test.go`, `execution_cancel_foreign_predecessor_test.go`, `execution_fleet_run_outputs_test.go`, `execution_run_test.go`, `execution_default_mailbox_test.go`, `execution_push_outcomes_test.go`)
+### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_preflight_reply_faults_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`, `execution_placement_test.go`, `execution_task_identity_test.go`, `execution_crossdevice_linux_test.go`, `execution_prepare_test.go`, `execution_publish_test.go`, `execution_publish_preparation_faults_test.go`, `execution_authorization_test.go`, `execution_unknown_test.go`, `execution_admission_rules_test.go`, `execution_capacity_test.go`, `execution_inputs_test.go`, `execution_nodestate_test.go`, `execution_ownership_test.go`, `execution_fleet_locks_test.go`, `execution_modes_test.go`, `execution_pickup_parity_test.go`, `execution_faults_test.go`, `execution_transport_protocol_test.go`, `execution_recovery_test.go`, `execution_cancel_lease_race_test.go`, `execution_authorized_cancel_ack_test.go`, `execution_result_cancel_race_test.go`, `execution_result_foreign_cancel_test.go`, `execution_cancel_foreign_predecessor_test.go`, `execution_fleet_run_outputs_test.go`, `execution_run_test.go`, `execution_default_mailbox_test.go`, `execution_push_outcomes_test.go`, `execution_authorization_fence_test.go`, `execution_cancel_push_loss_test.go`, `execution_lost_authorization_test.go`, `execution_publish_cancel_before_go_test.go`, `execution_publish_late_claim_test.go`, `execution_publish_unclaimed_test.go`, `execution_record_after_claim_test.go`, `execution_snapshot_index_test.go`, `execution_withdraw_unacked_test.go`, `publicapi/models_execution_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -1021,7 +1034,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionReleaseUsesItsOwnRemoteAsTheMailbox` | A link with no endpoint reaches the repository's own remote: the build runs on a worker polling that remote, the release tag names the planned head and its history holds no transport commit, a `beforeAll` hook reading the lock tag on that remote finds the `run` line of the run the `plan fixed` line names, one debug line names `origin` and the redacted endpoint, and afterwards the remote holds no `dispat-worker-*` branch and no lock. |
 | `TestExecutionSweepUsesItsOwnRemoteAsTheMailbox` | A sweep reaches the same remote and takes no lock there: a lock another release holds on it neither stops the sweep nor changes, the task runs on the worker, its `runOutputs` file is merged into the orchestrator's checkout, and no coordination branch remains. |
 | `TestExecutionDefaultMailboxRefusesACredentialCarryingRemote` | A push URL carrying a token cannot be a mailbox: a release with a configured link and a sweep naming the node alone on the command line both exit 1 with E225 naming the link and `origin`, before any lock line or task, and the token is never printed; `--worker build-a=file://<origin>` names the same repository cleanly and runs, and `--worker build-a=` exits 2. |
-| `TestExecutionWorkerFindsItsMailboxInItsCheckout` | A worker whose configuration states no endpoint, started in a checkout whose origin is the repository being released, reads its work from that remote: a release whose link states no endpoint places its build on it, the package is tagged, the worker says in one debug line which remote and push URL it reads, and no coordination branch remains. Outside a repository the same worker is refused with E225 naming both remedies, the row of `TestExecutionWorkerStartRefusals`. |
+| `TestExecutionWorkerFindsItsMailboxInItsCheckout` | A worker whose configuration states no endpoint, started in a checkout whose origin is the repository being released, reads its work from that remote: a release whose link states no endpoint places its build on it, the package is tagged, the worker says in one debug line which remote and push URL it reads, and no coordination branch remains. Outside a repository the same worker is refused with E225 naming both remedies, the start refusal row above. |
 | `TestExecutionRunOutputsMergeIntoTheOrchestratorsCheckout` | With `runOutputs: {tests: [coverage]}` each delegated task's `coverage/<package>.out` comes back from the node that wrote it and is merged into the orchestrator's `coverage/`: a stale file of the same path is replaced, a file no task wrote is kept, a file every task wrote with the same bytes is merged once, a package whose script wrote nothing is admitted as an empty set, and every set is reported merged once. |
 | `TestExecutionRunOutputsConflictLeavesNeitherFile` | Two tasks writing one path under the root with different bytes fail the sweep with E227 `path-conflict` naming the path and both tasks; the orchestrator's file at that path is the one it had before, neither disagreeing task's own file is merged, the undisputed task's set is, and the summary reports the two sets rejected (CCME §28.10, vector 32). |
 | `TestExecutionFleetRunOutputsRefuseASourcePackageFolder` | A linked fleet refuses a run output root that encloses a source package folder before planning or mutation, while an independent root works in the same configuration. |
@@ -1036,7 +1049,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionRunOutputsMergeFailureFailsTheSweep` | A set whose later destination is a folder, has a file or symlink parent, or denies writes is refused with E227. Its first file is restored, existing bytes and outside paths are preserved, temporary names are removed, and independent sets still merge. Repairing the obstruction lets the next sweep install the complete set. |
 | `TestExecutionRunSweepUnderRunOnlyWorkerWithoutLinksIsRefused` | A package whose build may only run on a worker cannot have its sweep task run here either: a sweep with no link is refused with E225 and the `execution-configuration` class naming `runOnly`, and no script runs. |
 
-### Goal 60: the provider relation (`stage_relation_test.go`)
+### Goal 60: the provider relation (`stage_relation_test.go`, `execution_prepare_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -1049,7 +1062,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `tests/integration/execution_prepare_test.go::TestStageRelationNoneCarriesNoBuildOutputs` | A relation saying a consumer's build reads nothing the provider builds is a declaration the distributed transport obeys: on two nodes the two builds run at once, proven with a gate file the provider's build waits on rather than with a sleep, the consumer's task checkout never holds the provider's declared output folder, the run succeeds and the consumer still publishes only after the provider published. |
 | `tests/integration/execution_prepare_test.go::TestStageRelationNoneNeedsNoPreparation` | A provider reached only across a `none` relation is a provider nothing has to build: a run whose only pending work sits behind one prepares nothing at all, reports no prepared provider, never runs the provider's build anywhere and still releases the consumer. |
 
-### Goal 10: config loading, resolution and options (`config_test.go`)
+### Goal 10: config loading, resolution and options (`config_test.go`, `config_release_edges_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -1067,7 +1080,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConfigCommitErrorsPolicy`                         | Under the default `warn` setting, commit errors (E130) log warnings while releasing sibling packages. Under `error`, dispat aborts releases with exit 1 while `status` still exits 0 to display the plan. |
 | `TestConfigParserQuiet`                                | The `parser.quiet` setting hides parser warnings (E140) while keeping planner errors (E130) visible. It counts hidden diagnostics, enforces `commitErrors: error` failures, and can be overridden in either direction with `--quiet-parser`. |
 | `TestConfigInitialsBaselines`                          | Initials configure the baseline version for packages with unparseable latest tags without falling back to older tags. Unmatched initial keys log warnings, and future releases resume tracking real tags. |
-| `TestConfigFormatsSmoke`                               | Verify configuration compatibility across `dispat.json`, `dispat.yaml`, and `dispat.toml` generated by `init`. The JSON test also confirms that `status` plans without tagging. |
+| `TestConfigFormatsSmoke` | The same monorepo releases under a `dispat.json` and a `dispat.yaml` the test writes and under the `dispat.toml` starter `init --format toml` generates; the JSON case also confirms that `status` plans without tagging. |
 | `TestConfigNamesKeepTheirCaseEndToEnd`                 | A map key keeps the case its file wrote, so a package, its space and a standalone package's synthetic space are reported and tagged under their configured names, and reach a script as `DISPAT_PACKAGE`, `DISPAT_SPACE` and the workspace listing. The selectors that address them — a `--package` flag, a flow entry, a commit scope — may spell them any other way. |
 | `TestConfigRefusesTwoSpellingsOfOneName`               | Two keys of one object that fold together, whether ASCII or Unicode aliases, have no lookup that could choose between them, so the load refuses them by name and nothing runs. |
 | `TestConfigUnicodeSimpleFoldKeepsDistinctScriptNames` | Dotted `İ` and plain `i` are distinct under Unicode simple folding, so both script names load and each command runs only its own body. |
@@ -1088,8 +1101,9 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConfigTagFormatStructureIsRefusedWithTheRuleItBroke` | Every structural rule a release tag format is held to, each refused naming the rule it broke: a second `{version}`, a `{channel}` with no `{counter}` and the reverse, a duplicated placeholder, the three of them out of order, and something other than literal text between the last two. |
 | `TestConfigTagFormatIsRefusedWhenGitWouldRefuseTheName` | A format is only exercised after the artefact is published, so a rendered name git would reject is refused at load time instead: a leading slash, dash or dot, a `.lock` suffix, a doubled separator, an unknown placeholder left as text, and a character git reserves. |
 | `TestConfigAliasFormatKeepsItsOwnStructuralRules` | An alias is written and never read back, which lets it spell a fragment of the version and keeps only the rules about rendering: one of each placeholder, a channel and a counter together or not at all, and a name git will accept. |
+| `TestConfigAbsoluteFileKeepsTheRequestedRepositoryRoot` | An absolute configuration file outside the checkout is loaded exactly, preserving the requested package root and ignoring a broken default file. |
 
-### Goal 11: the static `env` layers (`env_test.go`)
+### Goal 11: the static `env` layers (`env_test.go`, `workspace_env_collision_test.go`)
 
 | Test | Claim proven |
 |------|--------------|
@@ -1106,7 +1120,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestDotenvSteersDispatItself`                         | Variables defined exclusively in environment files expand inside dispat templates, such as changelog footers. |
 | `TestStaticEnvExpandsAgainstTheComputedSet` | A static env value is never shell-expanded by exec, so dispat expands it itself: against the computed release variables first, then the process environment, with `$$` a literal dollar and an unknown name expanding to nothing. |
 
-### Goal 12: the configuration ladder from the root down (`levels_test.go`)
+### Goal 12: the configuration ladder from the root down (`levels_test.go`, `config_versiongroup_test.go`)
 
 Each test validates an effect that only a specific layer could produce. Examples include a log line from one script, a
 version from one versioning mode, or a file preserved by one `revertOnFail` setting.
@@ -1121,7 +1135,7 @@ version from one versioning mode, or a file preserved by one `revertOnFail` sett
 | `TestSpaceVersionGroupReachesPackagesWithOverrideLayers` | A space-level `versionGroup` reaches every member package, including one the space file configures and one that carries its own folder file: the plan loads, names the group for each member, and versions them as one instead of refusing a `versioning` nobody wrote. |
 | `TestSpaceVersionGroupIsStillSupersededPerPackage` | A package that states its own `versioning` leaves the space's group: the group still moves its remaining members while the detached package versions independently. A layer stating both `versioning` and `versionGroup` is refused and named, a space folder's own file included. |
 
-### Goal 13: per-package overrides, versioning groups and `.dispatexclude` (`overrides_test.go`)
+### Goal 13: per-package overrides and `.dispatexclude` (`overrides_test.go`, `config_release_edges_test.go`)
 
 | Test                                         | Claim proven                                                                                                                                                                                                        |
 |----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1141,8 +1155,9 @@ version from one versioning mode, or a file preserved by one `revertOnFail` sett
 | `TestOverridesFolderConfigFilesAreHeldToTheirLevel` | A folder's own config file may not move its package, carry a setting the root would refuse, or declare a nameless entry, an unusable dependency object or a per-package login. |
 | `TestOverridesPackageReplacesEveryInheritedRecordField` | Every field of the changelog and GitHub objects overlays independently: one package restates them all, including its file name and its release destination, while its sibling keeps the root's. |
 | `TestOverridesWorkspaceLogNamesTheFoldersItExcluded` | A `.dispatexclude` takes a folder out of a space, which is a silent thing to do to a release plan, so the folder and the space are said at debug and the folder appears in no plan line. |
+| `TestConfigReleaseRejectsUnreadableExclusionPolicy` | A `.dispatexclude` that cannot be read, a looping link at the repository or a folder in a space, fails discovery naming the file instead of admitting excluded packages, and nothing is planned. |
 
-### Goal 14: the top-level `packages` section (`packages_test.go`)
+### Goal 14: the top-level `packages` section (`packages_test.go`, `final_standalone_config_test.go`)
 
 | Test                                    | Claim proven                                                                                                                                                                                                                                  |
 |-----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1156,6 +1171,8 @@ version from one versioning mode, or a file preserved by one `revertOnFail` sett
 | `TestPackagesDependenciesCarryKindAndKeep` | A package's own provider list holds everything the top-level object holds: a kind reaches propagation and a `keep` survives compute, both declared next to the package they belong to. |
 | `TestPackagesRefuseInvalidDeclarations` | A package's `src`, `manifestNames` and dependency declarations are held against the packages discovery actually found. |
 | `TestPackagesRefuseCollidingIdentities` | Two spaces' folders that fold onto one package name are refused, and a declared package path is held to the level that may state it. |
+| `TestFinalStandaloneFolderPolicyControlsItsRelease` | A standalone package's folder config controls its case-insensitive build override, version rewrite, budget and changelog; the release and retry prove it runs once. |
+| `TestFinalStandaloneFolderRefusalsPreventAnyRelease` | Invalid standalone folder policy stops both status and release before scripts or records, including syntax, types, nested ownership, versioning, budgets, script references, ignores and version rules. |
 
 ### Goal 15: dependency edges declared by a space (`spacedeps_test.go`)
 
@@ -1182,7 +1199,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRootPathPackageRefusals`                            | `revertOnFail` on a package rooted at the repository is refused whether it was written on the entry or inherited from the root file, an explicit `false` there keeps the setting for everything else, a build output holding another package's folder is refused, local changes under the release commit refuse the run, and the path refusals that did not change still hold. |
 | `TestRootPathPackageInALinkedPeer`                       | A fleet member may be a single-package repository: the peer's own configuration names its own root, and the package releases and is tagged in that repository with its changelog at the top while the entry repository keeps its own layout.                                                     |
 
-### Goal 16: release records (`records_test.go`)
+### Goal 16: release records (`records_test.go`, `alias_prerelease_test.go`, `final_config_boundaries_test.go`, `final_execution_boundaries_test.go`, `final_release_faults_test.go`)
 
 | Test                                                              | Claim proven                                                                                                                                                                                                                                                                                                                                                   |
 |-------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1235,6 +1252,10 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRecordsGithubReissuesAReadOnlyCallThatFailedTransiently` | A 5xx and a rate limit are answers a later attempt can outlive, so a read-only call is re-issued with backoff, honouring a `Retry-After` named in whole seconds and ignoring one that is not; the ladder is finite and a repository that never answers refuses the run. |
 | `TestRecordsGithubHeadersWithoutBodyRespectTheRequestTimeout` | A GitHub API returning 200 headers and no completed body ends at its request timeout rather than hanging or treating partial JSON as a record. |
 | `TestRecordsGithubRefusesALookupItCannotRead` | "Does this tag already have a release" decides whether anything is created, so a refusal, a body that is not JSON and a body past the bound are each a hard error naming the call, never a shrug that reads as "nothing published yet". |
+| `TestFinalSharedMovingAliasRefusesBothOwners` | Two packages cannot share a moving alias; the refusal writes neither build outputs nor tags, and separate alias namespaces allow both releases. |
+| `TestFinalExistingTagTargetReadFailurePreservesThePublishedRecord` | When a release stage has already created its immutable tag but Git cannot prove that tag's target, the outer run refuses to guess and reports a post-publication critical while retaining the truthful tag so retry performs no second upload. |
+| `TestFinalPostPublishTagInventoryFailureStillWritesTheReleaseTag` | A transient failure of the executor's post-publication tag inventory is warned rather than losing the release record: the immutable tag is still written, and retry converges without publishing twice. |
+| `TestFinalDeferredTagWriteFaultRetainsTheReleaseCommit` | A direct Git failure writing a finalize-deferred tag is E220 after publication; the release commit and changelog remain for review and no false baseline exists. The documented contract for a publication whose record never landed holds: with no tag saying the version is out, the retry uploads it a second time before establishing the missing immutable tag, which is why a publish script that must not upload twice verifies its destination. |
 
 ### Goal 46: draft GitHub releases (`draft_test.go`)
 
@@ -1261,7 +1282,7 @@ meets on day one and nowhere afterwards.
 | `TestRecordsAdoptedChangelogKeepsItsMode` | The rewrite replaces the whole file, so a changelog checked in with permissions of its own keeps them, which matters most on the file dispat did not create. |
 | `TestAdoptingOpensTheRecordUnderAHandWrittenPreamble` | A changelog with no entry headings of its own is all preamble, a heading inside a fenced block is not an entry, and the next entry still lands above the previous one. |
 
-### Goal 48: the shape of a record entry (`recordformat_test.go`)
+### Goal 48: the shape of a record entry (`recordformat_test.go`, `final_config_boundaries_test.go`)
 
 Goal 16 is about the artefacts a run leaves behind; this goal is about the bytes inside them. Every feature here
 renders into two destinations from one configuration, so each scenario asserts on the changelog file and on the body
@@ -1286,8 +1307,9 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestRecordsDefaultsAreUnchangedByTheNewOptions` | The byte-compatibility guarantee: a workspace configuring none of these options gets the whole file it always got, asserted byte for byte, so the release that ships them changes nobody's changelog. |
 | `TestRecordsRefuseInvalidEntryFormats` | Every part of the shared changelog and GitHub entry format that the renderer cannot carry out is refused before a release is planned. |
 | `TestRecordsRefuseACommitTypeWithTwoBumps` | A section's bump merges into the one commit parser the whole repository shares, so the fold runs across every layer that may declare one and a type two of them disagree about is refused naming the layer it was read in. |
+| `TestFinalFolderRecordPresentationKeepsRootCommitPolicy` | A package may customize changelog sections and commit links while its release version follows the root commit policy. |
 
-### Goal 17: the `init` and `preview` commands (`commands_test.go`)
+### Goal 17: the `init` and `preview` commands (`commands_test.go`, `command_release_edges_test.go`, `discovery_command_edges_test.go`, `preview_selection_edges_test.go`)
 
 | Test                                | Claim proven                                                                                                                                                                                                                                                                                 |
 |-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1300,8 +1322,12 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestCommandsReservedWordsShadowTheirScripts` | A command word always wins over a run script of the same name, and `dispat run <word>` is how the script is reached instead. Table-driven over the words whose bare form needs arguments, so the command winning shows as the usage exit; the words whose bare form does something observable prove the same rule in their own areas. |
 | `TestInitWritesJSONByDefaultAndRefusesAFormatItCannotWrite` | `dispat init` writes JSON when no format is asked for, and refuses a format it cannot write with nothing created. |
 | `TestCommandLineUsageRefusalsExitTwo` | Every arity rule, foreign flag and enumerated flag value is refused with exit code 2 and a sentence naming the mistake. |
+| `TestPlanningCommandsRequireGitBeforeReadingHistory` | Missing Git is reported explicitly before release planning or mutation. |
+| `TestCommandValidationExplainsSharedFlagsAndRepositoryFreeRollback` | Foreign shared flags identify their command owners; named rollback checks require no repository and report missing backups. |
+| `TestPreviewExplainsAnExplicitChangelogChannelMismatch` | Explicit changelog preview explains channel withholding while ordinary preview retains pending notes. |
+| `TestPreviewRefusesAnIncompletePlan` | A fatal cyclic plan produces no partial release preview. |
 
-### Goal 18: the `dispat run` command (`run_test.go`)
+### Goal 18: the `dispat run` command (`run_test.go`, `final_plan_faults_test.go`, `selection_depth_test.go`)
 
 | Test                                               | Claim proven                                                                                                                                                                                                                                                                                                |
 |----------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1343,8 +1369,12 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestRunScriptThatLeavesAChildHoldingTheOutputPipes` | Backgrounding a process is a legitimate thing for a release script to do, and a child that outlives the shell inherits the output pipes, so the wait for them is bounded and a script whose own process exited successfully has succeeded. |
 | `TestRunSeparatesAScriptItCannotRunFromOneThatFailed` | A missing interpreter and a script killed by a signal are dispat's own failure, said in its own words, rather than the script's answer. |
 | `TestRunQuotesForwardedArgumentsTheShellWouldOtherwiseRead` | Arguments typed after `--` are appended to a script's command text, so an ordinary flag goes through verbatim while an argument a shell would split, unquote or lose entirely is quoted and arrives as the one word it was typed as. |
+| `TestFinalPlanFaultStopsRunSinceBeforeTheScript` | An unreadable selection window prevents the selected script from running. |
+| `TestSelectionWindowsFromHEAD1ThroughHEAD9` | The revision-depth regression across `HEAD~1` through `HEAD~9`, `all`, and a transitive `--consumers` expansion ending at a web package. |
+| `TestRunSceneFixtureSelection` | The checked-in demo graph is bound to the real CLI: the selection a run makes over it is the one the demo shows. |
+| `TestCITestModuleSelectionRunsAffectedOnceAndAllRunsEveryModule` | The module selection the repository's CI sweep relies on runs each affected module once, and `all` runs every module. |
 
-### Goal 19: the standalone step commands (`standalone_test.go`)
+### Goal 19: the standalone step commands (`standalone_test.go`, `command_plan_failures_test.go`, `final_command_faults_test.go`, `final_github_step_boundaries_test.go`, `final_remaining_commands_test.go`, `standalone_interruption_edges_test.go`, `standalone_release_edges_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                                                 |
 |-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1367,8 +1397,18 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestStandaloneCommitTagRefusesAProviderAtItsConsumersCommit` | E201 on the standalone path (SPEC 19.3): after the consumer proceeded past its failed provider (vector 80d), `dispat commit --tag --package core` at the consumer's release commit exits 1 naming the consumer, the provider and both remedies, with no tag and no commit; covering both packages tags the provider and then the consumer. A nested `dispat commit --tag` in the provider's publish, inside a run that releases both, is left to that run and succeeds. |
 | `TestStandaloneStepsTakeTheWindowFlags`         | The steps take `dispat run`'s window: `--since` picks what a revision addressed, `--consumers` pulls the dependents in, `--on-error` is validated on every sweeping command, and a package tagged by `dispat commit --tag` falls off the recomputed window until `--since all` puts it back. |
 | `TestStandaloneStepCommandsSummariseForAPerson` | The step commands are run by hand as often as by CI, so a workspace whose log format is the readable one gets its tally printed on standard output instead of logged as a JSON line nobody asked for. |
+| `TestCommitPropagatesAWindowReadFailureBeforeWriting` | An unreadable commit selection window preserves the index, HEAD and tags. |
+| `TestStandaloneCommandsPropagateAPlanningReadFailure` | Commit, GitHub, preview and unchanged selection propagate unreadable planning evidence without mutation. |
+| `tests/integration/final_command_faults_test.go::TestFinalCommitRefusesUnreadableRepositoryMetadataBeforeMutation` | `commit` refuses unreadable cleanup, comment-character, or hook-location metadata before delegating to `git commit`, preserving HEAD, the index, and the working copy. |
+| `tests/integration/final_github_step_boundaries_test.go::TestFinalGitHubStepRefusesForeignRunStateBeforeTheAPI` | The standalone GitHub step rejects an unparseable run version and a tag that disagrees with the run version before making even a verification request, so malformed inherited `DISPAT_*` state cannot create a plausible external release. |
+| `tests/integration/final_github_step_boundaries_test.go::TestFinalPolyrepoGitHubStepChecksTheOwnerForItsTag` | In a polyrepo stage, the GitHub step checks the package owner's source repository for the run tag. A tag present only in the source suppresses W229 while the command creates exactly one GitHub release; the control repository remains tag-free. |
+| `TestFinalStandaloneCommitRetainsItsRecordWhenPinExportFails` | A commit-pin export failure returns an error while preserving the completed release commit, tag and existing output-directory data. |
+| `TestStandaloneGitHubInterruptDrainsTheInFlightRequest` | Interrupting a standalone GitHub step cancels the active request, drains queued work and creates no release tags. |
+| `TestStandaloneAutoversionReportsSyncLockFailureAfterTruthfulWrites` | Lockfile generation failure retains completed manifest edits but creates no commit or tag. |
+| `TestStandaloneCommitNoForceOverridesConfiguredForce` | Explicit no-force protects a tag created between planning and commit despite configured force permission. |
+| `TestStandaloneStepsRefuseAFatalPlanBeforeWriting` | Native changelog, version, commit and GitHub steps refuse a cyclic plan without scripts or records. |
 
-### Goal 20: the `--package` / `--space` / `--group` selection (`filter_test.go`)
+### Goal 20: the `--package` / `--space` / `--group` selection (`filter_test.go`, `preview_selection_edges_test.go`, `unicode_identity_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                                     |
 |-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1398,8 +1438,9 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestFilterGroupSelectsForEveryCommand`         | The group term narrows `preview`, `status`, `changelog`, `commit` and `compute` exactly as the other terms do, leaving the other group untouched.                                                                                                 |
 | `TestFilterReleaseByGroupNeverSplitsIt`         | Naming a member of a group under `--strict` is refused (`W231`) while naming the group releases every member at once, clean under `--strict`, across a space and a standalone package alike; a later unfiltered run finishes the rest.            |
 | `TestFilterPositionalPackagesAreAUsageError`    | A bare package name after `run`, `preview`, `changelog`, `autoversion`, `commit` or `compute` is a usage error (exit 2): the selection is a flag.                                                                                                 |
+| `TestSelectionTraceAccountsForEverySafetyNarrowing` | Trace logs identify withheld dependencies and split groups while strict selection remains mutation-free. |
 
-### Goal 21: the shell helpers (`if_test.go`, `for_test.go`, `exec_test.go`, `exec_space_test.go`)
+### Goal 21: the shell helpers (`if_test.go`, `for_test.go`, `exec_test.go`, `exec_space_test.go`, `command_release_edges_test.go`, `discovery_command_edges_test.go`, `final_command_faults_test.go`, `final_remaining_plan_test.go`, `fleet_space_commands_test.go`, `fleet_space_lazy_test.go`, `for_cancel_test.go`, `for_changed_test.go`, `if_changed_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                        |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1468,7 +1509,13 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestFleetNestedHelpersKeepTheirCurrentPackageSelection` | Nested changed-package loops and conditional helpers infer the actual peer package directory while inheriting the fleet configuration. |
 | `TestExecInSpaceIsStillTheSpacesPrimaryFolder` | Widening what a space's scripts are moves nothing else: `--in space:<name>` is still the space's first configured folder, which no space folder file can restate, and it moves neither the script nor the environment. |
 | `TestExecRefusesAPlaceItCannotRunIn` | `--in` takes a folder or a level, and each way of naming neither, a space the configuration does not declare or a path that is there but is a file, is refused before the script is handed to a shell. |
-### Goal 22: self-update (`selfupdate_test.go`)
+| `TestForRefusesAnUnknownWorkingPackageBeforeRunning` | An unknown package working directory prevents execution of the loop body. |
+| `TestIfAnEmptyMatchedBranchIsADeliberateNoop` | A matched empty conditional branch succeeds without executing the alternative branch. |
+| `TestIfReportsWhenItsInvocationFolderDisappears` | A vanished invocation directory produces an operational error before the selected conditional script can write anything. |
+| `tests/integration/final_command_faults_test.go::TestFinalExecComputedEnvironmentNeedsNoDeclaredPairs` | `exec --env dispat` supplies computed package release variables even when there are no configured environment pairs to remove. |
+| `tests/integration/final_command_faults_test.go::TestFinalExecFailsClosedWhenLayeredConfigurationCannotBeDiscovered` | `exec` refuses before starting a root-level script when the package or space environment it needs comes from a malformed layered configuration. |
+| `TestFinalRemainingExecCwdDiscoveryFailuresNameTheUnreadableLayer` | Both inferred subject sites (`--for cwd` and `--script-from cwd`) fail before a root script can run when package discovery cannot read the current folder's layer. |
+### Goal 22: self-update (`selfupdate_test.go`, `final_selfupdate_boundaries_test.go`, `go_install_update_test.go`)
 
 dispat builds two binaries at two versions and exercises them against a fake releases API. This tests the real
 binary-swapping flow on disk rather than mocking the filesystem.
@@ -1513,8 +1560,13 @@ binary-swapping flow on disk rather than mocking the filesystem.
 | `TestSelfUpdateReadsItsOwnRepositoryByDefault` | `--owner` and `--repo` exist for a fork, so leaving them out reaches dispat's own repository rather than an empty pair, which is what a real run depends on. |
 | `TestSelfUpdateReportsItselfAsJSON` | The update check is a CI gate as often as a person's question, so each outcome (something to install, nothing to install, a rollback with a backup and one without) is one structured line carrying the versions and the pending flag the gate exits on. |
 | `TestSelfUpdateCheckCarriesTheNotesAsFields` | A check that found something to install carries the release's notes as fields, so a job opening a pull request with them does not fetch the release twice, and the install footer is no more notes there than on a terminal. |
+| `TestFinalSelfUpdateCannotInstallANamedDraftOrFailedLookup` | Naming a version does not allow installation of a draft or a failed API lookup. |
+| `TestFinalSelfUpdateNotesPreserveUnicodeAndSkipBothFenceStyles` | Preview skips both Markdown fence styles and nested fence-like text, preserves visible notes, and clips long Unicode text at a complete rune. |
+| `TestFinalSelfUpdateRefusesIncompleteHTTPResponses` | A release listing that stops before its body ends is refused as the transport failure it is, without replacing the running binary or leaving a staged file. |
+| `TestFinalSelfUpdateReportsBothDownloadFailures` | Failure of both authenticated download and public fallback preserves both causes, keeps credentials out of the fallback and logs, and leaves the binary unchanged. |
+| `TestGoInstallBuildUsesTheGoToolchainForUpdates` | Go module metadata selects Go update instructions and prevents binary replacement, download or backup creation. |
 
-### Goal 45: installing a tool (`install_test.go`)
+### Goal 45: installing a tool (`install_test.go`, `final_api_boundaries_test.go`, `final_command_faults_test.go`, `install_target_edges_test.go`)
 
 dispat publishes a fictional tool as a release asset and installs it onto a folder standing in for one on `PATH`. The
 tool is a script that reports its own version, so every claim about which file landed is answered by running it.
@@ -1553,8 +1605,11 @@ tool is a script that reports its own version, so every claim about which file l
 | `TestInstallRefusesWhatItCannotResolve` | The repository reference, the asset pattern and the destination are read before any request: a reference with an empty part, a placeholder that never closes and a destination that cannot even be examined are each refused naming the part that was wrong. |
 | `TestInstallRefusesAReleaseThatCarriesNothing` | A release with no files attached is a tag cut before the build finished rather than an asset-name mismatch, so the refusal names the release and not the pattern. |
 | `TestInstallReportsItselfAsJSON` | The same for `dispat install`, whose reader is nearly always a provisioning script: every outcome carries the destination path, and a piped install names the folder the command runs in. |
+| `tests/integration/final_api_boundaries_test.go::TestFinalInstallExplainsAnUnprefixedListingWithNoVersions` | An empty install tag prefix is reported as an intentional unprefixed release listing when no tag is a valid version, and the refusal names the flags that can broaden the listing. |
+| `tests/integration/final_command_faults_test.go::TestFinalInstallRechecksTheFilesystemAfterReleaseDiscovery` | `install` safely refuses a destination that becomes a folder or an install directory that becomes a file after release discovery, preserving the new filesystem object and downloading no asset. |
+| `TestInstallRollbackKeepsTheCurrentToolWhenRotationCannotStart` | A rollback initialization failure preserves both the installed executable and its backup. |
 
-### Goal 23: the `compute` command (`compute_test.go`, `compute_discovery_refusal_test.go`)
+### Goal 23: the `compute` command (`compute_test.go`, `compute_discovery_refusal_test.go`, `compute_policy_boundaries_test.go`, `compute_release_failures_test.go`, `final_api_boundaries_test.go`, `final_command_faults_test.go`, `final_remaining_commands_test.go`)
 
 | Test                                  | Claim proven                                                                                                                                                                                                  |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1577,14 +1632,19 @@ tool is a script that reports its own version, so every claim about which file l
 | `TestComputeRefusesASymlinkedConfigWithoutSplittingItsTwoNames` | A root config symlink must not be replaced by a new regular file while its target keeps stale settings: compute refuses before backup or rewrite and preserves the alias and target bytes. |
 | `TestComputeStopsWhenTheAnswersRunOut` | `--interactive` asks per suggestion, and a stream that ends is an answer of its own: the remaining suggestions stay unapplied and the config is left byte for byte as it was. |
 | `TestComputeTOMLRefusalStillReportsTheSuggestion` | The TOML refusal is about writing rather than detecting, so the suggestion is printed exactly as the preview prints it. |
+| `TestComputeTOMLValueFragmentRefusalPreservesItsProvenance` | An unwritable TOML value fragment is named correctly and both source files remain unchanged. |
+| `tests/integration/final_api_boundaries_test.go::TestFinalComputeDerivesDependenciesWithoutInventingGitBaselines` | In an adopting source tree with no Git repository, `compute` still derives objective manifest dependency edges while explicitly omitting release initials that have no tag history, in preview and write modes. |
+| `tests/integration/final_command_faults_test.go::TestFinalComputeKeepsReadableEvidenceBesideAMalformedManifest` | `compute` reports a malformed sibling manifest without discarding readable dependency evidence, and repairs an invalid declared kind to the strongest of runtime, peer, optional, and development declarations. |
+| `TestFinalComputeRefusesAnUnavailableBackupAndCanRetry` | An occupied backup path refuses a compute write without changing configuration or existing backup data; moving the obstruction allows a convergent retry. |
+| `TestFinalComputeRejectsBrokenInputBeforeApplyingAcceptedChanges` | An oversized interactive answer reports its read error and discards earlier accepted suggestions before changing configuration or backups. |
+| `TestComputeWritesThroughARef`           | A `packages` map kept in a `$ref` fragment is edited in the fragment, at the key it holds, with the reference intact in the root config and the backup beside the file that was written.                                                                                                       |
+| `TestComputeRefusesAComposedKey`         | A key composed from a fragment and the keys beside the reference is refused rather than guessed at, leaving every file and every backup untouched.                                                                                                                                             |
 
 Unit tests in `services/dispat/internal/app` cover the finer-grained rules, testing each case in memory rather than
 invoking the full binary. These include cross-ecosystem matching, interactive selection, TOML snippet fallbacks,
 stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
-| `TestComputeWritesThroughARef`           | A `packages` map kept in a `$ref` fragment is edited in the fragment, at the key it holds, with the reference intact in the root config and the backup beside the file that was written.                                                                                                       |
-| `TestComputeRefusesAComposedKey`         | A key composed from a fragment and the keys beside the reference is refused rather than guessed at, leaving every file and every backup untouched.                                                                                                                                             |
 
-### Goal 24: native auto-versioning (`autoversion_test.go`)
+### Goal 24: native auto-versioning (`autoversion_test.go`, `unreleased_provider_edges_test.go`)
 
 | Test                                         | Claim proven                                                                                                                                                                                                                                                                                                                      |
 |----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1614,8 +1674,9 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoVersionRangePolicySpellsEachEcosystem` | The keyword policies are npm's, so an ecosystem with no caret cannot be handed one: a Python specifier pins with `==` whatever keyword was asked for, and a policy that is neither keyword nor template is written through verbatim. |
 | `TestAutoVersionReplaceRuleStepsOverAFolderItCannotEnter` | A replace rule reaches any file at all, so it also reaches what the filesystem will not let it read: the folder is named in a warning and skipped whole, and everything the rule could reach is still rewritten. |
 | `TestAutoVersionManifestSurvivesAPartialDiskWrite` | A filesystem quota interrupts the CLI's manifest rewrite after a temporary file exists. Even when the runtime reports a short count without an error, the original bytes and mode survive, the partial file is removed, and an unrestricted retry changes only the version. |
+| `TestReleaseAutoVersionKeepsANeverReleasedProviderAtCurrentVersion` | Consumer release preserves the current version of an unchanged, never-released provider and does not create a provider tag. |
 
-### Goal 25: the manifest commands (`manifests_test.go`)
+### Goal 25: the manifest commands (`manifests_test.go`, `aqua_test.go`, `command_release_edges_test.go`, `final_api_boundaries_test.go`, `final_command_faults_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                          |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1636,8 +1697,15 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestManifestsWriterLinkDropVerifyCycle`         | Run the full cycle through commands alone: apply links, confirm with `--verify-linked`, drop links, and confirm removal with `--verify-unlinked`.                                                                                              |
 | `TestManifestsScannerRangeGates`                 | Range gates operate independently from link gates and each other. Passing `--forbid-range 'workspace:*'` fails on matching declarations with E217 until rewritten. Passing `--require-range` inverts the check (E218). A linked tree with clean ranges passes range gates but fails link gates, and specifying the same pattern in both flags exits 2. |
 | `TestManifestsWriterSetBuild`                    | Pass `--set-build` to update mobile counters (`CFBundleVersion`, `android:versionCode`, Gradle `versionCode`, or the pubspec `+` suffix) without modifying version strings. Events report `buildWritten` without `versionWritten`, and the scanner reads the counter back. Non-integer values on Android exit 1. |
+| `TestScannerLinkGateRefusesALaxGoManifest` | Tolerant inventory cannot certify absence of local links when replacement directives are unreadable. |
+| `TestScannerPrintsAVersionWithoutAPackageName` | Human scanner output retains a nameless version and rejects a file supplied as a folder. |
+| `tests/integration/final_api_boundaries_test.go::TestFinalManifestCommandsRejectIncompleteEditSpecificationsBeforeWriting` | The `writer` and `replacer` command grammars reject every missing half of `--set`, `--link`, and `--replace` before opening the manifest, so an earlier valid edit on the same command line cannot leak through. |
+| `tests/integration/final_command_faults_test.go::TestFinalWriterBatchContainsAMalformedOverrideWithoutLosingOtherEdits` | A malformed npm override container is preserved byte for byte and reported as a failure while independent valid manifests in the same writer batch still receive their requested links. |
+| `TestAquaDemoFixtureThroughManifestCommands` | Scanner and writer compose over an `.aqua/aqua.yaml` that imports an arbitrary-name package list: literal and dynamic entries are reported without evaluation, the writer reaches the imported file through `--manifest-format aqua`, and malformed YAML preserves healthy partial results. |
+| `TestAquaComputeAndAutoversionUseQualifiedOwnership` | Compute and auto-versioning share the registry-qualified Aqua ownership while writing an exact pin. |
+| `TestAquaWriterBatchKeepsCompletedWriteWhenSymlinkRefuses` | A writer batch reports a later dot-named Aqua symlink it refuses and keeps the writes it already completed. |
 
-### Goal 26: the `autowriter` command (`autowriter_test.go`)
+### Goal 26: the `autowriter` command (`autowriter_test.go`, `final_api_boundaries_test.go`, `final_command_faults_test.go`, `unreleased_provider_edges_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                          |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1664,8 +1732,13 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoWriterLinkLocalReachesAnIndirectRequire` | Go builds only apply replace directives found in the main module. dispat inspects indirect requires so that providers reached through intermediate modules are redirected in the consumer's `go.mod`. |
 | `TestAutoWriterSetLocalLeavesAnIndirectRequireAlone` | Range updates only modify direct declarations. Indirect requires are managed by toolchains, so dispat leaves them untouched. |
 | `TestAutoWriterLeavesTheVersionOfAPackageNobodyVersions` | `{version}` resolves to the covered package's planned version and a package under versioning "none" has none, so the own-version write is skipped and said out loud rather than writing "0.0.0" into a manifest nobody versions. |
+| `tests/integration/final_api_boundaries_test.go::TestFinalAutoWriterLeavesANestedPackageManifestToItsOwner` | A recursive `autowriter --manifests all` scan for an outer package does not rewrite a nested manifest owned by another configured package. |
+| `tests/integration/final_command_faults_test.go::TestFinalAutoWriterUsesHealthyManifestBesideBrokenAndDifferentFormats` | `autowriter` keeps a healthy npm edit beside malformed Cargo and different-format manifests; a link-unsupported Dockerfile cannot satisfy strict mode, while a converged link in a supported npm manifest still can. |
+| `tests/integration/final_command_faults_test.go::TestFinalRecursiveEditorsStopBetweenAtomicFileWrites` | Ctrl-C during `autowriter` or `autoreplacer` preserves completed atomic writes, stops before every later file is changed, and reports interruption rather than successful partial completion. |
+| `tests/integration/final_command_faults_test.go::TestFinalStepCommandsStopWhenPlanningOrSelectionCannotReadGit` | `autowriter` and `autoreplacer` refuse unreadable planning and explicit-window Git inputs before opening any target, preserving every selected file. |
+| `TestAutoWriterResolvesANeverReleasedProviderToItsCurrentVersion` | Standalone writing resolves an unchanged, never-released provider to its current version without inventing a release. |
 
-### Goal 27: the `autoreplacer` command (`autoreplacer_test.go`)
+### Goal 27: the `autoreplacer` command (`autoreplacer_test.go`, `final_command_faults_test.go`, `replacer_safety_edges_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                          |
 |-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1677,6 +1750,9 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoReplacerConvergesUnderStrict`        | The replacer distinguishes previously reconciled files from files that never matched. Re-running a converged `{previous}=>{version}` pattern passes cleanly under `--strict`.                                                                               |
 | `TestAutoReplacerLeavesANestedPackageToItsOwner` | A parent package skips files owned by nested child packages. Each child package updates its own files, avoiding concurrent file writes across goroutines.                                                                                |
 | `TestAutoReplacerOutcomesReachTheExitCode`    | The `--strict` flag applies across the entire sweep. Missing `--replace` flags, missing `--files` flags, malformed specs, and positional arguments exit 2.                                                                        |
+| `tests/integration/final_command_faults_test.go::TestFinalAutoReplacerKeepsProviderFactsFromAHealthySibling` | `autoreplacer` reports a malformed sibling while retaining provider facts resolved from a healthy manifest's aliased local path and applying the provider-version replacement. |
+| `TestAutoReplacerReportsAnAtomicWriteRefusalWithoutTruncatingTheFile` | An atomic write refusal returns failure, preserves original content and leaves no temporary file or release tag. |
+| `TestAutoReplacerSkipsBinaryContentWithoutLosingTextEdits` | A replacement sweep skips binary content with a diagnostic while applying matching text edits and creating no tags. |
 
 ### Goal 28: Docker through the binary (`docker_test.go`)
 
@@ -1686,7 +1762,7 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestDockerReleaseReconcilesTagsAndCompose`     | Releases update both Docker formats during the version stage. Consumer `FROM` tags and `COPY --from` images update to match provider versions, build-stage copies remain untouched, and compose files update service versions and `build.tags` entries without altering port mappings. |
 | `TestDockerManifestCommands`                    | Config-free commands support both Docker formats. The `scanner` reports compose identities and Dockerfile base images without a config, commit, or plan. The `writer` updates compose tags and package versions in place, digest-pinned bases are skipped, and missing edits trigger failures under `--strict`. |
 
-### Goal 29: the release guards (`guard_test.go`)
+### Goal 29: the release guards (`guard_test.go`, `command_plan_failures_test.go`, `final_release_faults_test.go`, `final_remaining_release_test.go`, `push_recovery_record_edges_test.go`, `release_guard_read_edges_test.go`, `release_lost_response_test.go`)
 
 | Test                                       | Claim proven                                                                                                                                                                                                                                                     |
 |--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1700,8 +1776,18 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestReleaseRefusesToRepublishAnExistingTag` | The recovery pushes this run's tags again, so a checkout that planned a version somebody else published would write its own tag over that record. The remote's tags are read first: the run stops, names the tag, and the published ref is left where its own release put it. The record arrives mid-release here, which is the only way it can still reach the recovery: one the remote already held is refused under the lock (goal 59). |
 | `TestReleaseSettlesAConflictAndKeepsBothSides` | What landed changed the same file the release commit writes. The release has published by then, so it completes: `W243`, exit `0`, this release's side of the conflicting file with no markers in it, everything of theirs that did not conflict still in the merge, their side pushed to a `release-conflicts/...` branch, and both the changelog entry and the GitHub release body naming the file and that branch. The tag stays on the release commit, the lock is given back, and the run after it plans normally: a merge commit that edits changelogs still resolves to no package and raises no `W131`. |
 | `TestReleaseSettlesAConflictOverAFileItDeleted` | The conflict with no file to take: this side removed what the commits that landed mid-release edited, so this side is the absence and the path is removed from the merge, with their edit kept on the quarantine branch and both halves named in the record. |
+| `TestReleasePropagatesAnUnreadableAllowedBranchBeforeMutation` | An unreadable allowed branch prevents package work and release records. |
+| `TestFinalConflictSettlementFaultsKeepBothDurableInputs` | Git failures resolving the release side, pushing the quarantine branch, staging the audit note, or committing the settlement are E224; the local immutable release tag, remote foreign commit, visible merge state, and any successfully pushed quarantine ref truthfully describe how far recovery reached. |
+| `TestFinalRecoveryReadFaultsKeepThePublishedRecordLocal` | After publication and a concurrent remote advance, failure reading remote tags or fetching for recovery is E224; the immutable tag and release commit remain local, the foreign remote commit remains durable, and explicit merge/ref repair makes retry a publication no-op. |
+| `TestFinalConflictInspectionFailureAbortsBeforeSettlement` | If Git cannot enumerate the unmerged paths of a real recovery conflict, dispat refuses to guess, aborts the merge, preserves the published local immutable tag and the exact foreign remote commit/file, and creates no quarantine branch. |
+| `TestFinalConflictQuarantineLookupRefusalsPreserveBothSides` | If the quarantine-name lookup fails or reports the generated name occupied, conflict settlement stops before any quarantine push, keeps the merge open, and preserves the exact published local file and foreign remote commit/file. |
+| `TestFinalRecoveryAbortFailureReportsTheRetainedObstacle` | If an untracked local file makes recovery refuse before merging and `merge --abort` consequently fails, dispat reports the cleanup failure while E224 remains the release outcome; the published tag, untracked local input and foreign remote input remain reviewable. |
+| `TestPushRecoveryRefusesAnUnreadableBranchAfterPublication` | Failed branch proof during push recovery preserves the local publication and reports missing remote records for repair. |
+| `TestPushRecoveryReportsALateGitHubRecordFailure` | A late GitHub metadata failure reports incomplete recording while preserving the recovered remote branch, exact release tag and published outcome; retry does not republish. |
+| `TestReleaseBehindGuardRefusesUnreadableRemoteState` | Unreadable branch or remote evidence stops push-mode release before mutation; a healthy retry publishes once. |
+| `TestReleaseReconcilesGithubCreateWhoseResponseWasLost` | GitHub persists a create whose response is lost: independent work continues, the run reports E222 and exits non-zero, and durable tags make the rerun a no-op without another POST. |
 
-### Goal 30: the release lock (`lock_test.go`)
+### Goal 30: the release lock (`lock_test.go`, `final_release_faults_test.go`, `final_unlock_safety_test.go`, `lock_hardening_test.go`, `lock_response_edges_test.go`)
 
 The lock is a ref on the remote, so every claim here is read from the bare repository the fixtures push to. What was
 true *during* a run is read from a `beforeAll` hook, which runs while the lock is held. The harness disables the lock
@@ -1739,6 +1825,12 @@ the round trip is read from the tag object on the remote instead.
 | `TestReleaseLockRefusesAnAmbiguousPushDestination` | A remote with two push destinations is a lock that would exist in two places and coordinate nothing, so the run exits 1 naming the remote before any package work and nothing is tagged or committed, whether the remote is the one repository's own or, with `E336`, a source repository's of a fleet. |
 | `TestReleaseLockReplacedBeforePublishWithholdsThePublication` | A release reads its lock back before every publish command. A `beforePublish` hook that replaces the lock on the remote makes that read find another object: the lost line names the reason `lost`, the publication is refused with E336 and the `native-recording-or-lock` category before the command starts, nothing is tagged, and the replacement survives this run's cleanup. |
 | `TestReleaseLockVerifyOffSkipsTheLockRead` | A git fault fails every read of the remote lock. With `commit.verify` on, the lock is read back three times before the publication, which is withheld with E336 and nothing tagged. With `commit.verify: false` the lock is never read back, one warn line says so, and the release publishes, tags and gives its lock back. Both runs leave no lock behind. |
+| `TestFinalReleaseLockObjectFailureCleansOrReportsTheAttemptRef` | If Git cannot resolve the private attempt tag's object, release stops before planning, cleans the attempt with a live bounded context, and leaves no remote lock; if Git also refuses that cleanup, the warning names the one stranded local attempt ref. |
+| `TestFinalFleetUnlockFailureFailsAfterPublishing` | If one source repository's remote refuses to give back its release lock after publication and durable source/control recording, fleet cleanup reports E336, preserves the published result, source tag, source commit and control checkpoint, continues releasing the remaining control lock, leaves only the affected source lock visible for repair, exits nonzero, and emits one failed `release.finished` webhook with `published=1`. |
+| `TestReleaseLockCreationFailurePreventsPlanningAndPublication` | Local lock-tag creation failure prevents planning, package work and remote locking. |
+| `TestReleaseLockLocalCleanupFailurePreservesThePublishedOutcome` | Local cleanup failure returns E336 while retaining publication and successful remote lock cleanup. |
+| `TestReleaseLockPreservesALightweightForeignLockWhenAttemptCleanupFails` | A lightweight foreign lock remains authoritative even when cleanup of the refused attempt fails. |
+| `TestReleaseLockRecoversItsOwnAcceptedPushAfterAResponseFailure` | A lost lock-push response is reconciled by attempt identity and the owned lock is cleaned after release. |
 
 ### Goal 59: records under the lock (`release_records_test.go`)
 
@@ -1765,7 +1857,7 @@ claim is about what the lock does and does not buy.
 | `TestReleaseRecordsUnwritableStoreKeepsThePublication` | A store that refuses the create-only push leaves a published package recorded in its own repository, reports the push failure and exits non-zero, with one push carrying every record of the run.        |
 | `TestReleaseRecordsInAComposedWorkspace`           | A fleet compares every participating repository: a source repository whose checkout lacks its remote's record refuses the whole run with `E196` naming that repository, before anything publishes anywhere.  |
 
-### Goal 31: corrections and reverted changelogs (`corrections_test.go`)
+### Goal 31: corrections and reverted changelogs (`corrections_test.go`, `final_plan_faults_test.go`)
 
 Every scenario names its target the way an operator does, with `git rev-parse HEAD` after the commit it means, so the
 footers under test carry real shas rather than fixtures. Most run in a two-package repository with no edge between the
@@ -1797,6 +1889,7 @@ packages, which is what makes "the correction reached exactly this far" assertab
 | `TestCorrectionOfACommitThatCarriesNoRecord` | A commit whose message is not a release record is still in the window, and naming it as a target is a no-op rather than an error: there is nothing there to correct. |
 | `TestCorrectionDiagnosticsNameWhatTheyCouldNotReach` | A correction whose targets have all left the pending window addresses no package at all, and reporting it against nothing is the whole point of the no-op diagnostic being unsuppressible; a correction that does reach its target names the targets it resolved at trace. |
 | `TestCorrectionReachesATargetAcrossAMerge` | A merge gives the commit graph two paths to the same commit, and a correction naming a commit both paths reach is still an ancestor: the restatement decides the bump with no E210, as on a linear history. |
+| `TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder` | Correction ancestry about a released commit, the one question no pending window answers, requires the repository DAG and never falls back to log order. |
 
 ### Goal 32: references naming several files (`multiref_test.go`)
 
@@ -1844,7 +1937,7 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestVersioningNoneHeldProviderPrereleaseIsReadFromOneAnswer` | A held provider's withheld prerelease is not the version the run writes, so it does not classify the consumer either: a stable release picking up the provider's published stable version reports no W203. |
 | `TestVersioningNonePreviewShowsNoEntry`      | `dispat preview` renders no entry for a changed `none` package, with or without `--package`, instead of a header built from the `0.0.0` placeholder it carries in the plan. |
 
-### Goal 35: spaces spanning several folders (`spacepaths_test.go`)
+### Goal 35: spaces spanning several folders (`spacepaths_test.go`, `discovery_command_edges_test.go`)
 
 | Test                                    | Claim proven                                                                                                                                                                                                       |
 |-----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1854,6 +1947,7 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestSpacePathsAscentFromSecondPath`    | Config-file resolution from inside a later folder finds the monorepo root even when that folder's space file carries a `packages` map, the shape that would otherwise read as a nested monorepo root.               |
 | `TestSpacePathsFilterAndLocate`         | `--space` covers every folder's packages; standing in a later folder infers the space, and standing inside one of its packages narrows to that package.                                                             |
 | `TestSpacePathsNoneCombined`            | A versioning-none space spanning two folders runs scripts under both and never tags anything, while the releasable space next to it releases normally.                                                              |
+| `TestDiscoveryNamesOneIdentityRepeatedAcrossSpacePaths` | One package identity found under two folders of a space, spelled the same or folding onto one name, is refused with no partial plan, and an identical spelling is named once rather than as two names. |
 
 ### Goal 36: declared version groups across spaces (`versiongroups_test.go`, `npm_distribution_test.go`)
 
@@ -1904,7 +1998,7 @@ script-only members, and per-member tag spellings.
 | `TestVersionGroupRestingMemberDoesNotDecideTheGroupsChannel` | Under the defaults, a sparse member resting on stable while the rest ride an rc does not graduate the group: the train continues. |
 | `TestVersionGroupGraduationRetryFinishesTheTrain` | Under the defaults, a graduation whose second leg failed is retried and finishes the train, rather than reporting E185 for a member whose own window never carried the work that set the train's core. |
 
-### Goal 37: step commands wired into a running release (`stepwiring_test.go`)
+### Goal 37: step commands wired into a running release (`stepwiring_test.go`, `step_environment_edges_test.go`)
 
 | Test                                | Claim proven                                                                                                                                                                                                          |
 |-------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1915,6 +2009,10 @@ script-only members, and per-member tag spellings.
 | `TestStepsWiredRecordTheRunsDependencies` | A wired record's dependencies section states the run's provider movements. The consumer's changelog step replans after the provider's tag landed and after their shared fixed group would read that tag as a floor; the masked replan reproduces the run (no W228), and the entry names the movement the run actually made, not a version it never released. |
 | `TestStepsAlignedRecordsKeepTheirDependencyLinks` | An aligned record links its dependency lines exactly as the record the run would have written itself: a provider tag the run never planned appears mid-run, the replan drops the provider as already released (W228), and the alignment picks the movement and the provider's tag up from `DISPAT_UPDATED_<KEY>_TAG`, so the `auto` link names the run's own tag rather than rendering plain or appending an empty one. |
 | `TestStepsGithubBeforeCommitWarns`  | A github step ordered before the commit step is the W229 smell, said before anything is created; one release is created at the run's tag, and the correctly placed second github step finds it and skips (W224).       |
+| `TestGitHubStepReadsLegacyOutputAndDropsForeignPackageExport` | Legacy output assets upload only for their owning package; foreign package exports are ignored. |
+| `TestReleaseContinuesWhenOneGitHubTargetCannotResolve` | A missing-token GitHub target cannot suppress a healthy target or erase successful package tags. |
+| `TestStepAlignsItsRecordToTheRunEnvironment` | Where the step's replan can be corrected it is, and W228 says so: the run's version, its prerelease channel, the provider movements it listed and a stale provider destination are what the record states, and a workspace listing whose entries do not all resolve is skipped rather than refused. |
+| `TestStepRefusesARunEnvironmentItCannotHonor` | A step invoked inside a run is held to the run's answers: a version that does not parse, a listing naming an update it does not describe, a pin its own plan does not release and a tag the aligned version does not render each stop the changelog or commit step with exit 1 and `E219`, before any commit, tag, changelog byte or tree change. |
 
 ### Goal 38: the longitudinal fence (`longitudinal_test.go`)
 
@@ -1934,8 +2032,7 @@ accounting and fresh-changeset reporting.
 
 Three release shapes enter the plan without pending notes to group. Each must state its cause in the changelog entry
 and the GitHub body, because an empty record looks like a broken write rather than an intentional release. Goal 14,
-goal 36, and goal 38 test the fourth empty shape (the group ride); goal 31's `TestRevertPairOnATrainRendersCancelLine`
-covers the train revert pair.
+goal 36, and goal 38 test the fourth empty shape (the group ride); goal 31 covers the train revert pair.
 
 | Test                                    | Claim proven                                                                                                                             |
 |-----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
@@ -1956,7 +2053,7 @@ next cycle starts.
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestSmokeReleaseCycles` | Eleven cycles in sequence: bootstrap (everything direct, every manifest written); a shared minor riding the image with its FROM and compose tags following; a provider releasing alone with the consumer's manifest deliberately left behind; the consumer's own next release performing the reconciliation pickup (W197, manifest moves, changelog deliberately silent); a caret propagating the provider's fix (manifest and dependencies section both move); a whole rc train over the group, with prerelease versions in the manifests, fresh-only rc entries, and a graduation whose entry documents the provider's movement over the whole train; a run dying between the group's publishes with the retry catching the failed leg up at the published version as its own release; a provider leg dying under `isBuildWaitingPublish` with the consumer skipped (W194) rather than shipping against the missing publish; and a dead ride with the retry riding the cause-less laggard up at the published version (W234), its entry spanning the movement it rode for, the manifest pickup intact throughout; a release whose push is refused because somebody landed a commit mid-run, which merges what arrived, reports `W242`, keeps its tag on the commit it planned and is followed by a run that releases the commit that arrived; and the same again where what arrived changed the same file, which completes anyway with `W243`, the release's own side of the file, and a `release-conflicts/...` branch named in the entry. |
 
-### Goal 41: game engine manifests (`engines_test.go`)
+### Goal 41: game engine manifests (`engines_test.go`, `engine_dependency_release_test.go`)
 
 Unity, Godot, Unreal, Defold, and O3DE store versions in custom manifest files that standard package managers do not
 parse. This goal proves that dispat reads and writes all twelve engine formats like standard manifests using the same
@@ -1979,8 +2076,9 @@ monorepo containing a project for each engine alongside their generated folders.
 | `TestEnginesUnityRangesArePinned`                | Unity's package manager resolves an exact version and nothing else, so a range write pins rather than writing a caret the project could not open, and a folder range beside it is untouched.                     |
 | `TestEnginesScannerStrictGatesBrokenEngineManifests` | The partial-result contract reaching the exit code for the engine formats too: a broken `Packages/manifest.json` is reported while the healthy manifests are still listed, and `--strict` refuses the same repository. |
 | `TestEnginesComputeReadsTheEngineGraph`          | `dispat compute` derives its edges from the same manifests, so a versionless Unreal plugin edge is one it suggests.                                                                                             |
+| `TestEngineDependencyReleaseUsesNativeExactRanges` | Unity and O3DE receive native exact ranges during release; unrelated dependencies remain unchanged. |
 
-### Goal 42: external webhooks (`webhooks_test.go`)
+### Goal 42: external webhooks (`webhooks_test.go`, `webhook_queue_saturation_test.go`)
 
 The `webhooks` config declares HTTP endpoints a release run notifies of its progress: the run brackets
 (`release.started` / `release.finished`), per-package stage transitions and per-package outcomes. The contract under
@@ -2057,12 +2155,16 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsCoAuthorTrailersInEveryShape` | `Co-authored-by` is free text, so a bare name and a bare address are both accepted while empty angle brackets are dropped, the trailer naming the git author again is deduplicated, and the username format renders a name when there is no address to take a part of. |
 | `TestAuthorsIdentityWithNoAddress` | Git accepts a commit whose author has a name and no address, and the attribution survives it in what it renders and in deciding that two such commits are by one person. |
 
-### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`)
+### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`, `internal/harness/gitfault_test.go`, `internal/harness/go_install_test.go`)
 
 | Test | Claim proven |
 | --- | --- |
 | `TestCheckRaceReports` | Any recorded subprocess race fails the suite, even when a behavioral scenario accepts a nonzero exit. Unconfigured normal runs and empty report directories pass; unrelated files do not count as race reports. |
 | `TestGitFaultSelectsMatchesAndPassesTheRestThrough` | The stand-in `git` is the real Git for every invocation a scenario did not name, fails exactly the selected matches — every one, only the Nth, or the Nth onward — with the configured exit status and a recognisable marker, counts every match whether it failed it or not, and can answer with a reply of its own instead of running Git at all, or hold a selected invocation until the scenario resumes it and then run the real command. |
+| `TestExternalModuleRequirementsKeepsWorkspaceSelectionsOnly` | Offline install fixtures retain selected external dependency versions, deduplicate imports and exclude first-party or versionless modules. |
+| `TestFileProxyURLUsesGoProxyFileSemantics` | The offline installation fixture preserves Unix paths and encodes Windows drive and network paths as valid Go proxy file URLs. |
+| `tests/integration/internal/harness/binary_test.go::TestProductionCoverpkgIncludesEveryProductionModule` | The instrumented CLI build includes the CLI and all six public modules, so the integration percentage cannot improve by quietly dropping first-party code from its denominator. |
+| `tests/integration/internal/harness/binary_test.go::TestProductionCoverpkgAcceptsTheRunnerScope` | The subprocess and public-API test binaries are instrumented over one explicit package set. |
 
 Compiler selection and version-stamped fixtures have separate checks:
 
@@ -2078,7 +2180,7 @@ Compiler selection and version-stamped fixtures have separate checks:
 | `TestBuildVersionedRefusesAnUnlistedVersion` | A version outside `SelfUpdateFixtureVersions` fails before anything is built and names where it has to be added. |
 | `TestTinyFixtureStageBuildsTheFixtureVersions` | The TinyGo gate's fixture stage builds exactly `SelfUpdateFixtureVersions`, with the harness's flags, stamp, limits and file names, and the gate hands them to the suite. |
 
-### Goal 50: validated source commits (`commit_validation_test.go`)
+### Goal 50: validated source commits (`commit_validation_test.go`, `commit_configuration_faults_test.go`, `final_remaining_commands_test.go`)
 
 This goal owns authoring a source commit through Git with the existing CCME parser. Goal 19 continues to own per-package release commits; its release/tag/push cases are not duplicated here. Parser grammar itself remains owned by `pkg/ccme`.
 
@@ -2129,6 +2231,7 @@ Unix process-tree termination tests do not prove Windows descendant termination.
 | `TestCommitRefusesCommandLinesItCannotForward` | A Git option dispat cannot reason about, and an option missing the value it needs, are refused with HEAD and the staged diff untouched. |
 | `TestCommitMessageGateRefusesUnusableHookInput` | Every way Git's commit-msg invocation contract can be broken is refused by name, and an accepted message is rewritten in place under the requested cleanup. |
 | `TestCommitAuthoringHandlesTheRepositoryItFinds` | An oversized Git configuration value is refused rather than truncated, and a repository with no hooks folder or with a folder among its hooks authors normally. |
+| `TestFinalAuthorCommitPreservesWorkWhenValidationCannotStart` | Unavailable temporary storage or a non-directory hooks path refuses authoring before Git mutates HEAD, the index or the working copy. |
 
 ### Goal 51: standalone message diagnostics (`diagnostics_test.go`)
 
@@ -2142,7 +2245,7 @@ This goal owns checking supplied text without a commit operation. Goal 50 owns G
 | `TestDiagnosticsChecksLiteralWholeMessage` | Literal and multiline arguments reach the parser without Git cleanup; any invalid unit rejects the message. |
 | `TestDiagnosticsSeparatesUsageAndConfigErrors` | Arity and foreign flags exit 2; unreadable or malformed explicit configuration exits 1. |
 
-### Goal 52: repository-aware histories (`polyrepo*_test.go`)
+### Goal 52: repository-aware histories (`polyrepo*_test.go`, `config_import_chain_test.go`, `config_import_guards_test.go`, `config_import_precedence_test.go`, `config_release_edges_test.go`, `final_execution_boundaries_test.go`, `final_fleet_remote_preflight_test.go`, `final_fleet_snapshot_head_test.go`, `final_history_boundaries_test.go`, `final_ownership_boundaries_test.go`, `final_pins_faults_test.go`, `final_plan_boundaries_test.go`, `final_plan_config_faults_test.go`, `final_plan_polyrepo_faults_test.go`, `final_plan_projection_faults_test.go`, `final_polyrepo_github_recovery_test.go`, `final_release_faults_test.go`, `final_remaining_plan_test.go`, `final_remaining_release_test.go`, `fleet_history_edge_cases_test.go`, `fleet_wildcard_scope_test.go`, `record_recovery_edges_test.go`, `release_record_edges_test.go`)
 
 Every source in this goal is a disposable initialized Git repository checked out as a real submodule of a disposable
 control repository. The suite drives the compiled binary only. It neither contacts production services nor relies on
@@ -2251,8 +2354,70 @@ timestamps to relate histories.
 | `TestPolyrepoIncomparableDirectChannelsNeedCausalControlResolution` | The same rule for the channel a package chooses about itself: two direct choices from two repositories conflict exactly when no control revision observes both. |
 | `TestPolyrepoIncomparableFixedGroupPinsNeedCausalControlResolution` | A fixed group holds one shared version, so an exact pin on any member is a pin on the group, and two members pinned to different versions from two repositories are the same standoff one level up. |
 | `TestPolyrepoControlDirectivesProjectPropagationOntoSources` | A control directive reaches a package it does not hold and that package's dependents, so the guard keeping it honest accounts for the packages its scope names and the packages its propagation walks to alike. |
+| `TestConfigReleaseRejectsAShallowImportedPolicyOwner` | Imported source policy requires complete Git history before planning. |
+| `TestFinalFleetRollbackRefusesARepositoryThatMovedDuringTheBuild` | A failing source build that commits its own edits moves HEAD outside the accepted fleet snapshot; rollback refuses to clean through that unplanned commit, preserves it for review, advances no source tag or control checkpoint, and permits retry after an explicit reset. |
+| `TestFleetSourceRemoteReadFailureStopsBeforePublicationAndCanRetry` | Failure to prove a source remote stops the fleet before anything is planned, with no planning event before the refusal and nothing published; retry under the same push policy publishes once, records the exact source tag remotely and reads the source's checked-out push branch from the remote exactly once. |
+| `TestFinalHistoryAppliesControlCancellationWithoutPropagatingIt` | A bounded control cancel clears newer source work without becoming a cross-repository release proposal. |
+| `TestFinalHistoryExcludesBothParentsOfAReleasedControlMerge` | A source release checkpoint excludes both sides and the shared ancestry of an already-shipped control merge. |
+| `TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow` | An active prerelease requires its distinct fresh history window, read with the stable one as a single union walk; failure of that LocalGitx log read aborts planning and a healthy retry resumes the train correctly. |
+| `TestFinalHistoryRefusesMalformedMergeBaseBeforePublishing` | A malformed successful merge-base reply in a real composed prerelease history stops the release before publication and a healthy retry still sees the pending fix. |
+| `TestFinalHistoryRejectsDuplicateVersionsInsideAComposedSource` | Equal-precedence release refs on different commits are fatal in the composed LocalGitx tag path, with no package plan rows or release mutation. |
+| `TestFinalHistoryRequiresAControlBoundaryForControlIntent` | A source tag made before composition cannot bound later control intent without explicit control-snapshot evidence. |
+| `TestFinalHistoryRequiresTheLatestPrereleaseBoundarySeparately` | A valid stable cross-repository tuple cannot substitute for missing evidence at the consumer's newer prerelease tag. |
+| `TestFinalHistorySharesAControlCheckpointAcrossSourceReleases` | Two source release tags recorded by one canonical control commit resolve through the same immutable fleet snapshot. |
+| `TestFinalHistoryUsesInitialVersionsForComposedSourceBaselines` | Composed source planning uses configured initials for both an opaque newest tag and an untagged package while retaining the correct history windows. |
+| `TestFinalOwnershipCanonicalizesImportedPackageBoundaries` | An imported package path and its source scope are checked after symlink resolution; neither may claim a sibling source repository. |
+| `TestFinalOwnershipRefusesAControlUmbrellaContainingASource` | A configured control package may not wrap a composed source checkout, even when its own source scope does not directly enter that checkout; refusal preserves every repository HEAD and writes no tags or script markers. |
+| `TestFinalOwnershipRefusesADanglingImportedSourceScope` | A dangling imported `src` symlink is rejected by package-folder validation before ownership planning, while all repository state remains unchanged. |
+| `TestFinalOwnershipRefusesASymlinkedNestedGitMarker` | A symlink cannot impersonate a nested `.git` marker and alter the repository identity assigned to a configured package. |
+| `TestFinalOwnershipRefusesNestedConfiguredScopes` | Two configured package identities cannot own nested scopes in one composed history; the ambiguity is fatal before planning or mutation. |
+| `TestFinalCheckpointControlChangePreservesTheRemoteSource` | A control commit made by the source's `afterPush` hook is refused by the checkpoint's head check: the remote source commit, branch, and tag are preserved while the control checkpoint is withheld; explicit gitlink repair prevents duplicate publication on retry. |
+| `TestFinalImmutableBaselineRefDriftNeedsExactRepair` | Deleting an immutable baseline tag or replacing only its annotated tag object at the same peeled commit is detected before publication; restoring the exact original ref object makes retry safe. |
+| `TestFinalLivePinWriteFaultsStopBeforeTagAndCheckpoint` | If the private live-pin coordinator becomes unwritable or its atomic destination is replaced after publication, the truthful source commit remains but no tag or control checkpoint advances; explicitly recording that exact commit makes retry a publication no-op. |
+| `TestFinalMutationCommonDirectoryFailureRefusesBeforePlanning` | A Git failure resolving a source's common directory, by which every snapshot and record transaction is serialized, is E330 before planning or publication; once Git answers again the unchanged fleet publishes exactly once. |
+| `TestFinalMutationCommonDirectoryRepliesRefuseBeforePublication` | Empty, missing, and relative successful Git common-directory replies cannot redirect the per-repository serialization or make an unprotected fleet appear ready: no package publishes, and a healthy retry records exactly once. |
+| `TestFinalSourceChangeAfterPublicationLeavesNoFalseRecord` | A source commit made after upload but before native source recording is refused by the release commit's head check: no release commit, tag, or checkpoint is written. Once the unplanned commit and the generated state are removed, the documented contract for a publication without its record holds: with no durable baseline, the retry uploads again. |
+| `TestFinalSourceRecordPreflightGitFaultsRefuseBeforePublication` | Failures reading a pushable source's current branch, remote branch position, or protected release paths refuse before publication and mutation; a healthy retry publishes and records exactly once. |
+| `TestFinalSourceTagWriteFaultKeepsCommitBelowTheCheckpoint` | A direct source-tag Git failure after the source commit leaves that commit reviewable while control remains old; explicitly publishing the exact source tag/branch and checkpoint makes retry a no-op. |
+| `TestFinalPolyrepoControlHistoryToleratesATemporaryUnlink` | Historical gitlink deletion is represented as absence and a restored current fleet plans normally. |
+| `TestFinalPolyrepoRefusesAmbiguousReleaseCheckpointAssociation` | Two plausible checkpoints for one consumer tag with different fleet snapshots require explicit boundary evidence. |
+| `TestFinalPolyrepoRefusesReleaseCheckpointWithoutProviderPin` | Restoring a provider later cannot retroactively add it to a consumer release checkpoint. |
+| `TestFinalPolyrepoRepositoryBaselinesMustNameTheComposedReleaseSnapshot` | Planner validation rejects unknown consumers and non-reachable release tags even after config validates repository/revision. |
+| `TestFinalImportedConfigAllowsASymlinkWithinItsOwningRepository` | A valid in-repository configuration alias preserves source identity and composes the expected package. |
+| `TestFinalImportedConfigRefusesACanonicalPathItCannotResolve` | An imported path whose canonical target cannot be resolved is named and refused before package discovery. |
+| `TestFinalImportedConfigRefusesAGitRootFromAnotherDeclaredSource` | An imported file can only be attributed to a Git root that contains its canonical path. |
+| `TestFinalImportedConfigRefusesAGitRootThatDisappeared` | A successful Git-root reply still has to resolve to a real repository boundary. |
+| `TestFinalImportedConfigSchemaFailureCannotBecomeAnEmptySource` | Invalid imported policy aborts composition instead of silently retaining a source under control defaults. |
+| `TestFinalPolyrepoBaselineFaultsRefuseAnUnprovenRevision` | A baseline revision must resolve and be reachable in the named source. |
+| `TestFinalPolyrepoCompositionFaultsNameTheUntrustedBoundary` | Each control/source identity, completeness, inventory, pin, and HEAD inquiry fails closed and a healed retry composes the same fleet. |
+| `TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder` | Source correction ancestry about a released source commit remains repository-scoped and fail-closed. |
+| `TestFinalPolyrepoImportedConfigFaultRefusesUnattributedOwnership` | Imported configuration ownership requires a successful Git-root proof and a healed retry converges. |
+| `TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex` | Corrupt control-history framing cannot become an empty checkpoint index. |
+| `TestFinalPolyrepoMalformedRepositoryFactsFailClosed` | Invalid completeness booleans, HEAD object ids, and blank control logs fail at their trust boundary. |
+| `TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow` | Truncated framing and invalid commit or parent identities are rejected without shrinking the pending release window; healthy retries retain it. |
+| `TestFinalPolyrepoMalformedSubmoduleInventoryCannotEraseARepository` | Corrupt successful git-config output cannot shrink the source inventory. |
+| `TestFinalPolyrepoMalformedTagInventoryCannotEraseThePublishedBaseline` | Missing or extra ref fields, a valid row followed by a malformed row, missing tag names and invalid object or peeled identities cannot erase or move a published tag; a healthy retry plans the pending fix. |
+| `TestFinalPolyrepoPlanningFaultsDoNotShrinkTheFleetSnapshot` | Source completeness, HEAD, refs, commits, and control-history failures abort planning. |
+| `TestFinalPolyrepoRunSinceFaultStopsBeforeTheSelectedScript` | Control projection, source selection, and malformed control snapshots all stop before side effects. |
+| `TestFinalPolyrepoProjectionFaultsDoNotBecomeARepositoryBoundaryDiagnostic` | Object-presence and ancestry I/O failures stay operational errors rather than false stale-pin diagnostics. |
+| `TestPolyrepoGitHubFailureKeepsNativeRecordForAPIRepair` | A rejected GitHub create preserves the source tag and control checkpoint; release retry performs no second publication, and the standalone metadata step repairs the missing GitHub record against the same immutable tag. |
+| `TestFinalCheckpointTreeRepliesCannotInventAControlRecord` | A failed or malformed control `ls-tree` reply after the source release is durable cannot be treated as a changed gitlink: E335 preserves the remote source tag/branch and old control checkpoint, and explicit checkpoint repair makes retry a publication no-op. |
+| `TestFinalOrchestratedCheckpointCommitFaultPreservesTheRemoteSourceRecord` | A real Git failure creating the control checkpoint preserves the already pushed source commit, branch, and immutable tag while leaving the old control gitlink truthful; explicit checkpoint repair followed by retry does not publish the provider again. |
+| `TestFinalOrchestratedControlPushFaultKeepsTheLocalCheckpoint` | A real Git failure in the final control push leaves the source remote complete and the local control checkpoint available for repair while the control remote stays unchanged; pushing that checkpoint and retrying does not republish the provider. |
+| `TestFinalOrchestratedSourceCommitFaultNeedsAReviewedRetry` | A real Git failure creating the source release commit occurs after publication but before the source tag: the package stays reported as published, no control checkpoint is written, and retained generated state requires explicit review. As documented for a publication whose record never landed, the clean retry uploads again and then records the release once. |
+| `TestFinalOrchestratedTagVerificationFaultNeverAdvancesControl` | A real Git failure reading the new source tag after publication keeps that truthful local tag and source commit while advancing neither remote nor the control gitlink; after the retained source refs and checkpoint are explicitly repaired, retry does not republish the provider. |
+| `TestFinalTagSnapshotReadFaultsRefuseAnUnprovenFleet` | A real relevant-tag read failure at either initial snapshot capture or pre-publish revalidation is E330, publishes nothing, writes no source/control record, and a healthy retry publishes exactly once. |
+| `TestFinalRemainingExecUsesTheControlSpaceAuthority` | In a composed workspace where control and an imported source use the same local space name, `exec --for space:` resolves the control-owned folder layer, environment, and working directory rather than importing another repository's command authority. |
+| `TestFinalRemainingImportedFolderConfigFailsClosed` | A valid imported root configuration cannot hide a malformed space-folder layer; discovery refuses the complete package graph and preserves both repository heads and tags. |
+| `TestFinalRemainingPrivatePinStoreCreationFailureStopsBeforeScripts` | An unusable TMPDIR/TMP/TEMP prevents creation of the private composed-release pin coordinator before build, publish, tags, or repository mutation. |
+| `TestFinalRemainingRepositoryInputClosureCrossesGroupsAndDependencies` | An indirect provider input carried through a dependency, a fixed group, and another dependency remains in the consumer's release guard; an unplanned provider advance stops that consumer before publication. |
+| `TestFinalSourceTagPushFailureKeepsTheAlreadyPushedBranch` | If an orchestrated source branch push succeeds and the following immutable-tag push fails, E335 preserves the advanced source remote branch and local release tag while withholding the remote tag and control checkpoint; explicitly pushing that exact tag and checkpoint makes retry a publication no-op. |
+| `TestFleetHistoryRefusesAControlCommitWhoseFirstParentIsMissing` | Incomplete control DAG evidence cannot produce a partial fleet plan. |
+| `TestRecordSourceChangeAfterCommitPreservesTheUnadvertisedRevision` | A source commit made by an `afterCommit` hook is refused by the tag transaction's pin check: the truthful release commit remains, but no tag, remote ref, or checkpoint advertises it; exact record repair prevents republishing. |
+| `TestReleaseRecordPostPublishHeadReadFailuresWithholdTheCheckpoint` | Source HEAD proof failures after upload preserve published status while withholding the source tag and control checkpoint. |
+| `TestReleaseRecordSnapshotHeadReadFailureRefusesPublication` | A source HEAD read failure during snapshot validation stops publication and records; a healthy retry publishes once. |
 
-### Goal 55: choreographed fleets (`choreography_*_test.go`)
+### Goal 55: choreographed fleets (`choreography_*_test.go`, `compute_release_failures_test.go`, `compute_topology_edges_test.go`, `final_history_boundaries_test.go`, `final_plan_config_faults_test.go`, `linked_config_edges_test.go`, `linked_settings_edges_test.go`, `planning_release_edges_test.go`)
 
 Every peer is a disposable initialized Git repository with a bare remote of its own, configured through the typed
 `pkg/models` values and joined to its neighbours by real two-sided submodule links. The suite drives the compiled
@@ -2372,231 +2537,180 @@ cannot make the rest of the goal pass.
 | `TestChoreographyComputeDeclaresTheHalfOfAOneSidedLink` | A link one repository declares and its peer does not declare back is `+ link <peer> <repository>`: `--check` exits 1, `--write` writes the missing declaration into the checkout that already exists without cloning or adding a route, and the repaired fleet composes with no `W332` and no `E338`. |
 | `TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote` | The missing half pins the repository that holds the link at a revision its own remote can serve, so a repository with no remote has it withheld with a warning and `W332` stands. |
 | `TestComputeMinimalWritesTheJoiningLinkWhereACheckoutExists` | A component whose centre was never materialised has the joining link written by the member nearest that centre which this run does hold, and the missing checkout is reported as its own change. |
+| `TestChoreographyRefusesAmbiguousOrEscapingRoster` | Malformed own or peer identities, duplicate peer names and absolute or escaping link paths stop composition before any plan or repository mutation. |
+| `TestComputeStarKeepsStagedRepairsWhenACloneRevealsAConflictingEdge` | A hidden peer edge stops incompatible star repair while preserving staged changes and existing links. |
+| `TestComputeStarRequiresANamedFleetEntry` | Star topology refuses an ordinary repository before writing links or configuration. |
+| `TestFinalHistoryReportsChoreographedLinkReads` | Debug workload diagnostics count real release-subject and gitlink-tree reads while preserving the settled choreography plan. |
+| `TestFinalChoreographyRefusesControlStyleConfigImports` | A choreography peer refuses a second control authority before its fleet walk and planning. |
 
-### Goal 53: coverage scenarios: application and configuration (`cov_app_*`, `cov_cli_*`, `cov_config_*`, `cov_ignore_*`, `cov_fsx_*`)
+### Goal 61: the public modules through their exported API (`publicapi/*_test.go`)
 
-This goal owns the parts of the CLI, the configuration loader and the record writers that a successful release never
-reaches: what a configuration is refused for, what a command line is refused for, and what a step or a writer does when
-the filesystem, the environment or Git hands it something it cannot use. Each scenario asserts the diagnostic, the exit
-code and the on-disk state afterwards, because a refusal that leaves half a record behind is a different bug from a
-refusal that reports the wrong sentence. Goals 10 to 15 continue to own what a configuration *means*; goal 50 owns the
-ordinary authoring paths; nothing here repeats them.
+The published modules are exercised the way a program outside this repository uses them, through their exported API
+rather than through the CLI.
 
-| Test | Invariant |
+`TestPublicAPIScannerWriterScannerLifecycle`, `TestPublicAPIConfigReferenceEditAndReload`, and
+`TestPublicAPICCMEModelConsumptionContract` exercise current public modules through cross-component contracts; their
+profile is merged with the instrumented CLI subprocess counters. `TestPublicAPIExtendedManifestLifecycles` walks every
+supported ecosystem and engine manifest through the public scanner, writer, and scanner again, checking each requested
+dependency survives in canonical form. `TestPublicAPICCMEConformanceVectors` runs scoped, unscoped, multi-unit,
+escaped-separator, strict-type, and invalid UTF-8 messages through the current public parser and its preferred
+validity/scope predicates. `TestPublicAPIConfigWatchReloadsAnAtomicEdit` covers the optional config/watch subpackage so
+it remains part of the integration denominator and proves an atomic config edit is observed as a new successfully
+parsed value. `TestPublicAPIRefusalsPreserveInputsAndBoundResources` exercises malformed manifests, the public size
+limit, filesystem boundary types, unsafe versions, and conflicting shared ranges; every refusal checks that the
+original bytes remain intact. `TestPublicAPIConfigAndModelRejectMalformedBoundaries` checks reference cycles, malformed
+config documents, and invalid public model shapes without mutating their inputs.
+`TestPublicAPILinkAndBuildWriterLifecycles` round-trips local redirects through all five link-capable formats, removes
+them again, rescans the manifests, and updates all nine build-counter formats while proving rejected integer counters
+leave the files unchanged. `TestPublicAPIConfigResolutionSettersAndDependencyModels` resolves an owned nested folder,
+applies an override, decodes the public setter shapes, and round-trips canonical typed dependency models while proving
+a failed decode leaves the receiver unchanged.
+
+Eight conformance drivers exercise the public API of `pkg/ccme`. The CLI and these drivers use the same unsuffixed
+module from the workspace. `TestPublicAPICCMEHeaderGrammarConformance` walks the type charset, the scope-set grammar
+and its term cap, the breaking marker and the separator rules of §5 under both strictness modes.
+`TestPublicAPICCMEDirectiveAxesConformance` walks both propagation axes of §5.3, every doubled-sigil guard, the channel
+grammar of §11.2 and the footer reconciliation of §8.3. `TestPublicAPICCMEFooterRegistryConformance` walks the §8.1
+registry, the two breaking-change silent failures of §8.1.1, the correction footers of §7.4 and the control types of §7
+and §10. `TestPublicAPICCMEMessageStructureConformance` walks normalisation, unit splitting, escaped separators and the
+message-scoped bounds of §14.1 through both entry points, and `TestPublicAPICCMENormalizationIsIdempotent` checks the
+exported normaliser directly, including the fast path that returns its input untouched.
+`TestPublicAPICCMEVersionArithmetic` covers the exported semver surface the release engine shares with the parser, and
+`TestPublicAPICCMEValueTypeContracts` and `TestPublicAPICCMEConfigurationSurface` cover the value types a consumer of a
+result reads and every configuration the constructors accept or refuse.
+
+Eight drivers carry `pkg/models`, the published configuration model, through its own surface rather than through a
+loaded configuration. `TestPublicAPIModelOptionPredicates` drives every tri-state option field through its nil, false
+and true states and checks each deprecated spelling against its preferred one; `TestPublicAPIModelFoldLookups` drives
+the case-insensitive name resolution at each level a package resolves a script through;
+`TestPublicAPIModelScriptShapes` and `TestPublicAPIModelDependencyShapes` round-trip the `scripts` and `dependencies`
+keys through both written shapes and every error their normalisers report, including the map shape a YAML reader
+produces; `TestPublicAPIModelPathListShapes` round-trips a space's `path` key; `TestPublicAPIModelWebhookVocabulary`
+drives the event vocabulary, the subscription grammar and the format tokenizer; `TestPublicAPIModelStageRelationShapes`
+round-trips `isBuildWaitingPublish` through the boolean and the object it also accepts, the defaults an unstated
+`isBlocking` follows and every error its normaliser reports; and `TestPublicAPIModelFileRoundTrip` authors a whole
+configuration as typed values and checks that marshalling it twice is stable.
+`TestPublicAPIModelVersionGroupSerialization` preserves all three sharing axes through JSON and YAML and refuses
+invalid declarations without partially replacing the caller's existing policy.
+
+Fifteen drivers carry `pkg/config`, the published configuration library, and its optional `watch` subpackage.
+`TestPublicAPIConfigFoldingAndKeyPaths`, `TestPublicAPIConfigErrorVocabulary` and `TestPublicAPIConfigEventSurface`
+cover what a name means, every error value a caller matches on, and the logging surface a caller wires its own logging
+package in through. `TestPublicAPIConfigWeakTyping` and `TestPublicAPIConfigDecodeRules` cover the weakly typed readers
+and the object rules, including the unknown key, the two spellings of one name in one object at both object sizes, and
+every setter shape. `TestPublicAPIConfigSettingsRendering` covers the pruning of empty objects, the delimiter that
+names levels, the overrides written over the result and the deep clone. `TestPublicAPIConfigEnvLayers` and
+`TestPublicAPIConfigEnvBinding` cover the env-layer helpers and the opt-in environment binding including its strict
+refusal. `TestPublicAPIConfigLoaderOptions` covers the format table, a caller's own reader, and the nil loader;
+`TestPublicAPIConfigReferenceComposition` covers the `$ref` key, the keys written beside it, the several files it may
+merge, and every way it can be written wrong; `TestPublicAPIConfigAscent` covers the walk up the directory tree;
+`TestPublicAPIConfigEditWriting`, `TestPublicAPIConfigEditResolution` and `TestPublicAPIConfigStringMapReading` cover
+writing one key back, choosing which file holds it, and reading the entries a write starts from.
+`TestPublicAPIConfigWatchLifecycle` covers the watch subpackage: the first load a program exits on, the reloads a
+change produces (a file the configuration was not read from earns none, and one debounced save of the configuration
+earns exactly one, reading its new value), the failure that keeps the last good value, the watch set moving with the
+files each load reports, and the two ways a watcher stops.
+
+Seventy-six drivers carry the three manifest modules, `pkg/manifest`, `pkg/scanner` and `pkg/writer`, through their own
+exported surfaces on realistic files rather than through a release.
+
+Six of them cover the vocabulary the reading and writing halves share. `TestPublicAPIManifestFormatClassification`,
+`TestPublicAPIManifestKindVocabulary` and `TestPublicAPIManifestNameNormalisation` cover the file-name and
+folder-qualified format tables, the four dependency kinds and their spellings, and the name-splitting rules both halves
+resolve names through. `TestPublicAPIManifestImageReferences` splits every shape of image reference and checks the tag
+grammar a writer validates against; `TestPublicAPIManifestDockerfileReferences` locates the references `FROM`, `COPY
+--from` and `RUN --mount` carry, including continuations, stage aliases and carriage returns; and
+`TestPublicAPIManifestComposeIdentity` covers both rules by which a compose file names its own image, and their
+tie-breaks.
+
+Twelve drivers read manifests. `TestPublicAPIScannerReadsGradleBuildScripts`,
+`TestPublicAPIScannerReadsGradleVersionCatalog`, `TestPublicAPIScannerReadsRubyManifests`,
+`TestPublicAPIScannerReadsPythonManifests`, `TestPublicAPIScannerReadsPubspecAndCargo`,
+`TestPublicAPIScannerReadsAquaConfigurations`, `TestPublicAPIScannerReadsAppleManifests`,
+`TestPublicAPIScannerReadsDotNetAndMavenManifests`, `TestPublicAPIScannerReadsEngineManifests` and
+`TestPublicAPIScannerReadsNodeGoAndCompose` walk each ecosystem's own syntax: comments, quoting styles, interpolations,
+dependency groups, inline tables, nested documents, legacy encodings and the entries a reader deliberately drops.
+`TestPublicAPIScannerReportsUnreadableManifests` proves every reader names a malformed file in its error and leaves it
+as it was, and `TestPublicAPIScannerEcosystemsCoverEveryFormat` fences the ecosystem table against the format list.
+
+Twelve drivers cover the walk itself. `TestPublicAPIScannerWalkSkipsAndReportsWithoutStopping` fixes which folders a
+manifest walk enters and which a literal-text walk still sees;
+`TestPublicAPIScannerReportsUnreadableEntriesAndKeepsGoing` and `TestPublicAPIScannerRefusesAnOversizedManifestInAWalk`
+prove the partial-result contract for an unreadable folder, an unreadable file and the read cap;
+`TestPublicAPIScannerHonoursACancelledContext` covers both entry points under cancellation; and
+`TestPublicAPIScannerRootScanReadsOnlyTheFolderItself` covers the root-only scan, its aqua exception, and the folder
+wearing a manifest's name that it steps over. `TestPublicAPIScannerFollowsLocalAquaImports`,
+`TestPublicAPIScannerKeepsValidAquaImportsBesideRejectedSiblings`,
+`TestPublicAPIScannerRefusesAquaImportsThatLeaveTheTree` and `TestPublicAPIScannerPrefersTheRealAquaFileOverItsAlias`
+cover the local import walk, partial results when an imported sibling is malformed or oversized, every way a pattern or
+a symbolic link can leave the scanned tree, and the rule that prefers a real configuration over an alias for it.
+`TestPublicAPIScannerPackageRootRule`, `TestPublicAPIScannerNameIndexBindsByRank` and
+`TestPublicAPIScannerResolvesDeclaredLocalPaths` cover the three helpers a caller builds a dependency graph with.
+
+Six drivers cover the writer's entry points. `TestPublicAPIWriterReplacesLiteralText` covers the literal replacer
+including its binary, size and empty-pattern refusals; `TestPublicAPIWriterSwappableValueCoversEveryEntryPoint` drives
+all six methods of the swappable writer; `TestPublicAPIWriterFormatForcedRewrite` covers the format-forced rewrite and
+the kind canonicalisation that never touches the caller's own slice; `TestPublicAPIWriterRefusesToFollowASymbolicLink`
+and `TestPublicAPIWriterSupportTablesAgreeWithTheScanner` fence the symbolic-link refusal and the two support tables
+against the scanner's formats; and `TestPublicAPIWriterLinkRefusalsAndUnlinkableFormats` covers every refusal the three
+link entry points share.
+
+Nine drivers write one format each. `TestPublicAPIWriterRewritesJSONManifests`,
+`TestPublicAPIWriterRewritesXMLManifests`, `TestPublicAPIWriterRewritesTOMLManifests`,
+`TestPublicAPIWriterRewritesLineManifests`, `TestPublicAPIWriterRewritesYAMLManifests`,
+`TestPublicAPIWriterRewritesGradleBuildScripts`, `TestPublicAPIWriterRewritesEngineManifests` and
+`TestPublicAPIWriterRewritesGoModules` check each format's applied, missing and skipped outcomes, the values a writer
+declines because they defer to something outside the file, and the bytes around every change; and
+`TestPublicAPIWriterLifecycleAcrossEveryFormat` reads each of them back through the scanner.
+
+Ten drivers assert the properties every format writer shares.
+`TestPublicAPIWriterRewritingTheSameValuesTwiceWritesNothing` and
+`TestPublicAPIWriterWithNothingToWriteLeavesTheFileAlone` prove idempotence and the empty rewrite across every
+supported format; `TestPublicAPIWriterRefusesEveryFormatThroughASymbolicLink`,
+`TestPublicAPIWriterRefusesBuildCountersThroughASymbolicLink` and `TestPublicAPIWriterRefusesLinksThroughASymbolicLink`
+prove the same for the symbolic-link refusal across every rewrite, counter and link format;
+`TestPublicAPIWriterRefusesVersionsAFormatCannotHold` covers the versions each line-structured format declines rather
+than splice. `TestPublicAPIWriterLeavesEveryTruncatedManifestIntact`,
+`TestPublicAPIWriterLeavesEveryTruncatedLinkableManifestIntact` and
+`TestPublicAPIWriterLeavesEveryTruncatedCounterManifestIntact` cut each manifest at every byte and prove no prefix
+makes a writer leave a half-written file.
+
+Eighteen drivers cover the syntax and the shapes a real checkout carries. `TestPublicAPIWriterSurvivesTOMLQuoting`,
+`TestPublicAPIWriterSurvivesRubyQuoting`, `TestPublicAPIWriterSurvivesYAMLQuoting`,
+`TestPublicAPIWriterSurvivesPlistAndProjectShapes`, `TestPublicAPIWriterSurvivesEngineDocumentShapes`,
+`TestPublicAPIWriterSurvivesGradleCommentsAndClosures`, `TestPublicAPIWriterSurvivesComposeAndDockerShapes` and
+`TestPublicAPIWriterSurvivesAttributeSpelling` cover the comments, escapes, quoting styles and attribute spellings a
+hand-written manifest carries; `TestPublicAPIWriterRefusesAquaShapesItCannotSplice` covers the document shapes the aqua
+writer declines outright; and `TestPublicAPIWriterStepsOverUnreadablePluginEntries`,
+`TestPublicAPIWriterStepsOverRubyStatementsThatAreNotDeclarations`,
+`TestPublicAPIWriterHandlesNestedAndCompactOverrideMaps`, `TestPublicAPIWriterHandlesPubspecShapesItCannotSplice`,
+`TestPublicAPIWriterHandlesTOMLValuesItCannotSplice`, `TestPublicAPIWriterHandlesComposeFlowSequences`,
+`TestPublicAPIWriterHandlesMalformedCatalogEntries`, `TestPublicAPIWriterHandlesCarriageReturnsAndNamelessLines`,
+`TestPublicAPIWriterHandlesPubspecOverrideShapes` and `TestPublicAPIWriterHandlesLargeFilesAndKotlinBuildScripts` cover
+the declarations a writer steps over, the nesting and line endings a real file uses, and the values no splice can
+reach.
+
+Four drivers cover the two writes that are not version rewrites. `TestPublicAPIWriterManagesNpmOverrides`,
+`TestPublicAPIWriterManagesTOMLAndPubspecLinks` and `TestPublicAPIWriterManagesGoModuleReplaces` cover the whole life
+of a local redirect in each linkable format: the field each package manager spells it in, the map or table created and
+dropped with it, repointing, removal, and the directives a listing must not claim as local links.
+`TestPublicAPIWriterSetsBuildCounters` covers all nine counter formats, the counters a writer never creates because the
+project never declared one, and every refusal an integer counter carries.
+
+The boundaries each module holds when its input is hostile, truncated or concurrent with the caller have one row each:
+
+| Test | Claim proven |
 | --- | --- |
 | `TestPublicAPIWriterDropsDuplicateNpmLinksAcrossOverrideFields` | A hand-edited package manifest carrying the same local redirect in npm, Yarn and pnpm override fields drops every copy while preserving unrelated registry overrides. |
 | `TestPublicAPIWriterKeepsRegistryOverrideBesideDuplicateLocalLink` | Repointing multiple local redirect copies updates each path, then dropping them leaves a registry-version override of the same package untouched. |
-
-## Coverage scenarios: polyrepository composition and recording
-
-These scenarios (`cov_polyrepo_*_test.go`) reach the answers goal 52 leaves out: what a composed fleet is refused
-for before it exists, and what a repository looks like afterwards when one step of recording a release into it
-failed. Every fixture is the same one goal 52 uses — a control repository with real submodule gitlinks and real
-source repositories — and every assertion names the diagnostic, the exit code and the state left on disk and on the
-remotes, because a refusal that leaves half a record behind is a different bug from a refusal that reports the wrong
-sentence. Goal 52 continues to own what a composition *means*; nothing here repeats it.
-
-### Composing the fleet
-
-| Test | Claim proven |
-|------|--------------|
-
-### Recording a release into a fleet
-
-| Test | Claim proven |
-|------|--------------|
-| `TestFleetSourceRemoteReadFailureStopsBeforePublicationAndCanRetry` | Failure to prove a source remote stops the fleet before anything is planned, with no planning event before the refusal and nothing published; retry under the same push policy publishes once, records the exact source tag remotely and reads the source's checked-out push branch from the remote exactly once. |
-
-### The live pin coordinator
-
-| Test | Claim proven |
-|------|--------------|
-
-## Coverage scenarios: execution and distribution long tail
-
-These scenarios (`cov_tail_release_*_test.go`, `cov_tail_app_*_test.go`, `cov_tail_dist_*_test.go`) reach the answers
-the goals above leave to the unit suites on the execution and distribution side: the stage frames the executor decides
-not to run, the manifests auto-versioning cannot read and the declarations its selectors leave alone, the
-configuration the loader refuses before anything has run, and the machine-readable half of the two download commands.
-Each one is a real invocation of the compiled binary, and each asserts what the folder or the manifest holds
-afterwards as well as what the operator was told, because a stage that silently did not run and a rewrite that
-silently did nothing both read as success in a log.
-
-### Stage frames and the release environment
-
-| Test | Claim proven |
-|------|--------------|
-
-### Native auto-versioning
-
-| Test | Claim proven |
-|------|--------------|
-
-### The configuration a run is refused for
-
-| Test | Claim proven |
-|------|--------------|
-
-### The step commands and the notifications around them
-
-| Test | Claim proven |
-|------|--------------|
-
-### The GitHub recorder's unreadable answers
-
-| Test | Claim proven |
-|------|--------------|
-
-### The download commands
-
-| Test | Claim proven |
-|------|--------------|
-
-## Coverage scenarios: planning and git long tail
-
-These scenarios (`cov_tail_plan_*_test.go`, `cov_tail_gitx_*_test.go`, `cov_tail_script_*_test.go`) reach the answers
-the goals above leave to the unit suites on the planning and git side: the tag names a format would have written, the
-channel directives that propose nothing, the shapes a correction footer can be typed in, the propagation a scope term
-walks past, and the two repositories that can address one package in a composed fleet. Each one is a real invocation
-of the compiled binary, and each asserts on the diagnostics as well as on the plan, because a directive that quietly
-did nothing and a directive that worked produce the same version.
-
-### The tag names a format writes and reads
-
-| Test | Claim proven |
-|------|--------------|
-
-### The planner's channel axis
-
-| Test | Claim proven |
-|------|--------------|
-
-### Corrections and reverts
-
-| Test | Claim proven |
-|------|--------------|
-
-### Propagation, holds and version groups
-
-| Test | Claim proven |
-|------|--------------|
-
-### Two repositories deciding one package
-
-| Test | Claim proven |
-|------|--------------|
-
-### The shell a script runs under
-
-| Test | Claim proven |
-|------|--------------|
-
-## Production finalization regressions
-
-These cases extend the existing planning, configuration, publication, command and observability goals. Each owns a distinct boundary or failure outcome. Injected Git failures pass unrelated operations through to real Git; the assertions check exit status, diagnostics and durable state rather than implementation call order.
-
-### Planning inputs and repository boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot` | completeness, tag inventory, and pending history Git failures abort a monorepo status without a plan or release record. |
-| `TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder` | correction ancestry about a released commit, the one question no pending window answers, requires the repository DAG and never falls back to log order. |
-| `TestFinalPlanFaultStopsRunSinceBeforeTheScript` | an unreadable selection window prevents the selected script from running. |
-| `TestFinalPolyrepoCompositionFaultsNameTheUntrustedBoundary` | each control/source identity, completeness, inventory, pin, and HEAD inquiry fails closed and a healed retry composes the same fleet. |
-| `TestFinalPolyrepoMalformedSubmoduleInventoryCannotEraseARepository` | corrupt successful git-config output cannot shrink the source inventory. |
-| `TestFinalPolyrepoMalformedRepositoryFactsFailClosed` | invalid completeness booleans, HEAD object ids, and blank control logs fail at their trust boundary. |
-| `TestFinalPolyrepoBaselineFaultsRefuseAnUnprovenRevision` | a baseline revision must resolve and be reachable in the named source. |
-| `TestFinalPolyrepoPlanningFaultsDoNotShrinkTheFleetSnapshot` | source completeness, HEAD, refs, commits, and control-history failures abort planning. |
-| `TestFinalPolyrepoImportedConfigFaultRefusesUnattributedOwnership` | imported configuration ownership requires a successful Git-root proof and a healed retry converges. |
-| `TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder` | source correction ancestry about a released source commit remains repository-scoped and fail-closed. |
-| `TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex` | corrupt control-history framing cannot become an empty checkpoint index. |
-| `TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow` | truncated framing and invalid commit or parent identities are rejected without shrinking the pending release window; healthy retries retain it. |
-| `TestFinalPolyrepoMalformedTagInventoryCannotEraseThePublishedBaseline` | Missing or extra ref fields, a valid row followed by a malformed row, missing tag names and invalid object or peeled identities cannot erase or move a published tag; a healthy retry plans the pending fix. |
-| `TestFinalPolyrepoRunSinceFaultStopsBeforeTheSelectedScript` | control projection, source selection, and malformed control snapshots all stop before side effects. |
-| `TestFinalPolyrepoProjectionFaultsDoNotBecomeARepositoryBoundaryDiagnostic` | object-presence and ancestry I/O failures stay operational errors rather than false stale-pin diagnostics. |
-| `TestFinalPolyrepoRepositoryBaselinesMustNameTheComposedReleaseSnapshot` | planner validation rejects unknown consumers and non-reachable release tags even after config validates repository/revision. |
-| `TestFinalPlanRefusesTwoRefsForOnePublishedVersion` | equal-precedence version tags on different commits are fatal ambiguity. |
-| `TestFinalPolyrepoControlHistoryToleratesATemporaryUnlink` | historical gitlink deletion is represented as absence and a restored current fleet plans normally. |
-| `TestFinalPolyrepoRefusesAmbiguousReleaseCheckpointAssociation` | two plausible checkpoints for one consumer tag with different fleet snapshots require explicit boundary evidence. |
-| `TestFinalPolyrepoRefusesReleaseCheckpointWithoutProviderPin` | restoring a provider later cannot retroactively add it to a consumer release checkpoint. |
-| `TestFinalImportedConfigRefusesACanonicalPathItCannotResolve` | an imported path whose canonical target cannot be resolved is named and refused before package discovery. |
-| `TestFinalImportedConfigRefusesAGitRootThatDisappeared` | a successful Git-root reply still has to resolve to a real repository boundary. |
-| `TestFinalImportedConfigRefusesAGitRootFromAnotherDeclaredSource` | an imported file can only be attributed to a Git root that contains its canonical path. |
-| `TestFinalImportedConfigAllowsASymlinkWithinItsOwningRepository` | a valid in-repository configuration alias preserves source identity and composes the expected package. |
-| `TestFinalImportedConfigSchemaFailureCannotBecomeAnEmptySource` | invalid imported policy aborts composition instead of silently retaining a source under control defaults. |
-| `TestFinalChoreographyRefusesControlStyleConfigImports` | a choreography peer refuses a second control authority before its fleet walk and planning. |
-
-### Release locks and durable records
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalReleaseLockObjectFailureCleansOrReportsTheAttemptRef` | If Git cannot resolve the private attempt tag's object, release stops before planning, cleans the attempt with a live bounded context, and leaves no remote lock; if Git also refuses that cleanup, the warning names the one stranded local attempt ref. |
-| `TestFinalOrchestratedSourceCommitFaultNeedsAReviewedRetry` | A real Git failure creating the source release commit occurs after publication but before the source tag: the package stays reported as published, no control checkpoint is written, retained generated state requires explicit review, and a clean retry records the release once. |
-| `TestFinalOrchestratedTagVerificationFaultNeverAdvancesControl` | A real Git failure reading the new source tag after publication keeps that truthful local tag and source commit while advancing neither remote nor the control gitlink; after the retained source refs and checkpoint are explicitly repaired, retry does not republish the provider. |
-| `TestFinalOrchestratedCheckpointCommitFaultPreservesTheRemoteSourceRecord` | A real Git failure creating the control checkpoint preserves the already pushed source commit, branch, and immutable tag while leaving the old control gitlink truthful; explicit checkpoint repair followed by retry does not publish the provider again. |
-| `TestFinalOrchestratedControlPushFaultKeepsTheLocalCheckpoint` | A real Git failure in the final control push leaves the source remote complete and the local control checkpoint available for repair while the control remote stays unchanged; pushing that checkpoint and retrying does not republish the provider. |
-| `TestFinalTagSnapshotReadFaultsRefuseAnUnprovenFleet` | A real relevant-tag read failure at either initial snapshot capture or pre-publish revalidation is E330, publishes nothing, writes no source/control record, and a healthy retry publishes exactly once. |
-| `TestFinalCheckpointTreeRepliesCannotInventAControlRecord` | A failed or malformed control `ls-tree` reply after the source release is durable cannot be treated as a changed gitlink: E335 preserves the remote source tag/branch and old control checkpoint, and explicit checkpoint repair makes retry a publication no-op. |
-| `TestFinalLivePinWriteFaultsStopBeforeTagAndCheckpoint` | If the private live-pin coordinator becomes unwritable or its atomic destination is replaced after publication, the truthful source commit remains but no tag or control checkpoint advances; explicitly recording that exact commit makes retry a publication no-op. |
-| `TestFinalMutationCommonDirectoryFailureRefusesBeforePlanning` | A Git failure resolving a source's common directory, by which every snapshot and record transaction is serialized, is E330 before planning or publication; once Git answers again the unchanged fleet publishes exactly once. |
-| `TestFinalImmutableBaselineRefDriftNeedsExactRepair` | Deleting an immutable baseline tag or replacing only its annotated tag object at the same peeled commit is detected before publication; restoring the exact original ref object makes retry safe. |
-| `TestFinalSourceRecordPreflightGitFaultsRefuseBeforePublication` | Failures reading a pushable source's current branch, remote branch position, or protected release paths refuse before publication and mutation; a healthy retry publishes and records exactly once. |
-| `TestFinalMutationCommonDirectoryRepliesRefuseBeforePublication` | Empty, missing, and relative successful Git common-directory replies cannot redirect the per-repository serialization or make an unprotected fleet appear ready: no package publishes, and a healthy retry records exactly once. |
-| `TestFinalSourceChangeAfterPublicationLeavesNoFalseRecord` | A source commit made after upload but before native source recording is refused by the release commit's head check: no release commit, tag, or checkpoint is written; after the unplanned commit and the generated state are removed, the absent durable baseline makes retry upload again. |
-| `TestFinalSourceTagWriteFaultKeepsCommitBelowTheCheckpoint` | A direct source-tag Git failure after the source commit leaves that commit reviewable while control remains old; explicitly publishing the exact source tag/branch and checkpoint makes retry a no-op. |
-| `TestFinalCheckpointControlChangePreservesTheRemoteSource` | A control commit made by the source's `afterPush` hook is refused by the checkpoint's head check: the remote source commit, branch, and tag are preserved while the control checkpoint is withheld; explicit gitlink repair prevents duplicate publication on retry. |
-| `TestFinalRecoveryReadFaultsKeepThePublishedRecordLocal` | After publication and a concurrent remote advance, failure reading remote tags or fetching for recovery is E224; the immutable tag and release commit remain local, the foreign remote commit remains durable, and explicit merge/ref repair makes retry a publication no-op. |
-| `TestFinalConflictSettlementFaultsKeepBothDurableInputs` | Git failures resolving the release side, pushing the quarantine branch, staging the audit note, or committing the settlement are E224; the local immutable release tag, remote foreign commit, visible merge state, and any successfully pushed quarantine ref truthfully describe how far recovery reached. |
-| `TestFinalDeferredTagWriteFaultRetainsTheReleaseCommit` | A direct Git failure writing a finalize-deferred tag is E220 after publication; the release commit and changelog remain for review, no false baseline exists, and a healthy retry republishes once before establishing the missing immutable tag. |
-
-### Commands and manifest updates
-
-| Test | Claim proven |
-| --- | --- |
-| `tests/integration/final_command_faults_test.go::TestFinalCommitRefusesUnreadableRepositoryMetadataBeforeMutation` | `commit` refuses unreadable cleanup, comment-character, or hook-location metadata before delegating to `git commit`, preserving HEAD, the index, and the working copy. |
-| `tests/integration/final_command_faults_test.go::TestFinalComputeKeepsReadableEvidenceBesideAMalformedManifest` | `compute` reports a malformed sibling manifest without discarding readable dependency evidence, and repairs an invalid declared kind to the strongest of runtime, peer, optional, and development declarations. |
-| `tests/integration/final_command_faults_test.go::TestFinalWriterBatchContainsAMalformedOverrideWithoutLosingOtherEdits` | A malformed npm override container is preserved byte for byte and reported as a failure while independent valid manifests in the same writer batch still receive their requested links. |
-| `tests/integration/final_command_faults_test.go::TestFinalInstallRechecksTheFilesystemAfterReleaseDiscovery` | `install` safely refuses a destination that becomes a folder or an install directory that becomes a file after release discovery, preserving the new filesystem object and downloading no asset. |
-| `tests/integration/final_command_faults_test.go::TestFinalStepCommandsStopWhenPlanningOrSelectionCannotReadGit` | `autowriter` and `autoreplacer` refuse unreadable planning and explicit-window Git inputs before opening any target, preserving every selected file. |
-| `tests/integration/final_command_faults_test.go::TestFinalAutoWriterUsesHealthyManifestBesideBrokenAndDifferentFormats` | `autowriter` keeps a healthy npm edit beside malformed Cargo and different-format manifests; a link-unsupported Dockerfile cannot satisfy strict mode, while a converged link in a supported npm manifest still can. |
-| `tests/integration/final_command_faults_test.go::TestFinalAutoReplacerKeepsProviderFactsFromAHealthySibling` | `autoreplacer` reports a malformed sibling while retaining provider facts resolved from a healthy manifest's aliased local path and applying the provider-version replacement. |
-| `tests/integration/final_command_faults_test.go::TestFinalExecFailsClosedWhenLayeredConfigurationCannotBeDiscovered` | `exec` refuses before starting a root-level script when the package or space environment it needs comes from a malformed layered configuration. |
-| `tests/integration/final_command_faults_test.go::TestFinalExecComputedEnvironmentNeedsNoDeclaredPairs` | `exec --env dispat` supplies computed package release variables even when there are no configured environment pairs to remove. |
-| `tests/integration/final_command_faults_test.go::TestFinalRecursiveEditorsStopBetweenAtomicFileWrites` | Ctrl-C during `autowriter` or `autoreplacer` preserves completed atomic writes, stops before every later file is changed, and reports interruption rather than successful partial completion. |
-
-### Public writer contracts
-
-| Test | Claim proven |
-| --- | --- |
-| `tests/integration/publicapi/final_writer_safety_test.go::TestPublicAPIWriterRefusesNonObjectNpmOverrideContainers` | `Relink` refuses a selected npm, Yarn, or pnpm override container that exists as a non-object, and the refusal preserves the manifest byte for byte instead of introducing a duplicate JSON key. |
-| `tests/integration/publicapi/final_writer_safety_test.go::TestPublicAPIWriterDropsOnlyLocalPubspecOverrides` | `Links`, empty-path `Relink`, and `DropLinks` recognize only top-level `path` mappings in Dart `dependency_overrides` as local redirects, remove block and quoted flow-map paths, and preserve scalar version constraints and nested or flow-map Git metadata unchanged. |
-
-### Execution boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalInterruptedBuildRevertsBeforeExitAndRetriesCleanly` | Ctrl-C after a build has changed tracked and untracked package files marks the package cancelled, suppresses failure hooks and tags, completes `revertOnFail` cleanup on a detached context before process exit, and leaves the same release safely retryable. |
-| `TestFinalRollbackGitFailureLeavesVisibleRepairState` | If Git refuses a failing build's `revertOnFail` restore, the run reports the cleanup failure, retains tracked and untracked residue for review, creates no release tag, and succeeds only after explicit repair. |
-| `TestFinalFleetRollbackRefusesARepositoryThatMovedDuringTheBuild` | A failing source build that commits its own edits moves HEAD outside the accepted fleet snapshot; rollback refuses to clean through that unplanned commit, preserves it for review, advances no source tag or control checkpoint, and permits retry after an explicit reset. |
-| `TestFinalPostPublishTagInventoryFailureStillWritesTheReleaseTag` | A transient failure of the executor's post-publication tag inventory is warned rather than losing the release record: the immutable tag is still written, and retry converges without publishing twice. |
-| `TestFinalExistingTagTargetReadFailurePreservesThePublishedRecord` | When a release stage has already created its immutable tag but Git cannot prove that tag's target, the outer run refuses to guess and reports a post-publication critical while retaining the truthful tag so retry performs no second upload. |
-| `TestReleaseRecordSnapshotHeadReadFailureRefusesPublication` | A source HEAD read failure during snapshot validation stops publication and records; a healthy retry publishes once. |
-| `TestReleaseRecordPostPublishHeadReadFailuresWithholdTheCheckpoint` | Source HEAD proof failures after upload preserve published status while withholding the source tag and control checkpoint. |
-
-### Public API boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `tests/integration/final_api_boundaries_test.go::TestFinalManifestCommandsRejectIncompleteEditSpecificationsBeforeWriting` | The `writer` and `replacer` command grammars reject every missing half of `--set`, `--link`, and `--replace` before opening the manifest, so an earlier valid edit on the same command line cannot leak through. |
-| `tests/integration/final_api_boundaries_test.go::TestFinalComputeDerivesDependenciesWithoutInventingGitBaselines` | In an adopting source tree with no Git repository, `compute` still derives objective manifest dependency edges while explicitly omitting release initials that have no tag history, in preview and write modes. |
-| `tests/integration/final_api_boundaries_test.go::TestFinalAutoWriterLeavesANestedPackageManifestToItsOwner` | A recursive `autowriter --manifests all` scan for an outer package does not rewrite a nested manifest owned by another configured package. |
-| `tests/integration/final_api_boundaries_test.go::TestFinalInstallExplainsAnUnprefixedListingWithNoVersions` | An empty install tag prefix is reported as an intentional unprefixed release listing when no tag is a valid version, and the refusal names the flags that can broaden the listing. |
-| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIWriterPreservesUnaddressedPubspecYAMLSyntax` | A public `writer.Rewrite` call edits an ordinary Pub dependency while preserving a YAML document marker, explicit mapping key, and quoted nondependency key byte for byte. |
-| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIWriterDropsAMiddlePubspecOverrideBlock` | Public `writer.DropLinks` removes the last local override together with blank padding while preserving a following top-level Pubspec section. |
-| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIWriterRefusesAnIncompatibleGoModuleMajorBeforeWriting` | `writer.Rewrite` applies x/mod semantic validation after formatting and preserves `go.mod` when a requested v2 requirement lacks the required `/v2` module-path suffix. |
-| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIConfigRefusesAnUnencodableYAMLValueBeforeWriting` | A YAML `config.ApplyEdits` batch returns an error for an unsupported Go value instead of panicking; an earlier valid edit in the same batch, source bytes, and backup state remain unchanged. |
-| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIScannerDoesNotTreatRubyOptionSuffixesAsLocalPaths` | The Ruby scanner does not shorten a plugin-specific `subpath:` option into the standard `path:` local-dependency option. |
-| `tests/integration/publicapi/final_boundaries_test.go::TestPublicAPIScannerReportsAnEmptyAquaDocument` | An empty conventional Aqua file is reported as a malformed manifest rather than silently becoming an empty dependency inventory. |
+| `TestPublicAPIWriterRefusesNonObjectNpmOverrideContainers` | `Relink` refuses a selected npm, Yarn, or pnpm override container that exists as a non-object, and the refusal preserves the manifest byte for byte instead of introducing a duplicate JSON key. |
+| `TestPublicAPIWriterDropsOnlyLocalPubspecOverrides` | `Links`, empty-path `Relink`, and `DropLinks` recognize only top-level `path` mappings in Dart `dependency_overrides` as local redirects, remove block and quoted flow-map paths, and preserve scalar version constraints and nested or flow-map Git metadata unchanged. |
+| `TestPublicAPIWriterPreservesUnaddressedPubspecYAMLSyntax` | A public `writer.Rewrite` call edits an ordinary Pub dependency while preserving a YAML document marker, explicit mapping key, and quoted nondependency key byte for byte. |
+| `TestPublicAPIWriterDropsAMiddlePubspecOverrideBlock` | Public `writer.DropLinks` removes the last local override together with blank padding while preserving a following top-level Pubspec section. |
+| `TestPublicAPIWriterRefusesAnIncompatibleGoModuleMajorBeforeWriting` | `writer.Rewrite` applies x/mod semantic validation after formatting and preserves `go.mod` when a requested v2 requirement lacks the required `/v2` module-path suffix. |
+| `TestPublicAPIConfigRefusesAnUnencodableYAMLValueBeforeWriting` | A YAML `config.ApplyEdits` batch returns an error for an unsupported Go value instead of panicking; an earlier valid edit in the same batch, source bytes, and backup state remain unchanged. |
+| `TestPublicAPIScannerDoesNotTreatRubyOptionSuffixesAsLocalPaths` | The Ruby scanner does not shorten a plugin-specific `subpath:` option into the standard `path:` local-dependency option. |
+| `TestPublicAPIScannerReportsAnEmptyAquaDocument` | An empty conventional Aqua file is reported as a malformed manifest rather than silently becoming an empty dependency inventory. |
 | `TestPublicAPIWriterEditsEscapedAndRichTOMLVersions` | Escaped TOML names and rich Gradle catalog versions are rewritten at the selected version field. |
 | `TestPublicAPIWriterUpdatesCargoDottedDependencyVersion` | Cargo dotted dependency keys scanned as one provider can be rewritten through the public writer; quoted aliases and package renames resolve to the same declaration, a literal dot in a quoted dependency name is kept distinct from a dotted path, and workspace-inherited versions remain untouched. |
 | `TestPublicAPIWriterIgnoresTOMLStringsThatResembleCargoDeclarations` | Cargo rewrites preserve multiline readme text and quoted or nested inline data that resembles a dependency declaration or version key, updating only the version recognized by the scanner. |
@@ -2724,41 +2838,16 @@ These cases extend the existing planning, configuration, publication, command an
 | `TestStandaloneCommitNoForceOverridesConfiguredForce` | Explicit no-force protects a tag created between planning and commit despite configured force permission. |
 | `TestStandaloneCommandsPropagateAPlanningReadFailure` | Commit, GitHub, preview and unchanged selection propagate unreadable planning evidence without mutation. |
 | `TestCommitPropagatesAWindowReadFailureBeforeWriting` | An unreadable commit selection window preserves the index, HEAD and tags. |
+| `TestPublicAPIConfigPreparedCommitRefusesAChangedDestination` | Replacing a prepared file with a directory causes commit to fail, preserving the replacement, original backup, permissions and temporary-file cleanup. |
 | `TestPublicAPIManifestReadersRefuseSpecialFiles` | A manifest-shaped FIFO cannot block public scanning or writing; bounded child processes detect regressions. |
 | `TestPublicAPIWriterRefusesAManifestDirectory` | Writer admission refuses directories named like manifest files. |
 | `TestPublicAPIWriterKeepsOriginalBytesWhenItsDirectoryCannotBeWrittenTo` | Across JSON, Go module, Aqua, Gradle, Pubspec, Unity and Android counter writes, a real permission failure creating the replacement beside a readable manifest preserves its bytes and mode and leaves no temporary file. |
 | `TestPublicAPIAtomicEditsSurvivePartialDiskWrites` | A filesystem quota interrupts a manifest or configuration replacement after its temporary file exists; original bytes and configuration backup survive and incomplete temporary files are removed. |
 | `TestPublicAPIWriterDoesNotInventALinkFromBrokenPubspecFlowSyntax` | A truncated inline Pubspec override is not inventoried as a local link and link cleanup leaves its malformed source bytes untouched. |
 | `TestPublicAPIScannerTreatsEmptyPlistAsMetadataFree` | An empty plist is discoverable without invented identity, version or build metadata. |
-| `TestGoInstallBuildUsesTheGoToolchainForUpdates` | Go module metadata selects Go update instructions and prevents binary replacement, download or backup creation. |
-| `TestStepRefusesARunEnvironmentItCannotHonor` | A step invoked inside a run is held to the run's answers: a version that does not parse, a listing naming an update it does not describe, a pin its own plan does not release and a tag the aligned version does not render each stop the changelog or commit step with exit 1 and `E219`, before any commit, tag, changelog byte or tree change. |
-| `TestStepAlignsItsRecordToTheRunEnvironment` | Where the step's replan can be corrected it is, and W228 says so: the run's version, its prerelease channel, the provider movements it listed and a stale provider destination are what the record states, and a workspace listing whose entries do not all resolve is skipped rather than refused. |
-| `TestGitHubStepReadsLegacyOutputAndDropsForeignPackageExport` | Legacy output assets upload only for their owning package; foreign package exports are ignored. |
-| `TestReleaseContinuesWhenOneGitHubTargetCannotResolve` | A missing-token GitHub target cannot suppress a healthy target or erase successful package tags. |
-| `TestInstallRollbackKeepsTheCurrentToolWhenRotationCannotStart` | A rollback initialization failure preserves both the installed executable and its backup. |
-| `TestFleetHistoryRefusesAControlCommitWhoseFirstParentIsMissing` | Incomplete control DAG evidence cannot produce a partial fleet plan. |
 | `TestPublicAPIWriterRefusesAquaAliasesThatTheReaderCanFollow` | Scanning follows shared Aqua data while writing refuses to modify aliased source bytes. |
 | `TestPublicAPIWriterLeavesMetadataOnlyPlistsByteExact` | Plist metadata without a writable version remains byte-for-byte unchanged. |
 | `TestPublicAPIWriterHandlesEscapedPythonArraysAndLiteralKeysIdempotently` | Python TOML edits preserve escaped markers, literal keys and unrelated values and converge without rewriting again. |
-| `TestPlanningCommandsRequireGitBeforeReadingHistory` | Missing Git is reported explicitly before release planning or mutation. |
-| `TestReleaseLockPreservesALightweightForeignLockWhenAttemptCleanupFails` | A lightweight foreign lock remains authoritative even when cleanup of the refused attempt fails. |
-| `TestPushRecoveryRefusesAnUnreadableBranchAfterPublication` | Failed branch proof during push recovery preserves the local publication and reports missing remote records for repair. |
-| `TestPushRecoveryReportsALateGitHubRecordFailure` | A late GitHub metadata failure reports incomplete recording while preserving the recovered remote branch, exact release tag and published outcome; retry does not republish. |
-| `TestPolyrepoGitHubFailureKeepsNativeRecordForAPIRepair` | A rejected GitHub create preserves the source tag and control checkpoint; release retry performs no second publication, and the standalone metadata step repairs the missing GitHub record against the same immutable tag. |
-
-| `TestStandaloneGitHubInterruptDrainsTheInFlightRequest` | Interrupting a standalone GitHub step cancels the active request, drains queued work and creates no release tags. |
-| `TestAutoWriterResolvesANeverReleasedProviderToItsCurrentVersion` | Standalone writing resolves an unchanged, never-released provider to its current version without inventing a release. |
-| `TestReleaseAutoVersionKeepsANeverReleasedProviderAtCurrentVersion` | Consumer release preserves the current version of an unchanged, never-released provider and does not create a provider tag. |
-| `TestIfAnEmptyMatchedBranchIsADeliberateNoop` | A matched empty conditional branch succeeds without executing the alternative branch. |
-| `TestIfReportsWhenItsInvocationFolderDisappears` | A vanished invocation directory produces an operational error before the selected conditional script can write anything. |
-| `TestDiscoveryNamesOneIdentityRepeatedAcrossSpacePaths` | One package identity found under two folders of a space, spelled the same or folding onto one name, is refused with no partial plan, and an identical spelling is named once rather than as two names. |
-| `TestCommandValidationExplainsSharedFlagsAndRepositoryFreeRollback` | Foreign shared flags identify their command owners; named rollback checks require no repository and report missing backups. |
-| `TestAutoReplacerSkipsBinaryContentWithoutLosingTextEdits` | A replacement sweep skips binary content with a diagnostic while applying matching text edits and creating no tags. |
-| `TestAutoReplacerReportsAnAtomicWriteRefusalWithoutTruncatingTheFile` | An atomic write refusal returns failure, preserves original content and leaves no temporary file or release tag. |
-
-| `TestFileProxyURLUsesGoProxyFileSemantics` | The offline installation fixture preserves Unix paths and encodes Windows drive and network paths as valid Go proxy file URLs. |
-
-| `TestExternalModuleRequirementsKeepsWorkspaceSelectionsOnly` | Offline install fixtures retain selected external dependency versions, deduplicate imports and exclude first-party or versionless modules. |
 
 ## Requirement traceability
 
@@ -2774,35 +2863,13 @@ support. It is the `repo-checks` target of `Dockerfile.gotest` in CI and `script
 
 | Matrix section | Goals that carry it |
 | --- | --- |
-| Configuration (`CFG`) | 10, 11, 12, 13, 14, 15, 32, 35, 52 |
-| Planning (`PLN`) | 1, 3, 4, 5, 20, 23, 31, 52 |
-| Versioning (`VER`) | 2, 24, 34, 36, 38 |
-| Execution (`EXE`) | 6, 7, 8, 9, 18, 19, 21, 29, 37, 52 |
-| Publication and recovery (`PUB`) | 16, 29, 30, 46, 47, 48, 52 |
-| Distribution (`DST`) | 22, 25, 26, 27, 28, 36, 45 |
-| Observability (`OBS`) | 17, 33, 39, 40, 42, 43, 44, 51 |
-
-## Coverage scenarios: release execution and distribution
-
-These scenarios (`cov_*_test.go`) reach the answers the goals above leave to the unit suites: the response, filesystem
-and remote shapes a release meets when something is wrong with them. Each one is a real invocation of the compiled
-binary, and each one asserts what the operator is told as well as what is left on disk, because the whole subject here
-is failure that must be legible.
-
-### Self-update and install
-
-| Test | Claim proven |
-|------|--------------|
-
-### Release execution, webhooks and the GitHub recorder
-
-| Test | Claim proven |
-|------|--------------|
-
-### The git layer and the planner
-
-| Test | Claim proven |
-|------|--------------|
+| Configuration (`CFG`) | 4, 10, 11, 12, 13, 14, 15, 16, 19, 32, 35, 42, 48, 50, 52, 55, 57, 58, 60, 61 |
+| Planning (`PLN`) | 1, 2, 3, 4, 5, 10, 14, 16, 19, 20, 23, 31, 47, 52, 55 |
+| Versioning (`VER`) | 1, 2, 10, 16, 19, 24, 29, 34, 36, 38, 56 |
+| Execution (`EXE`) | 5, 6, 7, 8, 9, 18, 19, 21, 29, 37, 42, 52, 55, 57, 60 |
+| Publication and recovery (`PUB`) | 1, 7, 13, 16, 29, 30, 33, 42, 46, 47, 48, 52, 55, 59, 60 |
+| Distribution (`DST`) | 22, 24, 25, 26, 27, 28, 36, 45, 61 |
+| Observability (`OBS`) | 1, 17, 20, 22, 33, 39, 40, 42, 43, 44, 45, 48, 51, 57 |
 
 ## Regression fences
 
@@ -2888,153 +2955,8 @@ than showing up as a puzzling behaviour change somewhere downstream.
 
 ## Running
 
-Coverage infrastructure is guarded by
-`tests/integration/internal/harness/binary_test.go::TestProductionCoverpkgIncludesEveryProductionModule`: the
-instrumented CLI build must include the CLI and all six public modules, so the integration percentage cannot improve
-by quietly dropping first-party code from its denominator.
-`tests/integration/internal/harness/binary_test.go::TestProductionCoverpkgAcceptsTheRunnerScope` keeps the subprocess
-and public-API test binaries on one explicit package set. `TestPublicAPIScannerWriterScannerLifecycle`,
-`TestPublicAPIConfigReferenceEditAndReload`, and `TestPublicAPICCMEModelConsumptionContract` exercise current public
-modules through cross-component contracts; their profile is merged with the instrumented CLI subprocess counters.
-`TestPublicAPIExtendedManifestLifecycles` walks every supported ecosystem and engine manifest through the public
-scanner, writer, and scanner again, checking each requested dependency survives in canonical form.
-`TestPublicAPICCMEConformanceVectors` runs scoped, unscoped, multi-unit, escaped-separator, strict-type, and invalid
-UTF-8 messages through the current public parser and its preferred validity/scope predicates.
-`TestPublicAPIConfigWatchReloadsAnAtomicEdit` covers the optional config/watch subpackage so it remains part of the
-integration denominator and proves an atomic config edit is observed as a new successfully parsed value.
-`TestPublicAPIRefusalsPreserveInputsAndBoundResources` exercises malformed manifests, the public size limit,
-filesystem boundary types, unsafe versions, and conflicting shared ranges; every refusal checks that the original
-bytes remain intact. `TestPublicAPIConfigAndModelRejectMalformedBoundaries` checks reference cycles, malformed config
-documents, and invalid public model shapes without mutating their inputs.
-`TestPublicAPILinkAndBuildWriterLifecycles` round-trips local redirects through all five link-capable formats, removes
-them again, rescans the manifests, and updates all nine build-counter formats while proving rejected integer counters
-leave the files unchanged. `TestPublicAPIConfigResolutionSettersAndDependencyModels` resolves an owned nested folder,
-applies an override, decodes the public setter shapes, and round-trips canonical typed dependency models while proving
-a failed decode leaves the receiver unchanged.
-Eight conformance drivers exercise the public API of `pkg/ccme`. The CLI and these drivers use the same unsuffixed
-module from the workspace. `TestPublicAPICCMEHeaderGrammarConformance` walks the type charset, the
-scope-set grammar and its term cap, the breaking marker and the separator rules of §5 under both strictness modes.
-`TestPublicAPICCMEDirectiveAxesConformance` walks both propagation axes of §5.3, every doubled-sigil guard, the
-channel grammar of §11.2 and the footer reconciliation of §8.3. `TestPublicAPICCMEFooterRegistryConformance` walks the
-§8.1 registry, the two breaking-change silent failures of §8.1.1, the correction footers of §7.4 and the control types
-of §7 and §10. `TestPublicAPICCMEMessageStructureConformance` walks normalisation, unit splitting, escaped separators
-and the message-scoped bounds of §14.1 through both entry points, and `TestPublicAPICCMENormalizationIsIdempotent`
-checks the exported normaliser directly, including the fast path that returns its input untouched.
-`TestPublicAPICCMEVersionArithmetic` covers the exported semver surface the release engine shares with the parser, and
-`TestPublicAPICCMEValueTypeContracts` and `TestPublicAPICCMEConfigurationSurface` cover the value types a consumer of
-a result reads and every configuration the constructors accept or refuse.
-Eight drivers carry `pkg/models`, the published configuration model, through its own surface rather than through a
-loaded configuration. `TestPublicAPIModelOptionPredicates` drives every tri-state option field through its nil, false
-and true states and checks each deprecated spelling against its preferred one; `TestPublicAPIModelFoldLookups` drives
-the case-insensitive name resolution at each level a package resolves a script through;
-`TestPublicAPIModelScriptShapes` and `TestPublicAPIModelDependencyShapes` round-trip the `scripts` and `dependencies`
-keys through both written shapes and every error their normalisers report, including the map shape a YAML reader
-produces; `TestPublicAPIModelPathListShapes` round-trips a space's `path` key; `TestPublicAPIModelWebhookVocabulary`
-drives the event vocabulary, the subscription grammar and the format tokenizer;
-`TestPublicAPIModelStageRelationShapes` round-trips `isBuildWaitingPublish` through the boolean and the object it also
-accepts, the defaults an unstated `isBlocking` follows and every error its normaliser reports; and
-`TestPublicAPIModelFileRoundTrip`
-authors a whole configuration as typed values and checks that marshalling it twice is stable.
-`TestPublicAPIModelVersionGroupSerialization` preserves all three sharing axes through JSON and YAML and refuses
-invalid declarations without partially replacing the caller's existing policy.
-Fifteen drivers carry `pkg/config`, the published configuration library, and its optional `watch` subpackage.
-`TestPublicAPIConfigFoldingAndKeyPaths`, `TestPublicAPIConfigErrorVocabulary` and `TestPublicAPIConfigEventSurface`
-cover what a name means, every error value a caller matches on, and the logging surface a caller wires its own logging
-package in through. `TestPublicAPIConfigWeakTyping` and `TestPublicAPIConfigDecodeRules` cover the weakly typed
-readers and the object rules, including the unknown key, the two spellings of one name in one object at both object
-sizes, and every setter shape. `TestPublicAPIConfigSettingsRendering` covers the pruning of empty objects, the
-delimiter that names levels, the overrides written over the result and the deep clone. `TestPublicAPIConfigEnvLayers`
-and `TestPublicAPIConfigEnvBinding` cover the env-layer helpers and the opt-in environment binding including its
-strict refusal. `TestPublicAPIConfigLoaderOptions` covers the format table, a caller's own reader, and the nil loader;
-`TestPublicAPIConfigReferenceComposition` covers the `$ref` key, the keys written beside it, the several files it may
-merge, and every way it can be written wrong; `TestPublicAPIConfigAscent` covers the walk up the directory tree;
-`TestPublicAPIConfigEditWriting`, `TestPublicAPIConfigEditResolution` and `TestPublicAPIConfigStringMapReading` cover
-writing one key back, choosing which file holds it, and reading the entries a write starts from.
-`TestPublicAPIConfigWatchLifecycle` covers the watch subpackage: the first load a program exits on, the reloads a
-change produces (a file the configuration was not read from earns none, and one debounced save of the configuration
-earns exactly one, reading its new value), the failure that keeps the last good value, the watch set moving with the
-files each load reports, and the two ways a watcher stops.
-Seventy-six drivers carry the three manifest modules, `pkg/manifest`, `pkg/scanner` and `pkg/writer`, through their
-own exported surfaces on realistic files rather than through a release.
-Six of them cover the vocabulary the reading and writing halves share.
-`TestPublicAPIManifestFormatClassification`, `TestPublicAPIManifestKindVocabulary` and
-`TestPublicAPIManifestNameNormalisation` cover the file-name and folder-qualified format tables, the four dependency
-kinds and their spellings, and the name-splitting rules both halves resolve names through.
-`TestPublicAPIManifestImageReferences` splits every shape of image reference and checks the tag grammar a writer
-validates against; `TestPublicAPIManifestDockerfileReferences` locates the references `FROM`, `COPY --from` and
-`RUN --mount` carry, including continuations, stage aliases and carriage returns; and
-`TestPublicAPIManifestComposeIdentity` covers both rules by which a compose file names its own image, and their
-tie-breaks.
-Twelve drivers read manifests. `TestPublicAPIScannerReadsGradleBuildScripts`,
-`TestPublicAPIScannerReadsGradleVersionCatalog`, `TestPublicAPIScannerReadsRubyManifests`,
-`TestPublicAPIScannerReadsPythonManifests`, `TestPublicAPIScannerReadsPubspecAndCargo`,
-`TestPublicAPIScannerReadsAquaConfigurations`, `TestPublicAPIScannerReadsAppleManifests`,
-`TestPublicAPIScannerReadsDotNetAndMavenManifests`, `TestPublicAPIScannerReadsEngineManifests` and
-`TestPublicAPIScannerReadsNodeGoAndCompose` walk each ecosystem's own syntax: comments, quoting styles,
-interpolations, dependency groups, inline tables, nested documents, legacy encodings and the entries a reader
-deliberately drops. `TestPublicAPIScannerReportsUnreadableManifests` proves every reader names a malformed file in its
-error and leaves it as it was, and `TestPublicAPIScannerEcosystemsCoverEveryFormat` fences the ecosystem table against
-the format list.
-Twelve drivers cover the walk itself. `TestPublicAPIScannerWalkSkipsAndReportsWithoutStopping` fixes which folders a
-manifest walk enters and which a literal-text walk still sees;
-`TestPublicAPIScannerReportsUnreadableEntriesAndKeepsGoing` and
-`TestPublicAPIScannerRefusesAnOversizedManifestInAWalk` prove the partial-result contract for an unreadable folder, an
-unreadable file and the read cap; `TestPublicAPIScannerHonoursACancelledContext` covers both entry points under
-cancellation; and `TestPublicAPIScannerRootScanReadsOnlyTheFolderItself` covers the root-only scan, its aqua
-exception, and the folder wearing a manifest's name that it steps over.
-`TestPublicAPIScannerFollowsLocalAquaImports`, `TestPublicAPIScannerKeepsValidAquaImportsBesideRejectedSiblings`,
-`TestPublicAPIScannerRefusesAquaImportsThatLeaveTheTree` and
-`TestPublicAPIScannerPrefersTheRealAquaFileOverItsAlias` cover the local import walk, partial results when an
-imported sibling is malformed or oversized, every way a pattern or a symbolic link can leave the scanned tree, and
-the rule that prefers a real configuration over an alias for it.
-`TestPublicAPIScannerPackageRootRule`, `TestPublicAPIScannerNameIndexBindsByRank` and
-`TestPublicAPIScannerResolvesDeclaredLocalPaths` cover the three helpers a caller builds a dependency graph with.
-Six drivers cover the writer's entry points. `TestPublicAPIWriterReplacesLiteralText` covers the literal replacer
-including its binary, size and empty-pattern refusals; `TestPublicAPIWriterSwappableValueCoversEveryEntryPoint` drives
-all six methods of the swappable writer; `TestPublicAPIWriterFormatForcedRewrite` covers the format-forced rewrite and
-the kind canonicalisation that never touches the caller's own slice;
-`TestPublicAPIWriterRefusesToFollowASymbolicLink` and `TestPublicAPIWriterSupportTablesAgreeWithTheScanner` fence the
-symbolic-link refusal and the two support tables against the scanner's formats; and
-`TestPublicAPIWriterLinkRefusalsAndUnlinkableFormats` covers every refusal the three link entry points share.
-Nine drivers write one format each. `TestPublicAPIWriterRewritesJSONManifests`,
-`TestPublicAPIWriterRewritesXMLManifests`, `TestPublicAPIWriterRewritesTOMLManifests`,
-`TestPublicAPIWriterRewritesLineManifests`, `TestPublicAPIWriterRewritesYAMLManifests`,
-`TestPublicAPIWriterRewritesGradleBuildScripts`, `TestPublicAPIWriterRewritesEngineManifests` and
-`TestPublicAPIWriterRewritesGoModules` check each format's applied, missing and skipped outcomes, the values a writer
-declines because they defer to something outside the file, and the bytes around every change; and
-`TestPublicAPIWriterLifecycleAcrossEveryFormat` reads each of them back through the scanner.
-Ten drivers assert the properties every format writer shares.
-`TestPublicAPIWriterRewritingTheSameValuesTwiceWritesNothing` and
-`TestPublicAPIWriterWithNothingToWriteLeavesTheFileAlone` prove idempotence and the empty rewrite across every
-supported format; `TestPublicAPIWriterRefusesEveryFormatThroughASymbolicLink`,
-`TestPublicAPIWriterRefusesBuildCountersThroughASymbolicLink` and
-`TestPublicAPIWriterRefusesLinksThroughASymbolicLink` prove the same for the symbolic-link refusal across every
-rewrite, counter and link format; `TestPublicAPIWriterRefusesVersionsAFormatCannotHold` covers the versions each
-line-structured format declines rather than splice. `TestPublicAPIWriterLeavesEveryTruncatedManifestIntact`,
-`TestPublicAPIWriterLeavesEveryTruncatedLinkableManifestIntact` and
-`TestPublicAPIWriterLeavesEveryTruncatedCounterManifestIntact` cut each manifest at every byte and prove no prefix
-makes a writer leave a half-written file.
-Eighteen drivers cover the syntax and the shapes a real checkout carries.
-`TestPublicAPIWriterSurvivesTOMLQuoting`, `TestPublicAPIWriterSurvivesRubyQuoting`,
-`TestPublicAPIWriterSurvivesYAMLQuoting`, `TestPublicAPIWriterSurvivesPlistAndProjectShapes`,
-`TestPublicAPIWriterSurvivesEngineDocumentShapes`, `TestPublicAPIWriterSurvivesGradleCommentsAndClosures`,
-`TestPublicAPIWriterSurvivesComposeAndDockerShapes` and `TestPublicAPIWriterSurvivesAttributeSpelling` cover the
-comments, escapes, quoting styles and attribute spellings a hand-written manifest carries;
-`TestPublicAPIWriterRefusesAquaShapesItCannotSplice` covers the document shapes the aqua writer declines outright; and
-`TestPublicAPIWriterStepsOverUnreadablePluginEntries`,
-`TestPublicAPIWriterStepsOverRubyStatementsThatAreNotDeclarations`,
-`TestPublicAPIWriterHandlesNestedAndCompactOverrideMaps`, `TestPublicAPIWriterHandlesPubspecShapesItCannotSplice`,
-`TestPublicAPIWriterHandlesTOMLValuesItCannotSplice`, `TestPublicAPIWriterHandlesComposeFlowSequences`,
-`TestPublicAPIWriterHandlesMalformedCatalogEntries`, `TestPublicAPIWriterHandlesCarriageReturnsAndNamelessLines`,
-`TestPublicAPIWriterHandlesPubspecOverrideShapes` and `TestPublicAPIWriterHandlesLargeFilesAndKotlinBuildScripts`
-cover the declarations a writer steps over, the nesting and line endings a real file uses, and the values no splice
-can reach.
-Four drivers cover the two writes that are not version rewrites. `TestPublicAPIWriterManagesNpmOverrides`,
-`TestPublicAPIWriterManagesTOMLAndPubspecLinks` and `TestPublicAPIWriterManagesGoModuleReplaces` cover the whole life
-of a local redirect in each linkable format: the field each package manager spells it in, the map or table created and
-dropped with it, repointing, removal, and the directives a listing must not claim as local links.
-`TestPublicAPIWriterSetsBuildCounters` covers all nine counter formats, the counters a writer never creates because
-the project never declared one, and every refusal an integer counter carries.
+Integration coverage is gathered from the instrumented CLI build that goal 49 guards, merged with the profile of the
+public-API test binaries that goal 61 drives. The suite runs from its own module:
 
 ```sh
 cd tests/integration

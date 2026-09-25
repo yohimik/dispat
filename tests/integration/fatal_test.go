@@ -74,6 +74,59 @@ func TestFatalDuplicateVersionTags(t *testing.T) {
 	assert.Equal(t, 1, buildRuns(r), "the pending fix must not have been released")
 }
 
+// TestFatalErrorsIgnoreCommitErrors: the fatal bucket is not the unit-scoped
+// bucket `commitErrors` decides about. Whether a malformed commit warns or
+// fails the run, a repository with no correct plan aborts the same way: exit
+// 1, the code in the events, nothing built and nothing tagged.
+func TestFatalErrorsIgnoreCommitErrors(t *testing.T) {
+	shapes := []struct {
+		name  string
+		code  string
+		setup func(t *testing.T, policy string) *harness.Repo
+	}{
+		{name: "a dependency cycle", code: "E200", setup: func(t *testing.T, policy string) *harness.Repo {
+			r := harness.New(t)
+			cfg := libsConfig(markerBuild, 1)
+			cfg.CommitErrors = policy
+			cfg.Dependencies = []models.DependencyConfig{
+				{Consumer: "app", Provider: "core"},
+				{Consumer: "core", Provider: "app"},
+			}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.SeedPackage("packages", "app")
+			r.Commit("feat(core,app): both exist")
+			return r
+		}},
+		{name: "two tags naming one version", code: "E191", setup: func(t *testing.T, policy string) *harness.Repo {
+			r := harness.New(t)
+			cfg := libsConfig(markerBuild, 1)
+			cfg.CommitErrors = policy
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first release")
+			r.Git("tag", "-a", "core@0.1.0", "-m", "the release")
+			r.CommitEmpty("fix(core): pending work")
+			r.Git("tag", "-a", "core@0.1.0+dup", "-m", "duplicate version on a different commit")
+			return r
+		}},
+	}
+	for _, shape := range shapes {
+		for _, policy := range []string{"warn", "error"} {
+			t.Run(shape.name+" under commitErrors "+policy, func(t *testing.T) {
+				r := shape.setup(t, policy)
+				tags := len(r.TagList())
+
+				res := r.Release()
+				assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+				assert.True(t, harness.IsCodePresent(res.Events, shape.code), "stdout:\n%s", res.Stdout)
+				assert.Zero(t, buildRuns(r), "nothing was built")
+				assert.Len(t, r.TagList(), tags, "and nothing was tagged: %v", r.TagList())
+			})
+		}
+	}
+}
+
 // TestFatalShallowRepository: a shallow clone hides commits and tags, so
 // every window computed over it is silently wrong. dispat must refuse with
 // E196 instead of quietly planning from the truncated history.

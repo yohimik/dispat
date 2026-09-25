@@ -1,12 +1,11 @@
 package integration
 
-// Area 12: per-package overrides, versioning groups and .dispatexclude.
-// packages.md promises that a package can override its space's configuration
-// — from a top-level `packages` entry or from a dispat config file inside
-// the package folder, most local winning — that declared versionGroups
-// version their members as one across spaces, that `.dispatexclude` excludes
-// folders from discovery, and that the per-package record and concurrency
-// policies hold through a real release. Only the compiled binary can prove
+// Goal 13: per-package overrides and .dispatexclude. packages.md promises
+// that a package can override its space's configuration, from a top-level
+// `packages` entry or from a dispat config file inside the package folder,
+// most local winning; that `.dispatexclude` excludes folders from discovery;
+// and that the per-package record and concurrency policies hold through a
+// real release. Declared version groups across spaces are goal 36. Only the compiled binary can prove
 // the layers compose: config load, discovery, planning, scheduling and the
 // recorders all participate in every scenario here.
 
