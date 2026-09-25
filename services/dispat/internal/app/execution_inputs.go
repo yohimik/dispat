@@ -35,6 +35,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -44,6 +45,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // codeLockLost is the code dispat already reports a lost or unusable release
@@ -140,7 +142,13 @@ func (a *App) refusePublication(rel *plan.Release, err error) error {
 	refusal := execution.NewIdentifiedDiagnostic(
 		execution.Identity{Run: a.runID, Task: rel.Pkg.Name + ":publish"},
 		codeLockLost, execution.CategoryNativeRecordingOrLock, "%w", err)
-	a.logError(refusal).Str("package", rel.Pkg.Name).Msg("publication not authorized")
+	event := a.logError(refusal).Str("package", rel.Pkg.Name)
+	if errors.Is(err, release.ErrLockLost) {
+		// The lock on the remote is another run's now, or nobody's: the one
+		// remedy that must not be given is the one for a stranded lock.
+		event = event.Str("remedy", release.LockLostRemedy)
+	}
+	event.Msg("publication not authorized")
 	return refusal
 }
 

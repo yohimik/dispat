@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -400,4 +401,113 @@ func TestLockAcquireKeepsAnotherRunsLock(t *testing.T) {
 
 	lock.Release(context.Background())
 	assert.NotContains(t, git.calls, "deleteRemote", "another run's lock is never deleted")
+}
+
+// TestLockAcquireSettlesAFailedPushFromTheRemote: a push that reports a failure
+// is read back before it is believed, because a lost answer looks exactly like
+// a refusal. The object the remote carries decides: this attempt's own is a
+// lock this run owns, another is a refusal, none is a push that did not land,
+// and a remote that answers no read is removed under a lease on this
+// attempt's object and refused with what identifies a stranded lock.
+func TestLockAcquireSettlesAFailedPushFromTheRemote(t *testing.T) {
+	for name, tc := range map[string]struct {
+		read          lockRead
+		isHeld        bool
+		isLeaseDelete bool
+		refusal       []string
+	}{
+		"this attempt's object: the push landed": {read: lockRead{object: "object-id"}, isHeld: true},
+		"another object: another run holds it":   {read: lockRead{object: "another-object"}, refusal: []string{"lost answer"}},
+		"no lock: the push did not land":         {read: lockRead{}, refusal: []string{"lost answer"}},
+		"every read failed": {read: lockRead{err: errors.New("remote unreachable")}, isLeaseDelete: true,
+			refusal: []string{"could not be read back", "object-id", gitx.LockAttemptTagPrefix, "remote unreachable"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			shrinkLockVerify(t, time.Second)
+			var out bytes.Buffer
+			git := &readingLockGit{
+				fakeLockGit: fakeLockGit{failures: map[string]error{"push": errors.New("lost answer")}},
+				reads:       []lockRead{tc.read},
+			}
+			lock := &Lock{Git: git, Remote: "origin", Log: zerolog.New(&out)}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			err := lock.Acquire(ctx)
+
+			assert.Equal(t, tc.isHeld, lock.LockObject() != "", "held only when a read shows this attempt's object")
+			assert.Equal(t, tc.isLeaseDelete, slices.Contains(git.calls, "deleteRemote"),
+				"only a push nobody could read back is removed, and only under its own object")
+			if tc.isLeaseDelete {
+				assert.Equal(t, "object-id", git.deleteOID)
+			}
+			if tc.isHeld {
+				require.NoError(t, err, "the reads outlive the run's cancellation")
+				assert.Contains(t, out.String(), "the release lock push reported a failure but landed; this run owns the lock")
+				assert.NotContains(t, git.calls, "delete", "an owned attempt keeps its local tag")
+				return
+			}
+			require.Error(t, err)
+			for _, part := range tc.refusal {
+				assert.Contains(t, err.Error(), part)
+			}
+			assert.Contains(t, git.calls, "delete", "a refused attempt removes its own local tag")
+			require.NoError(t, lock.Release(context.Background()))
+			assert.Equal(t, tc.isLeaseDelete, slices.Contains(git.calls, "deleteRemote"),
+				"a lock this run does not hold is never given back")
+		})
+	}
+}
+
+// TestLockReleaseSettlesAFailedDeleteFromTheRemote: a delete that reports a
+// failure is read back once. A remote with no lock is a lock given back, not a
+// failure. One holding another run's object is left to its owner, and the run
+// fails with E336 and the remedy that says not to delete it, because it cannot
+// show it held the exclusion to its end. This run's own object or a read that
+// failed is a stranded lock, which is E336 with the remedy that clears it.
+func TestLockReleaseSettlesAFailedDeleteFromTheRemote(t *testing.T) {
+	for name, tc := range map[string]struct {
+		read       lockRead
+		isStranded bool
+		isReplaced bool
+		logged     string
+	}{
+		"no lock: the delete landed":        {read: lockRead{}, logged: "the remote holds no lock; it is released"},
+		"another object: another run's now": {read: lockRead{object: "another-object"}, isReplaced: true, logged: "another run holds the release lock now"},
+		"this run's object: still stranded": {read: lockRead{object: "object-id"}, isStranded: true},
+		"the read failed":                   {read: lockRead{err: errors.New("remote unreachable")}, isStranded: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			git := &readingLockGit{fakeLockGit: fakeLockGit{}}
+			lock := acquiredLockLogging(t, git, &out)
+			git.failures = map[string]error{"deleteRemote": errors.New("lost answer")}
+			git.reads = []lockRead{tc.read}
+
+			err := lock.Release(context.Background())
+
+			assert.Equal(t, 1, readsOf(git), "one read settles the delete")
+			assert.Contains(t, git.calls, "delete", "the local tag goes either way")
+			if tc.isReplaced {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "replaced by another run")
+				assert.Contains(t, out.String(), `"code":"E336"`)
+				assert.Contains(t, out.String(), tc.logged)
+				assert.Contains(t, out.String(), "so do not delete it", "the remedy leaves the other run's lock alone")
+				assert.NotContains(t, out.String(), "delete the tag on the remote", "nobody is told to delete a lock")
+				return
+			}
+			if !tc.isStranded {
+				require.NoError(t, err)
+				assert.NotContains(t, out.String(), `"code":"E336"`)
+				assert.NotContains(t, out.String(), "delete the tag on the remote", "nobody is told to delete a lock")
+				assert.Contains(t, out.String(), tc.logged)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "lost answer")
+			assert.Contains(t, out.String(), `"code":"E336"`)
+			assert.Contains(t, out.String(), "delete the tag on the remote")
+		})
+	}
 }

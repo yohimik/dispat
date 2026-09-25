@@ -43,6 +43,33 @@ const LockTagName = gitx.LockTagName
 const LockRemedy = "another release may hold it; if you are sure nothing else is releasing, " +
 	"delete the tag on the remote (git push <remote> --delete " + LockTagName + ") and run again"
 
+// LockLostRemedy is what to do when the lock this run took is no longer its
+// own: the remote carries another run's lock under the name, or none. It is
+// the opposite advice to LockRemedy on purpose. The tag on the remote belongs
+// to whoever wrote it, and deleting it would hand the repository to a third
+// run while the second is still releasing.
+const LockLostRemedy = "the release lock on the remote is no longer this run's; another run may hold it now, " +
+	"so do not delete it: check what this run published and run again once that run has finished"
+
+// The bounds of the remote calls around taking and giving back the lock.
+// Giving it back fits a fleet's 30 seconds per repository: the delete, one
+// read when the delete reports a failure, and the second the local cleanup
+// keeps for itself.
+const (
+	// lockDeleteTimeout bounds one lease delete of the remote lock.
+	lockDeleteTimeout = 18 * time.Second
+	// lockReleaseReadTimeout bounds the one read that settles a delete
+	// whose answer was a failure.
+	lockReleaseReadTimeout = 10 * time.Second
+	// lockPushReadTimeout bounds the reads that settle a push whose answer
+	// was a failure: the verification's own retries, cut off at this bound.
+	lockPushReadTimeout = 30 * time.Second
+	// lockMessageReadTimeout bounds the read of the holder's tag message.
+	lockMessageReadTimeout = 10 * time.Second
+	// lockLocalTimeout bounds removing this attempt's local tag.
+	lockLocalTimeout = time.Second
+)
+
 // LockGitx is the slice of git the lock needs. *gitx.LocalGitx satisfies it.
 //
 // Note what is missing: nothing here can force a push. Taking the lock has to
@@ -95,6 +122,11 @@ type Lock struct {
 // unreachable remote, a missing one, or a ref rule that forbids the tag are
 // all a remote this run cannot use to coordinate with the next one, and
 // releasing without coordination is the thing being prevented.
+//
+// A push that reports a failure is not taken at its word, because a lost
+// response looks exactly like a refusal: the remote is read back and decides
+// (see settleFailedPush). The lock is held only when a read shows this
+// attempt's object on the remote.
 func (l *Lock) Acquire(ctx context.Context) error {
 	// Each attempt gets its own local ref. A shared checkout may have two
 	// processes acquiring at once; neither may be able to retarget the source
@@ -114,7 +146,7 @@ func (l *Lock) Acquire(ctx context.Context) error {
 		// context; otherwise a harmless failed acquisition leaves a local tag
 		// that looks like durable lock state. If Git cannot remove it, say so:
 		// this is the only evidence an operator has for the stranded ref.
-		localCtx, cancelLocal := detachedDeadline(ctx, time.Second)
+		localCtx, cancelLocal := detachedDeadline(ctx, lockLocalTimeout)
 		if derr := l.Git.DeleteTag(localCtx, l.localTag); derr != nil {
 			l.Log.Warn().Err(derr).Str("tag", l.localTag).
 				Msg("could not remove the local lock tag after resolving its object failed")
@@ -126,45 +158,125 @@ func (l *Lock) Acquire(ctx context.Context) error {
 	l.Log.Trace().Str("tag", LockTagName).Str("attempt", l.localTag).
 		Str("remote", gitx.RedactURL(l.Remote)).Msg("pushing the release lock tag")
 	if err := l.Git.PushObjectToTag(ctx, l.Remote, oid, LockTagName); err != nil {
-		// Read the remote's lock once, and read it on a context this run's
-		// cancellation cannot take away: the two questions that follow — "did
-		// the push land after all" and "who holds it instead" — are exactly
-		// the questions an interrupted acquisition has to answer, and a probe
-		// that inherits the interrupt answers neither.
-		probeCtx, cancelProbe := detachedDeadline(ctx, 10*time.Second)
-		message := l.remoteLockMessage(probeCtx)
-		cancelProbe()
-		// A push whose response was lost still landed. The attempt id in the
-		// tag message is unique to this Acquire call, so finding it on the
-		// remote proves this run owns the lock rather than that somebody else
-		// does — and owning it is what makes Release able to give it back
-		// instead of stranding it for the next run to clear by hand.
-		if carriesAttempt(message, l.localTag) {
-			l.held = true
-			l.Log.Warn().Err(err).Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
-				Msg("the release lock push reported a failure but landed; this run owns the lock")
-			return nil
-		}
-		// The local tag was this attempt's, so it goes with the attempt. Left
-		// behind it would be read as a lock this clone holds by anyone looking
-		// at `git tag`, which is exactly the wrong thing to suggest — and an
-		// interrupted attempt has to clean it up on a live context of its own.
-		localCtx, cancelLocal := detachedDeadline(ctx, time.Second)
-		if derr := l.Git.DeleteTag(localCtx, l.localTag); derr != nil {
-			l.Log.Debug().Err(derr).Str("tag", l.localTag).
-				Msg("could not remove the local lock tag after a failed push")
-		}
-		cancelLocal()
-		if holder := describeHolder(message); holder != "" {
-			return fmt.Errorf("pushing the release lock tag to %s (%s): %w", gitx.RedactURL(l.Remote), holder, err)
-		}
-		return fmt.Errorf("pushing the release lock tag to %s: %w", gitx.RedactURL(l.Remote), err)
+		return l.settleFailedPush(ctx, err)
 	}
 	l.held = true
 	// Info, not debug: "who holds the lock" is the first question of a stuck
 	// pipeline, and this is the line that answers it at the default level.
 	l.Log.Info().Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).Msg("release lock acquired")
 	return nil
+}
+
+// settleFailedPush decides what a lock push that reported a failure did,
+// from what the remote carries now:
+//
+//   - this attempt's object: the push landed and only its answer was lost, so
+//     this run owns the lock and says so;
+//   - another object: another run holds the lock, and the refusal names it;
+//   - no lock at all: the push did not land;
+//   - nothing, because every read failed: the push may have landed, so it is
+//     removed under a lease on this attempt's object, and the refusal names
+//     the attempt and the object so a lock stranded anyway can be recognised.
+//
+// Every read runs on a context this run's cancellation cannot take away: "did
+// the push land" is exactly the question an interrupted acquisition has to
+// answer, and a read that inherits the interrupt answers nothing. A git that
+// cannot read a remote tag object falls back to the tag message, which is
+// what settled the question before objects could be read.
+func (l *Lock) settleFailedPush(ctx context.Context, pushErr error) error {
+	if _, isReadable := l.Git.(lockReader); !isReadable {
+		return l.settleFailedPushByMessage(ctx, pushErr)
+	}
+	readCtx, cancelRead := detachedDeadline(ctx, lockPushReadTimeout)
+	object, readErr := l.readRemoteObject(readCtx)
+	cancelRead()
+	switch {
+	case readErr != nil:
+		return l.abandonUnknownPush(ctx, pushErr, readErr)
+	case object == l.oid:
+		l.adoptLandedPush(pushErr)
+		return nil
+	}
+	l.dropAttempt(ctx)
+	if object == "" {
+		return fmt.Errorf("pushing the release lock tag to %s: %w", gitx.RedactURL(l.Remote), pushErr)
+	}
+	return l.formatRefusal(ctx, pushErr)
+}
+
+// settleFailedPushByMessage is settleFailedPush for a git that can only read
+// the remote tag's message. The attempt id in the message is unique to this
+// Acquire call, so finding it there proves this run owns the lock.
+func (l *Lock) settleFailedPushByMessage(ctx context.Context, pushErr error) error {
+	probeCtx, cancelProbe := detachedDeadline(ctx, lockMessageReadTimeout)
+	message := l.remoteLockMessage(probeCtx)
+	cancelProbe()
+	if carriesAttempt(message, l.localTag) {
+		l.adoptLandedPush(pushErr)
+		return nil
+	}
+	l.dropAttempt(ctx)
+	if holder := describeHolder(message); holder != "" {
+		return fmt.Errorf("pushing the release lock tag to %s (%s): %w", gitx.RedactURL(l.Remote), holder, pushErr)
+	}
+	return fmt.Errorf("pushing the release lock tag to %s: %w", gitx.RedactURL(l.Remote), pushErr)
+}
+
+// adoptLandedPush takes ownership of a lock whose push reported a failure and
+// landed all the same. Owning it is what makes Release able to give it back
+// instead of stranding it for the next run to clear by hand.
+func (l *Lock) adoptLandedPush(pushErr error) {
+	l.held = true
+	l.Log.Warn().Err(pushErr).Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
+		Msg("the release lock push reported a failure but landed; this run owns the lock")
+}
+
+// formatRefusal is the refusal of a lock another run holds, naming that run
+// when the remote tag's message says who it is.
+func (l *Lock) formatRefusal(ctx context.Context, pushErr error) error {
+	probeCtx, cancelProbe := detachedDeadline(ctx, lockMessageReadTimeout)
+	message := l.remoteLockMessage(probeCtx)
+	cancelProbe()
+	if holder := describeHolder(message); holder != "" {
+		return fmt.Errorf("pushing the release lock tag to %s (%s): %w", gitx.RedactURL(l.Remote), holder, pushErr)
+	}
+	return fmt.Errorf("pushing the release lock tag to %s: %w", gitx.RedactURL(l.Remote), pushErr)
+}
+
+// abandonUnknownPush gives up an acquisition whose push reported a failure and
+// whose outcome no read could establish. The push may have landed, and a lock
+// nobody owns strands every later run, so it is deleted under a lease on this
+// attempt's object: the lease can only remove this attempt's own lock, never
+// another run's. The refusal names the attempt and the object either way,
+// which is how an operator recognises a lock the delete could not reach.
+func (l *Lock) abandonUnknownPush(ctx context.Context, pushErr, readErr error) error {
+	deleteCtx, cancelDelete := detachedDeadline(ctx, lockDeleteTimeout)
+	deleteErr := l.Git.DeleteRemoteTagLease(deleteCtx, l.Remote, LockTagName, l.oid)
+	cancelDelete()
+	outcome := "a push that landed was removed again"
+	if deleteErr != nil {
+		outcome = "removing a push that may have landed also failed"
+		l.Log.Warn().Err(deleteErr).Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
+			Str("attempt", l.localTag).Msg("could not remove a release lock push whose outcome is unknown")
+	}
+	l.dropAttempt(ctx)
+	return fmt.Errorf("pushing the release lock tag to %s reported a failure and the lock could not be read "+
+		"back (%s; %v): a %s tag on the remote whose object is %s and whose message names attempt %s is this "+
+		"run's stranded lock and may be deleted, and any other is another run's: %w",
+		gitx.RedactURL(l.Remote), outcome, readErr, LockTagName, l.oid, l.localTag, pushErr)
+}
+
+// dropAttempt removes this attempt's local tag after an acquisition that did
+// not take the lock. Left behind it would be read as a lock this clone holds
+// by anyone looking at `git tag`, which is exactly the wrong thing to suggest,
+// and an interrupted attempt has to clean it up on a live context of its own.
+func (l *Lock) dropAttempt(ctx context.Context) {
+	localCtx, cancelLocal := detachedDeadline(ctx, lockLocalTimeout)
+	defer cancelLocal()
+	if err := l.Git.DeleteTag(localCtx, l.localTag); err != nil {
+		l.Log.Debug().Err(err).Str("tag", l.localTag).
+			Msg("could not remove the local lock tag after a failed push")
+	}
 }
 
 // Release gives the lock back: the tag goes from the remote first, then from
@@ -185,17 +297,11 @@ func (l *Lock) Release(ctx context.Context) error {
 	// Whatever happens below, this run has stopped claiming the lock: a second
 	// call must not try again, and a failure here is not retried.
 	l.held = false
-	// Reserve the final second for local cleanup, so a remote that consumes
-	// its entire allowance cannot strand the attempt ref in this checkout.
 	var cleanupErrs []error
-	remoteCtx, remoteCancel := detachedDeadline(ctx, 29*time.Second)
-	if err := l.Git.DeleteRemoteTagLease(remoteCtx, l.Remote, LockTagName, l.oid); err != nil {
-		l.Log.Error().Err(err).Str("code", "E336").Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
-			Str("remedy", LockRemedy).Msg("could not remove the release lock tag from the remote")
-		cleanupErrs = append(cleanupErrs, fmt.Errorf("removing the release lock tag from the remote: %w", err))
+	if err := l.deleteRemoteLock(ctx); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
 	}
-	remoteCancel()
-	localCtx, localCancel := detachedDeadline(ctx, time.Second)
+	localCtx, localCancel := detachedDeadline(ctx, lockLocalTimeout)
 	defer localCancel()
 	if err := l.Git.DeleteTag(localCtx, l.localTag); err != nil {
 		l.Log.Error().Err(err).Str("code", "E336").Str("tag", l.localTag).
@@ -210,6 +316,58 @@ func (l *Lock) Release(ctx context.Context) error {
 		}
 	}
 	return errors.Join(cleanupErrs...)
+}
+
+// deleteRemoteLock removes this run's lock from the remote under a lease on
+// its object, which is what keeps it from ever deleting another run's lock.
+//
+// A delete that reports a failure is read back once before it is believed,
+// because a lost response looks exactly like a refused delete:
+//
+//   - no lock on the remote: the delete landed, or the lock was already gone,
+//     and either way this run holds nothing any more;
+//   - another object: another run holds the lock now, so this run cannot show
+//     that it held the exclusion to its end (§27.7). That lock is the other
+//     run's to keep, so it is left alone and the run fails with E336 and the
+//     remedy that says not to delete it;
+//   - this run's object, or a read that failed: the lock is stranded, which
+//     is E336 with the remedy that tells an operator how to clear it.
+func (l *Lock) deleteRemoteLock(ctx context.Context) error {
+	remoteCtx, remoteCancel := detachedDeadline(ctx, lockDeleteTimeout)
+	err := l.Git.DeleteRemoteTagLease(remoteCtx, l.Remote, LockTagName, l.oid)
+	remoteCancel()
+	if err == nil {
+		return nil
+	}
+	object, readErr := l.readRemoteObjectOnce(ctx)
+	switch {
+	case readErr == nil && object == "":
+		l.Log.Debug().Err(err).Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
+			Msg("the release lock delete reported a failure and the remote holds no lock; it is released")
+		return nil
+	case readErr == nil && object != l.oid:
+		l.Log.Error().Err(err).Str("code", "E336").Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
+			Str("object", object).Str("remedy", LockLostRemedy).
+			Msg("another run holds the release lock now; this run's lock was replaced before it ended, and that one is left alone")
+		return fmt.Errorf("the release lock on %s was replaced by another run's before this run gave it back: %w",
+			gitx.RedactURL(l.Remote), err)
+	}
+	l.Log.Error().Err(err).Str("code", "E336").Str("tag", LockTagName).Str("remote", gitx.RedactURL(l.Remote)).
+		Str("remedy", LockRemedy).Msg("could not remove the release lock tag from the remote")
+	return fmt.Errorf("removing the release lock tag from the remote: %w", err)
+}
+
+// readRemoteObjectOnce reads the remote lock's object once, on a bounded
+// context of its own. A git that cannot read one answers ErrLockUnreadable,
+// which the caller treats as a read that failed.
+func (l *Lock) readRemoteObjectOnce(ctx context.Context) (string, error) {
+	reader, isReadable := l.Git.(lockReader)
+	if !isReadable {
+		return "", ErrLockUnreadable
+	}
+	readCtx, cancelRead := detachedDeadline(ctx, lockReleaseReadTimeout)
+	defer cancelRead()
+	return reader.RemoteTagObject(readCtx, l.Remote, LockTagName)
 }
 
 func detachedDeadline(ctx context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {

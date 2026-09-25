@@ -203,8 +203,11 @@ func TestReleaseLockCancelledAcquisitionUnwinds(t *testing.T) {
 
 // TestReleaseLockCleanupPreservesAReplacedLock proves ownership is verified at
 // cleanup rather than assumed: a lock replaced by another run while this one
-// worked belongs to that run, and this run's cleanup leaves it alone, reports
-// E336 and fails rather than claiming it returned its lock cleanly.
+// worked belongs to that run, and this run's cleanup leaves it alone. The
+// refused delete is read back and finds the other run's object. This run
+// cannot show it held the exclusion to its end, so it fails with E336 (§27.7),
+// and its remedy says not to delete the tag, which is the other run's to keep;
+// the package it published stays published.
 func TestReleaseLockCleanupPreservesAReplacedLock(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(markerBuild, 1)
@@ -225,10 +228,12 @@ func TestReleaseLockCleanupPreservesAReplacedLock(t *testing.T) {
 	r.WriteConfigModel(cfg)
 
 	res := releaseLocked(r)
-	assert.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, 1, r.TagCount("core@"))
+	assert.Equal(t, 1, res.Code, "a replaced lock fails the run\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, 1, r.TagCount("core@"), "what published stays published")
 	assert.True(t, remoteHoldsLock(t, bare), "another run's lock must survive this run's cleanup")
 	assert.Contains(t, res.Stdout, `"code":"E336"`)
-	assert.Contains(t, res.Stdout, "could not remove the release lock tag from the remote",
+	assert.Contains(t, res.Stdout, "so do not delete it", "the remedy leaves the other run's lock alone")
+	assert.NotContains(t, res.Stdout, "delete the tag on the remote", "nobody is told to delete the other run's lock")
+	assert.Contains(t, res.Stdout, "another run holds the release lock now",
 		"the refused delete is reported rather than forced")
 }

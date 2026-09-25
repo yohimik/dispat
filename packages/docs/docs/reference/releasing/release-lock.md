@@ -20,7 +20,9 @@ object ID matters when two processes share one checkout: neither process can ret
 
 A release happens in five steps:
 
-1. Create the `dispat-release-lock` tag and push it. Stop and exit `1` if the push is rejected for any reason.
+1. Create the `dispat-release-lock` tag and push it. Stop and exit `1` with `E336` if the push is rejected for any
+   reason. A push that reports a failure is read back from the remote before it is believed, as
+   [a push whose answer was lost](#a-push-or-a-delete-whose-answer-was-lost) describes.
 2. Check that this checkout is not behind the remote, when `commit.push` and `commit.verify` are both on: the branch it
    has checked out is compared with the remote's tip of that branch. In a fleet every participating repository with
    both settings on is checked the same way. A plan built from a stale checkout recomputes versions somebody else has
@@ -38,12 +40,18 @@ A release happens in five steps:
    publication is refused with `E336` before its command starts, and no later publication of the run starts either.
    A read that fails is tried again, three reads in all, each bounded, and a remote that answers none of them is
    refused the same way, because the run cannot show that it still owns the repository. `commit.verify: false`
-   skips this read with a warning, for a remote that rejects `ls-remote` and accepts pushes.
+   skips this read with a warning, for a remote that rejects `ls-remote` and accepts pushes. A refusal for a lock
+   that is another run's now carries the opposite remedy to a refusal at step 1: that lock is not this run's to
+   delete, so let its run finish, check what this run published, and run again.
 5. Delete the remote tag only if it still points to this run's object, then remove the local attempt tag.
 
 The last step happens no matter what the ones before it did. A failed package, a guard refusing the run, or an empty
 plan all trigger cleanup. Cleanup is detached from a cancelled release context and bounded to 30 seconds. If another owner has
-replaced the remote ref, the expected-object lease rejects the delete and preserves that owner's lock.
+replaced the remote ref, the expected-object lease rejects the delete and preserves that owner's lock. The rejected
+delete is read back once. No lock on the remote means the delete landed and only its answer was lost, which is a lock
+given back. The other owner's object on the remote means this run cannot show it held the exclusion until it ended, so
+the run fails with `E336` and a remedy that says not to delete that lock: let its run finish, check what this run
+published, and run again.
 
 If any repository's lock cannot be returned, dispat reports `E336` and exits nonzero. A publication that already
 succeeded remains published and is still counted that way in the summary; the closing `release.finished` webhook says
@@ -60,11 +68,29 @@ writing to the remote.
 
 ```console
 $ dispat release
-ERR unable to create the release lock tag error="pushing the release lock tag to origin: ... ! [rejected] dispat-release-lock -> dispat-release-lock (already exists)" remedy="another release may hold it; if you are sure nothing else is releasing, delete the tag on the remote (git push <remote> --delete dispat-release-lock) and run again" remote=origin tag=dispat-release-lock
+ERR unable to create the release lock tag code=E336 error="pushing the release lock tag to origin: ... ! [rejected] dispat-release-lock -> dispat-release-lock (already exists)" remedy="another release may hold it; if you are sure nothing else is releasing, delete the tag on the remote (git push <remote> --delete dispat-release-lock) and run again" remote=origin tag=dispat-release-lock
 ```
 
 Nothing was planned, built, published, or tagged. Wait for the other run to finish and run your command again. The
 second run gets the repository, sees the versions the first run released, and picks up from there.
+
+## A push or a delete whose answer was lost
+
+A push can land on the remote and still report a failure, because the connection broke before the answer came back.
+A refusal and a lost answer look the same from here, so dispat reads the lock back from the remote before it decides,
+on a bound of its own that an interrupt does not cut short:
+
+| The remote carries | Outcome |
+| --- | --- |
+| This attempt's own object | The push landed. The run owns the lock, says so with a warning, and proceeds. |
+| Another object | Another run holds the lock. The run is refused and names that run when the tag says who it is. |
+| No lock | The push did not land. The run is refused. |
+| Nothing, because every read failed | The push may have landed. dispat deletes it under a lease on this attempt's object, which can only remove this attempt's own lock, and refuses the run with `E336`. The refusal names the attempt and the object, so a lock the delete could not reach is recognisable: its message carries that `attempt` line and nobody holds it. |
+
+The same holds for the delete that gives the lock back. A delete that reports a failure is read back once. No lock on
+the remote means it was given back, which is a debug line and a successful cleanup. Another object means another run
+holds the lock now: this run's lock is already gone, and the other one is left alone. Only this run's own object, or
+a read that failed, is a lock left behind: `E336`, a non-zero exit, and the remedy for clearing it.
 
 ## Clearing a lock that was left behind
 

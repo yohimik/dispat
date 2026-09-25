@@ -101,25 +101,42 @@ func (l *Lock) VerifyHeld(ctx context.Context) error {
 	if !l.held {
 		return fmt.Errorf("%w: this run holds no lock on %s", ErrLockLost, gitx.RedactURL(l.Remote))
 	}
+	remote, err := l.readRemoteObject(ctx)
+	if err != nil {
+		return err
+	}
+	return l.compareLockObject(remote)
+}
+
+// readRemoteObject reads the object the remote advertises for the lock tag,
+// empty when it carries none. A read that fails is read again, up to
+// lockVerifyReads times with the pauses between them, each read bounded on its
+// own and every retry logged at warn level. It answers ErrLockUnreadable at
+// once for a git that cannot read a remote tag, the caller's context error
+// when the caller stops asking, and ErrLockUnverified when every read failed.
+//
+// It asks nothing about ownership, which is why an acquisition whose push
+// answer was lost can use it before it holds anything.
+func (l *Lock) readRemoteObject(ctx context.Context) (string, error) {
 	reader, isReadable := l.Git.(lockReader)
 	if !isReadable {
-		return ErrLockUnreadable
+		return "", ErrLockUnreadable
 	}
 	var failure error
 	for read := 1; read <= lockVerifyReads; read++ {
 		if read > 1 {
 			if err := waitLockVerifyPause(ctx, read-2); err != nil {
-				return err
+				return "", err
 			}
 		}
 		readCtx, cancelRead := context.WithTimeout(ctx, lockVerifyReadTimeout)
 		remote, err := reader.RemoteTagObject(readCtx, l.Remote, LockTagName)
 		cancelRead()
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
+			return "", ctxErr
 		}
 		if err == nil {
-			return l.compareLockObject(remote)
+			return remote, nil
 		}
 		failure = err
 		if read < lockVerifyReads {
@@ -128,7 +145,7 @@ func (l *Lock) VerifyHeld(ctx context.Context) error {
 				Msg("the release lock could not be read; reading it again")
 		}
 	}
-	return fmt.Errorf("%w: %d reads of %s failed, the last with: %w",
+	return "", fmt.Errorf("%w: %d reads of %s failed, the last with: %w",
 		ErrLockUnverified, lockVerifyReads, gitx.RedactURL(l.Remote), failure)
 }
 
