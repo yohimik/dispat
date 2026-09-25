@@ -534,6 +534,44 @@ func TestReleaseRecordsUnwritableStoreKeepsThePublication(t *testing.T) {
 	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"), "the store holds nothing")
 }
 
+// TestReleaseRecordsLostTagPushIsPlannedAgain: the release commit and the
+// release tag reach the remote in two pushes, and a run whose branch push
+// landed and whose tag push failed leaves the remote with the release commit
+// on its branch and no record of the version. The run exits non-zero with the
+// package published. A plain re-run from a fresh checkout of that remote, the
+// way a CI job is retried with no repair in between, reads the records the
+// store holds, finds none, and plans the same version again: it publishes a
+// second time and records it. That is the documented contract of a missing
+// record (a repeat run plans from durable tags), and why a publish script
+// that cannot be repeated has to verify the destination first.
+func TestReleaseRecordsLostTagPushIsPlannedAgain(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	cfg := recordsConfig(registry)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+	r, bare := newRecordsOrigin(t, cfg)
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --porcelain --force-with-lease=refs/tags/*"})
+
+	failed := r.CommandEnv(fault.Env())
+	assert.NotEqual(t, 0, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.Equal(t, 1, fault.Matches(), "only the tag push failed")
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+	assert.Contains(t, failed.Stdout, `"status":"published"`, "the package is reported published")
+	assert.Equal(t, "chore(release): core@0.1.0",
+		strings.TrimSpace(bareGit(t, bare, "log", "-1", "--format=%s", harness.DefaultBranch)),
+		"the release commit reached the branch")
+	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"), "and its tag did not")
+
+	retry := harness.Clone(t, bare)
+	status := retry.StatusOK()
+	assert.Equal(t, "0.0.0 -> 0.1.0", harness.GraphLine(status.Events, "core").Str("version"),
+		"the fresh checkout plans the same version again: %s", status.Stdout)
+	retry.ReleaseOK()
+	assert.Equal(t, []string{"core@0.1.0", "core@0.1.0"}, publishedVersions(t, registry),
+		"so the plain re-run publishes it a second time")
+	assert.Equal(t, strings.TrimSpace(bareGit(t, bare, "rev-parse", harness.DefaultBranch)),
+		remoteRecord(t, bare, "core@0.1.0"), "and records it on its own release commit")
+}
+
 // TestReleaseRecordsInAComposedWorkspace: a fleet plans from several stores at
 // once, so a stale checkout of any one of them plans a version that
 // repository has already published. The comparison covers every participating
