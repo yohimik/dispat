@@ -134,8 +134,12 @@ func TestExecutionInvalidMessageSizeCannotStartRelease(t *testing.T) {
 		{"longer than content", "1000000", "ended before its declared size"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// The refusal arrives as soon as the probe's answer is read, so the
+			// preflight bound only has to outlast a loaded machine reaching that
+			// read: a tighter one lets the deadline kill the faulted read first
+			// and report its own error instead of the size.
 			rig := newExecutionRig(t, func(cfg *models.File) {
-				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 2}
+				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10}
 			})
 			worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0)
 			fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*cat-file -s*", Output: tc.size})

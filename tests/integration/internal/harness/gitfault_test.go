@@ -85,6 +85,25 @@ func TestGitFaultSelectsMatchesAndPassesTheRestThrough(t *testing.T) {
 		assert.Equal(t, 1, fault.Matches())
 	})
 
+	t.Run("nothing counts before the arming invocation", func(t *testing.T) {
+		fault := NewGitFault(t, GitFault{Pattern: "*--version*", Nth: 1, ArmAfter: "*--exec-path*"})
+		code, stdout, stderr := runThroughFault(t, fault, "--version")
+		assert.Equal(t, 0, code, "a match before the arming invocation is the real git's")
+		assert.Contains(t, stdout, "git version")
+		assert.NotContains(t, stderr, GitFaultMarker)
+		assert.Equal(t, 0, fault.Matches(), "and is not counted")
+
+		code, _, _ = runThroughFault(t, fault, "--exec-path")
+		assert.Equal(t, 0, code, "the arming invocation itself runs")
+
+		code, _, stderr = runThroughFault(t, fault, "--version")
+		assert.Equal(t, 1, code, "the first match after arming is the one selected")
+		assert.Contains(t, stderr, GitFaultMarker)
+		code, _, _ = runThroughFault(t, fault, "--version")
+		assert.Equal(t, 0, code, "and only that one")
+		assert.Equal(t, 2, fault.Matches())
+	})
+
 	t.Run("a held command waits for Resume and then runs", func(t *testing.T) {
 		fault := NewGitFault(t, GitFault{Pattern: "*--version*", Hold: true})
 		type outcome struct {

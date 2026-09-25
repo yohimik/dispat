@@ -79,6 +79,11 @@ type GitFault struct {
 	// command's own standard output is discarded, so the caller reads the
 	// crafted reply rather than both.
 	After bool
+	// ArmAfter is a second glob: while it is set, no invocation is counted or
+	// failed until one matching ArmAfter has started. It is how a scenario
+	// names "the first read after the build was offered" without counting the
+	// reads before it, whose number depends on timing.
+	ArmAfter string
 	// Hold stops a selected invocation before it runs, until the scenario
 	// calls Resume, and then runs the real command. It models a remote that
 	// is slow to answer, which is how a scenario puts an interrupt inside one
@@ -157,6 +162,7 @@ func (f *GitFault) Env() []string {
 		"DISPAT_IT_GIT_FAULT_DIR=" + f.matches,
 		"DISPAT_IT_GIT_FAULT_HOLD=" + hold,
 		"DISPAT_IT_GIT_FAULT_HOLD_DIR=" + f.dir,
+		"DISPAT_IT_GIT_FAULT_ARM=" + f.ArmAfter,
 	}
 }
 
@@ -197,6 +203,12 @@ const gitFaultScript = `#!/bin/sh
 # Written by tests/integration/internal/harness/gitfault.go. It stands in for
 # git on the PATH of one dispat process and passes everything it is not asked
 # about through to the real one.
+if [ -n "$DISPAT_IT_GIT_FAULT_ARM" ] && [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/armed" ]; then
+	case "$*" in
+	$DISPAT_IT_GIT_FAULT_ARM) : > "$DISPAT_IT_GIT_FAULT_HOLD_DIR/armed" ;;
+	esac
+	exec "$DISPAT_IT_GIT_REAL" "$@"
+fi
 case "$*" in
 $DISPAT_IT_GIT_FAULT_PATTERN)
 	ordinal=1

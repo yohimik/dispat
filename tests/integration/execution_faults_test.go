@@ -102,6 +102,9 @@ type executionGitFault struct {
 	// newRig is the fixture this row needs, for the calls a workspace only
 	// makes when it prepares a provider or captures a declared output.
 	newRig func(*testing.T) *executionRig
+	// armAfter names the invocation after which the row's ordinal starts to
+	// count, for a call whose earlier matches vary with timing.
+	armAfter string
 }
 
 // TestExecutionOrchestratorGitFaults: the orchestrator's own git failing
@@ -155,10 +158,11 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			pattern: "*fetch*[0-9]-build-*", nth: 1,
 		},
 		"a node's answer cannot be read once": {
-			// The probe of preflight read two blobs, its document and the
-			// signature beside it, so the third is the first blob of a node's
-			// answer to a build.
-			pattern: "*cat-file blob*", nth: 3,
+			// Counted from the push that offers the build: how many blobs the
+			// preflight probe reads before that depends on when its claim and
+			// its result are observed, so the first blob read after the offer
+			// is the first blob of a node's answer to the build.
+			pattern: "*cat-file blob*", nth: 1, armAfter: "*push*[0-9]-build-*",
 		},
 		"the chain cannot be walked once": {
 			pattern: "*rev-list*[0-9]-build-*", nth: 1,
@@ -169,7 +173,7 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 				func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 0)
 			fault := harness.NewGitFault(t, harness.GitFault{
-				Pattern: row.pattern, Nth: row.nth, Onward: row.isOnward})
+				Pattern: row.pattern, Nth: row.nth, Onward: row.isOnward, ArmAfter: row.armAfter})
 
 			res := rig.release(fault.Env()...)
 			reply := stopAll(t, []*executionWorker{worker})[0]
