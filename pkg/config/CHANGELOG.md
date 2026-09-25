@@ -1,5 +1,43 @@
 # Changelog
 
+## pkg/config/v1.0.2-rc.1 (2026-09-25)
+
+### Fixes
+
+- refuse to edit a configuration path that is not a regular file ([7bc581c](https://github.com/yohimik/dispat/commit/7bc581c925da5575550c0990074e5d6614a76876)) (by yohimik, Claude Opus 5.5)
+  An edit to a configuration file reads and writes regular files only. A named
+  pipe at the path is refused by its type before it is opened, so an edit such
+  as `dispat compute --apply` no longer waits forever for a writer; a device is
+  refused rather than read without bound; a directory is refused in the same
+  words the manifest writer uses instead of a raw read error; and a file larger
+  than 16 MiB is refused. A path that becomes a pipe, a device or a directory
+  after the edit is prepared is refused before the backup is written, the rule a
+  symbolic link already followed, so a refused commit leaves nothing behind and
+  never silently replaces what appeared there.
+
+- keep Fold on the ordinary lower-case letter ([9e6da17](https://github.com/yohimik/dispat/commit/9e6da17b2e3a956e9aca6b66a9a4490ec49477a6)) (by yohimik, Claude Opus 5.5)
+  Fold keys each Unicode fold class by its ordinary lower-case letter. In
+  1.0.2-rc.0 it keyed a class by its smallest code point: μ and Μ folded to
+  the micro sign µ (U+00B5), ι and Ι to the combining iota subscript
+  (U+0345), and ꙋ and Ꙋ to ᲈ (U+1C88), so a table keyed by the documented
+  lower-case name answered UnknownKeyError for them. They fold to μ, ι and
+  ꙋ as in 1.0.1, and µ, U+0345, U+1FBE and ᲈ fold to the same letters.
+
+  Since 1.0.2-rc.0, whose changelog did not say so, Fold follows
+  strings.EqualFold rather than strings.ToLower: ς keys as σ, ſ as s, the
+  Greek symbol forms ϐ ϑ ϕ ϖ ϰ ϱ ϵ, ẛ and the Cyrillic forms U+1C80 to
+  U+1C88 as their ordinary letters, and İ as itself. Decoding and
+  ValidateEnv refuse Σ beside ς and s beside ſ as two spellings of one
+  key, and accept İ beside i. An edit refuses a symlinked configuration
+  file before writing its backup, instead of replacing the link with a
+  regular file.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## pkg/config/v1.0.2-rc.0 (2026-09-23)
 
 ### Fixes
