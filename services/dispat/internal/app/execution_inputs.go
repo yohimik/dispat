@@ -225,11 +225,6 @@ func (r *relevantInputs) resolveChangedInputs(ctx context.Context, git *gitx.Loc
 	if baseline == "" {
 		baseline = r.app.plannedHeads[rel.Pkg.Repository]
 	}
-	if baseline == "" {
-		// A repository whose history is unborn has nothing to compare and
-		// nothing that could have changed under it.
-		return nil, nil
-	}
 	pathspecs := r.formatRelevantPathspecs(root, rel)
 	if len(pathspecs) == 0 {
 		return nil, nil

@@ -20,7 +20,6 @@ package execution
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -125,7 +124,7 @@ func (c *Coordinator) PreparedSnapshot(packageName string) string {
 // every path, including the ones that fail, because an index left behind in a
 // temporary folder is a copy of somebody's working state.
 func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Source, log zerolog.Logger) (string, error) {
-	index, done, err := copyRepositoryIndex(ctx, git, source.Head)
+	index, done, err := copyRepositoryIndex(ctx, git)
 	if err != nil {
 		return "", err
 	}
@@ -140,7 +139,7 @@ func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Sou
 			Msg("the prepared input state is unchanged and is reused")
 		return commit, nil
 	}
-	commit := plumbing.CommitTree(ctx, tree, parentsOf(source.Head), KindSnapshot)
+	commit := plumbing.CommitTree(ctx, tree, []string{source.Head}, KindSnapshot)
 	if err := plumbing.Err(); err != nil {
 		return "", fmt.Errorf("execution: writing the input state of %s: %w", source.Dir, err)
 	}
@@ -190,15 +189,6 @@ func writeStateTree(ctx context.Context, git *gitx.LocalGitx, index string,
 	}
 }
 
-// parentsOf is the commit list a snapshot descends from: the planned head, or
-// nothing at all for a repository whose history is still unborn.
-func parentsOf(head string) []string {
-	if head == "" {
-		return nil
-	}
-	return []string{head}
-}
-
 // reuse answers the commit a repository's unchanged state was last captured
 // as.
 func (s *snapshots) reuse(dir, tree string) (string, bool) {
@@ -221,12 +211,13 @@ func (s *snapshots) remember(dir, tree, commit string) {
 // copyRepositoryIndex copies a repository's real index to a temporary file and
 // answers its path together with the removal of it.
 //
-// Only a genuinely unborn repository may start with no index. Git treats a
-// missing GIT_INDEX_FILE as empty, but an existing zero-byte file as corrupt;
-// a committed repository with a missing index must fail rather than silently
-// omit tracked files that are now ignored. The removal is answered rather than
-// deferred here so the caller holds it exactly as long as it uses the copy.
-func copyRepositoryIndex(ctx context.Context, git *gitx.LocalGitx, plannedHead string) (string, func(), error) {
+// A missing index is refused. Git treats a missing GIT_INDEX_FILE as empty,
+// and the repository has a planned head, so it has committed files: a
+// snapshot staged from no index would silently omit tracked files that are
+// now ignored. Planning refuses a repository with no commits before any
+// snapshot is taken. The removal is answered rather than deferred here so the
+// caller holds it exactly as long as it uses the copy.
+func copyRepositoryIndex(ctx context.Context, git *gitx.LocalGitx) (string, func(), error) {
 	real, err := git.IndexPath(ctx)
 	if err != nil {
 		return "", nil, fmt.Errorf("execution: locating the index of %s: %w", git.Dir, err)
@@ -250,22 +241,6 @@ func copyRepositoryIndex(ctx context.Context, git *gitx.LocalGitx, plannedHead s
 		return "", nil, fmt.Errorf("execution: preparing a temporary index: %w", err)
 	}
 	if err := writeIndexCopy(real, copied); err != nil {
-		if errors.Is(err, os.ErrNotExist) && plannedHead == "" {
-			hasHead, probeErr := git.IsCommitPresent(ctx, "HEAD")
-			if probeErr != nil {
-				done()
-				return "", nil, fmt.Errorf("execution: checking the unborn repository %s: %w", git.Dir, probeErr)
-			}
-			if !hasHead {
-				// Git needs an absent index path, held inside this private
-				// temporary folder so another process cannot substitute it.
-				if removeErr := os.Remove(path); removeErr != nil {
-					done()
-					return "", nil, fmt.Errorf("execution: preparing an empty index for %s: %w", git.Dir, removeErr)
-				}
-				return path, done, nil
-			}
-		}
 		done()
 		return "", nil, err
 	}

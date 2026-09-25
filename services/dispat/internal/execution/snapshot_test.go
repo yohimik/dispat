@@ -164,21 +164,6 @@ func TestSnapshotReusesAnUnchangedState(t *testing.T) {
 	assert.NotEqual(t, first, moved, "and a changed one is a new commit")
 }
 
-// TestSnapshotOfAnUnbornHistory: a repository with no commit yet has no
-// planned head to descend from, and the prepared state is a root commit rather
-// than a failure.
-func TestSnapshotOfAnUnbornHistory(t *testing.T) {
-	fixture := newSnapshotFixture(t)
-	source := fixture.source()
-	source.Head = ""
-
-	commit, err := newSnapshots().capture(t.Context(), fixture.git, source, zerolog.Nop())
-
-	require.NoError(t, err)
-	assert.Empty(t, strings.Fields(fixture.run(t, "rev-list", "--parents", "-1", commit))[1:],
-		"a state with no planned head descends from nothing")
-}
-
 // TestSnapshotNeverSeesAHalfWrittenFile: the guard is what keeps a version or
 // syncLock frame's writes out of a prepared state, so a file written in chunks
 // under the shared side is either wholly there or wholly not.

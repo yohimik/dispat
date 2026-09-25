@@ -11,27 +11,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
-
-// An unborn repository has never written an index. Its first delegated build
-// still needs the working files, and capture must not create the real index.
-func TestSnapshotCapturesAnUnbornRepositoryWithoutAnIndex(t *testing.T) {
-	dir := t.TempDir()
-	fixture := &snapshotFixture{dir: dir, git: &gitx.LocalGitx{Dir: dir, Log: zerolog.Nop()}}
-	fixture.run(t, "init", "-q")
-	fixture.write(t, "first.txt", "first\n")
-	index, err := fixture.git.IndexPath(t.Context())
-	require.NoError(t, err)
-	require.NoFileExists(t, index)
-
-	commit, err := newSnapshots().capture(t.Context(), fixture.git,
-		Source{Path: ".", Dir: dir}, zerolog.Nop())
-
-	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"first.txt": "first"}, fixture.listing(t, commit))
-	assert.NoFileExists(t, index, "capture does not create the repository's own index")
-}
 
 // A committed repository can lose its index independently of its worktree.
 // Rebuilding one from `git add .` would omit a tracked file that is now
