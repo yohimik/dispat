@@ -152,9 +152,13 @@ run builds it against what the provider published.
 An interrupted run follows the same rule. If you press Ctrl-C or a CI job dies, packages with a completed publish keep
 their record. dispat reports everything else as `cancelled`, and your next run recomputes the remaining plan.
 
-After an ordinary cancellation, dispat gives completed publishes up to five minutes to finish their commit, tags,
-push, and GitHub release record. It skips further user hooks during this detached finalization. A timeout is reported
-as a recording failure, with the local tags and commits left available for inspection.
+After an ordinary cancellation, dispat gives completed publishes up to five minutes, counted from the interrupt, to
+finish their commit, tags, push, and GitHub release record. The same holds whenever the interrupt arrives: during the
+build of another package, during `postAll`, during a commit or push hook, or while the release push is on the wire.
+A user hook that is running when the interrupt arrives is stopped, and no later hook starts, while the commit, the
+tags and the push it brackets go on. A run that is never interrupted has no such limit. A timeout is reported as a
+recording failure (`E223`), with the local tags and commits left available for inspection. The run still exits
+non-zero and its closing webhook says `interrupted`.
 
 A fleet released from a [control repository](../../control-repository.md#source-history-mode) recovers by the same
 rule, with the records spread across the repositories that own them. Each successful package is tagged in its owner

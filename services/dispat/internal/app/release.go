@@ -545,54 +545,24 @@ func publishByRepository(rel *plan.Release) string {
 // completeRelease runs the closing phase: the post-run hooks, the durable
 // records of whatever published, the summary, and the one closing webhook.
 //
-// An interrupted run stops running the operator's scripts — no postAll, no
-// finalize bracket hooks — but what *published* before the interruption must
-// still get its durable record: the release commit, the tags and the push are
-// how a completed leg commits (§17), and losing them re-releases released
-// versions on the next run. finalize therefore proceeds for the published
-// packages, detached from the cancellation.
+// An interrupt, whenever it arrives, stops the operator's scripts: a postAll
+// or finalize bracket hook that is running is stopped and none starts
+// afterwards. What *published* before the interruption still gets its durable
+// record: the release commit, the tags and the push are how a completed leg
+// commits (§17), and losing them re-releases released versions on the next
+// run. The records therefore run on a lifetime of their own (see
+// detachRecording), and whether the run was interrupted is read only once
+// they are written, because an interrupt can arrive at any moment of them.
 func (a *App) completeRelease(ctx context.Context, pl *plan.Plan, results map[string]*release.Result,
 	hooks *runHooks, gh *ghDispatch, fleet *workspaceRecorder, finishCleanup func() error, wh *webhook.Dispatcher,
 	start time.Time) (map[string]*release.Result, error) {
-	interrupted := ctx.Err() != nil
-	finCtx := ctx
-	finCancel := func() {}
-	if interrupted {
-		a.log.Warn().Msg("interrupted: skipping run hooks, recording completed releases")
-		finCtx, finCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-	} else {
-		hooks.env = release.RunEnv(pl, results, a.log)
-		if fleet != nil {
-			for _, owner := range fleet.ordered {
-				// The entry's own postAll is the run's, fired just below.
-				if owner.repo.Imported && !owner.repo.Entry {
-					owner.hooks.env = hooks.env
-					owner.hooks.run(ctx, "postAll", owner.repo.Config.Run.PostAll)
-				}
-			}
-		}
-		// postAll runs once the whole task graph has finished, releases or not —
-		// "nothing published" is an outcome a notification script wants to see
-		// too.
-		hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
-	}
 	crit := &criticals{}
-	if fleet == nil {
-		a.finalize(finCtx, finalizer{gh: gh, remote: a.pushRemote(), hooks: hooks, crit: crit,
-			skipHooks: interrupted}, pl, results)
-	}
-	// Every tag this run wrote exists now, in every repository, so a consumer
-	// its provider overtook on one commit can be named before the locks go.
-	a.reportOwedAfterPublication(finCtx, publicationOutcome{plan: pl, results: results, fleet: fleet}, crit)
-	finCancel()
-	if interrupted && errors.Is(finCtx.Err(), context.DeadlineExceeded) {
-		crit.record(a.log, plan.CodeCommitFailed, finCtx.Err(),
-			"recording completed releases timed out after interruption", nil)
-	}
+	a.recordCompletedReleases(ctx, closingRecord{plan: pl, results: results, hooks: hooks, gh: gh, fleet: fleet}, crit)
 	// Locks cover every publication, durable record and run hook. Their
 	// release is itself the final critical step: perform it before the summary
 	// and closing webhook so neither can call a stranded lock a success.
 	crit.keep(finishCleanup())
+	interrupted := ctx.Err() != nil
 	// What only a distributed run has to say, before the line every release
 	// prints: which machine did what, and whether anything it authorized is
 	// still in doubt (CCME §28.9).
@@ -616,6 +586,71 @@ func (a *App) completeRelease(ctx context.Context, pl *plan.Plan, results map[st
 		return results, fmt.Errorf("%d package(s) failed", failed)
 	}
 	return results, crit.err()
+}
+
+// closingRecord is what the closing phase records from: the plan, what every
+// package came to, the run's hooks and the destinations of its records.
+type closingRecord struct {
+	plan    *plan.Plan
+	results map[string]*release.Result
+	hooks   *runHooks
+	gh      *ghDispatch
+	fleet   *workspaceRecorder
+}
+
+// recordCompletedReleases runs postAll and writes the durable records of every
+// package that published, collecting what fails into crit.
+//
+// The recording context is created first, so that it exists however early the
+// interrupt arrives. The records themselves (finalize, and the owed-consumer
+// report that reads the tags it wrote) run on it; the hooks run on the live
+// run and stop with it.
+func (a *App) recordCompletedReleases(ctx context.Context, closing closingRecord, crit *criticals) {
+	recordCtx, stopRecording := detachRecording(ctx)
+	defer stopRecording()
+	closing.hooks.env = release.RunEnv(closing.plan, closing.results, a.log)
+	a.runPostAll(ctx, closing.hooks, closing.fleet)
+	if ctx.Err() != nil {
+		a.log.Warn().Msg("interrupted: skipping run hooks, recording completed releases")
+	}
+	if closing.fleet == nil {
+		observed, stopObserving := newRecordHooks(recordCtx, ctx)
+		a.finalize(recordCtx, finalizer{gh: closing.gh, remote: a.pushRemote(), hooks: closing.hooks, crit: crit,
+			observed: observed}, closing.plan, closing.results)
+		stopObserving()
+	}
+	// Every tag this run wrote exists now, in every repository, so a consumer
+	// its provider overtook on one commit can be named before the locks go.
+	a.reportOwedAfterPublication(recordCtx,
+		publicationOutcome{plan: closing.plan, results: closing.results, fleet: closing.fleet}, crit)
+	if cause := context.Cause(recordCtx); errors.Is(cause, errRecordingGraceElapsed) {
+		crit.record(a.log, plan.CodeCommitFailed, cause, "recording completed releases timed out after interruption", nil)
+	}
+}
+
+// runPostAll fires every postAll hook of the run once the task graph has
+// finished, releases or not ("nothing published" is an outcome a notification
+// script wants to see too): each imported repository's own, then the run's.
+// A hook starts only while the run is live, and an interrupt stops the one
+// that is running.
+func (a *App) runPostAll(ctx context.Context, hooks *runHooks, fleet *workspaceRecorder) {
+	if fleet != nil {
+		for _, owner := range fleet.ordered {
+			// The entry's own postAll is the run's, fired just below.
+			if !owner.repo.Imported || owner.repo.Entry {
+				continue
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			owner.hooks.env = hooks.env
+			owner.hooks.run(ctx, "postAll", owner.repo.Config.Run.PostAll)
+		}
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	hooks.run(ctx, "postAll", a.cfg.Run.PostAll)
 }
 
 func releaseFinalStatus(interrupted bool, failed int, critical error) string {

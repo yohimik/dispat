@@ -79,6 +79,12 @@ type GitFault struct {
 	// command's own standard output is discarded, so the caller reads the
 	// crafted reply rather than both.
 	After bool
+	// Hold stops a selected invocation before it runs, until the scenario
+	// calls Resume, and then runs the real command. It models a remote that
+	// is slow to answer, which is how a scenario puts an interrupt inside one
+	// Git call: IsHeld says when the call is waiting. It takes precedence over
+	// Code, Output and After.
+	Hold bool
 
 	t       testing.TB
 	dir     string
@@ -125,6 +131,10 @@ func (f *GitFault) Env() []string {
 	if f.After {
 		after = "1"
 	}
+	hold := "0"
+	if f.Hold {
+		hold = "1"
+	}
 	output := f.Output
 	outputFile := ""
 	if strings.ContainsRune(output, '\x00') {
@@ -145,7 +155,22 @@ func (f *GitFault) Env() []string {
 		"DISPAT_IT_GIT_FAULT_OUTPUT=" + output,
 		"DISPAT_IT_GIT_FAULT_OUTPUT_FILE=" + outputFile,
 		"DISPAT_IT_GIT_FAULT_DIR=" + f.matches,
+		"DISPAT_IT_GIT_FAULT_HOLD=" + hold,
+		"DISPAT_IT_GIT_FAULT_HOLD_DIR=" + f.dir,
 	}
+}
+
+// IsHeld reports whether a held invocation has started waiting for Resume.
+func (f *GitFault) IsHeld() bool {
+	_, err := os.Stat(filepath.Join(f.dir, "held"))
+	return err == nil
+}
+
+// Resume lets every held invocation run the real command, and every later
+// selected invocation run without waiting.
+func (f *GitFault) Resume() {
+	f.t.Helper()
+	require.NoError(f.t, os.WriteFile(filepath.Join(f.dir, "resumed"), nil, 0o644))
 }
 
 // Matches is how many invocations the pattern has selected so far, across
@@ -189,6 +214,13 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 		selected=1
 	fi
 	if [ "$selected" -eq 1 ]; then
+		if [ "$DISPAT_IT_GIT_FAULT_HOLD" -eq 1 ]; then
+			: > "$DISPAT_IT_GIT_FAULT_HOLD_DIR/held"
+			while [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/resumed" ]; do
+				sleep 0.1
+			done
+			exec "$DISPAT_IT_GIT_REAL" "$@"
+		fi
 		if [ "$DISPAT_IT_GIT_FAULT_AFTER" -eq 1 ]; then
 			if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT" ] || [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE" ]; then
 				"$DISPAT_IT_GIT_REAL" "$@" >/dev/null || exit "$?"

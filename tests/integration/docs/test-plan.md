@@ -104,7 +104,9 @@ integration suite itself.
    shuts the run down gracefully
    through the real signal handler: the in-flight script is killed, remaining packages report `cancelled` rather than
    `failed` or `skipped`, nothing is tagged for work that did not finish, and the next run releases the cancelled
-   packages at the version they were owed. The resource half of the same goal lives in `cancel_resources_test.go`: an
+   packages at the version they were owed. An interrupt that arrives after the packages published, during `postAll`,
+   a commit hook or the release push, stops the operator's scripts and still lands the release commit and tags on the
+   remote. The resource half of the same goal lives in `cancel_resources_test.go`: an
    interrupted run stops launching the commands still ahead of it, leaves none of its working files behind, and does
    not disturb a second run covering the same repository. `cancel_workspace_test.go` covers the phase before any of
    that: composing an inherited workspace can wait a few seconds for the live pin of a source the enclosing release is
@@ -755,6 +757,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 |---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `TestInterruptGracefulShutdown` | Sending a SIGINT mid-build (via `harness.StartRelease`/`Proc`) exits non-zero and marks both packages as `cancelled` in summary events. dispat creates no tags, treats killed builds as interruptions rather than failures, and releases both packages at their owed version on the next run. |
 | `TestInterruptStopsARunCommand`  | Because `dispat run` shares the release scheduler, a SIGINT during script execution exits non-zero, prevents subsequent packages from starting, and tags nothing. |
+| `TestInterruptInTheClosingPhaseStillRecordsWhatPublished` | An interrupt after the packages published stops the operator's scripts and nothing else. A SIGINT during `postAll`, a SIGINT or SIGTERM during `beforeCommit`, and a SIGINT while a stand-in git holds the release push each leave the release commit and the tag on the bare remote, exit non-zero, report `release.finished` as `interrupted`, stop the hook the signal landed in and start none of the bracket hooks after it. The held push proves that no cancelled context reaches Git on the record path. |
 | `TestCancelStopsTheRemainingCommandsOfAWarnOnlySequence` | The announce frame only warns, so nothing downstream would notice it running on after an interrupt. A SIGINT inside the first announce command leaves the release published and reports exactly one failed command: the two behind it are never launched. |
 | `TestCancelledRunsLeaveNoTemporaryFiles` | Three interrupted runs in a row, each with its own `TMPDIR`, leave no `dispat-*` working file behind: the output staging file of every hook and stage sequence is removed on the cancellation path as well as the successful one. |
 | `TestCancelDoesNotDisturbAConcurrentRun` | An interruption reaches its own run's script tree and nothing else: a second invocation covering the same repository at the same moment finishes its script and exits zero. |
@@ -1913,7 +1916,7 @@ until two commits are by two different people; the repository's own fixed identi
 | Test | Claim proven |
 | --- | --- |
 | `TestCheckRaceReports` | Any recorded subprocess race fails the suite, even when a behavioral scenario accepts a nonzero exit. Unconfigured normal runs and empty report directories pass; unrelated files do not count as race reports. |
-| `TestGitFaultSelectsMatchesAndPassesTheRestThrough` | The stand-in `git` is the real Git for every invocation a scenario did not name, fails exactly the selected matches — every one, only the Nth, or the Nth onward — with the configured exit status and a recognisable marker, counts every match whether it failed it or not, and can answer with a reply of its own instead of running Git at all. |
+| `TestGitFaultSelectsMatchesAndPassesTheRestThrough` | The stand-in `git` is the real Git for every invocation a scenario did not name, fails exactly the selected matches — every one, only the Nth, or the Nth onward — with the configured exit status and a recognisable marker, counts every match whether it failed it or not, and can answer with a reply of its own instead of running Git at all, or hold a selected invocation until the scenario resumes it and then run the real command. |
 
 Compiler selection and version-stamped fixtures have separate checks:
 

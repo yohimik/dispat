@@ -666,26 +666,6 @@ func pathWithin(root, path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// recordHooks carries the live run lifetime into user hooks while native
-// release recording proceeds on its separate durable context. Checking the
-// observer directly before every hook closes the small scheduling window in
-// which context.AfterFunc has observed cancellation but has not run yet.
-type recordHooks struct {
-	ctx      context.Context
-	observer context.Context
-}
-
-func (h recordHooks) run(hooks *runHooks, name string, refs []string) {
-	if h.ctx.Err() != nil || h.observer.Err() != nil {
-		if len(refs) > 0 {
-			hooks.log.Debug().Str("hook", name).
-				Msg("cancelled: skipping record hook while the native record completes")
-		}
-		return
-	}
-	hooks.run(h.ctx, name, refs)
-}
-
 func (w *workspaceRecorder) Record(ctx context.Context, rel *plan.Release) error {
 	return w.record(ctx, ctx, rel)
 }
@@ -701,15 +681,10 @@ func (w *workspaceRecorder) record(recordCtx, observerCtx context.Context, rel *
 	if r == nil {
 		return fmt.Errorf("no repository owner for package %s", rel.Pkg.Name)
 	}
-	ctx, cancel := context.WithTimeout(recordCtx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(recordCtx, release.RecordTimeout)
 	defer cancel()
-	hookCtx, cancelHooks := context.WithCancel(ctx)
-	stopHooks := context.AfterFunc(observerCtx, cancelHooks)
-	defer func() {
-		stopHooks()
-		cancelHooks()
-	}()
-	hooks := recordHooks{ctx: hookCtx, observer: observerCtx}
+	hooks, stopHooks := newRecordHooks(ctx, observerCtx)
+	defer stopHooks()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.git.Log.Debug().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).Msg("recording source release")

@@ -73,18 +73,16 @@ type finalizer struct {
 	// crit collects what fails in here. Nothing in the finalize phase may
 	// abort it: every package it covers has already published.
 	crit *criticals
-	// skipHooks silences the bracket hooks: an interrupted run still records
-	// what published (the commit, the tags, the push) but runs no more of the
-	// operator's scripts.
-	skipHooks bool
+	// observed is the live run the bracket hooks belong to, the same observer
+	// a fleet's source records use: an interrupted run still records what
+	// published (the commit, the tags, the push), a hook running when the
+	// interrupt arrives is stopped, and no later one starts.
+	observed recordHooks
 }
 
-// run executes one warn-only bracket hook, unless the run was interrupted.
-func (f finalizer) run(ctx context.Context, name string, refs []string) {
-	if f.skipHooks {
-		return
-	}
-	f.hooks.run(ctx, name, refs)
+// run executes one warn-only bracket hook while the run is still live.
+func (f finalizer) run(name string, refs []string) {
+	f.observed.run(f.hooks, name, refs)
 }
 
 // finalize runs the end-of-run release-commit phase: one commit staging every
@@ -159,7 +157,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	// changelog entry and no GitHub release, none of which the next run knows
 	// to go back for. See critical.go.
 	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, pkgs, tags)
-	fin.run(ctx, "beforeCommit", a.cfg.Run.BeforeCommit)
+	fin.run("beforeCommit", a.cfg.Run.BeforeCommit)
 	committed, err := a.git.CommitDirs(ctx, dirs, msg)
 	switch {
 	case err != nil:
@@ -169,9 +167,9 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		fin.crit.record(a.log, plan.CodeCommitFailed, err, "release commit failed", nil)
 	case committed:
 		a.log.Info().Str("commitMessage", msg).Msg("created release commit")
-		fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
+		fin.run("afterCommit", a.cfg.Run.AfterCommit)
 	default:
-		fin.run(ctx, "afterCommit", a.cfg.Run.AfterCommit)
+		fin.run("afterCommit", a.cfg.Run.AfterCommit)
 	}
 	for _, rel := range rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
@@ -184,7 +182,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 				})
 		}
 	}
-	fin.run(ctx, "postCommit", a.cfg.Run.PostCommit)
+	fin.run("postCommit", a.cfg.Run.PostCommit)
 	// released is the commit the records name. It is HEAD, except after a
 	// recovery: the branch tip is a merge by then, and what the records mean
 	// is the release commit that became its first parent. Empty until a
@@ -192,7 +190,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	// did.
 	var released string
 	if a.cfg.Commit.IsPushEnabled() {
-		fin.run(ctx, "beforePush", a.cfg.Run.BeforePush)
+		fin.run("beforePush", a.cfg.Run.BeforePush)
 		report, err := a.git.Push(ctx, fin.remote, pushTags)
 		if errors.Is(err, gitx.ErrRejected) {
 			// Somebody pushed to the branch while this run was working. The
@@ -212,7 +210,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		} else {
 			a.log.Info().Str("remote", gitx.RedactURL(fin.remote)).
 				Strs("tags", gitx.ReleaseRefNames(pushTags)).Msg("pushed release commit and tags")
-			fin.run(ctx, "afterPush", a.cfg.Run.AfterPush)
+			fin.run("afterPush", a.cfg.Run.AfterPush)
 		}
 	}
 	if fin.gh != nil && !fin.gh.empty() {

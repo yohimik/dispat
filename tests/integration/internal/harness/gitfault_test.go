@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,34 @@ func TestGitFaultSelectsMatchesAndPassesTheRestThrough(t *testing.T) {
 		assert.Equal(t, 0, code)
 		assert.Equal(t, "not a version at all", stdout)
 		assert.NotContains(t, stderr, GitFaultMarker)
+		assert.Equal(t, 1, fault.Matches())
+	})
+
+	t.Run("a held command waits for Resume and then runs", func(t *testing.T) {
+		fault := NewGitFault(t, GitFault{Pattern: "*--version*", Hold: true})
+		type outcome struct {
+			code   int
+			stdout string
+		}
+		done := make(chan outcome, 1)
+		go func() {
+			code, stdout, _ := runThroughFault(t, fault, "--version")
+			done <- outcome{code: code, stdout: stdout}
+		}()
+		require.Eventually(t, fault.IsHeld, 10*time.Second, 10*time.Millisecond, "the invocation never reached the hold")
+		select {
+		case <-done:
+			t.Fatal("a held invocation finished before Resume")
+		case <-time.After(300 * time.Millisecond):
+		}
+		fault.Resume()
+		select {
+		case finished := <-done:
+			assert.Equal(t, 0, finished.code)
+			assert.Contains(t, finished.stdout, "git version", "the real command ran once resumed")
+		case <-time.After(10 * time.Second):
+			t.Fatal("a resumed invocation never finished")
+		}
 		assert.Equal(t, 1, fault.Matches())
 	})
 

@@ -1160,6 +1160,13 @@ func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err er
 	return "", nil
 }
 
+// RecordTimeout bounds the durable record of one published package, which is
+// written on a context detached from the run's cancellation: the changelog,
+// the tag, a fleet's source commit, push and checkpoint. It is generous on
+// purpose, because it exists to end a record whose remote has stopped
+// answering, never to cut short one that is merely slow.
+const RecordTimeout = 5 * time.Minute
+
 // publishTail finishes a successful publish: the release recorders (changelog
 // file, GitHub release, ...), the tag, the status flip, then the warn-only
 // postPublish hook and the announce frame.
@@ -1175,8 +1182,11 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// Recording and tagging therefore run detached from cancellation — a
 	// Ctrl-C that killed the publish would have been an interruption, but one
 	// that loses the tag *after* the publish re-releases a released version on
-	// the next run, which is the one thing the model forbids.
-	recCtx := context.WithoutCancel(ctx)
+	// the next run, which is the one thing the model forbids. Detached is not
+	// unbounded: RecordTimeout keeps a remote that never answers from holding
+	// the run, and with it the release lock, for good.
+	recCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+	defer cancelRecord()
 	// Neither the recorders nor the tag may fail the package now. The artefact
 	// is on its registry: reporting the package as failed would revert its
 	// folder or run its onFail script, neither of which un-publishes anything.

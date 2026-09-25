@@ -119,15 +119,22 @@ read it back as a release tag.
     tag in release-commit mode, and a `PACKAGE_<KEY>` script export pins it to the exported commit instead of HEAD. The
     warn-only `postPublish` hook and the warn-only announce frame (`beforeAnnounce`, the announce stage,
     `postAnnounce`) run last. Because the publish succeeded, none of this can fail the package anymore. A failure here
-    is a [critical](#after-the-point-of-no-return).
-12. Run the warn-only `postAll` hook. It receives the run outcome through the `DISPAT_RESULT_*` variables.
+    is a [critical](#after-the-point-of-no-return). The recorders and the tag run detached from the run's
+    cancellation and are bounded at five minutes, so an interrupt cannot cost a published package its record and a
+    remote that stops answering cannot hold the run.
+12. Run the warn-only `postAll` hook. It receives the run outcome through the `DISPAT_RESULT_*` variables. From here
+    the durable records run on a context of their own: the run's cancellation does not reach them, and an interrupt
+    gives them five minutes from the moment it arrives. An uninterrupted run is not bounded by it. The hooks stay on
+    the live run: an interrupt stops the hook that is running, `postAll` included, and no later hook starts.
 13. Run the finalize phase when `commit` is enabled. dispat makes one release commit staging all published packages,
     then places tags on that commit or on a package's exported `PACKAGE_<KEY>` commit. The push follows when
     `commit.push` is enabled. It pushes the branch first, then the run's tags, skipping and warning about any tag
     already on the remote. GitHub releases referencing the pushed tags come last. The warn-only commit and push hooks
     bracket these operations (`beforeCommit`/`afterCommit`, `postCommit` after tags, `beforePush`/`afterPush`). Every
     package here has published, so nothing in this phase aborts it either. Each step runs, and each failure is a
-    [critical](#after-the-point-of-no-return).
+    [critical](#after-the-point-of-no-return). Every Git command of this phase runs on the recording context of step
+    12, so an interrupt that arrives during `beforeCommit` or during the push stops the hook and leaves the commit,
+    the tags and the push to finish. Recording that outlasts the grace is a critical (`E223`).
 14. Print a per-package summary and the totals. dispat exits `1` if anything failed or if it recorded any critical.
 
 ## Planning

@@ -683,7 +683,7 @@ Before a retry that can create release commits or revert failed package edits, i
 
 A nonzero release exit never proves that nothing published. Conversely, a successful remote upload without its dispat record can cause an unsafe duplicate attempt unless the publish script verifies the existing artifact.
 
-On interruption, dispat stops new package work but completes durable records for publishes it knows succeeded. User hooks may be skipped during detached finalization. Inspect the final summaries and records rather than inferring state from where the visible log stopped.
+On interruption, dispat stops new package work but completes durable records for publishes it knows succeeded, whenever the interrupt arrives, including during `postAll`, a commit or push hook, or the release push. A user hook that is running when the interrupt arrives is stopped and later hooks are skipped. The records get five minutes from the interrupt; a recording that outlasts them is a critical failure. Inspect the final summaries and records rather than inferring state from where the visible log stopped.
 
 Do not manually rewrite tags, force a push, reset files, or invoke standalone record commands as a shortcut unless the recovery procedure specifically requires that action and it is within the authorized task. Standalone `github`, `commit`, `writer`, `replacer`, auto-edit, `install`, and `self-update` commands can mutate local or external state.
 
