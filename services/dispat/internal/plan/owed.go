@@ -4,6 +4,7 @@
 package plan
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -143,7 +144,7 @@ func (cp *computation) findOwedRelease(pair owedPair, isLoaded func(string) bool
 		if !tag.Parsed || tag.Commit == "" {
 			continue
 		}
-		if cp.isReleaseReachedBy(cp.tagCommitKey(pair.provider, tag.Commit), pair.baseline, isLoaded) {
+		if cp.isReleaseReachedBy(cp.tagCommitKey(pair.provider, tag.Commit), pair, isLoaded) {
 			return tag, true
 		}
 	}
@@ -151,16 +152,35 @@ func (cp *computation) findOwedRelease(pair owedPair, isLoaded func(string) bool
 }
 
 // isReleaseReachedBy reports whether a release commit is an ancestor-or-self
-// of a consumer's baseline. A release commit the union does not hold is behind
-// every boundary the union was read from, because a window is exactly what
-// its boundary does not reach, so it is behind the baseline too whenever the
-// baseline is one of them: that answer costs nothing. Anything else is an
-// ordinary ancestry question, a bitset lookup for two commits of the union.
-func (cp *computation) isReleaseReachedBy(release, baseline string, isLoaded func(string) bool) bool {
-	if cp.byKey[release] == nil && isLoaded(baseline) {
+// of the pair's consumer baseline. A release commit the union does not hold is
+// behind every boundary the union was read from, because a window is exactly
+// what its boundary does not reach, so it is behind the baseline too whenever
+// the baseline is one of them, or reaches one (isBaselineAboveLoadedStable):
+// those answers cost nothing. Anything else is an ordinary ancestry question,
+// a bitset lookup for two commits of the union.
+func (cp *computation) isReleaseReachedBy(release string, pair owedPair, isLoaded func(string) bool) bool {
+	if cp.byKey[release] == nil && (isLoaded(pair.baseline) || cp.isBaselineAboveLoadedStable(pair, isLoaded)) {
 		return true
 	}
-	return cp.ancestorOrSelf(release, baseline)
+	return cp.ancestorOrSelf(release, pair.baseline)
+}
+
+// isBaselineAboveLoadedStable reports, in a single history, that the pair's
+// consumer baseline reaches the consumer's own stable boundary, which the
+// union was read from. That is a consumer on a prerelease train: its baseline
+// is a prerelease tag after the stable one, and no boundary itself. Only the
+// marker index is asked, never git, so an answer it cannot give is a no, and
+// the ordinary ancestry question follows.
+func (cp *computation) isBaselineAboveLoadedStable(pair owedPair, isLoaded func(string) bool) bool {
+	if len(cp.histories) > 0 {
+		return false
+	}
+	rel := cp.rel[pair.consumer]
+	if rel == nil || rel.StableCommit == "" || !isLoaded(rel.StableCommit) {
+		return false
+	}
+	isReached, known := cp.markedAncestor(rel.StableCommit, pair.baseline)
+	return known && isReached
 }
 
 // unionFrontier is where one repository's part of the union meets the history
@@ -272,27 +292,27 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 			continue
 		}
 		owed = append(owed, boundary)
+		if boundary.key == rootWindowKey {
+			// The whole history holds every other owed window, so nothing
+			// read after it could add a commit.
+			break
+		}
 	}
 	cp.log.Debug().Int("pairs", total).Int("boundaries", len(owed)).Msg("plan: owed windows examined")
 	if len(owed) == 0 {
 		return nil
 	}
 
-	lists := make([][]gitx.Commit, 0, len(owed))
-	for _, b := range owed {
-		if err := cp.ctx.Err(); err != nil {
-			return fmt.Errorf("plan: loading owed windows: %w", err)
-		}
-		commits, err := cp.git.Commits(cp.ctx, b.since)
-		if err != nil {
-			return fmt.Errorf("plan: owed window for %s: %w", b.pkg, err)
-		}
-		lists = append(lists, commits)
+	lists, err := cp.readOwedWindows(owed)
+	if err != nil {
+		return err
+	}
+	for i, b := range owed {
 		if cp.stats != nil {
 			cp.stats.CommitWindows.Add(1)
-			cp.stats.WindowCommitRefs.Add(int64(len(commits)))
+			cp.stats.WindowCommitRefs.Add(int64(len(lists[i])))
 		}
-		cp.log.Debug().Str("boundary", b.key).Str("consumer", b.pkg).Int("commits", len(commits)).
+		cp.log.Debug().Str("boundary", b.key).Str("consumer", b.pkg).Int("commits", len(lists[i])).
 			Msg("plan: owed window indexed")
 	}
 	cp.buildUnion(lists)
@@ -301,33 +321,152 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 	return nil
 }
 
+// readOwedWindows reads the owed windows' listings, each exactly the listing
+// Commits gives for its boundary. A Git implementation with a union walk
+// (gitx.UnionHistoryx) reads them all at once and each is recovered from the
+// walk by the marker pass, as the ordinary windows are (readUnionWindow); any
+// other reads one per boundary.
+func (cp *computation) readOwedWindows(owed []windowBoundary) ([][]gitx.Commit, error) {
+	if lists, err := cp.readUnionLists(owed); lists != nil || err != nil {
+		return lists, err
+	}
+	lists := make([][]gitx.Commit, 0, len(owed))
+	for _, b := range owed {
+		if err := cp.ctx.Err(); err != nil {
+			return nil, fmt.Errorf("plan: loading owed windows: %w", err)
+		}
+		commits, err := cp.git.Commits(cp.ctx, b.since)
+		if err != nil {
+			return nil, fmt.Errorf("plan: owed window for %s: %w", b.pkg, err)
+		}
+		lists = append(lists, commits)
+	}
+	return lists, nil
+}
+
+// readUnionLists reads every boundary's window in one union walk and answers
+// each window's listing, in the walk's order, which is the order Commits
+// lists it in (gitx.UnionHistoryx). It answers nil when the walk does not
+// apply: no capability, a single boundary, a boundary with no commit id, a
+// boundary off HEAD's line, or an index past its budget.
+func (cp *computation) readUnionLists(boundaries []windowBoundary) ([][]gitx.Commit, error) {
+	union, ok := cp.git.(gitx.UnionHistoryx)
+	if !ok || len(boundaries) < 2 {
+		return nil, nil
+	}
+	ids := make([]string, len(boundaries))
+	for i, b := range boundaries {
+		if b.commit == "" && b.since != "" {
+			return nil, nil
+		}
+		ids[i] = b.commit // "" is the whole history
+	}
+	if err := cp.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("plan: loading owed windows: %w", err)
+	}
+	all, err := union.CommitsSinceAny(cp.ctx, ids)
+	if errors.Is(err, gitx.ErrBoundaryNotBehindHead) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("plan: owed window for %s: %w", boundaries[0].pkg, err)
+	}
+	excluded, isIndexed := excludedByBoundaries(all, ids)
+	if !isIndexed {
+		return nil, nil
+	}
+	lists := make([][]gitx.Commit, len(boundaries))
+	for i := range boundaries {
+		list := make([]gitx.Commit, 0, len(all)-excluded[i].len())
+		for pos, commit := range all {
+			if !excluded[i].has(pos) {
+				list = append(list, commit)
+			}
+		}
+		lists[i] = list
+	}
+	return lists, nil
+}
+
+// excludedByBoundaries is, for each boundary, the commits of a union walk it
+// is an ancestor-or-self of: what its window leaves out of the walk. A
+// boundary the walk does not hold is behind every commit of it, so it leaves
+// nothing out (nil). isIndexed is false when the parents do not describe a
+// DAG or the marker index is past its budget.
+func excludedByBoundaries(all []gitx.Commit, ids []string) (excluded []*commitSet, isIndexed bool) {
+	at := make(map[string]int32, len(all))
+	for i, c := range all {
+		at[c.SHA] = int32(i)
+	}
+	index := newAncestryIndex(len(all), func(pos int) []int32 {
+		var parents []int32
+		for _, p := range all[pos].Parents {
+			if i, ok := at[p]; ok {
+				parents = append(parents, i)
+			}
+		}
+		return parents
+	})
+	if index == nil {
+		return nil, false
+	}
+	var markers []int32
+	for _, id := range ids {
+		if pos, ok := at[id]; ok {
+			markers = append(markers, pos)
+		}
+	}
+	index.mark(markers)
+	excluded = make([]*commitSet, len(ids))
+	for i, id := range ids {
+		if pos, ok := at[id]; ok {
+			if excluded[i] = index.ancestors(pos); excluded[i] == nil {
+				return nil, false
+			}
+		}
+	}
+	return excluded, true
+}
+
 // loadRepositoryOwedWindows is loadOwedWindows over a composed workspace:
 // each pair's window is a window over the provider's repository, where the
 // consumer's position is its boundary there (§§27.6, 27.11).
 func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
+	// Windows are decided first and read after, so that one repository's
+	// owed windows are one union walk. A window decided on is read as far as
+	// every later decision is concerned, exactly as when each was read the
+	// moment it was decided.
+	type owedLoad struct {
+		history            RepositoryHistory
+		boundary, consumer string
+	}
+	var queued []owedLoad
+	decided := make(map[string]bool)
+	isRead := func(key string) bool {
+		_, isListed := idx.commitLists[key]
+		return isListed || decided[key]
+	}
 	isLoaded := func(boundary string) bool {
 		repository, raw := splitHistoryKey(boundary)
 		history, ok := cp.histories[globx.Fold(repository)]
-		_, isRead := idx.commitLists[historyKey(history.Name, raw)]
-		return ok && isRead
+		return ok && isRead(historyKey(history.Name, raw))
 	}
 	pairs, total := cp.listOwedPairs()
 	frontiers := make(map[string]unionFrontier)
 	listed := len(idx.lists)
-	boundaries := 0
 	for _, pair := range pairs {
 		history, ok := cp.histories[globx.Fold(cp.byName[pair.provider].Repository)]
 		if !ok {
 			continue
 		}
-		if _, isWhole := idx.commitLists[historyKey(history.Name, "")]; isWhole {
+		if isRead(historyKey(history.Name, "")) {
 			continue // that repository's union is its whole history
 		}
 		boundary := historyKey(history.Name, "")
 		if tag, isReached := cp.findOwedRelease(pair, isLoaded); isReached {
 			boundary = historyKey(history.Name, tag.Commit)
 		}
-		if _, isRead := idx.commitLists[boundary]; isRead {
+		if isRead(boundary) {
 			continue // an ordinary window, or an owed one already read
 		}
 		folded := globx.Fold(history.Name)
@@ -339,14 +478,33 @@ func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
 		if cp.isHeldByUnion(boundary, frontier) {
 			continue
 		}
-		if _, _, err := cp.load(idx, history, boundary, pair.consumer); err != nil {
+		decided[boundary] = true
+		queued = append(queued, owedLoad{history: history, boundary: boundary, consumer: pair.consumer})
+	}
+	cp.log.Debug().Int("pairs", total).Int("boundaries", len(queued)).Msg("plan: owed windows examined")
+	if len(queued) == 0 {
+		return nil
+	}
+	var order []owedLoad // the first window of each repository
+	byRepository := make(map[string][]string)
+	for _, q := range queued {
+		folded := globx.Fold(q.history.Name)
+		if _, isSeen := byRepository[folded]; !isSeen {
+			order = append(order, q)
+		}
+		_, raw := splitHistoryKey(q.boundary)
+		byRepository[folded] = append(byRepository[folded], raw)
+	}
+	for _, first := range order {
+		raws := byRepository[globx.Fold(first.history.Name)]
+		if err := cp.readRepositoryUnion(idx, first.history, raws, first.consumer); err != nil {
 			return err
 		}
-		boundaries++
 	}
-	cp.log.Debug().Int("pairs", total).Int("boundaries", boundaries).Msg("plan: owed windows examined")
-	if boundaries == 0 {
-		return nil
+	for _, q := range queued {
+		if _, _, err := cp.load(idx, q.history, q.boundary, q.consumer); err != nil {
+			return err
+		}
 	}
 	cp.buildRepositoryUnion(idx.lists[listed:], idx.canonical)
 	cp.resetUnionAncestry()

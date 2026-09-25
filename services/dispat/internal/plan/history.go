@@ -447,59 +447,42 @@ func (cp *computation) readRepositoryUnions(idx *windowIndex) error {
 	}
 	for _, folded := range order {
 		rb := byRepository[folded]
-		union, ok := rb.history.Git.(gitx.UnionHistoryx)
-		if !ok || len(rb.raw) < 2 || !areCommitIDs(rb.raw) {
-			continue
+		if err := cp.readRepositoryUnion(idx, rb.history, rb.raw, rb.pkg); err != nil {
+			return err
 		}
-		if err := cp.ctx.Err(); err != nil {
-			return fmt.Errorf("plan: %s history for %s: %w", rb.history.Name, rb.pkg, err)
-		}
-		all, err := union.CommitsSinceAny(cp.ctx, rb.raw)
-		if errors.Is(err, gitx.ErrBoundaryNotBehindHead) {
-			continue // a pin off this head: no window is recoverable by ancestry
-		}
-		if err != nil {
-			return fmt.Errorf("plan: %s history for %s: %w", rb.history.Name, rb.pkg, err)
-		}
-		at := make(map[string]int32, len(all))
-		for i, c := range all {
-			at[c.SHA] = int32(i)
-		}
-		index := newAncestryIndex(len(all), func(pos int) []int32 {
-			var parents []int32
-			for _, p := range all[pos].Parents {
-				if i, ok := at[p]; ok {
-					parents = append(parents, i)
-				}
-			}
-			return parents
-		})
-		if index == nil {
-			continue
-		}
-		var markers []int32
-		for _, raw := range rb.raw {
-			if pos, ok := at[raw]; ok {
-				markers = append(markers, pos)
-			}
-		}
-		index.mark(markers)
-		windows := make(map[string]unionWindow, len(rb.raw))
-		for _, raw := range rb.raw {
-			window := unionWindow{all: all}
-			if pos, ok := at[raw]; ok {
-				if window.excluded = index.ancestors(pos); window.excluded == nil {
-					windows = nil // past the index's budget: read them one by one
-					break
-				}
-			}
-			// A boundary the union does not hold is behind every other one, or
-			// is no boundary at all: its window is the whole union.
-			windows[historyKey(rb.history.Name, raw)] = window
-		}
-		for key, window := range windows {
-			idx.unions[key] = window
-		}
+	}
+	return nil
+}
+
+// readRepositoryUnion reads the windows after several boundaries of one
+// repository in one union walk and leaves each in idx.unions for load to pick
+// up. It reads nothing where the walk does not apply: a Git implementation
+// without gitx.UnionHistoryx, a single boundary, a boundary that is not a
+// full commit id, the control history where it is served from its own index,
+// a boundary off HEAD's line, or an index past its budget.
+func (cp *computation) readRepositoryUnion(idx *windowIndex, history RepositoryHistory, raws []string, pkg string) error {
+	union, ok := history.Git.(gitx.UnionHistoryx)
+	if !ok || len(raws) < 2 || !areCommitIDs(raws) || (history.Control && cp.controlIndexed) {
+		return nil
+	}
+	if err := cp.ctx.Err(); err != nil {
+		return fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
+	}
+	all, err := union.CommitsSinceAny(cp.ctx, raws)
+	if errors.Is(err, gitx.ErrBoundaryNotBehindHead) {
+		return nil // a pin off this head: no window is recoverable by ancestry
+	}
+	if err != nil {
+		return fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
+	}
+	excluded, isIndexed := excludedByBoundaries(all, raws)
+	if !isIndexed {
+		return nil // read them one by one
+	}
+	// A boundary the union does not hold is behind every other one, or is no
+	// boundary at all: its window is the whole union.
+	for i, raw := range raws {
+		idx.unions[historyKey(history.Name, raw)] = unionWindow{all: all, excluded: excluded[i]}
 	}
 	return nil
 }
