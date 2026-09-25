@@ -768,6 +768,46 @@ func TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted(t *testing.T) {
 		"the remedy regenerates the file from what published")
 }
 
+// TestEdgeReleaseCommitLockStaysAtHeadWithNothingToRegenerateIt: the package
+// whose lock sync wrote the shared file fails its build, and the package that
+// publishes has no syncLock of its own. The closing phase restores the file
+// and has nothing to regenerate it with, so it says so once and the release
+// commit records the file exactly as HEAD has it, while the published package
+// is still committed and tagged.
+func TestEdgeReleaseCommitLockStaysAtHeadWithNothingToRegenerateIt(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]models.Script{
+		"build":   {`if [ "$DISPAT_PACKAGE" = core ]; then exit 1; fi`},
+		"publish": {"echo publishing"},
+		"regen":   {sharedLockRegenerator},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(),
+			AutoVersion: &models.AutoVersionConfig{SyncLock: []string{"regen"}}},
+		"tools": {Path: models.PathList{"tools"}, Flow: buildPublish()},
+	}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Include: []string{"lock.txt"}}
+	r.WriteConfigModel(cfg)
+	seedManifest(r, "packages", "core")
+	r.SeedPackage("tools", "util")
+	seed := "packages/core 0.0.0\n"
+	r.WriteFile("lock.txt", seed)
+	r.Commit("feat(core,util): core writes the lock and fails, util publishes")
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	require.True(t, r.IsTagged("util@0.1.0"), "tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("core@"))
+	warned := jsonLine(t, res,
+		"no published package ran syncLock scripts to regenerate the shared include paths, so they stay as HEAD has them")
+	assert.Equal(t, "warn", warned.Str("level"))
+	assert.False(t, harness.IsCodePresent(res.Events, "E223"), "there was nothing to regenerate, so nothing failed")
+	assert.Contains(t, r.Git("log", "-1", "--format=%s"), "util@0.1.0", "the release commit is made")
+	assert.Equal(t, seed, r.Git("show", "HEAD:lock.txt")+"\n", "and records the shared file as HEAD had it")
+	assert.Equal(t, seed, readFileString(t, r.Path("lock.txt")), "the file core's sync wrote is restored")
+}
+
 // TestEdgeDirtyGuardReadsARenameAsOneEntry: git's machine-readable status
 // writes a rename as the destination followed by the source, and only the
 // first of the two carries a status prefix. Reading the second as an entry of
