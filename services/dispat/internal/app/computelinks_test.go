@@ -174,22 +174,6 @@ func TestSuggestLinksStarRefusesAnExistingNonHubLink(t *testing.T) {
 	assert.Contains(t, err.Error(), "existing links are retained")
 }
 
-func TestSuggestLinksRejectsUnknownTopology(t *testing.T) {
-	a := computeFleet(t, fleetPeer("api", []string{"sdk"}, nil))
-	changes, err := a.suggestLinks("mesh")
-	assert.Nil(t, changes)
-	require.EqualError(t, err, `invalid compute topology "mesh": expected minimal or star`)
-}
-
-func TestSuggestLinksStarRequiresALinkedFleet(t *testing.T) {
-	a := computeFleet(t, fleetPeer("api", []string{"sdk"}, nil))
-	a.workspace.Repositories = append(a.workspace.Repositories,
-		config.Repository{Name: config.ControlRepository, Control: true})
-	changes, err := a.suggestLinks("star")
-	assert.Nil(t, changes)
-	require.EqualError(t, err, "star topology requires a linked fleet with a named entry repository")
-}
-
 func TestSuggestLinksExcludesDisabledRosterPeers(t *testing.T) {
 	root := t.TempDir()
 	disabled := false

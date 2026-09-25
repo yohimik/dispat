@@ -85,16 +85,10 @@ func (s linkSuggestion) render() string {
 // suggestLinks proposes what the fleet is missing: the links that would
 // connect its roster, the halves of the links only one end declares, the
 // checkouts its declared links lack, and the roster entries that would let
-// every peer compose the same fleet.
+// every peer compose the same fleet. topology is one Compute normalized, and
+// Compute refused star outside a linked fleet before anything was scanned.
 func (a *App) suggestLinks(topology string) ([]linkSuggestion, error) {
-	topology, err := normalizeComputeTopology(topology)
-	if err != nil {
-		return nil, err
-	}
 	if !a.workspace.IsLinked() {
-		if topology == "star" {
-			return nil, errors.New("star topology requires a linked fleet with a named entry repository")
-		}
 		return nil, nil
 	}
 	for _, finding := range a.workspace.LinkFindings() {
