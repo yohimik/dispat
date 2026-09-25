@@ -289,7 +289,7 @@ should expect:
   through. The gc build stops waiting for those pipes after five seconds and reports the script by its own exit. The
   scheduler here is single-threaded, so the blocking read of the inherited pipe stalls every goroutine, the timer
   included, and the tiny binary returns when the child lets go. The outcome is the same; a daemon that never exits
-  would hold the run. `TestCovTailScriptThatLeavesAChildHoldingTheOutputPipes` asserts the bound under gc and the
+  would hold the run. `TestRunScriptThatLeavesAChildHoldingTheOutputPipes` asserts the bound under gc and the
   outcome under both.
 
 ## Reading the logs
