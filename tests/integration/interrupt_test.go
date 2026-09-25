@@ -10,6 +10,7 @@ package integration
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -153,6 +154,94 @@ func TestInterruptTerminatesAPublishCommand(t *testing.T) {
 	r.ReleaseOK()
 	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
+}
+
+// TestInterruptKilledAfterAPublishStrandsTheLock: a run killed outright
+// between a publish command's success and the tag that records it is the one
+// interval a tag cannot describe. Its publish script reports success and then
+// kills the dispat process that started it, so nothing of the run survives to
+// clean up: the process dies of the signal, the package is uploaded and not
+// tagged, and the lock stays on the remote naming its holder. The next run is
+// refused by that stranded lock with E336 naming the host and process that
+// took it, before anything is planned. Once the operator clears the lock, as
+// the lock page's remedy says, the retry uploads again unless the publish
+// script verifies what the destination already holds, and records the tag
+// either way.
+func TestInterruptKilledAfterAPublishStrandsTheLock(t *testing.T) {
+	for name, isVerified := range map[string]bool{"a plain upload": false, "an upload that verifies first": true} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			registryPath := filepath.Join(t.TempDir(), "registry.log")
+			registry := harness.ShQuote(registryPath)
+			killed := harness.ShQuote(filepath.Join(t.TempDir(), "killed"))
+			upload := `echo "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION" >> ` + registry
+			if isVerified {
+				upload = `grep -qx "$DISPAT_PACKAGE@$DISPAT_NEW_VERSION" ` + registry + " 2>/dev/null || " + upload
+			}
+			cfg := libsConfig(markerBuild, 1)
+			cfg.Scripts["publish"] = models.Script{
+				upload,
+				// Once, and only after the upload succeeded: the parent of the
+				// shell running this line is the dispat process itself.
+				"if [ ! -e " + killed + " ]; then : > " + killed + "; kill -9 $PPID; fi",
+			}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
+			bare := r.AddBareRemote()
+			r.Git("push", "-q", "origin", "HEAD")
+
+			res := r.CommandEnv(harness.LockEnabled)
+			assert.Equal(t, -1, res.Code, "the process died of the signal\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Equal(t, []string{"core@0.1.0"}, readLines(t, registryPath), "the upload happened")
+			assert.Zero(t, r.TagCount("core@"), "and was never recorded")
+			require.True(t, remoteHoldsLock(t, bare), "the killed run's lock is stranded on the remote")
+			holder := lockHolderPID(t, bare)
+
+			refused := r.CommandEnv(harness.LockEnabled)
+			assert.Equal(t, 1, refused.Code, "stdout:\n%s\nstderr:\n%s", refused.Stdout, refused.Stderr)
+			assert.True(t, harness.IsCodePresent(refused.Events, "E336"), "stdout:\n%s", refused.Stdout)
+			assert.Contains(t, refused.Stdout, "pid "+holder, "the refusal names the process holding the lock")
+			assert.Contains(t, refused.Stdout, "delete the tag on the remote", "and the remedy for a stranded lock")
+			assert.Equal(t, 1, buildRuns(r), "the refused run built nothing")
+
+			// The operator's act, after confirming nothing is releasing.
+			r.Git("push", "-q", "origin", "--delete", lockTag)
+			retry := r.CommandEnv(harness.LockEnabled)
+			require.Equal(t, 0, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+			uploads := []string{"core@0.1.0", "core@0.1.0"}
+			if isVerified {
+				uploads = uploads[:1]
+			}
+			assert.Equal(t, uploads, readLines(t, registryPath),
+				"the retry uploads again unless the publish script verifies")
+			assert.True(t, r.IsTagged("core@0.1.0"), "and records the release: %v", r.TagList())
+			assert.False(t, remoteHoldsLock(t, bare))
+		})
+	}
+}
+
+// lockHolderPID is the process id the remote's lock tag says took it.
+func lockHolderPID(t *testing.T, bare string) string {
+	t.Helper()
+	for _, line := range strings.Split(bareGit(t, bare, "cat-file", "tag", lockTag), "\n") {
+		if pid, ok := strings.CutPrefix(line, "pid "); ok {
+			return pid
+		}
+	}
+	t.Fatalf("the lock tag names no process")
+	return ""
+}
+
+// readLines is a file's lines, none for a file that does not exist.
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	require.NoError(t, err)
+	return strings.Fields(string(data))
 }
 
 // closingPhaseHooks are the run hooks of the closing phase in the order a
