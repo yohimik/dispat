@@ -328,6 +328,16 @@ func checkScriptValues(label string, scripts map[string]Script) error {
 // each of its formats. The first that exists wins.
 var defaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dispat.toml"}
 
+// ExplicitFile is the configuration file a --config flag names: the name
+// itself when it is absolute, joined to root otherwise. Whether the file
+// exists is the load's question, which names the path when it does not.
+func ExplicitFile(root, name string) string {
+	if filepath.IsAbs(name) {
+		return filepath.Clean(name)
+	}
+	return filepath.Join(root, name)
+}
+
 // ResolveFile returns the path of the configuration file to load and the
 // monorepo root it establishes. An explicitly named file is used as-is,
 // relative to root — a typo there must fail loudly, not fall back to a
@@ -358,10 +368,7 @@ var defaultFileNames = []string{"dispat.json", "dispat.yaml", "dispat.yml", "dis
 // the error says so and names every candidate tried.
 func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
 	if explicit {
-		if filepath.IsAbs(name) {
-			return filepath.Clean(name), root, nil
-		}
-		return filepath.Join(root, name), root, nil
+		return ExplicitFile(root, name), root, nil
 	}
 	p, r, err := loader.Resolve(context.Background(), root, dispatResolver())
 	if errors.Is(err, lib.ErrNoConfig) {

@@ -692,12 +692,8 @@ func (r *runner) runDiagnostics() int {
 	level := requestedLevel
 	if r.fs.Changed("config") {
 		config.UseLogger(r.boot)
-		cfgPath, _, err := config.ResolveFile(*r.o.root, *r.o.cfgName, true)
-		if err != nil {
-			r.boot.Error().Err(err).Msg("config file not found")
-			return 1
-		}
-		cfg, err = config.Load(cfgPath, r.fs)
+		var err error
+		cfg, err = config.Load(config.ExplicitFile(*r.o.root, *r.o.cfgName), r.fs)
 		if err != nil {
 			r.boot.Error().Err(err).Msg("invalid configuration")
 			return 1
