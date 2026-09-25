@@ -163,6 +163,57 @@ func TestExecutionUnreadableClaimIsAdoptedWhenItSurfaces(t *testing.T) {
 	assert.Empty(t, rig.branches(), "the run closed the branches it created")
 }
 
+// TestExecutionUnreadableClaimIsWithdrawnBeforeItSurfaces: the node's claim
+// push applies and neither its answer nor the three reads after it can say so,
+// and the release is interrupted before the node polls again. The run
+// withdraws the attempt on top of the claim it found on the branch, and the
+// node's next poll finds that withdrawal over a claim of its own it never knew
+// had landed: it acknowledges at once, having run nothing, so the run settles
+// the attempt as acknowledged, records nothing and gives the lock back.
+func TestExecutionUnreadableClaimIsWithdrawnBeforeItSurfaces(t *testing.T) {
+	rig := newExecutionPushOutcomeRig(t)
+	// The first fault loses the claim push's answer and fails the three reads
+	// of the branch after it, as TestExecutionUnreadableClaimIsAdoptedWhenItSurfaces
+	// does. The second holds the node's next poll of its namespace, the first
+	// after the claim push, until the withdrawal is on the branch.
+	lost, poll := harness.NewGitFaultChain(t,
+		harness.GitFault{Pattern: "*[= ]refs/heads/*[0-9]-build-*", Nth: 1, Onward: true, Through: 4,
+			After: true, Output: executionLostPushReply},
+		harness.GitFault{Pattern: "*ls-remote --heads -- *refs/heads/dispat-worker-*[*]",
+			ArmAfter: "*push*[0-9]-build-*", Nth: 1, Hold: true})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, lost.Env()...)
+	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+
+	require.Eventually(t, poll.IsHeld, 120*time.Second, 50*time.Millisecond,
+		"the node never polled again after its unreadable claim")
+	started.Signal(syscall.SIGINT)
+	require.Eventually(t, func() bool {
+		for _, ref := range executionMailboxBranches(t, rig.mailbox) {
+			branch := strings.TrimPrefix(ref, "refs/heads/")
+			if strings.Contains(branch, "-build-") &&
+				slices.Contains(executionReadChain(rig.mailbox, branch), "cancel") {
+				return true
+			}
+		}
+		return false
+	}, 60*time.Second, 50*time.Millisecond, "the run never withdrew the claimed attempt")
+	poll.Resume()
+	res := started.Wait()
+	served := worker.stop(t)
+
+	assert.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero")
+	assert.GreaterOrEqual(t, lost.Matches(), 4, "the claim and its three reads")
+	settled, isSettled := executionLine(res, "the withdrawn attempt was acknowledged")
+	require.True(t, isSettled, "the run heard the acknowledgement\nstdout:\n%s\nworker:\n%s", res.Stdout, served.Stdout)
+	assert.Equal(t, "inputs", settled.Str("phase"), "nothing of the task had started on the node")
+	assert.Contains(t, served.Stdout, "the claim push has no known outcome")
+	assert.Contains(t, served.Stdout, `"message":"cancellation acknowledged"`)
+	assert.NotContains(t, served.Stdout, "is on the branch and is adopted", "the withdrawn claim is never run")
+	assert.Empty(t, rig.runs(), "no build ran anywhere")
+	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
+	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock went back")
+}
+
 // TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal: the release
 // is interrupted while a node builds, the node stops the build and pushes its
 // acknowledgement, and the push applies while its answer is lost. The node
@@ -313,6 +364,51 @@ func TestExecutionLostAssignmentCreateLeavesNoBranch(t *testing.T) {
 			assert.Empty(t, executionMailboxBranches(t, rig.mailbox))
 		})
 	}
+}
+
+// TestExecutionUnknownAssignmentGoesOnOnceTheNodeClaimedIt: the run's
+// assignment push applies and neither its answer nor the three reads after it
+// can say so, so the run settles it the one way that settles it, a delete
+// leased on the assignment itself. The node claims the assignment before that
+// delete reaches the mailbox, the lease is refused, and the branch the run
+// reads next has moved past its assignment: the push landed and a node
+// answered it, so the attempt goes on rather than being offered again. The
+// package is built once and the release succeeds.
+func TestExecutionUnknownAssignmentGoesOnOnceTheNodeClaimedIt(t *testing.T) {
+	rig := newExecutionPushOutcomeRig(t)
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	// The first fault loses the assignment push's answer and the three reads
+	// that follow it; the second holds the leased delete, the one push with an
+	// empty source, until the node's claim is on the branch.
+	lost, revoke := harness.NewGitFaultChain(t,
+		harness.GitFault{Pattern: "*[= ]refs/heads/*[0-9]-build-*", Nth: 1, Onward: true, Through: 4,
+			After: true, Output: executionLostPushReply},
+		harness.GitFault{Pattern: "*push* :refs/heads/*[0-9]-build-*", Nth: 1, Hold: true})
+	started := rig.repo.StartReleaseEnv(rig.env(lost.Env()...), "release")
+
+	require.Eventually(t, revoke.IsHeld, 120*time.Second, 50*time.Millisecond,
+		"the run never tried to revoke its unanswered assignment")
+	require.Eventually(t, func() bool {
+		for _, ref := range executionMailboxBranches(t, rig.mailbox) {
+			branch := strings.TrimPrefix(ref, "refs/heads/")
+			if strings.Contains(branch, "-build-") &&
+				slices.Contains(executionReadChain(rig.mailbox, branch), "claim") {
+				return true
+			}
+		}
+		return false
+	}, 60*time.Second, 50*time.Millisecond, "the node never claimed the assignment")
+	revoke.Resume()
+	res := started.Wait()
+	stopAll(t, []*executionWorker{worker})
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	_, isFenced := executionLine(res, "the attempt could not be fenced by revoking its coordination ref")
+	assert.True(t, isFenced, "the leased delete lost to the claim\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the package was built once: %v", rig.runs())
+	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
+	assert.Empty(t, rig.branches(), "no coordination branch outlives the run")
 }
 
 // TestExecutionSlowResultPushDoesNotStarveAnAuthorization: a node of capacity

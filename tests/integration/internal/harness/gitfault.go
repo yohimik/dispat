@@ -100,7 +100,17 @@ type GitFault struct {
 	dir     string
 	matches string
 	realGit string
+	// prefix names this fault's settings in the environment. A chained fault
+	// has one of its own, so that the two stand-ins read two sets.
+	prefix string
+	// next is the fault a chain hands every invocation this one passes on,
+	// in place of the real Git.
+	next *GitFault
 }
+
+// gitFaultPrefix is the environment prefix of a fault that is not chained
+// behind another one.
+const gitFaultPrefix = "DISPAT_IT_GIT_FAULT_"
 
 // NewGitFault writes the stand-in `git` into a fresh temporary directory and
 // returns the fault, ready to be handed to a run through Env.
@@ -109,16 +119,40 @@ type GitFault struct {
 // to reach it without consulting the PATH it is itself first on.
 func NewGitFault(t testing.TB, fault GitFault) *GitFault {
 	t.Helper()
+	return newGitFault(t, fault, gitFaultPrefix)
+}
+
+// NewGitFaultChain puts two faults on one process. Every invocation meets the
+// first stand-in, and whatever the first one runs, passing it through or
+// running it before a lost answer, it hands to the second instead of to the
+// real Git. It is how a scenario loses one answer and holds a later call in
+// the same run. Env of the first fault is the environment of the chain.
+func NewGitFaultChain(t testing.TB, first, second GitFault) (*GitFault, *GitFault) {
+	t.Helper()
+	head := newGitFault(t, first, gitFaultPrefix)
+	head.next = newGitFault(t, second, "DISPAT_IT_GIT_FAULT2_")
+	return head, head.next
+}
+
+func newGitFault(t testing.TB, fault GitFault, prefix string) *GitFault {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in git is a POSIX shell script")
 	}
 	realGit, err := exec.LookPath("git")
 	require.NoError(t, err, "git not available")
-	fault.t, fault.realGit = t, realGit
+	fault.t, fault.realGit, fault.prefix = t, realGit, prefix
 	fault.dir = t.TempDir()
 	fault.matches = filepath.Join(fault.dir, "matches")
 	require.NoError(t, os.MkdirAll(fault.matches, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(fault.dir, "git"), []byte(gitFaultScript), 0o755))
+	// A chained stand-in reads its own set of settings: the script is the
+	// same one with its variable names moved under the chain's prefix.
+	script := gitFaultScript
+	if prefix != gitFaultPrefix {
+		script = strings.ReplaceAll(script, gitFaultPrefix, prefix)
+		script = strings.ReplaceAll(script, "DISPAT_IT_GIT_REAL", prefix+"REAL")
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(fault.dir, "git"), []byte(script), 0o755))
 	return &fault
 }
 
@@ -129,6 +163,25 @@ func NewGitFault(t testing.TB, fault GitFault) *GitFault {
 // permission a fleet needs, above all — and exec keeps the last value of a
 // repeated key, so this PATH wins over the inherited one.
 func (f *GitFault) Env() []string {
+	env := []string{"PATH=" + f.dir + string(os.PathListSeparator) + os.Getenv("PATH")}
+	for fault := f; fault != nil; fault = fault.next {
+		env = append(env, fault.settings()...)
+	}
+	return env
+}
+
+// settings is one fault's part of the environment, under its own prefix. The
+// Git it runs for whatever it does not fail is the next fault of its chain,
+// and the real one at the end of it.
+func (f *GitFault) settings() []string {
+	realGit := f.realGit
+	if f.next != nil {
+		realGit = filepath.Join(f.next.dir, "git")
+	}
+	realKey := "DISPAT_IT_GIT_REAL"
+	if f.prefix != gitFaultPrefix {
+		realKey = f.prefix + "REAL"
+	}
 	code := f.Code
 	if code == 0 {
 		code = 1
@@ -155,20 +208,19 @@ func (f *GitFault) Env() []string {
 		output = ""
 	}
 	return []string{
-		"PATH=" + f.dir + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"DISPAT_IT_GIT_REAL=" + f.realGit,
-		"DISPAT_IT_GIT_FAULT_PATTERN=" + f.Pattern,
-		"DISPAT_IT_GIT_FAULT_CODE=" + strconv.Itoa(code),
-		"DISPAT_IT_GIT_FAULT_NTH=" + strconv.Itoa(f.Nth),
-		"DISPAT_IT_GIT_FAULT_ONWARD=" + onward,
-		"DISPAT_IT_GIT_FAULT_THROUGH=" + strconv.Itoa(f.Through),
-		"DISPAT_IT_GIT_FAULT_AFTER=" + after,
-		"DISPAT_IT_GIT_FAULT_OUTPUT=" + output,
-		"DISPAT_IT_GIT_FAULT_OUTPUT_FILE=" + outputFile,
-		"DISPAT_IT_GIT_FAULT_DIR=" + f.matches,
-		"DISPAT_IT_GIT_FAULT_HOLD=" + hold,
-		"DISPAT_IT_GIT_FAULT_HOLD_DIR=" + f.dir,
-		"DISPAT_IT_GIT_FAULT_ARM=" + f.ArmAfter,
+		realKey + "=" + realGit,
+		f.prefix + "PATTERN=" + f.Pattern,
+		f.prefix + "CODE=" + strconv.Itoa(code),
+		f.prefix + "NTH=" + strconv.Itoa(f.Nth),
+		f.prefix + "ONWARD=" + onward,
+		f.prefix + "THROUGH=" + strconv.Itoa(f.Through),
+		f.prefix + "AFTER=" + after,
+		f.prefix + "OUTPUT=" + output,
+		f.prefix + "OUTPUT_FILE=" + outputFile,
+		f.prefix + "DIR=" + f.matches,
+		f.prefix + "HOLD=" + hold,
+		f.prefix + "HOLD_DIR=" + f.dir,
+		f.prefix + "ARM=" + f.ArmAfter,
 	}
 }
 

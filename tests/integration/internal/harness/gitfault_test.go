@@ -143,4 +143,24 @@ func TestGitFaultSelectsMatchesAndPassesTheRestThrough(t *testing.T) {
 		assert.Contains(t, stderr, GitFaultMarker)
 		assert.Equal(t, 1, fault.Matches())
 	})
+
+	t.Run("a chain hands what its first fault runs to its second", func(t *testing.T) {
+		first, second := NewGitFaultChain(t,
+			GitFault{Pattern: "*--version*", Nth: 1, After: true, Output: "lost\n"},
+			GitFault{Pattern: "*--version*", Nth: 2, Code: 9})
+		code, stdout, stderr := runThroughFault(t, first, "--version")
+		assert.Equal(t, 0, code, "the first fault ran the command through the second and lost its answer")
+		assert.Equal(t, "lost\n", stdout)
+		assert.NotContains(t, stderr, GitFaultMarker)
+
+		code, _, stderr = runThroughFault(t, first, "--version")
+		assert.Equal(t, 9, code, "the second fault fails the second match it sees")
+		assert.Contains(t, stderr, GitFaultMarker)
+
+		code, stdout, _ = runThroughFault(t, first, "--exec-path")
+		assert.Equal(t, 0, code, "an invocation neither names reaches the real Git")
+		assert.NotEmpty(t, strings.TrimSpace(stdout))
+		assert.Equal(t, 2, first.Matches())
+		assert.Equal(t, 2, second.Matches(), "each fault counts what it saw")
+	})
 }
