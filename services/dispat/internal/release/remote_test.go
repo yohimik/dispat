@@ -363,6 +363,27 @@ func TestGuardBracketsTheOrchestratorsOwnFrames(t *testing.T) {
 	assert.Equal(t, filepath.Join(root, "a"), remote.requests()[0].Dir)
 }
 
+// TestGuardBracketsTheSignStage: the sign stage writes the package's own
+// version into the folder a snapshot is taken of, so it stays on the
+// orchestrator under the same guard, first of the three writers.
+func TestGuardBracketsTheSignStage(t *testing.T) {
+	root := t.TempDir()
+	seedFile(t, root, "a/package.json", `{"name": "@acme/a", "version": "1.0.0"}`)
+	p := avPlan(root, signedSpace(model.ScopeRoot, "locksync"), "a")
+	fillUpdates(p)
+	remote := &fakeRemote{}
+	executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 2, Publish: 2})
+	executor.Remote = remote
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, results["a"].Status, "%v", results["a"].Err)
+	assert.Equal(t, []string{"sign", "version", "syncLock"}, remote.guards)
+	assert.Equal(t, 0, remote.held, "every guard was given back")
+	assert.Len(t, remote.requests(), 1, "only the build went to a node")
+	assert.Contains(t, fileText(t, root, "a/package.json"), `"version": "1.0.1"`)
+}
+
 // TestGuardFailureFailsTheStageItBrackets: a guard that cannot be taken is a
 // run that cannot keep its snapshots whole, so the stage fails rather than
 // proceeding unguarded.

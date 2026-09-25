@@ -27,6 +27,7 @@ every package.
 | `scripts`               | map name → command or `[command, ...]` | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). A name binds one command or an array of them run in order. `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage. dispat itself reconciles declared workspace ranges and the package's own version, in every [manifest format it reads](../editing/manifests.md#supported-formats), before any `flow.version` script. Absent means off. See [`autoVersion`](./autoversion.md).                                                                                 |
 | `autoPropagate`         | object                   | no         | `autoVersion` under the propagate stage's name, with the same options. A space states one of the two, and a level stating either replaces both. See [Two names for one block](./autoversion.md#two-names-for-one-block). |
+| `autoSign`              | object                   | no         | The sign stage's native write of each package's own version into its own manifests, before the version stage and the build. With it on, `autoVersion` writes dependency ranges and replace rules alone. Absent means off. See [`autoSign`](./autosign.md). |
 | `env`                   | map name → value         | no         | Fixed environment variables for every script of the space's packages, its login script included. These merge over the top-level map key by key. See [Static env](./env.md).                                                                                                                                                                                                     |
 | `custom`                | object                   | no         | Free-form data dispat never reads. See [`custom`](./custom.md).                                                                                                                                                                                                                                                                                                                   |
 | `changelog`             | object                   | no         | Changelog options for this space's packages. These overlay the top-level object field by field, and a package's own overlay sits on top. See [`changelog`](./records.md#changelog).                                                                                                                            |
@@ -61,32 +62,36 @@ because you need them to understand the ordering.
 
 | # | Key | Kind | Runs |
 |---|-----|------|------|
-| 1 | `beforeAll` | hook | Before the package's first stage, whichever that is. This is its version stage when it has one, or its build otherwise. Fails the package's release. |
-| 2 | `beforeVersion` or `beforePropagate` | hook | Before the version stage. Fails the release. |
-| 3 | *(native reconciliation)* | - | Not a script. When the space sets [`autoVersion`](./autoversion.md), dispat rewrites the manifests itself here, before any `version` script. |
-| 4 | `version` or `propagate` | stage | Manifest-sync stage command(s). Runs for every package that picks a version up from a provider moving in this run, and for every releasing package when the space has [`autoVersion`](./autoversion.md). |
-| 5 | `postVersion` or `postPropagate` | hook | After the version stage. Fails the release. |
-| 6 | `autoVersion.syncLock` | stage | Lock-file regeneration (`npm install`), between the version and the build. Lives on [`autoVersion`](./autoversion.md), not on `flow`. Runs only where a manifest actually changed. |
-| 7 | `beforeBuild` | hook | Before the build stage. Fails the release. |
-| 8 | `build` | stage | Build stage command(s). |
-| 9 | `postBuild` | hook | After the build stage. Fails the release. |
-| 10 | `login` | stage | Authentication command(s). Runs once **per space**, before that space's first publish. Every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
-| 11 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
-| 12 | `publish` | stage | Publish stage command(s). Still gating. A publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. |
-| 13 | *(records and tag)* | - | Not a script. Writes the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return. From here nothing can fail the package. |
-| 14 | `postPublish` | hook | After a successful publish. Only **warns**. |
-| 15 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
-| 16 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
-| 17 | `postAnnounce` | hook | After the announce stage. Only **warns**. |
+| 1 | `beforeAll` | hook | Before the package's first stage, whichever that is. This is its sign stage when it has one, then its version stage when it has one, or its build otherwise. Fails the package's release. |
+| 2 | `beforeSign` | hook | Before the sign stage. Fails the release. |
+| 3 | *(native signing)* | - | Not a script. When the space sets [`autoSign`](./autosign.md), dispat writes the package's own version into its own manifests here, before any `sign` script. |
+| 4 | `sign` | stage | Own-version stage command(s). Runs only for a package whose space sets [`autoSign`](./autosign.md) or any of `sign`, `beforeSign` and `postSign`; a package without them has no sign stage at all. |
+| 5 | `postSign` | hook | After the sign stage. Fails the release. |
+| 6 | `beforeVersion` or `beforePropagate` | hook | Before the version stage. Fails the release. |
+| 7 | *(native reconciliation)* | - | Not a script. When the space sets [`autoVersion`](./autoversion.md), dispat rewrites the manifests itself here, before any `version` script. |
+| 8 | `version` or `propagate` | stage | Manifest-sync stage command(s). Runs for every package that picks a version up from a provider moving in this run, and for every releasing package when the space has [`autoVersion`](./autoversion.md). |
+| 9 | `postVersion` or `postPropagate` | hook | After the version stage. Fails the release. |
+| 10 | `autoVersion.syncLock` | stage | Lock-file regeneration (`npm install`), between the version and the build. Lives on [`autoVersion`](./autoversion.md), not on `flow`. Runs only where the sign or version stage actually changed a manifest. |
+| 11 | `beforeBuild` | hook | Before the build stage. Fails the release. |
+| 12 | `build` | stage | Build stage command(s). |
+| 13 | `postBuild` | hook | After the build stage. Fails the release. |
+| 14 | `login` | stage | Authentication command(s). Runs once **per space**, before that space's first publish. Every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
+| 15 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
+| 16 | `publish` | stage | Publish stage command(s). Still gating. A publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. |
+| 17 | *(records and tag)* | - | Not a script. Writes the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return. From here nothing can fail the package. |
+| 18 | `postPublish` | hook | After a successful publish. Only **warns**. |
+| 19 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
+| 20 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
+| 21 | `postAnnounce` | hook | After the announce stage. Only **warns**. |
 | - | `onFail` | outcome | Instead of the rest. Runs once when the package **fails** at any stage above, in the folder's final state (after `revertOnFail`). Warn-only. See below. |
 | - | `onSkip` | outcome | Instead of the rest. Runs once when the package is **skipped** because a provider failed. Warn-only. See below. |
 
-Steps 1 to 12 are the **gating** half. A failure anywhere in them fails the package. Nothing is tagged or recorded,
+Steps 1 to 16 are the **gating** half. A failure anywhere in them fails the package. Nothing is tagged or recorded,
 `revertOnFail` applies, and `onFail` runs instead of the rest. The publish stage itself is part of that half. A publish
 script that exits non-zero has *not* released the package, so the run treats it exactly like a failed build.
 
-The line falls between 12 and 13. Once the publish script has **succeeded**, the artefact is on its registry. No later
-failure can take it back, so 14 to 17 only warn. Every one of them runs even after an earlier one failed. Step 13 makes
+The line falls between 16 and 17. Once the publish script has **succeeded**, the artefact is on its registry. No later
+failure can take it back, so 18 to 21 only warn. Every one of them runs even after an earlier one failed. Step 17 makes
 the release irreversible. A tag or a record that cannot be written there is reported as a
 [critical](../internals/architecture.md#after-the-point-of-no-return) and the package stays published. That split is
 the whole reason there are two kinds of hook.
@@ -96,6 +101,12 @@ The version stage is also called the propagate stage, and each of its three keys
 is one entry, so a level stating either spelling replaces both inherited values, and one object stating both is
 refused. Whichever key configured it, the stage runs under its runtime name: `DISPAT_STAGE` carries `version`,
 `beforeVersion` or `postVersion`. See [Two names for one block](./autoversion.md#two-names-for-one-block).
+
+The sign stage is the one stage that exists only where it is configured. A package gets one when its space sets
+[`autoSign`](./autosign.md) or any of `flow.sign`, `flow.beforeSign` and `flow.postSign`, and it is then the package's
+first stage: `beforeAll` runs before it, and it waits for the package's providers the way the version stage does when
+it comes first. It shares the build budget with the version stage and the build, and it runs on the machine the
+release was started on. A package without that configuration runs exactly the stages it always did.
 
 All script references are optional. A stage without a script still runs and preserves ordering, skip semantics,
 statuses, tags and release records. It just executes no shell command. An unconfigured hook is a no-op. Scripts run
@@ -153,7 +164,7 @@ is `onFail` / `onSkip`) plus the specifics:
 
 | Variable              | Set for  | Meaning                                                 |
 |-----------------------|----------|---------------------------------------------------------|
-| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `version`, `build` or `publish`. |
+| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `sign`, `version`, `syncLock`, `build` or `publish`. |
 | `DISPAT_ERROR`        | `onFail` | The error message of the failing command or operation.  |
 | `DISPAT_BLOCKED_BY`   | `onSkip` | The provider whose failure caused the skip.             |
 

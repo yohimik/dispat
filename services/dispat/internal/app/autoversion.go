@@ -13,7 +13,7 @@ import (
 // each target space's autoVersion block for this invocation; a space with no
 // block at all is still skipped unless an override forces a policy, which
 // then starts from the defaults (every dependency kind, any range, write the
-// own version).
+// own version unless the space's sign stage owns it).
 type AutoVersionOptions struct {
 	Window       WindowOptions // which packages the command covers
 	OnError      string        // what a failure does to the failed package's dependents
@@ -43,7 +43,7 @@ func (o AutoVersionOptions) policy() func(*plan.Release) *model.AutoVersion {
 		return func(rel *plan.Release) *model.AutoVersion { return rel.Pkg.Space.AutoVersion }
 	}
 	return func(rel *plan.Release) *model.AutoVersion {
-		av := effectivePolicy(rel.Pkg.Space.AutoVersion)
+		av := effectivePolicy(rel.Pkg.Space)
 		if o.Range != "" {
 			av.Range = o.Range
 		}
@@ -141,19 +141,21 @@ func (w *autoVersionWork) needSyncLock(pl *plan.Plan, covered []string) []string
 
 // effectivePolicy clones the space's autoVersion block as the base the flag
 // overrides apply onto; a space without one starts from the defaults the
-// config loader would resolve (every dependency kind, any range, write the
-// own version).
-func effectivePolicy(av *model.AutoVersion) *model.AutoVersion {
-	if av == nil {
+// config loader would resolve (every dependency kind, any range, and the own
+// version written unless the space's autoSign owns it, which is when the
+// loader resolves writeVersion to false too). `--write-version` still asks for
+// the own version explicitly.
+func effectivePolicy(space *model.Space) *model.AutoVersion {
+	if space.AutoVersion == nil {
 		return &model.AutoVersion{
 			Manifests: model.ScopeRoot,
 			Kinds: map[model.DepKind]bool{
 				model.KindDependencies: true, model.KindDevDependencies: true,
 				model.KindPeerDependencies: true, model.KindOptionalDependencies: true,
 			},
-			WriteVersion: true,
+			WriteVersion: space.AutoSign == nil,
 		}
 	}
-	clone := *av
+	clone := *space.AutoVersion
 	return &clone
 }

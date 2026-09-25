@@ -724,3 +724,48 @@ func TestWebhookRefusedRunEmitsNothing(t *testing.T) {
 	require.NotEqual(t, 0, res.Code)
 	assert.Empty(t, sink.all(), "a refused run has nothing to report")
 }
+
+// TestWebhookSignStageOnlyWhenConfigured: a package whose configuration gives it
+// a sign stage reports that stage first, under the name `sign`, and reports a
+// failure there as `failedStage: sign`; a package with no sign configuration
+// reports exactly the stages it always did.
+func TestWebhookSignStageOnlyWhenConfigured(t *testing.T) {
+	sink := newWebhookSink(t)
+	r := harness.New(t)
+	cfg := webhooksConfig(echoBuild, models.WebhookConfig{URL: sink.srv.URL})
+	cfg.Scripts["sign"] = models.Script{"echo signing"}
+	cfg.Scripts["boom"] = models.Script{"exit 1"}
+	cfg.Packages = map[string]models.PackageConfig{
+		"web": {Flow: &models.SpaceFlowConfig{Sign: []string{"sign"}}},
+		"api": {Flow: &models.SpaceFlowConfig{Sign: []string{"boom"}}},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.SeedPackage("packages", "api")
+	r.Commit("feat(core,web,api): bootstrap three packages")
+	res := r.Release()
+	assert.Equal(t, 1, res.Code, "the failed sign stage fails the run")
+
+	stages := map[string][]string{}
+	for _, p := range sink.payloads(t) {
+		if name, ok := p["package"].(string); ok {
+			stages[name] = append(stages[name], p["event"].(string)+":"+str(p["stage"]))
+		}
+	}
+	assert.Equal(t, []string{
+		"stage.started:build", "stage.succeeded:build",
+		"stage.started:publish", "stage.succeeded:publish",
+		"package.published:",
+	}, stages["core"], "no sign configuration, no sign events")
+	assert.Equal(t, []string{
+		"stage.started:sign", "stage.succeeded:sign",
+		"stage.started:build", "stage.succeeded:build",
+		"stage.started:publish", "stage.succeeded:publish",
+		"package.published:",
+	}, stages["web"])
+	assert.Equal(t, []string{"stage.started:sign", "package.failed:"}, stages["api"])
+	failed := sink.find(t, "package.failed")
+	assert.Equal(t, "api", failed["package"])
+	assert.Equal(t, "sign", failed["failedStage"])
+}

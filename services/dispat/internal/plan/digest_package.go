@@ -39,6 +39,7 @@ type digestPackage struct {
 	BuildOutputs   []string            `json:"buildOutputs"`
 	BuildPlatforms []string            `json:"buildPlatforms"`
 	AutoVersion    *digestAutoVersion  `json:"autoVersion"`
+	AutoSign       *digestAutoSign     `json:"autoSign"`
 
 	Current        string `json:"current"`
 	Baseline       string `json:"baseline"`
@@ -80,6 +81,7 @@ type digestPackage struct {
 // the same, which is exactly what a worker executing the plan has to agree
 // about.
 type digestCommands struct {
+	Sign      []string `json:"sign"`
 	Version   []string `json:"version"`
 	Build     []string `json:"build"`
 	Publish   []string `json:"publish"`
@@ -87,6 +89,8 @@ type digestCommands struct {
 	Announce  []string `json:"announce"`
 	BeforeAll []string `json:"beforeAll"`
 
+	BeforeSign     []string `json:"beforeSign"`
+	PostSign       []string `json:"postSign"`
 	BeforeVersion  []string `json:"beforeVersion"`
 	PostVersion    []string `json:"postVersion"`
 	BeforeBuild    []string `json:"beforeBuild"`
@@ -144,6 +148,13 @@ type digestAutoVersion struct {
 	SyncLock       []string            `json:"syncLock"`
 }
 
+// digestAutoSign is the resolved own-version policy of the sign stage. It
+// decides which manifests carry the release's version, so it changes what a
+// release produces.
+type digestAutoSign struct {
+	Manifests string `json:"manifests"`
+}
+
 type digestReplaceRule struct {
 	Files []string `json:"files"`
 	Find  string   `json:"find"`
@@ -182,6 +193,7 @@ func canonicalPackage(name string, release *Release, root string) digestPackage 
 		BuildOutputs:   append([]string(nil), space.BuildOutputs...),
 		BuildPlatforms: append([]string(nil), space.BuildPlatforms...),
 		AutoVersion:    canonicalAutoVersion(space.AutoVersion),
+		AutoSign:       canonicalAutoSign(space.AutoSign),
 
 		Current:        release.Current.String(),
 		Baseline:       release.Baseline.String(),
@@ -222,12 +234,15 @@ func canonicalPackage(name string, release *Release, root string) digestPackage 
 
 func canonicalCommands(space *model.Space) digestCommands {
 	return digestCommands{
+		Sign:           append([]string(nil), space.SignScript...),
 		Version:        append([]string(nil), space.VersionScript...),
 		Build:          append([]string(nil), space.BuildScript...),
 		Publish:        append([]string(nil), space.PublishScript...),
 		Login:          append([]string(nil), space.LoginScript...),
 		Announce:       append([]string(nil), space.AnnounceScript...),
 		BeforeAll:      append([]string(nil), space.BeforeAllScript...),
+		BeforeSign:     append([]string(nil), space.BeforeSignScript...),
+		PostSign:       append([]string(nil), space.PostSignScript...),
 		BeforeVersion:  append([]string(nil), space.BeforeVersionScript...),
 		PostVersion:    append([]string(nil), space.PostVersionScript...),
 		BeforeBuild:    append([]string(nil), space.BeforeBuildScript...),
@@ -261,6 +276,14 @@ func canonicalUpdates(updates []ProviderUpdate) []digestUpdate {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// canonicalAutoSign flattens the sign stage's policy.
+func canonicalAutoSign(policy *model.AutoSign) *digestAutoSign {
+	if policy == nil {
+		return nil
+	}
+	return &digestAutoSign{Manifests: string(policy.Manifests)}
 }
 
 // canonicalAutoVersion flattens the policy, sorting the two sets it carries.

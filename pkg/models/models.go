@@ -178,6 +178,9 @@ type File struct {
 	// stating either replaces both inherited values, and one object stating
 	// both is refused.
 	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
+	// AutoSign is the default own-version policy of the sign stage; see
+	// AutoSignConfig. A level that states one replaces it whole.
+	AutoSign *AutoSignConfig `json:"autoSign,omitempty"`
 	// IsBuildWaitingPublish is the default provider relation: what the
 	// consumers of a package wait for, written as a boolean or as the object
 	// StageRelation describes.
@@ -970,6 +973,9 @@ type SpaceConfig struct {
 	// AutoPropagate is AutoVersion under the propagate stage's name; see
 	// File.AutoPropagate.
 	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
+	// AutoSign enables the sign stage's native write of each package's own
+	// version into its own manifests. nil means off. See AutoSignConfig.
+	AutoSign *AutoSignConfig `json:"autoSign,omitempty"`
 	// Env is static environment for every script of the space's packages —
 	// its stages, hooks, run scripts and its login script — merged over the
 	// top-level map key by key; see File.Env.
@@ -1057,8 +1063,10 @@ type SpaceFile struct {
 	// AutoPropagate is AutoVersion under the propagate stage's name; see
 	// File.AutoPropagate.
 	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
-	Env           map[string]string  `json:"env,omitempty"`
-	Custom        map[string]any     `json:"custom,omitempty"`
+	// AutoSign is this space's own-version policy; see SpaceConfig.AutoSign.
+	AutoSign *AutoSignConfig   `json:"autoSign,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	Custom   map[string]any    `json:"custom,omitempty"`
 	// Changelog, GitHub, Src and Concurrency are this space's; see
 	// SpaceConfig.
 	Changelog   *ChangelogConfig `json:"changelog,omitempty"`
@@ -1194,6 +1202,9 @@ type PackageConfig struct {
 	// AutoPropagate is AutoVersion under the propagate stage's name; see
 	// File.AutoPropagate.
 	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
+	// AutoSign is this package's own-version policy, replacing whatever it
+	// inherits whole; see SpaceConfig.AutoSign.
+	AutoSign *AutoSignConfig `json:"autoSign,omitempty"`
 	// ManifestNames are the manifest names this package is known by, stated
 	// here rather than read from its files. They exist for the packages whose
 	// manifests declare no name the workspace can learn — a Gradle module, a
@@ -1394,6 +1405,36 @@ func (c *AutoVersionConfig) IsWriteVersionEnabled() bool {
 	return c != nil && (c.WriteVersion == nil || *c.WriteVersion)
 }
 
+// AutoSignConfig is a space's `autoSign` object: the sign stage's native
+// write of each package's own planned version into the package's own
+// manifests (§12.4), before the propagate stage and the build. The presence of
+// the object enables the feature unless `enabled: false` says otherwise.
+//
+// The sign stage owns the own version. A package whose autoSign is enabled has
+// a propagate stage that writes dependency ranges and replace rules alone, so
+// its autoVersion (or autoPropagate) block must not state `writeVersion: true`
+// and resolves writeVersion to false; without autoSign that block writes both,
+// exactly as it always has.
+type AutoSignConfig struct {
+	// Enabled turns the block off without deleting it. Default true when the
+	// block sets any key at all. A completely empty {} block is treated as
+	// absent (the config loader's flattening prunes empty objects), so the
+	// minimal opt-in is {"enabled": true}.
+	Enabled *bool `json:"enabled,omitempty"`
+	// Manifests selects which manifests are scanned for the package's own
+	// version field: "root" (default), the manifests directly in the package
+	// folder, or "all", every manifest under it. Either way only the
+	// package's own manifests are written: a nested manifest (an example, a
+	// fixture) keeps its own version.
+	Manifests string `json:"manifests,omitempty"`
+}
+
+// IsEnabled reports whether the autoSign block is active (default true when
+// the block is present). Nil-safe.
+func (c *AutoSignConfig) IsEnabled() bool {
+	return c != nil && (c.Enabled == nil || *c.Enabled)
+}
+
 // SpaceFlowConfig is a space's `flow` object: what runs at which stage, keyed
 // by stage or hook name with no decoration. All entries are optional — a
 // stage with no script still runs, an unset hook is a no-op — and every one
@@ -1410,6 +1451,12 @@ type SpaceFlowConfig struct {
 	// one object stating both is refused. The stage keeps its runtime name,
 	// `version`, whichever key configured it.
 	Propagate []string `json:"propagate,omitempty"`
+	// Sign is the optional sign stage, the first stage of a package's
+	// release: it runs before the propagate stage and the build, and its job
+	// is writing the package's own version wherever that version lives.
+	// Stating it, or either of its hooks, gives every releasing package of the
+	// level a sign stage; see AutoSignConfig for the native half of it.
+	Sign []string `json:"sign,omitempty"`
 	// Login runs once per space before its first publish; every other
 	// publish of the space waits for it, and its failure fails them all.
 	Login []string `json:"login,omitempty"`
@@ -1421,6 +1468,8 @@ type SpaceFlowConfig struct {
 	// beforePublish fail the package's release when they fail; postPublish and
 	// the announce hooks only warn, because by then the release is out.
 	BeforeAll     []string `json:"beforeAll,omitempty"`
+	BeforeSign    []string `json:"beforeSign,omitempty"`
+	PostSign      []string `json:"postSign,omitempty"`
 	BeforeVersion []string `json:"beforeVersion,omitempty"`
 	PostVersion   []string `json:"postVersion,omitempty"`
 	// BeforePropagate and PostPropagate are BeforeVersion and PostVersion

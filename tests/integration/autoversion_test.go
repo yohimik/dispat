@@ -496,3 +496,91 @@ func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(pStages, "hook:beforeVersion\n"), "stages:\n%s", pStages)
 	assert.Equal(t, 2, strings.Count(pStages, "lock:syncLock\n"), "stages:\n%s", pStages)
 }
+
+// TestAutoSignWritesTheOwnVersionBeforePropagate: with autoSign beside
+// autoPropagate the sign stage writes each package's own version and the
+// propagate stage after it writes the dependency ranges alone. A snapshot taken
+// by each stage's post hook shows which stage wrote what, and the lock script
+// still runs after a change the sign stage made.
+func TestAutoSignWritesTheOwnVersionBeforePropagate(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["after-sign"] = models.Script{"cp package.json after-sign.json"}
+	cfg.Scripts["after-propagate"] = models.Script{"cp package.json after-propagate.json"}
+	cfg.Scripts["locksync"] = models.Script{"cp package.json lock-snapshot.json"}
+	flow := buildPublish()
+	flow.PostSign = []string{"after-sign"}
+	flow.PostPropagate = []string{"after-propagate"}
+	cfg.Spaces["libs"] = models.SpaceConfig{
+		Path:          models.PathList{"packages"},
+		Flow:          flow,
+		AutoSign:      &models.AutoSignConfig{Enabled: models.Bool(true)},
+		AutoPropagate: &models.AutoVersionConfig{Match: []string{"workspace:*"}, SyncLock: []string{"locksync"}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	r.WriteFile("packages/web/package.json",
+		`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	res := r.ReleaseOK()
+	require.Contains(t, r.TagList(), "web@0.1.0")
+
+	afterSign := readFile(t, r, "packages", "web", "after-sign.json")
+	assert.Contains(t, afterSign, `"version": "0.1.0"`, "the sign stage wrote the own version")
+	assert.Contains(t, afterSign, `"@acme/core": "workspace:*"`, "and left the range to the propagate stage")
+	afterPropagate := readFile(t, r, "packages", "web", "after-propagate.json")
+	assert.Contains(t, afterPropagate, `"@acme/core": "^0.1.0"`, "the propagate stage wrote the range")
+	assert.Equal(t, afterPropagate, readFile(t, r, "packages", "web", "package.json"))
+	assert.Contains(t, readFile(t, r, "packages", "core", "lock-snapshot.json"), `"version": "0.1.0"`,
+		"the lock follows a manifest only the sign stage changed")
+
+	written := 0
+	for _, ev := range res.Events {
+		switch ev.Str("message") {
+		case "manifest version written":
+			assert.Equal(t, "sign", ev.Str("stage"), "%v", ev)
+			written++
+		case "manifest reconciled":
+			assert.Equal(t, "version", ev.Str("stage"), "%v", ev)
+			assert.Equal(t, false, ev["versionWritten"], "the propagate stage writes no own version: %v", ev)
+		}
+	}
+	assert.Equal(t, 2, written, "one own-version write per package")
+}
+
+// TestAutoSignStandaloneAutoversionWritesRangesOnly: `dispat autoversion`
+// runs the propagate stage's reconciliation, so for a package whose sign stage
+// owns the own version it writes the ranges alone; --write-version asks for
+// the own version explicitly.
+func TestAutoSignStandaloneAutoversionWritesRangesOnly(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = models.SpaceConfig{
+		Path:        models.PathList{"packages"},
+		Flow:        buildPublish(),
+		AutoSign:    &models.AutoSignConfig{Enabled: models.Bool(true)},
+		AutoVersion: &models.AutoVersionConfig{Match: []string{"workspace:*"}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	r.WriteFile("packages/web/package.json",
+		`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	res := r.Command("autoversion", "--sync-lock=false")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	web := readFile(t, r, "packages", "web", "package.json")
+	assert.Contains(t, web, `"@acme/core": "^0.1.0"`)
+	assert.Contains(t, web, `"version": "0.0.0"`, "the own version is the sign stage's")
+
+	res = r.Command("autoversion", "--sync-lock=false", "--write-version")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	assert.Contains(t, readFile(t, r, "packages", "web", "package.json"), `"version": "0.1.0"`)
+}

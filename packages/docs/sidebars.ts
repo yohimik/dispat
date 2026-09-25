@@ -211,6 +211,7 @@ const sidebars: SidebarsConfig = {
         'configuration/parser',
         {type: 'doc', id: 'configuration/dependencies', label: 'dependencies'},
         {type: 'doc', id: 'configuration/autoversion', label: 'autoVersion'},
+        {type: 'doc', id: 'configuration/autosign', label: 'autoSign'},
         {type: 'doc', id: 'configuration/scripts', label: 'Script sequences'},
         {type: 'doc', id: 'configuration/run-hooks', label: 'Run-level hooks'},
         {type: 'doc', id: 'configuration/webhooks', label: 'Webhooks'},

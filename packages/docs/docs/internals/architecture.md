@@ -105,8 +105,9 @@ read it back as a release tag.
    source-history mode, revalidate every participating repository after all control and imported hooks finish. A
    relevant head, release-tag, or pin change is `E330` before the first package task.
 10. Execute the task graph with per-stage concurrency budgets. This runs a version, build, and publish stage per
-    *releasing* package, excluding held packages. The space's gating hooks bracket each stage (`beforeAll`,
-    `beforeVersion`/`postVersion`, `beforeBuild`/`postBuild`, `beforePublish`). A space's `flow.login` runs once before
+    *releasing* package, excluding held packages, and a sign stage first for a package whose space configures one. The
+    space's gating hooks bracket each stage (`beforeAll`, `beforeSign`/`postSign`, `beforeVersion`/`postVersion`,
+    `beforeBuild`/`postBuild`, `beforePublish`). A space's `flow.login` runs once before
     its first publish. Every other publish in that space waits on it. Source-history mode revalidates a package's
     owner plus the transitive provider and shared-version-group repository closure after `beforePublish` and before its
     publish command. The same check includes control when applicable control intent was consulted or a checkpoint will
@@ -338,7 +339,11 @@ this once per plan.
 
 ### The task graph: what a release actually schedules
 
-Each releasing package contributes up to four task nodes. The `version` node exists when any provider of the package
+Each releasing package contributes up to five task nodes. The `sign` node exists when the package's space enables
+[`autoSign`](../configuration/autosign.md) or configures any of `flow.sign`, `flow.beforeSign` and `flow.postSign`,
+and it is the package's first node: it writes the package's own version before anything else of the release runs. A
+package without that configuration has no `sign` node, and its graph is the graph it always was. The `version` node
+exists when any provider of the package
 moved in this run **or** its space auto-versions. Section §9.4 reconciles against every workspace dependency, so the
 stage cannot be conditional on this run's updates. "Moved" means `Release.Updates`, which is deliberately wider than
 `DueTo`. A provider releasing beside its consumer with no propagation between them still hands it a version to pick up.
@@ -353,14 +358,15 @@ Gating on `DueTo` made a scripted version stage and a native `autoVersion` block
   web:    version ─► syncLock ─► build ─► publish
 ```
 
-(The two provider edges land on web's *first* task, its `version`, and on its `publish`. Read the bullets below for the
+(The two provider edges land on web's *first* task, its `version`, and on its `publish`. With a sign stage, web's
+chain starts `sign ─► version`, and the first provider edge lands on `sign` instead. Read the bullets below for the
 precise rule.)
 
-- What a consumer's **first** task (version when present, build otherwise) waits for on each changed provider is that
-  provider's [relation](../configuration/spaces.md#the-provider-relation): nothing under `{build: none}`, the
-  provider's `build` under `isBuildWaitingPublish: false`, and its `build` and its `publish` under `true`. The last
-  covers the Docker case, where the consumer can only build after the base image is pushed; the first covers the
-  deployment case, where nothing the provider builds reaches the consumer's build at all.
+- What a consumer's **first** task (sign when present, then version, build otherwise) waits for on each changed
+  provider is that provider's [relation](../configuration/spaces.md#the-provider-relation): nothing under
+  `{build: none}`, the provider's `build` under `isBuildWaitingPublish: false`, and its `build` and its `publish` under
+  `true`. The last covers the Docker case, where the consumer can only build after the base image is pushed; the first
+  covers the deployment case, where nothing the provider builds reaches the consumer's build at all.
 - Build order is taken over the **whole dependency graph** and then restricted to the packages that build, exactly as
   the publish order is. A provider reached only through a package with nothing to release still builds first, because
   the consumer can read it through that package. A `{build: none}` hop ends the constraint of every path through it:
@@ -388,7 +394,7 @@ Completions come back over one channel and cascade new ready nodes.
 
 ```
    ready queues, one per class          budgets
-   build:    [web:version, ...]   ◄──   build/version share BuildConcurrency
+   build:    [web:version, ...]   ◄──   sign/version/build share BuildConcurrency
    publish:  [core:publish]       ◄──   PublishConcurrency
    syncLock: [web:syncLock]       ◄──   min over the voting spaces (default 1)
 
@@ -419,7 +425,10 @@ command that covers packages requires only one small file rather than a copy of 
 
 ### The stage seam: where a frame may leave this machine
 
-The task graph is the same graph whether a release runs on one machine or several. [Distributed
+The task graph is the same graph whether a release runs on one machine or several. Only build and publish frames can
+leave this machine: the sign, version and syncLock frames write the working tree every delegated frame is
+snapshotted from, so they run on the orchestrator under the snapshot guard, as every manifest reconciliation must
+(§28.3 of the specification). [Distributed
 execution](../distributed-execution.md) adds no barrier nodes and no edges, because a second scheduler would be a
 second answer to the order a release already has. What it adds is one seam inside the executor: the call that runs a
 stage frame asks a coordinator first, and the coordinator either runs the frame here or places it on a node.
@@ -647,7 +656,7 @@ registry half is delegated to the version and publish scripts. This keeps dispat
 | Not implemented                                             | Delegated to                                                                                                                                                                          |
 |-------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Rewriting dependency ranges in manifests                    | native under [`autoVersion`](../configuration/autoversion.md) for every scanner-read format, npm and Go through the game engines ([Supported formats](../editing/manifests.md#supported-formats)), reported as W197/W203; indirections and versions no manifest holds: `replace` rules or `flow.version`, via the `DISPAT_WORKSPACE_*` variables |
-| Manifest-vs-baseline version checks                         | native under `autoVersion` (W192); otherwise nothing                                                                                                                                  |
+| Manifest-vs-baseline version checks                         | native under `autoVersion`, or under `autoSign` where the sign stage owns the version (W192); otherwise nothing                                                                                                                                  |
 | Publish targets, registries, adopting published versions    | `flow.publish`                                                                                                                                                                        |
 | `initialVersion` / `preserveMajorZero` remapping            | current behaviour: first release from `0.0.0`, ordinary bumps                                                                                                                         |
 | Per-run safety limits (max packages, majors, channel moves) | (nothing; the exact-pin major-jump guard *is* enforced, with a default of 1)                                                                                                          |

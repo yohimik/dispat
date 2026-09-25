@@ -280,3 +280,37 @@ func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
 		"a fresh own bump proceeds when no build consumes the publish")
 	assert.True(t, r.IsTagged("consumer@0.1.0"), "tags: %v", r.TagList())
 }
+
+// TestOrderSignStageWaitsForProviders: a consumer's sign stage is its first
+// task, so it is what waits for a provider, exactly as the version stage does
+// when it comes first: under isBuildWaitingPublish the consumer signs only
+// once the provider's publish has finished, and it builds after it signs.
+func TestOrderSignStageWaitsForProviders(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]models.Script{
+		"provider-build":   {r.TsmarkScript("timeline.log", "provider-build", 0)},
+		"provider-publish": {r.TsmarkScript("timeline.log", "provider-publish", 250*time.Millisecond)},
+		"consumer-sign":    {r.TsmarkScript("timeline.log", "consumer-sign", 0)},
+		"consumer-build":   {r.TsmarkScript("timeline.log", "consumer-build", 0)},
+		"consumer-publish": {r.TsmarkScript("timeline.log", "consumer-publish", 0)},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"provider": {Path: models.PathList{"packages/provider"}, IsBuildWaitingPublish: models.StageRelationOf(true),
+			Flow: &models.SpaceFlowConfig{Build: []string{"provider-build"}, Publish: []string{"provider-publish"}}},
+		"consumer": {Path: models.PathList{"packages/consumer"},
+			Flow: &models.SpaceFlowConfig{Sign: []string{"consumer-sign"},
+				Build: []string{"consumer-build"}, Publish: []string{"consumer-publish"}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages/provider", "provider")
+	r.SeedPackage("packages/consumer", "consumer")
+	r.Commit("feat(provider)^: reaches its one consumer")
+	r.ReleaseOK()
+
+	tl := r.Timeline("timeline.log")
+	consumerSign := harness.Find(t, tl, "consumer-sign")
+	harness.AssertSequential(t, harness.Find(t, tl, "provider-publish"), consumerSign)
+	harness.AssertSequential(t, consumerSign, harness.Find(t, tl, "consumer-build"))
+}

@@ -113,6 +113,7 @@ and
 | `ignore`           | array of strings                           | no       | Default change-scope ignore patterns. See [What counts as a change](./change-scope.md#ignore-everything-except-these).                                                  |
 | `flow`             | object                                     | no       | Default stages and hooks for every space. See [Stages and hooks](./spaces.md#stages-and-hooks). A space, and then a package, replaces the entries it names and keeps the rest. You can declare `login` here and it still runs once per space.  |
 | `autoVersion`      | object                                     | no       | Default manifest-rewriting policy. See [`autoVersion`](./autoversion.md). A level that states one replaces it whole rather than merging into it.                 |
+| `autoSign`         | object                                     | no       | Default own-version policy of the sign stage, which writes each package's own version before the version stage and the build. A level that states one replaces it whole. See [`autoSign`](./autosign.md). |
 | `autoPropagate`    | object                                     | no       | `autoVersion` under the propagate stage's name, with the same options. One object may state only one of the two, and a level stating either replaces both. See [Two names for one block](./autoversion.md#two-names-for-one-block). |
 | `isBuildWaitingPublish` | bool or object                        | no       | Default for every space: what the consumers of a package wait for, and what a failed provider does to them. See [The provider relation](./spaces.md#the-provider-relation). The default is `false`.                                                                              |
 | `revertOnFail`     | bool                                       | no       | Default for every space. See [Space options](./spaces.md#space-options). The default is `false`.                                                                              |
@@ -165,6 +166,7 @@ is not the same as leaving it out, and only writing `false` overrides a `true` a
 | `aliasTags` | yes | yes | yes |
 | `webhooks` | yes | yes | yes |
 | `autoVersion`, `autoPropagate` | yes | yes | yes |
+| `autoSign` | yes | yes | yes |
 | `isBuildWaitingPublish` | yes | yes | yes |
 | `revertOnFail` | yes | yes | yes |
 | `versioning` | yes | yes | yes |
@@ -188,7 +190,7 @@ How a level combines with the one below it depends on the setting:
   `flow` clears an inherited entry. An empty array in `scripts` is an error because a name bound to no command resolves
   to nothing. dispat replaces an entry whole however many commands it binds. Restating a multi-command script creates a
   new sequence rather than adding to the inherited one.
-- **Replaced whole.** `autoVersion` (or `autoPropagate`), `aliasTags`, `webhooks`, `buildOutputs`, `buildPlatforms`, `runOnly`, and `manifestNames`. Their empty fields carry meaning against their
+- **Replaced whole.** `autoVersion` (or `autoPropagate`), `autoSign`, `aliasTags`, `webhooks`, `buildOutputs`, `buildPlatforms`, `runOnly`, and `manifestNames`. Their empty fields carry meaning against their
   siblings, so a partial overlay cannot express what they mean. Write an empty `aliasTags: []` to make a package opt
   out.
 - **Overlaid field by field.** `changelog` and `github`. A level can flip `enabled` and keep the titles it inherited.

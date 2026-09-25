@@ -125,28 +125,12 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 		// nested file that is still the package's own, because its folder is
 		// part of the format's name; see Manifest.IsAtPackageRoot.
 		if av.WriteVersion && m.IsAtPackageRoot() {
-			version = tc.rel.Next.String()
-			if m.Version != "" && m.Version != tc.rel.Previous().String() && m.Version != version {
-				// §12.4: tags are authoritative; a manifest version disagreeing
-				// with the baseline is drift worth telling the operator about —
-				// the computed version is written over it either way.
-				tc.log.Warn().Str("code", plan.CodeManifestVersionDrift).
-					Str("manifest", m.Path).
-					Str("manifestVersion", m.Version).
-					Str("baseline", tc.rel.Previous().String()).
-					Msg("manifest version disagrees with the baseline; writing the computed version")
-			}
+			version = tc.resolveOwnVersion(m)
 		}
 		if len(edits) == 0 && version == "" {
 			continue
 		}
-		path := filepath.Join(tc.rel.Pkg.Dir, filepath.FromSlash(m.Path))
-		var res writer.Result
-		if m.Ecosystem == scanner.EcosystemAqua {
-			res, err = writer.RewriteAs(path, manifest.FormatAqua, version, edits)
-		} else {
-			res, err = writer.Rewrite(path, version, edits)
-		}
+		res, err := tc.rewriteManifest(m, version, edits)
 		if err != nil {
 			return err
 		}
@@ -167,8 +151,38 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 	return nil
 }
 
-// markManifestsChanged records — under mu — that this package's version stage
-// modified a manifest, which is what its syncLock task keys off.
+// resolveOwnVersion answers the version a package's own manifest is written
+// with, its planned next version, and reports W192 when the version the
+// manifest declares is neither the baseline nor that version (§12.4): tags are
+// authoritative, and a manifest disagreeing with the baseline is drift worth
+// telling the operator about. The computed version is written over it either
+// way. It is the one place the own version is decided, whichever stage writes
+// it.
+func (tc *taskCtx) resolveOwnVersion(m scanner.Manifest) string {
+	version := tc.rel.Next.String()
+	if m.Version != "" && m.Version != tc.rel.Previous().String() && m.Version != version {
+		tc.log.Warn().Str("code", plan.CodeManifestVersionDrift).
+			Str("manifest", m.Path).
+			Str("manifestVersion", m.Version).
+			Str("baseline", tc.rel.Previous().String()).
+			Msg("manifest version disagrees with the baseline; writing the computed version")
+	}
+	return version
+}
+
+// rewriteManifest writes one scanned manifest of the package: its own version
+// when version is non-empty, and the declaration edits. A path-qualified
+// format the writer cannot recognise by its file name alone is named to it.
+func (tc *taskCtx) rewriteManifest(m scanner.Manifest, version string, edits []writer.Edit) (writer.Result, error) {
+	path := filepath.Join(tc.rel.Pkg.Dir, filepath.FromSlash(m.Path))
+	if m.Ecosystem == scanner.EcosystemAqua {
+		return writer.RewriteAs(path, manifest.FormatAqua, version, edits)
+	}
+	return writer.Rewrite(path, version, edits)
+}
+
+// markManifestsChanged records — under mu — that this package's sign or
+// version stage modified a manifest, which is what its syncLock task keys off.
 func (tc *taskCtx) markManifestsChanged() {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()

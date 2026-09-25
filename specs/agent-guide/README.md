@@ -356,7 +356,7 @@ Keep three layers of evidence:
 | Package checks | After version and lockfile reconciliation | Exercise the inputs the release actually uses. |
 | Artifact smoke checks | After build and before publish | Exercise the exact files that will be published. |
 
-Version reconciliation may change manifests, dependency ranges, replacement text, generated files, and lockfiles after the pre-release suite. Put checks that require the final reconciled inputs in `flow.beforeBuild` or later. `flow.postVersion` runs before lockfile synchronization and cannot validate the final installation.
+Signing and version reconciliation may change manifests, dependency ranges, replacement text, generated files, and lockfiles after the pre-release suite. Put checks that require the final reconciled inputs in `flow.beforeBuild` or later. `flow.postVersion` runs before lockfile synchronization and cannot validate the final installation.
 
 For binaries, invoke the newly built artifact by its explicit path. Check its version, executable permissions, platform and architecture, runtime dependencies, and at least one bounded representative operation. Unpack archives or install packages into a temporary environment to catch missing files. Record which target platforms actually executed.
 
@@ -582,12 +582,12 @@ not use a standalone release-step command to bypass CI/CD.
 
 ## Know the gating boundary
 
-Planning chooses versions before package work starts. Native `autoVersion` reconciliation, an optional `flow.version`, and lockfile synchronization prepare inputs. The version stage is also called the propagate stage: `autoPropagate` and `flow.propagate` (with `flow.beforePropagate` and `flow.postPropagate`) are the same settings under that name, one spelling per object, and the stage still reports itself as `version` at runtime. Build produces artifacts. Login authenticates once per configured space. Publish performs external publication. Native records then create the configured tags, changelog, GitHub release, commit, and push. Announce happens after publication.
+Planning chooses versions before package work starts. An optional sign stage (`autoSign` or `flow.sign`) writes each package's own version first, native `autoVersion` reconciliation and an optional `flow.version` then write the versions taken from providers, and lockfile synchronization follows; together they prepare inputs. The version stage is also called the propagate stage: `autoPropagate` and `flow.propagate` (with `flow.beforePropagate` and `flow.postPropagate`) are the same settings under that name, one spelling per object, and the stage still reports itself as `version` at runtime. Build produces artifacts. Login authenticates once per configured space. Publish performs external publication. Native records then create the configured tags, changelog, GitHub release, commit, and push. Announce happens after publication.
 
 | Work | Failure behavior |
 | --- | --- |
 | `run.beforeAll` | Gates the task graph; the release lock has already been acquired. |
-| Package hooks through `postVersion`, native reconciliation, and lock sync | Gate that package before build. |
+| Package hooks through `postVersion` (the sign frame included), native signing and reconciliation, and lock sync | Gate that package before build. |
 | `beforeBuild`, `build`, `postBuild` | Gate that package before publish. |
 | Space `login` | Gates publishes in that space. |
 | `beforePublish`, `publish` | Last gating package work. |

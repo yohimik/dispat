@@ -112,7 +112,12 @@ spaces:
     # script. Two independent strategies: the parsing one below (declared
     # workspace ranges reconciled to end-of-run provider versions, own
     # version field updated), and `replace` for the versions no manifest
-    # holds. All keys optional; the block's presence enables it.
+    # holds. All keys optional; the block's presence enables it. The same
+    # block may be written as autoPropagate (the version stage is also the
+    # propagate stage), one of the two per object.
+    # An optional sign stage runs before it: `autoSign: {manifests: root}`
+    # writes each package's own version there, and this block then writes
+    # the ranges alone (writeVersion defaults to false beside it).
     autoVersion:
       match: ["workspace:*"]     # only rewrite ranges matching these globs
                                  # (hand-pinned versions survive); empty = any
@@ -127,6 +132,7 @@ spaces:
       # manifests: root          # root (default), all, or none to turn the
                                  # parsing strategy off entirely
       # writeVersion: true       # also write the package's own version field
+                                 # (refused beside an enabled autoSign)
       # Literal find-and-write over the files these globs select, parsing
       # nothing: the strategy for a Gradle coordinate, a README example or a
       # CI workflow. {name}/{version}/{previous} stand for this package;
@@ -148,9 +154,11 @@ spaces:
       # Runs once per space, before the space's first publish; every other
       # publish of the space waits for it, and its failure fails them all.
       login: npm-login
-      # Hooks around the package stages (beforeAll, beforeVersion,
-      # postVersion, beforeBuild, postBuild, beforePublish, postPublish,
-      # beforeAnnounce, postAnnounce). Everything up to beforePublish gates
+      # Hooks around the package stages (beforeAll, beforeSign, postSign,
+      # beforeVersion, postVersion, beforeBuild, postBuild, beforePublish,
+      # postPublish, beforeAnnounce, postAnnounce). The version entries may be
+      # spelled propagate, beforePropagate and postPropagate instead; `sign`
+      # names the optional sign stage's own scripts. Everything up to beforePublish gates
       # the release, so a failure fails the package; postPublish and the
       # announce hooks warn. onFail / onSkip run when a package fails or is
       # skipped, warn-only.

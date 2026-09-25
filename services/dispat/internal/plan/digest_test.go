@@ -92,9 +92,11 @@ func TestPlanDigestIsStableAcrossRecomputation(t *testing.T) {
 // added, removed, renamed or reordered changes this value. Changing it on
 // purpose is legitimate and requires bumping DigestSchema in the same commit,
 // because a node running the older code has to disagree loudly rather than
-// agree by accident.
+// agree by accident. The value is the fixture's digest under
+// dispat-plan-digest/2, the schema that added the sign stage's commands and its
+// autoSign policy to every package.
 func TestPlanDigestGolden(t *testing.T) {
-	const golden = "baf5a78dd954f38145e63e01ecba246656aca9aa69987aef3c2b0763ec0c4259"
+	const golden = "d0fb41ef721a9f19ad13850b087749efda353fb7b7d233f8b30bc0e01ff13fa5"
 	assert.Equal(t, golden, digestOfFixture(t),
 		"changing the canonical document requires bumping DigestSchema in the same commit")
 }
@@ -175,6 +177,12 @@ func TestPlanDigestFollowsWhatIsReleased(t *testing.T) {
 		"a new head": {nil, map[string]string{"": "1111111111111111111111111111111111111111"}},
 		"a changed build command": {func(o *Options) {
 			o.Packages[0].Space.BuildScript = []string{"make build --release"}
+		}, heads},
+		"a sign command": {func(o *Options) {
+			o.Packages[0].Space.SignScript = []string{"sign-manifests"}
+		}, heads},
+		"an autoSign policy": {func(o *Options) {
+			o.Packages[0].Space.AutoSign = &model.AutoSign{Manifests: model.ScopeRoot}
 		}, heads},
 		"a changed build output": {func(o *Options) {
 			o.Packages[0].Space.BuildOutputs = []string{"build"}

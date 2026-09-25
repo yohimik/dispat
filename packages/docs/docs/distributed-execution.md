@@ -189,7 +189,7 @@ What stays on the orchestrator:
 
 | Work                                                          | Why it does not travel                                      |
 |---------------------------------------------------------------|-------------------------------------------------------------|
-| the version stage and the manifest and lock-file preparation   | they write the state every build of the run then consumes   |
+| the sign and version stages and the manifest and lock-file preparation | they write the state every build of the run then consumes |
 | the space login                                                | authentication must not travel                              |
 | release commits, tags, changelogs, GitHub releases, records     | a worker is never granted the right to write a release ref  |
 | `postPublish`, `announce`, `onFail`, `onSkip` and every run-level hook | they observe the run, which exists here          |

@@ -71,6 +71,7 @@ func fileFields(dst *File) fields {
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
 		"autopropagate":         obj(&dst.AutoPropagate, autoVersionFields),
+		"autosign":              obj(&dst.AutoSign, autoSignFields),
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"versioning":            versioningMode(&dst.Versioning),
@@ -105,6 +106,7 @@ func spaceConfigFields(dst *SpaceConfig) fields {
 		"scripts":               scriptMap(&dst.Scripts),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
 		"autopropagate":         obj(&dst.AutoPropagate, autoVersionFields),
+		"autosign":              obj(&dst.AutoSign, autoSignFields),
 		"env":                   strMap(&dst.Env),
 		"custom":                rawMap(&dst.Custom),
 		"changelog":             obj(&dst.Changelog, changelogFields),
@@ -135,6 +137,7 @@ func spaceFileFields(dst *SpaceFile) fields {
 		"scripts":               scriptMap(&dst.Scripts),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
 		"autopropagate":         obj(&dst.AutoPropagate, autoVersionFields),
+		"autosign":              obj(&dst.AutoSign, autoSignFields),
 		"env":                   strMap(&dst.Env),
 		"custom":                rawMap(&dst.Custom),
 		"changelog":             obj(&dst.Changelog, changelogFields),
@@ -175,6 +178,7 @@ func packageConfigFields(dst *PackageConfig) fields {
 		"scripts":               scriptMap(&dst.Scripts),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
 		"autopropagate":         obj(&dst.AutoPropagate, autoVersionFields),
+		"autosign":              obj(&dst.AutoSign, autoSignFields),
 		"manifestnames":         strs(&dst.ManifestNames),
 		"changelog":             obj(&dst.Changelog, changelogFields),
 		"github":                obj(&dst.GitHub, gitHubFields),
@@ -203,9 +207,12 @@ func spaceFlowFields(dst *SpaceFlowConfig) fields {
 		"publish":         strs(&dst.Publish),
 		"version":         strs(&dst.Version),
 		"propagate":       strs(&dst.Propagate),
+		"sign":            strs(&dst.Sign),
 		"login":           strs(&dst.Login),
 		"announce":        strs(&dst.Announce),
 		"beforeall":       strs(&dst.BeforeAll),
+		"beforesign":      strs(&dst.BeforeSign),
+		"postsign":        strs(&dst.PostSign),
 		"beforeversion":   strs(&dst.BeforeVersion),
 		"postversion":     strs(&dst.PostVersion),
 		"beforepropagate": strs(&dst.BeforePropagate),
@@ -425,6 +432,15 @@ func autoVersionFields(dst *AutoVersionConfig) fields {
 		"writeversion":        flagPtr(&dst.WriteVersion),
 		"synclock":            strs(&dst.SyncLock),
 		"synclockconcurrency": num(&dst.SyncLockConcurrency),
+	}
+}
+
+// autoSignFields is an `autoSign` object: the sign stage's native write of
+// each package's own version.
+func autoSignFields(dst *AutoSignConfig) fields {
+	return fields{
+		"enabled":   flagPtr(&dst.Enabled),
+		"manifests": str(&dst.Manifests),
 	}
 }
 

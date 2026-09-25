@@ -760,3 +760,64 @@ func TestPropagateSynonymsMarshalUnderTheirOwnKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestAutoSignConfigAccessors: the block is on by its presence, off when
+// absent or when it says `enabled: false`, like autoVersion.
+func TestAutoSignConfigAccessors(t *testing.T) {
+	var absent *AutoSignConfig
+	if absent.IsEnabled() {
+		t.Error("a nil autoSign block is off")
+	}
+	if !(&AutoSignConfig{}).IsEnabled() {
+		t.Error("a present block defaults to enabled")
+	}
+	if !(&AutoSignConfig{Manifests: "all"}).IsEnabled() {
+		t.Error("a block stating any key is enabled")
+	}
+	if (&AutoSignConfig{Enabled: Bool(false)}).IsEnabled() {
+		t.Error("enabled:false turns the block off")
+	}
+}
+
+// TestSignKeysMarshalUnderTheirConfigKeys: autoSign and the sign stage's flow
+// entries are keys of every level that carries a flow, and an unset one stays
+// absent so it inherits.
+func TestSignKeysMarshalUnderTheirConfigKeys(t *testing.T) {
+	sign := &AutoSignConfig{Manifests: "root"}
+	flow := &SpaceFlowConfig{Sign: []string{"sign"}, BeforeSign: []string{"pre"}, PostSign: []string{"post"}}
+	for _, c := range []struct {
+		name  string
+		value any
+	}{
+		{"File", File{AutoSign: sign, Flow: flow}},
+		{"SpaceConfig", SpaceConfig{AutoSign: sign, Flow: flow}},
+		{"SpaceFile", SpaceFile{AutoSign: sign, Flow: flow}},
+		{"PackageConfig", PackageConfig{AutoSign: sign, Flow: flow}},
+	} {
+		data, err := json.Marshal(c.value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		block, ok := raw["autoSign"].(map[string]any)
+		if !ok || block["manifests"] != "root" {
+			t.Errorf("%s: autoSign must marshal under its config key: %s", c.name, data)
+		}
+		stated := raw["flow"].(map[string]any)
+		for _, key := range []string{"sign", "beforeSign", "postSign"} {
+			if _, ok := stated[key]; !ok {
+				t.Errorf("%s: flow.%s must marshal under its config key: %s", c.name, key, data)
+			}
+		}
+		empty, err := json.Marshal(PackageConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(empty), "autoSign") {
+			t.Errorf("an unset autoSign must stay absent: %s", empty)
+		}
+	}
+}

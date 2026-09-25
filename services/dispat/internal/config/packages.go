@@ -542,6 +542,11 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	if po.AutoVersion != nil || po.AutoPropagate != nil {
 		sc.AutoVersion, sc.AutoPropagate = po.AutoVersion, po.AutoPropagate
 	}
+	// autoSign replaces whole, like autoVersion: `{enabled: false}` is how a
+	// level switches off a block it inherits.
+	if po.AutoSign != nil {
+		sc.AutoSign = po.AutoSign
+	}
 	// The record policies overlay field by field, so a level can flip enabled
 	// and keep the titles it inherited, or point at another repository and
 	// keep the token it inherited.
@@ -598,6 +603,7 @@ func rootDefaults(c *File) SpaceConfig {
 		Versioning:            c.Versioning,
 		AutoVersion:           c.AutoVersion,
 		AutoPropagate:         c.AutoPropagate,
+		AutoSign:              c.AutoSign,
 		Changelog:             c.Changelog,
 		GitHub:                c.GitHub,
 		Src:                   c.Src,
@@ -625,6 +631,7 @@ func spaceAsOverride(sc SpaceConfig) PackageConfig {
 		Scripts:               sc.Scripts,
 		AutoVersion:           sc.AutoVersion,
 		AutoPropagate:         sc.AutoPropagate,
+		AutoSign:              sc.AutoSign,
 		Env:                   sc.Env,
 		Custom:                sc.Custom,
 		Changelog:             sc.Changelog,
@@ -672,6 +679,7 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		Scripts:               f.Scripts,
 		AutoVersion:           f.AutoVersion,
 		AutoPropagate:         f.AutoPropagate,
+		AutoSign:              f.AutoSign,
 		Env:                   f.Env,
 		Custom:                f.Custom,
 		Changelog:             f.Changelog,
@@ -753,9 +761,12 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 	pick(&out.Build, over.Build)
 	pick(&out.Publish, over.Publish)
 	pickPair(&out.Version, &out.Propagate, over.Version, over.Propagate)
+	pick(&out.Sign, over.Sign)
 	pick(&out.Login, over.Login)
 	pick(&out.Announce, over.Announce)
 	pick(&out.BeforeAll, over.BeforeAll)
+	pick(&out.BeforeSign, over.BeforeSign)
+	pick(&out.PostSign, over.PostSign)
 	pickPair(&out.BeforeVersion, &out.BeforePropagate, over.BeforeVersion, over.BeforePropagate)
 	pickPair(&out.PostVersion, &out.PostPropagate, over.PostVersion, over.PostPropagate)
 	pick(&out.BeforeBuild, over.BeforeBuild)

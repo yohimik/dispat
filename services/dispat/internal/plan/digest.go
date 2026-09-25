@@ -50,7 +50,7 @@ import (
 // has to notice. The tag makes that visible instead of silent: bump it in the
 // same commit as any change to the document, and a node running the older
 // code disagrees loudly rather than agreeing by accident.
-const DigestSchema = "dispat-plan-digest/1"
+const DigestSchema = "dispat-plan-digest/2"
 
 // DigestInput is what the digest needs and the plan does not carry: the head
 // snapshot for a single history, the planner inputs the plan was computed

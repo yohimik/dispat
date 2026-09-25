@@ -48,6 +48,7 @@ func TestFieldTablesCoverEveryModelField(t *testing.T) {
 		{"WebhookConfig", WebhookConfig{}, webhookFields(&WebhookConfig{})},
 		{"WebhookHeader", WebhookHeader{}, webhookHeaderFields(&WebhookHeader{})},
 		{"AutoVersionConfig", AutoVersionConfig{}, autoVersionFields(&AutoVersionConfig{})},
+		{"AutoSignConfig", AutoSignConfig{}, autoSignFields(&AutoSignConfig{})},
 		{"AutoVersionReplaceConfig", AutoVersionReplaceConfig{},
 			autoVersionReplaceFields(&AutoVersionReplaceConfig{})},
 		{"ParserConfig", ParserConfig{}, parserFields(&ParserConfig{})},

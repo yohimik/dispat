@@ -58,6 +58,7 @@ type (
 	PackageConfig            = public.PackageConfig
 	VersionGroupConfig       = public.VersionGroupConfig
 	AutoVersionConfig        = public.AutoVersionConfig
+	AutoSignConfig           = public.AutoSignConfig
 	AutoVersionReplaceConfig = public.AutoVersionReplaceConfig
 	DependencyConfig         = public.DependencyConfig
 	Dependencies             = public.Dependencies
@@ -162,9 +163,12 @@ func scriptRefs(s *SpaceConfig) map[string][]string {
 		"flow.publish":         s.Flow.Publish,
 		"flow.version":         s.Flow.Version,
 		"flow.propagate":       s.Flow.Propagate,
+		"flow.sign":            s.Flow.Sign,
 		"flow.login":           s.Flow.Login,
 		"flow.announce":        s.Flow.Announce,
 		"flow.beforeAll":       s.Flow.BeforeAll,
+		"flow.beforeSign":      s.Flow.BeforeSign,
+		"flow.postSign":        s.Flow.PostSign,
 		"flow.beforeVersion":   s.Flow.BeforeVersion,
 		"flow.postVersion":     s.Flow.PostVersion,
 		"flow.beforePropagate": s.Flow.BeforePropagate,
@@ -1546,6 +1550,9 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 			return s, err
 		}
 	}
+	if err := validateAutoSign(label, s.AutoSign); err != nil {
+		return s, err
+	}
 	return s, nil
 }
 
@@ -1643,6 +1650,57 @@ func validateAutoVersion(label, key string, av *public.AutoVersionConfig) error 
 		return fmt.Errorf("%ssyncLockConcurrency must be >= 0, got %d", prefix, av.SyncLockConcurrency)
 	}
 	return nil
+}
+
+// validateAutoSign checks an autoSign object's own values under the owner's
+// error label. `none` is refused rather than accepted as a third scope: a sign
+// stage scanning nothing writes nothing, and `enabled: false` already says so.
+func validateAutoSign(label string, as *public.AutoSignConfig) error {
+	if as == nil {
+		return nil
+	}
+	switch as.Manifests {
+	case "", "root", "all":
+		return nil
+	case "none":
+		return fmt.Errorf(`%s: autoSign: manifests: "none" would write nothing; use "enabled": false to turn the block off`, label)
+	default:
+		return fmt.Errorf(`%s: autoSign: manifests: unknown value %q (want "root" or "all")`, label, as.Manifests)
+	}
+}
+
+// resolveAutoSign maps a validated autoSign object onto the domain policy;
+// nil (or enabled: false) resolves to nil, feature off.
+func resolveAutoSign(as *public.AutoSignConfig) *model.AutoSign {
+	if !as.IsEnabled() {
+		return nil
+	}
+	if as.Manifests == "all" {
+		return &model.AutoSign{Manifests: model.ScopeAll}
+	}
+	return &model.AutoSign{Manifests: model.ScopeRoot}
+}
+
+// resolveSpaceAutoVersion resolves the autoVersion block a space-shaped
+// configuration carries, under whichever of its two names it was written,
+// against the space's autoSign.
+//
+// The sign stage owns the package's own version. With autoSign enabled the
+// block writes dependency ranges and replace rules alone, so its resolved
+// WriteVersion is false; a block stating `writeVersion: true` beside it asks
+// for two writers of one field and is refused, naming both keys. Without
+// autoSign the block resolves exactly as it always has.
+func resolveSpaceAutoVersion(label string, scope scriptScope, sc SpaceConfig) (*model.AutoVersion, error) {
+	stated, key := resolveAutoVersionSetting(sc)
+	resolved := resolveAutoVersion(scope, stated)
+	if resolved == nil || !sc.AutoSign.IsEnabled() {
+		return resolved, nil
+	}
+	if stated.WriteVersion != nil && *stated.WriteVersion {
+		return nil, fmt.Errorf("%s: %s.writeVersion and autoSign both write the package's own version; the sign stage owns it, so leave writeVersion unset or false", label, key)
+	}
+	resolved.WriteVersion = false
+	return resolved, nil
 }
 
 // resolveAutoVersionSetting answers the autoVersion object a space-shaped
@@ -2235,7 +2293,10 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 	if err := checkRunOnlyAgainstLogin(label, sc.RunOnly, login); err != nil {
 		return nil, err
 	}
-	autoVersion, _ := resolveAutoVersionSetting(sc)
+	autoVersion, err := resolveSpaceAutoVersion(label, scope, sc)
+	if err != nil {
+		return nil, err
+	}
 	return &model.Space{
 		Name: spaceName,
 		Path: sc.Path.First(),
@@ -2273,7 +2334,11 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		BuildOutputs:         sc.BuildOutputs,
 		BuildPlatforms:       sc.BuildPlatforms,
 		RunOnly:              sc.RunOnly,
-		AutoVersion:          resolveAutoVersion(scope, autoVersion),
+		AutoVersion:          autoVersion,
+		SignScript:           scope.commands(sc.Flow.Sign),
+		BeforeSignScript:     scope.commands(sc.Flow.BeforeSign),
+		PostSignScript:       scope.commands(sc.Flow.PostSign),
+		AutoSign:             resolveAutoSign(sc.AutoSign),
 	}, nil
 }
 

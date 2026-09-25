@@ -34,9 +34,9 @@ import (
 // about any of the three is visible from the executor, which is what keeps the
 // scheduling code one description of the release rather than two.
 type Remotex interface {
-	// Guard brackets a frame the orchestrator keeps for itself: the version
-	// and syncLock stages, whose whole job is editing the working tree the
-	// dispatched builds are snapshotted from. The returned function gives the
+	// Guard brackets a frame the orchestrator keeps for itself: the sign,
+	// version and syncLock stages, whose whole job is editing the working tree
+	// the dispatched builds are snapshotted from. The returned function gives the
 	// guard back and is called on every path.
 	//
 	// It takes the stage name rather than the task, because what the guard is
@@ -183,12 +183,16 @@ func (tc *taskCtx) runStage(ctx context.Context, s stage) (what string, err erro
 		return tc.placedStage(ctx, s)
 	case taskPublish:
 		return tc.placedPublication(ctx, s)
-	default:
-		// The version stage and the lock-file preparation write the working
-		// tree every dispatched task is snapshotted from, so they stay here
-		// and they stay out of each other's way.
+	case taskSign, taskVersion, taskSyncLock:
+		// The sign and version stages and the lock-file preparation write the
+		// working tree every dispatched task is snapshotted from, so they stay
+		// here and they stay out of each other's way: every reconciliation of
+		// a manifest is an orchestrator task (§28.3).
 		return tc.guardedStage(ctx, s)
 	}
+	// A kind added later stays on the orchestrator until it says otherwise:
+	// running a frame here is never wrong, running one elsewhere can be.
+	return tc.guardedStage(ctx, s)
 }
 
 // guardedStage runs a frame the orchestrator keeps, under the guard that keeps

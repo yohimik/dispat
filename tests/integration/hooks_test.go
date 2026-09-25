@@ -770,3 +770,43 @@ func TestHooksRunLevelHooksAreTheReleasesOwn(t *testing.T) {
 	assert.Equal(t, "beforeAll\npostAll\nbeforeCommit\nafterCommit\npostCommit\nbeforePush\nafterPush\n",
 		string(data), "each exactly once, bracketing its own phase")
 }
+
+// TestHooksSignFrameFiresFirst: a space with a sign stage runs the sign frame
+// first in every package's frame, after beforeAll and before the version stage
+// and the build, and each hook reports its runtime name. The version stage is
+// configured under its propagate keys here, and its hooks still report
+// themselves as the version stage's.
+func TestHooksSignFrameFiresFirst(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = hookLog()
+	for _, name := range []string{"beforeSign", "sign", "postSign", "beforeVersion", "version", "postVersion"} {
+		cfg.Scripts[name] = models.Script{"echo $DISPAT_STAGE:$DISPAT_PACKAGE >> ../../hooks.log"}
+	}
+	flow := hookFlow()
+	flow.Version, flow.BeforeVersion, flow.PostVersion = nil, nil, nil
+	flow.Propagate = []string{"version"}
+	flow.BeforePropagate, flow.PostPropagate = []string{"beforeVersion"}, []string{"postVersion"}
+	flow.Sign, flow.BeforeSign, flow.PostSign = []string{"sign"}, []string{"beforeSign"}, []string{"postSign"}
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: flow}}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core)^: propagate to the consumer")
+
+	r.ReleaseOK()
+	assert.Equal(t, []string{
+		"beforeAll", "beforeSign", "sign", "postSign",
+		"beforeBuild", "build", "postBuild",
+		"beforePublish", "publish", "postPublish",
+		"beforeAnnounce", "announce", "postAnnounce",
+	}, hookSequence(t, r, "core"), "the provider's frame")
+	assert.Equal(t, []string{
+		"beforeAll", "beforeSign", "sign", "postSign",
+		"beforeVersion", "version", "postVersion",
+		"beforeBuild", "build", "postBuild",
+		"beforePublish", "publish", "postPublish",
+		"beforeAnnounce", "announce", "postAnnounce",
+	}, hookSequence(t, r, "app"), "the consumer's version stage follows its sign stage")
+}

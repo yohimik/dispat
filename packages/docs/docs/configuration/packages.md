@@ -107,6 +107,8 @@ The per-field rules follow from what each object means:
   `flow.propagate`, `flow.beforePropagate` and `flow.postPropagate` against their `version` twins. dispat rejects
   both spellings of one pair in one layer as a contradiction, like `versioning` and `versionGroup`; see
   [Two names for one block](./autoversion.md#two-names-for-one-block).
+- `autoSign` replaces **wholesale** too. Write `{"enabled": false}` to switch the space's block off for one package,
+  whose version stage then writes its own version again. See [`autoSign`](./autosign.md).
 - `manifestNames` replaces **wholesale**, like every other list. The layer nearest the package states what the package
   is called. Adding to an inherited list could never take a name away again.
 - `buildOutputs`, `buildPlatforms` and `runOnly` replace **wholesale** for the same reason. The nearest level that
@@ -134,9 +136,9 @@ field. The layer nearest the package wins:
 | 5 | space file package entry  | `<space folder>/dispat.json`, `packages.<package>` |
 | 6 | package configuration file| `<space folder>/<package>/dispat.json`             |
 
-Layer 0 is the repository's own defaults for the keys a space could state (`flow`, `autoVersion`, `versioning`,
-`tagFormat`, `aliasTags`, `webhooks`, `src`, `ignore`, `isBuildWaitingPublish`, `revertOnFail`). You write a setting every space
-shares once here. See [Where a setting can live](./README.md#where-a-setting-can-live).
+Layer 0 is the repository's own defaults for the keys a space could state (`flow`, `autoVersion`, `autoSign`,
+`versioning`, `tagFormat`, `aliasTags`, `webhooks`, `src`, `ignore`, `isBuildWaitingPublish`, `revertOnFail`). You
+write a setting every space shares once here. See [Where a setting can live](./README.md#where-a-setting-can-live).
 
 Layers 1 and 2 are the space, and they describe every package in it. Layers 3 to 6 each name one package, ordered by
 how close to it you write them. The order is the repository as a whole, then the space, then the space's own folder,

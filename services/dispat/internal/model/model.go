@@ -291,6 +291,12 @@ type Space struct {
 	BuildScript   []string
 	PublishScript []string
 	VersionScript []string
+	// SignScript is the optional sign stage's command sequence: the first
+	// stage of a package's release, before the version stage and the build,
+	// whose job is writing the package's own version. Any of the three sign
+	// sequences, or AutoSign, gives the package a sign stage; with none of
+	// them the package has no sign stage at all.
+	SignScript []string
 	// LoginScript runs once per space, before the first publish of any of the
 	// space's packages; every other publish of the space waits for it. Its
 	// job is authentication (npm login, docker login, ...), which is why it is
@@ -312,6 +318,8 @@ type Space struct {
 	// they exist to gate it. PostPublish runs after a successful publish and
 	// only warns: the release is out, failing the package would misreport it.
 	BeforeAllScript      []string // before the package's first stage
+	BeforeSignScript     []string
+	PostSignScript       []string
 	BeforeVersionScript  []string
 	PostVersionScript    []string
 	BeforeBuildScript    []string
@@ -361,6 +369,20 @@ type Space struct {
 	// for the version stage; nil means the feature is off and manifest
 	// syncing stays the VersionScript's job alone.
 	AutoVersion *AutoVersion
+	// AutoSign is the space's resolved sign-stage policy: the native write of
+	// each package's own version. nil means off. When it is on, AutoVersion
+	// never writes the own version (its WriteVersion is false), so the sign
+	// stage is the one writer of it.
+	AutoSign *AutoSign
+}
+
+// AutoSign is a space's resolved autoSign policy: which of a package's
+// manifests the sign stage scans for the package's own version field.
+type AutoSign struct {
+	// Manifests is the scan's scope: the package's root manifests or every
+	// manifest under it. Only the package's own manifests are written either
+	// way. ScopeNone is never resolved here.
+	Manifests ManifestScope
 }
 
 // Script resolves one of the package's effective scripts by name, matching

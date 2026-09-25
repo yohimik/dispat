@@ -2,7 +2,9 @@
 
 Run `dispat autoversion` to execute the native manifest reconciliation of the version stage. dispat rewrites declared
 workspace ranges to the planned versions and updates the package's own version. It then runs the space's `syncLock`
-scripts for each package whose manifests actually changed.
+scripts for each package whose manifests actually changed. A package whose space enables
+[`autoSign`](../configuration/autosign.md) leaves its own version to the sign stage, so the command writes its ranges
+alone unless `--write-version` asks for the own version too.
 
 Rewriting already-reconciled manifests changes nothing, so you can safely re-run this command. dispat skips a space
 without an `autoVersion` block unless you force one with a policy flag. That flag makes dispat start from the defaults.

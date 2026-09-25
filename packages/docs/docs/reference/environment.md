@@ -52,9 +52,9 @@ that page, because they exist only inside that one command.
 | `DISPAT_EXPORT_GITHUB`        | `/pkg/dist/app.tgz`  | Set once a script [exported it](#script-outputs). This is the opt-in for the package's GitHub release, and its value is the asset list. It travels under its full name and stays out of `DISPAT_OUTPUTS`. |
 | `DISPAT_EXECUTION_NODE`       | `build-a`            | The name of the worker node this script is running on. It is set only on a [delegated stage](../distributed-execution.md) or a delegated [`dispat run` task](../distributed-execution.md#running-scripts-on-workers) and is absent everywhere else, so `${DISPAT_EXECUTION_NODE+x}` asks whether the work left the orchestrator. |
 
-`DISPAT_STAGE` carries `version`, `build`, `publish`, or `announce` for a stage script. It holds the hook's name
-(`beforeBuild`, `postPublish`, `postAll`, ...) for a hook. It holds `login` for the login, `syncLock` for an
-[`autoVersion.syncLock`](../configuration/autoversion.md) script, and `run:<name>` for
+`DISPAT_STAGE` carries `sign`, `version`, `build`, `publish`, or `announce` for a stage script. It holds the hook's
+name (`beforeSign`, `beforeBuild`, `postPublish`, `postAll`, ...) for a hook. It holds `login` for the login,
+`syncLock` for an [`autoVersion.syncLock`](../configuration/autoversion.md) script, and `run:<name>` for
 [`dispat run <name>`](../configuration/spaces.md#scripts-and-dispat-run). The version stage keeps these runtime names
 when the configuration spells it `propagate`: a `flow.propagate` script sees `version`, and its hooks see
 `beforeVersion` and `postVersion`.
