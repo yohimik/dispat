@@ -1,5 +1,10 @@
 # Changelog
 
+## pkg/manifest/v1.2.2-rc.1 (2026-09-25)
+
+No changes: a version bump to keep the versioning group on one version.
+
+
 ## pkg/manifest/v1.2.2-rc.0 (2026-09-23)
 
 No changes: a version bump to keep the versioning group on one version.
