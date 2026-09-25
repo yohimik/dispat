@@ -329,7 +329,7 @@ case "$*" in
 *push*[0-9]-build-*)
  ordinal=1
  while ! mkdir "$DISPAT_IT_REFUSED_DIR/pushes/$ordinal" 2>/dev/null; do ordinal=$((ordinal + 1)); done
- if [ "$ordinal" -eq 2 ]; then
+ if [ "$ordinal" -eq "${DISPAT_IT_REFUSED_ORDINAL:-2}" ]; then
   for refspec in "$@"; do :; done
   printf '!\t%s\t[remote rejected] (pre-receive hook declined)\n' "$refspec"
   exit 1
@@ -338,6 +338,77 @@ case "$*" in
 esac
 exec "$DISPAT_IT_REFUSED_GIT" "$@"
 `
+
+// TestExecutionRefusedAssignmentIsOfferedAgain: the mailbox refuses the run's
+// first assignment push outright, the way a server rule does, with a porcelain
+// `[remote rejected]` line. The assignment provably never landed, so it is
+// no attempt anybody can be working on: the run says the mailbox did not take
+// it and offers the task again, and the package is built once and released
+// with no branch left behind.
+func TestExecutionRefusedAssignmentIsOfferedAgain(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the refusing fixture uses a POSIX shell")
+	}
+	rig := newExecutionPushOutcomeRig(t)
+	shim := t.TempDir()
+	realGit, err := exec.LookPath("git")
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(filepath.Join(shim, "pushes"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(executionRefusedResultScript), 0o755))
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+
+	res := rig.release("PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DISPAT_IT_REFUSED_GIT="+realGit, "DISPAT_IT_REFUSED_DIR="+shim, "DISPAT_IT_REFUSED_ORDINAL=1")
+	stopAll(t, []*executionWorker{worker})
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	refused, isRefused := executionLine(res, "the mailbox did not take the assignment")
+	require.True(t, isRefused, "the run said so\nstdout:\n%s", res.Stdout)
+	assert.Contains(t, refused.Str("error"), "hook declined", "with the server's reason")
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the package was built once: %v", rig.runs())
+	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
+	assert.Empty(t, rig.branches(), "no coordination branch outlives the run")
+}
+
+// TestExecutionRefusedClaimIsOfferedAgain: the mailbox refuses the node's
+// claim outright with a porcelain `[remote rejected]` line. The claim provably
+// never landed, so the node says the mailbox refused it, with the server's
+// reason, and leaves the work alone; the run, hearing no claim within its task
+// deadline, revokes the assignment and offers the task again, which the node
+// claims. The package is built once and released.
+func TestExecutionRefusedClaimIsOfferedAgain(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the refusing fixture uses a POSIX shell")
+	}
+	wait := 8
+	if harness.IsTinyGo() {
+		wait = 40
+	}
+	rig := newExecutionPushOutcomeRig(t, func(cfg *models.File) {
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: wait, Cancel: 20}
+	})
+	shim := t.TempDir()
+	realGit, err := exec.LookPath("git")
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(filepath.Join(shim, "pushes"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(executionRefusedResultScript), 0o755))
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0,
+		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DISPAT_IT_REFUSED_GIT="+realGit, "DISPAT_IT_REFUSED_DIR="+shim, "DISPAT_IT_REFUSED_ORDINAL=1")
+
+	res := rig.release()
+	replies := stopAll(t, []*executionWorker{worker})
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	refused, isRefused := executionLine(replies[0], "the mailbox refused this node's claim")
+	require.True(t, isRefused, "the node said so\nworker:\n%s", replies[0].Stdout)
+	assert.Contains(t, refused.Str("error"), "hook declined", "with the server's reason")
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the package was built once: %v", rig.runs())
+	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
+	assert.Empty(t, rig.branches(), "no coordination branch outlives the run")
+}
 
 // TestExecutionLostAssignmentCreateLeavesNoBranch: the orchestrator's first
 // assignment push loses its answer, once after it applied and once without
