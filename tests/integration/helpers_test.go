@@ -235,3 +235,101 @@ func assertOrderedIn(t *testing.T, text string, markers ...string) {
 		at = i
 	}
 }
+
+// refusalRepo is the one repository every refusal subtest rewrites the config
+// of. A refused configuration changes nothing on disk, so one fixture serves
+// the whole table and each subtest still starts from the same state.
+func refusalRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	r.WriteConfigModel(libsConfig(echoBuild, 1))
+	r.Commit("feat(core): bootstrap")
+	return r
+}
+
+// refusal is one row of a refusal table: what the configuration says, and the
+// sentence the reader is owed for it.
+type refusal struct {
+	name   string
+	mutate func(*models.File)
+	want   string
+}
+
+// diagnosticText is everything one refused invocation said, with the
+// structured fields decoded. A refusal that happens before the configured
+// logger exists is written by the bootstrap logger, which renders the
+// sentence as a JSON-escaped `error` field, so the decoded field is what a
+// test may assert the wording against.
+func diagnosticText(res harness.RunResult) string {
+	var b strings.Builder
+	b.WriteString(res.Stdout)
+	b.WriteString(res.Stderr)
+	for _, stream := range []string{res.Stdout, res.Stderr} {
+		for _, e := range harness.ParseEvents(stream) {
+			b.WriteString("\n" + e.Str("error"))
+			b.WriteString("\n" + e.Str("message"))
+		}
+	}
+	return b.String()
+}
+
+// runRefusals writes each row's configuration and requires that `dispat
+// status` refuses it, naming the mistake and releasing nothing.
+func runRefusals(t *testing.T, r *harness.Repo, rows []refusal) {
+	t.Helper()
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			cfg := libsConfig(echoBuild, 1)
+			row.mutate(&cfg)
+			r.WriteConfigModel(cfg)
+			res := r.Status("--log-format", "json")
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, diagnosticText(res), row.want)
+			assert.Empty(t, r.TagList(), "a refused configuration releases nothing")
+		})
+	}
+}
+
+// refuseStatus requires that `dispat status` refuses this repository as it
+// stands, naming want and releasing nothing.
+func refuseStatus(t *testing.T, r *harness.Repo, want string) {
+	t.Helper()
+	res := r.Status("--log-format", "json")
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, diagnosticText(res), want)
+	assert.Empty(t, r.TagList(), "a refused configuration releases nothing")
+}
+
+// writeJSON writes any config-shaped value as a folder's own dispat.json.
+func writeJSON(t *testing.T, r *harness.Repo, relPath string, value any) {
+	t.Helper()
+	data, err := json.MarshalIndent(value, "", "  ")
+	require.NoError(t, err)
+	r.WriteFile(relPath, string(data))
+}
+
+// configRefused runs `dispat status` and requires a refusal whose text
+// carries want.
+//
+// The comparison is made against the output with one level of quoting taken
+// out, because a refusal reaches the reader through whichever writer is
+// already standing — the JSON logger once the config loaded, the boot logger
+// when it did not — and the two escape the quotes in a label such as
+// spaces["libs"] differently. Neither spelling is what the scenario is about.
+func configRefused(t *testing.T, r *harness.Repo, want string) {
+	t.Helper()
+	res := r.Status()
+	assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, strings.ReplaceAll(res.Stdout+res.Stderr, `\"`, `"`), want)
+}
+
+// readRepoFile reads a file relative to the repository root, failing the test
+// when it is absent — the form for reading a record a package wrote somewhere
+// other than the default changelog name.
+func readRepoFile(t *testing.T, r *harness.Repo, relPath string) string {
+	t.Helper()
+	data, err := os.ReadFile(r.Path(relPath))
+	require.NoError(t, err, "reading %s", relPath)
+	return string(data)
+}

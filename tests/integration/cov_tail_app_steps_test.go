@@ -128,26 +128,6 @@ func TestCovTailComputeStopsWhenTheAnswersRunOut(t *testing.T) {
 		"and a question nobody answered changes nothing")
 }
 
-// TestCovTailWorkspaceLogNamesTheFoldersItExcluded: a .dispatexclude takes a
-// folder out of a space, which is a silent thing to do to somebody's release
-// plan. The folder and the space are said at debug, so the question "why is my
-// package not in the plan" has an answer in the log.
-func TestCovTailWorkspaceLogNamesTheFoldersItExcluded(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(libsConfig(echoBuild, 1))
-	r.SeedPackage("packages", "core")
-	r.SeedPackage("packages", "vendored")
-	r.WriteFile("packages/.dispatexclude", "vendored\n")
-	r.Commit("feat(core): bootstrap with a folder the space does not own")
-
-	res := r.StatusOK("--log-level", "debug")
-	assert.Contains(t, res.Stdout, "package folder excluded by .dispatexclude")
-	assert.Contains(t, res.Stdout, "vendored")
-	for _, e := range res.Events {
-		assert.NotEqual(t, "vendored", e.Package(), "and the folder is in no plan line")
-	}
-}
-
 // TestCovTailWebhookGivesUpOnAStatusNoRetryWouldChange: a 5xx and a 429 are
 // answers a later attempt could outlive, and a 400 is not. Retrying one is
 // only a slower way to fail, so the ladder stops at the first non-retryable

@@ -1075,6 +1075,16 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConfigRefCycleFailsBeforeAnyWork`                 | Circular `$ref` references cause dispat to exit 1 and print the reference cycle before running scripts or tagging releases. |
 | `TestConfigRefMissingFragmentIsNamed`                  | A missing `$ref` target causes dispat to exit 1, naming the referencing file, the problematic key, and the missing file path. |
 | `TestConfigPropagateSynonymsInOneObjectAreRefused`     | One object stating both spellings of a propagate pair (`autoVersion` and `autoPropagate`, or `flow.version` and `flow.propagate`) stops the run before any tag, in JSON and in YAML, with both keys and the object named; a package naming one spelling beside its space's other replaces it, and the entry runs under the stage's runtime name, `version`. |
+| `TestConfigRefusesUnusableScriptsAndReferences` | A `scripts` entry that binds no command, and a reference to one, are refused at whichever level holds them, with the level and the entry named. |
+| `TestConfigRefusesInvalidRepositorySettings` | Each root-level setting is held to its own vocabulary, and a refused configuration releases nothing. |
+| `TestConfigRefusesInvalidSpaceSettings` | A space's path list, versioning selection, tag format, `src` and concurrency weights are each refused with the space named. |
+| `TestConfigRefusesInvalidAutoVersionRules` | A manifest reconciliation rule dispat cannot apply is refused rather than quietly writing nothing. |
+| `TestConfigRefusesInvalidParserSettings` | A parser value the parser itself would refuse is refused while the configuration is still being loaded, `propagation.kinds: ["all"]` among them: the wildcard is spelled `*`, and a plausible guess at it is named rather than ignored. |
+| `TestConfigScalarSpellingsRelease` | A configuration written entirely in the one-value spellings, and with a list of built-in section names each written as its name alone, loads, discovers, plans and releases exactly as its long-form twin does. |
+| `TestConfigRefusesValuesNeitherSpellingCanRead` | A value that is neither the one thing nor a list of them names the key it was written under, and an element holding nothing at all is read as the empty thing it is and refused rather than decoded into whatever came next. |
+| `TestConfigTagFormatStructureIsRefusedWithTheRuleItBroke` | Every structural rule a release tag format is held to, each refused naming the rule it broke: a second `{version}`, a `{channel}` with no `{counter}` and the reverse, a duplicated placeholder, the three of them out of order, and something other than literal text between the last two. |
+| `TestConfigTagFormatIsRefusedWhenGitWouldRefuseTheName` | A format is only exercised after the artefact is published, so a rendered name git would reject is refused at load time instead: a leading slash, dash or dot, a `.lock` suffix, a doubled separator, an unknown placeholder left as text, and a character git reserves. |
+| `TestConfigAliasFormatKeepsItsOwnStructuralRules` | An alias is written and never read back, which lets it spell a fragment of the version and keeps only the rules about rendering: one of each placeholder, a channel and a counter together or not at all, and a name git will accept. |
 
 ### Goal 11: the static `env` layers (`env_test.go`)
 
@@ -1091,6 +1101,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestDotenvReachesScriptsAndDispat`                    | Variables from a root `.env` file reach scripts. Process environment variables override `.env` values, config `env` overrides both, and variable values are never written to logs. |
 | `TestDotenvFileFlag`                                   | The `--env-file` flag overrides the default `.env` path, merges multiple files with later flags winning, and exits 1 if a specified file is missing. |
 | `TestDotenvSteersDispatItself`                         | Variables defined exclusively in environment files expand inside dispat templates, such as changelog footers. |
+| `TestStaticEnvExpandsAgainstTheComputedSet` | A static env value is never shell-expanded by exec, so dispat expands it itself: against the computed release variables first, then the process environment, with `$$` a literal dollar and an unknown name expanding to nothing. |
 
 ### Goal 12: the configuration ladder from the root down (`levels_test.go`)
 
@@ -1124,6 +1135,9 @@ version from one versioning mode, or a file preserved by one `revertOnFail` sett
 | `TestOverridesSpaceFile`                     | A dispat config file in the space folder is the space said again and nearer: it replaces the stages and options it names for every package of the space, inherits the rest, and leaves the other space untouched.  |
 | `TestOverridesLadderNearestWins`             | All six layers name one package and one key, and the nearest wins (the package's own file); a package no entry names still takes the space file's value, and a farther layer still supplies what nearer ones omit. |
 | `TestOverridesSpaceLayerDependencies`        | Edges declared in a space's `packages` entry and in the space file both reach the plan: a provider's bump carries down the chain one layer at a time, exactly as a top-level declaration would.                    |
+| `TestOverridesFolderConfigFilesAreHeldToTheirLevel` | A folder's own config file may not move its package, carry a setting the root would refuse, or declare a nameless entry, an unusable dependency object or a per-package login. |
+| `TestOverridesPackageReplacesEveryInheritedRecordField` | Every field of the changelog and GitHub objects overlays independently: one package restates them all, including its file name and its release destination, while its sibling keeps the root's. |
+| `TestOverridesWorkspaceLogNamesTheFoldersItExcluded` | A `.dispatexclude` takes a folder out of a space, which is a silent thing to do to a release plan, so the folder and the space are said at debug and the folder appears in no plan line. |
 
 ### Goal 14: the top-level `packages` section (`packages_test.go`)
 
@@ -1137,6 +1151,8 @@ version from one versioning mode, or a file preserved by one `revertOnFail` sett
 | `TestPackagesSrcMustNameAFolder`        | A `src` that could never match (a missing folder, a path leaving the package, the package folder itself) fails the load rather than narrowing the package to nothing.                                                                                                                          |
 | `TestPackagesComputeRemoveFromEntry`    | A stale edge under `packages.<name>.dependencies` in the root config is emptied in place (the entry's other keys and the rest of the file survive) and the gate converges.                                                                    |
 | `TestPackagesDependenciesCarryKindAndKeep` | A package's own provider list holds everything the top-level object holds: a kind reaches propagation and a `keep` survives compute, both declared next to the package they belong to. |
+| `TestPackagesRefuseInvalidDeclarations` | A package's `src`, `manifestNames` and dependency declarations are held against the packages discovery actually found. |
+| `TestPackagesRefuseCollidingIdentities` | Two spaces' folders that fold onto one package name are refused, and a declared package path is held to the level that may state it. |
 
 ### Goal 15: dependency edges declared by a space (`spacedeps_test.go`)
 
@@ -1150,6 +1166,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestSpaceDependenciesRefuseAnEdgeItDoesNotTouch` | An edge touching neither end of the space it is written in is refused before anything runs, naming the space, both endpoints and the root object as where it belongs. Nothing is tagged.                        |
 | `TestSpaceFileDependenciesThroughTheBinary`                       | The space folder's own config file declares edges too, and they add to the root file's space entry rather than replacing it: only the file's edge can explain the consumer's release.                           |
 | `TestSpaceDependenciesComputeEditsThemInPlace`    | `compute --write` corrects a kind and drops a dead edge inside the space's object, keyed by consumer, and appends the newly detected edge to the root object instead. A second run has nothing left to say.     |
+| `TestSpaceDepsRefuseUnusableDependencyObjects` | A space's own dependency object and a package's provider list are held to the same two rules the root object is. |
 
 ### Goal 58: the repository root as a space folder or a package folder (`root_path_test.go`)
 
@@ -1204,6 +1221,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRecordsTagAtAnotherCommitIsLeftAlone` | A tag dispat can see at the wrong commit is reported (E221) and left there, because a tag moved here would be force-pushed over the copy on the remote and turn one local mistake into everyone's. Reached through `dispat commit --tag-name`, since a release plans its version *from* the tags. |
 | `TestRecordsForceRewritesAnUnreachableTag` | A tag on a commit this branch cannot reach is invisible to the planner, so it records nothing dispat can plan around: with force on (the default) the write succeeds and the tag names this release. Force means "do not fail because the ref exists", not "overwrite whatever is there". |
 | `TestRecordsTagFailureDoesNotUnpublishTheRelease` | The post-publish failure model end to end: the run publishes, says so, refuses to move a tag sitting at a foreign commit, carries on through the packages after it, and exits non-zero, without ever calling the published package failed. |
+| `TestRecordsRefuseInvalidAliasTags` | An alias naming no part of the version, a moving alias pinned against moving, and an alias readable back as a release tag are each refused. |
 
 ### Goal 46: draft GitHub releases (`draft_test.go`)
 
@@ -1252,6 +1270,8 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestRecordsEntrySpacingDefaultAndConfigured` | The seam between entries is exactly the configured number of blank lines whatever the entry above ends with (two by default, `entrySpacing: 1` narrows it), the same seam heads content that predates dispat, and a GitHub body carries no seam at all: the spacing belongs to the file. |
 | `TestRecordsEntrySpacingOutsideItsBoundsIsAConfigError` | A value outside the bounds fails the load (exit 1, "entrySpacing must be between 1 and 10") before anything is recorded. |
 | `TestRecordsDefaultsAreUnchangedByTheNewOptions` | The byte-compatibility guarantee: a workspace configuring none of these options gets the whole file it always got, asserted byte for byte, so the release that ships them changes nobody's changelog. |
+| `TestRecordsRefuseInvalidEntryFormats` | Every part of the shared changelog and GitHub entry format that the renderer cannot carry out is refused before a release is planned. |
+| `TestRecordsRefuseACommitTypeWithTwoBumps` | A section's bump merges into the one commit parser the whole repository shares, so the fold runs across every layer that may declare one and a type two of them disagree about is refused naming the layer it was read in. |
 
 ### Goal 17: the `init` and `preview` commands (`commands_test.go`)
 
@@ -1541,6 +1561,7 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoPropagateReleasesLikeAutoVersion`   | The same workspace released under `autoVersion` and under `autoPropagate` leaves identical manifests, tags and stage names: the block written under the propagate name reconciles ranges and own versions, its syncLock runs, and a `beforePropagate` hook runs as `beforeVersion`. |
 | `TestAutoSignWritesTheOwnVersionBeforePropagate` | With `autoSign` beside `autoPropagate`, the sign stage writes each own version and leaves the range, the propagate stage then writes the range and no own version (snapshots from `postSign` and `postPropagate`, and the log's stage labels), and syncLock runs after a change only the sign stage made. |
 | `TestAutoSignStandaloneAutoversionWritesRangesOnly` | `dispat autoversion` on a package whose sign stage owns the own version writes the ranges alone, and `--write-version` asks for the own version explicitly. |
+| `TestAutoVersionRefusesAnOnlyNamingNoPackage` | `autoVersion.only` narrows a rewrite to named providers, so a name that is no package narrows it to nothing and is refused wherever the block was written, on the space or on one package of it. |
 
 ### Goal 25: the manifest commands (`manifests_test.go`)
 
@@ -2267,20 +2288,6 @@ ordinary authoring paths; nothing here repeats them.
 
 | Test | Invariant |
 | --- | --- |
-| `TestCovConfigRefusesUnusableScriptsAndReferences` | A `scripts` entry that binds no command, and a reference to one, are refused at whichever level holds them, with the level and the entry named. |
-| `TestCovConfigRefusesInvalidRepositorySettings` | Each root-level setting is held to its own vocabulary, and a refused configuration releases nothing. |
-| `TestCovConfigRefusesInvalidSpaceSettings` | A space's path list, versioning selection, tag format, `src` and concurrency weights are each refused with the space named. |
-| `TestCovConfigRefusesInvalidRecordFormats` | Every part of the shared changelog and GitHub entry format that the renderer cannot carry out is refused before a release is planned. |
-| `TestCovConfigRefusesInvalidAutoVersionRules` | A manifest reconciliation rule dispat cannot apply is refused rather than quietly writing nothing. |
-| `TestCovConfigRefusesInvalidParserSettings` | A parser value the parser itself would refuse is refused while the configuration is still being loaded, `propagation.kinds: ["all"]` among them: the wildcard is spelled `*`, and a plausible guess at it is named rather than ignored. |
-| `TestCovConfigRefusesInvalidAliasTags` | An alias naming no part of the version, a moving alias pinned against moving, and an alias readable back as a release tag are each refused. |
-| `TestCovConfigRefusesInvalidPackageDeclarations` | A package's `src`, `manifestNames` and dependency declarations are held against the packages discovery actually found. |
-| `TestCovConfigRefusesCollidingPackageIdentities` | Two spaces' folders that fold onto one package name are refused, and a declared package path is held to the level that may state it. |
-| `TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel` | A folder's own config file may not move its package, carry a setting the root would refuse, or declare a nameless entry, an unusable dependency object or a per-package login. |
-| `TestCovConfigRefusesUnusableSpaceDependencyObjects` | A space's own dependency object and a package's provider list are held to the same two rules the root object is. |
-| `TestCovConfigPackageOverridesReplaceEveryInheritedRecordField` | Every field of the changelog and GitHub objects overlays independently: one package restates them all, including its file name and its release destination, while its sibling keeps the root's. |
-| `TestCovConfigScalarSpellingsRelease` | A configuration written entirely in the one-value spellings, and with a list of built-in section names each written as its name alone, loads, discovers, plans and releases exactly as its long-form twin does. |
-| `TestCovConfigRefusesValuesNeitherSpellingCanRead` | A value that is neither the one thing nor a list of them names the key it was written under, and an element holding nothing at all is read as the empty thing it is and refused rather than decoded into whatever came next. |
 | `TestCovAtomicWriteRefusesToReplaceASymlink` | A record or config file that is a symlink is refused by name, the link survives, and what it points at is never written through. |
 | `TestAtomicChangelogSurvivesPartialDiskWrite` | A filesystem quota interrupts the temporary changelog write. The original history and permissions survive, the partial file is removed, and an unrestricted retry adds exactly one entry without losing prior notes. |
 | `TestAtomicManifestSurvivesPartialDiskWrite` | A filesystem quota interrupts the CLI's manifest rewrite after a temporary file exists. Even when the runtime reports a short count without an error, the original bytes and mode survive, the partial file is removed, and an unrestricted retry changes only the version. |
@@ -2367,7 +2374,6 @@ silently did nothing both read as success in a log.
 | `TestCovTailBeforeAllFailureEndsThePackageBeforeItsFirstStage` | beforeAll runs before a package has a stage at all, so its failure ends the package there, with no build, no publish and no tag, while the packages beside it release, and the outcome hook names the stage the package never entered. |
 | `TestCovTailVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not skipped when its provider fails, but its version stage then has nothing to sync manifests to, so the stage's scripts and their hooks do not run; the same fixture with the provider alive runs both. |
 | `TestCovTailSyncLockSkippedWhenNothingWasReconciled` | A release that rewrote no manifest has no lock to regenerate, so syncLock is not run. |
-| `TestCovTailStaticEnvExpandsAgainstTheComputedSet` | A static env value is never shell-expanded by exec, so dispat expands it itself: against the computed release variables first, then the process environment, with `$$` a literal dollar and an unknown name expanding to nothing. |
 | `TestCovTailChangelogRefusesAPathItCannotWriteAtomically` | A changelog is rewritten whole through a temporary file and a rename, so a configured path whose parent is a file cannot be examined at all and the write is refused, leaving nothing written anywhere near it. |
 
 ### Native auto-versioning
@@ -2386,8 +2392,6 @@ silently did nothing both read as success in a log.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailConfigRefusesAnAutoVersionOnlyNamingNoPackage` | `autoVersion.only` narrows a rewrite to named providers, so a name that is no package narrows it to nothing and is refused wherever the block was written, on the space or on one package of it. |
-| `TestCovTailConfigRefusesACommitTypeWithTwoBumps` | A section's bump merges into the one commit parser the whole repository shares, so the fold runs across every layer that may declare one and a type two of them disagree about is refused naming the layer it was read in. |
 
 ### The step commands and the notifications around them
 
@@ -2396,7 +2400,6 @@ silently did nothing both read as success in a log.
 | `TestCovTailStepCommandsSummariseForAPerson` | The step commands are run by hand as often as by CI, so a workspace whose log format is the readable one gets its tally printed on standard output instead of logged as a JSON line nobody asked for. |
 | `TestCovTailAutoWriterLeavesTheVersionOfAPackageNobodyVersions` | `{version}` resolves to the covered package's planned version and a package under versioning "none" has none, so the own-version write is skipped and said out loud rather than writing "0.0.0" into a manifest nobody versions. |
 | `TestCovTailComputeStopsWhenTheAnswersRunOut` | `--interactive` asks per suggestion, and a stream that ends is an answer of its own: the remaining suggestions stay unapplied and the config is left byte for byte as it was. |
-| `TestCovTailWorkspaceLogNamesTheFoldersItExcluded` | A `.dispatexclude` takes a folder out of a space, which is a silent thing to do to a release plan, so the folder and the space are said at debug and the folder appears in no plan line. |
 | `TestCovTailWebhookGivesUpOnAStatusNoRetryWouldChange` | A 5xx and a 429 are answers a later attempt could outlive and a 400 is not, so the ladder stops at the first non-retryable status, reports the ordinary W239, and leaves the command's exit code alone. |
 | `TestCovTailExecRefusesAPlaceItCannotRunIn` | `--in` takes a folder or a level, and each way of naming neither, a space the configuration does not declare or a path that is there but is a file, is refused before the script is handed to a shell. |
 | `TestCovTailWebhookFormatRendersTheProgressValue` | A rendered payload is for an endpoint that wants its own shape, and `progress` is the one event carrying a number: it renders as the number for that event and as nothing for every event without one, so the template stays valid JSON throughout a run. |
@@ -2433,9 +2436,6 @@ did nothing and a directive that worked produce the same version.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailTagFormatStructureIsRefusedWithTheRuleItBroke` | Every structural rule a release tag format is held to, each refused naming the rule it broke: a second `{version}`, a `{channel}` with no `{counter}` and the reverse, a duplicated placeholder, the three of them out of order, and something other than literal text between the last two. |
-| `TestCovTailTagFormatIsRefusedWhenGitWouldRefuseTheName` | A format is only exercised after the artefact is published, so a rendered name git would reject is refused at load time instead: a leading slash, dash or dot, a `.lock` suffix, a doubled separator, an unknown placeholder left as text, and a character git reserves. |
-| `TestCovTailAliasFormatKeepsItsOwnStructuralRules` | An alias is written and never read back, which lets it spell a fragment of the version and keeps only the rules about rendering: one of each placeholder, a channel and a counter together or not at all, and a name git will accept. |
 | `TestCovTailPrereleaseSpellingFormatRendersBothShapes` | One format renders both shapes without being told which: a stable release drops the channel, the counter and the separators around them from the tag and from the version a script is handed, while the prerelease carries all three and the alias beside it still names the version's parts. |
 | `TestCovTailTagInventoryIsNotTheGlobThatFetchedIt` | The glob a format produces is a filter and not a decision: dispat's own release-lock ref and a ref that is the format's literal prefix with nothing where the version goes both come back from it, and neither may become a package's baseline. |
 

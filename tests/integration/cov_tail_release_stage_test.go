@@ -13,7 +13,6 @@ package integration
 
 import (
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -152,35 +151,4 @@ func TestCovTailSyncLockSkippedWhenNothingWasReconciled(t *testing.T) {
 			"a lock nothing invalidated is not regenerated")
 		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
-}
-
-// TestCovTailStaticEnvExpandsAgainstTheComputedSet: a static env value is
-// never shell-expanded by exec, so dispat expands it itself — against the
-// computed release variables first, then the process environment, with `$$`
-// standing for a literal dollar and an unknown name expanding to nothing,
-// exactly as a shell would read the same text.
-func TestCovTailStaticEnvExpandsAgainstTheComputedSet(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(`printf '%s\n' "$FROM_RUN" "$FROM_PROCESS" "$LITERAL" "$NOBODY_SET" > ../../env.txt`, 1)
-	cfg.Env = map[string]string{
-		"FROM_RUN":     "${DISPAT_PACKAGE}@$DISPAT_NEW_VERSION",
-		"FROM_PROCESS": "seen $DISPAT_IT_STATIC_ENV_PROBE",
-		"LITERAL":      "costs $$5",
-		"NOBODY_SET":   "[$THIS_NAME_IS_NOT_SET]",
-	}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): bootstrap")
-
-	res := r.CommandEnv([]string{"DISPAT_IT_STATIC_ENV_PROBE=from-the-process"})
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-
-	data, err := os.ReadFile(r.Path("env.txt"))
-	require.NoError(t, err)
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	require.Len(t, lines, 4, "output:\n%s", data)
-	assert.Equal(t, "core@0.1.0", lines[0], "the computed set answers first")
-	assert.Equal(t, "seen from-the-process", lines[1], "then the process environment")
-	assert.Equal(t, "costs $5", lines[2], "$$ is one literal dollar")
-	assert.Equal(t, "[]", lines[3], "an unknown name expands to nothing, as in a shell")
 }

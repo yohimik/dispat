@@ -338,3 +338,108 @@ func TestPackagesSrcMustNameAFolder(t *testing.T) {
 		})
 	}
 }
+
+// TestPackagesRefuseInvalidDeclarations: what a package declares
+// about itself — where its sources are, which manifests name it, what it
+// depends on — is held against the packages discovery actually found.
+func TestPackagesRefuseInvalidDeclarations(t *testing.T) {
+	r := refusalRepo(t)
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(utils): a second package")
+	runRefusals(t, r, []refusal{
+		{"absolute source directory", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{"core": {Src: r.Path("packages/core")}}
+		}, "must be a path relative to the package folder"},
+		{"negative package concurrency", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{"core": {Concurrency: []int{-1}}}
+		}, "concurrency values must be >= 0"},
+		{"invalid package environment name", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{"core": {Env: map[string]string{"BAD=NAME": "value"}}}
+		}, "env:"},
+		{"invalid package webhook", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{"core": {Webhooks: []models.WebhookConfig{{URL: "ftp://example.test/hook"}}}}
+		}, "must use http or https"},
+		{"src naming a file", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{"core": {Src: "main.txt"}}
+		}, "names a file, want a folder"},
+		{"manifest name with no text", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{"core": {ManifestNames: []string{""}}}
+		}, "manifestNames: empty name"},
+		{"manifest name claimed twice", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{
+				"core":  {ManifestNames: []string{"@acme/shared"}},
+				"utils": {ManifestNames: []string{"@acme/shared"}},
+			}
+		}, "identifies one package"},
+		{"unknown consumer", func(c *models.File) {
+			c.Dependencies = models.Dependencies{{Consumer: "absent", Provider: "core"}}
+		}, "unknown consumer package"},
+		{"unknown provider", func(c *models.File) {
+			c.Dependencies = models.Dependencies{{Consumer: "core", Provider: "absent"}}
+		}, "absent"},
+	})
+}
+
+// TestPackagesRefuseCollidingIdentities: a package name identifies
+// one package for the whole repository, so two folders that fold onto one
+// name are refused wherever they sit, and both spellings are shown.
+func TestPackagesRefuseCollidingIdentities(t *testing.T) {
+	t.Run("two spaces", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Spaces["apps"] = models.SpaceConfig{Path: models.PathList{"services"}, Flow: buildPublish()}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("services", "CORE")
+		r.Commit("feat(core): two spaces, one name")
+		refuseStatus(t, r, "exists in both space")
+	})
+
+	t.Run("a space package given a path of its own", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Packages = map[string]models.PackageConfig{"core": {Path: "elsewhere/core"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "its location is the space folder")
+	})
+
+	t.Run("a standalone package whose path names a file", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := harness.BaseFile(1)
+		cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
+		cfg.Flow = buildPublish()
+		cfg.Packages = map[string]models.PackageConfig{"core": {Path: "notes.txt"}}
+		r.WriteConfigModel(cfg)
+		r.WriteFile("notes.txt", "a file, not a folder\n")
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "is not a folder")
+	})
+
+	// A standalone path naming the repository itself is no longer one of
+	// these: it declares the single-package repository, which root_path_test.go
+	// covers.
+
+	t.Run("a standalone package whose path is absolute", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := harness.BaseFile(1)
+		cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
+		cfg.Flow = buildPublish()
+		cfg.Packages = map[string]models.PackageConfig{"core": {Path: r.Path("packages", "core")}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "must be a repository-relative path")
+	})
+
+	t.Run("a nameless package entry", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Packages = map[string]models.PackageConfig{"": {Path: "packages/core"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "package name must not be empty")
+	})
+}

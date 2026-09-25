@@ -584,3 +584,42 @@ func TestAutoSignStandaloneAutoversionWritesRangesOnly(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
 	assert.Contains(t, readFile(t, r, "packages", "web", "package.json"), `"version": "0.1.0"`)
 }
+
+// TestAutoVersionRefusesAnOnlyNamingNoPackage: autoVersion.only
+// narrows a rewrite to named providers, so a name that is no package narrows
+// it to nothing — a typo that would otherwise present as "the rewrite silently
+// stopped happening". It is refused wherever the block was written.
+func TestAutoVersionRefusesAnOnlyNamingNoPackage(t *testing.T) {
+	for name, tc := range map[string]struct {
+		adjust func(*models.File)
+		want   string
+	}{
+		"declared by the space": {
+			adjust: func(cfg *models.File) {
+				cfg.Spaces["libs"] = covTailAVSpace(&models.AutoVersionConfig{Only: []string{"nobody"}})
+			},
+			want: `space "libs": autoVersion.only: unknown package "nobody"`,
+		},
+		"declared by one package of the space": {
+			adjust: func(cfg *models.File) {
+				cfg.Spaces["libs"] = models.SpaceConfig{
+					Path: models.PathList{"packages"}, Flow: buildPublish(),
+					Packages: map[string]models.PackageConfig{
+						"core": {AutoVersion: &models.AutoVersionConfig{Only: []string{"nobody"}}},
+					},
+				}
+			},
+			want: `space "libs": package "core": autoVersion.only: unknown package "nobody"`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			tc.adjust(&cfg)
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): bootstrap")
+			configRefused(t, r, tc.want)
+		})
+	}
+}

@@ -581,3 +581,191 @@ func today(t *testing.T, r *harness.Repo) string {
 	require.True(t, ok)
 	return date
 }
+
+// TestRecordsRefuseInvalidEntryFormats: the changelog and GitHub record
+// objects share one entry-format vocabulary, and every part of it that the
+// renderer cannot carry out is refused before a release is planned.
+func TestRecordsRefuseInvalidEntryFormats(t *testing.T) {
+	r := refusalRepo(t)
+	runRefusals(t, r, []refusal{
+		{"changelog fileTitle with no line", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{FileTitle: []models.EntryLine{{}}}
+		}, "line is required"},
+		{"changelog header with no line", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{Header: []models.EntryLine{{}}},
+			}
+		}, "line is required"},
+		{"github channel with no name", func(c *models.File) {
+			c.GitHub = &models.GitHubConfig{Enabled: models.Bool(false), Channels: []string{""}}
+		}, "channels must not contain an empty name"},
+		{"github entry format", func(c *models.File) {
+			c.GitHub = &models.GitHubConfig{
+				Enabled:           models.Bool(false),
+				EntryFormatConfig: models.EntryFormatConfig{Footer: []models.EntryLine{{}}},
+			}
+		}, "line is required"},
+		{"noChangesText opening a rule", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{NoChangesText: "--- nothing changed"},
+			}
+		}, `must not begin with "---"`},
+		{"noChangesText containing a rule", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{NoChangesText: "nothing changed\n***\nreally"},
+			}
+		}, "horizontal rule"},
+		{"commitRefs placement", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					CommitRefs: &models.CommitRefsConfig{Placement: "prefix"},
+				},
+			}
+		}, "commitRefs.placement: unknown value"},
+		{"authors placement", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{Authors: &models.AuthorsConfig{Placement: "footer"}},
+			}
+		}, "authors.placement"},
+		{"authors format", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{Authors: &models.AuthorsConfig{Format: "email"}},
+			}
+		}, "authors.format"},
+		{"authors commits", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{Authors: &models.AuthorsConfig{Commits: "merges"}},
+			}
+		}, "authors.commits"},
+		{"authors exclude pattern", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					Authors: &models.AuthorsConfig{Exclude: []string{"bot@example.test", "  "}},
+				},
+			}
+		}, "pattern must not be empty"},
+		{"unknown built-in section", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{Sections: []models.SectionConfig{{Title: "Highlights"}}},
+			}
+		}, "is not a built-in section"},
+		{"bump on a built-in section", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					Sections: []models.SectionConfig{{Title: "Features", Bump: "major"}},
+				},
+			}
+		}, "bump belongs to a custom section"},
+		{"built-in section listed twice", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					Sections: []models.SectionConfig{{Title: "Fixes"}, {Title: "fixes"}},
+				},
+			}
+		}, "is listed twice"},
+		{"section with no title", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					Sections: []models.SectionConfig{{Types: []string{"perf"}}},
+				},
+			}
+		}, "title is required"},
+		{"section bump value", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					Sections: []models.SectionConfig{{Title: "Performance", Types: []string{"perf"}, Bump: "huge"}},
+				},
+			}
+		}, "bump: unknown value"},
+		{"section type with no name", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					Sections: []models.SectionConfig{{Title: "Performance", Types: []string{"perf", " "}}},
+				},
+			}
+		}, "a commit type must not be empty"},
+		{"type claimed twice", func(c *models.File) {
+			c.Changelog = &models.ChangelogConfig{
+				EntryFormatConfig: models.EntryFormatConfig{
+					Sections: []models.SectionConfig{
+						{Title: "Performance", Types: []string{"perf"}},
+						{Title: "Speed", Types: []string{"perf"}},
+					},
+				},
+			}
+		}, "is already claimed by"},
+		{"package record object", func(c *models.File) {
+			c.Packages = map[string]models.PackageConfig{"core": {
+				Path:      "packages/core",
+				Changelog: &models.ChangelogConfig{Channels: []string{""}},
+			}}
+		}, "channels must not contain an empty name"},
+		{"space package record object", func(c *models.File) {
+			s := c.Spaces["libs"]
+			s.Packages = map[string]models.PackageConfig{"core": {
+				Changelog: &models.ChangelogConfig{Channels: []string{""}},
+			}}
+			c.Spaces["libs"] = s
+		}, "channels must not contain an empty name"},
+	})
+}
+
+// TestRecordsRefuseACommitTypeWithTwoBumps: a section's bump merges
+// into the commit parser, and the parser is one table for the whole
+// repository while sections are per package and per destination. So the fold
+// runs across every layer that may declare one, and a type two of them
+// disagree about is refused naming the layer it was read in.
+func TestRecordsRefuseACommitTypeWithTwoBumps(t *testing.T) {
+	conflicting := &models.ChangelogConfig{
+		EntryFormatConfig: models.EntryFormatConfig{
+			Sections: []models.SectionConfig{{Title: "Chores", Types: []string{"chore"}, Bump: "minor"}},
+		},
+	}
+
+	for name, tc := range map[string]struct {
+		adjust func(*models.File)
+		want   string
+	}{
+		"the root record objects": {
+			adjust: func(cfg *models.File) { cfg.Changelog = conflicting },
+			want:   "changelog/github: sections:",
+		},
+		"a root package entry": {
+			adjust: func(cfg *models.File) {
+				cfg.Packages = map[string]models.PackageConfig{"core": {Changelog: conflicting}}
+			},
+			want: `packages["core"]: sections:`,
+		},
+		"a space": {
+			adjust: func(cfg *models.File) {
+				s := cfg.Spaces["libs"]
+				s.Changelog = conflicting
+				cfg.Spaces["libs"] = s
+			},
+			want: `spaces["libs"]: sections:`,
+		},
+		"a package entry inside a space": {
+			adjust: func(cfg *models.File) {
+				s := cfg.Spaces["libs"]
+				s.Packages = map[string]models.PackageConfig{"core": {Changelog: conflicting}}
+				cfg.Spaces["libs"] = s
+			},
+			want: `spaces["libs"]: packages["core"]: sections:`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			// The parser states one bump for the type; the section below
+			// states another for the same one.
+			cfg.Parser = &models.ParserConfig{Types: map[string]string{"chore": "patch"}}
+			tc.adjust(&cfg)
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): bootstrap")
+
+			configRefused(t, r, tc.want)
+			configRefused(t, r, "a commit type has one bump for the whole repository")
+		})
+	}
+}

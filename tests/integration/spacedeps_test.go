@@ -172,3 +172,46 @@ func TestSpaceDependenciesComputeEditsThemInPlace(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
 	assert.Contains(t, res.Stdout, "in sync")
 }
+
+// TestSpaceDepsRefuseUnusableDependencyObjects: a space's own
+// `dependencies` object is held to the same two rules the root object is,
+// with the space named.
+func TestSpaceDepsRefuseUnusableDependencyObjects(t *testing.T) {
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	r.Commit("feat(core,utils): bootstrap")
+
+	for _, tc := range []struct {
+		name string
+		deps models.Dependencies
+		want string
+	}{
+		{"no provider", models.Dependencies{{Consumer: "core"}}, "consumer and provider are required"},
+		{"depending on itself", models.Dependencies{{Consumer: "core", Provider: "CORE"}},
+			"cannot depend on itself"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := libsConfig(echoBuild, 1)
+			s := cfg.Spaces["libs"]
+			s.Dependencies = tc.deps
+			cfg.Spaces["libs"] = s
+			r.WriteConfigModel(cfg)
+			refuseStatus(t, r, tc.want)
+		})
+	}
+
+	t.Run("a package list naming nothing", func(t *testing.T) {
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Packages = map[string]models.PackageConfig{"core": {Dependencies: models.ProviderList{{Provider: " "}}}}
+		r.WriteConfigModel(cfg)
+		refuseStatus(t, r, "provider name must not be empty")
+	})
+
+	t.Run("a package list naming the package itself", func(t *testing.T) {
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Packages = map[string]models.PackageConfig{"core": {Dependencies: models.ProviderList{{Provider: "core"}}}}
+		r.WriteConfigModel(cfg)
+		refuseStatus(t, r, "cannot depend on itself")
+	})
+}

@@ -706,7 +706,7 @@ func TestVersionGroupsRefuseAGroupTheyCannotResolve(t *testing.T) {
 		r.WriteConfigModel(cfg)
 		r.SeedPackage("packages", "core")
 		r.Commit("feat(core): bootstrap")
-		covTailRefused(t, r, "group name must not be empty")
+		configRefused(t, r, "group name must not be empty")
 	})
 
 	t.Run("a group named after a space", func(t *testing.T) {
@@ -716,7 +716,7 @@ func TestVersionGroupsRefuseAGroupTheyCannotResolve(t *testing.T) {
 		r.WriteConfigModel(cfg)
 		r.SeedPackage("packages", "core")
 		r.Commit("feat(core): bootstrap")
-		covTailRefused(t, r, "group and space names share one namespace")
+		configRefused(t, r, "group and space names share one namespace")
 	})
 
 	t.Run("a space that versions independently", func(t *testing.T) {
@@ -729,7 +729,7 @@ func TestVersionGroupsRefuseAGroupTheyCannotResolve(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		r.SeedPackage("apps", "site")
 		r.Commit("feat(core,site): bootstrap")
-		covTailRefused(t, r, "does not version as a group")
+		configRefused(t, r, "does not version as a group")
 	})
 
 	t.Run("a space that is itself in a group", func(t *testing.T) {
@@ -746,7 +746,7 @@ func TestVersionGroupsRefuseAGroupTheyCannotResolve(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		r.SeedPackage("apps", "site")
 		r.Commit("feat(core,site): bootstrap")
-		covTailRefused(t, r, "name that group directly")
+		configRefused(t, r, "name that group directly")
 	})
 
 	t.Run("a space that does version as one is the accepted shape", func(t *testing.T) {

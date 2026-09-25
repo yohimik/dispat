@@ -12,8 +12,12 @@ package integration
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -507,4 +511,252 @@ func countLines(r *harness.Repo, name string) int {
 		return 0
 	}
 	return len(strings.Fields(strings.TrimSpace(string(data))))
+}
+
+// TestOverridesFolderConfigFilesAreHeldToTheirLevel: a folder's own
+// config file configures that folder. It may not move the package it sits in,
+// and it is held to the same validation the root file is.
+func TestOverridesFolderConfigFilesAreHeldToTheirLevel(t *testing.T) {
+	seed := func(t *testing.T) *harness.Repo {
+		t.Helper()
+		r := harness.New(t)
+		r.WriteConfigModel(libsConfig(echoBuild, 1))
+		r.SeedPackage("packages", "core")
+		return r
+	}
+
+	t.Run("a package folder naming its own path", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/core/dispat.json", models.PackageConfig{Path: "elsewhere"})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "path")
+	})
+
+	t.Run("a space folder with an invalid setting", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/dispat.json", models.SpaceFile{Versioning: "calver"})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "unknown versioning")
+	})
+
+	t.Run("a space folder with a nameless package entry", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/dispat.json", models.SpaceFile{
+			Packages: map[string]models.PackageConfig{"": {TagFormat: "x-{version}"}},
+		})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "package name must not be empty")
+	})
+
+	t.Run("a space folder with an unusable dependency object", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/dispat.json", models.SpaceFile{
+			Dependencies: models.Dependencies{{Consumer: "core", Provider: ""}},
+		})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "consumer and provider are required")
+	})
+
+	t.Run("a package entry overriding the space login", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/dispat.json", models.SpaceFile{
+			Packages: map[string]models.PackageConfig{
+				"core": {Flow: &models.SpaceFlowConfig{Login: []string{"build"}}},
+			},
+		})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "flow.login cannot be overridden per package")
+	})
+}
+
+// TestOverridesPackageReplacesEveryInheritedRecordField: one package
+// restates every field of the root's changelog and GitHub objects while a
+// second package restates none, so each overlay decision is visible in what
+// the two packages recorded.
+func TestOverridesPackageReplacesEveryInheritedRecordField(t *testing.T) {
+	srv, calls := pathRecordingGitHub(t)
+	t.Setenv("DISPAT_IT_TOKEN", "root-token")
+	t.Setenv("DISPAT_IT_CORE_TOKEN", "core-token")
+
+	rootFormat := models.EntryFormatConfig{
+		DateFormat:        "2006-01-02",
+		BreakingTitle:     "Root Breaking",
+		FeaturesTitle:     "Root Features",
+		FixesTitle:        "Root Fixes",
+		DependenciesTitle: "Root Dependencies",
+		ReleaseName:       "root ${DISPAT_PACKAGE}",
+		Header:            []models.EntryLine{{Line: []string{"root header line"}}},
+		Footer:            []models.EntryLine{{Line: []string{"root footer line"}}},
+		DependencyLink:    "https://root.test/${DISPAT_DEP_NAME}",
+		NoChangesText:     "root says nothing changed",
+		Sections:          []models.SectionConfig{{Title: "Root Performance", Types: []string{"perf"}}},
+		CommitRefs:        &models.CommitRefsConfig{Placement: "off", Format: "$DISPAT_COMMIT_SHORT"},
+		Authors:           &models.AuthorsConfig{Placement: "off", Format: "fullname", Commits: "ccme", Title: "Root Authors"},
+	}
+	coreFormat := models.EntryFormatConfig{
+		DateFormat:        "02.01.2006",
+		BreakingTitle:     "Core Breaking",
+		FeaturesTitle:     "Core Features",
+		FixesTitle:        "Core Fixes",
+		DependenciesTitle: "Core Dependencies",
+		ReleaseName:       "core ${DISPAT_PACKAGE}",
+		Header:            []models.EntryLine{{Line: []string{"core header line"}}},
+		Footer:            []models.EntryLine{{Line: []string{"core footer line"}}},
+		DependencyLink:    "https://core.test/${DISPAT_DEP_NAME}",
+		NoChangesText:     "core says nothing changed",
+		Sections:          []models.SectionConfig{{Title: "Core Performance", Types: []string{"perf"}}},
+		CommitRefs:        &models.CommitRefsConfig{Placement: "suffix", Format: "[$DISPAT_COMMIT_SHORT]", Link: ""},
+		Authors: &models.AuthorsConfig{
+			Placement: "section", Format: "username", Commits: "all", Title: "Core Authors",
+			Include: []string{"*"}, Exclude: []string{"nobody@example.test"},
+		},
+	}
+
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{
+		FileTitle:         []models.EntryLine{{Line: []string{"# Root Changelog"}}},
+		EntrySpacing:      models.Int(2),
+		EntryFormatConfig: rootFormat,
+	}
+	cfg.GitHub = &models.GitHubConfig{
+		Enabled: models.Bool(true), AllPackages: models.Bool(true), Draft: models.Bool(false),
+		Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+		EntryFormatConfig: rootFormat,
+	}
+	cfg.Packages = map[string]models.PackageConfig{"core": {
+		Changelog: &models.ChangelogConfig{
+			File:              "NOTES.md",
+			FileTitle:         []models.EntryLine{{Line: []string{"# Core Notes"}}},
+			EntrySpacing:      models.Int(3),
+			EntryFormatConfig: coreFormat,
+		},
+		GitHub: &models.GitHubConfig{
+			AllPackages: models.Bool(true), Draft: models.Bool(true),
+			Owner: "core-owner", Repo: "core-repo", APIURL: srv.URL, TokenEnv: "DISPAT_IT_CORE_TOKEN",
+			EntryFormatConfig: coreFormat,
+		},
+	}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "plain")
+	r.Commit("feat(core,plain): bootstrap both packages")
+	r.ReleaseOK()
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("plain@0.1.0"), "tags: %v", r.TagList())
+
+	t.Run("the overriding package writes its own file, title and format", func(t *testing.T) {
+		notes := readRepoFile(t, r, "packages/core/NOTES.md")
+		assert.Contains(t, notes, "# Core Notes", "the package names its own file title")
+		assert.Contains(t, notes, "core header line")
+		assert.Contains(t, notes, "core footer line")
+		assert.Contains(t, notes, "Core Features")
+		assert.NotContains(t, notes, "Root Features", "an overridden title is replaced, not joined")
+		assert.Contains(t, notes, time.Now().UTC().Format("02.01.2006"),
+			"the entry heading carries the package's date format:\n%s", notes)
+		assert.Contains(t, notes, "Core Authors", "an authors section placement is the package's")
+		assert.Equal(t, "", changelogOf(t, r, "core"),
+			"nothing was written to the inherited file name")
+	})
+
+	t.Run("the inheriting package keeps every root value", func(t *testing.T) {
+		log := changelogOf(t, r, "plain")
+		assert.Contains(t, log, "# Root Changelog")
+		assert.Contains(t, log, "root header line")
+		assert.Contains(t, log, "root footer line")
+		assert.Contains(t, log, "Root Features")
+		assert.NotContains(t, log, "Core Features")
+		assert.NotContains(t, log, "Root Authors", "an off placement writes no section")
+	})
+
+	t.Run("the overriding package retargets its GitHub release", func(t *testing.T) {
+		var corePath, plainPath string
+		var coreBody, plainBody struct {
+			TagName string `json:"tag_name"`
+			Name    string `json:"name"`
+			Draft   bool   `json:"draft"`
+		}
+		for _, call := range calls() {
+			var decoded struct {
+				TagName string `json:"tag_name"`
+				Name    string `json:"name"`
+				Draft   bool   `json:"draft"`
+			}
+			require.NoError(t, json.Unmarshal(call.Body, &decoded))
+			switch decoded.TagName {
+			case "core@0.1.0":
+				corePath, coreBody = call.Path, decoded
+			case "plain@0.1.0":
+				plainPath, plainBody = call.Path, decoded
+			}
+		}
+		require.NotEmpty(t, corePath, "no release was created for core; calls: %+v", calls())
+		assert.Contains(t, corePath, "/repos/core-owner/core-repo/releases")
+		assert.True(t, coreBody.Draft, "the package's own draft policy applies")
+		assert.Equal(t, "core core", coreBody.Name, "the package's releaseName template rendered")
+
+		require.NotEmpty(t, plainPath, "no release was created for plain")
+		assert.Contains(t, plainPath, "/repos/acme/mono/releases")
+		assert.False(t, plainBody.Draft)
+		assert.Equal(t, "root plain", plainBody.Name)
+	})
+}
+
+// TestOverridesWorkspaceLogNamesTheFoldersItExcluded: a .dispatexclude takes a
+// folder out of a space, which is a silent thing to do to somebody's release
+// plan. The folder and the space are said at debug, so the question "why is my
+// package not in the plan" has an answer in the log.
+func TestOverridesWorkspaceLogNamesTheFoldersItExcluded(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(echoBuild, 1))
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "vendored")
+	r.WriteFile("packages/.dispatexclude", "vendored\n")
+	r.Commit("feat(core): bootstrap with a folder the space does not own")
+
+	res := r.StatusOK("--log-level", "debug")
+	assert.Contains(t, res.Stdout, "package folder excluded by .dispatexclude")
+	assert.Contains(t, res.Stdout, "vendored")
+	for _, e := range res.Events {
+		assert.NotEqual(t, "vendored", e.Package(), "and the folder is in no plan line")
+	}
+}
+
+// recordedCall is one request the coverage fake was handed.
+type recordedCall struct {
+	Method string
+	Path   string
+	Body   []byte
+}
+
+// pathRecordingGitHub is githubFake with the request path kept as well as the
+// body: which repository a release was created in is exactly what the
+// per-package owner and repo overrides decide, and the body alone cannot say.
+func pathRecordingGitHub(t *testing.T) (*httptest.Server, func() []recordedCall) {
+	t.Helper()
+	var mu sync.Mutex
+	var calls []recordedCall
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/releases/tags/"):
+			w.WriteHeader(http.StatusNotFound)
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/releases"):
+			_, _ = w.Write([]byte(`[]`))
+		case req.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+		case req.Method == http.MethodPost:
+			data, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			calls = append(calls, recordedCall{Method: req.Method, Path: req.URL.Path, Body: data})
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() []recordedCall {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]recordedCall(nil), calls...)
+	}
 }

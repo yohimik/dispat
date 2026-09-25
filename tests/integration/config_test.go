@@ -870,3 +870,426 @@ func TestConfigUnicodeSimpleFoldKeepsDistinctScriptNames(t *testing.T) {
 	assert.Contains(t, plain.Stdout, "plain")
 	assert.NotContains(t, plain.Stdout, "dotted")
 }
+
+// TestConfigRefusesUnusableScriptsAndReferences: a `scripts` entry that
+// binds no command, and a reference to one, are refused at whichever level
+// holds them, with the level and the entry named.
+func TestConfigRefusesUnusableScriptsAndReferences(t *testing.T) {
+	r := refusalRepo(t)
+	runRefusals(t, r, []refusal{
+		{"nameless entry", func(c *models.File) {
+			c.Scripts[""] = models.Script{"echo nameless"}
+		}, "scripts contains an empty script name"},
+		{"entry binding no command", func(c *models.File) {
+			c.Scripts["build"] = models.Script{}
+		}, `scripts["build"] is empty`},
+		{"sole command blank", func(c *models.File) {
+			c.Scripts["build"] = models.Script{"   "}
+		}, `scripts["build"] is empty`},
+		{"blank command among several", func(c *models.File) {
+			c.Scripts["build"] = models.Script{"echo one", "", "echo three"}
+		}, `scripts["build"][1] is empty`},
+		{"space scripts entry binding no command", func(c *models.File) {
+			s := c.Spaces["libs"]
+			s.Scripts = map[string]models.Script{"local": {}}
+			c.Spaces["libs"] = s
+		}, `scripts["local"] is empty`},
+		{"empty run-hook reference", func(c *models.File) {
+			c.Run = &models.RunConfig{BeforeAll: []string{""}}
+		}, "contains an empty script reference"},
+		{"empty flow reference", func(c *models.File) {
+			s := c.Spaces["libs"]
+			s.Flow = &models.SpaceFlowConfig{Build: []string{""}, Publish: []string{"publish"}}
+			c.Spaces["libs"] = s
+		}, "contains an empty script reference"},
+	})
+}
+
+// TestConfigRefusesInvalidRepositorySettings: the root-level settings that
+// decide how a whole run behaves are each held to their own vocabulary.
+func TestConfigRefusesInvalidRepositorySettings(t *testing.T) {
+	r := refusalRepo(t)
+	runRefusals(t, r, []refusal{
+		{"nothing to release", func(c *models.File) {
+			c.Spaces = nil
+			c.Packages = nil
+		}, "at least one space or package is required"},
+		{"commitErrors", func(c *models.File) { c.CommitErrors = "fatal" }, "unknown commitErrors"},
+		{"versioning", func(c *models.File) { c.Versioning = "semver" }, `versioning "semver" is invalid`},
+		{"logLevel", func(c *models.File) { c.LogLevel = "loud" }, "unknown logLevel"},
+		{"three concurrency values", func(c *models.File) { c.Concurrency = []int{1, 2, 3} },
+			"concurrency accepts at most two values"},
+		{"negative concurrency", func(c *models.File) { c.Concurrency = []int{-1} },
+			"concurrency values must be >= 0"},
+		{"nameless interpreter", func(c *models.File) { c.Shell = []string{"", "-c"} },
+			"first element (the interpreter) must not be empty"},
+		{"empty allowBranch pattern", func(c *models.File) {
+			c.Run = &models.RunConfig{AllowBranch: []string{""}}
+		}, "run.allowBranch contains an empty pattern"},
+		{"absolute commit.include", func(c *models.File) {
+			c.Commit = &models.CommitConfig{Enabled: models.Bool(true), Include: []string{"/etc/hosts"}}
+		}, "must be a repository-relative path"},
+		{"escaping commit.include", func(c *models.File) {
+			c.Commit = &models.CommitConfig{Enabled: models.Bool(true), Include: []string{"../outside"}}
+		}, "escapes the repository root"},
+		{"initial version", func(c *models.File) {
+			c.Initials = map[string]string{"core": "one point oh"}
+		}, "invalid version"},
+		{"tag format", func(c *models.File) { c.TagFormat = "{name}@v{major}" },
+			"only available in aliasTags"},
+	})
+
+	// The log format is the one setting the table cannot carry: the rows are
+	// read back as JSON events, and asking for that on the command line would
+	// override the very key under test.
+	t.Run("logFormat", func(t *testing.T) {
+		cfg := libsConfig(echoBuild, 1)
+		cfg.LogFormat = "yaml"
+		r.WriteConfigModel(cfg)
+		res := r.Status()
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "unknown logFormat")
+		assert.Empty(t, r.TagList(), "a refused configuration releases nothing")
+	})
+}
+
+// TestConfigRefusesInvalidSpaceSettings: a space's own path list and
+// versioning selection are held to the same rules the root settings are, with
+// the space named.
+func TestConfigRefusesInvalidSpaceSettings(t *testing.T) {
+	r := refusalRepo(t)
+	withSpace := func(mutate func(*models.SpaceConfig)) func(*models.File) {
+		return func(c *models.File) {
+			s := c.Spaces["libs"]
+			mutate(&s)
+			c.Spaces["libs"] = s
+		}
+	}
+	runRefusals(t, r, []refusal{
+		{"no path", withSpace(func(s *models.SpaceConfig) { s.Path = nil }), "path is required"},
+		{"empty path entry", withSpace(func(s *models.SpaceConfig) {
+			s.Path = models.PathList{"packages", ""}
+		}), "path[1] must not be empty"},
+		{"absolute path", withSpace(func(s *models.SpaceConfig) {
+			s.Path = models.PathList{"/srv/packages"}
+		}), "must be a repository-relative path"},
+		{"escaping path", withSpace(func(s *models.SpaceConfig) {
+			s.Path = models.PathList{"../elsewhere"}
+		}), "escapes the repository root"},
+		{"versioning and versionGroup together", withSpace(func(s *models.SpaceConfig) {
+			s.Versioning = "fixed"
+			s.VersionGroup = "core"
+		}), "mutually exclusive"},
+		{"unknown space versioning", withSpace(func(s *models.SpaceConfig) {
+			s.Versioning = "calver"
+		}), `unknown versioning "calver"`},
+		{"unknown version group", withSpace(func(s *models.SpaceConfig) {
+			s.VersionGroup = "absent"
+		}), "absent"},
+		{"space tag format", withSpace(func(s *models.SpaceConfig) {
+			s.TagFormat = "{name}-{channel}"
+		}), "contains no {version} placeholder"},
+		{"space src leaves the package", withSpace(func(s *models.SpaceConfig) {
+			s.Src = "../outside"
+		}), "leaves the package folder"},
+		{"space src is the package folder", withSpace(func(s *models.SpaceConfig) {
+			s.Src = "."
+		}), "is the package folder itself"},
+		{"space concurrency weights", withSpace(func(s *models.SpaceConfig) {
+			s.Concurrency = []int{1, 2, 3}
+		}), "concurrency accepts at most two values"},
+		{"negative space weight", withSpace(func(s *models.SpaceConfig) {
+			s.Concurrency = []int{0, -2}
+		}), "concurrency values must be >= 0"},
+	})
+}
+
+// TestConfigRefusesInvalidAutoVersionRules: the native manifest
+// reconciliation reads several vocabularies of its own, and a rule it cannot
+// apply is refused rather than quietly writing nothing.
+func TestConfigRefusesInvalidAutoVersionRules(t *testing.T) {
+	r := refusalRepo(t)
+	av := func(a models.AutoVersionConfig) func(*models.File) {
+		return func(c *models.File) {
+			s := c.Spaces["libs"]
+			s.AutoVersion = &a
+			c.Spaces["libs"] = s
+		}
+	}
+	runRefusals(t, r, []refusal{
+		{"manifests", av(models.AutoVersionConfig{Manifests: "some"}), "manifests: unknown value"},
+		{"replace rule with no files", av(models.AutoVersionConfig{
+			Replace: []models.AutoVersionReplaceConfig{{Find: "x", Write: "y"}},
+		}), "files is required"},
+		{"replace rule with an empty glob", av(models.AutoVersionConfig{
+			Replace: []models.AutoVersionReplaceConfig{{Files: []string{""}, Find: "x", Write: "y"}},
+		}), "files: empty glob"},
+		{"replace rule with a broken glob", av(models.AutoVersionConfig{
+			Replace: []models.AutoVersionReplaceConfig{{Files: []string{"[a-"}, Find: "x", Write: "y"}},
+		}), "invalid pattern"},
+		{"replace rule with no find", av(models.AutoVersionConfig{
+			Replace: []models.AutoVersionReplaceConfig{{Files: []string{"*.txt"}, Write: "y"}},
+		}), "find is required"},
+		{"replace rule with no write", av(models.AutoVersionConfig{
+			Replace: []models.AutoVersionReplaceConfig{{Files: []string{"*.txt"}, Find: "x"}},
+		}), "write is required"},
+		{"dependency kind", av(models.AutoVersionConfig{Kinds: []string{"buildDependencies"}}), "kinds:"},
+		{"match pattern", av(models.AutoVersionConfig{Match: []string{"[a-"}}), "match: invalid pattern"},
+		{"nameMatch", av(models.AutoVersionConfig{NameMatch: "fuzzy"}), "nameMatch: unknown value"},
+		{"syncLockConcurrency", av(models.AutoVersionConfig{SyncLockConcurrency: -2}),
+			"syncLockConcurrency must be >= 0"},
+	})
+}
+
+// TestConfigRefusesInvalidParserSettings: the parser block is dispat's
+// view of the CCME configuration, and a value the parser itself would refuse
+// is refused while the configuration is still being loaded.
+func TestConfigRefusesInvalidParserSettings(t *testing.T) {
+	r := refusalRepo(t)
+	parser := func(p models.ParserConfig) func(*models.File) {
+		return func(c *models.File) { c.Parser = &p }
+	}
+	runRefusals(t, r, []refusal{
+		{"propagation bump", parser(models.ParserConfig{
+			Propagation: &models.ParserPropagationConfig{Bump: "huge"},
+		}), "propagation.bump: unknown value"},
+		{"propagation depth", parser(models.ParserConfig{
+			Propagation: &models.ParserPropagationConfig{Depth: "deep"},
+		}), "propagation.depth"},
+		{"propagation channelDepth", parser(models.ParserConfig{
+			Propagation: &models.ParserPropagationConfig{ChannelDepth: "-3"},
+		}), "propagation.channelDepth"},
+		{"propagation kinds", parser(models.ParserConfig{
+			Propagation: &models.ParserPropagationConfig{Kinds: []string{"buildDependencies"}},
+		}), "propagation.kinds: unknown kind"},
+		// The wildcard is spelled "*", the scope-set selector of §5.2, and
+		// "all" is a plausible guess the loader does not take. The case is
+		// here so the documentation cannot drift back into offering it.
+		{"propagation kinds spelled as a word", parser(models.ParserConfig{
+			Propagation: &models.ParserPropagationConfig{Kinds: []string{"all"}},
+		}), `propagation.kinds: unknown kind "all"`},
+		{"separator the parser refuses", parser(models.ParserConfig{Separator: "-"}),
+			"separator"},
+	})
+}
+
+// TestConfigScalarSpellingsRelease: a configuration written entirely in
+// the one-value spellings loads, discovers, plans and releases exactly as its
+// long-form twin does.
+func TestConfigScalarSpellingsRelease(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigRaw(map[string]any{
+		"logLevel":    "info",
+		"logFormat":   "json",
+		"updateCheck": false,
+		// A list of built-in section names, each written as its name alone.
+		"github": map[string]any{"enabled": false, "sections": []any{"features", "fixes"}},
+		// One value where a pair is allowed, one command where a list is,
+		// one folder where a list of folders is, one script reference where
+		// a sequence is.
+		"concurrency": 1,
+		"scripts": map[string]any{
+			"build":   "echo building",
+			"publish": "echo publishing",
+		},
+		"spaces": map[string]any{
+			"libs": map[string]any{
+				"path": "packages",
+				"flow": map[string]any{"build": "build", "publish": "publish"},
+			},
+		},
+		"changelog": map[string]any{
+			// One entry line where a list is allowed, one built-in section
+			// named on its own where a list of section objects is, and a
+			// number written as text.
+			"header":       "written by the shorthand config",
+			"sections":     "Features",
+			"entrySpacing": "2",
+		},
+		// One provider where a list is allowed, on both spellings of the
+		// dependency declaration.
+		"dependencies": map[string]any{"app": "core"},
+		"packages":     map[string]any{"tool": map[string]any{"dependencies": "core"}},
+	})
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.SeedPackage("packages", "tool")
+	r.Commit("feat(core,app,tool): bootstrap the shorthand repository")
+
+	res := r.ReleaseOK("--log-format", "json")
+	for _, name := range []string{"core", "app", "tool"} {
+		assert.True(t, r.IsTagged(name+"@0.1.0"), "%s must be released; tags: %v", name, r.TagList())
+	}
+	assert.Contains(t, changelogOf(t, r, "core"), "written by the shorthand config",
+		"the single header line reached the record")
+	assert.Contains(t, changelogOf(t, r, "core"), "Features",
+		"the single named section reached the record")
+	require.NotEmpty(t, res.Events)
+}
+
+// TestConfigRefusesValuesNeitherSpellingCanRead: a value that is neither
+// the one thing nor a list of them names the key it was written under, so a
+// reader can find it in the file.
+func TestConfigRefusesValuesNeitherSpellingCanRead(t *testing.T) {
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	base := func() map[string]any {
+		return map[string]any{
+			"logFormat":   "json",
+			"updateCheck": false,
+			"github":      map[string]any{"enabled": false},
+			"scripts":     map[string]any{"build": "echo building", "publish": "echo publishing"},
+			"spaces": map[string]any{
+				"libs": map[string]any{
+					"path": "packages",
+					"flow": map[string]any{"build": "build", "publish": "publish"},
+				},
+			},
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+		want   string
+	}{
+		{"a script that is an object", func(c map[string]any) {
+			c["scripts"] = map[string]any{"build": map[string]any{"run": "echo"}}
+		}, "scripts"},
+		{"a space path that is an object", func(c map[string]any) {
+			c["spaces"] = map[string]any{"libs": map[string]any{
+				"path": map[string]any{"first": "packages"},
+				"flow": map[string]any{"build": "build", "publish": "publish"},
+			}}
+		}, "path"},
+		{"a section that is a number", func(c map[string]any) {
+			c["changelog"] = map[string]any{"sections": []any{7}}
+		}, "a built-in section name or an object"},
+		// An element holding nothing at all is read as the empty thing it is
+		// and refused by the validation, rather than decoded into whatever
+		// happened to be next.
+		{"a section that holds nothing", func(c map[string]any) {
+			c["changelog"] = map[string]any{"sections": []any{nil}}
+		}, "changelog:"},
+		{"an entry line that holds nothing", func(c map[string]any) {
+			c["changelog"] = map[string]any{"footer": []any{nil}}
+		}, "changelog:"},
+		{"an entry line that is a number", func(c map[string]any) {
+			c["changelog"] = map[string]any{"header": []any{7}}
+		}, "header"},
+		{"an entry spacing that is not a number", func(c map[string]any) {
+			c["changelog"] = map[string]any{"entrySpacing": "many"}
+		}, "entrySpacing"},
+		{"a dependency object that is a number", func(c map[string]any) {
+			c["dependencies"] = 7
+		}, "dependencies"},
+		{"a provider list that is an object", func(c map[string]any) {
+			c["packages"] = map[string]any{"core": map[string]any{
+				"dependencies": map[string]any{"provider": map[string]any{"name": "x"}},
+			}}
+		}, "dependencies"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base()
+			tc.mutate(cfg)
+			r.WriteConfigRaw(cfg)
+			res := r.Status("--log-format", "json")
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, diagnosticText(res), tc.want)
+			assert.Empty(t, r.TagList(), "a refused configuration releases nothing")
+		})
+	}
+}
+
+// TestConfigTagFormatStructureIsRefusedWithTheRuleItBroke: the structural
+// rules a release tag format is held to. Each of them exists so a rendered tag
+// can be read back into exactly one version: a second {version} makes the
+// split ambiguous, a {channel} with no {counter} gives every prerelease of one
+// train the same name, a {counter} with no {channel} cannot tell alpha.1 from
+// beta.1, and the three placeholders out of order (or with something between
+// the last two) render a prerelease section that cannot be dropped for a
+// stable release.
+func TestConfigTagFormatStructureIsRefusedWithTheRuleItBroke(t *testing.T) {
+	r := refusalRepo(t)
+	format := func(f string) func(*models.File) {
+		return func(c *models.File) { c.TagFormat = f }
+	}
+	runRefusals(t, r, []refusal{
+		{"two version placeholders", format("{name}@{version}-{version}"),
+			"contains more than one {version} placeholder"},
+		{"channel without counter", format("{name}@{version}-{channel}"),
+			"uses {channel} without {counter}"},
+		{"counter without channel", format("{name}@{version}-{counter}"),
+			"uses {counter} without {channel}"},
+		{"two channel placeholders", format("{name}@{version}-{channel}{channel}.{counter}"),
+			"contains more than one {channel} placeholder"},
+		{"two counter placeholders", format("{name}@{version}-{channel}.{counter}{counter}"),
+			"contains more than one {counter} placeholder"},
+		{"prerelease section before the version", format("{name}@{channel}.{counter}-{version}"),
+			"expects {version}, then {channel}, then {counter}, in that order"},
+		{"a placeholder inside the prerelease section",
+			format("{name}@{version}-{channel}{name}{counter}"),
+			"places another placeholder between {channel} and {counter}"},
+	})
+}
+
+// TestConfigTagFormatIsRefusedWhenGitWouldRefuseTheName: the second half of
+// the check, and the one that catches the mistakes that read naturally. A
+// leading slash, a leading dash, a leading dot, a ".lock" suffix, a doubled
+// separator and a shell-glob character are all things a person writes into a
+// tag template without thinking, and all things git-check-ref-format refuses.
+// The refusal names the rendered sample, not the template, because the sample
+// is what git would have been asked to create.
+func TestConfigTagFormatIsRefusedWhenGitWouldRefuseTheName(t *testing.T) {
+	r := refusalRepo(t)
+	format := func(f string) func(*models.File) {
+		return func(c *models.File) { c.TagFormat = f }
+	}
+	runRefusals(t, r, []refusal{
+		{"leading slash", format("/{name}@{version}"),
+			"a ref name may not begin or end with '/'"},
+		{"leading dash", format("-{name}@{version}"),
+			"a ref name may not begin with '-'"},
+		{"leading dot", format(".{name}@{version}"),
+			"a ref name may not begin or end with '.'"},
+		{"lock suffix", format("{name}@{version}.lock"),
+			"a ref name may not end with '.lock'"},
+		{"doubled slash", format("{name}//{version}"),
+			"a ref name may not contain '//', '..' or '@{'"},
+		{"an unknown placeholder left as text", format("{name}@{revision}{version}"),
+			"a ref name may not contain '//', '..' or '@{'"},
+		{"a character git reserves", format("{name}~{version}"),
+			`a ref name may not contain "~"`},
+	})
+}
+
+// TestConfigAliasFormatKeepsItsOwnStructuralRules: an alias is only ever
+// written, never read back, which is what lets it spell a fragment of the
+// version. The rules it keeps are the ones that are about rendering rather
+// than parsing — one of each placeholder, a channel and a counter together or
+// not at all — plus the same ref-name check, since an alias is created by the
+// same `git tag` the release tag is.
+func TestConfigAliasFormatKeepsItsOwnStructuralRules(t *testing.T) {
+	r := refusalRepo(t)
+	alias := func(f string) func(*models.File) {
+		return func(c *models.File) {
+			c.AliasTags = []models.AliasTagConfig{{Format: f}}
+		}
+	}
+	runRefusals(t, r, []refusal{
+		{"two version placeholders", alias("{name}@v{version}-{version}"),
+			"contains more than one {version} placeholder"},
+		{"channel without counter", alias("{name}@v{major}-{channel}"),
+			"uses {channel} without {counter}"},
+		{"counter without channel", alias("{name}@v{major}-{counter}"),
+			"uses {counter} without {channel}"},
+		{"two channel placeholders", alias("{name}@v{major}-{channel}{channel}.{counter}"),
+			"contains more than one {channel} placeholder"},
+		{"two counter placeholders", alias("{name}@v{major}-{channel}.{counter}{counter}"),
+			"contains more than one {counter} placeholder"},
+		{"a name git refuses", alias("/{name}@v{major}"),
+			"a ref name may not begin or end with '/'"},
+	})
+}

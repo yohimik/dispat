@@ -1601,3 +1601,29 @@ func TestRecordsCatchUpGithubBodySpansTheProvidersMovement(t *testing.T) {
 	assert.NotContains(t, body, "0.1.1 -> 0.1.1",
 		"a movement line with no movement is the bug this spans away")
 }
+
+// TestRecordsRefuseInvalidAliasTags: an alias is only ever written, so the
+// rules it is held to are its own — and the strictest of them is that an
+// alias must never be readable back as a release tag.
+func TestRecordsRefuseInvalidAliasTags(t *testing.T) {
+	r := refusalRepo(t)
+	alias := func(a models.AliasTagConfig) func(*models.File) {
+		return func(c *models.File) { c.AliasTags = []models.AliasTagConfig{a} }
+	}
+	runRefusals(t, r, []refusal{
+		{"no format", alias(models.AliasTagConfig{Moving: true}), "format is required"},
+		{"format naming no version part", alias(models.AliasTagConfig{Format: "{name}-latest"}),
+			"names no part of the version"},
+		{"moving alias pinned", alias(models.AliasTagConfig{Format: "{name}@v{major}", Moving: true, Force: models.Bool(false)}),
+			"a moving alias cannot set force: false"},
+		{"channel with no name", alias(models.AliasTagConfig{Format: "{name}@v{major}", Channels: []string{""}}),
+			"channels must not contain an empty name"},
+		{"alias readable as a release tag", alias(models.AliasTagConfig{Format: "{name}@{version}"}),
+			"would be read back as a release tag"},
+		{"space alias tag", func(c *models.File) {
+			s := c.Spaces["libs"]
+			s.AliasTags = []models.AliasTagConfig{{Format: ""}}
+			c.Spaces["libs"] = s
+		}, "format is required"},
+	})
+}
