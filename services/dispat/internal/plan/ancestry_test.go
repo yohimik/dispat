@@ -114,6 +114,9 @@ func (g perBoundaryGit) HeadSHA(ctx context.Context) (string, error) { return g.
 func (g perBoundaryGit) ResolveCommit(ctx context.Context, rev string) (string, error) {
 	return g.inner.ResolveCommit(ctx, rev)
 }
+func (g perBoundaryGit) ChangedFiles(ctx context.Context, commits []string) (map[string][]string, error) {
+	return g.inner.ChangedFiles(ctx, commits)
+}
 
 // randomRepository grows a history with side branches and merges, every
 // commit a CCME message drawn from the directives whose meaning rests on

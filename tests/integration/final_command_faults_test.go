@@ -263,7 +263,7 @@ func TestFinalStepCommandsStopWhenPlanningOrSelectionCannotReadGit(t *testing.T)
 			},
 			{
 				name:    "selection window",
-				pattern: "*log --format=*--diff-merges=first-parent HEAD~1..HEAD*",
+				pattern: "*log --format=* HEAD~1..HEAD*",
 				want:    "resolving commits since",
 			},
 		} {

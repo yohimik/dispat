@@ -273,6 +273,7 @@ func (cp *computation) derived(rec *commitRec) map[string]bool {
 	if cp.scopeDirs == nil {
 		cp.prepareScopeDirs()
 	}
+	cp.readUnforeseenFiles(rec)
 	out := make(map[string]bool)
 	firstFile := make(map[string]string)
 	for _, file := range rec.commit.Files {

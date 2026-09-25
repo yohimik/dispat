@@ -49,7 +49,7 @@ func TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot(t *testing.T) {
 		},
 		{
 			name:    "pending commit window",
-			pattern: "*log --format=*--diff-merges=first-parent HEAD*",
+			pattern: "*log --format=* HEAD*",
 			want:    "plan: core: git log",
 		},
 	} {
@@ -107,7 +107,7 @@ func TestFinalPlanFaultStopsRunSinceBeforeTheScript(t *testing.T) {
 	r.WriteFile("packages/core/change.txt", "pending\n")
 	r.Commit("fix(core): pending change")
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*log --format=*--diff-merges=first-parent HEAD~1..HEAD*",
+		Pattern: "*log --format=* HEAD~1..HEAD*",
 	})
 
 	res := r.CommandEnv(fault.Env(), "run", "build", "--since", "HEAD~1")

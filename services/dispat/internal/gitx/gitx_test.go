@@ -425,7 +425,11 @@ func TestCommitsCarrySHAsParentsAndFullMessages(t *testing.T) {
 	assert.Contains(t, newest.Message, "A body paragraph")
 	assert.Contains(t, newest.Message, "Propagate-Depth: 2")
 	assert.Contains(t, newest.Message, "BREAKING CHANGE: the old API is gone")
-	assert.Equal(t, []string{"packages/core/second.txt"}, newest.Files,
+	assert.True(t, newest.AreFilesDeferred, "the history read lists no paths")
+	assert.Empty(t, newest.Files)
+	files, err := cli.ChangedFiles(ctx, []string{newest.SHA})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"packages/core/second.txt"}, files[newest.SHA],
 		"the body must not leak into the changed-file list")
 
 	assert.Empty(t, commits[1].Parents, "the root commit has no parent")
@@ -471,7 +475,9 @@ func TestCommitsCarryTheAuthorIdentity(t *testing.T) {
 	assert.Equal(t, "zoe@example.com", commits[0].AuthorEmail)
 	assert.Equal(t, "Ada Lovelace", commits[1].AuthorName)
 	assert.Equal(t, "ada@example.com", commits[1].AuthorEmail)
-	assert.Equal(t, []string{"packages/core/accented.txt"}, commits[0].Files,
+	files, err := cli.ChangedFiles(ctx, []string{commits[0].SHA})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"packages/core/accented.txt"}, files[commits[0].SHA],
 		"the author fields must not shift the file list")
 }
 
@@ -498,7 +504,9 @@ func TestCommitsAuthorSurvivesSeparatorLikeMessages(t *testing.T) {
 		"the message text must not be read as the author")
 	assert.Equal(t, "real@example.com", newest.AuthorEmail)
 	assert.Contains(t, newest.Message, "Another Person <other@example.com>")
-	assert.Equal(t, []string{"packages/core/tricky.txt"}, newest.Files,
+	files, err := cli.ChangedFiles(ctx, []string{newest.SHA})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"packages/core/tricky.txt"}, files[newest.SHA],
 		"a path-shaped line inside the message is not a changed file")
 }
 

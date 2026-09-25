@@ -64,7 +64,7 @@ func TestFinalPlanningWorkloadIsDebugOnlyAndPreservesThePlan(t *testing.T) {
 	t.Run("failed history still reports partial workload and the error", func(t *testing.T) {
 		r := singlePackageRepo(t, echoBuild)
 		r.Commit("feat(core): bootstrap")
-		fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*log --format=*--diff-merges=first-parent HEAD*"})
+		fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*log --format=* HEAD*"})
 		res := r.CommandEnv(fault.Env(), "status", "--log-level", "debug", "--log-format", "json")
 		require.NotZero(t, res.Code)
 		var workload, failure int

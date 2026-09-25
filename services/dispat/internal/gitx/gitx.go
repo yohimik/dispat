@@ -466,6 +466,13 @@ type Commit struct {
 	// resolution (§6.2). For a merge commit these are the changes against the
 	// first parent.
 	Files []string
+	// AreFilesDeferred reports that Files was not read with the commit: the
+	// implementation lists a commit's changed paths on request instead
+	// (ChangedFilesx), and the caller asks for the commits whose paths it
+	// needs. Listing paths means diffing every commit against its parent,
+	// which is most of what reading a history costs, and only a commit
+	// carrying a unit whose scope comes from its files (§6.2) ever reads them.
+	AreFilesDeferred bool
 }
 
 // Tags are one package's reachable release tags, newest first by creation
@@ -528,7 +535,9 @@ type Gitx interface {
 	Tags(ctx context.Context, pkg string, format TagFormat) (Tags, error)
 	// Commits lists commit messages lines reachable from HEAD, newest first.
 	// When sinceTag is non-empty only commits after that tag are listed;
-	// otherwise the whole history down to the first commit is used.
+	// otherwise the whole history down to the first commit is used. An
+	// implementation with ChangedFilesx leaves each commit's Files to it and
+	// says so with AreFilesDeferred.
 	Commits(ctx context.Context, sinceTag string) ([]Commit, error)
 	// CreateTag creates an annotated tag at target, or at HEAD when target
 	// is empty.
@@ -601,6 +610,20 @@ type CommitProbex interface {
 // reads one window per boundary and asks IsAncestor, exactly as before.
 type UnionHistoryx interface {
 	CommitsSinceAny(ctx context.Context, boundaries []string) ([]Commit, error)
+}
+
+// ChangedFilesx is the optional Gitx capability that lists commits' changed
+// paths apart from their messages (§6.2, CCME §13.11). An implementation with
+// it answers Commits and CommitsSinceAny without paths, marking each commit
+// AreFilesDeferred, and the caller asks ChangedFiles for the commits whose
+// scope derives from their files.
+//
+// The answer for a commit is exactly the Files the commit would have carried
+// had it been read with its paths: the changes against the first parent for a
+// merge, every path of a root commit, and a renamed file under its new name
+// alone.
+type ChangedFilesx interface {
+	ChangedFiles(ctx context.Context, commits []string) (map[string][]string, error)
 }
 
 // ErrBoundaryNotBehindHead is CommitsSinceAny declining a boundary HEAD does
@@ -1538,31 +1561,96 @@ func (c *LocalGitx) octopusBases(ctx context.Context, commits []string) ([]strin
 	return bases, nil
 }
 
-var _ UnionHistoryx = (*LocalGitx)(nil)
+var (
+	_ UnionHistoryx = (*LocalGitx)(nil)
+	_ ChangedFilesx = (*LocalGitx)(nil)
+)
 
 // log reads the commits a revision range selects, with the payload planning
-// needs from each.
+// needs from each: everything but the changed paths, which ChangedFiles reads
+// for the few commits that need them. The walk is the same either way; what
+// the paths would add is a diff of every commit against its parent.
 func (c *LocalGitx) log(ctx context.Context, revisions ...string) ([]Commit, error) {
 	args := []string{
 		"log",
 		"--format=" + logRecordSep + "%H" + logFieldSep + "%P" + logFieldSep +
 			"%an" + logFieldSep + "%ae" + logFieldSep + "%B" + logFieldSep,
-		"--name-only",
-		// §6.2: a merge commit's changed-file list is its diff against the
-		// *first parent*. Without this git shows no diff for merges at all, so
-		// every file-derived scope inside a merge silently resolves to nothing.
-		// This does not change which commits are traversed — the window is
-		// still every commit reachable from HEAD (§13.3).
-		"--diff-merges=first-parent",
 	}
 	out, err := c.run(ctx, append(args, revisions...)...)
 	if err != nil {
 		return nil, err
 	}
 	commits, err := parseCommits(out)
-	// --name-only diffs every commit the range lists.
-	commitsDiffed.Add(uint64(len(commits)))
+	for i := range commits {
+		commits[i].AreFilesDeferred = true
+	}
 	return commits, err
+}
+
+// ChangedFiles implements ChangedFilesx in one git process, whatever the
+// number of commits.
+//
+// It is `git log` over exactly the named commits (--no-walk, fed on standard
+// input) rather than `git diff-tree`, because the paths must be the ones a
+// history read with --name-only lists, and the two commands disagree: log
+// detects renames as diff.renames configures it and lists a renamed file under
+// its new name, while diff-tree is plumbing, ignores that setting and lists
+// both names. §6.2 counts a merge commit's changes against its first parent,
+// which --diff-merges=first-parent selects here as it did in the history read.
+func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[string][]string, error) {
+	var stdin strings.Builder
+	seen := make(map[string]bool, len(commits))
+	for _, commit := range commits {
+		if !fullObjectID(commit) {
+			return nil, fmt.Errorf("gitx: changed files of %q: not a full commit id", commit)
+		}
+		if !seen[commit] {
+			seen[commit] = true
+			stdin.WriteString(commit + "\n")
+		}
+	}
+	if len(seen) == 0 {
+		return map[string][]string{}, nil
+	}
+	out, err := c.runStream(ctx, gitStream{stdin: strings.NewReader(stdin.String())},
+		"log", "--no-walk=unsorted", "--stdin",
+		"--format="+logRecordSep+"%H"+logFieldSep,
+		"--name-only", "--diff-merges=first-parent")
+	if err != nil {
+		return nil, err
+	}
+	commitsDiffed.Add(uint64(len(seen)))
+	files, err := parseChangedFiles(out)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) != len(seen) {
+		return nil, fmt.Errorf("gitx: changed files listed %d of %d commits", len(files), len(seen))
+	}
+	return files, nil
+}
+
+// parseChangedFiles reads the ChangedFiles listing: per commit a record of its
+// id and the paths it changed, one per line.
+func parseChangedFiles(out string) (map[string][]string, error) {
+	files := make(map[string][]string)
+	for _, record := range strings.Split(out, logRecordSep) {
+		if strings.TrimSpace(record) == "" {
+			continue
+		}
+		sha, list, ok := strings.Cut(record, logFieldSep)
+		if !ok || !fullObjectID(sha) {
+			return nil, fmt.Errorf("gitx: malformed changed files record")
+		}
+		var paths []string
+		for line := range strings.Lines(list) {
+			if line = strings.TrimRight(line, "\r\n"); line != "" {
+				paths = append(paths, strings.Clone(line))
+			}
+		}
+		files[strings.Clone(sha)] = paths
+	}
+	return files, nil
 }
 
 func parseCommits(out string) ([]Commit, error) {

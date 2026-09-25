@@ -254,7 +254,7 @@ func TestFinalPolyrepoPlanningFaultsDoNotShrinkTheFleetSnapshot(t *testing.T) {
 		},
 		{
 			name:  "source pending commits",
-			fault: harness.GitFault{Pattern: "*log --format=*--diff-merges=first-parent HEAD*"},
+			fault: harness.GitFault{Pattern: "*log --format=* HEAD*"},
 			want:  "lib-source history for core",
 		},
 		{
@@ -330,7 +330,7 @@ func TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow(t *test
 				output = strings.Join([]string{object, scenario.parent, "Author", "author@example.test", "fix(core): pending"}, "\x1f")
 			}
 			fault := harness.NewGitFault(t, harness.GitFault{
-				Pattern: "*log --format=*--diff-merges=first-parent HEAD*", Output: output,
+				Pattern: "*log --format=* HEAD*", Output: output,
 			})
 			result := fleet.control.CommandEnv(fault.Env(), "status")
 			require.NotZero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
@@ -477,7 +477,7 @@ func TestFinalPolyrepoRunSinceFaultStopsBeforeTheSelectedScript(t *testing.T) {
 			fault: harness.GitFault{
 				// Repository windows may be read in either order. Select the
 				// owner explicitly instead of relying on a shared call ordinal.
-				Pattern: "*-C */sources/lib log --format=*--diff-merges=first-parent *..HEAD*",
+				Pattern: "*-C */sources/lib log --format=* *..HEAD*",
 			},
 			want:    "resolving repository lib-source commits",
 			matches: 1,

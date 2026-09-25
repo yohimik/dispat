@@ -60,7 +60,7 @@ func TestCommitPropagatesAWindowReadFailureBeforeWriting(t *testing.T) {
 	beforeHead := r.Git("rev-parse", "HEAD")
 	beforeIndex := r.Git("diff", "--cached")
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*log --format=*--diff-merges=first-parent HEAD~1..HEAD*",
+		Pattern: "*log --format=* HEAD~1..HEAD*",
 		Code:    128,
 	})
 

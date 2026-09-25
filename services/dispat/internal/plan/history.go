@@ -99,6 +99,9 @@ func cloneHistoryCommit(repository, root string, commit gitx.Commit) historyComm
 			AuthorEmail: strings.Clone(commit.AuthorEmail),
 			Message:     strings.Clone(commit.Message),
 			Files:       files,
+			// Deferred files stay deferred: the planner reads them for the
+			// commits that need them, from the repository named above.
+			AreFilesDeferred: commit.AreFilesDeferred,
 		},
 	}
 }

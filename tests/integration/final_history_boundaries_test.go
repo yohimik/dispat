@@ -61,7 +61,7 @@ func TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow(t *testing.T) {
 	f := finalFreshPrereleaseHistory(t)
 
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*-C */sources/lib log --format=*--diff-merges=first-parent HEAD --not *",
+		Pattern: "*-C */sources/lib log --format=* HEAD --not *",
 	})
 	res := f.control.CommandEnv(fault.Env(), "status")
 	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)

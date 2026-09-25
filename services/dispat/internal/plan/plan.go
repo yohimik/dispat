@@ -1550,6 +1550,10 @@ type computation struct {
 	ancCache map[[2]string]bool
 	ancNoGit map[string]bool
 	ancErr   error
+	// filesErr is the first failure to read a commit's deferred changed
+	// files outside the pre-pass (readUnforeseenFiles). It aborts Compute:
+	// a scope resolved without the files it derives from is wrong.
+	filesErr error
 	// pinPresent memoises the commit-presence probe behind sourceContainsPin,
 	// keyed by qualified revision. The guard asks the same question once per
 	// applicable control unit, and a fleet catching up has many of those over
@@ -1940,22 +1944,32 @@ func PackagesChangedSince(ctx context.Context, git TagInventoryGitx, opts Option
 			}
 		}
 	}
-	selected := make(map[string]bool)
-	for _, rec := range records {
-		configured := cp.parser
-		if parser := cp.parsers[globx.Fold(rec.repository)]; parser != nil {
-			configured = parser
-		}
-		data, err := configured.Parse(rec.commit.Message)
+	units := make([][]*ccme.Unit, len(records))
+	var needFiles []*commitRec
+	for i, rec := range records {
+		data, err := cp.parserFor(rec).Parse(rec.commit.Message)
 		if data == nil {
 			return nil, fmt.Errorf("plan: %s: %w", rec.key, err)
 		}
-		for _, u := range data.ValidUnits() {
+		units[i] = data.ValidUnits()
+		if rec.commit.AreFilesDeferred && areFilesNeededBy(units[i]) {
+			needFiles = append(needFiles, rec)
+		}
+	}
+	if err := cp.readDeferredFiles(needFiles); err != nil {
+		return nil, err
+	}
+	selected := make(map[string]bool)
+	for i, rec := range records {
+		for _, u := range units[i] {
 			scopes, written := unitScopes(u)
 			for name := range cp.resolveScopeSet(scopes, written, rec).packages {
 				selected[name] = true
 			}
 		}
+	}
+	if cp.filesErr != nil {
+		return nil, cp.filesErr
 	}
 	out := make([]string, 0, len(selected))
 	for _, name := range cp.order {
@@ -2786,56 +2800,81 @@ func (cp *computation) ancestryFailed() error {
 // §13.4 parse and resolve
 // ---------------------------------------------------------------------------
 
+// parseAndResolve parses every commit of the union, reads the changed files of
+// the commits whose units derive a scope from them (files.go), and then
+// resolves the units commit by commit.
 func (cp *computation) parseAndResolve() error {
-	for _, rec := range cp.commits {
-		parser := cp.parser
-		if configured := cp.parsers[globx.Fold(rec.repository)]; configured != nil {
-			parser = configured
-		}
-		data, err := parser.Parse(rec.commit.Message)
+	parsed := make([]*ccme.Result, len(cp.commits))
+	var needFiles []*commitRec
+	for i, rec := range cp.commits {
+		data, err := cp.parserFor(rec).Parse(rec.commit.Message)
 		if data == nil {
 			return fmt.Errorf("plan: %s: %w", rec.key, err)
 		}
-		// A parse error invalidates only the offending unit (§16); its
-		// siblings still apply, so the error itself is reported rather than
-		// returned.
-		cp.liftDiagnostics(data, rec.key)
+		parsed[i] = data
+		if rec.commit.AreFilesDeferred && areFilesNeededBy(data.ValidUnits()) {
+			needFiles = append(needFiles, rec)
+		}
+	}
+	if err := cp.readDeferredFiles(needFiles); err != nil {
+		return err
+	}
+	for i, rec := range cp.commits {
+		cp.resolveCommit(rec, parsed[i])
+		parsed[i] = nil
+	}
+	return cp.filesErr
+}
 
-		rec.units = data.ValidUnits()
-		rec.unitCount = len(data.Units)
-		cp.resolveAuthors(rec)
-		rec.scope = make([]map[string]bool, len(rec.units))
-		rec.propagations = make([]propagation, len(rec.units))
-		rec.channelPropagations = make([]channelPropagation, len(rec.units))
-		for i, u := range rec.units {
-			// The commit behind the unit, recorded here because this is the
-			// one place a unit and the record that carried it are both in
-			// hand. Every unit of one message shares its key.
-			cp.unitCommits[u] = rec.key
-			scopes, written := unitScopes(u)
-			res := cp.resolveScopeSet(scopes, written, rec)
-			cp.reportScope(res, rec, "")
-			// A correction with no scope-set takes the union of its targets'
-			// packages, and §7.4.2 disapplies the file-derived fallback for it.
-			// Its resolution here is provisional, so neither the inert warning
-			// nor the set itself means anything until §13.4b has settled it.
-			if res.inert() && !(isCorrection(u) && !written) {
-				cp.warn(CodeInertUnit, "", rec.key,
-					"unit resolved to no package and is inert: "+u.Header.Raw)
-			}
-			rec.scope[i] = res.packages
-			if !u.IsCancel() {
-				// The unit's Propagate-Scope restricts both axes (§8.5a), so
-				// it is resolved once, by whichever axis asks first.
-				var propagateScope *scopeResult
-				rec.channelPropagations[i] = cp.unitChannelPropagation(u, rec, &propagateScope)
-				if u.Bump != ccme.BumpNone {
-					rec.propagations[i] = cp.unitPropagation(u, rec, &propagateScope)
-				}
+// parserFor is the parser configured for the history carrying rec.
+func (cp *computation) parserFor(rec *commitRec) *ccme.Parser {
+	if configured := cp.parsers[globx.Fold(rec.repository)]; configured != nil {
+		return configured
+	}
+	return cp.parser
+}
+
+// resolveCommit is §13.4 for one parsed commit: its diagnostics, its authors,
+// and every unit's scope-set and propagation.
+func (cp *computation) resolveCommit(rec *commitRec, data *ccme.Result) {
+	// A parse error invalidates only the offending unit (§16); its
+	// siblings still apply, so the error itself is reported rather than
+	// returned.
+	cp.liftDiagnostics(data, rec.key)
+
+	rec.units = data.ValidUnits()
+	rec.unitCount = len(data.Units)
+	cp.resolveAuthors(rec)
+	rec.scope = make([]map[string]bool, len(rec.units))
+	rec.propagations = make([]propagation, len(rec.units))
+	rec.channelPropagations = make([]channelPropagation, len(rec.units))
+	for i, u := range rec.units {
+		// The commit behind the unit, recorded here because this is the
+		// one place a unit and the record that carried it are both in
+		// hand. Every unit of one message shares its key.
+		cp.unitCommits[u] = rec.key
+		scopes, written := unitScopes(u)
+		res := cp.resolveScopeSet(scopes, written, rec)
+		cp.reportScope(res, rec, "")
+		// A correction with no scope-set takes the union of its targets'
+		// packages, and §7.4.2 disapplies the file-derived fallback for it.
+		// Its resolution here is provisional, so neither the inert warning
+		// nor the set itself means anything until §13.4b has settled it.
+		if res.inert() && !(isCorrection(u) && !written) {
+			cp.warn(CodeInertUnit, "", rec.key,
+				"unit resolved to no package and is inert: "+u.Header.Raw)
+		}
+		rec.scope[i] = res.packages
+		if !u.IsCancel() {
+			// The unit's Propagate-Scope restricts both axes (§8.5a), so
+			// it is resolved once, by whichever axis asks first.
+			var propagateScope *scopeResult
+			rec.channelPropagations[i] = cp.unitChannelPropagation(u, rec, &propagateScope)
+			if u.Bump != ccme.BumpNone {
+				rec.propagations[i] = cp.unitPropagation(u, rec, &propagateScope)
 			}
 		}
 	}
-	return nil
 }
 
 // liftDiagnostics carries ccme's diagnostics into the plan's, preserving code
