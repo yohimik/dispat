@@ -272,6 +272,70 @@ func TestFinalOrchestratedCheckpointCommitFaultPreservesTheRemoteSourceRecord(t 
 	assert.Equal(t, sourceAfter, control.Git("rev-parse", "HEAD:sources/lib"))
 }
 
+// TestFinalOrchestratedRecordReadFaultsStopTheRecordWhereTheyHappen: between
+// the writes of an orchestrated record, dispat reads back what it just wrote:
+// the source head its record commit made, the gitlink the control repository
+// holds, and the control head its checkpoint made. A read Git cannot answer
+// stops the record at that point with E335 naming it: the package stays
+// published once, and no step after the failed read runs, so no tag, source
+// push or checkpoint push stands on an unconfirmed read.
+func TestFinalOrchestratedRecordReadFaultsStopTheRecordWhereTheyHappen(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		repository       string // "source" or "control"
+		armAfter         string
+		pattern          string
+		isSourceTagged   bool
+		isControlChanged bool
+	}{
+		{name: "the source head after its record commit", repository: "source",
+			armAfter: "commit --only *", pattern: "rev-parse HEAD^{commit}*"},
+		{name: "the control gitlink before the checkpoint", repository: "control",
+			armAfter: "", pattern: "ls-tree -z HEAD -- sources/lib*", isSourceTagged: true},
+		{name: "the control head after the checkpoint commit", repository: "control",
+			armAfter: "commit --only *", pattern: "rev-parse HEAD^{commit}*",
+			isSourceTagged: true, isControlChanged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fleet := newFinalFaultFleet(t)
+			control := fleet.control
+			root := canonicalRoot(t, control)
+			if tc.repository == "source" {
+				root = filepath.Join(root, "sources", "lib")
+			}
+			fault := harness.GitFault{Pattern: "*-C " + root + " *" + tc.pattern, Nth: 1}
+			if tc.armAfter != "" {
+				fault.ArmAfter = "*-C " + root + " *" + tc.armAfter
+			} else {
+				// The gitlink is read while the checkpoint is prepared, after
+				// the source record reached its remote.
+				fault.ArmAfter = "*-C " + filepath.Join(root, "sources", "lib") + " *push*refs/tags/lib@0.1.0*"
+			}
+			injected := harness.NewGitFault(t, fault)
+
+			failed := control.CommandEnv(injected.Env())
+			require.NotZero(t, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+			assert.Contains(t, failed.Stdout+failed.Stderr, harness.GitFaultMarker)
+			assert.True(t, harness.IsCodePresent(failed.Events, "E335"), "stdout:\n%s", failed.Stdout)
+			assert.Contains(t, failed.Stdout, `"status":"published"`)
+			assert.Equal(t, 1, injected.Matches())
+			assert.Equal(t, 1, finalPublishCount(t, control))
+			if tc.isSourceTagged {
+				assert.Equal(t, []string{"lib@0.1.0"}, polyrepoTags(control, "sources/lib"))
+			} else {
+				assert.Empty(t, polyrepoTags(control, "sources/lib"), "no tag follows the unconfirmed head")
+				assert.Empty(t, control.Git("-C", fleet.sourceRemote, "tag", "--list"), "nothing reached the source remote")
+			}
+			assert.Equal(t, tc.isControlChanged, control.Git("rev-parse", "HEAD") != fleet.controlBefore,
+				"only a checkpoint commit that ran moves the control repository")
+			assert.Equal(t, tc.isControlChanged, control.Git("rev-parse", "HEAD:sources/lib") != fleet.sourceBefore)
+			assert.Equal(t, fleet.controlBefore,
+				control.Git("-C", fleet.controlRemote, "rev-parse", "refs/heads/"+harness.DefaultBranch),
+				"no checkpoint reached the control remote")
+		})
+	}
+}
+
 // TestFinalOrchestratedControlPushFaultKeepsTheLocalCheckpoint: the final
 // control push is the last external write in an orchestrated record. Its
 // failure must leave the source remote complete and the local checkpoint
