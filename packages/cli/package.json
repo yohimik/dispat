@@ -1,6 +1,6 @@
 {
   "name": "@dispat/bin",
-  "version": "1.11.0-rc.4",
+  "version": "1.11.0-rc.5",
   "description": "Autistic stability for ADHD projects. Mathematical planning and saga recovery for releases in any language. The dispat CLI, as a native binary.",
   "keywords": ["cli", "release", "release-automation", "release-orchestration", "orchestrator", "orchestration", "saga", "workflow", "dependency-graph", "versioning", "monorepo", "polyrepo", "conventional-commits", "changelog", "ci-cd", "adhd", "autism", "neurodivergent", "deterministic", "control-repository"],
   "license": "MIT",

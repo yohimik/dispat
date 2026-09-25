@@ -1,5 +1,56 @@
 # Changelog
 
+## packages/cli/v1.11.0-rc.5 (2026-09-25)
+
+### Fixes
+
+- authenticate the release packager's GitHub lookup ([b14497f](https://github.com/yohimik/dispat/commit/b14497f433d20e7adf60a79b8d877300e70ee99f)) (by yohimik, Claude Opus 5.5)
+  The npm release build reads the exact dispat release it wraps from the GitHub
+  API. That lookup was anonymous, so on a shared runner address it drew on the
+  same 60-requests-an-hour quota as every other anonymous caller there:
+  1.11.0-rc.5 failed with a 403 once the image builds had spent it, and
+  make-fetch-happen retries 408, 420, 429 and server errors but never a 403.
+  The packager now sends the release job's GITHUB_TOKEN, only to api.github.com
+  over HTTPS. A rate-limited 403 or 429 waits for the time the response names
+  (retry-after, or the rate limit's reset), at most a minute, for at most three
+  attempts, and a refusal reports GitHub's own message.
+
+  The npm-released, npm-version and npm-binary-version step outputs come from a
+  postPublish hook named released, like the dispat package's, instead of an
+  announce stage that announced nothing.
+
+- reset TinyGo rollback retention and expose acceptance failures ([ad62412](https://github.com/yohimik/dispat/commit/ad62412ff79631548fd5a617a0c31d8854ab0790)) (by yohimik)
+
+- bind every receipt and acknowledge cancellation that wins the result lease ([612a58b](https://github.com/yohimik/dispat/commit/612a58b5295015a13203cae8f4648f551a460913)) (by yohimik)
+
+- authenticate queued transitions and settle concurrent withdrawal safely ([f694114](https://github.com/yohimik/dispat/commit/f6941140a99209e851ecf889c54b9aa8cfd023e4)) (by yohimik)
+
+- retain authenticated coordination ownership through cancellation races ([7dceee9](https://github.com/yohimik/dispat/commit/7dceee974ac2937c6d5d64e3cec5c76df0822ed7)) (by yohimik)
+
+- preserve complete writes and reconcile release identities and late claims ([7fb8a84](https://github.com/yohimik/dispat/commit/7fb8a84693d4472e31a73d1cdc10f5db64578b88)) (by yohimik)
+
+- settle worker cleanup races and report failed output merges ([96c435e](https://github.com/yohimik/dispat/commit/96c435e24f2de9a181bbf13b4c2bf49036d29cc0)) (by yohimik)
+
+- isolate distributed outputs and preserve recovery state ([fe7c42f](https://github.com/yohimik/dispat/commit/fe7c42fa606781166be077e9322ff5e173295658)) (by yohimik)
+
+- admit durable receipts and retain fleet command ownership ([f2f1d96](https://github.com/yohimik/dispat/commit/f2f1d965679a22cfe00adb8170e37ee9bd60bdb7)) (by yohimik)
+
+- keep Git maintenance attached and stream tag receipts ([dd79291](https://github.com/yohimik/dispat/commit/dd7929143c99a16f3d920fe99e220d79be8331a0)) (by yohimik)
+
+- preserve uncertain publication and bound worker state ([e92ca16](https://github.com/yohimik/dispat/commit/e92ca16f0cbbee47a18a45b41f085f217e3e45da)) (by yohimik)
+
+- bound transports and fence worker state ownership ([792522e](https://github.com/yohimik/dispat/commit/792522e7a8ad723724dd53fbb967d492d2ceaad9)) (by yohimik)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.6): 1.11.0-rc.5 -> 1.11.0-rc.6
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## packages/cli/v1.11.0-rc.4 (2026-09-23)
 
 ### Dependencies

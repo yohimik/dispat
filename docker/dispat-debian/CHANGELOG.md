@@ -1,5 +1,31 @@
 # Changelog
 
+## docker/dispat-debian/v1.11.0-rc.6 (2026-09-25)
+
+### Fixes
+
+- authenticate the image builds' release lookup and wait out a rate limit ([ef5a0a3](https://github.com/yohimik/dispat/commit/ef5a0a329cf2d0d96fbfda70e4a525502c6acf4a)) (by yohimik, Claude Opus 5.5)
+  The four images' fetch stages ran install.sh anonymously, so every image
+  build shared the runner address's small hourly quota, and install.sh read
+  any refused lookup, a spent rate limit included, as "no release for TAG".
+  The fetch stages now install curl and mount the build's GITHUB_TOKEN as the
+  github_token secret, which the compose files declare from the environment and
+  the docker space exports on every compose call (empty means anonymous, as
+  before). install.sh and install.ps1 wait out a rate-limited 403 or 429 for up
+  to three attempts, as retry-after or x-ratelimit-reset asks and at most a
+  minute each, call a release missing only on a 404, and otherwise report the
+  HTTP status with GitHub's own message.
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.6): 1.11.0-rc.5 -> 1.11.0-rc.6
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## docker/dispat-debian/v1.11.0-rc.5 (2026-09-23)
 
 ### Fixes
