@@ -414,6 +414,27 @@ type OwedPair struct {
 // off the head: a run cannot know before it publishes whether that commit will
 // be empty, and an empty one leaves the tag on the head.
 func (p *Plan) OwedAtHead(isHeadReached func(repository, commit string) bool) []OwedPair {
+	return p.listOwedAtHead(isHeadReached, (*Release).IsReleasing)
+}
+
+// OwedAtHeadAmong is OwedAtHead for an invocation that releases only the named
+// packages of the plan, in plan order, as the standalone `dispat commit --tag`
+// does: a package the plan releases and the invocation does not cover is not
+// released after the provider, so it is owed exactly as a consumer the plan
+// leaves out.
+func (p *Plan) OwedAtHeadAmong(names []string, isHeadReached func(repository, commit string) bool) []OwedPair {
+	isCovered := make(map[string]bool, len(names))
+	for _, name := range names {
+		isCovered[name] = true
+	}
+	return p.listOwedAtHead(isHeadReached, func(r *Release) bool {
+		return isCovered[r.Pkg.Name] && r.IsReleasing()
+	})
+}
+
+// listOwedAtHead is OwedAtHead with the releasing packages told by a
+// predicate.
+func (p *Plan) listOwedAtHead(isHeadReached func(repository, commit string) bool, isReleased func(*Release) bool) []OwedPair {
 	position := make(map[string]int, len(p.Order))
 	for i, name := range p.Order {
 		position[name] = i
@@ -421,7 +442,7 @@ func (p *Plan) OwedAtHead(isHeadReached func(repository, commit string) bool) []
 	var pairs []OwedPair
 	for _, consumerName := range p.Order {
 		consumer := p.Releases[consumerName]
-		if consumer == nil || consumer.IsReleasing() || len(consumer.owedBoundaries) == 0 {
+		if consumer == nil || isReleased(consumer) || len(consumer.owedBoundaries) == 0 {
 			continue
 		}
 		providers := make([]string, 0, len(consumer.owedBoundaries))
@@ -431,7 +452,7 @@ func (p *Plan) OwedAtHead(isHeadReached func(repository, commit string) bool) []
 		sort.Slice(providers, func(i, j int) bool { return position[providers[i]] < position[providers[j]] })
 		for _, providerName := range providers {
 			provider := p.Releases[providerName]
-			if provider == nil || !provider.IsReleasing() {
+			if provider == nil || !isReleased(provider) {
 				continue
 			}
 			boundary := consumer.owedBoundaries[providerName]

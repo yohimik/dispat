@@ -75,6 +75,11 @@ func (a *App) Commit(ctx context.Context, opts CommitOptions) error {
 		a.log.Error().Err(err).Msg("cannot commit")
 		return err
 	}
+	if opts.Tag {
+		if err := a.refuseOwedTag(ctx, pl, covered); err != nil {
+			return err
+		}
+	}
 	if a.workspace != nil {
 		return a.commitWorkspace(ctx, pl, covered, opts)
 	}

@@ -73,7 +73,8 @@ commit first and release the provider alone, which leaves the provider's tag pas
 run still plans the consumer's catch-up (`W193`). `dispat status` prints the same lines, warns that a release would be
 refused, and still exits `0`. The refusal is conservative in commit mode: the release commit usually moves the
 provider's tag past the consumer's commit, but a run cannot know before it publishes whether that commit will be
-empty, and an empty one leaves the tag on the head.
+empty, and an empty one leaves the tag on the head. [`dispat commit --tag`](../cli/commit.md) refuses the same way
+outside a release stage script, before it commits or tags anything, unless it covers the consumer too.
 
 The same state can arise after publication, when the run releases the provider and then the consumer on the
 consumer's own release commit and the consumer fails. dispat then reports `E201` as a critical failure, exits `1`, and

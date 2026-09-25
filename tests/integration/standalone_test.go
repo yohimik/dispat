@@ -300,6 +300,52 @@ func TestStandaloneCommitPushWithoutRemoteFails(t *testing.T) {
 	assert.Equal(t, 1, r.TagCount("core@"), "the local work before the push still happened")
 }
 
+// TestStandaloneCommitTagRefusesAProviderAtItsConsumersCommit is SPEC 19.3's
+// E201 for a hand-built pipeline: the consumer proceeded at the commit its
+// provider failed on (vector 80d), and `dispat commit --tag` for the provider
+// alone would tag it where the consumer's tag already sits, where ancestry
+// could never tell that the consumer came first. It is refused before any
+// commit or tag, and covering the consumer too tags both. A nested invocation
+// inside a run that releases both is left to that run, which asked the
+// question of its whole selection before anything ran.
+func TestStandaloneCommitTagRefusesAProviderAtItsConsumersCommit(t *testing.T) {
+	t.Run("the provider alone is refused", func(t *testing.T) {
+		r := admissionProceeded(t, admissionShape{})
+		head := r.Git("rev-parse", "HEAD")
+		refused := r.Command("commit", "--tag", "--package", "core")
+		require.Equal(t, 1, refused.Code, "stdout:\n%s\nstderr:\n%s", refused.Stdout, refused.Stderr)
+		report := admissionEvent(refused.Events, "E201", "cli")
+		require.NotNil(t, report, "E201 names the consumer; stdout:\n%s", refused.Stdout)
+		assert.Equal(t, "core", report.Str("provider"))
+		assert.Equal(t, "commit and tag cli in the same invocation (--package core,cli), or tag core after a new commit",
+			report.Str("remedy"))
+		assert.Zero(t, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, head, r.Git("rev-parse", "HEAD"), "nothing was committed")
+
+		both := r.Command("commit", "--tag", "--package", "core,cli")
+		require.Equal(t, 0, both.Code, "stdout:\n%s\nstderr:\n%s", both.Stdout, both.Stderr)
+		assert.Equal(t, 1, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
+	})
+
+	t.Run("a nested invocation follows its run", func(t *testing.T) {
+		bin, _ := harness.Build(t)
+		r := admissionProceeded(t, admissionShape{}, func(cfg *models.File) {
+			cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true),
+				Name: "admission-test", Email: "admission@example.com"}
+			publish := cfg.Scripts["core-publish"]
+			cfg.Scripts["core-publish"] = models.Script{publish[0],
+				`[ -n "$` + admissionProviderOK + `" ] || exit 1`, bin + " commit --tag", publish[1]}
+		})
+		res := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.False(t, harness.IsCodePresent(res.Events, "E201"), "stdout:\n%s", res.Stdout)
+		assert.Equal(t, 1, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
+		assertAdmissionSettled(t, r)
+	})
+}
+
 // TestStandaloneGithubPublishesFromAStageScript: the github step command in
 // an announce stage. The build stage exports DISPAT_EXPORT_GITHUB with the
 // files to attach; the announce script runs `dispat github`, which reads

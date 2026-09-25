@@ -50,6 +50,12 @@ If a package has nothing to stage, dispat cleanly skips it.
 Pass `--tag` to create an annotated release tag at the new commit. dispat skips the tag and logs `W223` if it already
 exists at that exact commit, but fails if the tag points anywhere else.
 
+Outside a release stage script, `--tag` refuses to tag a provider on the release commit of a consumer it still owes
+unless the same invocation tags that consumer after it
+([`E201`](../reference/plan-errors.md#after-the-plan-before-any-releasing)). dispat checks this before it commits or
+tags anything. Cover both packages (`--package <provider>,<consumer>`), or commit first and tag the provider alone.
+Inside a release stage script the run that started the script has already checked its whole selection.
+
 Add `--push` to push the branch to your remote once all packages finish. If you also pass `--tag`, dispat pushes the
 tags with force, so a tag the remote already carries is replaced rather than left as it is. Pass `--no-force` to skip
 those tags instead; see [`commit.force`](../configuration/records.md#force).

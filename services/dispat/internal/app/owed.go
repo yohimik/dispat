@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/rs/zerolog"
 
@@ -42,6 +43,37 @@ func (a *App) reportOwedAtHead(ctx context.Context, pl *plan.Plan) error {
 	}
 	a.owedAtHead = pairs
 	return nil
+}
+
+// refuseOwedTag is E201 for the standalone `dispat commit --tag`: a provider
+// it would tag at the baseline commit of a consumer it still owes, without
+// tagging that consumer after it, is refused before any commit or tag is
+// written. A nested invocation is left to the run that started it, which
+// asked the question of its whole selection before anything ran; the step
+// covers only the invoking package, so asking again would refuse the very
+// run that releases the consumer next.
+func (a *App) refuseOwedTag(ctx context.Context, pl *plan.Plan, covered []string) error {
+	if os.Getenv(release.OutputEnvVar) != "" {
+		return nil
+	}
+	isHeadReached, readErr := a.resolveHeadReach(ctx, pl)
+	pairs := pl.OwedAtHeadAmong(covered, isHeadReached)
+	if err := readErr(); err != nil {
+		a.log.Error().Err(err).Msg("cannot compare the head with a consumer's baseline, nothing tagged")
+		return err
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	for _, pair := range pairs {
+		a.log.Error().Str("code", plan.CodeOwedAtBaseline).Str("package", pair.Consumer).
+			Str("provider", pair.Provider).Str("commit", pair.Commit).
+			Str("remedy", fmt.Sprintf("commit and tag %s in the same invocation (--package %s,%s), or tag %s after a new commit",
+				pair.Consumer, pair.Provider, pair.Consumer, pair.Provider)).
+			Msg("a provider would be tagged at the baseline commit of a consumer it still owes, nothing tagged")
+	}
+	return fmt.Errorf("%s: %s would be tagged at the baseline commit of %s, which it still owes",
+		plan.CodeOwedAtBaseline, pairs[0].Provider, pairs[0].Consumer)
 }
 
 // resolveHeadReach answers, per repository, whether the head the plan releases

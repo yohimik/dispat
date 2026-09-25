@@ -112,3 +112,16 @@ func TestOwedAtHeadReportsABoundaryAheadOfTheHead(t *testing.T) {
 	require.Equal(t, "c2", p.Releases["app"].OwedBoundary("core"))
 	assert.Equal(t, []OwedPair{{Provider: "core", Consumer: "app", Commit: "c2"}}, p.OwedAtHead(isHeadReachedAt(git, "c1")))
 }
+
+// TestOwedAtHeadAmongReadsTheInvocationsSelection: `dispat commit --tag`
+// releases only the packages it covers, so a consumer the plan releases but
+// the invocation leaves out is owed exactly as one the plan leaves out.
+func TestOwedAtHeadAmongReadsTheInvocationsSelection(t *testing.T) {
+	git := proceededAtHead()
+	p := compute(t, git, nil)
+	require.True(t, p.Releases["app"].IsReleasing())
+	assert.Equal(t, []OwedPair{{Provider: "core", Consumer: "app", Commit: "c2"}},
+		p.OwedAtHeadAmong([]string{"core"}, isHeadReachedIn(git)))
+	assert.Empty(t, p.OwedAtHeadAmong([]string{"core", "app"}, isHeadReachedIn(git)), "app is tagged after core")
+	assert.Empty(t, p.OwedAtHeadAmong([]string{"app"}, isHeadReachedIn(git)), "core is not tagged at all")
+}
