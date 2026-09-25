@@ -5395,6 +5395,18 @@ with `E201` before `core` publishes, because after both tags sat on one commit n
 and `core` published at a later commit in a run `cli` sat out leaves `C1` in `cli`'s owed window (§13.3), so the next
 run plans `cli`'s catch-up.
 
+**Vector 80e**: the consumer of vector 80d proceeds onto a prerelease train. `C1` carries `feat(core)^: x` and
+`feat(cli)%beta: y`. Run 1: `core@1.5.0` fails to publish; `cli` proceeds at its planned `2.1.0-beta.0` and is tagged
+at `HEAD`.
+
+→ Run 2 plans `core@1.5.0` and `cli@2.1.0-beta.1`, ordered after `core`, with `core` in `cli`'s provenance: every
+answer of vector 80d holds, `E201` and the later catch-up included. `C1` is still in `W(cli)`, because a train's
+window runs from its stable tag, but it has left `Wfresh(cli)`, and the prerelease published `C1`, not `core`'s version.
+Admission for a dependent is its fresh window together with delivery (§13.3, §13.4a), so `core` still owes `cli`, and
+`C1`'s bump keeps counting toward `cli`'s train target (§11.4) whether or not it is owed. An implementation that reads
+a contribution the consumer's train carries as delivered fails here: it publishes `core` alone at `cli`'s release
+commit without `E201`, and every later prerelease of `cli` stays on `core@1.4.2` with no diagnostic.
+
 **Vector 81**: suppressing a catch-up from the consumer. `C1`: `feat(core)^: x`; run 1 publishes `core@1.5.0` and fails
 on `cli`. Then a new commit `C2` lands.
 
