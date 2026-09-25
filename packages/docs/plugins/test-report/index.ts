@@ -27,6 +27,60 @@ const VERSIONS = 'versions.json';
 const REQUIRE = 'DISPAT_DOCS_REQUIRE_REPORT';
 const ARCHIVE_VERSION = 'DISPAT_DOCS_REPORT_VERSION';
 
+interface ReadVersionsOptions {
+  siteDir: string;
+}
+
+/** The released doc snapshots versions.json names; none in a new checkout. */
+async function readVersions(options: ReadVersionsOptions): Promise<string[]> {
+  const {siteDir} = options;
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.resolve(siteDir, VERSIONS), 'utf8')) as unknown;
+    if (Array.isArray(parsed) && parsed.every((version) => typeof version === 'string')) return parsed;
+  } catch {
+    // A new checkout can have no released doc snapshots yet.
+  }
+  return [];
+}
+
+interface ReadArchiveFilesOptions {
+  archivesPath: string;
+}
+
+/** The archived reports' file names, sorted; none when the folder is absent. */
+async function readArchiveFiles(options: ReadArchiveFilesOptions): Promise<string[]> {
+  const {archivesPath} = options;
+  try {
+    return (await fs.readdir(archivesPath)).filter((file) => file.endsWith('.json')).sort();
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+    return [];
+  }
+}
+
+interface ReadReportSourceOptions {
+  reportPath: string;
+  required: boolean;
+}
+
+/**
+ * The measured report's text, or null when a build that does not require it
+ * has none. A release build without it fails here.
+ */
+async function readReportSource(options: ReadReportSourceOptions): Promise<string | null> {
+  const {reportPath, required} = options;
+  try {
+    return await fs.readFile(reportPath, 'utf8');
+  } catch (cause) {
+    if (required) {
+      logger.error`A release build needs path=${REPORT}, which could not be read. It is built by ${'go run github.com/yohimik/dispat/tools/testreport build'} from a full test run and downloaded by the release workflow.`;
+      throw cause;
+    }
+    logger.warn`No path=${REPORT} in this build: the coverage, test-results, benchmarks and experiments pages will render without numbers. This is expected outside a release.`;
+    return null;
+  }
+}
+
 /**
  * Feeds the coverage, test-results, benchmarks and experiments pages from the
  * report a release run measured, so no statement about the test suite, no
@@ -42,13 +96,7 @@ export default function testReport(context: LoadContext): Plugin {
     getPathsToWatch: () => [reportPath, archivesPath],
 
     async loadContent(): Promise<ReportData> {
-      let versions: string[] = [];
-      try {
-        const parsed = JSON.parse(await fs.readFile(path.resolve(context.siteDir, VERSIONS), 'utf8')) as unknown;
-        if (Array.isArray(parsed) && parsed.every((version) => typeof version === 'string')) versions = parsed;
-      } catch {
-        // A new checkout can have no released doc snapshots yet.
-      }
+      const versions = await readVersions({siteDir: context.siteDir});
       const archiveVersion = process.env[ARCHIVE_VERSION] ?? '';
       if (archiveVersion && !required) throw new Error(`${ARCHIVE_VERSION} is only valid for a required release build`);
       if (archiveVersion && !versions.includes(archiveVersion)) {
@@ -58,12 +106,7 @@ export default function testReport(context: LoadContext): Plugin {
       // Without that stamp, the report belongs only to /next/: even the newest
       // frozen docs must read their own archive rather than borrow local data.
       const currentVersions = ['current', ...(archiveVersion ? [archiveVersion] : [])];
-      let archiveFiles: string[] = [];
-      try {
-        archiveFiles = (await fs.readdir(archivesPath)).filter((file) => file.endsWith('.json')).sort();
-      } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
-      }
+      const archiveFiles = await readArchiveFiles({archivesPath});
       const archivedVersions: string[] = [];
       for (const file of archiveFiles) {
         const version = file.slice(0, -'.json'.length);
@@ -71,17 +114,8 @@ export default function testReport(context: LoadContext): Plugin {
         validateArchivedReport(archive, version);
         archivedVersions.push(version);
       }
-      let source: string;
-      try {
-        source = await fs.readFile(reportPath, 'utf8');
-      } catch (cause) {
-        if (required) {
-          logger.error`A release build needs path=${REPORT}, which could not be read. It is built by ${'go run github.com/yohimik/dispat/tools/testreport build'} from a full test run and downloaded by the release workflow.`;
-          throw cause;
-        }
-        logger.warn`No path=${REPORT} in this build: the coverage, test-results, benchmarks and experiments pages will render without numbers. This is expected outside a release.`;
-        return {report: null, currentVersions, archivedVersions};
-      }
+      const source = await readReportSource({reportPath, required});
+      if (source === null) return {report: null, currentVersions, archivedVersions};
       const report = validateReport(JSON.parse(source));
       if (required && process.env.GITHUB_SHA && report.commit !== process.env.GITHUB_SHA) {
         throw new Error(`Report commit ${report.commit} does not match GITHUB_SHA ${process.env.GITHUB_SHA}`);
