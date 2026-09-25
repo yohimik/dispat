@@ -192,6 +192,9 @@ func TestAutoReplacerLeavesANestedPackageToItsOwner(t *testing.T) {
 	r.WriteFile("packages/outer/inner/main.txt", "inner\n")
 	r.WriteFile("packages/outer/note.md", "pinned 0.0.0\n")
 	r.WriteFile("packages/outer/inner/note.md", "pinned 0.0.0\n")
+	// Deeper files are owned by the nearest package folder above them.
+	r.WriteFile("packages/outer/docs/deep/note.md", "pinned 0.0.0\n")
+	r.WriteFile("packages/outer/inner/sub/note.md", "pinned 0.0.0\n")
 	r.Commit("feat(outer,inner): bootstrap")
 
 	// The write half carries {name}, so the file records which package wrote
@@ -204,4 +207,8 @@ func TestAutoReplacerLeavesANestedPackageToItsOwner(t *testing.T) {
 	assert.Contains(t, arpRead(t, r, "packages", "outer", "note.md"), "written by outer")
 	assert.Contains(t, arpRead(t, r, "packages", "outer", "inner", "note.md"), "written by inner",
 		"the nested package's own turn reached its file, and outer left it alone")
+	assert.Contains(t, arpRead(t, r, "packages", "outer", "docs", "deep", "note.md"), "written by outer",
+		"a file deep in outer's own folders is outer's")
+	assert.Contains(t, arpRead(t, r, "packages", "outer", "inner", "sub", "note.md"), "written by inner",
+		"and one deep in inner's folders is inner's")
 }
