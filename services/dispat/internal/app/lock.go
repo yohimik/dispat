@@ -72,7 +72,12 @@ func (a *App) lockDisabled() bool {
 //
 // An orchestrated fleet releases under one repository's policy: the control
 // configuration is the run's configuration, and its unsafeDisableLock speaks
-// for every source. A choreographed peer owns its policy as it owns
+// for every source. A source's own configuration does not, even when it is
+// imported and sets the key: an imported configuration contributes that
+// repository's packages and records, not the run's lock policy, and a source
+// that could switch its own lock off would take the fleet's exclusion apart
+// one repository at a time. What it states is reported as ignored (see
+// isLockBypassIgnored). A choreographed peer owns its policy as it owns
 // everything else, so the entry's setting speaks for the entry alone and one
 // peer cannot unlock another. The environment kill switch is the
 // invocation's, and applies to whatever that invocation releases.
@@ -81,13 +86,43 @@ func (a *App) lockDisabled() bool {
 // question can be asked before any lock is taken, which is where a run that
 // delegates work has to ask it.
 func (a *App) lockBypassOf(repository *config.Repository) (isBypassed, isByConfig bool) {
+	if !a.workspace.IsLinked() {
+		if a.cfg.UnsafeDisableLock {
+			return true, true
+		}
+		return lockDisabledByEnv(), false
+	}
 	if repository.Config != nil && repository.Config.UnsafeDisableLock {
 		return true, true
 	}
-	if !a.workspace.IsLinked() && a.cfg.UnsafeDisableLock {
-		return true, true
-	}
 	return lockDisabledByEnv(), false
+}
+
+// isLockBypassIgnored reports whether a repository's own configuration asks
+// for the unsafe lock bypass and this run takes its lock anyway: a source of an
+// orchestrated fleet whose own configuration sets unsafeDisableLock, where only
+// the control configuration and the environment decide.
+func (a *App) isLockBypassIgnored(repository *config.Repository) bool {
+	if a.workspace.IsLinked() || repository.Control || repository.Config == nil || repository.Config == a.cfg {
+		return false
+	}
+	if !repository.Config.UnsafeDisableLock {
+		return false
+	}
+	isBypassed, _ := a.lockBypassOf(repository)
+	return !isBypassed
+}
+
+// warnLockBypassIgnored reports, in one line, the sources of an orchestrated
+// fleet whose own unsafeDisableLock this run did not honour, so a source that
+// expected to release unlocked learns that its lock was taken. It carries no
+// W331: that code names repositories releasing WITHOUT their lock, and these
+// release with it.
+func warnLockBypassIgnored(log zerolog.Logger, repositories []string) {
+	log.Warn().Strs("repositories", repositories).
+		Strs("setting", []string{"unsafeDisableLock"}).
+		Msg("ignored: a source's own unsafeDisableLock does not switch its lock off in an orchestrated fleet; " +
+			"only the control configuration or " + lockDisableEnv + " can, so these repositories are locked")
 }
 
 // lockDisabledByEnv reads the environment kill switch. Only a value that

@@ -145,3 +145,61 @@ func TestReleaseLocksNameTheDistributedRun(t *testing.T) {
 		assert.Contains(t, message, "\nrun "+run+"\n")
 	})
 }
+
+// TestLockBypassBelongsToTheFleetsPolicyOwner: an orchestrated fleet releases
+// under the control configuration, so only that configuration or the
+// environment switches a source's lock off, and a source's own setting is
+// reported as ignored. A choreographed peer owns its policy, so its own
+// setting releases it alone without a lock.
+func TestLockBypassBelongsToTheFleetsPolicyOwner(t *testing.T) {
+	orchestrated := func(control, source bool) (*App, *config.Repository) {
+		controlCfg := &config.File{UnsafeDisableLock: control}
+		a := &App{cfg: controlCfg}
+		a.workspace = &config.Workspace{Repositories: []config.Repository{
+			{Name: config.ControlRepository, Config: controlCfg, Control: true, Entry: true},
+			{Name: "sdk", Config: &config.File{UnsafeDisableLock: source}, Imported: true},
+		}}
+		return a, &a.workspace.Repositories[1]
+	}
+	linked := func(entry, peer bool) (*App, *config.Repository) {
+		entryCfg := &config.File{UnsafeDisableLock: entry}
+		a := &App{cfg: entryCfg}
+		a.workspace = &config.Workspace{Repositories: []config.Repository{
+			{Name: "api", Config: entryCfg, Imported: true, Entry: true},
+			{Name: "sdk", Config: &config.File{UnsafeDisableLock: peer}, Imported: true},
+		}}
+		return a, &a.workspace.Repositories[1]
+	}
+	for name, tc := range map[string]struct {
+		app        func() (*App, *config.Repository)
+		env        string
+		isBypassed bool
+		isByConfig bool
+		isIgnored  bool
+	}{
+		"an orchestrated source's own setting is ignored": {
+			app: func() (*App, *config.Repository) { return orchestrated(false, true) }, isIgnored: true},
+		"the control configuration speaks for every source": {
+			app: func() (*App, *config.Repository) { return orchestrated(true, false) }, isBypassed: true, isByConfig: true},
+		"the environment reaches an orchestrated source": {
+			app: func() (*App, *config.Repository) { return orchestrated(false, true) }, env: "true", isBypassed: true},
+		"a linked peer's own setting is its own": {
+			app: func() (*App, *config.Repository) { return linked(false, true) }, isBypassed: true, isByConfig: true},
+		"a linked entry cannot unlock another peer": {
+			app: func() (*App, *config.Repository) { return linked(true, false) }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(lockDisableEnv, tc.env)
+			if tc.env == "" {
+				require.NoError(t, os.Unsetenv(lockDisableEnv))
+			}
+			a, source := tc.app()
+
+			isBypassed, isByConfig := a.lockBypassOf(source)
+
+			assert.Equal(t, tc.isBypassed, isBypassed)
+			assert.Equal(t, tc.isByConfig, isByConfig)
+			assert.Equal(t, tc.isIgnored, a.isLockBypassIgnored(source))
+		})
+	}
+}

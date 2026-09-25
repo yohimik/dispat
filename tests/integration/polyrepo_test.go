@@ -2403,6 +2403,58 @@ func TestPolyrepoReleaseLockGuardsAndCleansSourceWork(t *testing.T) {
 	})
 }
 
+// TestPolyrepoSourceCannotSwitchOffItsOwnLock: an orchestrated fleet releases
+// under the control configuration's lock policy. A source whose imported
+// configuration sets unsafeDisableLock is still locked, and says so on one
+// warning line naming the ignored setting and the repository (not W331, which
+// names repositories released without a lock), so the lock another
+// run holds on that source refuses the fleet with E336 exactly as it would
+// with no setting at all. The lock stays the other run's, and the control lock
+// this run took first is given back.
+func TestPolyrepoSourceCannotSwitchOffItsOwnLock(t *testing.T) {
+	source := harness.New(t)
+	source.SeedPackage("packages", "lib")
+	imported := polyrepoFile()
+	delete(imported, "polyrepo")
+	imported["spaces"] = centralSpaces(map[string]string{"workspace": "packages"})
+	imported["unsafeDisableLock"] = true
+	writePolyrepoJSON(t, source, "dispat.json", imported)
+	source.Commit("feat(lib): a source that asks to release without its lock")
+
+	control := harness.New(t)
+	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
+	central := polyrepoFile()
+	central["configs"] = []string{"sources/lib/dispat.json"}
+	writePolyrepoJSON(t, control, "dispat.json", central)
+	control.Commit("chore: import the source configuration")
+	controlRemote := control.AddBareRemote()
+	sourceRemote := filepath.Join(t.TempDir(), "lib-source.git")
+	control.Git("init", "-q", "--bare", sourceRemote)
+	control.Git("-C", "sources/lib", "remote", "set-url", "origin", sourceRemote)
+	control.Git("-C", "sources/lib", "push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	bareGit(t, sourceRemote, "-c", "user.email=other@dispat.test", "-c", "user.name=other clone",
+		"tag", "-a", lockTag, "-m", "held by another release", harness.DefaultBranch)
+	held := lockObject(t, sourceRemote)
+
+	res := releaseLocked(control)
+
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	requireDiagnostic(t, res, "E336")
+	var ignored []any
+	for _, event := range res.Events {
+		if event.Code() == "W331" {
+			t.Errorf("a locked source is not a bypassed one: %v", event)
+		}
+		if strings.HasPrefix(event.Str("message"), "ignored: ") {
+			ignored, _ = event["repositories"].([]any)
+		}
+	}
+	assert.Equal(t, []any{"lib-source"}, ignored, "the ignored setting is named with its repository")
+	assert.Equal(t, held, lockObject(t, sourceRemote), "the other run's lock is untouched")
+	assert.Empty(t, polyrepoTags(control, "sources/lib"), "a refused fleet mutates no source")
+	assertLockCleared(t, control, controlRemote)
+}
+
 // TestPolyrepoReleaseCleansLivePinContext captures the private coordinator
 // path from a real package shell. Every return from the outer Release owns its
 // removal, including a successful publication and a beforePublish refusal.

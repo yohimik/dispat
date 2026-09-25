@@ -344,6 +344,13 @@ name; it is not forced to the front. Within one dispat process, native Git trans
 a transaction that touches several worktrees takes them in canonical Git common-directory order, takes linked worktrees
 of one repository once, and gives them back in reverse. Hooks and scripts run outside those transactions.
 
+The lock policy is the control configuration's. Its `unsafeDisableLock`, or `DISPAT_UNSAFE_DISABLE_LOCK` in the
+environment, is the only way to release a source without its lock. A source whose imported configuration sets
+`unsafeDisableLock` is still locked, and the run says so in one warning line naming the ignored setting and the
+repositories, because a source that could switch its own lock off would take the fleet's exclusion apart one
+repository at a time. A [choreographed fleet](./choreographed-repositories.md) is the other way round: each peer owns
+its own setting.
+
 The fleet lock coordinates dispat runs, and the per-repository serialization covers one process only. Neither can
 exclude every process that can write the Git worktrees. Git's own lock files refuse a conflicting writer of the index
 or of a ref, and every transaction re-proves the revision it records before it writes. The checks detect relevant

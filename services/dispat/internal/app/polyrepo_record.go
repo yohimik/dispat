@@ -146,17 +146,7 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 		}
 		return config.WithDiagnostic("E336", errors.Join(cleanupErrs...))
 	}
-	var bypassedRepositories []string
-	isByConfig := false
-	for _, r := range w.ordered {
-		if isBypassed, isStated := w.lockBypass(r); isBypassed {
-			bypassedRepositories = append(bypassedRepositories, r.repo.Name)
-			isByConfig = isByConfig || isStated
-		}
-	}
-	if len(bypassedRepositories) > 0 {
-		warnLockDisabled(w.app.log, bypassedRepositories, isByConfig)
-	}
+	w.reportLockBypass()
 	for _, r := range w.ordered {
 		if isBypassed, _ := w.lockBypass(r); isBypassed {
 			continue
@@ -193,6 +183,29 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 	w.app.log.Debug().Int("repositories", len(w.ordered)).Int("locks", len(held)).
 		Strs("order", w.repositoryNames()).Msg("fleet release locks acquired")
 	return unlock, nil
+}
+
+// reportLockBypass writes the run's one W331 line naming every repository
+// that releases without its lock, and, in an orchestrated fleet, the one line
+// naming the sources whose own bypass setting was ignored.
+func (w *workspaceRecorder) reportLockBypass() {
+	var bypassedRepositories, ignoredRepositories []string
+	isByConfig := false
+	for _, r := range w.ordered {
+		if isBypassed, isStated := w.lockBypass(r); isBypassed {
+			bypassedRepositories = append(bypassedRepositories, r.repo.Name)
+			isByConfig = isByConfig || isStated
+		}
+		if w.app.isLockBypassIgnored(r.repo) {
+			ignoredRepositories = append(ignoredRepositories, r.repo.Name)
+		}
+	}
+	if len(bypassedRepositories) > 0 {
+		warnLockDisabled(w.app.log, bypassedRepositories, isByConfig)
+	}
+	if len(ignoredRepositories) > 0 {
+		warnLockBypassIgnored(w.app.log, ignoredRepositories)
+	}
 }
 
 // lockBypass decides whether one repository releases without its remote lock,
