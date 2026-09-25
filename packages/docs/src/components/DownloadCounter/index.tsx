@@ -1,9 +1,16 @@
 import useBaseUrl from '@docusaurus/useBaseUrl';
-import React from 'react';
+import React, {type FC} from 'react';
 import {displayDigits, formatCounter, startPolling, STALE_MS, type DownloadSnapshot} from './model';
 import styles from './styles.module.css';
 
-export default function DownloadCounter(): React.ReactElement {
+/** The props of DownloadCounter, which renders from the published snapshot alone. */
+export interface BaseDownloadCounterProps {}
+
+export interface DownloadCounterProps extends BaseDownloadCounterProps {
+  children?: never;
+}
+
+export const DownloadCounter: FC<DownloadCounterProps> = () => {
   const url = useBaseUrl('/downloads.json');
   const [snapshot, setSnapshot] = React.useState<DownloadSnapshot>();
   const [failed, setFailed] = React.useState(false);
@@ -46,4 +53,4 @@ export default function DownloadCounter(): React.ReactElement {
       </p>
     </div>
   );
-}
+};

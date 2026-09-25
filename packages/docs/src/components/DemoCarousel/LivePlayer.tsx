@@ -10,7 +10,7 @@ type Props = Omit<React.ComponentProps<typeof Player>, 'component' | 'lazyCompon
 };
 
 /** Kept in its own browser-only chunk so the landing route never eagerly loads Remotion Player. */
-const LivePlayer = React.forwardRef<PlayerRef, Props>(({component: Component, sourceHeight, cropTop, mobile, ...props}, ref) => {
+export const LivePlayer = React.forwardRef<PlayerRef, Props>(({component: Component, sourceHeight, cropTop, mobile, ...props}, ref) => {
   // Desktop crops the export title strip; portrait reflows the same scene.
   // The accessible page heading sits outside both canvases.
   const Scene = React.useMemo(() => function FramedScene() {
@@ -25,4 +25,3 @@ const LivePlayer = React.forwardRef<PlayerRef, Props>(({component: Component, so
   return <Player {...props} component={Scene} ref={ref} compositionWidth={mobile ? MOBILE_WIDTH : 1920} compositionHeight={mobile ? MOBILE_HEIGHT : 800} initiallyMuted numberOfSharedAudioTags={0} showVolumeControls={false} />;
 });
 LivePlayer.displayName = 'LivePlayer';
-export default LivePlayer;

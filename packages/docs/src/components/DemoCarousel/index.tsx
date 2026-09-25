@@ -2,8 +2,8 @@ import Link from '@docusaurus/Link';
 import BrowserOnly from '@docusaurus/BrowserOnly';
 import type {PlayerRef} from '@remotion/player';
 import type {Feature} from '@site/plugins/readme/types';
-import Inlines from '@site/src/components/Inline';
-import React from 'react';
+import {Inlines} from '@site/src/components/Inline';
+import React, {type FC} from 'react';
 import aquaFixture from '../../../demo/fixtures/aqua/expected.json';
 import runFixture from '../../../demo/fixtures/run/expected.json';
 import forFixture from '../../../demo/fixtures/for/expected.json';
@@ -25,7 +25,7 @@ type Media = {
 };
 
 const FPS = 20;
-const LivePlayer = React.lazy(() => import('./LivePlayer'));
+const LivePlayer = React.lazy(() => import('./LivePlayer').then((module) => ({default: module.LivePlayer})));
 const SCENE_COMMANDS: Record<string, string> = {
   'demo-why': 'dispat status', 'demo-order': 'dispat', 'demo-blast': 'dispat status',
   'demo-heal': 'dispat\n# Repair the failing test, then commit the change.\ngit commit -am "chore(api): repair failing test"\ndispat', 'demo-control': 'dispat status', 'demo-polyglot': 'dispat writer',
@@ -503,7 +503,16 @@ function DeckControls({
   );
 }
 
-export default function DemoCarousel({features}: {features: Feature[]}): React.ReactElement {
+export interface BaseDemoCarouselProps {
+  features: Feature[];
+}
+
+export interface DemoCarouselProps extends BaseDemoCarouselProps {
+  children?: never;
+}
+
+export const DemoCarousel: FC<DemoCarouselProps> = (props) => {
+  const {features} = props;
   const slides = React.useMemo(
     () => [
       ...features.map((feature) => {
@@ -735,4 +744,4 @@ export default function DemoCarousel({features}: {features: Feature[]}): React.R
       </div>
     </div>
   );
-}
+};

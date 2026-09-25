@@ -1,6 +1,6 @@
 import Link from '@docusaurus/Link';
 import type {Inline} from '@site/plugins/readme/types';
-import React from 'react';
+import React, {type FC} from 'react';
 
 // Renders the inline-markdown tokens the readme plugin parsed out of the
 // repository README and the CLI one.
@@ -43,7 +43,16 @@ function Token({token}: {token: Inline}): React.ReactElement {
   }
 }
 
-export default function Inlines({tokens}: {tokens: Inline[]}): React.ReactElement {
+export interface BaseInlinesProps {
+  tokens: Inline[];
+}
+
+export interface InlinesProps extends BaseInlinesProps {
+  children?: never;
+}
+
+export const Inlines: FC<InlinesProps> = (props) => {
+  const {tokens} = props;
   return (
     <>
       {tokens.map((token, i) => (
@@ -54,4 +63,4 @@ export default function Inlines({tokens}: {tokens: Inline[]}): React.ReactElemen
       ))}
     </>
   );
-}
+};

@@ -1,13 +1,20 @@
 import {usePluginData} from '@docusaurus/useGlobalData';
 import {useDocsVersion} from '@docusaurus/plugin-content-docs/client';
 import Admonition from '@theme/Admonition';
-import React from 'react';
+import React, {type FC} from 'react';
 import {BINARY_SIZES_PLUGIN} from '@site/plugins/binary-sizes/name';
 import type {BinarySizesData} from '@site/plugins/binary-sizes/types';
 
 function mib(bytes: number): string { return `${(bytes / 1024 / 1024).toFixed(2)} MiB`; }
 
-export default function BinarySizes(): React.ReactElement {
+/** The props of BinarySizes, which renders from the plugin's global data alone. */
+export interface BaseBinarySizesProps {}
+
+export interface BinarySizesProps extends BaseBinarySizesProps {
+  children?: never;
+}
+
+export const BinarySizes: FC<BinarySizesProps> = () => {
   const data = usePluginData(BINARY_SIZES_PLUGIN) as BinarySizesData;
   const version = useDocsVersion().version;
   const current = data.currentVersions.includes(version);
@@ -24,4 +31,4 @@ export default function BinarySizes(): React.ReactElement {
     </tbody></table>
     <p><em>Measured from the published assets for <a href={`https://github.com/yohimik/dispat/releases/tag/services/dispat/v${manifest.version}`}>release {manifest.version}</a>{manifest.schemaVersion === 1 && <>, at <a href={`https://github.com/yohimik/dispat/commit/${manifest.sourceCommit}`}>source commit {manifest.sourceCommit.slice(0, 12)}</a>. Toolchains: {manifest.toolchains.go}; {manifest.toolchains.tinygo}</> }.</em></p>
   </>;
-}
+};
