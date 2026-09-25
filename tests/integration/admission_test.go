@@ -492,6 +492,32 @@ func TestAdmissionReportsAConsumerThatFailedAfterItsProviderAtItsCommit(t *testi
 	assertAdmissionSettled(t, r)
 }
 
+// TestAdmissionReportsAConsumerItCannotCheckAfterItsProviderPublished: the
+// check behind the after-the-fact E201 reads the commit the provider's new tag
+// sits on. When Git cannot read it, a debt no later plan could see is as
+// likely as none, so the run reports E201 as a question it could not answer,
+// naming both packages and the consumer's baseline, and fails, while the
+// provider stays published and tagged.
+func TestAdmissionReportsAConsumerItCannotCheckAfterItsProviderPublished(t *testing.T) {
+	r := admissionProceeded(t, admissionShape{})
+	baseline := r.Git("rev-list", "-n1", "cli@0.2.0")
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*rev-parse refs/tags/core@0.2.0^{commit}*", Code: 128})
+
+	failed := r.CommandEnv(append(fault.Env(), admissionProviderOK+"=1", admissionConsumerFails+"=1"), "release")
+	require.NotEqual(t, 0, failed.Code, "stdout:\n%s", failed.Stdout)
+	require.Equal(t, 1, r.TagCount("core@0.2.0"), "the provider published; tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("cli@0.2.1"), "tags: %v", r.TagList())
+	assert.NotZero(t, fault.Matches())
+	report := admissionEvent(failed.Events, "E201", "cli")
+	require.NotNil(t, report, "stdout:\n%s", failed.Stdout)
+	assert.Equal(t, "cannot tell whether a consumer was left behind a provider released at its baseline commit",
+		report.Str("message"))
+	assert.Equal(t, "core", report.Str("provider"))
+	assert.Equal(t, baseline, report.Str("commit"))
+	assert.Contains(t, report.Str("error"), "reading the commit of core@0.2.0")
+	assert.Contains(t, failed.Stdout+failed.Stderr, harness.GitFaultMarker)
+}
+
 // TestAdmissionCatchesUpAfterTheProviderShipsAlone keeps the consumer out of
 // the provider's successful retry at a later commit. The consumer's baseline
 // reaches no release of the provider carrying the commit it is owed, so the
@@ -527,14 +553,11 @@ func TestAdmissionCatchesUpAfterTheProviderShipsAlone(t *testing.T) {
 	}
 }
 
-// TestAdmissionCatchesUpAConsumerOwedByTwoProviders: two providers of one
-// consumer, whose last releases sit at different commits, both fail while the
-// consumer proceeds past their pending commits on its own feature. Both then
-// ship in a run the consumer sits out. The consumer is owed two windows at
-// once, one after each provider's release its baseline reaches, and the
-// unfiltered run after that catches it up exactly once for both, without a
-// new commit and without republishing either provider, then converges.
-func TestAdmissionCatchesUpAConsumerOwedByTwoProviders(t *testing.T) {
+// admissionOwedByTwo is the workspace of
+// TestAdmissionCatchesUpAConsumerOwedByTwoProviders at the point its consumer
+// is owed two windows, one after each provider's release its baseline reaches.
+func admissionOwedByTwo(t *testing.T) *harness.Repo {
+	t.Helper()
 	ok := []string{admissionProviderOK + "=1"}
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
@@ -574,6 +597,19 @@ func TestAdmissionCatchesUpAConsumerOwedByTwoProviders(t *testing.T) {
 	require.Equal(t, 0, providers.Code, "provider-only retry: %s", providers.Stdout)
 	require.Subset(t, r.TagList(), []string{"core@0.2.0", "util@0.2.0"})
 	assert.Zero(t, r.TagCount("cli@0.2.1"), "the consumer was absent from this run")
+	return r
+}
+
+// TestAdmissionCatchesUpAConsumerOwedByTwoProviders: two providers of one
+// consumer, whose last releases sit at different commits, both fail while the
+// consumer proceeds past their pending commits on its own feature. Both then
+// ship in a run the consumer sits out. The consumer is owed two windows at
+// once, one after each provider's release its baseline reaches, and the
+// unfiltered run after that catches it up exactly once for both, without a
+// new commit and without republishing either provider, then converges.
+func TestAdmissionCatchesUpAConsumerOwedByTwoProviders(t *testing.T) {
+	ok := []string{admissionProviderOK + "=1"}
+	r := admissionOwedByTwo(t)
 
 	catchUp := r.CommandEnv(ok, "release")
 	require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
@@ -583,6 +619,48 @@ func TestAdmissionCatchesUpAConsumerOwedByTwoProviders(t *testing.T) {
 	assert.True(t, harness.IsCodePresentForPackage(catchUp.Events, "W193", "cli"),
 		"stdout:\n%s", catchUp.Stdout)
 	assertAdmissionSettled(t, r)
+}
+
+// TestAdmissionRefusesAPlanWhoseOwedWindowCannotBeRead: a consumer its
+// provider shipped without is owed the commits after the provider's earlier
+// release, and planning reads that window from Git: alone for one debt, in one
+// walk for two. A window Git cannot read is a refusal naming it, never a plan
+// in which the consumer is owed nothing; once Git answers, the same status
+// plans the catch-up.
+func TestAdmissionRefusesAPlanWhoseOwedWindowCannotBeRead(t *testing.T) {
+	env := []string{admissionProviderOK + "=1"}
+	for _, tc := range []struct {
+		name    string
+		prepare func(t *testing.T) *harness.Repo
+		fault   harness.GitFault
+		matches int // the ordinary windows' walk asks first in one walk
+	}{
+		{name: "one owed window", prepare: func(t *testing.T) *harness.Repo {
+			r := admissionProceeded(t, admissionShape{})
+			r.CommitEmpty("chore(core): retry the provider")
+			require.Equal(t, 0, r.CommandEnv(env, "--package", "core").Code)
+			return r
+		}, fault: harness.GitFault{Pattern: "*log --format=* core@0.1.0..HEAD*"}, matches: 1},
+		{name: "two owed windows read in one walk", prepare: admissionOwedByTwo,
+			fault: harness.GitFault{Pattern: "*merge-base --octopus --all *", Nth: 2, Code: 128}, matches: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.prepare(t)
+			fault := harness.NewGitFault(t, tc.fault)
+
+			refused := r.CommandEnv(fault.Env(), "status")
+			require.NotZero(t, refused.Code, "stdout:\n%s\nstderr:\n%s", refused.Stdout, refused.Stderr)
+			combined := refused.Stdout + refused.Stderr
+			assert.Contains(t, combined, "owed window for cli")
+			assert.Contains(t, combined, harness.GitFaultMarker)
+			assert.NotContains(t, combined, "release plan ready")
+			assert.Equal(t, tc.matches, fault.Matches(), "the owed windows were read once")
+
+			healed := r.StatusOK()
+			assert.Equal(t, "0.2.0 -> 0.2.1", harness.GraphLine(healed.Events, "cli").Str("version"),
+				"the window Git reads plans the catch-up")
+		})
+	}
 }
 
 // TestAdmissionCatchesUpAHeldConsumerAfterItsProviderShipped: the consumer is
