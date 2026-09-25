@@ -654,6 +654,54 @@ func TestAutoSignRefusesABlockThatWritesNothingOrTwice(t *testing.T) {
 	})
 }
 
+// TestNativeManifestWriteFailureFailsItsOwnStage: a native manifest write
+// that cannot be made fails the package at the stage that owns it, before
+// any build: the sign stage's own-version write is logged as `auto-signing
+// failed` and fails the stage named `sign`, and without autoSign the version
+// stage's reconciliation is logged as `auto-versioning failed` and fails the
+// stage named `version`. Nothing is tagged and the manifest is unchanged.
+func TestNativeManifestWriteFailureFailsItsOwnStage(t *testing.T) {
+	skipIfSuperuser(t)
+	for _, row := range []struct {
+		name, stage, what string
+		space             models.SpaceConfig
+	}{
+		{name: "the sign stage", stage: "sign", what: "auto-signing failed",
+			space: models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(),
+				AutoSign: &models.AutoSignConfig{Enabled: models.Bool(true)}}},
+		{name: "the version stage", stage: "version", what: "auto-versioning failed",
+			space: models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(),
+				AutoVersion: &models.AutoVersionConfig{WriteVersion: models.Bool(true)}}},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig("echo built > ../../built", 1)
+			cfg.Spaces["libs"] = row.space
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			manifest := `{"name": "@acme/core", "version": "0.0.0"}`
+			r.WriteFile("packages/core/package.json", manifest)
+			r.Commit("feat(core): first release")
+			// The folder refuses the temporary file every atomic rewrite starts
+			// from, which is a write the stage cannot make.
+			folder := r.Path("packages", "core")
+			require.NoError(t, os.Chmod(folder, 0o555))
+			t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
+
+			res := r.Release()
+			require.NoError(t, os.Chmod(folder, 0o755))
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			failed := jsonLine(t, res, row.what)
+			assert.Equal(t, "core", failed.Package())
+			assert.Equal(t, row.stage, failed.Str("stage"), "%v", failed)
+			assert.Contains(t, res.Stdout, `"failedStage":"`+row.stage+`"`)
+			assert.NoFileExists(t, r.Path("built"), "no build ran")
+			assert.Empty(t, r.TagList())
+			assert.Equal(t, manifest, readFile(t, r, "packages", "core", "package.json"))
+		})
+	}
+}
+
 // TestAutoVersionRefusesAnOnlyNamingNoPackage: autoVersion.only
 // narrows a rewrite to named providers, so a name that is no package narrows
 // it to nothing — a typo that would otherwise present as "the rewrite silently

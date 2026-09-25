@@ -1681,6 +1681,7 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoSignStandaloneAutoversionWritesRangesOnly` | `dispat autoversion` on a package whose sign stage owns the own version writes the ranges alone, and `--write-version` asks for the own version explicitly. |
 | `TestAutoSignAllScopeWritesOnlyThePackagesOwnManifests` | `autoSign.manifests: all` reaches Unity's `ProjectSettings/ProjectSettings.asset` and still writes only the package's own manifests, so a nested example keeps its version; a manifest the scan cannot parse is reported from the sign stage and the others are written. |
 | `TestAutoSignRefusesABlockThatWritesNothingOrTwice` | A sign stage that would write nothing (`manifests: none`), an unknown scope, and a `writeVersion: true` stated beside `autoSign` or inherited from the top level are refused when the configuration loads, naming the keys, before any script or tag. |
+| `TestNativeManifestWriteFailureFailsItsOwnStage` | A native manifest write the package folder refuses fails the package at the stage that owns it before any build: the sign stage's write is logged as `auto-signing failed` at stage `sign`, and without `autoSign` the version stage's reconciliation as `auto-versioning failed` at stage `version`; the `failedStage` names the same stage, nothing is tagged and the manifest is unchanged. |
 
 ### Goal 25: the manifest commands (`manifests_test.go`, `aqua_test.go`, `command_release_edges_test.go`, `final_api_boundaries_test.go`, `final_command_faults_test.go`)
 
