@@ -1400,8 +1400,24 @@ type computation struct {
 // marker pass (ancestry.go). The log range per distinct window origin remains
 // the fallback when a history cannot provide a union walk.
 func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, error) {
+	cp := newComputation(ctx, git, opts)
+	if err := cp.prepare(opts); err != nil { // §13.1
+		return cp.failedPlan(err)
+	}
+	if err := cp.resolveDirectBumps(); err != nil { // §13.2 to §13.6
+		return cp.failedPlan(err)
+	}
+	if err := cp.propagateAndVersion(); err != nil { // §13.7 to §13.10
+		return nil, err
+	}
+	return cp.emitPlan(), nil
+}
+
+// newComputation allocates the working state of one Compute: every index the
+// phases fill, sized from the options where the size is known.
+func newComputation(ctx context.Context, git TagInventoryGitx, opts Options) *computation {
 	pkgs := opts.Packages
-	cp := &computation{
+	return &computation{
 		ctx:              ctx,
 		git:              git,
 		log:              opts.Log,
@@ -1449,6 +1465,47 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 		repositoryHeads:     make(map[string]string),
 		withoutDelivery:     opts.withoutDelivery,
 	}
+}
+
+// failedPlan is how Compute ends early. errFatalPlan means a repository-scoped
+// diagnostic was recorded, and the run gets the fatal plan carrying it (§16);
+// any other error is returned as it is. Only the plan's own validation
+// returns errFatalPlan, so a Git or parser failure is never mistaken for one.
+func (cp *computation) failedPlan(err error) (*Plan, error) {
+	if errors.Is(err, errFatalPlan) {
+		return cp.fatalPlan(), nil
+	}
+	return nil, err
+}
+
+// prepare readies what the history phases read: the options indexed, the
+// workspace loaded (§13.1), the histories checked for completeness and their
+// parsers built.
+func (cp *computation) prepare(opts Options) error {
+	if err := cp.indexOptions(opts); err != nil {
+		return err
+	}
+	if err := cp.loadWorkspace(opts.Dependencies); err != nil { // §13.1
+		return err
+	}
+	for _, dependency := range opts.InactiveExternalDependencies {
+		cp.warn(CodeExternalProviderAbsent, dependency.Consumer, "", fmt.Sprintf(
+			"external provider %q is absent; the %s edge is inactive for this workspace snapshot",
+			dependency.Provider, dependency.Kind.String()))
+	}
+	if len(cp.histories) > 0 {
+		cp.prepareRepositoryReach()
+	}
+	if err := cp.checkHistoriesComplete(); err != nil {
+		return err
+	}
+	return cp.prepareParsers(opts)
+}
+
+// indexOptions copies the options' repository histories, link evidence,
+// repository baselines, non-package scopes and ignored tags into the lookup
+// sets the phases consult.
+func (cp *computation) indexOptions(opts Options) error {
 	for key, history := range opts.Repositories {
 		if history.Name == "" {
 			history.Name = key
@@ -1470,19 +1527,8 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 	} else {
 		cp.evidence = checkpointEvidence{cp: cp}
 	}
-	for _, baseline := range opts.RepositoryBaselines {
-		repository := baseline.Repository
-		if history, ok := cp.histories[globx.Fold(repository)]; ok {
-			repository = history.Name
-		}
-		key := baselineKey{consumer: globx.Fold(baseline.Consumer), tag: baseline.ReleaseTag,
-			repository: globx.Fold(repository)}
-		if _, duplicate := cp.baselines[key]; duplicate {
-			cp.err(CodeRepositoryBoundary, baseline.Consumer, "", fmt.Sprintf(
-				"duplicate repository baseline for release %s and repository %s", baseline.ReleaseTag, repository))
-			return cp.fatalPlan(), nil
-		}
-		cp.baselines[key] = historyKey(repository, baseline.Revision)
+	if err := cp.indexRepositoryBaselines(opts.RepositoryBaselines); err != nil {
+		return err
 	}
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
@@ -1497,26 +1543,36 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 		}
 		cp.ignoredTagsByRepository[repository] = set
 	}
+	return nil
+}
 
-	if err := cp.loadWorkspace(opts.Dependencies); err != nil { // §13.1
-		if errors.Is(err, errFatalPlan) {
-			return cp.fatalPlan(), nil
+// indexRepositoryBaselines records each repository baseline under its
+// consumer, release tag and repository. Two baselines for one key leave no
+// single boundary to read, which is repository-scoped (E333).
+func (cp *computation) indexRepositoryBaselines(baselines []RepositoryBaseline) error {
+	for _, baseline := range baselines {
+		repository := baseline.Repository
+		if history, ok := cp.histories[globx.Fold(repository)]; ok {
+			repository = history.Name
 		}
-		return nil, err
+		key := baselineKey{consumer: globx.Fold(baseline.Consumer), tag: baseline.ReleaseTag,
+			repository: globx.Fold(repository)}
+		if _, duplicate := cp.baselines[key]; duplicate {
+			cp.err(CodeRepositoryBoundary, baseline.Consumer, "", fmt.Sprintf(
+				"duplicate repository baseline for release %s and repository %s", baseline.ReleaseTag, repository))
+			return errFatalPlan
+		}
+		cp.baselines[key] = historyKey(repository, baseline.Revision)
 	}
-	for _, dependency := range opts.InactiveExternalDependencies {
-		cp.warn(CodeExternalProviderAbsent, dependency.Consumer, "", fmt.Sprintf(
-			"external provider %q is absent; the %s edge is inactive for this workspace snapshot",
-			dependency.Provider, dependency.Kind.String()))
-	}
-	if len(cp.histories) > 0 {
-		cp.prepareRepositoryReach()
-	}
+	return nil
+}
 
-	// §16 E196: a shallow or grafted clone hides commits and tags, so every
-	// window and baseline computed over it is silently wrong. Checked before
-	// any history is read.
-	checkHistories := []RepositoryHistory{{Git: git}}
+// checkHistoriesComplete is §16 E196: a shallow or grafted clone hides
+// commits and tags, so every window and baseline computed over it is silently
+// wrong. Checked before any history is read. A composed workspace also
+// records each repository's HEAD here.
+func (cp *computation) checkHistoriesComplete() error {
+	checkHistories := []RepositoryHistory{{Git: cp.git}}
 	if len(cp.histories) > 0 {
 		checkHistories = checkHistories[:0]
 		for _, history := range cp.histories {
@@ -1524,61 +1580,65 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 		}
 	}
 	for _, history := range checkHistories {
-		if shallow, err := history.Git.IsShallow(ctx); err != nil {
-			return nil, fmt.Errorf("plan: checking repository %s completeness: %w", history.Name, err)
+		if shallow, err := history.Git.IsShallow(cp.ctx); err != nil {
+			return fmt.Errorf("plan: checking repository %s completeness: %w", history.Name, err)
 		} else if shallow {
 			cp.err(CodeShallowRepository, "", "",
 				fmt.Sprintf("repository %s is shallow or grafted: history is incomplete, so no correct plan can be computed; run `git fetch --unshallow` first", history.Name))
-			return cp.fatalPlan(), nil
+			return errFatalPlan
 		}
 		if len(cp.histories) > 0 {
 			head, ok := history.Git.(interface {
 				HeadSHA(context.Context) (string, error)
 			})
 			if !ok {
-				return nil, fmt.Errorf("plan: repository %s cannot report its HEAD", history.Name)
+				return fmt.Errorf("plan: repository %s cannot report its HEAD", history.Name)
 			}
-			sha, err := head.HeadSHA(ctx)
+			sha, err := head.HeadSHA(cp.ctx)
 			if err != nil {
-				return nil, fmt.Errorf("plan: reading repository %s HEAD: %w", history.Name, err)
+				return fmt.Errorf("plan: reading repository %s HEAD: %w", history.Name, err)
 			}
 			cp.repositoryHeads[history.Name] = sha
 		}
 	}
-	// The parser options come from the configuration file's `parser` object;
-	// a zero Config is the specification defaults, so nothing changes for a
-	// repository that configures nothing.
+	return nil
+}
+
+// prepareParsers builds the parser of the configuration file's `parser`
+// object and one per repository history. A zero Config is the specification
+// defaults, so nothing changes for a repository that configures nothing.
+func (cp *computation) prepareParsers(opts Options) error {
 	parser, err := ccme.NewParser(opts.ParserConfig)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	cp.parser = parser
 	cp.parsers[""] = parser
 	for _, history := range cp.histories {
 		configured, err := ccme.NewParser(history.ParserConfig)
 		if err != nil {
-			return nil, fmt.Errorf("plan: repository %s parser: %w", history.Name, err)
+			return fmt.Errorf("plan: repository %s parser: %w", history.Name, err)
 		}
 		cp.parsers[globx.Fold(history.Name)] = configured
 	}
+	return nil
+}
 
+// resolveDirectBumps runs §13.2 to §13.6: tags and windows, the parsed and
+// scoped units, the directive phases on the corrected stream, and each
+// package's direct bump.
+func (cp *computation) resolveDirectBumps() error {
 	if err := cp.loadTagsAndWindows(); err != nil { // §13.2, §13.3
-		if errors.Is(err, errFatalPlan) {
-			return cp.fatalPlan(), nil
-		}
-		return nil, err
+		return err
 	}
 	cp.log.Debug().Int("packages", len(cp.order)).Int("commits", len(cp.commits)).
 		Msg("plan: windows loaded")
 	if err := cp.parseAndResolve(); err != nil { // §13.4
-		return nil, err
+		return err
 	}
 	cp.log.Debug().Int("commits", len(cp.commits)).Msg("plan: window units parsed and scoped")
 	if err := cp.resolveApplicableControlBoundaries(); err != nil {
-		if errors.Is(err, errFatalPlan) {
-			return cp.fatalPlan(), nil
-		}
-		return nil, err
+		return err
 	}
 	cp.markDirectiveCommits()  // §13.11: one marker pass for the phases below
 	cp.collectCancels()        // §13.5
@@ -1586,19 +1646,20 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 	cp.suppressRevertedNotes() // §7.3, on the corrected stream
 	cp.resolveHolds()          // §13.6a
 	if err := cp.validateControlProjectionHeads(); err != nil {
-		if errors.Is(err, errFatalPlan) {
-			return cp.fatalPlan(), nil
-		}
-		return nil, err
+		return err
 	}
 	cp.directBumps() // §13.6
 	if err := cp.ancestryFailed(); err != nil {
-		return nil, err
+		return err
 	}
 	cp.log.Debug().Int("held", len(cp.held)).Int("pinned", len(cp.pinned)).
 		Msg("plan: direct bumps resolved")
+	return nil
+}
 
-	// §13.7 is §9.2's three phases; §13.8 is invoked from inside it.
+// propagateAndVersion runs §13.7, which is §9.2's three phases with §13.8
+// invoked from inside it, and then §13.9 and §13.10 with their reports.
+func (cp *computation) propagateAndVersion() error {
 	cp.propagateChannels() // phase 1
 	cp.log.Debug().Int("proposals", len(cp.proposed)).Msg("plan: channel proposals propagated")
 	cp.resolveChannels() // phase 2 (§13.8)
@@ -1618,10 +1679,12 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 	}
 	cp.log.Debug().Int("packages", len(cp.order)).Int("releasing", releasing).
 		Int("diagnostics", len(cp.diags)).Msg("plan: versions computed and ordered")
-	if err := cp.ancestryFailed(); err != nil {
-		return nil, err
-	}
+	return cp.ancestryFailed()
+}
 
+// emitPlan hands the computed plan over and drops the scratch indexes only
+// planning reads.
+func (cp *computation) emitPlan() *Plan {
 	repositoryInputOrder, repositoryInputs := cp.releaseRepositoryInputs()
 	cp.releaseWorkspaceScratch()
 	return &Plan{
@@ -1632,7 +1695,7 @@ func Compute(ctx context.Context, git TagInventoryGitx, opts Options) (*Plan, er
 		RepositoryHeads:      cp.repositoryHeads,
 		RepositoryInputOrder: repositoryInputOrder,
 		RepositoryInputs:     repositoryInputs,
-	}, nil
+	}
 }
 
 // These composition indexes have no role after the release plan is built;
