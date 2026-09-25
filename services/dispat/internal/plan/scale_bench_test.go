@@ -387,3 +387,58 @@ func BenchmarkComputeFleetSnapshot(b *testing.B) {
 		})
 	}
 }
+
+// chainWorkspace is the topology that makes graph traversals largest: package
+// i consumes package i-1, so the walk from package i reaches every package
+// after it, and one unit per package asks for a walk from every package. Every
+// package is released at one base commit, so the owed windows are examined
+// for every (provider, consumer) pair the chain holds.
+func chainWorkspace(packages int) ([]*model.Package, []model.Dependency, *fakeGit) {
+	history := []commit{{sha: "base", message: "chore: base"}}
+	space := &model.Space{Name: "workspace"}
+	pkgs := make([]*model.Package, packages)
+	deps := make([]model.Dependency, 0, packages)
+	for i := range pkgs {
+		name := fmt.Sprintf("pkg-%04d", i)
+		pkgs[i] = &model.Package{Name: name, Dir: "/r/pkgs/" + name, Space: space}
+		history = append(history, commit{sha: fmt.Sprintf("c%06d", i),
+			message: fmt.Sprintf("fix(%s)^: change for the next package", name),
+			files:   []string{"pkgs/" + name + "/main.go"}})
+		if i > 0 {
+			deps = append(deps, model.Dependency{Consumer: name, Provider: fmt.Sprintf("pkg-%04d", i-1)})
+		}
+	}
+	git := newFakeGit(history...)
+	for _, p := range pkgs {
+		git = git.tag(p.Name, "1.0.0", "base")
+	}
+	return pkgs, deps, git
+}
+
+// BenchmarkComputeChainTopology measures the graph caches of §13.11 where they
+// are largest: a 4,096-package chain, where the unbounded walks the owed pairs
+// and the units share hold a quadratic number of targets between them. What a
+// cache keeps is dropped with the computation, so it never shows in
+// retained_MiB; the peak heap is what the cache bound is about.
+func BenchmarkComputeChainTopology(b *testing.B) {
+	for _, packages := range []int{1024, 4096} {
+		b.Run(fmt.Sprintf("packages=%d", packages), func(b *testing.B) {
+			pkgs, deps, git := chainWorkspace(packages)
+			opts := Options{Packages: pkgs, Dependencies: deps, Root: "/r"}
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := Compute(context.Background(), git, opts); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			reportPeakHeap(b, func() any {
+				pl, err := Compute(context.Background(), git, opts)
+				if err != nil {
+					b.Fatal(err)
+				}
+				return pl
+			})
+		})
+	}
+}

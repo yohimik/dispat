@@ -691,6 +691,26 @@ var gitInvocations atomic.Uint64
 // Exported for benchmarks and for the tests that assert a call was not made.
 func GitInvocations() uint64 { return gitInvocations.Load() }
 
+// gitOutputBytes counts the standard output every git subprocess this process
+// started has written, buffered or streamed. The number of processes says what
+// a run pays in forks; this says what it pays in reading and parsing, which is
+// the other half of a history read's cost.
+var gitOutputBytes atomic.Uint64
+
+// GitOutputBytes reports how many bytes of standard output git subprocesses
+// have written to this process. Exported for benchmarks.
+func GitOutputBytes() uint64 { return gitOutputBytes.Load() }
+
+// commitsDiffed counts the commits whose changed paths a git subprocess
+// computed for this process: every commit of a history read that lists
+// paths. Diffing a commit against its parent is the expensive part of such a
+// read, and most of the paths it produces are never looked at.
+var commitsDiffed atomic.Uint64
+
+// CommitsDiffed reports how many commits git has diffed to list their changed
+// paths for this process. Exported for benchmarks.
+func CommitsDiffed() uint64 { return commitsDiffed.Load() }
+
 func (c *LocalGitx) run(ctx context.Context, args ...string) (string, error) {
 	return c.runEnv(ctx, nil, args...)
 }
@@ -794,10 +814,12 @@ func (c *LocalGitx) runStream(ctx context.Context, stream gitStream, args ...str
 	if err != nil {
 		safeStderr := strings.TrimSpace(redactGitOutput(stderr.String(), args))
 		ev.Err(err).Str("stderr", safeStderr).Msg("git failed")
+		gitOutputBytes.Add(uint64(out.Len() + written.count))
 		return out.String(), fmt.Errorf("git %s: %w: %s",
 			strings.Join(safeArgs, " "), err, safeStderr)
 	}
 	ev.Int("outBytes", out.Len()+written.count).Msg("git")
+	gitOutputBytes.Add(uint64(out.Len() + written.count))
 	return out.String(), nil
 }
 
@@ -1537,7 +1559,10 @@ func (c *LocalGitx) log(ctx context.Context, revisions ...string) ([]Commit, err
 	if err != nil {
 		return nil, err
 	}
-	return parseCommits(out)
+	commits, err := parseCommits(out)
+	// --name-only diffs every commit the range lists.
+	commitsDiffed.Add(uint64(len(commits)))
+	return commits, err
 }
 
 func parseCommits(out string) ([]Commit, error) {

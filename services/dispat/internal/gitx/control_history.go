@@ -54,7 +54,10 @@ func (c *LocalGitx) ControlGitlinkHistory(ctx context.Context) ([]ControlHistory
 	if strings.TrimSpace(out) == "" {
 		return nil, fmt.Errorf("gitx: malformed empty control history")
 	}
-	return parseControlGitlinkHistory(out)
+	history, err := parseControlGitlinkHistory(out)
+	// --raw diffs every commit of the walk.
+	commitsDiffed.Add(uint64(len(history)))
+	return history, err
 }
 
 // parseControlGitlinkHistory reads the whole `git log` answer into the commits

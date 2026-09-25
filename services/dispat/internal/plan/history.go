@@ -69,6 +69,9 @@ type HistoryStats struct {
 	// evidence makes: one per repository for the release subjects, and one
 	// per (repository, revision) whose links a route passes through.
 	LinkReads atomic.Int64
+	// AuthorScans counts the commits the window attribution examined: what
+	// collecting every release's authors costs, in commits read.
+	AuthorScans atomic.Int64
 }
 
 type historyCommit struct {

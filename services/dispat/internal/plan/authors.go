@@ -194,6 +194,9 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 	windowSeen := make(map[string]bool)
 	freshSeen := make(map[string]bool)
 	reachable := cp.windowRepositories(name)
+	if cp.stats != nil {
+		cp.stats.AuthorScans.Add(int64(len(cp.commits)))
+	}
 	for _, rec := range cp.commits {
 		// A commit from a repository the package's window cannot reach is not
 		// pending for it, whatever its key says. Deciding that from the
