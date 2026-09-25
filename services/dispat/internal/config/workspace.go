@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
@@ -317,10 +318,7 @@ type Workspace struct {
 	// LinkFindings is the nil-safe way to read them.
 	Findings      []LinkFinding
 	modules       []submodule
-	byName        map[string]int
-	byFold        map[string]int
-	byRoot        map[string]int
-	sourceOrder   []int
+	index         workspaceIndex
 	inheritedPins bool
 	// disabled retains the boundaries of the repositories this run excluded.
 	disabled []DisabledRepository
@@ -363,23 +361,42 @@ func (w *Workspace) IsInheritedPinsEnabled() bool {
 }
 
 func newWorkspace(controlRoot string, repositories []Repository, modules []submodule) *Workspace {
-	w := &Workspace{
-		ControlRoot: controlRoot, Repositories: repositories, modules: modules,
-		byName: make(map[string]int, len(repositories)), byFold: make(map[string]int, len(repositories)),
-		byRoot: make(map[string]int, len(repositories)),
-	}
-	for i := range repositories {
-		w.byName[repositories[i].Name] = i
-		w.byFold[globx.Fold(repositories[i].Name)] = i
-		w.byRoot[repositories[i].Root] = i
-		if !repositories[i].Control {
-			w.sourceOrder = append(w.sourceOrder, i)
+	return &Workspace{ControlRoot: controlRoot, Repositories: repositories, modules: modules}
+}
+
+// workspaceIndex is the lookup a workspace answers its repository questions
+// from: by exact name, by folded name, by root, and the source repositories in
+// root order. It is built once, on the first question, from the repositories
+// the workspace holds by then, whoever assembled it.
+type workspaceIndex struct {
+	once        sync.Once
+	byName      map[string]int
+	byFold      map[string]int
+	byRoot      map[string]int
+	sourceOrder []int
+}
+
+// indexed answers the workspace's index, building it on the first call.
+func (w *Workspace) indexed() *workspaceIndex {
+	w.index.once.Do(func() {
+		repositories := w.Repositories
+		index := &w.index
+		index.byName = make(map[string]int, len(repositories))
+		index.byFold = make(map[string]int, len(repositories))
+		index.byRoot = make(map[string]int, len(repositories))
+		for i := range repositories {
+			index.byName[repositories[i].Name] = i
+			index.byFold[globx.Fold(repositories[i].Name)] = i
+			index.byRoot[repositories[i].Root] = i
+			if !repositories[i].Control {
+				index.sourceOrder = append(index.sourceOrder, i)
+			}
 		}
-	}
-	sort.Slice(w.sourceOrder, func(i, j int) bool {
-		return pathPrefix(repositories[w.sourceOrder[i]].Root) < pathPrefix(repositories[w.sourceOrder[j]].Root)
+		sort.Slice(index.sourceOrder, func(i, j int) bool {
+			return pathPrefix(repositories[index.sourceOrder[i]].Root) < pathPrefix(repositories[index.sourceOrder[j]].Root)
+		})
 	})
-	return w
+	return &w.index
 }
 
 // RepositoryForPackage returns the source repository owning p.
@@ -387,13 +404,8 @@ func (w *Workspace) RepositoryForPackage(p *model.Package) *Repository {
 	if w == nil || p == nil {
 		return nil
 	}
-	if i, ok := w.byName[p.Repository]; ok {
+	if i, ok := w.indexed().byName[p.Repository]; ok {
 		return &w.Repositories[i]
-	}
-	for i := range w.Repositories {
-		if w.Repositories[i].Name == p.Repository {
-			return &w.Repositories[i]
-		}
 	}
 	return nil
 }
@@ -404,13 +416,8 @@ func (w *Workspace) RepositoryByName(name string) *Repository {
 	if w == nil {
 		return nil
 	}
-	if i, ok := w.byFold[globx.Fold(name)]; ok {
+	if i, ok := w.indexed().byFold[globx.Fold(name)]; ok {
 		return &w.Repositories[i]
-	}
-	for i := range w.Repositories {
-		if strings.EqualFold(w.Repositories[i].Name, name) {
-			return &w.Repositories[i]
-		}
 	}
 	return nil
 }
@@ -441,18 +448,9 @@ func (w *Workspace) RepositoryForDir(dir string) *Repository {
 }
 
 func (w *Workspace) repositoryForCanonicalDir(dir string) *Repository {
-	if len(w.byRoot) == 0 {
-		var best *Repository
-		for i := range w.Repositories {
-			repo := &w.Repositories[i]
-			if within(repo.Root, dir) && (best == nil || len(repo.Root) > len(best.Root)) {
-				best = repo
-			}
-		}
-		return best
-	}
+	byRoot := w.indexed().byRoot
 	for current := filepath.Clean(dir); ; current = filepath.Dir(current) {
-		if i, ok := w.byRoot[current]; ok {
+		if i, ok := byRoot[current]; ok {
 			return &w.Repositories[i]
 		}
 		parent := filepath.Dir(current)
@@ -467,21 +465,13 @@ func pathPrefix(path string) string {
 }
 
 func (w *Workspace) sourceWithinCanonicalDir(dir string) *Repository {
-	if len(w.sourceOrder) == 0 {
-		for i := range w.Repositories {
-			repo := &w.Repositories[i]
-			if !repo.Control && within(dir, repo.Root) {
-				return repo
-			}
-		}
-		return nil
-	}
+	sourceOrder := w.indexed().sourceOrder
 	prefix := pathPrefix(dir)
-	i := sort.Search(len(w.sourceOrder), func(i int) bool {
-		return pathPrefix(w.Repositories[w.sourceOrder[i]].Root) >= prefix
+	i := sort.Search(len(sourceOrder), func(i int) bool {
+		return pathPrefix(w.Repositories[sourceOrder[i]].Root) >= prefix
 	})
-	if i < len(w.sourceOrder) {
-		repo := &w.Repositories[w.sourceOrder[i]]
+	if i < len(sourceOrder) {
+		repo := &w.Repositories[sourceOrder[i]]
 		if strings.HasPrefix(pathPrefix(repo.Root), prefix) {
 			return repo
 		}
