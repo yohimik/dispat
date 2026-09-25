@@ -65,9 +65,11 @@ one again and pays a fetch, so a container may use an empty volume for it.
 Two processes must not serve one node name from one state folder. The second one to start refuses, because two nodes
 sharing a folder would each hold half the record of what has been answered. `worker.lock` holds the serving process's
 id and is removed when that process stops. A worker that finds the id of a process that is gone takes the folder over,
-so a crashed worker restarts without anybody deleting the file. A new claim is trusted after it has settled for a
-second, which is how one of several workers started at once against one folder serves and the others refuse. A serving
-worker reads the lock again before it claims each assignment, and stops when another process's id is written there.
+and so does one that finds its own id, which an earlier process with the same id left: a worker restarted in a
+container is process 1 every time. A crashed worker restarts without anybody deleting the file. A new claim is trusted
+after it has settled for a second, which is how one of several workers started at once against one folder serves and
+the others refuse. A serving worker reads the lock again before it claims each assignment, and stops when another
+process's id is written there.
 
 ### `--idle-timeout`
 

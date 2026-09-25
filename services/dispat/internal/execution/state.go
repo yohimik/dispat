@@ -228,10 +228,22 @@ func claimNodeLock(path string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("execution: reading the worker state lock %s: %w", path, err)
 	}
-	if owner != 0 && IsProcessRunning(owner) {
+	if isLiveLockOwner(owner) {
 		return owner, nil
 	}
 	return takeOverNodeLock(path, owner)
+}
+
+// isLiveLockOwner reports whether the process a lock names is another process
+// that is still running.
+//
+// This process's own id is never a live owner. It has not written its claim
+// yet when it asks, so a lock naming it was written by an earlier process that
+// happened to have the same id, which is the ordinary case for a worker
+// restarted in a container, where it is process 1 every time. Reading that as
+// a live owner would refuse every restart until somebody deleted the file.
+func isLiveLockOwner(owner int) bool {
+	return owner != 0 && owner != os.Getpid() && IsProcessRunning(owner)
 }
 
 // takeOverNodeLock renames a stale lock aside, verifies what it renamed, and
@@ -250,7 +262,7 @@ func takeOverNodeLock(path string, stale int) (int, error) {
 		}
 		return 0, fmt.Errorf("execution: taking over the worker state lock %s: %w", path, err)
 	}
-	if taken := readTakenNodeLockOwner(aside); taken != 0 && taken != stale && IsProcessRunning(taken) {
+	if taken := readTakenNodeLockOwner(aside); taken != stale && isLiveLockOwner(taken) {
 		// A fresh claim, written between the read above and the rename: it is
 		// put back and its owner is reported, which is what the doc comment of
 		// the refusal has always promised and what a plain remove could not
@@ -357,7 +369,7 @@ func claimNodeLockAfterTakeover(path string) (int, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if os.IsExist(err) {
 		owner, readErr := readNodeLockOwner(path)
-		if readErr == nil && owner != 0 && IsProcessRunning(owner) {
+		if readErr == nil && isLiveLockOwner(owner) {
 			return owner, nil
 		}
 		return 0, nodeLockOccupied(path, 0)

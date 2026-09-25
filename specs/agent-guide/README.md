@@ -634,9 +634,10 @@ Before deleting a coordination ref, verify that its current tip still belongs to
 Leftover `dispat-worker-*` branches on the repository, or on a mailbox a link names, are coordination state, not release records. A completed run deletes its own; an uncertain publication retains its authorization as evidence until the operator follows the recovery order above. They carry full source and command text, so report other leftovers for cleanup after checking that their current tips still belong to the run's authenticated chain and no process uses them. Investigate a changed or unauthenticated tip instead of deleting it as residue. Never write a `dispat-worker-*` branch yourself, and never run a release from a node whose `execution.role` is `worker`: a node refuses a message nobody signed, and a worker refuses the release with `E226`.
 
 A worker state folder has one serving process, and its `worker.lock` holds that process's id. A crashed worker's
-successor takes the folder over from the id of a process that is gone, so do not delete or rename `worker.lock` to
-restart a worker; start it normally and investigate an `E225` refusal if another process still owns the folder. A
-serving worker that finds another process's id in the file stops with `E225`.
+successor takes the folder over from the id of a process that is gone, or from its own id left by an earlier process
+with that id (a container worker is process 1 on every restart), so do not delete or rename `worker.lock` to restart a
+worker; start it normally and investigate an `E225` refusal if another process still owns the folder. A serving worker
+that finds another process's id in the file stops with `E225`.
 
 ## Respect the release lock
 

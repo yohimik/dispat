@@ -32,12 +32,18 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 	assert.Equal(t, filepath.Join(root, "build-a", "seen.json"), state.Seen)
 
 	t.Run("a second process on the same folder is refused", func(t *testing.T) {
+		// The process that started this test stands in for the one serving
+		// the folder: it is alive and it is not this process.
+		lock := filepath.Join(state.Dir, stateLockFile)
+		require.NoError(t, os.WriteFile(lock, []byte(strconv.Itoa(os.Getppid())), 0o644))
+		defer func() { require.NoError(t, os.WriteFile(lock, []byte(strconv.Itoa(os.Getpid())), 0o644)) }()
+
 		_, _, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
 
 		require.Error(t, err)
 		assert.Equal(t, config.DiagnosticExecution, config.DiagnosticCode(err))
 		assert.Equal(t, CategoryConfiguration, DiagnosticCategory(err))
-		assert.Contains(t, err.Error(), strconv.Itoa(os.Getpid()))
+		assert.Contains(t, err.Error(), strconv.Itoa(os.Getppid()))
 	})
 
 	t.Run("another node in the same folder is a folder of its own", func(t *testing.T) {
@@ -65,6 +71,19 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 		require.NoError(t, release())
 	})
 
+	t.Run("a lock naming this process's own id is an earlier process's", func(t *testing.T) {
+		// A worker restarted in a container is process 1 every time, so the
+		// lock its crashed predecessor left names the restarted process. It
+		// has not written its claim yet, so the lock cannot be its own.
+		require.NoError(t, os.WriteFile(filepath.Join(state.Dir, stateLockFile),
+			[]byte(strconv.Itoa(os.Getpid())), 0o644))
+
+		_, release, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
+
+		require.NoError(t, err, "the restarted worker takes its folder over")
+		require.NoError(t, release())
+	})
+
 	t.Run("a lock its owner has created and not yet written is waited for", func(t *testing.T) {
 		// The owner creates the file and writes its id in two steps. A second
 		// process arriving between them used to read the empty file as stale
@@ -74,14 +93,14 @@ func TestNodeStateIsOwnedByOneProcess(t *testing.T) {
 		written := make(chan error, 1)
 		go func() {
 			time.Sleep(10 * stateLockWritePoll)
-			written <- os.WriteFile(lock, []byte(strconv.Itoa(os.Getpid())), 0o644)
+			written <- os.WriteFile(lock, []byte(strconv.Itoa(os.Getppid())), 0o644)
 		}()
 
 		_, _, err := OpenNodeState(root, "build-a", "file:///srv/mailbox.git")
 
 		require.NoError(t, <-written)
 		require.Error(t, err, "the owner was starting, not gone")
-		assert.Contains(t, err.Error(), strconv.Itoa(os.Getpid()))
+		assert.Contains(t, err.Error(), strconv.Itoa(os.Getppid()))
 		require.NoError(t, os.Remove(lock))
 	})
 
@@ -215,7 +234,9 @@ func TestSeenSetRecordPrunesWithoutRestart(t *testing.T) {
 //
 // The claim that arrives between the read and the takeover is simulated by
 // writing a live process id into the lock, which is exactly what the winner
-// would have left there.
+// would have left there. The parent of the test binary is that process: it is
+// running and it is not this one, whose own id in a lock it has not written
+// yet can only be an earlier process's.
 func TestAStaleLockIsTakenOverWithoutTakingAFreshOne(t *testing.T) {
 	t.Run("a lock its process no longer holds is taken over", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), stateLockFile)
@@ -232,17 +253,17 @@ func TestAStaleLockIsTakenOverWithoutTakingAFreshOne(t *testing.T) {
 
 	t.Run("a claim written between the read and the takeover is put back", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), stateLockFile)
-		require.NoError(t, os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644))
+		require.NoError(t, os.WriteFile(path, []byte(strconv.Itoa(os.Getppid())), 0o644))
 
 		// The stale process id this caller read a moment ago, and a live one
 		// in the file now: the winner of the race got there first.
 		owner, err := takeOverNodeLock(path, 999999)
 
 		require.NoError(t, err)
-		assert.Equal(t, os.Getpid(), owner, "the loser reports the winner")
+		assert.Equal(t, os.Getppid(), owner, "the loser reports the winner")
 		held, err := os.ReadFile(path)
 		require.NoError(t, err, "the winner's lock is still there")
-		assert.Equal(t, strconv.Itoa(os.Getpid()), string(held))
+		assert.Equal(t, strconv.Itoa(os.Getppid()), string(held))
 		entries, err := os.ReadDir(filepath.Dir(path))
 		require.NoError(t, err)
 		assert.Len(t, entries, 1, "nothing is left beside it")
@@ -268,12 +289,12 @@ func TestAStaleLockIsTakenOverWithoutTakingAFreshOne(t *testing.T) {
 
 	t.Run("a claim that lands between the removal and the create is reported", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), stateLockFile)
-		require.NoError(t, os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644))
+		require.NoError(t, os.WriteFile(path, []byte(strconv.Itoa(os.Getppid())), 0o644))
 
 		owner, err := claimNodeLockAfterTakeover(path)
 
 		require.NoError(t, err)
-		assert.Equal(t, os.Getpid(), owner, "the process that created the lock first owns the folder")
+		assert.Equal(t, os.Getppid(), owner, "the process that created the lock first owns the folder")
 	})
 }
 

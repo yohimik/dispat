@@ -694,8 +694,9 @@ Three conditions dispat already had a code for keep it and join the specificatio
   same number, so a task that overruns is stopped on the machine rather than abandoned while it is still running.
 - **Two workers must not share one state folder for one node name.** The second one to start refuses. Give each node
   its own `--state-dir`, and expect the folder to be disposable: everything in it is rebuilt. The owning worker's
-  process id is in `worker.lock`; a worker that finds the id of a process that is gone takes the folder over, so a
-  crashed worker restarts without anybody deleting a file.
+  process id is in `worker.lock`; a worker that finds the id of a process that is gone, or its own id left by an
+  earlier process, as a container's process 1 always is, takes the folder over, so a crashed worker restarts without
+  anybody deleting a file.
 - **Nested dispat commands on a worker are restricted.** Under a task's authority `release`, a bare `dispat`,
   `commit`, `github`, `changelog`, `autoversion`, `compute` and `worker` are refused with `E226`. Everything a build
   script legitimately uses stays allowed, including `exec`, `if`, `for`, `install`, `scanner`, `writer`, `replacer`,
