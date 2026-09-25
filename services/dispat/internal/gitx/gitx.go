@@ -999,6 +999,34 @@ func (c *LocalGitx) TagsForPackages(ctx context.Context, formats map[string]TagF
 	return parseTagsForPackages(out, formats)
 }
 
+// FindTag looks one tag up by its exact name among the tags HEAD reaches,
+// with its commit peeled: the tag the baseline query (Tags) would see under
+// that name, found without listing every other one. It is the question a
+// refused release tag write asks (release.CreateReleaseTagAs), which is rare;
+// a tag HEAD cannot reach is not found, exactly as the baseline never saw it.
+func (c *LocalGitx) FindTag(ctx context.Context, name string) (Tag, bool, error) {
+	if err := validRefName(name); err != nil {
+		return Tag{}, false, fmt.Errorf("gitx: finding tag %q: %w", name, err)
+	}
+	ref := "refs/tags/" + name
+	out, err := c.run(ctx, "for-each-ref", "--merged", "HEAD",
+		"--format=%(refname)\t%(objectname)\t%(*objectname)", ref)
+	if err != nil {
+		return Tag{}, false, err
+	}
+	for line := range strings.Lines(out) {
+		entry, err := parseTagInventoryLine(line)
+		if err != nil {
+			return Tag{}, false, err
+		}
+		// A pattern matches the refs below it too, so the name is compared.
+		if entry.name == ref {
+			return Tag{Name: name, Commit: strings.Clone(entry.commit)}, true, nil
+		}
+	}
+	return Tag{}, false, nil
+}
+
 type packageTagMatcher struct {
 	packageName string
 	prefix      string

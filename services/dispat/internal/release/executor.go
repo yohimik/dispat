@@ -1551,6 +1551,9 @@ func CreateReleaseTagAs(ctx context.Context, tagger Taggerx, rel *plan.Release, 
 	if name != "" {
 		tag = name
 	}
+	if finder, ok := tagger.(tagFinder); ok {
+		return createFoundTag(ctx, finder, tagger, rel, tagWrite{name: tag, isForced: force}, log)
+	}
 	if insp, ok := tagger.(tagInspector); ok {
 		tags, err := insp.Tags(ctx, rel.Pkg.Name, rel.TagFormat())
 		if err != nil {

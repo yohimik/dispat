@@ -169,10 +169,11 @@ func TestFinalFleetRollbackRefusesARepositoryThatMovedDuringTheBuild(t *testing.
 }
 
 // TestFinalPostPublishTagInventoryFailureStillWritesTheReleaseTag: planning
-// reads the repository-wide tag inventory first; the executor reads this
-// package's tags again only after publication, to recognize a nested tag. A
-// transient failure of that second read cannot turn a published package into
-// an unrecorded release when the immutable tag write itself still succeeds.
+// reads the repository-wide tag inventory first; after publication the
+// executor writes the release tag create-only and reads no inventory at all
+// unless that write is refused, since a refusal is the only sign of a nested
+// tag. A second inventory read that would fail is therefore never made, and
+// the published package is recorded by its tag.
 func TestFinalPostPublishTagInventoryFailureStillWritesTheReleaseTag(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig("echo built", 1)
@@ -189,9 +190,8 @@ func TestFinalPostPublishTagInventoryFailureStillWritesTheReleaseTag(t *testing.
 	res := r.CommandEnv(fault.Env())
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	combined := res.Stdout + res.Stderr
-	assert.Contains(t, combined, harness.GitFaultMarker)
-	assert.Contains(t, combined, "existing tags could not be listed before tagging")
-	assert.Equal(t, 2, fault.Matches(), "planning succeeds and only the executor's second inventory read fails")
+	assert.NotContains(t, combined, harness.GitFaultMarker)
+	assert.Equal(t, 1, fault.Matches(), "planning reads the inventory and the executor never does")
 	assert.True(t, r.IsTagged("core@0.1.0"), "the successful tag write durably records the publication")
 
 	retry := r.Release()
