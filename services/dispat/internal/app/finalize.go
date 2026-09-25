@@ -107,7 +107,46 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	if !a.cfg.Commit.IsEnabled() {
 		return
 	}
+	rc := newReleaseCommit(pl, results)
+	if len(rc.rels) == 0 {
+		return
+	}
+	if !fin.isIncludeWithheld {
+		rc.dirs = a.appendIncludeDirs(rc.dirs, a.cfg.Commit.Include)
+	}
 
+	// Every package in this list has published. From here nothing may abort:
+	// a failure is recorded and the phase carries on to the rest of what it
+	// owes, because the alternative is a released package with no tag, no
+	// changelog entry and no GitHub release, none of which the next run knows
+	// to go back for. See critical.go.
+	a.commitAndTag(ctx, fin, rc)
+	// released is the commit the records name. It is HEAD, except after a
+	// recovery: the branch tip is a merge by then, and what the records mean
+	// is the release commit that became its first parent. Empty until a
+	// recovery happens, so an ordinary run reads HEAD exactly as it always
+	// did.
+	var released string
+	if a.cfg.Commit.IsPushEnabled() {
+		released = a.pushRelease(ctx, fin, rc)
+	}
+	if fin.gh != nil && !fin.gh.empty() {
+		a.recordGitHubReleases(ctx, fin, rc.rels, released)
+	}
+}
+
+// releaseCommit is what the release commit records: the packages it names
+// with their tags, the folders it stages, the refs its push sends and the
+// published releases themselves.
+type releaseCommit struct {
+	pkgs, tags, dirs []string
+	pushTags         []gitx.ReleaseRef
+	rels             []*plan.Release
+}
+
+// newReleaseCommit collects the published packages of the plan, in plan
+// order, into what the release commit records.
+func newReleaseCommit(pl *plan.Plan, results map[string]*release.Result) releaseCommit {
 	// Two lists, because the two consumers want different things. tags is what
 	// this run released, one per package, and it is what the commit message
 	// names. pushTags additionally carries the aliases, because a "v1" that
@@ -119,52 +158,44 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	// shape the day somebody adds an alias to the config. `dispat commit`
 	// renders its own message from the release tag alone; this keeps the two
 	// spellings of the same placeholder in agreement.
-	var pkgs, tags, dirs []string
-	var pushTags []gitx.ReleaseRef
-	var rels []*plan.Release
+	var rc releaseCommit
 	for _, name := range pl.Order {
 		if r, ok := results[name]; ok && r.Status == release.StatusPublished {
 			rel := pl.Releases[name]
-			pushTags = append(pushTags, gitx.ReleaseRef{Name: rel.TagName()})
+			rc.pushTags = append(rc.pushTags, gitx.ReleaseRef{Name: rel.TagName()})
 			for _, alias := range rel.AliasTags() {
-				pushTags = append(pushTags, gitx.ReleaseRef{Name: alias.Name, IsMoving: alias.Force})
+				rc.pushTags = append(rc.pushTags, gitx.ReleaseRef{Name: alias.Name, IsMoving: alias.Force})
 			}
-			dirs = append(dirs, rel.Pkg.Dir)
-			rels = append(rels, rel)
+			rc.dirs = append(rc.dirs, rel.Pkg.Dir)
+			rc.rels = append(rc.rels, rel)
 			// The commit message names the releases this commit records. A
 			// package whose scripts exported PACKAGE_<KEY> made its own
 			// commit already — its record is that commit, and naming it here
 			// would claim a release the leg's commit already claims.
 			if rel.ExportedCommit() == "" {
-				pkgs = append(pkgs, name)
-				tags = append(tags, rel.TagName())
+				rc.pkgs = append(rc.pkgs, name)
+				rc.tags = append(rc.tags, rel.TagName())
 			}
 		}
 	}
-	if len(rels) == 0 {
-		return
-	}
-	if len(pkgs) == 0 {
+	if len(rc.pkgs) == 0 {
 		// Every published package recorded itself; whatever this commit still
 		// carries (shared include files, stray artifacts) belongs to the run
 		// as a whole, so the message names the run's releases.
-		for _, rel := range rels {
-			pkgs = append(pkgs, rel.Pkg.Name)
-			tags = append(tags, rel.TagName())
+		for _, rel := range rc.rels {
+			rc.pkgs = append(rc.pkgs, rel.Pkg.Name)
+			rc.tags = append(rc.tags, rel.TagName())
 		}
 	}
-	if !fin.isIncludeWithheld {
-		dirs = a.appendIncludeDirs(dirs, a.cfg.Commit.Include)
-	}
+	return rc
+}
 
-	// Every package in this list has published. From here nothing may abort:
-	// a failure is recorded and the phase carries on to the rest of what it
-	// owes, because the alternative is a released package with no tag, no
-	// changelog entry and no GitHub release, none of which the next run knows
-	// to go back for. See critical.go.
-	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, pkgs, tags)
+// commitAndTag makes the release commit, bracketed by beforeCommit and
+// afterCommit, then tags every published package and runs postCommit.
+func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit) {
+	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, rc.pkgs, rc.tags)
 	fin.run("beforeCommit", a.cfg.Run.BeforeCommit)
-	committed, err := a.git.CommitDirs(ctx, dirs, msg)
+	committed, err := a.git.CommitDirs(ctx, rc.dirs, msg)
 	switch {
 	case err != nil:
 		// Tagging still follows: the tags then point at each package's
@@ -177,7 +208,7 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	default:
 		fin.run("afterCommit", a.cfg.Run.AfterCommit)
 	}
-	for _, rel := range rels {
+	for _, rel := range rc.rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
 		if err := release.CreateReleaseTag(ctx, a.git, rel, a.cfg.Commit.IsForceEnabled(), a.log); err != nil {
@@ -189,61 +220,63 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 		}
 	}
 	fin.run("postCommit", a.cfg.Run.PostCommit)
-	// released is the commit the records name. It is HEAD, except after a
-	// recovery: the branch tip is a merge by then, and what the records mean
-	// is the release commit that became its first parent. Empty until a
-	// recovery happens, so an ordinary run reads HEAD exactly as it always
-	// did.
-	var released string
-	if a.cfg.Commit.IsPushEnabled() {
-		fin.run("beforePush", a.cfg.Run.BeforePush)
-		report, err := a.git.Push(ctx, fin.remote, pushTags)
-		if errors.Is(err, gitx.ErrRejected) {
-			// Somebody pushed to the branch while this run was working. The
-			// release still owes its commit and tags, and the way to deliver
-			// them is to join what landed with what this run made.
-			report, released, err = a.mergeAndPush(ctx, fin, rels, tags, pushTags)
-		}
-		a.reportPush(report, fin.remote)
-		a.recordRecordConflicts(fin.crit, report, fin.remote)
-		if err != nil {
-			// The commit and the tags are local records already; the remote
-			// copy is what is missing, and a later push sends it. The GitHub
-			// releases below still go out — they document the release, and
-			// withholding them would lose the second record too.
-			fin.crit.record(a.log, plan.CodePushFailed, err, "push failed",
-				func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", gitx.RedactURL(fin.remote)) })
-		} else {
-			a.log.Info().Str("remote", gitx.RedactURL(fin.remote)).
-				Strs("tags", gitx.ReleaseRefNames(pushTags)).Msg("pushed release commit and tags")
-			fin.run("afterPush", a.cfg.Run.AfterPush)
+}
+
+// pushRelease pushes the release commit and its tags, bracketed by beforePush
+// and afterPush, and returns the commit the records name when a rejected push
+// had to be recovered by a merge (empty otherwise).
+func (a *App) pushRelease(ctx context.Context, fin finalizer, rc releaseCommit) (released string) {
+	fin.run("beforePush", a.cfg.Run.BeforePush)
+	report, err := a.git.Push(ctx, fin.remote, rc.pushTags)
+	if errors.Is(err, gitx.ErrRejected) {
+		// Somebody pushed to the branch while this run was working. The
+		// release still owes its commit and tags, and the way to deliver
+		// them is to join what landed with what this run made.
+		report, released, err = a.mergeAndPush(ctx, fin, rc.rels, rc.tags, rc.pushTags)
+	}
+	a.reportPush(report, fin.remote)
+	a.recordRecordConflicts(fin.crit, report, fin.remote)
+	if err != nil {
+		// The commit and the tags are local records already; the remote
+		// copy is what is missing, and a later push sends it. The GitHub
+		// releases below still go out — they document the release, and
+		// withholding them would lose the second record too.
+		fin.crit.record(a.log, plan.CodePushFailed, err, "push failed",
+			func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", gitx.RedactURL(fin.remote)) })
+	} else {
+		a.log.Info().Str("remote", gitx.RedactURL(fin.remote)).
+			Strs("tags", gitx.ReleaseRefNames(rc.pushTags)).Msg("pushed release commit and tags")
+		fin.run("afterPush", a.cfg.Run.AfterPush)
+	}
+	return released
+}
+
+// recordGitHubReleases creates the GitHub releases of the published packages,
+// stamped with the release commit.
+func (a *App) recordGitHubReleases(ctx context.Context, fin finalizer, rels []*plan.Release, released string) {
+	// The releases document the exact release commit and tag in their
+	// body, whether or not they were pushed; with push enabled the tag is
+	// additionally pinned to the commit via target_commitish (only then
+	// does the SHA exist on the remote). Every resolved releaser gets the
+	// stamp: the dispatch routes each package to one of them.
+	sha, shaErr := released, error(nil)
+	if sha == "" {
+		sha, shaErr = a.git.HeadSHA(ctx)
+	}
+	if shaErr != nil {
+		a.log.Warn().Err(shaErr).Msg("cannot resolve HEAD, github releases will omit the commit")
+	} else {
+		for _, gh := range fin.gh.all {
+			gh.CommitSHA = sha
+			if a.cfg.Commit.IsPushEnabled() {
+				gh.TargetCommitish = sha
+			}
 		}
 	}
-	if fin.gh != nil && !fin.gh.empty() {
-		// The releases document the exact release commit and tag in their
-		// body, whether or not they were pushed; with push enabled the tag is
-		// additionally pinned to the commit via target_commitish (only then
-		// does the SHA exist on the remote). Every resolved releaser gets the
-		// stamp: the dispatch routes each package to one of them.
-		sha, shaErr := released, error(nil)
-		if sha == "" {
-			sha, shaErr = a.git.HeadSHA(ctx)
-		}
-		if shaErr != nil {
-			a.log.Warn().Err(shaErr).Msg("cannot resolve HEAD, github releases will omit the commit")
-		} else {
-			for _, gh := range fin.gh.all {
-				gh.CommitSHA = sha
-				if a.cfg.Commit.IsPushEnabled() {
-					gh.TargetCommitish = sha
-				}
-			}
-		}
-		for _, rel := range rels {
-			if err := fin.gh.Record(ctx, rel); err != nil {
-				fin.crit.record(a.log, plan.CodeRecordFailed, err, "github release failed",
-					func(e *zerolog.Event) *zerolog.Event { return e.Str("package", rel.Pkg.Name) })
-			}
+	for _, rel := range rels {
+		if err := fin.gh.Record(ctx, rel); err != nil {
+			fin.crit.record(a.log, plan.CodeRecordFailed, err, "github release failed",
+				func(e *zerolog.Event) *zerolog.Event { return e.Str("package", rel.Pkg.Name) })
 		}
 	}
 }
