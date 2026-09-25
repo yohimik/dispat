@@ -1201,6 +1201,46 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 		default:
 			fmt.Fprintf(r.stdout, "no pending changes for %s\n", res.Scope)
 		}
+	case cmdChangelog, cmdAutoversion, cmdAutowriter, cmdAutoreplacer, cmdCommit, cmdGithub:
+		return r.dispatchStep(ctx, a, cfg, window)
+	case cmdTrigger:
+		if a.Trigger(ctx, r.inv.event, r.inv.progress, r.inv.message) != nil {
+			return 1
+		}
+	case cmdCompute:
+		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
+			Write:       *o.computeWrite,
+			Topology:    *o.computeTopology,
+			Interactive: *o.computeInteractive,
+			Check:       *o.check,
+			Filter:      sel,
+			In:          os.Stdin,
+			Out:         r.stdout,
+		})
+		if err != nil {
+			return 1
+		}
+		if *o.check && open > 0 {
+			return 1
+		}
+	default:
+		// The same mapping as status, so the two commands sharing
+		// --require-release cannot disagree about what its refusal means.
+		if _, err := a.Release(ctx, relOpts); err != nil {
+			if errors.Is(err, app.ErrNothingToRelease) {
+				return 3
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+// dispatchStep runs one of the step commands a release flow calls from its
+// scripts, over the window every sweeping command shares.
+func (r *runner) dispatchStep(ctx context.Context, a *app.App, cfg *config.File, window app.WindowOptions) int {
+	o := r.o
+	switch r.inv.cmd {
 	case cmdChangelog:
 		if a.Changelog(ctx, app.ChangelogOptions{Window: window, OnError: *o.onError,
 			File: *o.clFile, FileTitle: *o.clFileTitle, DateFormat: *o.clDateFormat,
@@ -1257,35 +1297,6 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 			ghOpts.Draft = o.ghDraft
 		}
 		if a.GitHub(ctx, ghOpts) != nil {
-			return 1
-		}
-	case cmdTrigger:
-		if a.Trigger(ctx, r.inv.event, r.inv.progress, r.inv.message) != nil {
-			return 1
-		}
-	case cmdCompute:
-		open, err := a.Compute(ctx, cfgPath, app.ComputeOptions{
-			Write:       *o.computeWrite,
-			Topology:    *o.computeTopology,
-			Interactive: *o.computeInteractive,
-			Check:       *o.check,
-			Filter:      sel,
-			In:          os.Stdin,
-			Out:         r.stdout,
-		})
-		if err != nil {
-			return 1
-		}
-		if *o.check && open > 0 {
-			return 1
-		}
-	default:
-		// The same mapping as status, so the two commands sharing
-		// --require-release cannot disagree about what its refusal means.
-		if _, err := a.Release(ctx, relOpts); err != nil {
-			if errors.Is(err, app.ErrNothingToRelease) {
-				return 3
-			}
 			return 1
 		}
 	}
