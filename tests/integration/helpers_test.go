@@ -342,3 +342,16 @@ func skipIfSuperuser(t *testing.T) {
 		t.Skip("a read-only folder does not stop the superuser")
 	}
 }
+
+// jsonLine is the first logged line whose message is msg, failing the
+// test when there is none.
+func jsonLine(t *testing.T, res harness.RunResult, msg string) harness.Event {
+	t.Helper()
+	for _, e := range res.Events {
+		if e.Str("message") == msg {
+			return e
+		}
+	}
+	t.Fatalf("no %q line in:\n%s\nstderr:\n%s", msg, res.Stdout, res.Stderr)
+	return nil
+}

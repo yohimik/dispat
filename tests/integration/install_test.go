@@ -1142,3 +1142,304 @@ func requireShell(t *testing.T) {
 		t.Skip("the fixture's tool is a shell script")
 	}
 }
+
+// TestInstallFolderRuleFallsThroughUntilSomethingAnswers: where a download
+// goes when no flag says. The variable answers first, a relative answer is
+// made absolute before it is reported — the report and the write must name the
+// same folder however the process moves — and with nothing naming one the rule
+// falls through the shared folder to the user's own.
+func TestInstallFolderRuleFallsThroughUntilSomethingAnswers(t *testing.T) {
+	const ref = "https://github.com/acme/tool"
+	name := "tool" + exeSuffix()
+
+	t.Run("the variable names the folder when no flag does", func(t *testing.T) {
+		r := newToolRepo(t)
+		dir := t.TempDir()
+		res := installCheck(r, []string{"DISPAT_BIN_DIR=" + dir}, ref)
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "install to "+filepath.Join(dir, name))
+	})
+
+	t.Run("a relative folder is resolved before it is reported", func(t *testing.T) {
+		r := newToolRepo(t)
+		r.WorkFrom()
+		// The folder is resolved against the process's own working directory,
+		// which a temp folder reaches through a link on macOS, so the
+		// expectation follows the same links the binary's answer did.
+		root, err := filepath.EvalSymlinks(r.Root)
+		require.NoError(t, err)
+		res := installCheck(r, []string{"DISPAT_BIN_DIR=vendor-bin"}, ref)
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "install to "+filepath.Join(root, "vendor-bin", name),
+			`a report naming "vendor-bin" would say nothing about which one`)
+	})
+
+	t.Run("nothing names one and the rule falls through", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("the shared folder of the rule is a unix path")
+		}
+		r := newToolRepo(t)
+		home := t.TempDir()
+
+		res := installCheck(r, []string{"HOME=" + home}, ref)
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		if isWritableDir("/usr/local/bin") {
+			assert.Contains(t, res.Stdout, "install to /usr/local/bin/"+name,
+				"the shared folder is first whenever it can be written to")
+			return
+		}
+		assert.Contains(t, res.Stdout, "install to "+filepath.Join(home, ".local", "bin", name),
+			"and the user's own folder is where it goes when it cannot")
+
+		// The two rungs below that one only exist under an unwritable shared
+		// folder, so they are asserted where that is what the machine has.
+		res = installCheck(r, []string{"HOME=", "USERPROFILE=" + home}, ref)
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "install to "+filepath.Join(home, ".local", "bin", name),
+			"windows names the same folder differently and the rule reads both")
+
+		res = installCheck(r, []string{"HOME=", "USERPROFILE="}, ref)
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "nowhere to install",
+			"a machine with neither is one that has to be told")
+		assert.Contains(t, res.Stdout+res.Stderr, "--bin-dir")
+	})
+}
+
+// TestInstallReadsARepositoryHoweverItIsSpelled: naming a repository by URL is
+// worth doing because the URL is what the browser is showing, so every
+// spelling a reader has at hand reaches the same two path segments — and every
+// spelling that names no repository is refused with the spelling that would,
+// before a single request.
+func TestInstallReadsARepositoryHoweverItIsSpelled(t *testing.T) {
+	r := newToolRepo(t)
+
+	for name, tc := range map[string]struct{ ref, want string }{
+		"the shorthand":                {ref: "acme/tool", want: "repository acme/tool"},
+		"an ssh remote":                {ref: "git@github.com:acme/tool.git", want: "repository acme/tool"},
+		"a clone URL":                  {ref: "https://github.com/acme/tool.git", want: "repository acme/tool"},
+		"a page inside the repository": {ref: "https://github.com/acme/tool/releases/tag/v1.1.0", want: "repository acme/tool"},
+		"a trailing slash":             {ref: "https://github.com/acme/tool/", want: "repository acme/tool"},
+		"an enterprise host":           {ref: "https://ghe.example.com/acme/tool", want: "repository ghe.example.com/acme/tool"},
+		"an enterprise host with no scheme": {ref: "ghe.example.com/acme/tool",
+			want: "repository ghe.example.com/acme/tool"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := installCheck(r, nil, tc.ref, "--bin-dir", r.bin)
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout, tc.want)
+		})
+	}
+
+	before := len(r.requests())
+	for name, tc := range map[string]struct{ ref, want string }{
+		"a host and nothing else":      {ref: "https://github.com", want: "names a host but no repository"},
+		"an owner and nothing else":    {ref: "acme", want: "names no repository"},
+		"an owner no GitHub name is":   {ref: "ac me/tool", want: "which no GitHub name may"},
+		"a repository no name is":      {ref: "acme/to ol", want: "which no GitHub name may"},
+		"a dot standing for the owner": {ref: "./tool", want: "is not a name for the owner"},
+		"a host no host name is":       {ref: "https://exa mple.com/acme/tool", want: "which no host name may"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := installCheck(r, nil, tc.ref, "--bin-dir", r.bin)
+			assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+		})
+	}
+	assert.Equal(t, before, len(r.requests()), "no refusal here costs a request")
+}
+
+// TestInstallReadsAPortFromASchemeQualifiedURL: the enterprise clone URL a
+// browser or a git remote actually hands somebody — a scheme, a credential and
+// an explicit port together — reaches the repository it names.
+//
+// It used to reach another one. The scp-like "host:path" split that reads
+// git@host:owner/repo ran even after a scheme had been consumed, so the port
+// became the owner and the owner became the repository: a reference spelled
+// `ssh://git@host:22/acme/tool` was read as owner "22" and repository "acme",
+// and the command queried a repository nobody named. Dropping either the
+// credential or the port hid it, which is why it survived, so both are present
+// in each row and the whole host, port included, is asserted rather than only
+// the two names.
+func TestInstallReadsAPortFromASchemeQualifiedURL(t *testing.T) {
+	r := newToolRepo(t)
+	for name, tc := range map[string]struct{ ref, want string }{
+		"an ssh remote with a port": {ref: "ssh://git@ghe.example.com:22/acme/tool",
+			want: "repository ghe.example.com:22/acme/tool"},
+		"an https clone URL with a credential and a port": {ref: "https://ci-bot@ghe.example.com:8443/acme/tool",
+			want: "repository ghe.example.com:8443/acme/tool"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := installCheck(r, nil, tc.ref, "--bin-dir", r.bin)
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout, tc.want,
+				"%s names the repository acme/tool on that host, whatever else it carries", tc.ref)
+		})
+	}
+}
+
+// TestInstallRefusesWhatItCannotResolve: the repository reference, the
+// asset pattern and the destination folder are all read before a request, so
+// each mistake in them costs nothing and has to say which part was wrong.
+func TestInstallRefusesWhatItCannotResolve(t *testing.T) {
+	t.Run("a reference with an empty part", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			ref  string
+			want string
+		}{
+			"only whitespace":                        {ref: "   ", want: "no repository given"},
+			"an owner and no repository":             {ref: "acme/", want: "names no repository"},
+			"an empty segment between the two names": {ref: "acme//tool", want: "the repository is empty"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				r := newToolRepo(t)
+				res := r.Command("install", tc.ref, "--api-url", r.api, "--check")
+				assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+				assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+				assert.Contains(t, res.Stdout+res.Stderr, "owner/repo",
+					"the refusal shows the spelling that would have worked")
+			})
+		}
+	})
+
+	t.Run("an asset pattern with a placeholder that never closes", func(t *testing.T) {
+		r := newToolRepo(t)
+		res := r.Command("install", "acme/tool", "--api-url", r.api,
+			"--asset", "tool-{os}-{arch", "--check")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "never closed")
+	})
+
+	t.Run("a destination it cannot even look at", func(t *testing.T) {
+		r := newToolRepo(t)
+		// A file where the folder's parent would be: the destination cannot be
+		// examined at all, which is neither "nothing is there" nor "something
+		// is", and an install may not proceed on a question it could not ask.
+		blocker := filepath.Join(t.TempDir(), "not-a-folder")
+		require.NoError(t, os.WriteFile(blocker, []byte("a file\n"), 0o644))
+
+		res := r.Command("install", "acme/tool", "--api-url", r.api,
+			"--asset", "tool-{os}-{arch}", "--bin-dir", filepath.Join(blocker, "bin"))
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "cannot be read")
+	})
+}
+
+// TestInstallRefusesAReleaseThatCarriesNothing: a release with no files
+// attached is a real shape — a tag cut before the build finished, a workflow
+// that failed after creating the release — and it is not an asset-name
+// mismatch. The refusal names the release rather than the pattern, so the
+// reader does not go looking at their own spelling.
+func TestInstallRefusesAReleaseThatCarriesNothing(t *testing.T) {
+	r := newToolRepo(t)
+	r.attach(toolNew)
+
+	res := r.Command("install", "acme/tool", "--api-url", r.api,
+		"--asset", "tool-{os}-{arch}", "--check")
+	assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "carries no files to download")
+}
+
+// TestInstallReportsItselfAsJSON: the same for `dispat install`, whose
+// reader is nearly always a provisioning script. Every outcome carries the
+// destination path, because a script that installed something has to know
+// where it went, and the pending flag the --check gate exits on.
+func TestInstallReportsItselfAsJSON(t *testing.T) {
+	// --rollback downloads nothing, so it is refused beside --asset; the two
+	// invocations are spelled separately for that reason.
+	install := func(r *toolRepo, dir string, args ...string) harness.RunResult {
+		r.T.Helper()
+		return r.Command(append([]string{"install", "acme/tool", "--api-url", r.api,
+			"--asset", "tool-{os}-{arch}", "--bin-dir", dir, "--log-format", "json"}, args...)...)
+	}
+	rollback := func(r *toolRepo, dir string, args ...string) harness.RunResult {
+		r.T.Helper()
+		return r.Command(append([]string{"install", "acme/tool", "--api-url", r.api,
+			"--bin-dir", dir, "--rollback"}, args...)...)
+	}
+
+	t.Run("an install, then the same install with nothing left to do", func(t *testing.T) {
+		r := newToolRepo(t)
+		dir := t.TempDir()
+		path := filepath.Join(dir, "tool"+exeSuffix())
+
+		res := install(r, dir)
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.FileExists(t, path)
+
+		res = install(r, dir)
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		line := jsonLine(t, res, "already installed")
+		assert.Equal(t, path, line.Str("path"))
+		assert.NotEmpty(t, line.Str("tag"), "the release it matched is named")
+	})
+
+	t.Run("a rollback with nothing to put back", func(t *testing.T) {
+		r := newToolRepo(t)
+		dir := t.TempDir()
+		res := rollback(r, dir, "--check", "--log-format", "json")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		line := jsonLine(t, res, "no backup to roll back to")
+		assert.Equal(t, false, line["pending"])
+
+		res = rollback(r, dir, "--check")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "there is no backup of")
+	})
+
+	t.Run("a rollback with a backup to put back", func(t *testing.T) {
+		r := newToolRepo(t)
+		dir := t.TempDir()
+		require.Equal(t, 0, install(r, dir).Code, "the first install")
+		r.publish("1.2.0", "tool-"+platform(), "checksums.txt")
+		require.Equal(t, 0, install(r, dir).Code, "the second, which keeps the first beside it")
+
+		res := rollback(r, dir, "--check", "--log-format", "json")
+		assert.Equal(t, 1, res.Code, "there is something to restore; stdout:\n%s", res.Stdout)
+		assert.NotEmpty(t, jsonLine(t, res, "a backup is available").Str("backup"))
+
+		res = rollback(r, dir, "--log-format", "json")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		line := jsonLine(t, res, "rolled back")
+		assert.Equal(t, filepath.Join(dir, "tool"+exeSuffix()), line.Str("path"))
+	})
+
+	t.Run("a check that would hand the file to a command", func(t *testing.T) {
+		r := newToolRepo(t)
+		dir := t.TempDir()
+		res := install(r, dir, "--pipe", "cat", "--check")
+		assert.Equal(t, 1, res.Code, "a pipe always has something to do; stdout:\n%s", res.Stdout)
+		line := jsonLine(t, res, "install check")
+		assert.Equal(t, "cat", line.Str("pipe"))
+		assert.Equal(t, dir, line.Str("dir"), "a piped install names the folder it runs in")
+	})
+}
+
+// isWritableDir answers the question install's own folder rule asks of
+// /usr/local/bin — can a file be created here — the way the rule answers it,
+// by creating one. Asking the mode bits instead answers for the wrong user
+// under sudo and for no user at all on a read-only mount.
+func isWritableDir(dir string) bool {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	probe, err := os.CreateTemp(dir, ".dispat-it-probe-*")
+	if err != nil {
+		return false
+	}
+	name := probe.Name()
+	probe.Close()
+	_ = os.Remove(name)
+	return true
+}
+
+// installCheck runs `dispat install <ref> --check` against the fixture's
+// fake with extra environment pairs, which is how the folder rule is driven:
+// the rule reads the environment, and only a whole process has one.
+func installCheck(r *toolRepo, env []string, ref string, args ...string) harness.RunResult {
+	r.T.Helper()
+	full := append([]string{"install", ref, "--api-url", r.api,
+		"--asset", "tool-{os}-{arch}", "--check"}, args...)
+	return r.CommandEnv(env, full...)
+}

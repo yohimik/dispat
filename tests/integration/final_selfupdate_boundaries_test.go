@@ -24,12 +24,12 @@ import (
 // and the binary is left alone. The same cut in the asset response is a row of
 // TestSelfUpdateRefusesWhatItCannotTrust.
 func TestFinalSelfUpdateRefusesIncompleteHTTPResponses(t *testing.T) {
-	api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
+	api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Length", "4096")
 		_, _ = fmt.Fprint(w, "partial response")
 	})
 	r := harness.New(t)
-	exe := covSUExe(t, suOld)
+	exe := suExe(t, suOld)
 	before, err := os.ReadFile(exe)
 	require.NoError(t, err)
 	res := r.CommandBin(exe, "self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
@@ -48,17 +48,17 @@ func TestFinalSelfUpdateRefusesIncompleteHTTPResponses(t *testing.T) {
 func TestFinalSelfUpdateCannotInstallANamedDraftOrFailedLookup(t *testing.T) {
 	for _, draft := range []bool{true, false} {
 		t.Run(fmt.Sprint("draft=", draft), func(t *testing.T) {
-			api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
+			api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
 				if !draft {
 					http.Error(w, "release lookup unavailable", http.StatusServiceUnavailable)
 					return
 				}
-				release := covSUReleaseJSON(a.base, suNew, []byte("not published"))
+				release := suReleaseJSON(a.base, suNew, []byte("not published"))
 				release["draft"] = true
 				_ = json.NewEncoder(w).Encode(release)
 			})
 			r := harness.New(t)
-			exe := covSUExe(t, suOld)
+			exe := suExe(t, suOld)
 			res := r.CommandBin(exe, "self-update", "--release", suNew,
 				"--api-url", api.base, "--owner", "o", "--repo", "r")
 			require.NotZero(t, res.Code)
@@ -67,7 +67,7 @@ func TestFinalSelfUpdateCannotInstallANamedDraftOrFailedLookup(t *testing.T) {
 				want = "is a draft"
 			}
 			assert.Contains(t, res.Stdout+res.Stderr, want)
-			assert.Equal(t, suOld, covVersionOf(t, r, exe))
+			assert.Equal(t, suOld, versionOf(t, r, exe))
 			assert.NoFileExists(t, backupPath(exe))
 			assert.Len(t, api.requests(), 1, "a refused named lookup never downloads an asset")
 		})
@@ -77,7 +77,7 @@ func TestFinalSelfUpdateCannotInstallANamedDraftOrFailedLookup(t *testing.T) {
 // TestFinalSelfUpdateReportsBothDownloadFailures retains both endpoint
 // failures when the authenticated asset and its public fallback are unavailable.
 func TestFinalSelfUpdateReportsBothDownloadFailures(t *testing.T) {
-	api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
+	api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
 		switch {
 		case strings.HasPrefix(req.URL.Path, "/assets/"):
 			http.Error(w, "private endpoint refused", http.StatusForbidden)
@@ -85,11 +85,11 @@ func TestFinalSelfUpdateReportsBothDownloadFailures(t *testing.T) {
 			assert.Empty(t, req.Header.Get("Authorization"), "the public fallback receives no token")
 			http.Error(w, "public endpoint unavailable", http.StatusServiceUnavailable)
 		default:
-			_ = json.NewEncoder(w).Encode([]any{covSUReleaseJSON(a.base, suNew, []byte("binary"))})
+			_ = json.NewEncoder(w).Encode([]any{suReleaseJSON(a.base, suNew, []byte("binary"))})
 		}
 	})
 	r := harness.New(t)
-	exe := covSUExe(t, suOld)
+	exe := suExe(t, suOld)
 	res := r.CommandBinEnv(exe, []string{"GITHUB_TOKEN=private-example-token"},
 		"self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
 	require.NotZero(t, res.Code)
@@ -98,7 +98,7 @@ func TestFinalSelfUpdateReportsBothDownloadFailures(t *testing.T) {
 	assert.Contains(t, combined, "503")
 	assert.Contains(t, combined, "public download URL then failed too")
 	assert.NotContains(t, combined, "private-example-token")
-	assert.Equal(t, suOld, covVersionOf(t, r, exe))
+	assert.Equal(t, suOld, versionOf(t, r, exe))
 	assert.NoFileExists(t, backupPath(exe))
 }
 

@@ -8,6 +8,7 @@ package integration
 // running from.
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -770,7 +771,7 @@ func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
 	}{
 		{
 			name:    "a checksum that describes something else",
-			payload: func(t *testing.T) []byte { return covSUPayload(t, suNew) },
+			payload: func(t *testing.T) []byte { return suPayload(t, suNew) },
 			digest:  "sha256:" + strings.Repeat("00", 32),
 			noNotes: true,
 			want:    "hashes to",
@@ -782,12 +783,12 @@ func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
 		},
 		{
 			name:    "a program answering with another version",
-			payload: func(t *testing.T) []byte { return covSUPayload(t, suOld) },
+			payload: func(t *testing.T) []byte { return suPayload(t, suOld) },
 			want:    "reports a different version",
 		},
 		{
 			name:    "a download shorter than the release says",
-			payload: func(t *testing.T) []byte { return covSUPayload(t, suNew) },
+			payload: func(t *testing.T) []byte { return suPayload(t, suNew) },
 			serve: func(w http.ResponseWriter, payload []byte) {
 				half := payload[:len(payload)/2]
 				w.Header().Set("Content-Length", fmt.Sprint(len(half)))
@@ -807,7 +808,7 @@ func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			payload := row.payload(t)
-			api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
+			api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
 				if strings.HasPrefix(req.URL.Path, "/dl/") || strings.HasPrefix(req.URL.Path, "/assets/") {
 					if row.serve != nil {
 						row.serve(w, payload)
@@ -817,7 +818,7 @@ func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
 					_, _ = w.Write(payload)
 					return
 				}
-				release := covSUReleaseJSON(a.base, suNew, payload)
+				release := suReleaseJSON(a.base, suNew, payload)
 				if row.digest != "" {
 					release["assets"].([]any)[0].(map[string]any)["digest"] = row.digest
 				}
@@ -828,12 +829,12 @@ func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
 				_ = json.NewEncoder(w).Encode([]any{release})
 			})
 			r := harness.New(t)
-			exe := covSUExe(t, suOld)
+			exe := suExe(t, suOld)
 
 			res := r.CommandBin(exe, "self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
 			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Contains(t, res.Stdout+res.Stderr, row.want)
-			assert.Equal(t, suOld, covVersionOf(t, r, exe), "the working binary is untouched")
+			assert.Equal(t, suOld, versionOf(t, r, exe), "the working binary is untouched")
 			assert.NoFileExists(t, backupPath(exe), "and nothing was moved, so there is no backup")
 			entries, err := os.ReadDir(filepath.Dir(exe))
 			require.NoError(t, err)
@@ -1265,3 +1266,536 @@ func renderedReleaseBody(t *testing.T) string {
 
 	return bodyFor(t, bodies(), "core@0.1.0")
 }
+
+// TestSelfUpdateVersionReportsTheCheckOutcome: `--version` is the one
+// invocation that states the check's answer either way. Behind, it is the
+// ordinary notice; current, it says so, which is what makes `dispat --version`
+// an answer to "am I up to date" rather than only to "what am I running".
+func TestSelfUpdateVersionReportsTheCheckOutcome(t *testing.T) {
+	r := newSURepo(t)
+	on := []string{"DISPAT_UPDATE_CHECK=1"}
+	args := []string{"--version", "--api-url", r.api, "--owner", "o", "--repo", "r"}
+
+	res := r.CommandBinEnv(r.exe, on, args...)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "dispat "+suOld, "the version line is still the point")
+	assert.Contains(t, res.Stdout, "a newer stable release is available: "+suNew)
+
+	// The same command on the release the fake publishes: nothing to install,
+	// and the line says that rather than saying nothing.
+	current := suExe(t, suNew)
+	res = r.CommandBinEnv(current, on, args...)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "this is the latest stable release")
+	assert.NotContains(t, res.Stdout, "a newer stable release is available")
+}
+
+// TestSelfUpdateWalksAPaginatedListing: a repository with more releases than
+// one page holds still answers "which version is current", and the Link header
+// is how the walk continues. The next page's address is the server's own text,
+// so one that leaves the configured host ends the listing instead of carrying
+// the operator's token somewhere nobody configured.
+func TestSelfUpdateWalksAPaginatedListing(t *testing.T) {
+	payload := suPayload(t, suNew)
+
+	t.Run("the release on the second page is found", func(t *testing.T) {
+		api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if req.URL.Query().Get("page") == "2" {
+				_ = json.NewEncoder(w).Encode([]any{suReleaseJSON(a.base, suNew, payload)})
+				return
+			}
+			w.Header().Set("Link", `<`+a.base+`/repos/o/r/releases?per_page=100&page=2>; rel="prev", `+
+				`<`+a.base+`/repos/o/r/releases?per_page=100&page=2>; rel="next"`)
+			_ = json.NewEncoder(w).Encode([]any{suForeignRelease})
+		})
+		r := harness.New(t)
+		exe := suExe(t, suOld)
+
+		res := r.CommandBin(exe, "self-update", "--check", "--api-url", api.base, "--owner", "o", "--repo", "r")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "available dispat "+suNew)
+		assert.Contains(t, strings.Join(api.requests(), "\n"), "page=2",
+			"the Link header is what reached the page the release is on")
+	})
+
+	t.Run("a next page on another host ends the listing", func(t *testing.T) {
+		api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Link", `<http://127.0.0.1:1/repos/o/r/releases?per_page=100&page=2>; rel="next"`)
+			_ = json.NewEncoder(w).Encode([]any{suForeignRelease})
+		})
+		r := harness.New(t)
+		exe := suExe(t, suOld)
+
+		res := r.CommandBin(exe, "self-update", "--check", "--api-url", api.base, "--owner", "o", "--repo", "r")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		out := res.Stdout + res.Stderr
+		assert.Contains(t, out, "leaves the configured API host")
+		assert.Contains(t, out, "no matching release")
+		for _, path := range api.requests() {
+			assert.NotContains(t, path, "page=2", "the foreign page was never requested")
+		}
+	})
+}
+
+// TestSelfUpdateFallsBackToThePublicDownloadURL: a credential that reads the
+// listing and not the assets is a real shape — a fine-grained token, a proxy
+// in front of the API — and it used to be an install that simply worked. The
+// endpoint's refusal is said out loud, the public address is tried once with
+// no credential, and the staged file starts empty again so the refusal's own
+// body cannot end up in the installed binary.
+func TestSelfUpdateFallsBackToThePublicDownloadURL(t *testing.T) {
+	payload := suPayload(t, suNew)
+	const refusal = `{"message":"Resource not accessible by personal access token"}`
+	api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasPrefix(req.URL.Path, "/assets/"):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprint(w, refusal)
+		case strings.HasPrefix(req.URL.Path, "/dl/"):
+			w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+			_, _ = w.Write(payload)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]any{suReleaseJSON(a.base, suNew, payload)})
+		}
+	})
+	r := harness.New(t)
+	exe := suExe(t, suOld)
+
+	res := r.CommandBinEnv(exe, []string{"GITHUB_TOKEN=sesame"},
+		"self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "installed dispat "+suNew)
+	assert.Contains(t, res.Stdout+res.Stderr, "trying the public download URL")
+	assert.Equal(t, suNew, versionOf(t, r, exe), "the bytes that landed are the release's")
+
+	paths := strings.Join(api.requests(), "\n")
+	assert.Contains(t, paths, "/assets/", "the endpoint was tried first")
+	assert.Contains(t, paths, "/dl/", "and the public address second")
+}
+
+// TestSelfUpdateNotesAreSafeToPrint: the notes are read out of somebody else's
+// markdown, so what a terminal would act on is taken out rather than printed —
+// whole sequences, not just the escape that opens them, because the tail of one
+// is visible debris. An overlong line is cut on a rune boundary and a body with
+// more in it than a summary holds says so and points at the changelog.
+func TestSelfUpdateNotesAreSafeToPrint(t *testing.T) {
+	r := newSURepo(t)
+	r.body = hostileNotes
+	r.serve(t, map[string]string{suNew: harness.BuildVersioned(t, suNew)})
+
+	res := r.update("--check")
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "what changed in "+suNew)
+	assert.Contains(t, res.Stdout, "Features", "the heading survives its colouring")
+	assert.Contains(t, res.Stdout, "... the notes go on",
+		"a body past the summary's bounds points at the changelog instead")
+
+	for _, debris := range []string{"[1m", "[0m", "]0;", "titled", "38;2;255", "never.printed", "\x1b"} {
+		assert.NotContains(t, res.Stdout, debris, "a terminal must not be handed %q", debris)
+	}
+	assert.Contains(t, res.Stdout, "a bullet with a two byte sequence",
+		"a two byte sequence takes only itself")
+	assert.Contains(t, res.Stdout, "a bullet opening on a bell and a delete",
+		"bare control bytes are dropped and the text stays")
+	assert.Contains(t, res.Stdout, " ...", "the overlong line is cut rather than printed whole")
+	assert.NotContains(t, res.Stdout, "curl -fsSL", "and the footer is still not notes")
+	assert.Equal(t, suOld, versionOf(t, r.Repo, r.exe), "--check still installs nothing")
+}
+
+// TestSelfUpdateRollbackNeedsAFolderItCanWriteTo: a rollback is three renames
+// in the binary's own folder, so a folder that will not take a file is refused
+// before anything moves, naming what the reader has to change. The binary that
+// was running is still the one that runs.
+func TestSelfUpdateRollbackNeedsAFolderItCanWriteTo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("folder permissions do not gate a rename on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a folder whatever its mode says")
+	}
+	r := newSURepo(t)
+	require.Equal(t, 0, r.update().Code, "the update that leaves a backup to roll back to")
+	require.Equal(t, suNew, versionOf(t, r.Repo, r.exe))
+
+	dir := filepath.Dir(r.exe)
+	require.NoError(t, os.Chmod(dir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	res := r.CommandBin(r.exe, "self-update", "--rollback")
+	assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "rights to replace")
+	assert.Equal(t, suNew, versionOf(t, r.Repo, r.exe), "and nothing was rotated")
+}
+
+// TestSelfUpdateReadsOnlyTheReleasesItCanInstall: the listing of a monorepo
+// carries other modules' releases, drafts nobody published and tags that are
+// not versions at all, and each is passed over for its own reason rather than
+// failing the check. Past a point a listing stops being an answer to "which
+// version is current" and is refused by size, before it is parsed.
+func TestSelfUpdateReadsOnlyTheReleasesItCanInstall(t *testing.T) {
+	payload := suPayload(t, suNew)
+
+	t.Run("a draft and a tag with no version in it are passed over", func(t *testing.T) {
+		api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]any{
+				// Higher than anything published, and a draft: a release
+				// nobody can install yet.
+				map[string]any{"tag_name": "services/dispat/v9.9.9", "draft": true,
+					"prerelease": false, "assets": []any{}},
+				// dispat's own prefix over something that is not a version.
+				map[string]any{"tag_name": "services/dispat/vnightly", "draft": false,
+					"prerelease": false, "assets": []any{}},
+				suForeignRelease,
+				suReleaseJSON(a.base, suNew, payload),
+			})
+		})
+		r := harness.New(t)
+		exe := suExe(t, suOld)
+
+		res := r.CommandBin(exe, "self-update", "--check", "--log-level", "debug",
+			"--api-url", api.base, "--owner", "o", "--repo", "r")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "available dispat "+suNew,
+			"the draft is not a release this can install")
+		assert.NotContains(t, res.Stdout, "9.9.9")
+		assert.Contains(t, res.Stdout, "tag carries no version",
+			"and the tag that is not a version says why it was passed over")
+	})
+
+	t.Run("a listing past the cap is refused by size", func(t *testing.T) {
+		api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// A well-formed listing whose one release carries a body no
+			// release has: read far enough to know it is over the bound, and
+			// no further.
+			_, _ = w.Write([]byte(`[{"tag_name":"services/dispat/v1.1.0","draft":false,"body":"`))
+			_, _ = w.Write(bytes.Repeat([]byte("x"), 9<<20))
+			_, _ = w.Write([]byte(`","assets":[]}]`))
+		})
+		r := harness.New(t)
+		exe := suExe(t, suOld)
+
+		res := r.CommandBin(exe, "self-update", "--check",
+			"--api-url", api.base, "--owner", "o", "--repo", "r")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "larger than",
+			"the bound is named rather than the parse failing further down")
+	})
+}
+
+// TestSelfUpdateRollbackChecksTheBackupFirst: a rollback is only worth
+// doing if the file it would put back is a working dispat, and finding out
+// otherwise afterwards means finding out with no dispat at all. So the backup
+// is run first: one that is not a program refuses the rollback outright, and
+// one that runs without saying which version it is rolls back with the
+// version left unstated rather than guessed.
+func TestSelfUpdateRollbackChecksTheBackupFirst(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in backups are shell scripts")
+	}
+	updated := func(t *testing.T) *suRepo {
+		t.Helper()
+		r := newSURepo(t)
+		require.Equal(t, 0, r.update().Code, "the update that leaves a backup behind")
+		require.Equal(t, suNew, r.version(r.exe))
+		return r
+	}
+
+	t.Run("a backup that is not a program refuses the rollback", func(t *testing.T) {
+		r := updated(t)
+		require.NoError(t, os.WriteFile(r.backup, []byte("this was never a binary\n"), 0o755))
+
+		res := r.CommandBin(r.exe, "self-update", "--rollback")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "does not run")
+		assert.Equal(t, suNew, r.version(r.exe), "and the working binary is where it was")
+	})
+
+	t.Run("a backup that says nothing rolls back with the version unstated", func(t *testing.T) {
+		r := updated(t)
+		require.NoError(t, os.WriteFile(r.backup, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+
+		res := r.CommandBin(r.exe, "self-update", "--check", "--rollback")
+		assert.Equal(t, 1, res.Code, "there is still something to restore; stdout:\n%s", res.Stdout)
+		assert.NotContains(t, res.Stdout, "is dispat "+suOld,
+			"a version nothing stated is not one to print")
+	})
+}
+
+// TestSelfUpdateRefusesAnAnswerThatIsNotARelease: the update check
+// reads somebody else's server, so each way an answer can fail to be a release
+// is refused on its own terms: a listing that is not a listing, a version
+// that is not a version, and a release whose body is not a release.
+func TestSelfUpdateRefusesAnAnswerThatIsNotARelease(t *testing.T) {
+	t.Run("a listing that is not JSON", func(t *testing.T) {
+		api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`<html>a proxy sign-in page</html>`))
+		})
+		r := harness.New(t)
+		exe := suExe(t, suOld)
+
+		res := r.CommandBin(exe, "self-update", "--check", "--api-url", api.base, "--owner", "o", "--repo", "r")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "listing releases")
+	})
+
+	t.Run("a release name that is not a version", func(t *testing.T) {
+		r := newSURepo(t)
+		res := r.update("--release", "nightly")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "is not a version")
+		assert.Equal(t, suOld, r.version(r.exe))
+	})
+
+	t.Run("a release whose body is not a release", func(t *testing.T) {
+		api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<html>a proxy sign-in page</html>`))
+		})
+		r := harness.New(t)
+		exe := suExe(t, suOld)
+
+		res := r.CommandBin(exe, "self-update", "--release", "1.2.3",
+			"--api-url", api.base, "--owner", "o", "--repo", "r")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "looking up")
+	})
+}
+
+// TestSelfUpdateReadsItsOwnRepositoryByDefault: --owner and --repo
+// exist for a fork, and leaving them out has to reach dispat's own repository
+// rather than nothing. Pointed at a fake that publishes under those defaults,
+// the plain command finds the release, which is what says the defaults are
+// what a real run uses.
+func TestSelfUpdateReadsItsOwnRepositoryByDefault(t *testing.T) {
+	payload := suPayload(t, suNew)
+	var asked []string
+	api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+		asked = append(asked, req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]any{suReleaseJSON(a.base, suNew, payload)})
+	})
+	r := harness.New(t)
+	exe := suExe(t, suOld)
+
+	res := r.CommandBin(exe, "self-update", "--check", "--api-url", api.base)
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "available dispat "+suNew)
+	assert.Contains(t, strings.Join(asked, "\n"), "/repos/yohimik/dispat/releases",
+		"the defaults are dispat's own repository, not an empty pair")
+}
+
+// TestSelfUpdateReportsItselfAsJSON: the update check is a CI gate as
+// often as a person's question, so each of its outcomes is one structured line
+// carrying what the gate decides on — the version running, the version
+// available, and whether the same invocation without --check would change the
+// binary.
+func TestSelfUpdateReportsItselfAsJSON(t *testing.T) {
+	jsonArgs := func(args ...string) []string {
+		return append([]string{"--log-format", "json"}, args...)
+	}
+
+	t.Run("a check that has something to install", func(t *testing.T) {
+		r := newSURepo(t)
+		res := r.update(jsonArgs("--check")...)
+		assert.Equal(t, 1, res.Code, "the gate fails when there is something to do")
+		line := jsonLine(t, res, "update check")
+		assert.Equal(t, suOld, line.Str("version"))
+		assert.Equal(t, suNew, line.Str("latest"))
+		assert.Equal(t, true, line["pending"])
+	})
+
+	t.Run("an update with nothing to install", func(t *testing.T) {
+		r := newSURepo(t)
+		require.Equal(t, 0, r.update().Code, "the update that brings it up to date")
+		require.Equal(t, suNew, r.version(r.exe))
+
+		// The same command again: already current, and the JSON line says so
+		// rather than the command saying nothing.
+		res := r.CommandBin(r.exe, append([]string{"self-update", "--api-url", r.api,
+			"--owner", "o", "--repo", "r"}, jsonArgs()...)...)
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		line := jsonLine(t, res, "already on the latest release")
+		assert.Equal(t, suNew, line.Str("version"))
+		assert.Equal(t, suNew, line.Str("latest"))
+	})
+
+	t.Run("a rollback with nothing to put back", func(t *testing.T) {
+		r := newSURepo(t)
+		res := r.CommandBin(r.exe, append([]string{"self-update", "--rollback", "--check"}, jsonArgs()...)...)
+		require.Equal(t, 0, res.Code, "nothing to do is not a failure; stdout:\n%s", res.Stdout)
+		line := jsonLine(t, res, "no backup to roll back to")
+		assert.Equal(t, false, line["pending"])
+
+		// And the sentence a person reads, for the same state.
+		res = r.CommandBin(r.exe, "self-update", "--rollback", "--check")
+		require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout, "there is no backup to roll back to")
+	})
+
+	t.Run("a rollback with a backup to put back", func(t *testing.T) {
+		r := newSURepo(t)
+		require.Equal(t, 0, r.update().Code)
+		require.Equal(t, suNew, r.version(r.exe))
+
+		res := r.CommandBin(r.exe, append([]string{"self-update", "--rollback", "--check"}, jsonArgs()...)...)
+		assert.Equal(t, 1, res.Code, "there is something to restore")
+		line := jsonLine(t, res, "a backup is available")
+		assert.Equal(t, suOld, line.Str("backup"))
+		assert.Equal(t, true, line["pending"])
+
+		res = r.CommandBin(r.exe, append([]string{"self-update", "--rollback"}, jsonArgs()...)...)
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		line = jsonLine(t, res, "rolled back")
+		assert.Equal(t, suNew, line.Str("from"))
+		assert.Equal(t, suOld, line.Str("version"))
+		assert.Equal(t, filepath.Base(r.exe), filepath.Base(line.Str("path")))
+		assert.Equal(t, suOld, r.version(r.exe), "and the file itself is the one the line named")
+	})
+}
+
+// TestSelfUpdateCheckCarriesTheNotesAsFields: a check that found
+// something to install carries the release's own notes, so a job that opens a
+// pull request with them does not have to fetch the release a second time to
+// read what changed.
+func TestSelfUpdateCheckCarriesTheNotesAsFields(t *testing.T) {
+	payload := suPayload(t, suNew)
+	api := suServe(t, func(a *suAPI, w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]any{suReleaseJSON(a.base, suNew, payload)})
+	})
+	r := harness.New(t)
+	exe := suExe(t, suOld)
+
+	res := r.CommandBin(exe, "self-update", "--check", "--log-format", "json",
+		"--api-url", api.base, "--owner", "o", "--repo", "r")
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	line := jsonLine(t, res, "update check")
+	assert.Equal(t, "services/dispat/v"+suNew, line.Str("tag"))
+
+	rendered := strings.Join([]string{line.Str("notes"), line.Str("changelog"), res.Stdout}, "\n")
+	assert.Contains(t, rendered, "Features", "the notes reach the field, not only the terminal")
+	assert.NotContains(t, rendered, "curl -fsSL",
+		"and the install footer is no more notes here than it is on a terminal")
+}
+
+// suAPI is a releases API a scenario writes itself. The shared fake in
+// selfupdate_test.go answers one shape well; these scenarios are about the
+// other shapes, so the handler is the scenario's and this type only carries
+// what every handler needs: the address the server ended up on, which the URLs
+// inside a release have to name, and the requests it answered.
+type suAPI struct {
+	base string
+
+	mu   sync.Mutex
+	hits []string
+}
+
+// requests is the paths the fake has answered so far, query strings included,
+// which is how a test sees that a Link header was followed.
+func (a *suAPI) requests() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.hits...)
+}
+
+// suServe stands up the fake over plain HTTP and returns it with base
+// filled in, so a handler may build absolute URLs for its own server.
+func suServe(t *testing.T, handle func(a *suAPI, w http.ResponseWriter, req *http.Request)) *suAPI {
+	t.Helper()
+	api := &suAPI{}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		api.mu.Lock()
+		api.hits = append(api.hits, req.URL.RequestURI())
+		api.mu.Unlock()
+		handle(api, w, req)
+	}))
+	srv.Start()
+	t.Cleanup(srv.Close)
+	api.base = "http://" + srv.Listener.Addr().String()
+	return api
+}
+
+// suReleaseJSON renders one release exactly as the API describes one: both
+// asset addresses, the published size and the digest of the bytes the fake
+// will actually serve.
+func suReleaseJSON(base, version string, payload []byte) map[string]any {
+	sum := sha256.Sum256(payload)
+	return map[string]any{
+		"tag_name":   "services/dispat/v" + version,
+		"draft":      false,
+		"prerelease": strings.Contains(version, "-"),
+		"body":       suBody,
+		"html_url":   base + "/o/r/releases/tag/services%2Fdispat%2Fv" + version,
+		"assets": []any{map[string]any{
+			"name":                 assetName(),
+			"size":                 len(payload),
+			"browser_download_url": base + "/dl/" + version,
+			"url":                  base + "/assets/" + version,
+			"digest":               "sha256:" + hex.EncodeToString(sum[:]),
+		}},
+	}
+}
+
+// suForeignRelease is another module's release: what a monorepo listing is
+// mostly made of, and what a page carrying nothing for dispat looks like.
+var suForeignRelease = map[string]any{
+	"tag_name": "pkg/ccme/v9.9.9", "draft": false, "prerelease": false, "assets": []any{},
+}
+
+// suPayload is the bytes a release of the given version hands out.
+func suPayload(t *testing.T, version string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(harness.BuildVersioned(t, version))
+	require.NoError(t, err)
+	return data
+}
+
+// suExe copies a version-stamped binary somewhere a self-update may
+// replace it, which is the fixture of every scenario here: the suite's shared
+// build must never be the file under test.
+func suExe(t *testing.T, version string) string {
+	t.Helper()
+	exe := filepath.Join(t.TempDir(), "dispat"+exeSuffix())
+	copyFile(t, harness.BuildVersioned(t, version), exe)
+	return exe
+}
+
+// versionOf asks a binary which version it is.
+func versionOf(t *testing.T, r *harness.Repo, path string) string {
+	t.Helper()
+	res := r.CommandBin(path, "--version")
+	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "dispat "); ok {
+			v, _, _ := strings.Cut(rest, " (")
+			return v
+		}
+	}
+	t.Fatalf("no version line in:\n%s", res.Stdout)
+	return ""
+}
+
+// hostileNotes is a release body written to act on a terminal rather than
+// to be read by one: colour and title sequences, sequences that never finish,
+// bare control bytes, a line far past what one line of notes may be, and more
+// bullets than a summary prints. Whoever publishes a release writes the body,
+// so this is less an attacker than a stray sequence, and the answer is the
+// same either way — none of it reaches the terminal as itself.
+var hostileNotes = "### \x1b[1mFeatures\x1b[0m\n\n" +
+	"- a bullet that sets the window title \x1b]0;titled\x07 and carries on\n" +
+	"- a bullet ending on a bare escape \x1b\n" +
+	"- a bullet whose colour sequence never ends \x1b[38;2;255\n" +
+	"- a bullet whose operating system command never ends \x1b]8;;http://never.printed\n" +
+	"- a bullet with a two byte sequence \x1bN inside it\n" +
+	"- \x07\x7fa bullet opening on a bell and a delete\n" +
+	"- " + strings.Repeat("длинная строка про изменение ", 20) + "\n" +
+	"\n### Fixes\n\n" + strings.Repeat("- one more fix nobody has room for\n", 60) +
+	"\n---\n\n**Install this version:**\n\n```sh\ncurl -fsSL https://never.printed/install.sh | sh\n```\n"
