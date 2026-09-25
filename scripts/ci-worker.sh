@@ -8,7 +8,6 @@
 #
 #   sh scripts/ci-worker.sh create          create the instance and wait until it answers
 #   sh scripts/ci-worker.sh start <dispat>  install that binary and start the worker on it
-#   sh scripts/ci-worker.sh endpoint        print the repository URL the worker polls
 #   sh scripts/ci-worker.sh prune           delete this run's coordination branches left on it
 #   sh scripts/ci-worker.sh collect <dir>   copy the worker's log into <dir>
 #   sh scripts/ci-worker.sh delete          delete the instance (a missing one is not an error)
@@ -34,7 +33,7 @@
 set -eu
 
 command=${1:-}
-[ -n "$command" ] || { echo "usage: ci-worker.sh create|start|endpoint|prune|collect|delete" >&2; exit 2; }
+[ -n "$command" ] || { echo "usage: ci-worker.sh create|start|prune|collect|delete" >&2; exit 2; }
 shift
 
 dir=${DISPAT_CI_WORKER_DIR:-${RUNNER_TEMP:-/tmp}/dispat-ci-worker}
@@ -350,13 +349,6 @@ LAUNCHER
   log "worker $node serving $repository"
 }
 
-# endpoint prints the repository the worker polls, as start resolves it. It
-# reads nothing but the environment and the checkout, so a job can check what
-# its worker will reach before any machine exists.
-endpoint() {
-  printf '%s\n' "$(resolve_repository)"
-}
-
 # prune deletes the coordination branches this run's node left on the
 # repository, with the job's own credential. The orchestrator closes every
 # branch it created when the sweep ends, so this finds something only after a
@@ -418,7 +410,6 @@ delete() {
 case "$command" in
   create) create ;;
   start) start "$@" ;;
-  endpoint) endpoint ;;
   prune) prune ;;
   collect) collect "$@" ;;
   delete) delete ;;
