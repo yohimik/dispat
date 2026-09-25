@@ -1347,8 +1347,9 @@ func TestRecordsGithubAttachmentFailures(t *testing.T) {
 // remote is always named with its user information, query and fragment taken
 // out. A CI runner is handed a credential in the URL, either behind a remote
 // name or as the remote itself, and the second is the case where the argument
-// a failed push quotes back is the secret. Port 1 refuses at once, so the run
-// fails on the remote rather than waiting on one.
+// a failed push quotes back is the secret. A password Go's URL parser cannot
+// read, one holding a stray `%`, is cut at its last `@` all the same. Port 1
+// refuses at once, so the run fails on the remote rather than waiting on one.
 func TestRecordsNeverLogARemoteCredential(t *testing.T) {
 	const url = "https://ci-bot:s3cr3t@127.0.0.1:1/acme/mono.git"
 	for _, row := range []struct {
@@ -1362,6 +1363,8 @@ func TestRecordsNeverLogARemoteCredential(t *testing.T) {
 	}{
 		{name: "a named remote whose URL carries a credential", upfront: true},
 		{name: "the URL itself as the remote, with the upfront check off", remote: url, verify: models.Bool(false)},
+		{name: "a URL whose password does not parse as the remote", verify: models.Bool(false),
+			remote: "https://ci-bot:s3cr3t%zz@127.0.0.1:1/acme/mono.git?token=abc123#fragment"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			r := harness.New(t)
