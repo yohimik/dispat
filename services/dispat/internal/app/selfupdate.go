@@ -71,20 +71,7 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		opts.Log.Error().Err(err).Msg("self-update failed")
 		return false, err
 	}
-	current := opts.Build.Version
-	// Whether this invocation would change the binary, which is the whole of
-	// what --check answers. Nothing downgrades on its own: only naming a
-	// version, or forcing the install, reaches a release that is not newer.
-	cur, _ := ccme.ParseVersion(current) // Describe only reports parseable versions
-	var change bool
-	switch {
-	case opts.Force:
-		change = true
-	case opts.Release != "":
-		change = rel.Version.Compare(cur) != 0
-	default:
-		change = rel.Version.Compare(cur) > 0
-	}
+	change := isBinaryChange(opts, rel)
 
 	// The notes are read off the response that already chose the release, so
 	// what the user is told afterwards describes the release that was selected
@@ -107,22 +94,55 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		return change, nil
 	}
 	if !change {
-		if opts.JSON {
-			opts.Log.Info().Str("version", current).Str("latest", rel.Version.String()).
-				Msg("already on the latest release")
-			return false, nil
-		}
-		fmt.Fprintf(opts.Out, "dispat %s is already the latest release (%s)\n", current, rel.Tag)
-		fmt.Fprintln(opts.Out, "install it again anyway with --force")
+		reportUpToDate(opts, rel)
 		return false, nil
 	}
+	exe, backup, err := installRelease(ctx, opts, rel)
+	if err != nil {
+		return false, err
+	}
+	reportInstalled(opts, installedUpdate{rel: rel, notes: notes, exe: exe, backup: backup})
+	return false, nil
+}
+
+// isBinaryChange is whether this invocation would change the binary, which
+// is the whole of what --check answers. Nothing downgrades on its own: only
+// naming a version, or forcing the install, reaches a release that is not
+// newer.
+func isBinaryChange(opts SelfUpdateOptions, rel selfupdate.Release) bool {
+	cur, _ := ccme.ParseVersion(opts.Build.Version) // Describe only reports parseable versions
+	switch {
+	case opts.Force:
+		return true
+	case opts.Release != "":
+		return rel.Version.Compare(cur) != 0
+	default:
+		return rel.Version.Compare(cur) > 0
+	}
+}
+
+// reportUpToDate says the running binary is already the release selected.
+func reportUpToDate(opts SelfUpdateOptions, rel selfupdate.Release) {
+	if opts.JSON {
+		opts.Log.Info().Str("version", opts.Build.Version).Str("latest", rel.Version.String()).
+			Msg("already on the latest release")
+		return
+	}
+	fmt.Fprintf(opts.Out, "dispat %s is already the latest release (%s)\n", opts.Build.Version, rel.Tag)
+	fmt.Fprintln(opts.Out, "install it again anyway with --force")
+}
+
+// installRelease replaces the running binary with the release's asset for
+// this platform, and returns the binary's path (empty when it cannot be
+// resolved) and the backup of the binary it replaced.
+func installRelease(ctx context.Context, opts SelfUpdateOptions, rel selfupdate.Release) (string, string, error) {
 	// A go install build is replaced by another go install: rewriting the
 	// file the Go toolchain owns would work exactly until the next one.
 	if opts.Build.Origin == selfupdate.OriginGoInstall {
 		err := fmt.Errorf("this dispat was installed with go install; update it with: %s",
 			selfupdate.GoInstallCommand)
 		opts.Log.Error().Err(err).Msg("self-update cannot replace a go install build")
-		return false, err
+		return "", "", err
 	}
 
 	asset, ok := rel.Asset(opts.GOOS, opts.GOARCH)
@@ -130,7 +150,7 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		err := fmt.Errorf("%s carries no %s: it has %s", rel.Tag,
 			selfupdate.AssetName(opts.GOOS, opts.GOARCH), strings.Join(rel.AssetNames(), ", "))
 		opts.Log.Error().Err(err).Msg("no binary for this platform")
-		return false, err
+		return "", "", err
 	}
 
 	if !opts.JSON {
@@ -150,7 +170,7 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 	}
 	if err != nil {
 		opts.Log.Error().Err(err).Msg("self-update failed")
-		return false, err
+		return "", "", err
 	}
 	exe, exeErr := selfupdate.Executable()
 	if exeErr != nil {
@@ -160,32 +180,44 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 		exe = ""
 		opts.Log.Warn().Err(exeErr).Msg("installed, but the binary's own path cannot be resolved")
 	}
+	return exe, backup, nil
+}
 
+// installedUpdate is what an installed update reports: the release, its
+// notes, where the binary is and where the replaced one was kept.
+type installedUpdate struct {
+	rel         selfupdate.Release
+	notes       selfupdate.Notes
+	exe, backup string
+}
+
+// reportInstalled reports an installed update, as one event in JSON mode and
+// as the report otherwise.
+func reportInstalled(opts SelfUpdateOptions, u installedUpdate) {
 	if opts.JSON {
-		ev := opts.Log.Info().Str("version", rel.Version.String()).Str("tag", rel.Tag)
-		if exe != "" {
-			ev = ev.Str("path", exe)
+		ev := opts.Log.Info().Str("version", u.rel.Version.String()).Str("tag", u.rel.Tag)
+		if u.exe != "" {
+			ev = ev.Str("path", u.exe)
 		}
-		ev.Str("backup", backup).Func(notesFields(opts, rel, notes)).Msg("update installed")
-		return false, nil
+		ev.Str("backup", u.backup).Func(notesFields(opts, u.rel, u.notes)).Msg("update installed")
+		return
 	}
-	if exe != "" {
-		fmt.Fprintf(opts.Out, "installed dispat %s at %s\n", rel.Version.String(), exe)
+	if u.exe != "" {
+		fmt.Fprintf(opts.Out, "installed dispat %s at %s\n", u.rel.Version.String(), u.exe)
 	} else {
-		fmt.Fprintf(opts.Out, "installed dispat %s\n", rel.Version.String())
+		fmt.Fprintf(opts.Out, "installed dispat %s\n", u.rel.Version.String())
 	}
-	if backup != "" {
-		fmt.Fprintf(opts.Out, "the previous binary is at %s, removed on its own after a week\n", backup)
+	if u.backup != "" {
+		fmt.Fprintf(opts.Out, "the previous binary is at %s, removed on its own after a week\n", u.backup)
 		fmt.Fprintf(opts.Out, "put it back with \"dispat self-update --rollback\"\n")
 	}
-	writeNotes(opts, rel, notes)
+	writeNotes(opts, u.rel, u.notes)
 	// The macOS warning stays last. It is the one line that asks the reader to
 	// go and do something, and burying it under the changelog would be the
 	// same as not printing it.
-	if note := selfupdate.MacNote(opts.GOOS, exe); exe != "" && note != "" {
+	if note := selfupdate.MacNote(opts.GOOS, u.exe); u.exe != "" && note != "" {
 		fmt.Fprint(opts.Out, note)
 	}
-	return false, nil
 }
 
 // readNotes turns the selected release's body into something printable, and
