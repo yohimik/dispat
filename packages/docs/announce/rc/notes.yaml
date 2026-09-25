@@ -14,18 +14,23 @@
   {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is ready for testing.
   This release candidate: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
   Catch-up experiment: https://dispat.dev/next/internals/experiments/
+  Sign stage: https://dispat.dev/next/configuration/autosign/
   Worker nodes guide: https://dispat.dev/next/distributed-execution/
   Report a problem: https://github.com/yohimik/dispat/issues
 
   Nothing repeated, nothing stranded.
 
-  If a library ships and an app using it fails, the next run finishes what is left, with one command and no manual step. An app with changes of its own ships anyway and picks the library up later, also when it sat out the run where the library shipped.
+  If a library ships and an app using it fails, the next run finishes what is left, with one command and no manual step. An app with changes of its own ships anyway and picks the library up later, also when it sat out the run where the library shipped, and also when it went ahead on a prerelease.
 
   Shipping the library alone on the very commit the app was last released at is refused, because two tags on one commit cannot say which came first. Commit first, or ship both together.
 
+  New and optional: a sign stage writes each package's own version before anything else runs, and the version stage can be written as propagate, with autoPropagate beside autoVersion. Existing configurations run exactly as before.
+
+  Harder to break: an interrupt while the release commit and tags are written still records what published, and a skipped package leaves no edits and no lockfile entries behind.
+
   Measured, not claimed. A new release experiment breaks the app's publish after the library shipped and counts what dispat, lerna, nx and changesets each need to catch up. The table is on the site.
 
-  Worker nodes use the repository itself. The orchestrator leaves work on branches of the project's own repository and workers pick it up; another endpoint is one setting away. Publishing and credentials stay on one machine, and a stage that ran on a worker is caught up exactly like one that ran locally.
+  Worker nodes use the project's own repository as their mailbox, find it from their own checkout, and tell a refused push from a lost one. Publishing and credentials stay on one machine.
 
   Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
 

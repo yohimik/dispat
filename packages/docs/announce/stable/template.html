@@ -249,6 +249,7 @@
     <p>Everything travels over Git. The orchestrator leaves work on branches of the project's own repository and workers pick it up, so there are no open ports and nothing to install but dispat.</p>
     <p>What one machine builds, the next one can use, checked before it is used.</p>
     <p>Publishing and credentials stay on one machine. Without a workers section, nothing changes.</p>
+    <p>New and optional: a sign stage writes each package's own version before anything else runs, and the version stage can be written as propagate. Existing configurations run exactly as before.</p>
     <p>If a library ships and an app using it fails, nothing is repeated: the next run finishes what is left. An app with changes of its own ships anyway and picks the library up later, also when it sat out the run where the library shipped.</p>
     <p>Autistic stability for ADHD projects. Mathematical planning. Saga recovery.</p>
     <p>Preview with `dispat status`; it publishes nothing.</p>
