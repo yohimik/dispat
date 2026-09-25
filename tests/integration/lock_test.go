@@ -161,6 +161,53 @@ func TestReleaseLockHeldElsewhere(t *testing.T) {
 	}
 }
 
+// TestReleaseLockRefusalWithoutAHolderToName: the refusal names who holds the
+// lock when the lock's own message says so. A lock someone wrote by hand as a
+// lightweight tag carries no message, and a message Git cannot fetch or read
+// names nobody either: the run is refused all the same, without a holder
+// line, and the lock stays exactly as it was.
+func TestReleaseLockRefusalWithoutAHolderToName(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		isLightweight bool
+		pattern       string
+	}{
+		{name: "a lightweight lock tag", isLightweight: true},
+		{name: "a message Git cannot fetch", pattern: "*fetch --no-tags * refs/tags/" + lockTag + "*"},
+		{name: "a fetched message Git cannot read", pattern: "*cat-file -p FETCH_HEAD*"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := harness.New(t)
+			r.WriteConfigModel(libsConfig(markerBuild, 1))
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
+			bare := r.AddBareRemote()
+			held := holdLock(t, r, bare)
+			env := harness.LockEnabled
+			var fault *harness.GitFault
+			if tc.isLightweight {
+				bareGit(t, bare, "tag", "-d", lockTag)
+				bareGit(t, bare, "tag", lockTag, harness.DefaultBranch)
+				held = lockObject(t, bare)
+			} else {
+				fault = harness.NewGitFault(t, harness.GitFault{Pattern: tc.pattern})
+				env = append(append([]string{}, env...), fault.Env()...)
+			}
+
+			res := r.CommandEnv(env)
+			assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout, "unable to create the release lock tag")
+			assert.NotContains(t, res.Stdout, "held for", "no holder is named")
+			assert.Equal(t, 0, buildRuns(r), "nothing was built")
+			assert.Equal(t, 0, r.TagCount("core@"), "nothing was tagged")
+			assert.Equal(t, held, lockObject(t, bare), "the lock is untouched")
+			if fault != nil {
+				assert.NotZero(t, fault.Matches(), "the holder's message was asked for")
+			}
+		})
+	}
+}
+
 // TestReleaseLockBlocksConcurrentRuns: the claim the whole feature is for,
 // with two real releases against one remote. The first holds the lock inside
 // a hook until the test lets it go; the second, started in that window, is
