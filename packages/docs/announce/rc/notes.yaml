@@ -28,6 +28,8 @@
 
   Harder to break: an interrupt while the release commit and tags are written still records what published, and a skipped package leaves no edits and no lockfile entries behind.
 
+  Faster on long histories: planning a 50,000-commit benchmark takes 0.4 seconds instead of 2.9.
+
   Measured, not claimed. A new release experiment breaks the app's publish after the library shipped and counts what dispat, lerna, nx and changesets each need to catch up. The table is on the site.
 
   Worker nodes use the project's own repository as their mailbox, find it from their own checkout, and tell a refused push from a lost one. Publishing and credentials stay on one machine.

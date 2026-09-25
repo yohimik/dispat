@@ -32,6 +32,8 @@
 
   New and optional: a sign stage writes each package's own version before anything else runs, and the version stage can be written as propagate. Existing configurations run exactly as before.
 
+  Faster on long histories: planning a 50,000-commit benchmark takes 0.4 seconds instead of 2.9.
+
   If a library ships and an app using it fails, nothing is repeated: the next run finishes what is left. An app with changes of its own ships anyway and picks the library up later, also when it sat out the run where the library shipped.
 
   Autistic stability for ADHD projects. Mathematical planning. Saga recovery.
