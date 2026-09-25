@@ -402,6 +402,36 @@ func TestExecutionWorkerKeepsFutureIssuedReplayKnowledge(t *testing.T) {
 	assert.NotContains(t, stored, expiredKey)
 }
 
+// TestExecutionWorkerAcceptsAModestClockSkew: an issue time bounds replay and
+// nothing else, and it is the writer's clock rather than the reader's, so two
+// machines whose clocks disagree by minutes still coordinate. Probes issued a
+// quarter of an hour ahead of this node's clock and a quarter of an hour
+// behind it sit well inside the 24-hour window the replay rule allows, and the
+// node claims and answers both; TestExecutionWorkerRejectsAssignments is the
+// refusal of a message outside it.
+func TestExecutionWorkerAcceptsAModestClockSkew(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	skews := map[string]time.Duration{"ahead": 15 * time.Minute, "behind": -15 * time.Minute}
+	for label, skew := range skews {
+		branch := executionBranchName("skew" + label)
+		orchestrator.offer(branch, orchestrator.probe(branch, "skew-"+label, func(m map[string]any) {
+			m["issuedAt"] = time.Now().UTC().Add(skew).Format(time.RFC3339)
+		}))
+	}
+
+	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 4)
+	for label := range skews {
+		branch := executionBranchName("skew" + label)
+		result := executionAwaitMessage(t, rig.mailbox, branch, "result")
+		assert.Equal(t, "succeeded", result["status"], label)
+		assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, branch), label)
+	}
+	res := worker.proc.Wait()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.NotContains(t, executionRejections(res), "issued-at", "neither skewed message was refused")
+}
+
 // executionLabel is a branch-safe label for one table row's name.
 func executionLabel(name string) string {
 	var label strings.Builder
