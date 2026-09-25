@@ -52,6 +52,81 @@ $DownloadUrl = if ($env:DISPAT_DOWNLOAD_URL) { $env:DISPAT_DOWNLOAD_URL } else {
 $headers = @{ Accept = 'application/vnd.github+json' }
 if ($Token) { $headers['Authorization'] = "Bearer $Token" }
 
+# Get-ResponseHeader reads one header of a refused answer, from whichever
+# object the PowerShell in use put the answer on: PowerShell 7 hands over an
+# HttpResponseMessage, whose headers are asked with TryGetValues, and Windows
+# PowerShell 5.1 an HttpWebResponse, whose headers index by name.
+function Get-ResponseHeader($response, $name) {
+    if (-not $response) { return '' }
+    try {
+        $values = $null
+        if ($response.Headers.TryGetValues($name, [ref]$values)) { return "$(@($values)[0])" }
+    } catch { }
+    try {
+        $value = $response.Headers[$name]
+        if ($value) { return "$value" }
+    } catch { }
+    return ''
+}
+
+# Get-RateLimitWait answers the seconds a refused answer asks to be waited out,
+# or $null when the refusal is no rate limit and another attempt would only get
+# the same answer. GitHub refuses with a 403 or a 429 when a limit is spent and
+# says when to come back: retry-after in seconds, or x-ratelimit-reset in epoch
+# seconds once x-ratelimit-remaining is 0. Without either it asks for a
+# minute, which is also the longest wait. The same rule as install.sh's.
+function Get-RateLimitWait($status, $response) {
+    if ($status -ne 403 -and $status -ne 429) { return $null }
+    $retryAfter = Get-ResponseHeader $response 'Retry-After'
+    $isExhausted = (Get-ResponseHeader $response 'X-RateLimit-Remaining') -eq '0'
+    if (-not $retryAfter -and -not $isExhausted) { return $null }
+    if ($retryAfter -match '^\d{1,4}$') { return [Math]::Min([int]$retryAfter, 60) }
+    $reset = Get-ResponseHeader $response 'X-RateLimit-Reset'
+    if ($isExhausted -and $reset -match '^\d+$') {
+        $seconds = [long]$reset - [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        return [int][Math]::Max(0, [Math]::Min($seconds, 60))
+    }
+    return 60
+}
+
+# Invoke-GitHubApi asks the releases API for one URL, waiting out a rate limit
+# for up to three attempts in all. A refusal that remains fails with its HTTP
+# status and GitHub's own message; the error carries the status in its data,
+# so a caller can still tell a missing release (404) from anything else.
+function Invoke-GitHubApi($uri, $what) {
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            return Invoke-RestMethod -Uri $uri -Headers $headers
+        } catch {
+            # Kept by name: every nested catch below rebinds $_.
+            $record = $_
+            $response = $null
+            try { $response = $record.Exception.Response } catch { }
+            if (-not $response) { throw $record }
+            $status = 0
+            try { $status = [int]$response.StatusCode } catch { }
+            $message = ''
+            try { $message = ($record.ErrorDetails.Message | ConvertFrom-Json).message } catch { }
+            $failure = "HTTP $status$(if ($message) { ": $message" })"
+            $wait = Get-RateLimitWait $status $response
+            if ($null -ne $wait -and $attempt -lt 3) {
+                Write-Information "the GitHub API is rate limited ($failure); retrying in ${wait}s (attempt $($attempt + 1) of 3)" `
+                    -InformationAction Continue
+                Start-Sleep -Seconds $wait
+                continue
+            }
+            $text = if ($null -ne $wait) {
+                "${what}: the GitHub API rate limit is spent ($failure). Wait for it to reset, or pass -Token."
+            } else {
+                "${what}: $failure"
+            }
+            $refusal = [System.Exception]::new($text)
+            $refusal.Data['Status'] = $status
+            throw $refusal
+        }
+    }
+}
+
 if (-not $Arch) {
     $Arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
         'X64' { 'amd64' }
@@ -83,7 +158,8 @@ if (-not $Version) {
     # through a script block enumerates on every PowerShell version.
     $releases = @()
     for ($page = 1; $page -le 3; $page++) {
-        $batch = @(Invoke-RestMethod -Uri "$ApiUrl/repos/$Owner/$Repo/releases?per_page=100&page=$page" -Headers $headers | ForEach-Object { $_ })
+        $batch = @(Invoke-GitHubApi "$ApiUrl/repos/$Owner/$Repo/releases?per_page=100&page=$page" 'cannot list the releases' |
+            ForEach-Object { $_ })
         if ($batch.Count -eq 0) { break }
         $releases += $batch
     }
@@ -105,11 +181,13 @@ if ($Version -notmatch '^\d+\.\d+\.\d+') {
 $tag = "$TagPrefix$Version"
 
 # Fetching the release by tag also turns "no such version" into a clean failure
-# here rather than a 404 on the download.
+# here rather than a 404 on the download. Only a 404 means that: any other
+# refusal says what it was.
 try {
-    $release = Invoke-RestMethod -Uri "$ApiUrl/repos/$Owner/$Repo/releases/tags/$tag" -Headers $headers
+    $release = Invoke-GitHubApi "$ApiUrl/repos/$Owner/$Repo/releases/tags/$tag" "cannot read the release $tag"
 } catch {
-    throw "no release for $tag. Check the version, or the releases page."
+    if ($_.Exception.Data['Status'] -eq 404) { throw "no release for $tag. Check the version, or the releases page." }
+    throw
 }
 # Guarded rather than dotted into directly: under Set-StrictMode a response that
 # is not the release object (a proxy's error document, an Enterprise instance

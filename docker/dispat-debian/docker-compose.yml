@@ -14,3 +14,8 @@ services:
         DISPAT_VERSION: ${INSTALL_DISPAT_VERSION:?}
       labels:
         io.dispat.cli.version: ${INSTALL_DISPAT_VERSION:?}
+      secrets:
+        - github_token
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN

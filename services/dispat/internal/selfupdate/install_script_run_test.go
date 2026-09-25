@@ -21,8 +21,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,12 +54,26 @@ type scriptFixture struct {
 	// request, which is what a token that reads the listing and not the
 	// assets gets.
 	refuseAsset bool
+	// refusal answers the release lookups in place of the release, the way
+	// GitHub refuses a request it will not serve.
+	refusal *scriptRefusal
 
 	mu          sync.Mutex
+	lookups     int
 	apiHits     int
 	storageHits int
 	publicHits  int
 	storageAuth string
+}
+
+// scriptRefusal is one refusal of the releases API: its status, the headers
+// that say whether and when to come back, and GitHub's message. It answers
+// the first times lookups, or every lookup when times is 0.
+type scriptRefusal struct {
+	status  int
+	headers map[string]string
+	message string
+	times   int
 }
 
 // signInPage is what github.com serves at the public download URL of a private
@@ -119,6 +136,19 @@ func newScriptFixture(t *testing.T, token string) *scriptFixture {
 				return
 			}
 			http.Redirect(w, req, f.storageURL, http.StatusFound)
+			return
+		}
+		f.mu.Lock()
+		f.lookups++
+		lookup, refusal := f.lookups, f.refusal
+		f.mu.Unlock()
+		if refusal != nil && (refusal.times == 0 || lookup <= refusal.times) {
+			for name, value := range refusal.headers {
+				w.Header().Set(name, value)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(refusal.status)
+			fmt.Fprintf(w, `{"message":%q,"documentation_url":"https://docs.github.com/rest"}`, refusal.message)
 			return
 		}
 		if !authed {
@@ -189,6 +219,18 @@ func (f *scriptFixture) releaseJSON(base string) string {
 }`
 }
 
+func (f *scriptFixture) refuse(refusal *scriptRefusal) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refusal = refusal
+}
+
+func (f *scriptFixture) lookupCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lookups
+}
+
 func (f *scriptFixture) counts() (api, storage, public int, storageAuth string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -236,6 +278,7 @@ func scriptPath(t *testing.T, downloader string) string {
 	for _, name := range []string{
 		downloader, "uname", "tr", "sed", "awk", "sort", "tail", "cut",
 		"chmod", "mv", "rm", "mkdir", "grep", "cat", "sha256sum", "shasum",
+		"mktemp", "date", "sleep",
 	} {
 		path, err := exec.LookPath(name)
 		if err != nil {
@@ -341,6 +384,122 @@ func TestInstallScriptFallsBackToThePublicURL(t *testing.T) {
 	}
 }
 
+// requireErrorHeaders skips a scenario that reads the headers of a refusal
+// through a downloader that cannot show them: busybox's wget prints only the
+// status line of an error answer, which install.sh then reports as it is.
+func requireErrorHeaders(t *testing.T, downloader string) {
+	t.Helper()
+	if downloader != "wget" {
+		return
+	}
+	help, _ := exec.Command("wget", "--help").CombinedOutput()
+	if strings.Contains(string(help), "BusyBox") {
+		t.Skip("busybox wget prints no headers of an error answer")
+	}
+}
+
+// TestInstallScriptWaitsOutARateLimit: an anonymous lookup shares the
+// address's hourly quota with every other anonymous caller there, which is
+// what the image builds meet on a busy runner. A refusal that says the limit
+// is spent, and when it resets, is waited out and asked again instead of
+// being read as a release that does not exist.
+func TestInstallScriptWaitsOutARateLimit(t *testing.T) {
+	requireExec(t)
+	for _, downloader := range []string{"curl", "wget"} {
+		t.Run(downloader, func(t *testing.T) {
+			requireErrorHeaders(t, downloader)
+			f := newScriptFixture(t, "")
+			f.refuse(&scriptRefusal{
+				status: http.StatusForbidden,
+				headers: map[string]string{
+					"X-RateLimit-Remaining": "0",
+					"X-RateLimit-Reset":     strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10),
+				},
+				message: "API rate limit exceeded for 203.0.113.7.",
+				times:   1,
+			})
+
+			out, code, target := f.run(t, downloader)
+			require.Equal(t, 0, code, "output:\n%s", out)
+			assert.Contains(t, out, "the GitHub API is rate limited (HTTP 403")
+			assert.Contains(t, out, "retrying in 0s (attempt 2 of 3)",
+				"a reset already past is no reason to wait")
+			assert.Equal(t, 2, f.lookupCount(), "one refusal, then the release")
+			installed, err := os.ReadFile(target)
+			require.NoError(t, err)
+			assert.Equal(t, string(f.body), string(installed))
+		})
+	}
+}
+
+// TestInstallScriptGivesUpOnASpentRateLimit: three attempts in all, and the
+// failure then says the limit is spent and how to get a larger one, rather
+// than that the release does not exist.
+func TestInstallScriptGivesUpOnASpentRateLimit(t *testing.T) {
+	requireExec(t)
+	for _, downloader := range []string{"curl", "wget"} {
+		t.Run(downloader, func(t *testing.T) {
+			requireErrorHeaders(t, downloader)
+			f := newScriptFixture(t, "")
+			f.refuse(&scriptRefusal{
+				status:  http.StatusTooManyRequests,
+				headers: map[string]string{"Retry-After": "0"},
+				message: "You have exceeded a secondary rate limit.",
+			})
+
+			out, code, _ := f.run(t, downloader)
+			assert.NotEqual(t, 0, code, "output:\n%s", out)
+			assert.Equal(t, 3, f.lookupCount(), "three attempts in all")
+			assert.Contains(t, out, "cannot read the release "+DefaultTagPrefix+scriptVersion+
+				": the GitHub API rate limit is spent (HTTP 429")
+			assert.Contains(t, out, "pass --token")
+			assert.NotContains(t, out, "no release for")
+			if downloader == "curl" {
+				assert.Contains(t, out, "HTTP 429: You have exceeded a secondary rate limit.",
+					"GitHub's own explanation is kept")
+			}
+			_, _, public, _ := f.counts()
+			assert.Zero(t, public, "nothing is downloaded without the release")
+		})
+	}
+}
+
+// TestInstallScriptFailsARefusalAtOnce: a refusal that is no rate limit is
+// asked once. Only a 404 means the release does not exist; any other status
+// is reported as itself.
+func TestInstallScriptFailsARefusalAtOnce(t *testing.T) {
+	requireExec(t)
+	for _, tc := range []struct {
+		name    string
+		refusal scriptRefusal
+		want    string
+	}{
+		{
+			name:    "missing",
+			refusal: scriptRefusal{status: http.StatusNotFound, message: "Not Found"},
+			want:    "no release for " + DefaultTagPrefix + scriptVersion + ". Check the version",
+		},
+		{
+			name:    "forbidden",
+			refusal: scriptRefusal{status: http.StatusForbidden, message: "Resource not accessible by integration"},
+			want:    "cannot read the release " + DefaultTagPrefix + scriptVersion + ": HTTP 403",
+		},
+	} {
+		for _, downloader := range []string{"curl", "wget"} {
+			t.Run(tc.name+"/"+downloader, func(t *testing.T) {
+				f := newScriptFixture(t, "")
+				f.refuse(&tc.refusal)
+
+				out, code, _ := f.run(t, downloader)
+				assert.NotEqual(t, 0, code, "output:\n%s", out)
+				assert.Contains(t, out, tc.want)
+				assert.NotContains(t, out, "retrying")
+				assert.Equal(t, 1, f.lookupCount(), "a refusal that is no rate limit is not asked again")
+			})
+		}
+	}
+}
+
 // TestInstallScriptsAgreeOnTheAuthenticatedDownload: install.ps1 cannot be
 // executed here, because the image the Go tests run in has no PowerShell, so
 // the two scripts are compared as text instead. What has to hold on both
@@ -393,4 +552,37 @@ func TestInstallScriptsAgreeOnTheAuthenticatedDownload(t *testing.T) {
 		"Windows PowerShell 5.1 returns the refused redirect rather than raising it, so it has to be asked for")
 	assert.Contains(t, sh, "wget --max-redirect=0 --version",
 		"the busybox probe is the option's own exit code, not the wording of its help text")
+}
+
+// TestInstallScriptsAgreeOnTheRateLimit: install.ps1 cannot be executed here
+// either, so its half of the rate-limit rule is compared as text with the
+// half of install.sh the scenarios above run. Both read the same two signals,
+// wait at most a minute, stop after three attempts, and call a release
+// missing only when the API answered 404.
+func TestInstallScriptsAgreeOnTheRateLimit(t *testing.T) {
+	sh := readRepoFile(t, "install.sh")
+	ps1 := readRepoFile(t, "install.ps1")
+
+	for _, want := range []string{"retry-after", "x-ratelimit-remaining", "x-ratelimit-reset"} {
+		assert.Contains(t, strings.ToLower(sh), want, "install.sh must read %s", want)
+		assert.Contains(t, strings.ToLower(ps1), want, "install.ps1 must read %s", want)
+	}
+	for name, script := range map[string]string{"install.sh": sh, "install.ps1": ps1} {
+		assert.Contains(t, script, "retrying in", "%s must say it waits, and for how long", name)
+		assert.Contains(t, script, "of 3)", "%s must stop after three attempts", name)
+		assert.Contains(t, script, "the GitHub API rate limit is spent", "%s must name a spent limit as such", name)
+	}
+
+	assert.Contains(t, sh, `[ "$ATTEMPT" -lt 3 ] || return 1`)
+	assert.Contains(t, sh, `[ "$WAIT" -le 60 ] || WAIT=60`, "install.sh caps a wait at a minute")
+	assert.Contains(t, sh, `[ "$STATUS" != 404 ] || die "no release for ${TAG}.`,
+		"install.sh calls a release missing only on a 404")
+
+	assert.Contains(t, ps1, "$attempt -lt 3", "install.ps1 must stop after three attempts")
+	assert.Contains(t, ps1, "[Math]::Min([int]$retryAfter, 60)", "install.ps1 caps a wait at a minute")
+	assert.Contains(t, ps1, "Start-Sleep -Seconds $wait")
+	assert.Contains(t, ps1, `if ($_.Exception.Data['Status'] -eq 404) { throw "no release for $tag.`,
+		"install.ps1 calls a release missing only on a 404")
+	assert.NotContains(t, ps1, `} catch {
+    throw "no release for $tag.`, "install.ps1 must not turn every failure into a missing release")
 }

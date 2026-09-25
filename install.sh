@@ -92,26 +92,155 @@ else
 	die "neither curl nor wget is installed"
 fi
 
-# get fetches a URL to stdout. The token is passed through a branch rather than
-# an expanded variable because a header carries spaces, and an unquoted
-# expansion would split it into three arguments.
-get() {
+# The releases API is asked through api_get, which keeps what each answer said:
+# the body in $API_DIR/body, the response headers in $API_DIR/headers, and the
+# HTTP status in STATUS (000 when no answer arrived at all). A failure is then
+# reported with its status and GitHub's own message rather than guessed at,
+# and a rate limit can be waited out rather than read as "no such release".
+API_DIR=$(mktemp -d 2>/dev/null) || die "cannot create a temporary folder"
+TMP=""
+cleanup() {
+	rm -rf "$API_DIR"
+	if [ -n "$TMP" ]; then
+		rm -f "$TMP"
+	fi
+}
+# An interrupt exits, which runs the EXIT trap; a trap on the signal alone
+# would clean up and then carry on.
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+
+# api_request asks for an API URL once. The token is passed through a branch
+# rather than an expanded variable because a header carries spaces, and an
+# unquoted expansion would split it into three arguments. curl reports the
+# status itself and keeps an error's body; wget prints the headers of every
+# response it reads to stderr (-S), and the last status line there is the
+# answer's. busybox's wget prints only the status line of an error and keeps
+# no body, so through it a refusal carries its status alone and a rate limit
+# cannot be told from any other 403: it fails at once, with that status.
+api_request() {
+	: >"$API_DIR/body"
+	: >"$API_DIR/headers"
 	case "$DOWNLOADER" in
 	curl)
 		if [ -n "$TOKEN" ]; then
-			curl -fsSL -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $TOKEN" "$1"
+			STATUS=$(curl -sSL -D "$API_DIR/headers" -o "$API_DIR/body" -w '%{http_code}' \
+				-H "Accept: application/vnd.github+json" -H "Authorization: Bearer $TOKEN" "$1") || STATUS=000
 		else
-			curl -fsSL -H "Accept: application/vnd.github+json" "$1"
+			STATUS=$(curl -sSL -D "$API_DIR/headers" -o "$API_DIR/body" -w '%{http_code}' \
+				-H "Accept: application/vnd.github+json" "$1") || STATUS=000
 		fi
 		;;
 	wget)
 		if [ -n "$TOKEN" ]; then
-			wget -qO- --header="Accept: application/vnd.github+json" --header="Authorization: Bearer $TOKEN" "$1"
+			wget -q -S -O "$API_DIR/body" --header="Accept: application/vnd.github+json" \
+				--header="Authorization: Bearer $TOKEN" "$1" 2>"$API_DIR/headers" || true
 		else
-			wget -qO- --header="Accept: application/vnd.github+json" "$1"
+			wget -q -S -O "$API_DIR/body" --header="Accept: application/vnd.github+json" \
+				"$1" 2>"$API_DIR/headers" || true
 		fi
+		STATUS=$(sed -n 's|^[ 	]*HTTP/[0-9.]*[ 	][ 	]*\([0-9][0-9][0-9]\).*$|\1|p' "$API_DIR/headers" | tail -n 1)
 		;;
 	esac
+	case "$STATUS" in
+	[0-9][0-9][0-9]) ;;
+	*) STATUS=000 ;;
+	esac
+}
+
+# api_header prints the value of one header of the last answer, named in lower
+# case. Earlier answers are the redirects on the way to it.
+api_header() {
+	tr -d '\r' <"$API_DIR/headers" | awk -v name="$1" '
+		{ sub(/^[ \t]+/, "") }
+		/^HTTP\// { value = ""; next }
+		{
+			colon = index($0, ":")
+			if (colon > 0 && tolower(substr($0, 1, colon - 1)) == name) {
+				value = substr($0, colon + 1)
+				sub(/^[ \t]+/, "", value)
+				sub(/[ \t]+$/, "", value)
+			}
+		}
+		END { print value }
+	'
+}
+
+# rate_limit_wait sets WAIT to the seconds a rate-limited answer asks for, and
+# fails for any other answer, which another attempt would only repeat. GitHub
+# refuses with a 403 or a 429 when a limit is spent and says when to come back:
+# retry-after in seconds, or x-ratelimit-reset in epoch seconds once
+# x-ratelimit-remaining is 0. Without either it asks for a minute, which is
+# also the longest wait. The same rule as the npm packager's.
+rate_limit_wait() {
+	case "$STATUS" in
+	403 | 429) ;;
+	*) return 1 ;;
+	esac
+	RETRY_AFTER=$(api_header retry-after)
+	REMAINING=$(api_header x-ratelimit-remaining)
+	[ -n "$RETRY_AFTER" ] || [ "$REMAINING" = 0 ] || return 1
+	WAIT=60
+	case "$RETRY_AFTER" in
+	'' | *[!0-9]* | ?????*) ;;
+	*)
+		WAIT=$RETRY_AFTER
+		[ "$WAIT" -le 60 ] || WAIT=60
+		return 0
+		;;
+	esac
+	RESET=$(api_header x-ratelimit-reset)
+	NOW=$(date +%s 2>/dev/null) || NOW=""
+	case "$REMAINING:$RESET:$NOW" in
+	0:[0-9]*:[0-9]*)
+		case "$RESET$NOW" in *[!0-9]*) return 0 ;; esac
+		WAIT=$((RESET - NOW))
+		[ "$WAIT" -ge 0 ] || WAIT=0
+		[ "$WAIT" -le 60 ] || WAIT=60
+		;;
+	esac
+	return 0
+}
+
+# api_get fetches an API URL, waiting out a rate limit for up to three attempts
+# in all, and answers non-zero with STATUS set when the last answer was not a
+# success. RATE_LIMITED says whether that last answer was a spent rate limit.
+api_get() {
+	ATTEMPT=1
+	RATE_LIMITED=""
+	while :; do
+		api_request "$1"
+		case "$STATUS" in
+		2??) return 0 ;;
+		esac
+		rate_limit_wait || return 1
+		RATE_LIMITED=1
+		[ "$ATTEMPT" -lt 3 ] || return 1
+		ATTEMPT=$((ATTEMPT + 1))
+		log "the GitHub API is rate limited ($(api_failure)); retrying in ${WAIT}s (attempt ${ATTEMPT} of 3)"
+		sleep "$WAIT"
+	done
+}
+
+# api_failure describes the last answer: its status and GitHub's message, or
+# that nothing answered at all.
+api_failure() {
+	if [ "$STATUS" = 000 ]; then
+		printf 'no answer from %s' "$API_URL"
+		return
+	fi
+	MESSAGE=$(sed -n 's/.*"message"[ 	]*:[ 	]*"\([^"]*\)".*/\1/p' "$API_DIR/body" | sed -n 1p)
+	printf 'HTTP %s%s' "$STATUS" "${MESSAGE:+: $MESSAGE}"
+}
+
+# api_refusal is the error an API failure dies with. A spent rate limit says
+# how to get a larger one.
+api_refusal() {
+	if [ -n "$RATE_LIMITED" ]; then
+		printf '%s: the GitHub API rate limit is spent (%s). Wait for it to reset, or pass --token.' "$1" "$(api_failure)"
+		return
+	fi
+	printf '%s: %s' "$1" "$(api_failure)"
 }
 
 # download writes a URL to a file, with no headers of any kind. Separate from
@@ -256,8 +385,9 @@ if [ -z "$VERSION" ]; then
 	TAGS=""
 	PAGE=1
 	while [ "$PAGE" -le 3 ]; do
-		BODY=$(get "${API_URL}/repos/${OWNER}/${REPO}/releases?per_page=100&page=${PAGE}") || break
-		PAGE_TAGS=$(printf '%s' "$BODY" | json_fields |
+		api_get "${API_URL}/repos/${OWNER}/${REPO}/releases?per_page=100&page=${PAGE}" ||
+			die "$(api_refusal "cannot list the releases")"
+		PAGE_TAGS=$(json_fields <"$API_DIR/body" |
 			sed -n 's|^"tag_name":"\(.*\)"$|\1|p')
 		# A page with no tags at all is the end of the listing; a page whose
 		# tags all belong to other packages still asks for the next one.
@@ -286,9 +416,13 @@ TAG="${TAG_PREFIX}${VERSION}"
 
 # GitHub reports a "digest" per asset, which is what internal/selfupdate checks
 # too. Fetching the release by tag also turns "no such version" into a clean
-# failure here rather than a 404 on the download.
-RELEASE=$(get "${API_URL}/repos/${OWNER}/${REPO}/releases/tags/${TAG}" 2>/dev/null) ||
-	die "no release for ${TAG}. Check the version, or the releases page."
+# failure here rather than a 404 on the download. Only a 404 means that: any
+# other refusal says what it was.
+if ! api_get "${API_URL}/repos/${OWNER}/${REPO}/releases/tags/${TAG}"; then
+	[ "$STATUS" != 404 ] || die "no release for ${TAG}. Check the version, or the releases page."
+	die "$(api_refusal "cannot read the release ${TAG}")"
+fi
+RELEASE=$(cat "$API_DIR/body")
 
 # Both walks start at the assets array and not before it. The release object
 # carries a "name" of its own, which is its title, and a title somebody set to
@@ -347,7 +481,6 @@ fi
 # Staged inside the target directory so the final move is a rename on the same
 # filesystem: a half-downloaded binary never appears on PATH.
 TMP="${TARGET}.download.$$"
-trap 'rm -f "$TMP"' EXIT INT TERM
 
 if [ -n "$TOKEN" ] && [ -n "$ASSET_API_URL" ]; then
 	log "downloading ${ASSET} ${VERSION} from the release API..."
@@ -373,7 +506,7 @@ fi
 
 chmod 0755 "$TMP"
 mv -f "$TMP" "$TARGET"
-trap - EXIT INT TERM
+TMP=""
 log "installed ${TARGET}"
 
 # A binary built for another platform cannot be run here, and that is the normal

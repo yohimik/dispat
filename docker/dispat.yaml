@@ -56,7 +56,14 @@ scripts:
   # pending: the workspace version is then a plan nobody published, install.sh
   # would 404 on it, and the gate's question is only whether the image still
   # builds — so that one case substitutes the newest version that exists.
+  #
+  # GITHUB_TOKEN reaches the Dockerfiles' fetch stages as the compose files'
+  # github_token build secret, which raises install.sh's release lookups above
+  # the anonymous quota a runner's address shares. It is exported empty when
+  # there is none, so the secret's source always exists and an empty token is
+  # an anonymous lookup, exactly as a build without the secret.
   build: |
+    export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
     if [ "$DISPAT_STAGE" != "build" ] && [ "$DISPAT_WORKSPACE_DISPAT_RELEASING" = "true" ]; then
       tag=$(git tag -l 'services/dispat/v*' --sort=-v:refname | head -n 1)
       INSTALL_DISPAT_VERSION=${tag##*/v}
@@ -71,7 +78,7 @@ scripts:
   # to send ("tag does not exist"). Rebuilding here is the builder replaying
   # its hot cache from the build stage; the push is the only new work, and it
   # ships the manifest list with every tag the channel file adds.
-  push-image: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml build --push
+  push-image: GITHUB_TOKEN="${GITHUB_TOKEN:-}" docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml build --push
   # The Docker Hub repository description, from the README.docker.md beside
   # each image. The Hub does not read it from the pushed image, so it is
   # PATCHed through the API after the publish; jq builds both JSON bodies so

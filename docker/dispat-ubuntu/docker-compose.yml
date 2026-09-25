@@ -28,3 +28,12 @@ services:
         DISPAT_VERSION: ${INSTALL_DISPAT_VERSION:?}
       labels:
         io.dispat.cli.version: ${INSTALL_DISPAT_VERSION:?}
+      # The fetch stage's GitHub token, as a build secret the Dockerfile mounts
+      # into install.sh's environment. docker/dispat.yaml exports the variable
+      # before every compose call, empty when there is no token, and an empty
+      # token is an anonymous lookup.
+      secrets:
+        - github_token
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN

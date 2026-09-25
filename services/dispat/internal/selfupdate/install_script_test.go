@@ -86,7 +86,29 @@ func TestImagesInstallThroughTheScript(t *testing.T) {
 			assert.Contains(t, dockerfile, `sh /tmp/install.sh --version "${DISPAT_VERSION}" --os linux --arch "${TARGETARCH}"`,
 				"TARGETARCH is what makes a cross-built image install its own architecture")
 
+			// The release lookup authenticates when the build has a token, so it
+			// does not share a runner address's anonymous quota. The token is a
+			// secret rather than a build arg, which would keep it in the image's
+			// history, and the fetch stage carries curl: busybox wget cannot
+			// fetch the asset with a credential, and install.sh refuses to try.
+			_, fetch, found := strings.Cut(dockerfile, " AS fetch\n")
+			require.True(t, found, "the binary is fetched in a stage named fetch")
+			fetch, _, _ = strings.Cut(fetch, "\nFROM ")
+			assert.Contains(t, fetch, "RUN apk add --no-cache ca-certificates curl",
+				"the fetch stage installs curl, which install.sh prefers over wget")
+			assert.Contains(t, fetch, "RUN --mount=type=secret,id=github_token,env=GITHUB_TOKEN \\\n"+
+				`    sh /tmp/install.sh --version "${DISPAT_VERSION}"`,
+				"install.sh runs with the token secret in its environment")
+			assert.NotContains(t, dockerfile, "ARG GITHUB_TOKEN",
+				"a build arg would write the token into the image's history")
+
 			compose := readRepoFile(t, filepath.Join("docker", pkg, "docker-compose.yml"))
+			assert.Contains(t, compose, "      secrets:\n        - github_token\n",
+				"the compose build hands the fetch stage the token secret")
+			assert.Contains(t, compose, "\nsecrets:\n  github_token:\n    environment: GITHUB_TOKEN\n",
+				"the secret's value is the GITHUB_TOKEN of whoever runs compose")
+			assert.NotContains(t, compose, "GITHUB_TOKEN:",
+				"the token must not travel as a build arg")
 			assert.Contains(t, compose, "DISPAT_VERSION: ${INSTALL_DISPAT_VERSION:?}",
 				"the CLI version an image installs is the workspace's INSTALL_DISPAT_VERSION, not the image's own")
 			assert.Contains(t, compose, "image: docker.io/yohimik/"+pkg+":",
@@ -106,6 +128,13 @@ func TestImagesInstallThroughTheScript(t *testing.T) {
 				"a prerelease must never move latest")
 		})
 	}
+
+	// Both compose calls that build name the secret's variable, empty when
+	// there is no token, so its source always exists and an empty token asks
+	// anonymously.
+	space := readRepoFile(t, filepath.Join("docker", "dispat.yaml"))
+	assert.Contains(t, space, "  build: |\n    export GITHUB_TOKEN=\"${GITHUB_TOKEN:-}\"\n")
+	assert.Contains(t, space, `  push-image: GITHUB_TOKEN="${GITHUB_TOKEN:-}" docker compose `)
 }
 
 // composeVarRef finds compose's interpolation of a dispat variable:
