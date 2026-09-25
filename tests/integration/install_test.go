@@ -985,30 +985,42 @@ func TestInstallTracesTheDecisionsItMade(t *testing.T) {
 }
 
 // TestInstallRefusesABadCommandLineBeforeAnyRequest: a usage mistake must
-// cost nothing, so each of these is answered without the fake being asked a
-// single question.
+// cost nothing, so each of these exits 2 with the sentence naming the mistake
+// without the fake being asked a single question. An asset placeholder
+// nobody defines is the one refusal that is not decided by the command line
+// alone today: it is read against the release, so it costs the listing and
+// exits 1.
 func TestInstallRefusesABadCommandLineBeforeAnyRequest(t *testing.T) {
 	r := newToolRepo(t)
-	for name, args := range map[string][]string{
-		"a URL naming only a host":  {"install", "https://github.com/onlyowner"},
-		"no repository at all":      {"install"},
-		"two repositories":          {"install", "acme/tool", "acme/other"},
-		"a name that is a path":     {"install", "acme/tool", "--as", "../evil"},
-		"a rollback that installs":  {"install", "acme/tool", "--rollback", "--release", "1.0.0"},
-		"a placeholder nobody has":  {"install", "acme/tool", "--asset", "tool-{arch64}"},
-		"an owner beside the URL":   {"install", "acme/tool", "--owner", "other"},
-		"a repo beside the URL":     {"install", "acme/tool", "--repo", "other"},
-		"a flag of another command": {"install", "acme/tool", "--tag", "1.2.0"},
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"a URL naming only a host":  {[]string{"install", "https://github.com/onlyowner"}, "names a host but no repository"},
+		"no repository at all":      {[]string{"install"}, "install requires a repository"},
+		"two repositories":          {[]string{"install", "acme/tool", "acme/other"}, "install takes one repository"},
+		"a name that is a path":     {[]string{"install", "acme/tool", "--as", "../evil"}, "--as takes a file name, not a path"},
+		"a rollback that installs":  {[]string{"install", "acme/tool", "--rollback", "--release", "1.0.0"}, "--release means nothing beside it"},
+		"an owner beside the URL":   {[]string{"install", "acme/tool", "--owner", "other"}, "--owner means nothing beside it"},
+		"a repo beside the URL":     {[]string{"install", "acme/tool", "--repo", "other"}, "--repo means nothing beside it"},
+		"a flag of another command": {[]string{"install", "acme/tool", "--tag", "1.2.0"}, "--tag is not an install flag"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := len(r.requests())
-			res := r.Command(append(args, "--api-url", r.api, "--bin-dir", r.bin)...)
-			assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-			if !strings.Contains(name, "placeholder") {
-				assert.Equal(t, before, len(r.requests()), "a usage mistake costs no request")
-			}
+			res := r.Command(append(tc.args, "--api-url", r.api, "--bin-dir", r.bin)...)
+			assert.Equal(t, 2, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+			assert.Equal(t, before, len(r.requests()), "a usage mistake costs no request")
+			assert.NoFileExists(t, r.installed(), "and installs nothing")
 		})
 	}
+
+	t.Run("a placeholder nobody defines", func(t *testing.T) {
+		res := r.Command("install", "acme/tool", "--asset", "tool-{arch64}", "--api-url", r.api, "--bin-dir", r.bin)
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "{arch64}")
+		assert.NoFileExists(t, r.installed(), "and installs nothing")
+	})
 }
 
 // TestInstallNamesAFlagThatIsNotIts: the refusal a provisioning script's

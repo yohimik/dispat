@@ -148,6 +148,10 @@ func TestRunUnknownScriptFails(t *testing.T) {
 	r := runRepo(t)
 	res := r.RunScript("format")
 	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, `no script \"format\" is defined`,
+		"the refusal names the script nobody defines")
+	assert.Empty(t, runLog(r), "and no script ran in any package")
+	assert.NoFileExists(t, r.Path("packages", "core", "run-env.txt"))
 }
 
 // TestRunWhenDiscoveryItselfFails: a space pointing at a folder that is not

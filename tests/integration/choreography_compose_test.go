@@ -470,7 +470,7 @@ func TestChoreographyReadsOneBoundaryTwoPeersBothState(t *testing.T) {
 	api := fleet.peer("api")
 	provider := api.Git("-C", ".links/sdk", "rev-parse", "HEAD")
 	api.Git("tag", "-a", "api-pkg@0.1.0", "-m", "tagged by hand")
-	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "fix(sdk-pkg): work after the hand-made tag")
+	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "fix(sdk-pkg)^: work after the hand-made tag")
 
 	baseline := models.RepositoryBaselineConfig{
 		Consumer: "api-pkg", ReleaseTag: "api-pkg@0.1.0", Repository: "sdk", Revision: provider}
@@ -485,6 +485,8 @@ func TestChoreographyReadsOneBoundaryTwoPeersBothState(t *testing.T) {
 
 	res := api.StatusOK("--package", "*")
 	requireNoDiagnostic(t, res, "E333")
+	assert.Equal(t, "propagated from sdk-pkg", harness.GraphLine(res.Events, "api-pkg").Str("reason"),
+		"the one declared revision is the boundary: the work after it reaches the consumer: %s", res.Stdout)
 }
 
 // TestChoreographyRefusesALinkedPeerWithNoConfiguration: a peer is a

@@ -7,6 +7,7 @@ package integration
 // see, and what they hand down to the commands a script starts.
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -84,16 +85,43 @@ func TestChoreographyNestedCommandComposesTheSameFleet(t *testing.T) {
 }
 
 // TestChoreographyDiagnosticsReadsAConfigWithoutAFleet: validating a message
-// is a parser question, and it must not need a fleet to answer it.
+// is a parser question, and it must not need a fleet to answer it. The peer's
+// own parser settings are read, which is what makes a type the peer declares
+// silent where the defaults warn about it, while the fleet is never composed:
+// the check still answers with the linked peer's checkout gone.
 func TestChoreographyDiagnosticsReadsAConfigWithoutAFleet(t *testing.T) {
 	fleet := crossRepositoryFleet(t)
+	fleet.writeConfig("api", func(cfg *models.File) {
+		cfg.Parser = &models.ParserConfig{Types: map[string]string{"ops": "patch"}}
+	})
 	api := fleet.peer("api")
+	api.Commit("chore: declare a type of the peer's own")
+	require.NoError(t, os.RemoveAll(api.Path(".links", "sdk")))
 
-	res := api.Command("diagnostics", "--config", "dispat.json", "fix(api-pkg): a message")
+	res := api.Command("diagnostics", "--config", "dispat.json", "--log-format", "json", "ops(api-pkg): a message")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Empty(t, diagnosticCodes(res), "the peer's own type is valid under its own settings")
+	assert.NotContains(t, res.Stdout+res.Stderr, ".links", "and no fleet was composed to answer")
 
-	bad := api.Command("diagnostics", "--config", "dispat.json", "not a conventional commit")
+	defaults := api.Command("diagnostics", "--log-format", "json", "ops(api-pkg): a message")
+	require.Equal(t, 0, defaults.Code, "stdout:\n%s\nstderr:\n%s", defaults.Stdout, defaults.Stderr)
+	assert.NotEmpty(t, diagnosticCodes(defaults),
+		"the parser defaults warn about the same type, so the settings above were read: %s", defaults.Stdout)
+
+	bad := api.Command("diagnostics", "--config", "dispat.json", "--log-format", "json", "not a conventional commit")
 	assert.Equal(t, 1, bad.Code)
+	assert.True(t, harness.IsCodePresent(bad.Events, "E101"), "the refusal names the syntax error: %s", bad.Stdout)
+}
+
+// diagnosticCodes is every diagnostic code one run reported, in order.
+func diagnosticCodes(res harness.RunResult) []string {
+	var codes []string
+	for _, e := range res.Events {
+		if code := e.Code(); code != "" {
+			codes = append(codes, code)
+		}
+	}
+	return codes
 }
 
 // TestChoreographyStatusFromInsideALinkedCheckout: a run started in the copy

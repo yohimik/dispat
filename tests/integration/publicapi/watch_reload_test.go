@@ -151,26 +151,47 @@ func TestPublicAPIConfigWatchLifecycle(t *testing.T) {
 		dir := t.TempDir()
 		path := writeConfigFile(t, dir, "app.json", `{"a":1}`)
 		probe := &watchProbe{files: []string{path}, loader: loader}
+		// Every reload reports the value it read, so a reload the unrelated
+		// file caused, however late it arrives, reads {"a":1} and is told
+		// apart from the one app.json's change earns.
+		var mu sync.Mutex
+		var reloads []any
+		// One save arrives as several events, and the debounce is what makes
+		// it one reload; a short one keeps the scenario quick.
 		w, err := configwatch.Start(context.Background(), configwatch.Options[map[string]any]{
 			Load:     probe.load,
-			Debounce: -1,
+			Debounce: 50 * time.Millisecond,
+			OnUpdate: func(value map[string]any) {
+				mu.Lock()
+				defer mu.Unlock()
+				reloads = append(reloads, value["a"])
+			},
 		})
 		if err != nil {
 			t.Fatalf("Start: %v", err)
 		}
 		defer w.Close()
+		seen := func() []any {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]any(nil), reloads...)
+		}
 
-		before := probe.calls()
 		writeConfigFile(t, dir, "unrelated.txt", "nothing to do with it")
 		time.Sleep(200 * time.Millisecond)
-		if probe.calls() != before {
-			t.Errorf("an unrelated file triggered %d reloads", probe.calls()-before)
+		if got := seen(); len(got) != 0 {
+			t.Errorf("an unrelated file triggered reloads: %v", got)
 		}
 
 		writeConfigFile(t, dir, "app.json", `{"a":2}`)
 		waitFor(t, "the reload the config's own change earns", func() bool {
-			return probe.calls() > before
+			return len(seen()) > 0
 		})
+		// A late spurious reload would arrive in this window as well.
+		time.Sleep(200 * time.Millisecond)
+		if got := seen(); len(got) != 1 || got[0] != float64(2) {
+			t.Errorf("reloads = %v, want exactly one, reading app.json's new value", got)
+		}
 	})
 
 	t.Run("a reload that fails keeps the last good value", func(t *testing.T) {

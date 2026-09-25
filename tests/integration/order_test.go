@@ -139,16 +139,24 @@ func TestOrderBuildDoesNotWaitForPublishByDefault(t *testing.T) {
 	harness.AssertSequential(t, providerPublish, consumerPublish)
 }
 
-// TestOrderDiamondDependencyConverges checks a fan-out/fan-in shape: b and
-// c both depend on a, and d depends on both. a must finish before either b
-// or c starts; b and c may (and, given two slots and 100ms builds, reliably
-// do) run concurrently; d must wait for both — at the build stage and at
-// the publish stage.
+// TestOrderDiamondDependencyConverges: in the diamond a <- b, c <- d, b and c
+// build at once while d waits for both, in the build and in the publish. The
+// overlap is proven with gates rather than with sleeps: b's build waits for a
+// file c's build creates and c's waits for b's, so the two builds either ran
+// together or the run could not finish them.
 func TestOrderDiamondDependencyConverges(t *testing.T) {
 	r := harness.New(t)
+	gate := func(name string) string { return r.Path(name + "-build.gate") }
+	// Each build opens its own gate, then waits for its sibling's. A package
+	// with no sibling (a, d) waits for nothing. The wait is bounded and fails
+	// the build when it runs out, so a serialised schedule fails the release.
+	rendezvous := `touch "` + r.Path("") + `/$DISPAT_PACKAGE-build.gate"; ` +
+		`case "$DISPAT_PACKAGE" in b) other=c ;; c) other=b ;; *) other= ;; esac; ` +
+		`if [ -n "$other" ]; then i=0; while [ ! -f "` + r.Path("") + `/$other-build.gate" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done; ` +
+		`[ -f "` + r.Path("") + `/$other-build.gate" ]; fi`
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
-		"build":   {r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 100*time.Millisecond)},
+		"build":   {rendezvous, r.TsmarkScript("build.log", "$DISPAT_PACKAGE", 0)},
 		"publish": {r.TsmarkScript("publish.log", "$DISPAT_PACKAGE", 20*time.Millisecond)},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
@@ -167,13 +175,15 @@ func TestOrderDiamondDependencyConverges(t *testing.T) {
 	r.Commit("feat(a,b,c,d): bootstrap the diamond")
 
 	r.ReleaseOK()
+	for _, name := range []string{"b", "c"} {
+		assert.FileExists(t, gate(name), "the rendezvous is the evidence that %s built beside its sibling", name)
+	}
 
 	build := r.Timeline("build.log")
 	a, b, c, d := harness.Find(t, build, "a"), harness.Find(t, build, "b"),
 		harness.Find(t, build, "c"), harness.Find(t, build, "d")
 	harness.AssertSequential(t, a, b)
 	harness.AssertSequential(t, a, c)
-	harness.AssertOverlaps(t, b, c)
 	harness.AssertSequential(t, b, d)
 	harness.AssertSequential(t, c, d)
 

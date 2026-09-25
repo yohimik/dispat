@@ -85,8 +85,15 @@ func TestFatalShallowRepository(t *testing.T) {
 
 	// A file:// clone honours --depth; a plain local-path clone would not.
 	r.Git("clone", "-q", "--depth", "1", "file://"+r.Root, r.Path("shallow-clone"))
+	built := buildRuns(r)
 	res := r.CommandAt("shallow-clone", "release")
-	assert.NotZero(t, res.Code, "a shallow clone must refuse to release")
+	assert.Equal(t, 1, res.Code, "a shallow clone must refuse to release")
 	assert.True(t, harness.IsCodePresent(res.Events, "E196"),
 		"shallowness must surface as E196: %s", res.Stdout)
+	assert.Contains(t, res.Stdout, "shallow", "the refusal says which check fired: %s", res.Stdout)
+	assert.Empty(t, plannedPackages(res), "the refusal comes before a plan")
+	assert.Equal(t, built, buildRuns(r), "nothing was built in the original checkout")
+	assert.NoFileExists(t, r.Path("shallow-clone", "build.log"), "nor in the shallow clone")
+	assert.NotContains(t, r.Git("-C", "shallow-clone", "tag", "--list"), "core@0.1.1",
+		"and nothing was tagged")
 }

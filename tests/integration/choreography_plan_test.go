@@ -107,13 +107,15 @@ func TestChoreographyNeedsATupleWithoutAReleaseCommit(t *testing.T) {
 
 // TestChoreographyReadsABaselineDeclaredByThePeerThatKnowsIt: a boundary is a
 // statement about two repositories, and with no control file the run reads it
-// wherever the fleet wrote it down.
+// wherever the fleet wrote it down. The declared revision is what the
+// consumer's window in the provider starts from, so a propagating commit after
+// it reaches the consumer.
 func TestChoreographyReadsABaselineDeclaredByThePeerThatKnowsIt(t *testing.T) {
 	fleet := crossRepositoryFleet(t)
 	api := fleet.peer("api")
 	provider := api.Git("-C", ".links/sdk", "rev-parse", "HEAD")
 	api.Git("tag", "-a", "api-pkg@0.1.0", "-m", "tagged by hand")
-	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "fix(sdk-pkg): work after the hand-made tag")
+	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "fix(sdk-pkg)^: work after the hand-made tag")
 
 	// The tuple lives in the provider's configuration, not the entry's.
 	fleet.configureIn(api.Repo, "sdk", "chore: state the boundary here", func(cfg *models.File) {
@@ -123,6 +125,8 @@ func TestChoreographyReadsABaselineDeclaredByThePeerThatKnowsIt(t *testing.T) {
 
 	res := api.StatusOK("--package", "*")
 	requireNoDiagnostic(t, res, "E333")
+	assert.Equal(t, "propagated from sdk-pkg", harness.GraphLine(res.Events, "api-pkg").Str("reason"),
+		"the work after the declared revision is in the consumer's window: %s", res.Stdout)
 }
 
 // TestChoreographyDoesNotCountALinkMoveAsAChange: a settlement writes a

@@ -133,7 +133,7 @@ func TestCancelDoesNotDisturbAConcurrentRun(t *testing.T) {
 	r.SeedPackage("packages", "a")
 	r.Commit("feat(a): bootstrap the package")
 
-	interrupted := r.StartRelease("run", "slow")
+	interrupted := r.StartCommandEnv(nil, "run", "slow")
 	require.Eventually(t, func() bool {
 		data, err := os.ReadFile(r.Path("slow.tsmark"))
 		return err == nil && strings.Contains(string(data), "a start")

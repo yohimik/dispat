@@ -13,6 +13,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -268,9 +269,33 @@ func TestExecutionWorkerRejectsAssignments(t *testing.T) {
 }
 
 // TestExecutionWorkerPrunesAnsweredWorkWhileServing: a node can stay up past
-// the full acceptance horizon. An old answer still blocks a replay while live, then a
-// later answer removes it from the durable record without restarting the node.
+// the full acceptance horizon. An old answer still blocks a replay while live,
+// then a later answer removes it from the durable record without restarting
+// the node.
+//
+// The old answer is seeded to expire a margin after the attempt starts, and
+// the replay has to be answered inside that margin. The test controls the
+// margin: a machine too loaded to answer in time gets a longer one on a fresh
+// node rather than a failure, so the wall time is as short as the machine
+// allows and a slow runner costs time rather than a false result.
 func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
+	for _, margin := range []time.Duration{3 * time.Second, 10 * time.Second, 30 * time.Second, 90 * time.Second} {
+		live := false
+		t.Run(fmt.Sprintf("the old answer expires %s ahead", margin), func(t *testing.T) {
+			live = pruneAnsweredWorkWithin(t, margin)
+		})
+		if live {
+			return
+		}
+	}
+	t.Fatal("no attempt answered the replay while the seeded answer was still live")
+}
+
+// pruneAnsweredWorkWithin runs one attempt of
+// TestExecutionWorkerPrunesAnsweredWorkWhileServing with the old answer
+// expiring margin from now. It answers false, and skips, when the node only
+// reached the replay after the expiry, which proves nothing either way.
+func pruneAnsweredWorkWithin(t *testing.T, margin time.Duration) bool {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
 	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
@@ -281,7 +306,7 @@ func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
 	oldKey := orchestrator.run + " preflight 1"
 	// A header may be issued 24 hours ahead of acceptance and remain valid
 	// for 24 hours after issuance. Seed just inside that 48-hour boundary.
-	expires := time.Now().Add(15 * time.Second)
+	expires := time.Now().Add(margin)
 	oldAt := expires.Add(-48 * time.Hour)
 	seed, err := json.Marshal(map[string]time.Time{oldKey: oldAt})
 	require.NoError(t, err)
@@ -298,7 +323,13 @@ func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
 	control := executionBranchName("zzz-seen-prune-control")
 	orchestrator.offer(control, orchestrator.probe(control, "control"))
 	executionAwaitMessage(t, rig.mailbox, control, "result")
-	require.Positive(t, time.Until(expires), "the seeded answer must still be in the replay window")
+	// The branches are served in name order, so the replay was answered
+	// before the control result appeared.
+	if time.Until(expires) <= 0 {
+		worker.stop(t)
+		t.Skipf("the node answered after the seeded answer expired; a longer margin follows")
+		return false
+	}
 	before, err := os.ReadFile(seenPath)
 	require.NoError(t, err)
 	stored := map[string]time.Time{}
@@ -323,6 +354,7 @@ func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
 	require.NoError(t, json.Unmarshal(content, &stored))
 	assert.NotContains(t, stored, oldKey, "the fresh answer must prune the expired one from disk")
 	assert.Contains(t, stored, orchestrator.run+" fresh 1")
+	return true
 }
 
 // A future-issued assignment accepted 25 hours ago can still pass the

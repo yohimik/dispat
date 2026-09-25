@@ -671,17 +671,20 @@ func TestExecutionWorkerTaskGitFaults(t *testing.T) {
 	}
 }
 
-// TestExecutionLostResultPushIsRecognized: a node whose push applied and whose
-// answer was lost re-reads the branch, finds what it meant to put there, and
-// reports once rather than failing the work it had already finished.
-func TestExecutionLostResultPushIsRecognized(t *testing.T) {
+// TestExecutionLostClaimPushIsRecognized: a node whose claim push applied and
+// whose answer was lost re-reads the branch, finds the claim it meant to put
+// there, and carries on to one result rather than failing the work it had
+// already taken. The lost result push is the recovery goal's
+// TestExecutionLostResultPushIsRecognizedNotRepeated.
+func TestExecutionLostClaimPushIsRecognized(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
 	branch := executionBranchName("lostreply")
 	orchestrator.offer(branch, orchestrator.probe(branch, "preflight"))
-	// The push applies and is then reported as a rejected lease, which is what
-	// a lost response looks like from inside the process: the porcelain line
-	// says the ref was refused while the remote already holds the object.
+	// The first push on the branch is the claim. It applies and is then
+	// reported as a rejected lease, which is what a lost response looks like
+	// from inside the process: the porcelain line says the ref was refused
+	// while the remote already holds the object.
 	fault := harness.NewGitFault(t, harness.GitFault{
 		Pattern: "*push*" + branch + "*", Nth: 1, After: true,
 		Output: "!\trefs/heads/" + branch + ":refs/heads/" + branch + "\t[rejected]\n",

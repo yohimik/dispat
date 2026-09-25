@@ -582,10 +582,28 @@ func TestAutoWriterLinkLocalLeavesTheComputedGraphAlone(t *testing.T) {
 	r := arGoRepo(t)
 
 	before := r.Command("compute", "--check")
+	require.Equal(t, 0, before.Code, "the fixture's graph is in sync to begin with: %s", before.Stdout)
 	res := r.Command("autowriter", "--since", "all", "--link-local")
 	require.Equal(t, 0, res.Code, "stderr:\n%s", res.Stderr)
+	require.Contains(t, arRead(t, r, "packages", "api", "go.mod"), "replace github.com/acme/core => ../core",
+		"the link was written")
 
 	after := r.Command("compute", "--check")
 	assert.Equal(t, before.Code, after.Code,
 		"linking locally suggests no config change that was not already suggested")
+	assert.Equal(t, computeReport(before), computeReport(after),
+		"the suggestions and the edge counts are exactly what they were before the link")
+	assert.Contains(t, computeReport(after), "1 detected edge(s), 1 declared")
+}
+
+// computeReport is what `dispat compute` said to its reader: its stdout with
+// the JSON log lines, which carry timestamps, left out.
+func computeReport(res harness.RunResult) string {
+	var lines []string
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "{") {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
