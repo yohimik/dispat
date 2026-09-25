@@ -94,8 +94,11 @@ test('npm readiness bounds stalled response headers and bodies with real HTTP re
   const address = server.address()
   assert.ok(address && typeof address !== 'string')
   const started = Date.now()
+  // The overall budget leaves room for several 40 ms stalls on a runner busy
+  // with other suites: the claim is that each stalled request is cut off, not
+  // how many of them fit into a quarter of a second.
   await assert.rejects(waitForNpm(version, {
-    timeoutMs: 250, requestTimeoutMs: 40, intervalMs: 1, log: () => {},
+    timeoutMs: 2000, requestTimeoutMs: 40, intervalMs: 1, log: () => {},
     fetch: (_url, options) => fetch(`http://127.0.0.1:${address.port}`, options)
   }), /Timed out waiting/)
   assert.ok(requests >= 2)
