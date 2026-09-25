@@ -321,7 +321,9 @@ type publishChain struct {
 func newPublishChain(t *testing.T, isAuthorized bool) *publishChain {
 	t.Helper()
 	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, answeredPreflight)
-	fixture.coordinator.Timeouts.Cancel = 500 * time.Millisecond
+	// Every row finds its answer on the branch at once, so the window only has
+	// to outlast the chain of Git calls a withdrawal makes on a loaded runner.
+	fixture.coordinator.Timeouts.Cancel = 5 * time.Second
 	pool := NewPool([]Link{{Name: "build-a", Endpoint: fixture.orchestrator.endpoint}},
 		[]*NodeReport{linuxNode(1)}, LocalNode{Name: "here", Capacity: 1}, zerolog.Nop())
 	lease, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
