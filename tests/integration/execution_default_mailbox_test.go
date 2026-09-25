@@ -76,6 +76,55 @@ func TestExecutionReleaseUsesItsOwnRemoteAsTheMailbox(t *testing.T) {
 	assert.Equal(t, rig.origin, reached.Str("endpoint"), "a path carries nothing to redact")
 }
 
+// TestExecutionFleetLinkReachesTheEntryRepository: in a composed workspace a
+// link with no endpoint reaches the entry repository's remote, the one the
+// release is started in and takes its first lock on. A worker polling only
+// that remote builds the other peer's package, whose history the run pushed
+// there for it, and the fleet releases both peers with no coordination branch
+// left on the entry remote and no lock anywhere.
+func TestExecutionFleetLinkReachesTheEntryRepository(t *testing.T) {
+	builds := filepath.Join(t.TempDir(), "builds.log")
+	fleet := newChoreographyFleet(t, executionFleetEntry, executionFleetDelegate)
+	fleet.writeConfig(executionFleetDelegate, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+	})
+	fleet.peer(executionFleetDelegate).Commit("chore: build this repository on a node")
+	fleet.push(executionFleetDelegate)
+	fleet.writeConfig(executionFleetEntry, func(cfg *models.File) {
+		cfg.LogLevel = "debug"
+		cfg.Execution = &models.ExecutionConfig{
+			SecretEnv: executionSecretEnv,
+			Workers:   []models.ExecutionWorkerConfig{{Name: executionNode}},
+			Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30},
+		}
+	})
+	fleet.peer(executionFleetEntry).Commit("chore: delegate the builds of this fleet")
+	fleet.push(executionFleetEntry)
+	fleet.link(executionFleetEntry, executionFleetDelegate)
+	entry := fleet.peer(executionFleetEntry)
+	worker := startWorker(t, entry.Repo, executionWorkerConfig(entry.remote), 0,
+		append(fileProtocolEnv(), executionBuildLogEnv+"="+builds)...)
+
+	res := entry.CommandEnv(append(append(fileProtocolEnv(), harness.LockEnabled...),
+		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+builds), "--package", "*")
+	stopAll(t, []*executionWorker{worker})
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	reached, isReached := executionLine(res, "worker link reaches the release remote")
+	require.True(t, isReached, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, entry.remote, reached.Str("endpoint"), "the entry repository's remote")
+	record := readFileString(t, builds)
+	assert.Contains(t, record, executionNode+" "+executionFleetDelegate+"-pkg ",
+		"the other peer's package was built on the node: %s", record)
+	assert.Equal(t, []string{executionFleetEntry + "-pkg@0.1.0"}, entry.TagList())
+	assert.Contains(t, tagsIn(entry.Repo, ".links/"+executionFleetDelegate), executionFleetDelegate+"-pkg@0.1.0")
+	assert.Empty(t, executionCoordinationBranches(t, entry.remote), "the entry remote keeps no coordination branch")
+	for _, name := range []string{executionFleetEntry, executionFleetDelegate} {
+		assert.False(t, remoteHoldsLock(t, fleet.peer(name).remote), "%s holds no lock", name)
+	}
+}
+
 // TestExecutionSweepUsesItsOwnRemoteAsTheMailbox: a sweep reaches the same
 // remote and takes no lock there. A lock another release holds on that remote
 // neither stops the sweep nor is touched by it; the task runs on the worker,
