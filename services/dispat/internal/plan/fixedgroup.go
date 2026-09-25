@@ -577,7 +577,7 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 		}
 		own, propagated, fresh := rel.OwnBump, rel.PropagatedBump, rel.NewWork
 		if mask != "" {
-			own, propagated, fresh = cp.groupFresh(name, mask)
+			own, propagated, fresh = cp.groupFresh(name, mask, g.Baseline)
 			if own != rel.OwnBump || propagated != rel.PropagatedBump || fresh != rel.NewWork {
 				g.absorbed = true
 			}
@@ -611,30 +611,40 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 // group's published baseline commit rather than the member's own tag: the
 // bumps of its direct tuples and stale propagation sources whose commits the
 // mask does not contain, and whether anything at all survives. A member whose
-// whole window sits at or behind the mask contributes nothing — its work is
-// published, just not under its own tag yet — which is what lets the group
+// whole window sits at or behind the mask contributes nothing (its work is
+// published, just not under its own tag yet), which is what lets the group
 // stay put and the member catch up at the version that already carries its
 // work, instead of the whole group burning the next prefix on a re-count.
 //
-// A source the member's own window no longer holds is never masked. It is a
-// contribution the member released past before its provider delivered it
-// (§13.4a), so it sits behind the member's release, and behind the mask, by
-// definition: the group version at the mask carries the commit, never the
-// provider's version, and masking it would split the group, the member
-// catching up alone while the rest of the group stays behind.
-func (cp *computation) groupFresh(name, mask string) (own, propagated ccme.Bump, fresh bool) {
+// A source the member released past before its provider delivered it
+// (§13.4a) sits behind the member's own release, so it can sit behind the mask
+// too. Whether the group's version at the mask accounts for it depends on
+// whose release that version is. Where the member itself holds the group's
+// version, it is the release that overtook the provider, and it carries the
+// commit but never the provider's version: masking the source would release
+// the member alone while the rest of the group stays behind, so it counts.
+// Where the member is behind the group's version, the group moved past the
+// member's release in a later run whose aggregate already counted the
+// source, as a retry that published the rest of the group while the member
+// failed, or a selection that left the member out. The member was planned at
+// that version, and counting the source again would move the group once more
+// on every retry (§13.7c G3), so it is masked like any other published work.
+func (cp *computation) groupFresh(name, mask string, groupBaseline ccme.Version) (own, propagated ccme.Bump, fresh bool) {
 	for _, c := range cp.ownContribs[name] {
 		if cp.ancestorOrSelf(c.key, mask) {
 			continue
 		}
 		own = ccme.MaxBump(own, c.bump)
 	}
-	for _, s := range cp.rel[name].Sources {
+	rel := cp.rel[name]
+	isBehindGroup := !rel.HasBaseline || versionLess(rel.Baseline, groupBaseline)
+	for _, s := range rel.Sources {
 		key := s.commitKey
 		if key == "" {
 			key = s.Commit
 		}
-		if cp.inWindow(name, key) && cp.ancestorOrSelf(key, mask) {
+		isFresh := cp.inWindow(name, key) && !cp.containedInBaseline(name, key)
+		if (isFresh || isBehindGroup) && cp.ancestorOrSelf(key, mask) {
 			continue
 		}
 		propagated = ccme.MaxBump(propagated, s.Bump)

@@ -760,8 +760,15 @@ func aheadGroupMember(f *fakeGit) *fakeGit {
 // with app consuming core.
 func planGroupMemberAhead(t *testing.T, git *fakeGit) *Plan {
 	t.Helper()
+	return planGroupMemberAheadUnder(t, git, sharedGroup{mode: model.VersioningFixed})
+}
+
+// planGroupMemberAheadUnder is planGroupMemberAhead with the group's sharing
+// axes stated.
+func planGroupMemberAheadUnder(t *testing.T, git *fakeGit, rule sharedGroup) *Plan {
+	t.Helper()
 	libs := &model.Space{Name: "libs"}
-	apps := &model.Space{Name: "apps", Versioning: model.VersioningFixed}
+	apps := &model.Space{Name: "apps", Versioning: rule.mode, CounterSharing: rule.counter, ChannelSharing: rule.channels}
 	pkgs := []*model.Package{
 		{Name: "core", Dir: "/r/libs/core", Space: libs},
 		{Name: "app", Dir: "/r/apps/app", Space: apps},
@@ -790,6 +797,53 @@ func TestFixedGroupMovesAsOneWhenAMemberGotAheadOfItsProvider(t *testing.T) {
 	assert.True(t, tool.IsReleasing(), "the group moves as one")
 	assertVersion(t, v(1, 1, 1), tool.Next)
 	assert.True(t, tool.FixedRide, "tool rides to the group's version")
+}
+
+// TestFixedGroupKeepsItsPlannedVersionAcrossAFailedCatchUp is the retry after
+// the run above: core published c2 at c3 and the group moved to 1.1.1 there,
+// tool published it and app failed. The group's 1.1.1 already accounts for
+// what core owes app, so app catches up at 1.1.1, the version it was planned
+// at (§13.7c G3), and tool does not ride again.
+func TestFixedGroupKeepsItsPlannedVersionAcrossAFailedCatchUp(t *testing.T) {
+	for _, rule := range sharingRules(model.VersioningFixed) {
+		t.Run(rule.String(), func(t *testing.T) {
+			git := aheadGroupMember(newFakeGit(groupMemberAheadHistory()...)).
+				tag("core", "1.1.0", "c3").tag("tool", "1.1.1", "c3")
+			p := planGroupMemberAheadUnder(t, git, rule)
+			app, tool := p.Releases["app"], p.Releases["tool"]
+			assert.False(t, p.Releases["core"].IsReleasing(), "core published everything it had")
+			require.True(t, app.IsReleasing(), "core still owes app c2: %v", codes(p))
+			assertVersion(t, v(1, 1, 1), app.Next, "app is released at the version the failed run planned")
+			assert.Equal(t, []string{"core"}, app.DueTo)
+			assert.False(t, tool.IsReleasing(), "tool already holds 1.1.1 and has nothing of its own")
+			assert.False(t, hasCode(p, CodeFixedAlign), "nobody rides: %v", codes(p))
+
+			settled := planGroupMemberAheadUnder(t, git.tag("app", "1.1.1", "c3"), rule)
+			for _, name := range []string{"core", "app", "tool"} {
+				assert.False(t, settled.Releases[name].IsReleasing(), "%s: nothing is owed twice", name)
+			}
+		})
+	}
+}
+
+// TestFixedGroupKeepsItsPlannedVersionAfterAPartialSelection: tool alone was
+// released at 1.2.0 on its own feature while app, owed core's c2 and planned
+// at 1.2.0 with it, sat the run out. app then catches up at 1.2.0 rather than
+// moving the group to 1.2.1.
+func TestFixedGroupKeepsItsPlannedVersionAfterAPartialSelection(t *testing.T) {
+	for _, rule := range sharingRules(model.VersioningFixed) {
+		t.Run(rule.String(), func(t *testing.T) {
+			git := aheadGroupMember(newFakeGit(append(groupMemberAheadHistory()[:2],
+				commit{sha: "c3", message: "feat(tool): own feature"})...)).
+				tag("tool", "1.2.0", "c3")
+			p := planGroupMemberAheadUnder(t, git, rule)
+			app, tool := p.Releases["app"], p.Releases["tool"]
+			require.True(t, p.Releases["core"].IsReleasing(), "core still has c2 pending")
+			require.True(t, app.IsReleasing(), "core still owes app c2: %v", codes(p))
+			assertVersion(t, v(1, 2, 0), app.Next, "app is released at the version the partial run planned")
+			assert.False(t, tool.IsReleasing(), "tool already holds 1.2.0")
+		})
+	}
 }
 
 // TestFormatGroupLabelNamesTheRepositoryOfALocalGroup: a diagnostic about a

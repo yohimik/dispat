@@ -577,6 +577,81 @@ func TestVersionGroupPartialReleaseNewerWorkMovesOn(t *testing.T) {
 		"the laggard never lands on the version it skipped past; tags: %v", r.TagList())
 }
 
+// groupOwedRepo is a fixed group whose member app1 consumes core1, a package
+// outside the group, and whose other member lib1 does not. core1's publish,
+// and app1's, fail while their marker files exist.
+func groupOwedRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	cfg := groupConfig(models.VersioningFixed)
+	cfg.Scripts["flaky-publish"] = models.Script{`[ ! -f "../../fail-$DISPAT_PACKAGE" ] || exit 1`, "echo publishing"}
+	flaky := &models.SpaceFlowConfig{Publish: []string{"flaky-publish"}}
+	cfg.Spaces["svc"] = models.SpaceConfig{Path: models.PathList{"services"}, VersionGroup: "platform", Flow: flaky}
+	cfg.Spaces["core"] = models.SpaceConfig{Path: models.PathList{"core"}, Flow: flaky}
+	cfg.Dependencies = models.Dependencies{{Consumer: "app1", Provider: "core1"}}
+	r := seedGroupRepo(t, cfg)
+	r.SeedPackage("core", "core1")
+	r.Commit("feat(core1, lib1, app1): bootstrap")
+	r.ReleaseOK()
+	require.True(t, r.IsTagged("app1@0.1.0"), "tags: %v", r.TagList())
+
+	// app1 proceeds past core1's failed publish on a feature of its own and
+	// lib1 rides with it, so the group holds 0.2.0 and core1 still owes app1.
+	r.Commit("feat(core1)^: streaming\n\n---\n\nfeat(app1): own flag")
+	require.NoError(t, os.WriteFile(r.Path("fail-core1"), nil, 0o644))
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "core1's publish fails\nstdout:\n%s", res.Stdout)
+	require.True(t, r.IsTagged("app1@0.2.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("lib1@0.2.0"), "tags: %v", r.TagList())
+	require.Zero(t, r.TagCount("core1@0.2.0"), "tags: %v", r.TagList())
+	require.NoError(t, os.Remove(r.Path("fail-core1")))
+	return r
+}
+
+// TestVersionGroupOwedCatchUpKeepsThePlannedVersion: a fixed group member
+// that is owed a provider's release keeps the version it was planned at when
+// its catch-up fails or is left out (SPEC 13.7c G3). The group's version
+// already counted the debt, so the next run releases the member at that
+// version instead of moving the whole group again, and the member that
+// published it does not ride a second time.
+func TestVersionGroupOwedCatchUpKeepsThePlannedVersion(t *testing.T) {
+	t.Run("a catch-up that failed", func(t *testing.T) {
+		r := groupOwedRepo(t)
+		r.CommitEmpty("chore(core1): retry the provider")
+		require.NoError(t, os.WriteFile(r.Path("fail-app1"), nil, 0o644))
+		failed := r.Release()
+		require.Equal(t, 1, failed.Code, "app1's catch-up fails\nstdout:\n%s", failed.Stdout)
+		require.True(t, r.IsTagged("core1@0.2.0"), "tags: %v", r.TagList())
+		require.True(t, r.IsTagged("lib1@0.2.1"), "the group moved for the debt; tags: %v", r.TagList())
+		require.Zero(t, r.TagCount("app1@0.2.1"), "tags: %v", r.TagList())
+
+		require.NoError(t, os.Remove(r.Path("fail-app1")))
+		res := r.ReleaseOK()
+		assert.True(t, r.IsTagged("app1@0.2.1"), "app1 lands on the version planned for it; tags: %v", r.TagList())
+		assert.Zero(t, r.TagCount("app1@0.2.2"), "tags: %v", r.TagList())
+		assert.Equal(t, 3, r.TagCount("lib1@"), "lib1 is not re-released; tags: %v", r.TagList())
+		assert.False(t, harness.IsCodePresent(res.Events, "W234"), "nobody rides; stdout:\n%s", res.Stdout)
+
+		before := len(r.TagList())
+		r.ReleaseOK()
+		assert.Len(t, r.TagList(), before, "converged")
+	})
+
+	t.Run("a catch-up left out of a selection", func(t *testing.T) {
+		r := groupOwedRepo(t)
+		r.CommitEmpty("feat(lib1): own feature")
+		r.ReleaseOK("--package", "lib1")
+		require.True(t, r.IsTagged("lib1@0.3.0"), "tags: %v", r.TagList())
+		require.Zero(t, r.TagCount("app1@0.3.0"), "tags: %v", r.TagList())
+
+		res := r.ReleaseOK()
+		assert.True(t, r.IsTagged("core1@0.2.0"), "tags: %v", r.TagList())
+		assert.True(t, r.IsTagged("app1@0.3.0"), "app1 joins the version planned with it; tags: %v", r.TagList())
+		assert.Zero(t, r.TagCount("app1@0.3.1"), "tags: %v", r.TagList())
+		assert.Equal(t, 3, r.TagCount("lib1@"), "lib1 is not re-released; tags: %v", r.TagList())
+		assert.False(t, harness.IsCodePresent(res.Events, "W234"), "nobody rides; stdout:\n%s", res.Stdout)
+	})
+}
+
 // TestVersionGroupTrainPartialReleaseAdvancesTheTrain: a partial release on
 // a prerelease train. The catch-up masking is deliberately confined to
 // stable group baselines — a train's window spans work its own prereleases
