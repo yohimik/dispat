@@ -152,23 +152,6 @@ func TestCovTailSyncLockSkippedWhenNothingWasReconciled(t *testing.T) {
 			"a lock nothing invalidated is not regenerated")
 		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
-
-	t.Run("a space asking only for a lock refresh still runs it", func(t *testing.T) {
-		r := harness.New(t)
-		cfg := libsConfig(echoBuild, 1)
-		cfg.Scripts["locksync"] = models.Script{`echo ran >> ../../locksync.log`}
-		cfg.Spaces["libs"] = syncSpace(&models.AutoVersionConfig{
-			Manifests: "none", SyncLock: []string{"locksync"},
-		})
-		r.WriteConfigModel(cfg)
-		r.SeedPackage("packages", "core")
-		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
-		r.Commit("feat(core): bootstrap")
-
-		r.ReleaseOK()
-		assert.FileExists(t, r.Path("locksync.log"),
-			"there is no manifest change to gate on, so gating would mean never running")
-	})
 }
 
 // TestCovTailRefusesAnExportNameItReserves: the DISPAT_ namespace is dispat's

@@ -9,8 +9,6 @@ package integration
 // and a release whose commit has nothing to stage.
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -73,57 +71,6 @@ func TestGitDirtyGuardReadsARenameAsOneEntry(t *testing.T) {
 		"the source is the rename's second half, not an entry with a status prefix to strip")
 	assert.Empty(t, r.TagList(), "the guard refuses before anything is released")
 	assert.FileExists(t, r.Path("packages", "core", "renamed.txt"), "and the work is untouched")
-}
-
-// TestGitPushRefusesAPlanTheRemoteAlreadyRecorded: a checkout that plans a
-// version the remote has already recorded is refused before it runs anything,
-// and `commit.force` decides nothing about it.
-//
-// This is the shape the older behaviour was written for, where such a run was
-// allowed to reach its push and the tag was skipped or force-replaced there.
-// Both answers planned a published version a second time; the refusal is the
-// answer now, and the remote's annotated tag is read peeled, because the
-// listing carries the ref and its target and only one of the two names a
-// commit.
-func TestGitPushRefusesAPlanTheRemoteAlreadyRecorded(t *testing.T) {
-	setup := func(t *testing.T, force bool) (*harness.Repo, string, string) {
-		t.Helper()
-		r := harness.New(t)
-		cfg := libsConfig(echoBuild, 1)
-		cfg.Commit = &models.CommitConfig{
-			Enabled: models.Bool(true), Push: true, Force: models.Bool(force),
-		}
-		r.WriteConfigModel(cfg)
-		r.SeedPackage("packages", "core")
-		r.Commit("feat(core): bootstrap")
-		bare := r.AddBareRemote()
-		r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-		bootstrap := r.Git("rev-parse", "HEAD")
-		// Somebody's earlier run left the tag there, annotated the way a
-		// release writes one.
-		bareGit(t, bare, "-c", "user.email=other@dispat.test", "-c", "user.name=other clone",
-			"tag", "-a", "core@0.1.0", "-m", "an earlier release", harness.DefaultBranch)
-		return r, bare, bootstrap
-	}
-
-	// remoteTagCommit is what refs/tags/core@0.1.0 peels to on the remote.
-	remoteTagCommit := func(t *testing.T, bare string) string {
-		t.Helper()
-		return strings.TrimSpace(bareGit(t, bare, "rev-list", "-n", "1", "core@0.1.0"))
-	}
-
-	for _, force := range []bool{false, true} {
-		t.Run(fmt.Sprintf("commit.force=%v", force), func(t *testing.T) {
-			r, bare, bootstrap := setup(t, force)
-
-			res := r.Release()
-			require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.True(t, harness.IsCodePresent(res.Events, "E196"), "stdout:\n%s", res.Stdout)
-			assert.Equal(t, bootstrap, remoteTagCommit(t, bare),
-				"the published ref is exactly where it was")
-			assert.Empty(t, r.TagList(), "and this clone wrote none of its own; tags: %v", r.TagList())
-		})
-	}
 }
 
 // TestGitReleaseCommitIsSkippedWhenNothingWasStaged: with the changelog off

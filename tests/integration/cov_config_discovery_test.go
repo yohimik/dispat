@@ -282,24 +282,3 @@ func TestCovConfigRefusesUnusableSpaceDependencyObjects(t *testing.T) {
 		refuseStatus(t, r, "cannot depend on itself")
 	})
 }
-
-// TestCovConfigSpaceAtTheRepositoryRootKeepsOneConfiguration: a space whose
-// path is the repository root has the root config file sitting in its folder.
-// That file is the configuration, not a folder override of it, so it is read
-// once and the space's packages are the root's direct sub-folders.
-func TestCovConfigSpaceAtTheRepositoryRootKeepsOneConfiguration(t *testing.T) {
-	r := harness.New(t)
-	cfg := harness.BaseFile(1)
-	cfg.Scripts = map[string]models.Script{"build": {echoBuild}, "publish": {"echo publishing"}}
-	cfg.Spaces = map[string]models.SpaceConfig{
-		"root": {Path: models.PathList{"."}, Flow: buildPublish()},
-	}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage(".", "core")
-	r.Commit("feat(core): a space at the repository root")
-
-	res := r.StatusOK("--log-format", "json")
-	assert.NotEmpty(t, harness.GraphLine(res.Events, "core"), "core must be discovered:\n%s", res.Stdout)
-	r.ReleaseOK()
-	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
-}

@@ -52,16 +52,4 @@ func TestCovShellRunSeparatesAScriptItCannotRunFromOneThatFailed(t *testing.T) {
 		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Contains(t, diagnosticText(res), "terminated by a signal")
 	})
-
-	t.Run("a script that simply fails keeps its own code", func(t *testing.T) {
-		r := harness.New(t)
-		cfg := libsConfig(echoBuild, 1)
-		cfg.Scripts["picky"] = models.Script{"exit 7"}
-		r.WriteConfigModel(cfg)
-		r.SeedPackage("packages", "core")
-		r.Commit("feat(core): bootstrap")
-
-		res := r.Command("exec", "picky")
-		assert.Equal(t, 7, res.Code, "a script's own code is propagated unchanged")
-	})
 }

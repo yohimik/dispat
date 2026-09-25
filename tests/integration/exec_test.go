@@ -440,20 +440,23 @@ func TestExecIsReservedAndRefusesBadFlags(t *testing.T) {
 	}
 
 	// These were well formed and simply name something that is not there, which
-	// is a runtime failure rather than a usage one.
-	for name, args := range map[string][]string{
-		"an unknown package":                    {"exec", "which", "--for", "pkg:ghost"},
-		"an unknown space":                      {"exec", "which", "--for", "space:ghost"},
-		"a missing folder":                      {"exec", "which", "--in", "nowhere"},
-		"a package to run in that is not there": {"exec", "which", "--in", "pkg:ghost"},
+	// is a runtime failure rather than a usage one, and the message names what
+	// could not be found.
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"an unknown package":                    {[]string{"exec", "which", "--for", "pkg:ghost"}, "ghost"},
+		"an unknown space":                      {[]string{"exec", "which", "--for", "space:ghost"}, "ghost"},
+		"a missing folder":                      {[]string{"exec", "which", "--in", "nowhere"}, "cannot run in folder"},
+		"a package to run in that is not there": {[]string{"exec", "which", "--in", "pkg:ghost"}, "ghost"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			res := r.Command(args...)
+			res := r.Command(tc.args...)
 			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
 		})
 	}
-	assert.Contains(t, r.Command("exec", "which", "--for", "pkg:ghost").Stdout, "ghost",
-		"the message names what could not be found")
 }
 
 // TestExecForwardsArgumentsAfterTheDash: `dispat exec` runs one declared

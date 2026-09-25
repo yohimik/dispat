@@ -211,6 +211,14 @@ func TestForRunsEveryItemWhereTheCommandWasInvoked(t *testing.T) {
 		require.NoError(t, err, "DISPAT_DIR is absolute and names the item's own folder")
 		assert.Equal(t, want, string(data))
 	}
+
+	// --in moves every iteration somewhere else, and a folder that is not
+	// there is refused by the flag rather than by whatever the shell would
+	// have said about a directory it could not enter.
+	res = r.Command("for", "one", "--do", `echo "$DISPAT_ITEM" >> moved.txt`, "--in", "nowhere")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "--in")
+	assert.NoFileExists(t, r.Path("moved.txt"), "no iteration ran")
 }
 
 func TestForIteratesSpacesAndGroups(t *testing.T) {

@@ -337,23 +337,75 @@ func TestWebhookHeadersAndMethod(t *testing.T) {
 	assert.Equal(t, "application/json", deliveries[0].Header.Get("Content-Type"))
 }
 
+// TestWebhookConfigRejections: a webhook that could never deliver is refused
+// before any work, with the entry and the field named, and nothing is
+// released. A refused configuration changes nothing on disk, so one repository
+// serves every row.
 func TestWebhookConfigRejections(t *testing.T) {
-	// A broken webhook declaration stops the load before any work: the
-	// message names the entry, and nothing is released.
-	for name, hook := range map[string]models.WebhookConfig{
-		"unknown event": {URL: "https://example.com", Events: []string{"package.publishd"}},
-		"missing url":   {Events: []string{"package.published"}},
-		"bad method":    {URL: "https://example.com", Method: "DELETE"},
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	r.WriteConfigModel(webhooksConfig(echoBuild))
+	r.Commit("feat(core): bootstrap")
+
+	hook := func(w models.WebhookConfig) func(*models.File) {
+		return func(c *models.File) { c.Webhooks = []models.WebhookConfig{w} }
+	}
+	for _, row := range []struct {
+		name   string
+		mutate func(*models.File)
+		want   []string
+	}{
+		{"unknown event", hook(models.WebhookConfig{
+			URL: "https://example.com", Events: []string{"package.publishd"},
+		}), []string{"webhooks[0]", "unknown event"}},
+		{"missing url", hook(models.WebhookConfig{Events: []string{"package.published"}}),
+			[]string{"webhooks[0]"}},
+		{"bad method", hook(models.WebhookConfig{URL: "https://example.com", Method: "DELETE"}),
+			[]string{"webhooks[0]"}},
+		{"unparsable url", hook(models.WebhookConfig{URL: "http://%zz"}),
+			[]string{"webhooks[0]", "is invalid"}},
+		{"foreign scheme", hook(models.WebhookConfig{URL: "ftp://example.test/hook"}),
+			[]string{"webhooks[0]", "must use http or https"}},
+		{"no host", hook(models.WebhookConfig{URL: "https:///hook"}),
+			[]string{"webhooks[0]", "has no host"}},
+		{"unparsable env condition", hook(models.WebhookConfig{
+			URL: "https://example.test/hook", Env: "=true",
+		}), []string{"webhooks[0]", "env:"}},
+		{"nameless header", hook(models.WebhookConfig{
+			URL: "https://example.test/hook", Headers: []models.WebhookHeader{{Value: "1"}},
+		}), []string{"webhooks[0]", "name is required"}},
+		{"header name with a colon", hook(models.WebhookConfig{
+			URL:     "https://example.test/hook",
+			Headers: []models.WebhookHeader{{Name: "X-Trace: id", Value: "1"}},
+		}), []string{"webhooks[0]", "must not contain spaces or colons"}},
+		{"negative timeout", hook(models.WebhookConfig{
+			URL: "https://example.test/hook", Timeout: -1,
+		}), []string{"webhooks[0]", "timeout must be >= 0"}},
+		{"unknown format field", hook(models.WebhookConfig{
+			URL: "https://example.test/hook", Format: `{"text":"{nonesuch}"}`,
+		}), []string{"webhooks[0]", "unknown field"}},
+		{"duplicate name", func(c *models.File) {
+			c.Webhooks = []models.WebhookConfig{
+				{Name: "ops", URL: "https://example.test/one"},
+				{Name: "ops", URL: "https://example.test/two"},
+			}
+		}, []string{"is already used by"}},
+		{"a space webhook", func(c *models.File) {
+			s := c.Spaces["libs"]
+			s.Webhooks = []models.WebhookConfig{{URL: "ftp://example.test/hook"}}
+			c.Spaces["libs"] = s
+		}, []string{"webhooks[0]", "must use http or https"}},
 	} {
-		t.Run(name, func(t *testing.T) {
-			r := harness.New(t)
-			r.WriteConfigModel(webhooksConfig(echoBuild, hook))
-			r.SeedPackage("packages", "core")
-			r.Commit("feat(core): bootstrap")
-			res := r.Release()
-			require.NotEqual(t, 0, res.Code)
-			assert.Contains(t, res.Stdout+res.Stderr, "webhooks[0]")
-			assert.False(t, r.IsTagged("core@0.1.0"), "a refused load must release nothing")
+		t.Run(row.name, func(t *testing.T) {
+			cfg := webhooksConfig(echoBuild)
+			row.mutate(&cfg)
+			r.WriteConfigModel(cfg)
+			res := r.Release("--log-format", "json")
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			for _, want := range row.want {
+				assert.Contains(t, diagnosticText(res), want)
+			}
+			assert.Empty(t, r.TagList(), "a refused load must release nothing")
 		})
 	}
 }

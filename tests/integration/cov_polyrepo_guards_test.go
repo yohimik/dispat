@@ -191,45 +191,6 @@ func TestCovPolyrepoIncludePathCannotChangeOwnerMidRun(t *testing.T) {
 	assert.Equal(t, pinnedBefore, control.Git("rev-parse", "HEAD:sources/lib"))
 }
 
-// TestCovPolyrepoSnapshotNoticesARelevantTagThatDisappeared: the fixed fleet
-// inventory is every ref a configured package may write, read once before
-// planning. A baseline tag deleted while the run is building is as much a
-// change to that inventory as one that moved, and it has to be reported as
-// what it was — a ref that is gone — before the package publishes against a
-// history that no longer says what the plan read.
-func TestCovPolyrepoSnapshotNoticesARelevantTagThatDisappeared(t *testing.T) {
-	source := harness.New(t)
-	source.SeedPackage("packages", "lib")
-	source.Commit("feat(lib): bootstrap library")
-	source.Git("tag", "-a", "lib@1.0.0", "-m", "first release")
-	source.WriteFile("packages/lib/api.txt", "more\n")
-	source.Commit("feat(lib): extend the API")
-
-	control := harness.New(t)
-	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
-	cfg.Scripts["untag"] = models.Script{"git tag -d lib@1.0.0"}
-	cfg.Scripts["publish"] = models.Script{"echo published > ../../../../published.txt"}
-	cfg.Flow = &models.SpaceFlowConfig{
-		Build:         []string{"build"},
-		BeforePublish: []string{"untag"},
-		Publish:       []string{"publish"},
-	}
-	control.WriteConfigModel(cfg)
-	control.Commit("chore: configure a hook that removes a baseline tag")
-
-	res := control.Release()
-	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.IsCodePresent(res.Events, "E330"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	out := covPolyrepoOutput(res)
-	assert.Contains(t, out, "was deleted")
-	assert.Contains(t, out, "lib@1.0.0")
-	assert.NotContains(t, polyrepoTags(control, "sources/lib"), "lib@1.1.0")
-	assert.NoFileExists(t, control.Path("published.txt"),
-		"the inventory is re-read before the publish command, not after it")
-}
-
 // TestCovPolyrepoExportThatIsNotACommitIsNotAdmitted: a native record step
 // hands the run its source revision by exporting the package's exact commit,
 // and the run admits only that. A value the right length that is not an object

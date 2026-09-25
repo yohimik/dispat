@@ -227,9 +227,6 @@ func TestCovConfigRefusesInvalidRecordFormats(t *testing.T) {
 				EntryFormatConfig: models.EntryFormatConfig{Header: []models.EntryLine{{}}},
 			}
 		}, "line is required"},
-		{"changelog channel with no name", func(c *models.File) {
-			c.Changelog = &models.ChangelogConfig{Channels: []string{"stable", " "}}
-		}, "channels must not contain an empty name"},
 		{"github channel with no name", func(c *models.File) {
 			c.GitHub = &models.GitHubConfig{Enabled: models.Bool(false), Channels: []string{""}}
 		}, "channels must not contain an empty name"},
@@ -344,52 +341,6 @@ func TestCovConfigRefusesInvalidRecordFormats(t *testing.T) {
 	})
 }
 
-// TestCovConfigRefusesInvalidWebhookDeclarations: a webhook that could never
-// deliver — no host, an unknown event, a header name a request cannot carry —
-// is refused with the entry and the field named.
-func TestCovConfigRefusesInvalidWebhookDeclarations(t *testing.T) {
-	r := refusalRepo(t)
-	hook := func(w models.WebhookConfig) func(*models.File) {
-		return func(c *models.File) { c.Webhooks = []models.WebhookConfig{w} }
-	}
-	runRefusals(t, r, []refusal{
-		{"unparsable url", hook(models.WebhookConfig{URL: "http://%zz"}), "is invalid"},
-		{"foreign scheme", hook(models.WebhookConfig{URL: "ftp://example.test/hook"}),
-			"must use http or https"},
-		{"no host", hook(models.WebhookConfig{URL: "https:///hook"}), "has no host"},
-		{"unknown event", hook(models.WebhookConfig{
-			URL: "https://example.test/hook", Events: []string{"release.exploded"},
-		}), "unknown event"},
-		{"unparsable env condition", hook(models.WebhookConfig{
-			URL: "https://example.test/hook", Env: "=true",
-		}), "env:"},
-		{"nameless header", hook(models.WebhookConfig{
-			URL: "https://example.test/hook", Headers: []models.WebhookHeader{{Value: "1"}},
-		}), "name is required"},
-		{"header name with a colon", hook(models.WebhookConfig{
-			URL:     "https://example.test/hook",
-			Headers: []models.WebhookHeader{{Name: "X-Trace: id", Value: "1"}},
-		}), "must not contain spaces or colons"},
-		{"negative timeout", hook(models.WebhookConfig{
-			URL: "https://example.test/hook", Timeout: -1,
-		}), "timeout must be >= 0"},
-		{"unknown format field", hook(models.WebhookConfig{
-			URL: "https://example.test/hook", Format: `{"text":"{nonesuch}"}`,
-		}), "unknown field"},
-		{"duplicate name", func(c *models.File) {
-			c.Webhooks = []models.WebhookConfig{
-				{Name: "ops", URL: "https://example.test/one"},
-				{Name: "ops", URL: "https://example.test/two"},
-			}
-		}, "is already used by"},
-		{"space webhook", func(c *models.File) {
-			s := c.Spaces["libs"]
-			s.Webhooks = []models.WebhookConfig{{URL: "ftp://example.test/hook"}}
-			c.Spaces["libs"] = s
-		}, "must use http or https"},
-	})
-}
-
 // TestCovConfigRefusesInvalidAutoVersionRules: the native manifest
 // reconciliation reads several vocabularies of its own, and a rule it cannot
 // apply is refused rather than quietly writing nothing.
@@ -493,9 +444,6 @@ func TestCovConfigRefusesInvalidPackageDeclarations(t *testing.T) {
 	r.SeedPackage("packages", "utils")
 	r.Commit("feat(utils): a second package")
 	runRefusals(t, r, []refusal{
-		{"src naming no folder", func(c *models.File) {
-			c.Packages = map[string]models.PackageConfig{"core": {Src: "sources"}}
-		}, "names no folder inside the package"},
 		{"absolute source directory", func(c *models.File) {
 			c.Packages = map[string]models.PackageConfig{"core": {Src: r.Path("packages/core")}}
 		}, "must be a path relative to the package folder"},

@@ -12,6 +12,7 @@ package integration
 // and everything pushable to a real remote.
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -308,42 +309,47 @@ func TestRecordsCommitModeLeavesHistoryUntouchedWhenNothingPublished(t *testing.
 // anything is built. The package with nothing wrong with it is not released
 // either, and neither the remote nor this checkout is changed.
 //
-// It used to be the opposite: the run went ahead and the push decided, leaving
-// the remote tag alone (force off) or replacing it (force on), both of which
-// published a@0.1.0 a second time.
+// `commit.force` decides nothing about it: forcing rewrites this run's own
+// refs, and a refused run has none. The remote's annotated tag is read peeled,
+// because the listing carries the ref and its target and only the second names
+// a commit.
 func TestRecordsPushRefusesEveryPackageWhenOneIsAlreadyRecorded(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = &models.CommitConfig{
-		Enabled: models.Bool(true), Push: true, Force: models.Bool(false),
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("commit.force=%v", force), func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			cfg.Commit = &models.CommitConfig{
+				Enabled: models.Bool(true), Push: true, Force: models.Bool(force),
+			}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "a")
+			r.SeedPackage("packages", "b")
+
+			r.AddBareRemote()
+			r.Commit("feat(a,b): first release of both")
+			r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+			head := r.Git("rev-parse", "HEAD")
+
+			// Plant a's future tag on the remote only: create it at the source
+			// commit, push it, delete it locally, so the planner would plan a@0.1.0.
+			r.Git("tag", "-a", "a@0.1.0", "-m", "left by an earlier run")
+			r.Git("push", "-q", "origin", "a@0.1.0")
+			remoteTarget := r.Git("rev-list", "-n1", "a@0.1.0")
+			r.Git("tag", "-d", "a@0.1.0")
+
+			res := r.Release()
+			require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.True(t, harness.IsCodePresent(res.Events, "E196"), "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout, "a@0.1.0", "the record it is missing is named")
+
+			remoteRefs := r.Git("ls-remote", "origin")
+			assert.NotContains(t, remoteRefs, "refs/tags/b@0.1.0", "the healthy package is not released either")
+			assert.Empty(t, r.TagList(), "and nothing was recorded in this checkout")
+			assert.Equal(t, head, r.Git("rev-parse", "HEAD"), "no release commit was made")
+			stillAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
+			assert.Equal(t, remoteTarget, stillAt, "the existing remote record is where it was")
+		})
 	}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "a")
-	r.SeedPackage("packages", "b")
-
-	r.AddBareRemote()
-	r.Commit("feat(a,b): first release of both")
-	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-	head := r.Git("rev-parse", "HEAD")
-
-	// Plant a's future tag on the remote only: create it at the source
-	// commit, push it, delete it locally, so the planner would plan a@0.1.0.
-	r.Git("tag", "-a", "a@0.1.0", "-m", "left by an earlier run")
-	r.Git("push", "-q", "origin", "a@0.1.0")
-	remoteTarget := r.Git("rev-list", "-n1", "a@0.1.0")
-	r.Git("tag", "-d", "a@0.1.0")
-
-	res := r.Release()
-	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.IsCodePresent(res.Events, "E196"), "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout, "a@0.1.0", "the record it is missing is named")
-
-	remoteRefs := r.Git("ls-remote", "origin")
-	assert.NotContains(t, remoteRefs, "refs/tags/b@0.1.0", "the healthy package is not released either")
-	assert.Empty(t, r.TagList(), "and nothing was recorded in this checkout")
-	assert.Equal(t, head, r.Git("rev-parse", "HEAD"), "no release commit was made")
-	stillAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
-	assert.Equal(t, remoteTarget, stillAt, "the existing remote record is where it was")
 }
 
 // TestRecordsPushNeverReplacesARecordTheRemoteHolds: a record the remote holds

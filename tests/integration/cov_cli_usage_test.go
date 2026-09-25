@@ -161,29 +161,3 @@ func TestCovNestedWorkspaceContextIsRefusedWhenItCannotBeRead(t *testing.T) {
 	assert.Equal(t, 2, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Contains(t, res.Stderr, "invalid nested workspace context")
 }
-
-// TestCovShellHelperRefusesAWorkingDirectoryItCannotEnter: `--in` names a
-// folder a script runs in, and a value naming no folder is refused by the
-// flag rather than left to whatever the shell says about a directory it
-// cannot enter.
-func TestCovShellHelperRefusesAWorkingDirectoryItCannotEnter(t *testing.T) {
-	r := usageRepo(t)
-
-	t.Run("exec", func(t *testing.T) {
-		res := r.Command("exec", "build", "--in", "nowhere")
-		assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout+res.Stderr, "cannot run in folder")
-	})
-
-	t.Run("if", func(t *testing.T) {
-		res := r.Command("if", "--changed", "--then", "build", "--in", "nowhere")
-		assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout+res.Stderr, "nowhere")
-	})
-
-	t.Run("for", func(t *testing.T) {
-		res := r.Command("for", "one", "--do", "echo $DISPAT_ITEM", "--in", "nowhere")
-		assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout+res.Stderr, "--in")
-	})
-}

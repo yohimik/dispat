@@ -35,7 +35,8 @@ func TestCovConfigScalarSpellingsRelease(t *testing.T) {
 		"logLevel":    "info",
 		"logFormat":   "json",
 		"updateCheck": false,
-		"github":      map[string]any{"enabled": false},
+		// A list of built-in section names, each written as its name alone.
+		"github": map[string]any{"enabled": false, "sections": []any{"features", "fixes"}},
 		// One value where a pair is allowed, one command where a list is,
 		// one folder where a list of folders is, one script reference where
 		// a sequence is.
@@ -119,6 +120,15 @@ func TestCovConfigRefusesValuesNeitherSpellingCanRead(t *testing.T) {
 		{"a section that is a number", func(c map[string]any) {
 			c["changelog"] = map[string]any{"sections": []any{7}}
 		}, "a built-in section name or an object"},
+		// An element holding nothing at all is read as the empty thing it is
+		// and refused by the validation, rather than decoded into whatever
+		// happened to be next.
+		{"a section that holds nothing", func(c map[string]any) {
+			c["changelog"] = map[string]any{"sections": []any{nil}}
+		}, "changelog:"},
+		{"an entry line that holds nothing", func(c map[string]any) {
+			c["changelog"] = map[string]any{"footer": []any{nil}}
+		}, "changelog:"},
 		{"an entry line that is a number", func(c map[string]any) {
 			c["changelog"] = map[string]any{"header": []any{7}}
 		}, "header"},

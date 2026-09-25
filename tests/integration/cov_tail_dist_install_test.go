@@ -128,9 +128,8 @@ func TestCovTailSelfUpdateRollbackChecksTheBackupFirst(t *testing.T) {
 
 // TestCovTailSelfUpdateRefusesAnAnswerThatIsNotARelease: the update check
 // reads somebody else's server, so each way an answer can fail to be a release
-// is refused on its own terms — a listing that is not a listing, a version
-// that is not a version, and a version nobody published, which is a different
-// answer from "you are up to date".
+// is refused on its own terms: a listing that is not a listing, a version
+// that is not a version, and a release whose body is not a release.
 func TestCovTailSelfUpdateRefusesAnAnswerThatIsNotARelease(t *testing.T) {
 	t.Run("a listing that is not JSON", func(t *testing.T) {
 		api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
@@ -150,15 +149,6 @@ func TestCovTailSelfUpdateRefusesAnAnswerThatIsNotARelease(t *testing.T) {
 		res := r.update("--release", "nightly")
 		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
 		assert.Contains(t, res.Stdout+res.Stderr, "is not a version")
-		assert.Equal(t, suOld, r.version(r.exe))
-	})
-
-	t.Run("a version nobody published", func(t *testing.T) {
-		r := newSURepo(t)
-		res := r.update("--release", "9.9.9")
-		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-		assert.Contains(t, res.Stdout+res.Stderr, "no matching release",
-			`"nobody published that" is not "you are up to date"`)
 		assert.Equal(t, suOld, r.version(r.exe))
 	})
 

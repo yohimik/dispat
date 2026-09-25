@@ -181,6 +181,13 @@ func TestIfChangedInRunsElsewhere(t *testing.T) {
 	here, err := os.ReadFile(r.Path("packages/web/here.txt"))
 	require.NoError(t, err, "core changed, so the gate held even though --in names web")
 	assert.Contains(t, string(here), "packages/web", "the branch ran in the folder --in named")
+
+	// A folder that is not there is refused by name before either branch runs.
+	res = r.Command("if", "--changed", "--since", "HEAD~1", "--in", "nowhere",
+		"--then", "pwd > nowhere.txt", "--else", "pwd > nowhere.txt")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "nowhere")
+	assert.NoFileExists(t, r.Path("nowhere.txt"), "neither branch ran")
 }
 
 func TestIfChangedConsumersNeedsASelection(t *testing.T) {
