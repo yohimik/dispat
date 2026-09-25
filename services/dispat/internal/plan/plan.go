@@ -2822,6 +2822,9 @@ func (cp *computation) parseAndResolve() error {
 	for i, rec := range cp.commits {
 		cp.resolveCommit(rec, parsed[i])
 		parsed[i] = nil
+		// The paths have served their one purpose, the derived set, which
+		// derivedSet keeps; nothing after this pass reads them.
+		rec.commit.Files = nil
 	}
 	return cp.filesErr
 }

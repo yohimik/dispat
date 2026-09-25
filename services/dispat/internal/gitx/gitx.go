@@ -1576,11 +1576,11 @@ func (c *LocalGitx) log(ctx context.Context, revisions ...string) ([]Commit, err
 		"--format=" + logRecordSep + "%H" + logFieldSep + "%P" + logFieldSep +
 			"%an" + logFieldSep + "%ae" + logFieldSep + "%B" + logFieldSep,
 	}
-	out, err := c.run(ctx, append(args, revisions...)...)
-	if err != nil {
+	var log commitLog
+	if _, err := c.runStream(ctx, gitStream{stdout: &log}, append(args, revisions...)...); err != nil {
 		return nil, err
 	}
-	commits, err := parseCommits(out)
+	commits, err := log.close()
 	for i := range commits {
 		commits[i].AreFilesDeferred = true
 	}
@@ -1653,52 +1653,139 @@ func parseChangedFiles(out string) (map[string][]string, error) {
 	return files, nil
 }
 
+// parseCommits reads a whole commit log held in memory. The history read
+// itself streams (commitLog); this is the same parse over a string.
 func parseCommits(out string) ([]Commit, error) {
-	if strings.TrimSpace(out) == "" {
-		return nil, nil
+	var log commitLog
+	for {
+		i := strings.Index(out, logRecordSep)
+		if i < 0 {
+			log.addRecord(out, false)
+			break
+		}
+		log.addRecord(out[:i], false)
+		out = out[i+len(logRecordSep):]
 	}
+	return log.close()
+}
 
-	var commits []Commit
-	for _, record := range strings.Split(out, logRecordSep) {
-		if strings.TrimSpace(record) == "" {
+// commitLog parses the commit log as git writes it, one record at a time.
+//
+// The output is never held whole: a record is collected in a buffer bounded
+// by the largest record and parsed as soon as the next one starts. What a
+// commit keeps is copied out of the record, so no commit's strings point
+// into a buffer holding anything else: a plan keeps its commits' messages
+// for the whole run, and a message that was a sub-slice of the log output
+// kept the entire output alive with it, separators, other commits and path
+// lists included.
+type commitLog struct {
+	record  []byte
+	commits []Commit
+	err     error
+}
+
+// Write implements io.Writer for the git process's standard output. It never
+// refuses a write: a malformed record is remembered for close to report, and
+// git is left to finish rather than be killed by a closed pipe.
+func (l *commitLog) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, logRecordSep[0])
+		if i < 0 {
+			l.record = append(l.record, p...)
+			break
+		}
+		l.record = append(l.record, p[:i]...)
+		l.flush()
+		p = p[i+1:]
+	}
+	return n, nil
+}
+
+// flush parses the buffered record and empties the buffer for the next one.
+func (l *commitLog) flush() {
+	if len(l.record) > 0 {
+		l.addRecord(string(l.record), true)
+	}
+	l.record = l.record[:0]
+}
+
+// addRecord parses one record. isOwned says the string is a copy made for
+// this record alone, which the commit may keep as it is.
+func (l *commitLog) addRecord(record string, isOwned bool) {
+	if l.err != nil || strings.TrimSpace(record) == "" {
+		return
+	}
+	commit, err := parseCommitRecord(record, isOwned)
+	if err != nil {
+		l.err = err
+		return
+	}
+	l.commits = append(l.commits, commit)
+}
+
+// close parses the last record and answers the commits, or the first
+// malformed record's error and no commits at all: a truncated history is not
+// a shorter one.
+func (l *commitLog) close() ([]Commit, error) {
+	l.flush()
+	if l.err != nil {
+		return nil, l.err
+	}
+	return l.commits, nil
+}
+
+// parseCommitRecord reads one record: the fixed fields, then the path list
+// when the log listed paths. The fixed fields are everything a commit keeps
+// of the record, and they are one string of their own; each path is another.
+func parseCommitRecord(record string, isOwned bool) (Commit, error) {
+	end, separators := len(record), 0
+	for i := 0; i < len(record); i++ {
+		if record[i] != logFieldSep[0] {
 			continue
 		}
-		fields := strings.SplitN(record, logFieldSep, logCommitFields+1)
-		if len(fields) < logCommitFields {
-			return nil, fmt.Errorf("gitx: malformed commit log record: expected at least %d fields, got %d",
-				logCommitFields, len(fields))
+		if separators++; separators == logCommitFields {
+			end = i
+			break
 		}
-		sha := strings.TrimSpace(fields[0])
-		if !fullObjectID(sha) {
-			return nil, fmt.Errorf("gitx: malformed commit log object id")
-		}
-		parents := strings.Fields(fields[1])
-		for _, parent := range parents {
-			if !fullObjectID(parent) {
-				return nil, fmt.Errorf("gitx: malformed commit log parent")
-			}
-		}
-		commit := Commit{
-			SHA:     sha,
-			Parents: parents,
-			// Trimmed because git pads neither, but a name is free text and a
-			// configured identity can carry trailing spaces the record would
-			// otherwise render.
-			AuthorName:  strings.TrimSpace(fields[2]),
-			AuthorEmail: strings.TrimSpace(fields[3]),
-			Message:     strings.Trim(fields[4], "\n"),
-		}
-		if len(fields) > logCommitFields {
-			for _, line := range strings.Split(fields[logCommitFields], "\n") {
-				if line = strings.TrimRight(line, "\r"); line != "" {
-					commit.Files = append(commit.Files, line)
-				}
-			}
-		}
-		commits = append(commits, commit)
 	}
-
-	return commits, nil
+	if separators < logCommitFields-1 {
+		return Commit{}, fmt.Errorf("gitx: malformed commit log record: expected at least %d fields, got %d",
+			logCommitFields, separators+1)
+	}
+	kept := record[:end]
+	if !isOwned || end < len(record) {
+		kept = strings.Clone(kept)
+	}
+	fields := strings.SplitN(kept, logFieldSep, logCommitFields)
+	sha := strings.TrimSpace(fields[0])
+	if !fullObjectID(sha) {
+		return Commit{}, fmt.Errorf("gitx: malformed commit log object id")
+	}
+	parents := strings.Fields(fields[1])
+	for _, parent := range parents {
+		if !fullObjectID(parent) {
+			return Commit{}, fmt.Errorf("gitx: malformed commit log parent")
+		}
+	}
+	commit := Commit{
+		SHA:     sha,
+		Parents: parents,
+		// Trimmed because git pads neither, but a name is free text and a
+		// configured identity can carry trailing spaces the record would
+		// otherwise render.
+		AuthorName:  strings.TrimSpace(fields[2]),
+		AuthorEmail: strings.TrimSpace(fields[3]),
+		Message:     strings.Trim(fields[4], "\n"),
+	}
+	if end < len(record) {
+		for line := range strings.SplitSeq(record[end+1:], "\n") {
+			if line = strings.TrimRight(line, "\r"); line != "" {
+				commit.Files = append(commit.Files, strings.Clone(line))
+			}
+		}
+	}
+	return commit, nil
 }
 
 // CreateTag creates an annotated tag at target (any commit-ish), or at HEAD
