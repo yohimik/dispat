@@ -286,8 +286,8 @@ func TestDotenvReachesScriptsAndDispat(t *testing.T) {
 }
 
 // TestDotenvFileFlag: --env-file replaces the default file, is repeatable with
-// the later file winning, and a named file that is not there stops the run
-// rather than being quietly skipped.
+// the later file winning, and a named file that is not there, or is a folder,
+// stops the run rather than being quietly skipped.
 func TestDotenvFileFlag(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(libsConfig(`printf '%s|%s' "$SOURCE" "$ONLY_BASE" > env.txt`, 1))
@@ -308,6 +308,10 @@ func TestDotenvFileFlag(t *testing.T) {
 	missing := r.Status("--env-file", "absent.env")
 	assert.Equal(t, 1, missing.Code, "a named file that is not there is a mistake worth stopping for")
 	assert.Contains(t, missing.Stderr, "cannot read the environment file")
+
+	folder := r.Status("--env-file", "packages")
+	assert.Equal(t, 1, folder.Code, "a named path that is a folder is no environment file either")
+	assert.Contains(t, folder.Stderr, "cannot read the environment file packages")
 }
 
 // TestDotenvSteersDispatItself: an environment file feeds dispat's own reads,

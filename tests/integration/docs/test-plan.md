@@ -1131,7 +1131,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestStaticEnvReachesTheLoginScript`                   | Space-level `env` variables pass to login scripts, which execute once per space in the space directory without package context. |
 | `TestStaticEnvFromARefKeepsKeyCase`                    | Environment variables imported through `$ref` fragments preserve their original casing in script environments. |
 | `TestDotenvReachesScriptsAndDispat`                    | Variables from a root `.env` file reach scripts. Process environment variables override `.env` values, config `env` overrides both, and variable values are never written to logs. |
-| `TestDotenvFileFlag`                                   | The `--env-file` flag overrides the default `.env` path, merges multiple files with later flags winning, and exits 1 if a specified file is missing. |
+| `TestDotenvFileFlag`                                   | The `--env-file` flag overrides the default `.env` path, merges multiple files with later flags winning, and exits 1 if a specified file is missing or is a folder. |
 | `TestDotenvSteersDispatItself`                         | Variables defined exclusively in environment files expand inside dispat templates, such as changelog footers. |
 | `TestStaticEnvExpandsAgainstTheComputedSet` | A static env value is never shell-expanded by exec, so dispat expands it itself: against the computed release variables first, then the process environment, with `$$` a literal dollar and an unknown name expanding to nothing. |
 
