@@ -348,6 +348,41 @@ func (s Sequence) Run(ctx context.Context) error {
 // packages are skipped (unless they have a release reason of their own) and
 // independent packages continue.
 func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
+	results, changed := newReleasingResults(p)
+	if len(results) == 0 {
+		return results
+	}
+
+	// The workspace listing depends only on the plan, never on how the run
+	// goes, so its variables are built once and shared by every task's
+	// environment.
+	wsVars := WorkspaceEnv(p, e.Log)
+	logins := newSpaceLogins(p)
+	sched, reachedProviders := e.buildTaskGraph(p, changed)
+
+	// The tasks run under a context of their own, so that a task that
+	// panicked can stop the rest of the graph without cancelling the run that
+	// owns it: the run still has its closing phase, its records and its locks
+	// to see to (see containPanic).
+	tasks, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins, stop: stop,
+		reachedProviders: reachedProviders,
+		results:          results, started: make(map[string]time.Time), scan: e.Scanner,
+		avChanged:           make(map[string]bool),
+		reconciledProviders: make(map[string][]string, len(changed)),
+		builtPackages:       make(map[string]bool, len(changed))}
+
+	r.prepareNativeWrites(ctx, changed)
+	if err := r.drain(tasks, sched, changed); err != nil {
+		r.reportStopped(ctx, tasks, err)
+	}
+	return results
+}
+
+// newReleasingResults starts one Result for every package the plan releases
+// and returns them with the set of those packages' names.
+func newReleasingResults(p *plan.Plan) (map[string]*Result, map[string]bool) {
 	results := make(map[string]*Result)
 	changed := make(map[string]bool)
 	for name, rel := range p.Releases {
@@ -368,16 +403,12 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			}
 		}
 	}
-	if len(results) == 0 {
-		return results
-	}
+	return results, changed
+}
 
-	// The workspace listing depends only on the plan, never on how the run
-	// goes, so its variables are built once and shared by every task's
-	// environment.
-	wsVars := WorkspaceEnv(p, e.Log)
-
-	// One login gate per space that configures a login script.
+// newSpaceLogins makes one login gate per space that configures a login
+// script.
+func newSpaceLogins(p *plan.Plan) map[spaceLoginKey]*spaceLogin {
 	logins := make(map[spaceLoginKey]*spaceLogin)
 	for _, rel := range p.Releases {
 		if len(rel.Pkg.Space.LoginScript) > 0 {
@@ -388,6 +419,12 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		}
 	}
 
+	return logins
+}
+
+// buildTaskGraph states the releasing packages' task graph and returns it with
+// what each consumer reaches over the publication order.
+func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph.Scheduler[task], map[string][]string) {
 	// Build the task graph. The scheduler owns the dependency bookkeeping —
 	// registration, in-degrees, the became-ready cascade — and this loop only
 	// states the edges; AddEdge registers its nodes as a side effect.
@@ -454,32 +491,23 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		}
 	}
 
-	// The tasks run under a context of their own, so that a task that
-	// panicked can stop the rest of the graph without cancelling the run that
-	// owns it: the run still has its closing phase, its records and its locks
-	// to see to (see containPanic).
-	tasks, stop := context.WithCancelCause(ctx)
-	defer stop(nil)
-	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins, stop: stop,
-		reachedProviders: reachedProviders,
-		results:          results, started: make(map[string]time.Time), scan: e.Scanner,
-		avChanged:           make(map[string]bool),
-		reconciledProviders: make(map[string][]string, len(changed)),
-		builtPackages:       make(map[string]bool, len(changed))}
+	return sched, reachedProviders
+}
 
-	r.prepareNativeWrites(ctx, changed)
-
+// drain runs the task graph under the stage budgets until every task ran or
+// the tasks' context stopped.
+func (r *run) drain(tasks context.Context, sched *graph.Scheduler[task], changed map[string]bool) error {
 	// Sign and version tasks share the build budget: they are short local
 	// manifest updates leading straight into the build. syncLock has its own
 	// budget — almost always 1 — because its whole reason to exist is
 	// serialising lock file regeneration. Draining per class keeps the budgets independent, so
 	// a stalled stage never blocks another's.
 	budgets := map[taskKind]int{
-		taskBuild:    e.BuildConcurrency,
-		taskPublish:  e.PublishConcurrency,
-		taskSyncLock: syncLockBudget(p, changed),
+		taskBuild:    r.BuildConcurrency,
+		taskPublish:  r.PublishConcurrency,
+		taskSyncLock: syncLockBudget(r.plan, changed),
 	}
-	err := graph.Drain(tasks, sched,
+	return graph.Drain(tasks, sched,
 		func(t task) taskKind {
 			switch t.kind {
 			case taskPublish, taskSyncLock:
@@ -493,7 +521,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		// occupy. syncLock keeps the ordinary cost: its budget exists to
 		// serialise lock-file writers, not to price packages.
 		func(t task) int {
-			pkg := p.Releases[t.pkg].Pkg
+			pkg := r.plan.Releases[t.pkg].Pkg
 			switch t.kind {
 			case taskPublish:
 				return pkg.PublishWeight
@@ -504,29 +532,30 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 			}
 		},
 		func(t task) { r.execute(tasks, t) })
-	if err != nil {
-		// Interrupted, stopped by a task's internal error, or (impossibly
-		// after E200) cyclic: tasks that never launched left their packages
-		// pending. Cancelled, not failed — nothing about them went wrong, and
-		// the next run picks them up unchanged. The names are collected under
-		// the lock and announced after it: the observer is called outside the
-		// mutex everywhere.
-		for _, name := range r.cancelPending() {
-			ev := packageEvent(name, p.Releases[name], EventPackageCancelled)
-			ev.Status = StatusCancelled.String()
-			e.notify(ev)
-		}
-		switch {
-		case errors.Is(context.Cause(tasks), errTaskPanicked) && ctx.Err() == nil:
-			e.Log.Error().Msg("run stopped after an internal error: remaining packages cancelled; " +
-				"completed releases keep their records")
-		case ctx.Err() != nil:
-			e.Log.Warn().Msg("run interrupted: remaining packages cancelled; completed releases keep their records")
-		default:
-			e.Log.Error().Err(err).Msg("task graph stalled")
-		}
+}
+
+// reportStopped settles a task graph that did not drain.
+func (r *run) reportStopped(ctx, tasks context.Context, err error) {
+	// Interrupted, stopped by a task's internal error, or (impossibly
+	// after E200) cyclic: tasks that never launched left their packages
+	// pending. Cancelled, not failed — nothing about them went wrong, and
+	// the next run picks them up unchanged. The names are collected under
+	// the lock and announced after it: the observer is called outside the
+	// mutex everywhere.
+	for _, name := range r.cancelPending() {
+		ev := packageEvent(name, r.plan.Releases[name], EventPackageCancelled)
+		ev.Status = StatusCancelled.String()
+		r.notify(ev)
 	}
-	return results
+	switch {
+	case errors.Is(context.Cause(tasks), errTaskPanicked) && ctx.Err() == nil:
+		r.Log.Error().Msg("run stopped after an internal error: remaining packages cancelled; " +
+			"completed releases keep their records")
+	case ctx.Err() != nil:
+		r.Log.Warn().Msg("run interrupted: remaining packages cancelled; completed releases keep their records")
+	default:
+		r.Log.Error().Err(err).Msg("task graph stalled")
+	}
 }
 
 // prepareNativeWrites builds the inputs of the native manifest writes once,
