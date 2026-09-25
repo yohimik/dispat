@@ -6,38 +6,72 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestInstallRefusesALiveSocketDestination proves the target guard identifies
-// a service endpoint before release discovery or download. Moving a live
-// socket aside would silently disconnect the process that owns it.
-func TestInstallRefusesALiveSocketDestination(t *testing.T) {
-	r := newToolRepo(t)
-	bin, err := os.MkdirTemp("/tmp", "dispat-sock-")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(bin) })
-	target := filepath.Join(bin, "tool"+exeSuffix())
-	listener, err := net.Listen("unix", target)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = listener.Close()
-		_ = os.Remove(target)
-	})
-
-	before := len(r.requests())
-	res := r.Command("install", "https://github.com/acme/tool", "--api-url", r.api,
-		"--bin-dir", bin, "--asset", "tool-{os}-{arch}")
-	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout+res.Stderr, "is a socket, not a file dispat may replace")
-	assert.Equal(t, before, len(r.requests()), "target refusal happens before release discovery")
-
-	conn, err := net.Dial("unix", target)
-	require.NoError(t, err, "the refused install preserves the live socket")
-	require.NoError(t, conn.Close())
+// unixDestinationRefusals are the rows of
+// TestInstallRefusesADestinationItMustNotReplace that only a unix filesystem
+// can hold. Naming what stands in the way is the point, because "not a
+// regular file" tells a reader nothing they can act on.
+func unixDestinationRefusals() []installDestinationRefusal {
+	var socket string
+	var listener net.Listener
+	return []installDestinationRefusal{{
+		name: "a named pipe",
+		occupy: func(t *testing.T, r *toolRepo) []string {
+			require.NoError(t, syscall.Mkfifo(r.installed(), 0o600))
+			t.Cleanup(func() { _ = os.Remove(r.installed()) })
+			return r.installArgsIn(r.bin)
+		},
+		want: "is a named pipe",
+		kept: func(t *testing.T, r *toolRepo) {
+			info, err := os.Lstat(r.installed())
+			require.NoError(t, err)
+			assert.NotZero(t, info.Mode()&os.ModeNamedPipe, "the pipe is still a pipe")
+		},
+	}, {
+		name: "a device",
+		occupy: func(t *testing.T, r *toolRepo) []string {
+			if _, err := os.Stat("/dev/null"); err != nil {
+				t.Skip("no /dev/null on this machine")
+			}
+			return r.installArgsIn("/dev", "--as", "null", "--check")
+		},
+		want: "is a device",
+		kept: func(t *testing.T, r *toolRepo) {
+			info, err := os.Stat(filepath.Join("/dev", "null"))
+			require.NoError(t, err)
+			assert.NotZero(t, info.Mode()&os.ModeDevice, "the device is untouched")
+		},
+	}, {
+		// Moving a live socket aside would silently disconnect the process
+		// that owns it. Its folder is short on purpose: a socket path has a
+		// length limit a test folder can exceed.
+		name: "a live socket",
+		occupy: func(t *testing.T, r *toolRepo) []string {
+			bin, err := os.MkdirTemp("/tmp", "dispat-sock-")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = os.RemoveAll(bin) })
+			socket = filepath.Join(bin, "tool"+exeSuffix())
+			listener, err = net.Listen("unix", socket)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_ = listener.Close()
+				_ = os.Remove(socket)
+			})
+			return r.installArgsIn(bin)
+		},
+		want: "is a socket, not a file dispat may replace",
+		kept: func(t *testing.T, r *toolRepo) {
+			conn, err := net.Dial("unix", socket)
+			require.NoError(t, err, "the refused install preserves the live socket")
+			require.NoError(t, conn.Close())
+		},
+	}}
 }
 
 // TestInstallRollbackKeepsTheCurrentToolWhenRotationCannotStart exercises the

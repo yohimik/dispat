@@ -19,33 +19,28 @@ import (
 )
 
 // TestFinalSelfUpdateRefusesIncompleteHTTPResponses distinguishes a broken
-// transport from a complete response carrying invalid JSON or a bad digest.
+// transport from a complete response carrying invalid JSON: a release listing
+// that stops before its body ends is refused as the transport failure it is,
+// and the binary is left alone. The same cut in the asset response is a row of
+// TestSelfUpdateRefusesWhatItCannotTrust.
 func TestFinalSelfUpdateRefusesIncompleteHTTPResponses(t *testing.T) {
-	for _, phase := range []string{"listing", "asset"} {
-		t.Run(phase, func(t *testing.T) {
-			api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
-				if phase == "listing" || strings.HasPrefix(req.URL.Path, "/dl/") {
-					w.Header().Set("Content-Length", "4096")
-					_, _ = fmt.Fprint(w, "partial response")
-					return
-				}
-				_ = json.NewEncoder(w).Encode([]any{covSUReleaseJSON(a.base, suNew, []byte("expected binary"))})
-			})
-			r := harness.New(t)
-			exe := covSUExe(t, suOld)
-			before, err := os.ReadFile(exe)
-			require.NoError(t, err)
-			res := r.CommandBin(exe, "self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
-			require.NotZero(t, res.Code)
-			assert.Contains(t, res.Stdout+res.Stderr, "unexpected EOF")
-			after, err := os.ReadFile(exe)
-			require.NoError(t, err)
-			assert.Equal(t, before, after)
-			entries, err := os.ReadDir(filepath.Dir(exe))
-			require.NoError(t, err)
-			assert.Len(t, entries, 1, "a partial response leaves no backup or staging file")
-		})
-	}
+	api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Length", "4096")
+		_, _ = fmt.Fprint(w, "partial response")
+	})
+	r := harness.New(t)
+	exe := covSUExe(t, suOld)
+	before, err := os.ReadFile(exe)
+	require.NoError(t, err)
+	res := r.CommandBin(exe, "self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
+	require.NotZero(t, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "unexpected EOF")
+	after, err := os.ReadFile(exe)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+	entries, err := os.ReadDir(filepath.Dir(exe))
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "a partial response leaves no backup or staging file")
 }
 
 // TestFinalSelfUpdateCannotInstallANamedDraftOrFailedLookup ensures an

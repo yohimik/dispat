@@ -750,44 +750,96 @@ func TestSelfUpdateInstallsANamedVersion(t *testing.T) {
 }
 
 // TestSelfUpdateRefusesWhatItCannotTrust: the checks stand between a download
-// and the only binary the user has, so a release whose checksum does not
-// describe what arrives is refused with the working binary still in place.
+// and the only binary the user has. A release whose checksum does not describe
+// what arrives, a file that is not a program, a program answering with another
+// version, a download shorter than the release says, and an asset response
+// that stops before its body ends are each refused with the working binary
+// still in place, no backup made and nothing staged beside it.
 func TestSelfUpdateRefusesWhatItCannotTrust(t *testing.T) {
-	r := newSURepo(t)
+	for _, row := range []struct {
+		name string
+		// payload is the file the release offers; serve is what the download
+		// endpoint does with it.
+		payload func(t *testing.T) []byte
+		serve   func(w http.ResponseWriter, payload []byte)
+		digest  string
+		// noNotes serves the release without a body, as a release cut by hand
+		// is: the update is judged on the binary alone.
+		noNotes bool
+		want    string
+	}{
+		{
+			name:    "a checksum that describes something else",
+			payload: func(t *testing.T) []byte { return covSUPayload(t, suNew) },
+			digest:  "sha256:" + strings.Repeat("00", 32),
+			noNotes: true,
+			want:    "hashes to",
+		},
+		{
+			name:    "a file that is not a program",
+			payload: func(t *testing.T) []byte { return []byte("this release shipped a README by mistake\n") },
+			want:    "does not run",
+		},
+		{
+			name:    "a program answering with another version",
+			payload: func(t *testing.T) []byte { return covSUPayload(t, suOld) },
+			want:    "reports a different version",
+		},
+		{
+			name:    "a download shorter than the release says",
+			payload: func(t *testing.T) []byte { return covSUPayload(t, suNew) },
+			serve: func(w http.ResponseWriter, payload []byte) {
+				half := payload[:len(payload)/2]
+				w.Header().Set("Content-Length", fmt.Sprint(len(half)))
+				_, _ = w.Write(half)
+			},
+			want: "the download is incomplete",
+		},
+		{
+			name:    "an asset response that stops before its body ends",
+			payload: func(t *testing.T) []byte { return []byte("expected binary") },
+			serve: func(w http.ResponseWriter, _ []byte) {
+				w.Header().Set("Content-Length", "4096")
+				_, _ = fmt.Fprint(w, "partial response")
+			},
+			want: "unexpected EOF",
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			payload := row.payload(t)
+			api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
+				if strings.HasPrefix(req.URL.Path, "/dl/") || strings.HasPrefix(req.URL.Path, "/assets/") {
+					if row.serve != nil {
+						row.serve(w, payload)
+						return
+					}
+					w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+					_, _ = w.Write(payload)
+					return
+				}
+				release := covSUReleaseJSON(a.base, suNew, payload)
+				if row.digest != "" {
+					release["assets"].([]any)[0].(map[string]any)["digest"] = row.digest
+				}
+				if row.noNotes {
+					delete(release, "body")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode([]any{release})
+			})
+			r := harness.New(t)
+			exe := covSUExe(t, suOld)
 
-	// A release that advertises the right size and a checksum of something
-	// else: what a corrupted or substituted download looks like.
-	var base string
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		data := r.assets[suNew]
-		if strings.HasPrefix(req.URL.Path, "/dl/") {
-			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
-			_, _ = w.Write(data)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]map[string]any{{
-			"tag_name": "services/dispat/v" + suNew, "draft": false, "prerelease": false,
-			"assets": []map[string]any{{
-				"name": assetName(), "size": len(data),
-				"browser_download_url": base + "/dl/x",
-				"digest":               "sha256:" + strings.Repeat("00", 32),
-			}},
-		}})
-	}))
-	base = "http://" + srv.Listener.Addr().String()
-	srv.Start()
-	defer srv.Close()
-
-	res := r.CommandBin(r.exe, "self-update", "--api-url", base, "--owner", "o", "--repo", "r")
-	assert.Equal(t, 1, res.Code)
-	assert.Contains(t, res.Stdout, "hashes to")
-	assert.Equal(t, suOld, r.version(r.exe), "the working binary is untouched")
-	assert.NoFileExists(t, r.backup, "and nothing was moved, so there is no backup")
-
-	entries, err := os.ReadDir(filepath.Dir(r.exe))
-	require.NoError(t, err)
-	assert.Len(t, entries, 1, "the refused download is cleaned up: %v", entries)
+			res := r.CommandBin(exe, "self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
+			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, row.want)
+			assert.Equal(t, suOld, covVersionOf(t, r, exe), "the working binary is untouched")
+			assert.NoFileExists(t, backupPath(exe), "and nothing was moved, so there is no backup")
+			entries, err := os.ReadDir(filepath.Dir(exe))
+			require.NoError(t, err)
+			assert.Len(t, entries, 1, "the refused download is cleaned up: %v", entries)
+		})
+	}
 }
 
 // TestSelfUpdateOverTLS: the release host every real invocation talks to is an

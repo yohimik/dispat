@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1249,6 +1250,132 @@ func TestRecordsGithubReleaseAttachments(t *testing.T) {
 	}
 	assert.Equal(t, "binary-bytes\n", byName["app.bin"])
 	assert.Equal(t, "docs-bytes\n", byName["docs.txt"])
+}
+
+// TestRecordsGithubAttachmentFailures: the attachments are uploaded after the
+// release exists, so none of their failures can take the release back. Each
+// row is a way an attachment cannot be made, and each leaves the package
+// tagged and published, names what went wrong, and exits 1, because a
+// release whose files never reached it is a recording nobody finished. An
+// entry dispat cannot attach at all (a relative path, a missing file, a
+// folder, a repeated name) is skipped with a warning while the sound files
+// beside it still go up.
+func TestRecordsGithubAttachmentFailures(t *testing.T) {
+	type upload struct{ name, body string }
+	for _, row := range []struct {
+		name string
+		// create is the body the release creation answers with; {uploads}
+		// stands for the fake's own asset endpoint.
+		create  string
+		publish string
+		skip    func(t *testing.T)
+		want    []string
+		uploads []string
+	}{
+		{
+			name:    "a created release nobody can parse",
+			create:  `201 Created`,
+			publish: `echo artefact > app.bin && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin" >> "$DISPAT_OUTPUT"`,
+			want:    []string{"parsing created release"},
+		},
+		{
+			name:    "a created release with no upload URL",
+			create:  `{"id": 7}`,
+			publish: `echo artefact > app.bin && echo "DISPAT_EXPORT_GITHUB=$PWD/app.bin" >> "$DISPAT_OUTPUT"`,
+			want:    []string{"upload_url"},
+		},
+		{
+			name:   "a file it cannot open",
+			create: `{"id": 7, "upload_url": "{uploads}"}`,
+			publish: `echo artefact > locked.bin && chmod 000 locked.bin && ` +
+				`echo "DISPAT_EXPORT_GITHUB=$PWD/locked.bin" >> "$DISPAT_OUTPUT"`,
+			skip: func(t *testing.T) {
+				if runtime.GOOS == "windows" {
+					t.Skip("file permissions do not gate a read on windows")
+				}
+				if os.Geteuid() == 0 {
+					t.Skip("root reads a file whatever its mode says")
+				}
+			},
+			want: []string{"locked.bin", "permission denied"},
+		},
+		{
+			name:   "entries it cannot attach beside an upload the endpoint refuses",
+			create: `{"upload_url": "{uploads}"}`,
+			publish: `mkdir -p dist/second && echo good > dist/app.bin && echo other > dist/second/app.bin` +
+				` && echo refused > dist/refused.txt` +
+				` && echo "DISPAT_EXPORT_GITHUB=$PWD/dist/app.bin $PWD/dist/second/app.bin` +
+				` $PWD/dist/refused.txt dist/relative.bin $PWD/dist/nothing-here.bin $PWD/dist" >> "$DISPAT_OUTPUT"`,
+			want: []string{"not an absolute path", "names a directory, want a file", "nothing-here.bin",
+				"name repeats in the export", "github release asset upload failed"},
+			// The second app.bin is the repeat and the invalid entries are
+			// never attempted; the first path under a name is the one sent.
+			uploads: []string{"app.bin=good\n", "refused.txt=refused\n"},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			if row.skip != nil {
+				row.skip(t)
+			}
+			var mu sync.Mutex
+			var uploads []upload
+			var srv *httptest.Server
+			srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if githubTagProbe(w, req, nil) {
+					return
+				}
+				switch {
+				case req.Method == http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+				case req.URL.Path == "/uploads":
+					name := req.URL.Query().Get("name")
+					body, err := io.ReadAll(req.Body)
+					require.NoError(t, err)
+					mu.Lock()
+					uploads = append(uploads, upload{name: name, body: string(body)})
+					mu.Unlock()
+					if name == "refused.txt" {
+						// An upload is not re-issued: a half-done one is the
+						// next run's reconcile job rather than this one's retry.
+						w.WriteHeader(http.StatusInternalServerError)
+						_, _ = w.Write([]byte(`{"message":"no room"}`))
+						return
+					}
+					w.WriteHeader(http.StatusCreated)
+				default:
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(strings.ReplaceAll(row.create, "{uploads}", srv.URL+"/uploads{?name,label}")))
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			r := harness.New(t)
+			cfg := githubConfig(srv.URL)
+			cfg.Scripts["publish"] = models.Script{row.publish}
+			r.WriteConfigModel(cfg)
+			t.Setenv("DISPAT_IT_TOKEN", "tkn")
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): bootstrap with artefacts")
+			t.Cleanup(func() { _ = os.Chmod(r.Path("packages", "core", "locked.bin"), 0o600) })
+
+			res := r.Release()
+			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			for _, want := range row.want {
+				assert.Contains(t, res.Stdout+res.Stderr, want)
+			}
+			assert.True(t, r.IsTagged("core@0.1.0"),
+				"the release is out whatever its attachments did; tags: %v", r.TagList())
+			if row.uploads != nil {
+				mu.Lock()
+				defer mu.Unlock()
+				var got []string
+				for _, u := range uploads {
+					got = append(got, u.name+"="+u.body)
+				}
+				assert.Equal(t, row.uploads, got)
+			}
+		})
+	}
 }
 
 // The failures after the point of no return.

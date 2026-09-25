@@ -11,7 +11,6 @@ package integration
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -189,32 +188,4 @@ func TestCovTailSelfUpdateReadsItsOwnRepositoryByDefault(t *testing.T) {
 	assert.Contains(t, res.Stdout, "available dispat "+suNew)
 	assert.Contains(t, strings.Join(asked, "\n"), "/repos/yohimik/dispat/releases",
 		"the defaults are dispat's own repository, not an empty pair")
-}
-
-// TestCovTailSelfUpdateRefusesADownloadThatIsShort: the release states the
-// size of the asset it publishes, so a transfer that ended early is knowable
-// before the digest is even considered. A truncated binary that happened to
-// still run would be the worst possible thing to swap in, so the size is
-// checked and the running binary is left alone.
-func TestCovTailSelfUpdateRefusesADownloadThatIsShort(t *testing.T) {
-	payload := covSUPayload(t, suNew)
-	api := covSUServe(t, func(a *covSUAPI, w http.ResponseWriter, req *http.Request) {
-		if strings.HasPrefix(req.URL.Path, "/dl/") || strings.HasPrefix(req.URL.Path, "/assets/") {
-			// The release says len(payload); the connection hands over half.
-			half := payload[:len(payload)/2]
-			w.Header().Set("Content-Length", fmt.Sprint(len(half)))
-			_, _ = w.Write(half)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]any{covSUReleaseJSON(a.base, suNew, payload)})
-	})
-	r := harness.New(t)
-	exe := covSUExe(t, suOld)
-
-	res := r.CommandBin(exe, "self-update", "--api-url", api.base, "--owner", "o", "--repo", "r")
-	assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout+res.Stderr, "the download is incomplete")
-	assert.Equal(t, suOld, covVersionOf(t, r, exe), "the working binary is where it was")
-	assert.NoFileExists(t, backupPath(exe), "and nothing was kept beside it")
 }

@@ -8,6 +8,12 @@ package integration
 // the fixture.
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,6 +74,104 @@ func TestDraftReleasesWaitForAHumanToPublish(t *testing.T) {
 	r.ReleaseOK()
 	assert.Len(t, bodies(), 1)
 	assert.True(t, r.IsTagged("core@0.1.0"), "the tag is dispat's, whoever publishes the release")
+}
+
+// TestDraftSearchReadsTheListingItCanTrust: a draft has no tag ref, so the
+// release listing is the only thing that can see one, and the search walks it
+// page by page within a bound. A full page is not the end of the listing, so a
+// draft on the second page is found and skipped (W224) rather than created a
+// second time. A listing that does not parse is a permissions or proxy
+// problem, not an answer, and fails the record instead of reading as "no
+// draft yet". A listing that parses and carries no draft within the searched
+// pages says so and creates the release.
+func TestDraftSearchReadsTheListingItCanTrust(t *testing.T) {
+	fullPage := func(w http.ResponseWriter) {
+		entries := make([]map[string]any, 0, 100)
+		for i := range 100 {
+			entries = append(entries, map[string]any{"tag_name": fmt.Sprintf("other@0.0.%d", i), "draft": false})
+		}
+		_ = json.NewEncoder(w).Encode(entries)
+	}
+	for _, row := range []struct {
+		name    string
+		listing func(w http.ResponseWriter, req *http.Request)
+		code    int
+		want    string
+		skipped bool
+		pages   int
+		creates int
+	}{
+		{
+			name: "a draft past the first page is found",
+			listing: func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Query().Get("page") == "1" {
+					fullPage(w)
+					return
+				}
+				_ = json.NewEncoder(w).Encode([]map[string]any{{
+					"tag_name": "core@0.1.0", "draft": true,
+					"upload_url": "http://127.0.0.1:1/uploads{?name,label}",
+				}})
+			},
+			skipped: true, pages: 2,
+		},
+		{
+			name: "a listing that does not parse fails the record",
+			listing: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"message":"not a listing at all"}`))
+			},
+			code: 1, want: "parsing release listing", pages: 1,
+		},
+		{
+			name:    "a listing with no draft in the searched pages creates the release",
+			listing: func(w http.ResponseWriter, _ *http.Request) { fullPage(w) },
+			want:    "no draft found within the searched pages", pages: 3, creates: 1,
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var mu sync.Mutex
+			creates, pages := 0, 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if githubTagProbe(w, req, nil) {
+					return
+				}
+				switch {
+				case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/releases"):
+					mu.Lock()
+					pages++
+					mu.Unlock()
+					w.Header().Set("Content-Type", "application/json")
+					row.listing(w, req)
+				case req.Method == http.MethodGet:
+					w.WriteHeader(http.StatusOK)
+				default:
+					mu.Lock()
+					creates++
+					mu.Unlock()
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"id": 1}`))
+				}
+			}))
+			t.Cleanup(srv.Close)
+			r := harness.New(t)
+			cfg := githubConfig(srv.URL)
+			cfg.GitHub.AllPackages = models.Bool(true)
+			cfg.GitHub.Draft = models.Bool(true)
+			r.WriteConfigModel(cfg)
+			t.Setenv("DISPAT_IT_TOKEN", "tkn")
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): bootstrap")
+
+			res := r.Command("github", "--package", "core", "--log-level", "debug")
+			assert.Equal(t, row.code, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, row.want)
+			assert.Equal(t, row.skipped, harness.IsCodePresent(res.Events, "W224"), "stdout:\n%s", res.Stdout)
+			mu.Lock()
+			defer mu.Unlock()
+			assert.Equal(t, row.pages, pages, "the search reads the pages it needs and no more")
+			assert.Equal(t, row.creates, creates, "a release is created only when no draft was found")
+		})
+	}
 }
 
 // TestDraftFlagHoldsBackAndTheFlipAbandonsTheDraft: --draft drafts a release

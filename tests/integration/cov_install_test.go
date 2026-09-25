@@ -113,40 +113,6 @@ func TestInstallFolderRuleFallsThroughUntilSomethingAnswers(t *testing.T) {
 	})
 }
 
-// TestInstallRefusesALinkToSomethingThatIsNotAFile: a link on PATH pointing at
-// a binary is an ordinary way to install one, and replacing the link is what
-// was asked for. A link to anything else is that thing, and an install is two
-// renames: the first would move somebody's folder out of the way to stand a
-// binary where it stood.
-func TestInstallRefusesALinkToSomethingThatIsNotAFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("creating a link needs a privilege the test runner may not have")
-	}
-	r := newToolRepo(t)
-	folder := filepath.Join(r.bin, "a-folder-somebody-owns")
-	require.NoError(t, os.Mkdir(folder, 0o755))
-	require.NoError(t, os.Symlink(folder, r.installed()))
-
-	before := len(r.requests())
-	res := r.install()
-	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout, "link to something that is not a file")
-	assert.Equal(t, before, len(r.requests()), "the refusal is decided on disk and costs no request")
-	assert.DirExists(t, folder, "and what the link pointed at is still there")
-
-	// The same link pointed at an ordinary file is exactly what an install
-	// replaces, so the rule is about what the link resolves to rather than
-	// about links.
-	require.NoError(t, os.Remove(r.installed()))
-	target := filepath.Join(r.bin, "the-real-file")
-	require.NoError(t, os.WriteFile(target, []byte("#!/bin/sh\necho \"tool 0.0.1\"\n"), 0o755))
-	require.NoError(t, os.Symlink(target, r.installed()))
-
-	res = r.install()
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, toolNew, r.version(r.installed()))
-}
-
 // TestInstallReadsARepositoryHoweverItIsSpelled: naming a repository by URL is
 // worth doing because the URL is what the browser is showing, so every
 // spelling a reader has at hand reaches the same two path segments — and every

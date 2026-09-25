@@ -253,8 +253,14 @@ func (r *toolRepo) requests() []string {
 // in, naming the asset the way a reader would.
 func (r *toolRepo) install(args ...string) harness.RunResult {
 	r.T.Helper()
-	return r.Command(append([]string{"install", "https://github.com/acme/tool",
-		"--api-url", r.api, "--bin-dir", r.bin, "--asset", "tool-{os}-{arch}"}, args...)...)
+	return r.Command(r.installArgsIn(r.bin, args...)...)
+}
+
+// installArgsIn is the command line install runs, pointed at dir instead of
+// the fixture's own folder.
+func (r *toolRepo) installArgsIn(dir string, args ...string) []string {
+	return append([]string{"install", "https://github.com/acme/tool",
+		"--api-url", r.api, "--bin-dir", dir, "--asset", "tool-{os}-{arch}"}, args...)
 }
 
 // installWithToken is install with a credential in the environment and
@@ -699,28 +705,88 @@ func TestInstallPipeIsAlwaysSomethingToDo(t *testing.T) {
 	assert.Empty(t, entries, "--check downloads nothing, pipe or not")
 }
 
-// TestInstallRefusesADestinationItMustNotReplace: /usr/local/bin is a shared
-// folder, and a name that is already a directory there belongs to somebody.
-// Installing over it would rename that directory aside to put a binary where
-// it stood, which is a thing no download may do quietly.
+// installDestinationRefusal is one thing that can stand where an install
+// would put its binary: occupy puts it there and returns the command line
+// that points an install at it, and kept says what must still be true of it
+// after the refusal.
+type installDestinationRefusal struct {
+	name   string
+	occupy func(t *testing.T, r *toolRepo) []string
+	want   string
+	kept   func(t *testing.T, r *toolRepo)
+}
+
+// TestInstallRefusesADestinationItMustNotReplace: an install is two renames,
+// and the first would move whatever stands at the destination out of the way
+// to put a binary where it stood. A folder, a link to something that is not a
+// file, a named pipe, a device and a live socket each belong to somebody, so
+// each is refused by what it is, before any request, and is still there
+// afterwards. The rows only a unix filesystem can hold come from
+// unixDestinationRefusals.
 func TestInstallRefusesADestinationItMustNotReplace(t *testing.T) {
-	r := newToolRepo(t)
-	require.NoError(t, os.Mkdir(r.installed(), 0o755))
+	rows := append([]installDestinationRefusal{{
+		name: "a folder",
+		occupy: func(t *testing.T, r *toolRepo) []string {
+			require.NoError(t, os.Mkdir(r.installed(), 0o755))
+			return r.installArgsIn(r.bin)
+		},
+		want: "is a folder",
+		kept: func(t *testing.T, r *toolRepo) {
+			for _, args := range [][]string{{"--force"}, {"--check"}} {
+				res := r.install(args...)
+				assert.Equal(t, 1, res.Code, "args: %v\nstdout:\n%s", args, res.Stdout)
+				assert.Contains(t, res.Stdout, "is a folder", "args: %v", args)
+			}
+			assert.DirExists(t, r.installed(), "and it is still where it was")
+			entries, err := os.ReadDir(r.bin)
+			require.NoError(t, err)
+			assert.Len(t, entries, 1, "nothing was staged beside it: %v", entries)
 
-	for _, args := range [][]string{nil, {"--force"}, {"--check"}} {
-		res := r.install(args...)
-		assert.Equal(t, 1, res.Code, "args: %v\nstdout:\n%s", args, res.Stdout)
-		assert.Contains(t, res.Stdout, "is a folder")
+			// A pipe never touches the destination, so it never asks about it.
+			res := r.install("--pipe", "cat > unpacked")
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		},
+	}, {
+		name: "a link to a folder",
+		occupy: func(t *testing.T, r *toolRepo) []string {
+			if runtime.GOOS == "windows" {
+				t.Skip("creating a link needs a privilege the test runner may not have")
+			}
+			folder := filepath.Join(r.bin, "a-folder-somebody-owns")
+			require.NoError(t, os.Mkdir(folder, 0o755))
+			require.NoError(t, os.Symlink(folder, r.installed()))
+			return r.installArgsIn(r.bin)
+		},
+		want: "link to something that is not a file",
+		kept: func(t *testing.T, r *toolRepo) {
+			assert.DirExists(t, filepath.Join(r.bin, "a-folder-somebody-owns"),
+				"what the link pointed at is still there")
+
+			// The same link pointed at an ordinary file is exactly what an
+			// install replaces, so the rule is about what the link resolves
+			// to rather than about links.
+			require.NoError(t, os.Remove(r.installed()))
+			target := filepath.Join(r.bin, "the-real-file")
+			require.NoError(t, os.WriteFile(target, []byte("#!/bin/sh\necho \"tool 0.0.1\"\n"), 0o755))
+			require.NoError(t, os.Symlink(target, r.installed()))
+			res := r.install()
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Equal(t, toolNew, r.version(r.installed()))
+		},
+	}}, unixDestinationRefusals()...)
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			r := newToolRepo(t)
+			args := row.occupy(t, r)
+			before := len(r.requests())
+			res := r.Command(args...)
+			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, row.want)
+			assert.Equal(t, before, len(r.requests()), "the refusal is decided on disk and costs no request")
+			row.kept(t, r)
+		})
 	}
-	assert.DirExists(t, r.installed(), "and it is still where it was")
-
-	entries, err := os.ReadDir(r.bin)
-	require.NoError(t, err)
-	assert.Len(t, entries, 1, "nothing was staged beside it: %v", entries)
-
-	// A pipe never touches the destination, so it never asks about it.
-	res := r.install("--pipe", "cat > unpacked")
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 }
 
 // TestInstallPipeSeesTheAssetUnderItsOwnName: an unpacker switches on the
