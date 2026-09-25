@@ -276,7 +276,9 @@ func (e *linkEvidence) project(from, revision, to string) (string, string) {
 		if !ok {
 			return "", fmt.Sprintf("repository %s is not part of this run", hop)
 		}
-		path := linkPathTo(history, next)
+		// A link carries the peer's identity exactly: composition refused a
+		// roster name that only folds onto it (E339).
+		path := history.Links[next]
 		if path == "" {
 			return "", fmt.Sprintf("repository %s does not link %s", hop, next)
 		}
@@ -416,20 +418,6 @@ func sortedNames[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// linkPathTo is where one repository holds its link to a peer, whichever case
-// either side spelled the identity in.
-func linkPathTo(history RepositoryHistory, peer string) string {
-	if path, ok := history.Links[peer]; ok {
-		return path
-	}
-	for name, path := range history.Links {
-		if strings.EqualFold(name, peer) {
-			return path
-		}
-	}
-	return ""
 }
 
 // linkPathsOf lists a repository's link paths in one stable order, which is
