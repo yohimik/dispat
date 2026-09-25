@@ -550,6 +550,15 @@ func TestConfigSpaceLayerRejections(t *testing.T) {
 			want: "cannot be set on a package entry",
 		},
 		{
+			name: "a package entry in a space file cannot hold packages",
+			setup: func(r *harness.Repo) {
+				r.WriteConfigModel(libsConfig(echoBuild, 1))
+				r.WriteFile("packages/dispat.json",
+					`{"packages":{"core":{"packages":{"nested":{"path":"nested"}}}}}`)
+			},
+			want: "cannot be set on a package entry",
+		},
+		{
 			name: "a space packages key must match a folder of that space",
 			setup: func(r *harness.Repo) {
 				cfg := libsConfig(echoBuild, 1)

@@ -15,7 +15,6 @@ package integration
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,64 +43,10 @@ func writeJSON(t *testing.T, r *harness.Repo, relPath string, value any) {
 	r.WriteFile(relPath, string(data))
 }
 
-// TestCovConfigRefusesUnreadableFolderInputs: the change-scope ignore file and
-// the package-exclude file are read at three levels, and a level that cannot
-// carry out what its file says stops the run naming that level's folder.
-func TestCovConfigRefusesUnreadableFolderInputs(t *testing.T) {
-	t.Run("repository ignore file", func(t *testing.T) {
-		r := harness.New(t)
-		r.WriteConfigModel(libsConfig(echoBuild, 1))
-		r.SeedPackage("packages", "core")
-		r.WriteFile(".dispatignore", "docs/\n!\n")
-		r.Commit("feat(core): bootstrap")
-		refuseStatus(t, r, "re-includes nothing")
-	})
-
-	t.Run("space ignore file", func(t *testing.T) {
-		r := harness.New(t)
-		r.WriteConfigModel(libsConfig(echoBuild, 1))
-		r.SeedPackage("packages", "core")
-		r.WriteFile("packages/.dispatignore", "/\n")
-		r.Commit("feat(core): bootstrap")
-		refuseStatus(t, r, "names nothing")
-	})
-
-	t.Run("package ignore file", func(t *testing.T) {
-		r := harness.New(t)
-		r.WriteConfigModel(libsConfig(echoBuild, 1))
-		r.SeedPackage("packages", "core")
-		r.WriteFile("packages/core/.dispatignore", "!\n")
-		r.Commit("feat(core): bootstrap")
-		refuseStatus(t, r, "re-includes nothing")
-	})
-
-	t.Run("exclude file that is a folder", func(t *testing.T) {
-		r := harness.New(t)
-		r.WriteConfigModel(libsConfig(echoBuild, 1))
-		r.SeedPackage("packages", "core")
-		require.NoError(t, os.MkdirAll(r.Path("packages", ".dispatexclude"), 0o755))
-		r.Commit("feat(core): bootstrap")
-		refuseStatus(t, r, ".dispatexclude")
-	})
-}
-
 // TestCovConfigRefusesCollidingPackageIdentities: a package name identifies
 // one package for the whole repository, so two folders that fold onto one
 // name are refused wherever they sit, and both spellings are shown.
 func TestCovConfigRefusesCollidingPackageIdentities(t *testing.T) {
-	t.Run("two folders of one space", func(t *testing.T) {
-		r := harness.New(t)
-		cfg := libsConfig(echoBuild, 1)
-		s := cfg.Spaces["libs"]
-		s.Path = models.PathList{"packages", "vendored"}
-		cfg.Spaces["libs"] = s
-		r.WriteConfigModel(cfg)
-		r.SeedPackage("packages", "core")
-		r.SeedPackage("vendored", "Core")
-		r.Commit("feat(core): two folders, one name")
-		refuseStatus(t, r, "exists in two folders of space")
-	})
-
 	t.Run("two spaces", func(t *testing.T) {
 		r := harness.New(t)
 		cfg := libsConfig(echoBuild, 1)
@@ -164,8 +109,7 @@ func TestCovConfigRefusesCollidingPackageIdentities(t *testing.T) {
 
 // TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel: a folder's own
 // config file configures that folder. It may not move the package it sits in,
-// declare a repository-wide commit type, or carry the spaces and packages of
-// somewhere else, and it is held to the same validation the root file is.
+// and it is held to the same validation the root file is.
 func TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel(t *testing.T) {
 	seed := func(t *testing.T) *harness.Repo {
 		t.Helper()
@@ -180,19 +124,6 @@ func TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel(t *testing.T) {
 		writeJSON(t, r, "packages/core/dispat.json", models.PackageConfig{Path: "elsewhere"})
 		r.Commit("feat(core): bootstrap")
 		refuseStatus(t, r, "path")
-	})
-
-	t.Run("a space folder declaring a section bump", func(t *testing.T) {
-		r := seed(t)
-		writeJSON(t, r, "packages/dispat.json", models.SpaceFile{
-			Changelog: &models.ChangelogConfig{
-				EntryFormatConfig: models.EntryFormatConfig{
-					Sections: []models.SectionConfig{{Title: "Performance", Types: []string{"perf"}, Bump: "patch"}},
-				},
-			},
-		})
-		r.Commit("feat(core): bootstrap")
-		refuseStatus(t, r, "bump cannot be set in a folder's own config file")
 	})
 
 	t.Run("a space folder with an invalid setting", func(t *testing.T) {
@@ -218,14 +149,6 @@ func TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel(t *testing.T) {
 		})
 		r.Commit("feat(core): bootstrap")
 		refuseStatus(t, r, "consumer and provider are required")
-	})
-
-	t.Run("a space folder package entry holding packages of its own", func(t *testing.T) {
-		r := seed(t)
-		r.WriteFile("packages/dispat.json",
-			`{"packages":{"core":{"packages":{"nested":{"path":"nested"}}}}}`)
-		r.Commit("feat(core): bootstrap")
-		refuseStatus(t, r, "cannot be set on a package entry")
 	})
 
 	t.Run("a package entry overriding the space login", func(t *testing.T) {

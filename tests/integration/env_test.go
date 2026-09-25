@@ -16,6 +16,7 @@ package integration
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -70,20 +71,43 @@ func TestStaticEnvReachesScripts(t *testing.T) {
 
 // TestStaticEnvCannotShadowComputedVariables: the DISPAT_ prefix is reserved,
 // so the one way a configuration could lie to a script about its own release
-// is refused at load time rather than silently ignored.
+// is refused at load time rather than silently ignored, at whichever level
+// the key is written, and the refusal names that level.
 func TestStaticEnvCannotShadowComputedVariables(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Env = map[string]string{"DISPAT_VERSION": "9.9.9"}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): first")
+	for name, tc := range map[string]struct {
+		adjust func(*models.File)
+		want   string
+	}{
+		"the root": {
+			adjust: func(cfg *models.File) { cfg.Env = map[string]string{"DISPAT_VERSION": "9.9.9"} },
+			want:   "reserved DISPAT_ prefix",
+		},
+		"a space": {
+			adjust: func(cfg *models.File) {
+				s := cfg.Spaces["libs"]
+				s.Env = map[string]string{"DISPAT_SNEAKY": "x"}
+				cfg.Spaces["libs"] = s
+			},
+			want: `space "libs": env: key "DISPAT_SNEAKY" uses the reserved DISPAT_ prefix`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			tc.adjust(&cfg)
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
 
-	// A config-load refusal happens before the configured logger exists, so it
-	// is reported on stderr by the bootstrap logger.
-	res := r.Status()
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stderr, "reserved DISPAT_ prefix")
+			// A config-load refusal happens before the configured logger
+			// exists, so it is reported on stderr by the bootstrap logger,
+			// which escapes the quotes in a label.
+			res := r.Status()
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, strings.ReplaceAll(res.Stderr, `\"`, `"`), tc.want)
+			assert.Empty(t, r.TagList())
+		})
+	}
 }
 
 // TestReleaseGroupVariableReachesScripts: DISPAT_GROUP is the package's third

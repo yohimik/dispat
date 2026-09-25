@@ -44,25 +44,38 @@ func TestIfReportsWhenItsInvocationFolderDisappears(t *testing.T) {
 }
 
 // TestDiscoveryNamesOneIdentityRepeatedAcrossSpacePaths verifies the
-// diagnostic for the exact same package spelling found under two configured
-// roots. It must name one duplicated identity rather than imply two names.
+// diagnostic for one package identity found under two folders of a space: a
+// name identifies one package for the whole repository, so the folders are
+// refused whether the two spellings are identical or fold onto one name. An
+// identical spelling is named once rather than implying two names.
 func TestDiscoveryNamesOneIdentityRepeatedAcrossSpacePaths(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	libs := cfg.Spaces["libs"]
-	libs.Path = models.PathList{"packages", "vendor"}
-	cfg.Spaces["libs"] = libs
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.SeedPackage("vendor", "core")
-	r.Commit("feat(core): duplicated checkout")
+	for _, row := range []struct {
+		name, spelling string
+	}{
+		{"the same spelling twice", "core"},
+		{"two spellings that fold onto one name", "Core"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			libs := cfg.Spaces["libs"]
+			libs.Path = models.PathList{"packages", "vendor"}
+			cfg.Spaces["libs"] = libs
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.SeedPackage("vendor", row.spelling)
+			r.Commit("feat(core): duplicated checkout")
 
-	res := r.Status()
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	out := diagnosticText(res)
-	assert.Contains(t, out, `package "core" exists in two folders of space`)
-	assert.NotContains(t, out, `packages "core" and "core"`, "identical spellings are named once")
-	assert.Empty(t, plannedPackages(res), "ambiguous ownership cannot produce a partial plan")
+			res := r.Status()
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			out := diagnosticText(res)
+			assert.Contains(t, out, "exists in two folders of space")
+			if row.spelling == "core" {
+				assert.NotContains(t, out, `packages "core" and "core"`, "identical spellings are named once")
+			}
+			assert.Empty(t, plannedPackages(res), "ambiguous ownership cannot produce a partial plan")
+		})
+	}
 }
 
 // TestCommandValidationExplainsSharedFlagsAndRepositoryFreeRollback covers two

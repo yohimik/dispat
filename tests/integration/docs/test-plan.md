@@ -708,7 +708,7 @@ package.
 | `TestIgnoreScopeLevelsConcatenate`                  | Repository, space, and package ignore patterns all apply. A package can re-include a repository exclusion with `!`, and sibling packages do not inherit that override. |
 | `TestIgnoreScopeFileAndKeyAgree`                    | A `.dispatignore` file at the repository root or package folder behaves identically to the `ignore` configuration key at those levels. |
 | `TestIgnoreScopeAppliesToSince`                     | The `--since` flag uses the same file resolution logic, so packages with only ignored changes are skipped and their scripts never run. |
-| `TestIgnoreScopeRefusesAPatternItCannotCarryOut`    | An invalid pattern such as a bare `!` fails configuration loading immediately with exit 1 instead of releasing packages. |
+| `TestIgnoreScopeRefusesAPatternItCannotCarryOut` | A pattern that means nothing as written (a bare `!`, a `/` naming nothing) fails configuration loading with exit 1 instead of releasing packages, whether it is the package's `ignore` key or a `.dispatignore` file at the repository, a space or a package; a `.dispatignore` that is a folder is refused the same way rather than read as "no patterns". |
 
 ### Goal 5: release edge cases (`edgecases_test.go`)
 
@@ -1049,7 +1049,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConfigUnicodeSimpleFoldKeepsDistinctScriptNames` | Dotted `İ` and plain `i` are distinct under Unicode simple folding, so both script names load and each command runs only its own body. |
 | `TestConfigDispatexcludeSelectsTheConfigFile`           | When multiple configuration files exist in a directory, `.dispatexclude` names files to ignore. This behavior applies at the root, space, and package levels, validated by checking format-specific tag output. |
 | `TestConfigResolutionAscendsPastASpaceFile`            | When a space configuration file declares `packages`, invoking dispat inside the space directory still ascends to the root configuration that manages the space. |
-| `TestConfigSpaceLayerRejections`                       | dispat rejects invalid layer declarations before planning: `path` inside space package lists, `path` or `spaces` in space files, `packages` in package files, and space package patterns matching no folders. |
+| `TestConfigSpaceLayerRejections` | dispat rejects invalid layer declarations before planning: `path` inside space package lists, `path` or `spaces` in space files, `packages` in a package entry of the root or of a space file, and space package patterns matching no folders. |
 | `TestConfigRefSplitsTheFile`                           | Splitting configuration across files with `$ref` produces identical releases to single-file setups. Running with `--log-level trace` outputs every referenced path. |
 | `TestConfigRefCycleFailsBeforeAnyWork`                 | Circular `$ref` references cause dispat to exit 1 and print the reference cycle before running scripts or tagging releases. |
 | `TestConfigRefMissingFragmentIsNamed`                  | A missing `$ref` target causes dispat to exit 1, naming the referencing file, the problematic key, and the missing file path. |
@@ -1061,7 +1061,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 |------|--------------|
 | `TestStaticEnvReachesScripts`                          | Environment variables merge across top-level, space, and package layers, with local values taking precedence. Variable names maintain exact casing, `$DISPAT_VERSION` expands to the package version, and run hooks access only top-level variables. |
 | `TestWorkspaceEnvironmentReportsSanitizedNameCollisions` | Package names that sanitize to one shell key warn and retain one complete workspace entry while their release identities and versions remain distinct. |
-| `TestStaticEnvCannotShadowComputedVariables`           | Defining static variables with the reserved `DISPAT_` prefix fails configuration loading rather than being ignored, ensuring scripts can safely rely on `DISPAT_VERSION`. |
+| `TestStaticEnvCannotShadowComputedVariables` | Defining static variables with the reserved `DISPAT_` prefix fails configuration loading rather than being ignored, at the root or on a space with the space named, ensuring scripts can safely rely on `DISPAT_VERSION`. |
 | `TestReleaseGroupVariableReachesScripts`               | `DISPAT_GROUP` names the versioning group whose versions move together, the package's third address beside its name and its space. A grouped package carries the group name, an independently versioned one leaves the variable unset rather than empty, and a static `env` naming it is refused at load like every other computed variable. |
 | `TestStaticEnvRefusesUnusableKeys`                     | dispat rejects environment variable keys containing `=` or empty names during configuration loading and reports the reason. |
 | `TestStaticEnvFromFolderConfigFiles`                   | Environment variables defined in space and package configuration files reach scripts with exact casing, local definitions taking precedence. |
@@ -1226,7 +1226,7 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestRecordsNoChangesTextThatExpandsToNothingFallsBack` | A configured sentence naming a variable nothing defines expands to nothing, and falls back to the built-in that names the cause, because an entry must never publish as a header alone. |
 | `TestRecordsCustomTypeSectionsOrdered` | The whole sections feature in one run: a custom section claims a commit type dispat has never heard of and declares the bump that makes it releasable at all, the list reorders two built-ins, and the built-ins it never names are appended after it rather than dropped. |
 | `TestRecordsBreakingWinsOverACustomClaim` | A claimed type that is also a breaking change renders under Breaking Changes rather than hiding in the custom section, because a reader scans an entry for what breaks them. |
-| `TestRecordsSectionBumpIsRefusedInAFolderConfig` | A section's `bump` in a folder's own config file would render without ever becoming releasable, because the commit parser is built once from the root file; discovery refuses it, naming the section and where the declaration belongs. |
+| `TestRecordsSectionBumpIsRefusedInAFolderConfig` | A section's `bump` in a folder's own config file, a package's or a space's, would render without ever becoming releasable, because the commit parser is built once from the root file; discovery refuses it with exit 1, naming the section and where the declaration belongs, and writes no changelog. |
 | `TestRecordsBodyParagraphsStayInTheirBullet` | A commit body is indented two spaces so both paragraphs stay part of the bullet above them in every markdown renderer, and the blank line between them carries no trailing space. |
 | `TestRecordsEntrySpacingDefaultAndConfigured` | The seam between entries is exactly the configured number of blank lines whatever the entry above ends with (two by default, `entrySpacing: 1` narrows it), the same seam heads content that predates dispat, and a GitHub body carries no seam at all: the spacing belongs to the file. |
 | `TestRecordsEntrySpacingOutsideItsBoundsIsAConfigError` | A value outside the bounds fails the load (exit 1, "entrySpacing must be between 1 and 10") before anything is recorded. |
@@ -2239,9 +2239,8 @@ ordinary authoring paths; nothing here repeats them.
 | `TestCovConfigRefusesInvalidParserSettings` | A parser value the parser itself would refuse is refused while the configuration is still being loaded, `propagation.kinds: ["all"]` among them: the wildcard is spelled `*`, and a plausible guess at it is named rather than ignored. |
 | `TestCovConfigRefusesInvalidAliasTags` | An alias naming no part of the version, a moving alias pinned against moving, and an alias readable back as a release tag are each refused. |
 | `TestCovConfigRefusesInvalidPackageDeclarations` | A package's `src`, `manifestNames` and dependency declarations are held against the packages discovery actually found. |
-| `TestCovConfigRefusesUnreadableFolderInputs` | An ignore file at any of the three levels that cannot be carried out, and an exclude file that is a folder, stop the run naming that folder. |
-| `TestCovConfigRefusesCollidingPackageIdentities` | Two folders that fold onto one package name are refused wherever they sit, and a declared package path is held to the level that may state it. |
-| `TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel` | A folder's own config file may not move its package, declare a repository-wide commit type, or carry spaces and packages of somewhere else. |
+| `TestCovConfigRefusesCollidingPackageIdentities` | Two spaces' folders that fold onto one package name are refused, and a declared package path is held to the level that may state it. |
+| `TestCovConfigRefusesFolderConfigFilesThatOverstepTheirLevel` | A folder's own config file may not move its package, carry a setting the root would refuse, or declare a nameless entry, an unusable dependency object or a per-package login. |
 | `TestCovConfigRefusesUnusableSpaceDependencyObjects` | A space's own dependency object and a package's provider list are held to the same two rules the root object is. |
 | `TestCovConfigPackageOverridesReplaceEveryInheritedRecordField` | Every field of the changelog and GitHub objects overlays independently: one package restates them all, including its file name and its release destination, while its sibling keeps the root's. |
 | `TestCovConfigScalarSpellingsRelease` | A configuration written entirely in the one-value spellings, and with a list of built-in section names each written as its name alone, loads, discovers, plans and releases exactly as its long-form twin does. |
@@ -2361,8 +2360,6 @@ silently did nothing both read as success in a log.
 | `TestCovTailConfigRefusesAVersionGroupItCannotResolve` | A versionGroup shares one namespace with the spaces and may name only a group or a space that versions as one: a nameless group, a group named after a space, a space that versions independently and a space already in a group are each refused, and a space that does version as one is accepted. |
 | `TestCovTailConfigRefusesAnAutoVersionOnlyNamingNoPackage` | `autoVersion.only` narrows a rewrite to named providers, so a name that is no package narrows it to nothing and is refused wherever the block was written, on the space or on one package of it. |
 | `TestCovTailConfigRefusesACommitTypeWithTwoBumps` | A section's bump merges into the one commit parser the whole repository shares, so the fold runs across every layer that may declare one and a type two of them disagree about is refused naming the layer it was read in. |
-| `TestCovTailConfigRefusesAnEnvNameAScriptCouldNotRead` | Static env becomes real environment variables, so a key inside dispat's own reserved prefix is refused where it was written rather than exported over a computed variable a script depends on. |
-| `TestCovTailConfigRefusesAnIgnoreFileItCannotRead` | `.dispatignore` decides what a package is changed by, so a path of that name that is not a readable file is refused rather than read as "no patterns", which would silently widen every package's window. |
 
 ### The step commands and the notifications around them
 
@@ -2682,7 +2679,7 @@ These cases extend the existing planning, configuration, publication, command an
 | Test | Claim proven |
 | --- | --- |
 | `TestConfigReleaseRejectsAShallowImportedPolicyOwner` | Imported source policy requires complete Git history before planning. |
-| `TestConfigReleaseRejectsUnreadableExclusionPolicy` | Unreadable exclusion policy fails discovery instead of admitting excluded packages. |
+| `TestConfigReleaseRejectsUnreadableExclusionPolicy` | A `.dispatexclude` that cannot be read, a looping link at the repository or a folder in a space, fails discovery naming the file instead of admitting excluded packages, and nothing is planned. |
 | `TestConfigAbsoluteFileKeepsTheRequestedRepositoryRoot` | An absolute configuration file outside the checkout is loaded exactly, preserving the requested package root and ignoring a broken default file. |
 | `TestPreviewRefusesAnIncompletePlan` | A fatal cyclic plan produces no partial release preview. |
 | `TestPreviewExplainsAnExplicitChangelogChannelMismatch` | Explicit changelog preview explains channel withholding while ordinary preview retains pending notes. |
@@ -2732,7 +2729,7 @@ These cases extend the existing planning, configuration, publication, command an
 | `TestReleaseAutoVersionKeepsANeverReleasedProviderAtCurrentVersion` | Consumer release preserves the current version of an unchanged, never-released provider and does not create a provider tag. |
 | `TestIfAnEmptyMatchedBranchIsADeliberateNoop` | A matched empty conditional branch succeeds without executing the alternative branch. |
 | `TestIfReportsWhenItsInvocationFolderDisappears` | A vanished invocation directory produces an operational error before the selected conditional script can write anything. |
-| `TestDiscoveryNamesOneIdentityRepeatedAcrossSpacePaths` | Repeated package identity across space paths produces a singular collision diagnostic and no partial plan. |
+| `TestDiscoveryNamesOneIdentityRepeatedAcrossSpacePaths` | One package identity found under two folders of a space, spelled the same or folding onto one name, is refused with no partial plan, and an identical spelling is named once rather than as two names. |
 | `TestCommandValidationExplainsSharedFlagsAndRepositoryFreeRollback` | Foreign shared flags identify their command owners; named rollback checks require no repository and report missing backups. |
 | `TestAutoReplacerSkipsBinaryContentWithoutLosingTextEdits` | A replacement sweep skips binary content with a diagnostic while applying matching text edits and creating no tags. |
 | `TestAutoReplacerReportsAnAtomicWriteRefusalWithoutTruncatingTheFile` | An atomic write refusal returns failure, preserves original content and leaves no temporary file or release tag. |

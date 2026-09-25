@@ -408,27 +408,35 @@ func TestRecordsBreakingWinsOverACustomClaim(t *testing.T) {
 // commit parser, which is built once for the whole repository out of the root
 // file. A folder's own config is read later, during discovery, so a type
 // declared there would render under its section without ever becoming
-// releasable — a section nothing reaches. The load refuses it and says where
-// the declaration belongs.
+// releasable: a section nothing reaches. The load refuses it and says where
+// the declaration belongs, whether the folder is a package's or a space's.
 func TestRecordsSectionBumpIsRefusedInAFolderConfig(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(libsConfig(echoBuild, 1))
-	r.SeedPackage("packages", "core")
-	r.WriteFile("packages/core/dispat.json", `{
+	for name, file := range map[string]string{
+		"a package folder": "packages/core/dispat.json",
+		"a space folder":   "packages/dispat.json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			r.WriteConfigModel(libsConfig(echoBuild, 1))
+			r.SeedPackage("packages", "core")
+			r.WriteFile(file, `{
   "changelog": {
     "sections": [{"title": "Added", "types": ["add"], "bump": "minor"}]
   }
 }`)
-	r.Commit("feat(core): add streaming")
+			r.Commit("feat(core): add streaming")
 
-	res := r.Release()
-	require.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	// A folder's config is read during discovery rather than at load, so the
-	// refusal arrives as the run's own error event rather than on stderr.
-	assert.Contains(t, res.Stdout, "package discovery failed")
-	assert.Contains(t, res.Stdout, "sections[0]")
-	assert.Contains(t, res.Stdout, "bump cannot be set in a folder's own config file")
-	assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
+			res := r.Release()
+			require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+			// A folder's config is read during discovery rather than at load,
+			// so the refusal arrives as the run's own error event rather than
+			// on stderr.
+			assert.Contains(t, res.Stdout, "package discovery failed")
+			assert.Contains(t, res.Stdout, "sections[0]")
+			assert.Contains(t, res.Stdout, "bump cannot be set in a folder's own config file")
+			assert.NoFileExists(t, r.Path("packages", "core", "CHANGELOG.md"))
+		})
+	}
 }
 
 // TestRecordsBodyParagraphsStayInTheirBullet: a commit body is indented two

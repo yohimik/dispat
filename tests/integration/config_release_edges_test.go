@@ -67,16 +67,29 @@ func TestConfigReleaseRejectsAShallowImportedPolicyOwner(t *testing.T) {
 
 // TestConfigReleaseRejectsUnreadableExclusionPolicy proves configuration
 // discovery cannot ignore a broken .dispatexclude and silently choose one of
-// several candidate files without applying its exclusions.
+// several candidate files without applying its exclusions: a link that loops
+// at the repository and a folder where a space's file goes are both refused
+// naming the file, and nothing is planned.
 func TestConfigReleaseRejectsUnreadableExclusionPolicy(t *testing.T) {
-	repo := harness.New(t)
-	repo.SeedPackage("packages", "core")
-	repo.WriteConfigModel(harness.BaseFile(1))
-	repo.Commit("feat(core): seed package")
-	require.NoError(t, os.Symlink(".dispatexclude", repo.Path(".dispatexclude")))
+	for name, occupy := range map[string]func(t *testing.T, repo *harness.Repo){
+		"a looping link at the repository": func(t *testing.T, repo *harness.Repo) {
+			require.NoError(t, os.Symlink(".dispatexclude", repo.Path(".dispatexclude")))
+		},
+		"a folder in a space": func(t *testing.T, repo *harness.Repo) {
+			require.NoError(t, os.MkdirAll(repo.Path("packages", ".dispatexclude"), 0o755))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := harness.New(t)
+			repo.SeedPackage("packages", "core")
+			repo.WriteConfigModel(libsConfig(echoBuild, 1))
+			repo.Commit("feat(core): seed package")
+			occupy(t, repo)
 
-	res := repo.Status("--package", "*")
-	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout+res.Stderr, ".dispatexclude")
-	assert.Empty(t, plannedPackages(res))
+			res := repo.Status("--package", "*")
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, diagnosticText(res), ".dispatexclude")
+			assert.Empty(t, plannedPackages(res))
+		})
+	}
 }

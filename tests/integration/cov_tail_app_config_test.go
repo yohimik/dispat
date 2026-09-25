@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
 
@@ -215,38 +214,4 @@ func TestCovTailConfigRefusesACommitTypeWithTwoBumps(t *testing.T) {
 			covTailRefused(t, r, "a commit type has one bump for the whole repository")
 		})
 	}
-}
-
-// TestCovTailConfigRefusesAnEnvNameAScriptCouldNotRead: static env becomes
-// real environment variables, so a key that is not a variable name is refused
-// where it was written rather than exported as something no shell can read.
-func TestCovTailConfigRefusesAnEnvNameAScriptCouldNotRead(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	s := cfg.Spaces["libs"]
-	s.Env = map[string]string{"DISPAT_SNEAKY": "x"}
-	cfg.Spaces["libs"] = s
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): bootstrap")
-
-	covTailRefused(t, r, `space "libs": env: key "DISPAT_SNEAKY" uses the reserved DISPAT_ prefix`)
-}
-
-// TestCovTailConfigRefusesAnIgnoreFileItCannotRead: .dispatignore is read per
-// folder, and a folder of that name is not a file of ignore patterns. Reading
-// it as "no patterns" would silently widen what a package is changed by, so it
-// is refused naming the file.
-func TestCovTailConfigRefusesAnIgnoreFileItCannotRead(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(libsConfig(echoBuild, 1))
-	r.SeedPackage("packages", "core")
-	// A folder where the ignore file goes. Git does not track an empty one,
-	// so it carries a file, which is also what makes the read fail.
-	r.WriteFile("packages/core/.dispatignore/keep.txt", "not patterns\n")
-	r.Commit("feat(core): bootstrap")
-
-	res := r.Status()
-	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout+res.Stderr, ".dispatignore")
 }

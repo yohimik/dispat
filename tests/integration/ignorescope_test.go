@@ -172,17 +172,46 @@ func TestIgnoreScopeAppliesToSince(t *testing.T) {
 }
 
 // TestIgnoreScopeRefusesAPatternItCannotCarryOut: a pattern that means
-// nothing as written fails the load, with the package that holds it named.
+// nothing as written fails the load, with the level that holds it named,
+// whether it is written as the ignore key or in a .dispatignore file at the
+// repository, a space or a package. A .dispatignore that is a folder is not a
+// file of patterns either: reading it as "no patterns" would silently widen
+// what a package is changed by.
 func TestIgnoreScopeRefusesAPatternItCannotCarryOut(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Packages = map[string]models.PackageConfig{"core": {Ignore: []string{"docs/", "!"}}}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): bootstrap")
+	for _, row := range []struct {
+		name  string
+		setup func(r *harness.Repo, cfg *models.File)
+		want  string
+	}{
+		{"a bare ! in the package's ignore key", func(r *harness.Repo, cfg *models.File) {
+			cfg.Packages = map[string]models.PackageConfig{"core": {Ignore: []string{"docs/", "!"}}}
+		}, "re-includes nothing"},
+		{"a bare ! in the repository's file", func(r *harness.Repo, cfg *models.File) {
+			r.WriteFile(".dispatignore", "docs/\n!\n")
+		}, "re-includes nothing"},
+		{"a pattern naming nothing in the space's file", func(r *harness.Repo, cfg *models.File) {
+			r.WriteFile("packages/.dispatignore", "/\n")
+		}, "names nothing"},
+		{"a bare ! in the package's file", func(r *harness.Repo, cfg *models.File) {
+			r.WriteFile("packages/core/.dispatignore", "!\n")
+		}, "re-includes nothing"},
+		{"a folder where the package's file goes", func(r *harness.Repo, cfg *models.File) {
+			// Git does not track an empty folder, so it carries a file.
+			r.WriteFile("packages/core/.dispatignore/keep.txt", "not patterns\n")
+		}, ".dispatignore"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			r.SeedPackage("packages", "core")
+			row.setup(r, &cfg)
+			r.WriteConfigModel(cfg)
+			r.Commit("feat(core): bootstrap")
 
-	res := r.Release()
-	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout, "re-includes nothing")
-	assert.Empty(t, r.TagList(), "a refused config releases nothing")
+			res := r.Release()
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, diagnosticText(res), row.want)
+			assert.Empty(t, r.TagList(), "a refused config releases nothing")
+		})
+	}
 }
