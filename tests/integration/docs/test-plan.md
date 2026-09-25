@@ -1937,6 +1937,9 @@ Compiler selection and version-stamped fixtures have separate checks:
 | `TestVersionedPrebuiltName` | Version-stamped fixtures select the exact prebuilt filename. |
 | `TestPrebuiltWithSelectedCompilerBuildsVersionedFixtures` | A selected compiler builds stamped fixtures even when the ordinary binary is prebuilt. |
 | `TestVersionedBuildRejectsPrebuiltOnlySelection` | A prebuilt binary alone cannot silently substitute for a version-stamped fixture. |
+| `TestVersionedFixturesDeclareTheirCompiler` | A fixture directory named beside TinyGo supplies every stamped fixture, and TinyGo still declares the runtime the tests expect. |
+| `TestBuildVersionedRefusesAnUnlistedVersion` | A version outside `SelfUpdateFixtureVersions` fails before anything is built and names where it has to be added. |
+| `TestTinyFixtureStageBuildsTheFixtureVersions` | The TinyGo gate's fixture stage builds exactly `SelfUpdateFixtureVersions`, with the harness's flags, stamp, limits and file names, and the gate hands them to the suite. |
 
 ### Goal 50: validated source commits (`commit_validation_test.go`)
 

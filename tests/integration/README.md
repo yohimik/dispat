@@ -34,10 +34,14 @@ compile with `-p 2`, and run with `GOMAXPROCS=2` and a 6 GiB Go heap limit. The 
 helper still use Go.
 
 `DISPAT_TEST_BINARY=<path>` makes the harness drive an already-built ordinary binary. It may be paired with
-`DISPAT_TEST_COMPILER=tinygo` so version-stamped fixtures use the same compiler, or with
-`DISPAT_TEST_VERSIONED_BINARY_DIR=<dir>`, whose matching files are named `dispat-<version>`. A self-update test that
-asks for a versioned binary rejects an incomplete prebuilt selection instead of silently building that fixture with
-Go. This is how a release gate can test the exact artifact it will export while keeping every candidate on TinyGo.
+`DISPAT_TEST_COMPILER=tinygo` so version-stamped fixtures use the same compiler, with
+`DISPAT_TEST_VERSIONED_BINARY_DIR=<dir>`, whose matching files are named `dispat-<version>`, or with both: the
+directory then supplies every fixture, and the compiler declares the runtime the binaries were built for, which the
+tests that expect TinyGo behavior read. Self-update tests ask only for the versions in
+`harness.SelfUpdateFixtureVersions`, and a test that asks for a versioned binary rejects an incomplete prebuilt
+selection instead of silently building that fixture with Go. The TinyGo gate in
+[`services/dispat/Dockerfile`](../../services/dispat/Dockerfile) uses both: it tests the exact artifact it will export,
+and its `tiny-fixtures` stage builds the fixtures once for every shard.
 
 Prebuilt and TinyGo modes reject `DISPAT_COVERDIR` and `DISPAT_TEST_RACE=1`: those settings promise Go coverage or race
 instrumentation that the selected binaries do not carry. Ordinary Go coverage and race runs retain their existing

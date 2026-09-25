@@ -23,12 +23,15 @@ done
 # The integration suite's key is the production code, not the checkout: its
 # source stage takes pkg and services/dispat only from the pruned stage, never
 # from the context and never through src-dispat, and the prune removes the
-# unit tests. A unit-test or changelog commit then replays the suite.
+# unit tests. A unit-test or changelog commit then replays the suite. The one
+# file it names under services/dispat is the release Dockerfile, which the
+# harness reads to hold the TinyGo fixture stage to its version list.
 stage() { sed -n "/^FROM .* AS $1\$/,/^FROM .* AS /p" "$dockerfile" | sed '$d'; }
 integration=$(stage src-integration)
 printf '%s\n' "$integration" | head -1 | grep -q '^FROM runner AS src-integration$' ||
   { echo 'src-integration must build on runner, not on a stage that copies the checkout' >&2; exit 1; }
 if printf '%s\n' "$integration" | grep '^COPY' | grep -v -- '--from=src-production' |
+  grep -v ' services/dispat/Dockerfile ./services/dispat/Dockerfile$' |
   grep -Eq '[[:space:]](\./)?(pkg|services/dispat)(/|[[:space:]])'; then
   echo 'src-integration copies pkg or services/dispat from the build context' >&2
   exit 1

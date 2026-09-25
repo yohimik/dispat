@@ -137,10 +137,12 @@ RUN find pkg services/dispat -type d -name testdata -prune -exec rm -rf {} + \
  && find pkg services/dispat -depth -type d -empty -delete
 
 # The black-box suite's inputs: the pruned production tree above, the suite
-# itself, and the three things it reads from the repository at run time (the
-# two package configurations the npm distribution tests replay and the demo
-# fixtures the landing page shares). Not on src-dispat, whose unit tests,
-# installers, image folders and specification are no input of this suite.
+# itself, and the four things it reads from the repository at run time (the
+# two package configurations the npm distribution tests replay, the demo
+# fixtures the landing page shares, and the release Dockerfile whose TinyGo
+# fixture stage the harness holds to its version list). Not on src-dispat,
+# whose unit tests, installers, image folders and specification are no input
+# of this suite.
 # BuildKit keys a COPY --from on the checksums of the files it copies, so a
 # commit that leaves the pruned tree identical replays test-integration from
 # the cache and only its TEST_COMMIT stamp runs.
@@ -151,6 +153,7 @@ COPY --chown=gopher:gopher tests/integration ./tests/integration
 COPY --chown=gopher:gopher packages/cli/dispat.yaml ./packages/cli/dispat.yaml
 COPY --chown=gopher:gopher packages/docs/dispat.yaml ./packages/docs/dispat.yaml
 COPY --chown=gopher:gopher packages/docs/demo/fixtures ./packages/docs/demo/fixtures
+COPY --chown=gopher:gopher services/dispat/Dockerfile ./services/dispat/Dockerfile
 
 # The lint gate, one target per module: what `dispat run vet --since all`
 # sweeps. vet compiles what it analyses, so these are the build gates too.

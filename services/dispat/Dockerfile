@@ -179,6 +179,27 @@ RUN set -eu; \
     echo "DISPAT_EXPORT_GITHUB=$assets" > /out/dispat-output; \
     cat /out/dispat-output
 
+# The version-stamped binaries the self-update tests install, built once by
+# the same fork, for the builder's own architecture, before any shard starts.
+# The versions are harness.SelfUpdateFixtureVersions and the flags, stamp and
+# limits are the ones the harness gives a TinyGo build of its own; the harness
+# test TestTinyFixtureStageBuildsTheFixtureVersions holds this loop to both.
+# One after another, each with two compile jobs, so the stage holds one TinyGo
+# link in memory at a time.
+FROM tiny-build AS tiny-fixtures
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.cache/tinygo \
+    --mount=type=cache,target=/go/pkg/mod \
+    set -eu; \
+    mkdir -p /fixtures; \
+    for version in 1.0.0 1.1.0 1.2.0 1.2.0-rc.1; do \
+      if GOMAXPROCS=2 GOMEMLIMIT=6GiB tinygo build -opt=z -no-debug -p 2 \
+        -ldflags "-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${version}" \
+        -o "/fixtures/dispat-${version}" . > /tmp/tinygo.raw 2>&1; then :; else \
+        cat /tmp/tinygo.raw >&2; exit 1; fi; \
+      echo "built dispat-${version}"; \
+    done
+
 # Full TinyGo acceptance uses the exact native release binary and the same
 # compiler for version-stamped fixtures. Keep the Go runner and helper, and
 # run unprivileged so permission regressions cannot disappear into skips.
@@ -203,31 +224,37 @@ COPY packages/cli/dispat.yaml /src/packages/cli/dispat.yaml
 COPY packages/docs/dispat.yaml /src/packages/docs/dispat.yaml
 COPY packages/docs/demo/fixtures /src/packages/docs/demo/fixtures
 COPY go.work /src/go.work
+COPY --from=tiny-fixtures /fixtures /fixtures
 RUN cd /src/tools && GOWORK=off go build -o /usr/local/bin/testreport ./testreport \
  && cd /src && go work edit -dropuse=./tools go.work \
  && mkdir -p /gate && chown -R gopher:gopher /src /gate
 USER gopher
 ENV GOWORK=/src/go.work GOPATH=/home/gopher/go GOMAXPROCS=2 GOMEMLIMIT=6GiB
+# The fixtures come from the directory; the compiler is still named, because
+# it is what tells the tests that expect TinyGo's runtime that they drive one.
 ENV DISPAT_TEST_COMPILER=/usr/local/tinygo/bin/tinygo
+ENV DISPAT_TEST_VERSIONED_BINARY_DIR=/fixtures
 # Keep the complete event stream on disk, but print only the summary and
 # failed tests. Dumping a full suite hides its failures behind BuildKit's
 # per-step log limit.
 #
-# The suite runs in three go test processes over an exact round-robin split
-# of its tests (`testreport test --shards`, as the integration gate of
-# Dockerfile.gotest runs six), and still leaves the one log the check below
+# The suite runs in six go test processes over an exact round-robin split of
+# its tests (`testreport test --shards`, as the integration gate of
+# Dockerfile.gotest does), and still leaves the one log the check below
 # reads. It waits far more than it computes, so the processes wait side by
-# side rather than one after another. Three rather than one per core of the
-# release runner, because each shard compiles the version-stamped fixtures it
-# needs with TinyGo on its own, about 3 GiB apiece while it links: four doing
-# so at once held 12 GiB, more than a 16 GB runner can spare. Each -timeout
-# bounds one shard.
+# side rather than one after another. Memory does not bound the count: no
+# shard builds a TinyGo binary of its own (the fixtures come from the
+# tiny-fixtures stage, whose one link at a time peaks between 1.7 and
+# 3.3 GiB), and this stage's cgroup peaks at 0.8 GiB with four shards and with
+# six alike. Six is the integration gate's count: on one builder six finish
+# in 13 minutes where four take 21, and pinned to the four CPUs of a release
+# runner six still finish in 14. Each -timeout bounds one shard.
 RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/gopher/go/pkg/mod,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
     DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
-      testreport test tiny-integration --shards 3 -- \
+      testreport test tiny-integration --shards 6 -- \
         -C /src/tests/integration -count=1 -timeout 120m \
         -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./...; \
     cp /src/coverage/testlog/tiny-integration.json /gate/integration.json; \

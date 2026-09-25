@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -109,9 +110,31 @@ func IsTinyGo() bool {
 	return err == nil && kind == "tinygo"
 }
 
+// tinyGoBuildArgs are the flags of every TinyGo build of dispat the suite
+// drives: the release's size flags, and two compile jobs so a build's memory
+// stays bounded. services/dispat/Dockerfile builds the self-update fixtures
+// with the same flags, which TestTinyFixtureStageBuildsTheFixtureVersions
+// holds it to.
+var tinyGoBuildArgs = []string{"-opt=z", "-no-debug", "-p", "2"}
+
+// tinyGoBuildEnv bounds the compiler process itself the same way: two threads
+// and a 6 GiB Go heap limit.
+var tinyGoBuildEnv = []string{"GOMAXPROCS=2", "GOMEMLIMIT=6GiB"}
+
+// versionLDFlag stamps the version a build reports, exactly as the release
+// build in services/dispat/Dockerfile does.
+const versionLDFlag = "-X github.com/yohimik/dispat/services/dispat/internal/cli.Version="
+
+// SelfUpdateFixtureVersions are the versions a test may ask BuildVersioned
+// for. The TinyGo gate builds exactly these once, in the tiny-fixtures stage of
+// services/dispat/Dockerfile, and hands them to every shard through
+// DISPAT_TEST_VERSIONED_BINARY_DIR, so a version outside this list fails every
+// run rather than only the gate that has no fixture for it.
+var SelfUpdateFixtureVersions = []string{"1.0.0", "1.1.0", "1.2.0", "1.2.0-rc.1"}
+
 func compilerBuildArgs() []string {
 	if IsTinyGo() {
-		return []string{"-opt=z", "-no-debug", "-p", "2"}
+		return slices.Clone(tinyGoBuildArgs)
 	}
 	return nil
 }
@@ -147,11 +170,12 @@ func validateBuildSelection() error {
 	if err != nil {
 		return err
 	}
+	// The fixture directory may be named beside DISPAT_TEST_COMPILER: the
+	// directory supplies every versioned binary (versionedBuildSelection asks
+	// it first), and the compiler only declares the runtime those binaries
+	// and the prebuilt one were made by, which IsTinyGo reports.
 	if versioned && !prebuilt {
 		return errors.New("DISPAT_TEST_VERSIONED_BINARY_DIR requires DISPAT_TEST_BINARY")
-	}
-	if versioned && os.Getenv("DISPAT_TEST_COMPILER") != "" {
-		return errors.New("DISPAT_TEST_VERSIONED_BINARY_DIR and DISPAT_TEST_COMPILER are mutually exclusive")
 	}
 	if (prebuilt || kind == "tinygo") && coverDir() != "" {
 		return errors.New("TinyGo/prebuilt dispat tests and DISPAT_COVERDIR are mutually exclusive: the selected binaries have no Go coverage instrumentation")
@@ -245,6 +269,10 @@ var stamped struct {
 // scenarios need this.
 func BuildVersioned(t testing.TB, version string) string {
 	t.Helper()
+	if !slices.Contains(SelfUpdateFixtureVersions, version) {
+		t.Fatalf("BuildVersioned(%q): not in harness.SelfUpdateFixtureVersions %q; add it there and to the tiny-fixtures stage of services/dispat/Dockerfile",
+			version, SelfUpdateFixtureVersions)
+	}
 	// The plain build owns the temp directory and its cleanup, so ask for it
 	// first and put the stamped binaries alongside.
 	Build(t)
@@ -270,8 +298,7 @@ func BuildVersioned(t testing.TB, version string) string {
 		t.Fatal(err)
 	}
 	out := filepath.Join(binaries.dir, "dispat-"+version)
-	args := []string{"-ldflags",
-		"-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=" + version}
+	args := []string{"-ldflags", versionLDFlag + version}
 	args = append(args, compilerBuildArgs()...)
 	if coverDir() != "" {
 		args = append(args, "-cover", "-covermode=atomic", "-coverpkg="+productionCoverpkg())
@@ -312,7 +339,7 @@ func goBuild(compilerBin, out, dir string, extraArgs ...string) error {
 	cmd := exec.Command(compilerBin, args...)
 	cmd.Dir = dir
 	if filepath.Base(compilerBin) == "tinygo" {
-		cmd.Env = append(os.Environ(), "GOMAXPROCS=2", "GOMEMLIMIT=6GiB")
+		cmd.Env = append(os.Environ(), tinyGoBuildEnv...)
 	}
 	if b, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s build in %s: %w\n%s", compilerBin, dir, err, b)
