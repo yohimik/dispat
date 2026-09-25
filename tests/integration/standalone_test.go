@@ -123,6 +123,48 @@ func TestStandaloneCommitPushAndNothingToCommit(t *testing.T) {
 	assert.Equal(t, 1, r.TagCount("core@"))
 }
 
+// TestStandaloneCommitTagWritesTheAliasTags: a space that publishes alias
+// tags gets them from `dispat commit --tag` as from a release: the release tag
+// and its alias at the same commit, both pushed.
+func TestStandaloneCommitTagWritesTheAliasTags(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	space := cfg.Spaces["libs"]
+	space.AliasTags = []models.AliasTagConfig{{Format: "{name}-v{major}", Moving: true}}
+	cfg.Spaces["libs"] = space
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): a feature worth an alias")
+	remote := r.AddBareRemote()
+	r.Git("push", "-q", "origin", "HEAD:main")
+
+	res := r.Command("commit", "--package", "core", "--tag", "--push")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	release := r.Git("rev-parse", "core@0.1.0^{commit}")
+	assert.Equal(t, release, r.Git("rev-parse", "core-v0^{commit}"), "the alias names the release commit")
+	remoteTags := r.Git("ls-remote", "--tags", remote)
+	assert.Contains(t, remoteTags, "refs/tags/core@0.1.0")
+	assert.Contains(t, remoteTags, "refs/tags/core-v0", "the alias is pushed with the release tag")
+}
+
+// TestStandaloneCommitStopsAtAFailedCommit: `dispat commit --tag` records the
+// release on the commit it makes. When Git cannot make that commit the step
+// fails naming it, and no tag is written for a commit that does not exist.
+func TestStandaloneCommitStopsAtAFailedCommit(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): a feature")
+	r.WriteFile("packages/core/CHANGELOG.md", "## 0.1.0\n")
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*commit --only *"})
+
+	res := r.CommandEnv(fault.Env(), "commit", "--package", "core", "--tag")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	combined := res.Stdout + res.Stderr
+	assert.Contains(t, combined, "release commit failed")
+	assert.Contains(t, combined, harness.GitFaultMarker)
+	assert.Equal(t, 1, fault.Matches())
+	assert.Zero(t, r.TagCount("core@"), "no tag names a commit that was never made")
+}
+
 func TestStandaloneCommitExportsPinWhenDispatOutputSet(t *testing.T) {
 	r := singlePackageRepo(t, echoBuild)
 	r.Commit("feat(core): pinned feature")
