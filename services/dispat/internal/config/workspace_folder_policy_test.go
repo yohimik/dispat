@@ -100,21 +100,6 @@ func TestWorkspaceFolderInputsFollowTheirRepositoryOwner(t *testing.T) {
 	}, excluded, "only the control-owned and explicitly imported .dispatexclude files apply")
 }
 
-func TestResolvedWorkspaceSpaceConfigsNilWorkspaceKeepsLegacyFolderLayers(t *testing.T) {
-	cfg := minimalConfig()
-	root := writeModelRepo(t, cfg, "pkgs/core")
-	writeJSON(t, filepath.Join(root, "pkgs", "dispat.json"),
-		SpaceFile{Scripts: map[string]Script{"folder-only": {"echo folder"}}})
-
-	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
-	require.NoError(t, err)
-	spaces, err := ResolvedWorkspaceSpaceConfigs(loaded, root, nil)
-	require.NoError(t, err)
-	require.Len(t, spaces, 1)
-	_, ok := spaces[0].Script("folder-only")
-	assert.True(t, ok)
-}
-
 // TestWorkspaceNestedOwnerFolderConfigCannotPreemptOwnership ensures the
 // ownership check remains the diagnostic boundary when a control space walks
 // into an undeclared nested Git repository. Files in that other repository

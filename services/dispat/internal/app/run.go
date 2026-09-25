@@ -204,7 +204,7 @@ func (a *App) scriptDefinedAnywhere(name string) bool {
 		}
 	}
 	if a.workspace != nil {
-		if spaces, err := config.ResolvedWorkspaceSpaceConfigs(a.cfg, a.root, a.workspace); err == nil {
+		if spaces, err := config.ResolvedWorkspaceSpaceConfigs(a.workspace); err == nil {
 			for _, sc := range spaces {
 				if _, ok := sc.Script(name); ok {
 					return true

@@ -868,22 +868,12 @@ func DiscoverWorkspace(c *File, controlRoot string, workspace *Workspace) ([]*mo
 	return pkgs, active, excluded, err
 }
 
-// ResolvedWorkspaceSpaceConfigs resolves space-only folder layers with the
-// same ownership policy as DiscoverWorkspace. The slice retains equal local
-// space names from different imported repositories because either may define
-// the only occurrence of a run script.
-func ResolvedWorkspaceSpaceConfigs(c *File, controlRoot string, workspace *Workspace) ([]SpaceConfig, error) {
-	if workspace == nil {
-		resolved, err := ResolvedSpaceConfigs(c, controlRoot)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]SpaceConfig, 0, len(resolved))
-		for _, name := range sortedSpaceNames(c) {
-			out = append(out, resolved[name])
-		}
-		return out, nil
-	}
+// ResolvedWorkspaceSpaceConfigs resolves a composed workspace's space-only
+// folder layers with the same ownership policy as DiscoverWorkspace. The slice
+// retains equal local space names from different imported repositories
+// because either may define the only occurrence of a run script. A single
+// history resolves its own with ResolvedSpaceConfigs.
+func ResolvedWorkspaceSpaceConfigs(workspace *Workspace) ([]SpaceConfig, error) {
 	gitRoots := &gitRootMemo{byDir: make(map[string]string)}
 	var out []SpaceConfig
 	for i := range workspace.Repositories {
