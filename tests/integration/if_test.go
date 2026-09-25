@@ -108,6 +108,26 @@ func TestIfPropagatesTheExitCode(t *testing.T) {
 	assert.Empty(t, res.Stdout)
 }
 
+// TestIfRefusesAConditionItCannotRead: a condition that silently evaluated
+// false would look exactly like a variable that was not set, so an empty
+// condition and one whose name is not a variable name are usage errors that
+// name the condition, and neither branch runs.
+func TestIfRefusesAConditionItCannotRead(t *testing.T) {
+	r := harness.New(t)
+	for name, tc := range map[string]struct{ cond, want string }{
+		"an empty condition":            {"", "empty condition"},
+		"a name that is not a variable": {"1CI=yes", "is not a variable name"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := r.Command("if", tc.cond, "--then", "echo then", "--else", "echo else")
+			assert.Equal(t, 2, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+			assert.NotContains(t, res.Stdout, "then")
+			assert.NotContains(t, res.Stdout, "else")
+		})
+	}
+}
+
 func TestIfRunsInTheInvocationFolder(t *testing.T) {
 	// The chosen script runs where the command was invoked, so a relative path
 	// in it means what the caller meant.

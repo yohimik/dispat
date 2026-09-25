@@ -999,6 +999,7 @@ func TestInstallRefusesABadCommandLineBeforeAnyRequest(t *testing.T) {
 		"no repository at all":         {[]string{"install"}, "install requires a repository"},
 		"two repositories":             {[]string{"install", "acme/tool", "acme/other"}, "install takes one repository"},
 		"a name that is a path":        {[]string{"install", "acme/tool", "--as", "../evil"}, "--as takes a file name, not a path"},
+		"a name that is a folder":      {[]string{"install", "acme/tool", "--as", ".."}, "is not a name for a tool"},
 		"a rollback that installs":     {[]string{"install", "acme/tool", "--rollback", "--release", "1.0.0"}, "--release means nothing beside it"},
 		"an owner beside the URL":      {[]string{"install", "acme/tool", "--owner", "other"}, "--owner means nothing beside it"},
 		"a repo beside the URL":        {[]string{"install", "acme/tool", "--repo", "other"}, "--repo means nothing beside it"},

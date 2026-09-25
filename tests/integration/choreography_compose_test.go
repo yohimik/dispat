@@ -109,6 +109,8 @@ func TestChoreographyRefusesAnIdentityItCannotTrust(t *testing.T) {
 		}},
 		{"a roster without its own identity", "E339",
 			func(cfg *models.File) { cfg.Repository = "" }},
+		{"a roster whose identity is blank", "E339",
+			func(cfg *models.File) { cfg.Repository = "  " }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fleet := newChoreographyFleet(t, "api", "sdk")

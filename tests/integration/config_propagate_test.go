@@ -46,6 +46,16 @@ packages:
       version: sync
       propagate: sync
 `, []string{"core", "flow.version and flow.propagate are mutually exclusive"}},
+		{"yaml top level", "dispat.yaml", `scripts:
+  build: echo building
+  publish: echo publishing
+spaces:
+  libs:
+    path: packages
+    flow: {build: build, publish: publish}
+autoVersion: {range: exact}
+autoPropagate: {range: tilde}
+`, []string{"autoVersion and autoPropagate are mutually exclusive"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := harness.New(t)

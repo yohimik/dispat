@@ -179,6 +179,8 @@ func TestFilterNarrowsTheWindowNeverWidensIt(t *testing.T) {
 // TestFilterUnmatchedTermsAreErrors: a term matching nothing is a typo, and
 // the error looks across the other flag — the two spellings tell each other
 // apart so a standalone package's name explains itself.
+// A repository that configures no space refuses every --space term by
+// saying so, since only --package can reach its packages.
 func TestFilterUnmatchedTermsAreErrors(t *testing.T) {
 	r := filterRepo(t)
 
@@ -203,6 +205,19 @@ func TestFilterUnmatchedTermsAreErrors(t *testing.T) {
 	res = r.RunScript("lint", "-s", "core")
 	assert.Equal(t, 1, res.Code)
 	assert.Contains(t, res.Stdout, "core is a package")
+
+	// A repository that configures no space at all has only standalone
+	// packages, so the refusal names the flag that selects them instead.
+	standalone := harness.New(t)
+	standalone.SeedPackage("tools", "solo")
+	cfg := harness.BaseFile()
+	cfg.Scripts = map[string]models.Script{"lint": {"echo linting"}}
+	cfg.Packages = map[string]models.PackageConfig{"solo": {Path: "tools/solo"}}
+	standalone.WriteConfigModel(cfg)
+	standalone.Commit("feat(solo): bootstrap")
+	res = standalone.RunScript("lint", "-s", "solo")
+	assert.Equal(t, 1, res.Code)
+	assert.Contains(t, res.Stdout, "this repository configures none; every package is standalone, so select it with --package")
 }
 
 // TestFilterSpaceTermStaysInItsSpace: a --space term selects that space's
