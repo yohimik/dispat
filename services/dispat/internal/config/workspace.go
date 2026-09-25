@@ -201,7 +201,7 @@ func composeWorkspace(ctx context.Context, cfg *File, configPath, controlRoot st
 	for i := range repos {
 		repos[i].CompositionHead = compositionHeads[repos[i].Name]
 	}
-	if err := resolveRepositoryBaselines(cfg, repos, participants); err != nil {
+	if err := resolveRepositoryBaselines(cfg, baselineResolution{repos: repos, participants: participants}); err != nil {
 		return nil, err
 	}
 	workspace := newWorkspace(root, repos, modules)
@@ -687,46 +687,123 @@ func waitForLivePin(ctx context.Context, interval time.Duration) error {
 	}
 }
 
-func resolveRepositoryBaselines(cfg *File, repos []Repository, participants *participation) error {
-	byName := make(map[string]Repository, len(repos))
-	for _, repo := range repos {
+// baselineOrigin is where one explicit baseline was written: the repository
+// whose configuration states it and its index in that file's list.
+type baselineOrigin struct {
+	repository string
+	index      int
+}
+
+// baselineResolution is what resolving the explicit baselines reads: the
+// composed repositories a tuple may name, the repositories the run excluded,
+// and, in a linked fleet, the origin of every tuple the peers' files merged
+// into one list. With no origins every tuple comes from one file.
+type baselineResolution struct {
+	repos        []Repository
+	participants *participation
+	origins      []baselineOrigin
+}
+
+// origin answers where tuple i was written. Without recorded origins every
+// tuple is the one configuration file's own, at its own index.
+func (r baselineResolution) origin(i int) baselineOrigin {
+	if i < len(r.origins) {
+		return r.origins[i]
+	}
+	return baselineOrigin{index: i}
+}
+
+// resolveRepositoryBaselines validates every explicit baseline and resolves
+// its revision to a full commit in the repository it names (CCME §27.6).
+//
+// Two tuples sharing a (consumer, releaseTag, repository) key are E333 when
+// one file states both. In a linked fleet two peers may state the same
+// boundary (§27.11): tuples that resolve to one commit are that boundary, kept
+// once, and tuples that resolve to different commits are E333 naming both
+// peers and both revisions, so the plan never depends on which peer the run
+// was started from.
+func resolveRepositoryBaselines(cfg *File, resolution baselineResolution) error {
+	byName := make(map[string]Repository, len(resolution.repos))
+	for _, repo := range resolution.repos {
 		byName[repo.Name] = repo
 	}
-	seen := map[string]RepositoryBaselineConfig{}
+	type stated struct {
+		baseline RepositoryBaselineConfig
+		origin   baselineOrigin
+		written  string
+	}
+	firstByKey := map[string]stated{}
+	statedIn := map[string]RepositoryBaselineConfig{}
+	kept := make([]RepositoryBaselineConfig, 0, len(cfg.RepositoryBaselines))
 	for i := range cfg.RepositoryBaselines {
-		b := &cfg.RepositoryBaselines[i]
-		where := fmt.Sprintf("repositoryBaselines[%d]", i)
+		b := cfg.RepositoryBaselines[i]
+		origin := resolution.origin(i)
+		where := describeBaselineOrigin(origin)
 		if strings.TrimSpace(b.Consumer) == "" || strings.TrimSpace(b.ReleaseTag) == "" ||
 			strings.TrimSpace(b.Repository) == "" || strings.TrimSpace(b.Revision) == "" {
 			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: consumer, releaseTag, repository and revision are required", where))
 		}
 		key := globx.Fold(b.Consumer) + "\x00" + b.ReleaseTag + "\x00" + b.Repository
-		if previous, ok := seen[key]; ok {
+		if previous, ok := statedIn[origin.repository+"\x00"+key]; ok {
 			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s duplicates baseline for consumer %q and releaseTag %q (previous repository %q revision %q)",
 				where, b.Consumer, b.ReleaseTag, previous.Repository, previous.Revision))
 		}
-		repo, ok := byName[b.Repository]
-		if !ok {
-			for _, excluded := range participants.disabled {
-				if strings.EqualFold(excluded.Name, b.Repository) {
-					return WithDiagnostic(DiagnosticBoundary, fmt.Errorf(
-						"config: %s: repository %q is excluded by repositoryOverrides; an excluded repository supplies no baseline",
-						where, b.Repository))
-				}
-			}
-			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: unknown repository %q", where, b.Repository))
+		statedIn[origin.repository+"\x00"+key] = b
+		written := b.Revision
+		if err := resolution.resolveBaseline(&b, where, byName); err != nil {
+			return err
 		}
-		oid, err := gitOutput(repo.Root, "rev-parse", "--verify", b.Revision+"^{commit}")
-		if err != nil {
-			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: revision %q is not a commit in repository %q", where, b.Revision, repo.Name))
+		first, isStated := firstByKey[key]
+		if !isStated {
+			firstByKey[key] = stated{baseline: b, origin: origin, written: written}
+			kept = append(kept, b)
+			continue
 		}
-		if _, err := gitOutput(repo.Root, "merge-base", "--is-ancestor", oid, "HEAD"); err != nil {
-			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: revision %q is not reachable from repository %q HEAD", where, b.Revision, repo.Name))
+		if first.baseline.Revision != b.Revision {
+			return WithDiagnostic(DiagnosticBoundary, fmt.Errorf(
+				"config: repositories %q and %q state conflicting baselines for consumer %q, releaseTag %q and repository %q: "+
+					"revision %q (commit %s) and revision %q (commit %s); state one boundary",
+				first.origin.repository, origin.repository, b.Consumer, b.ReleaseTag, b.Repository,
+				first.written, first.baseline.Revision, written, b.Revision))
 		}
-		b.Repository = repo.Name
-		b.Revision = oid
-		seen[key] = *b
 	}
+	cfg.RepositoryBaselines = kept
+	return nil
+}
+
+// describeBaselineOrigin names where a tuple was written for a refusal: its
+// index, and in a linked fleet the peer whose file states it.
+func describeBaselineOrigin(origin baselineOrigin) string {
+	if origin.repository == "" {
+		return fmt.Sprintf("repositoryBaselines[%d]", origin.index)
+	}
+	return fmt.Sprintf("repository %q repositoryBaselines[%d]", origin.repository, origin.index)
+}
+
+// resolveBaseline checks that one tuple names a participating repository and
+// a commit reachable from its head, and rewrites the tuple to that
+// repository's exact name and the commit's full object ID.
+func (r baselineResolution) resolveBaseline(b *RepositoryBaselineConfig, where string, byName map[string]Repository) error {
+	repo, ok := byName[b.Repository]
+	if !ok {
+		for _, excluded := range r.participants.disabled {
+			if strings.EqualFold(excluded.Name, b.Repository) {
+				return WithDiagnostic(DiagnosticBoundary, fmt.Errorf(
+					"config: %s: repository %q is excluded by repositoryOverrides; an excluded repository supplies no baseline",
+					where, b.Repository))
+			}
+		}
+		return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: unknown repository %q", where, b.Repository))
+	}
+	oid, err := gitOutput(repo.Root, "rev-parse", "--verify", b.Revision+"^{commit}")
+	if err != nil {
+		return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: revision %q is not a commit in repository %q", where, b.Revision, repo.Name))
+	}
+	if _, err := gitOutput(repo.Root, "merge-base", "--is-ancestor", oid, "HEAD"); err != nil {
+		return WithDiagnostic(DiagnosticBoundary, fmt.Errorf("config: %s: revision %q is not reachable from repository %q HEAD", where, b.Revision, repo.Name))
+	}
+	b.Repository = repo.Name
+	b.Revision = oid
 	return nil
 }
 

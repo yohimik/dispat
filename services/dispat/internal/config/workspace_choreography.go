@@ -94,8 +94,10 @@ func ComposeLinked(ctx context.Context, cfg *File, configPath, entryRoot string,
 	walk.reportRosterDisagreement()
 
 	repos := walk.repositories()
-	mergePeerBaselines(cfg, repos)
-	if err := resolveRepositoryBaselines(cfg, repos, &participation{disabled: walk.disabled}); err != nil {
+	origins := mergePeerBaselines(cfg, repos)
+	if err := resolveRepositoryBaselines(cfg, baselineResolution{
+		repos: repos, participants: &participation{disabled: walk.disabled}, origins: origins,
+	}); err != nil {
 		return nil, err
 	}
 	workspace := newWorkspace(root, repos, nil)
@@ -550,26 +552,28 @@ func (w *linkWalk) repositories() []Repository {
 // peer declares into the entry's list. A boundary is a statement about two
 // repositories, and the repository that owns the consumer is the one that
 // knows it; with no control file to write it in, the run has to read them all.
-func mergePeerBaselines(cfg *File, repos []Repository) {
-	seen := make(map[string]bool, len(cfg.RepositoryBaselines))
-	key := func(b RepositoryBaselineConfig) string {
-		return globx.Fold(b.Consumer) + "\x00" + b.ReleaseTag + "\x00" + globx.Fold(b.Repository)
-	}
-	for _, b := range cfg.RepositoryBaselines {
-		seen[key(b)] = true
+//
+// Every peer's tuples are appended, including one whose key another peer
+// already states: whether two such tuples agree is a question about the
+// commits their revisions name, which only resolution can answer. The origin
+// of each merged tuple, index for index, is returned so resolution can tell a
+// duplicate within one file from the same boundary stated by two peers, and
+// name both peers when they disagree.
+func mergePeerBaselines(cfg *File, repos []Repository) []baselineOrigin {
+	origins := make([]baselineOrigin, 0, len(cfg.RepositoryBaselines))
+	for i := range cfg.RepositoryBaselines {
+		origins = append(origins, baselineOrigin{repository: cfg.Repository, index: i})
 	}
 	for i := range repos {
 		if repos[i].Config == cfg {
 			continue
 		}
-		for _, b := range repos[i].Config.RepositoryBaselines {
-			if seen[key(b)] {
-				continue
-			}
-			seen[key(b)] = true
+		for j, b := range repos[i].Config.RepositoryBaselines {
 			cfg.RepositoryBaselines = append(cfg.RepositoryBaselines, b)
+			origins = append(origins, baselineOrigin{repository: repos[i].Name, index: j})
 		}
 	}
+	return origins
 }
 
 // readLinkInventory reads the submodule names and paths a repository declares,

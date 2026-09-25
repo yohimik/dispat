@@ -105,6 +105,35 @@ func TestChoreographyNeedsATupleWithoutAReleaseCommit(t *testing.T) {
 		"the plan the tuple unblocked is an ordinary plan")
 }
 
+// handTaggedBoundaryFleet is the fleet the explicit-boundary scenarios read:
+// api-pkg@0.1.0 tagged by hand, so no release commit proves what it
+// incorporated and only a tuple can, and a propagating fix in sdk after the
+// revision api's checkout pinned. With isProviderReleased, sdk-pkg@0.1.0 is
+// tagged by hand at that fix and pushed, so the provider has released its work
+// and the declared revision alone decides whether api-pkg is still owed it.
+// It returns the fleet, the revision before the work and the work commit.
+func handTaggedBoundaryFleet(t *testing.T, isProviderReleased bool) (*choreographyFleet, string, string) {
+	t.Helper()
+	fleet := crossRepositoryFleet(t)
+	api := fleet.peer("api")
+	before := api.Git("-C", ".links/sdk", "rev-parse", "HEAD")
+	api.Git("tag", "-a", "api-pkg@0.1.0", "-m", "tagged by hand")
+	api.Git("push", "-q", "origin", "api-pkg@0.1.0")
+	work := fleet.workIn(api.Repo, "sdk", "sdk-pkg", "fix(sdk-pkg)^: work after the hand-made tag")
+	if isProviderReleased {
+		api.Git("-C", ".links/sdk", "tag", "-a", "sdk-pkg@0.1.0", "-m", "released by hand", work)
+		api.Git("-C", ".links/sdk", "push", "-q", "origin", "sdk-pkg@0.1.0")
+	}
+	return fleet, before, work
+}
+
+// sdkBaseline is the one tuple these scenarios declare: api-pkg@0.1.0
+// incorporated sdk through revision.
+func sdkBaseline(revision string) []models.RepositoryBaselineConfig {
+	return []models.RepositoryBaselineConfig{{
+		Consumer: "api-pkg", ReleaseTag: "api-pkg@0.1.0", Repository: "sdk", Revision: revision}}
+}
+
 // TestChoreographyReadsABaselineDeclaredByThePeerThatKnowsIt: a boundary is a
 // statement about two repositories, and with no control file the run reads it
 // wherever the fleet wrote it down. The declared revision is what the

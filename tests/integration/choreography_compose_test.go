@@ -489,6 +489,42 @@ func TestChoreographyReadsOneBoundaryTwoPeersBothState(t *testing.T) {
 		"the one declared revision is the boundary: the work after it reaches the consumer: %s", res.Stdout)
 }
 
+// TestChoreographyRefusesConflictingBoundariesTwoPeersState: two peers that
+// write the same boundary down at different commits contradict each other, and
+// a fleet has no control file to settle which one is right. The conflicting
+// tuple is E333 (CCME §27.6) naming both peers and both revisions, and a run
+// from either end refuses it the same way (§27.12 vector 2) rather than
+// planning from whichever tuple its own file happened to state.
+func TestChoreographyRefusesConflictingBoundariesTwoPeersState(t *testing.T) {
+	fleet, before, work := handTaggedBoundaryFleet(t, true)
+	api := fleet.peer("api")
+	fleet.configureIn(api.Repo, "sdk", "chore: state the boundary at the work", func(cfg *models.File) {
+		cfg.RepositoryBaselines = sdkBaseline(work)
+	})
+	fleet.writeConfig("api", func(cfg *models.File) {
+		cfg.Dependencies = models.Dependencies{{Consumer: "api-pkg", Provider: "sdk-pkg"}}
+		cfg.RepositoryBaselines = sdkBaseline(before)
+	})
+	api.Commit("chore: state the boundary before the work")
+	fleet.push("api")
+	// sdk catches up with its own remote, where the tuple was pushed from api's
+	// checkout, and follows api, so a clone of sdk reads both statements too.
+	fleet.peer("sdk").Git("pull", "-q", "--ff-only", "origin", harness.DefaultBranch)
+	fleet.follow("sdk", "api")
+
+	for name, entry := range map[string]*harness.Repo{"api": api.Repo, "a fresh sdk clone": fleet.enter("sdk")} {
+		t.Run(name, func(t *testing.T) {
+			res := entry.Status("--package", "*")
+			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			requireDiagnostic(t, res, "E333")
+			out := res.Stdout + res.Stderr
+			for _, named := range []string{`\"api\"`, `\"sdk\"`, before, work, "conflicting baselines"} {
+				assert.Contains(t, out, named)
+			}
+		})
+	}
+}
+
 // TestChoreographyRefusesALinkedPeerWithNoConfiguration: a peer is a
 // repository that states what it releases, and a checkout with no dispat file
 // of its own is refused by name rather than composed against its linker's.

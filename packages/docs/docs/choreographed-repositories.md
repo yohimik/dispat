@@ -310,8 +310,11 @@ repositoryBaselines:
 
 This says `api-pkg@2.4.0` incorporated `sdk` through that revision. Write the entry in whichever peer knows it: dispat
 merges the `repositoryBaselines` of every composed repository before it resolves a boundary, because there is no
-central file to collect them in. An explicit tuple wins over the link evidence. `control` is not a valid `repository`
-value here, because this fleet has no participant by that name.
+central file to collect them in. Two peers may state the same boundary: tuples for one consumer, release tag and
+repository whose revisions resolve to one commit are that boundary, stated twice. Tuples that resolve to different
+commits contradict each other, and dispat reports `E333` naming both peers and both revisions from whichever peer the
+run starts in, so correct the peer that is wrong. An explicit tuple wins over the link evidence. `control` is not a
+valid `repository` value here, because this fleet has no participant by that name.
 
 ## Repository participation
 

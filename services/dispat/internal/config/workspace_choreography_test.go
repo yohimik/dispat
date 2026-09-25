@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -356,6 +357,63 @@ func TestChoreographyMergesBaselinesFromEveryPeer(t *testing.T) {
 	_, cfg, err = choreoCompose(t, api, LinkedOptions{})
 	require.NoError(t, err)
 	assert.Len(t, cfg.RepositoryBaselines, 1, "the same boundary from two peers is one baseline")
+}
+
+// TestChoreographyRefusesConflictingBaselinesFromTwoPeers: two peers stating
+// one (consumer, releaseTag, repository) key at different commits is a
+// conflicting tuple (CCME §27.6), and the refusal cannot depend on which peer
+// the run started in (§27.12 vector 2): both entries refuse it with E333
+// naming both peers and both revisions. Two spellings of one commit are one
+// boundary, and a duplicate within one file stays the file's own mistake.
+func TestChoreographyRefusesConflictingBaselinesFromTwoPeers(t *testing.T) {
+	api := choreoRepo(t, "api", choreoConfig("api", "sdk"))
+	sdk := choreoRepo(t, "sdk", choreoConfig("sdk", "api"))
+	before := strings.TrimSpace(workspaceGit(t, sdk, "rev-parse", "HEAD"))
+	require.NoError(t, os.WriteFile(filepath.Join(sdk, "pkgs", "sdk", "work.txt"), []byte("work\n"), 0o644))
+	workspaceGit(t, sdk, "add", ".")
+	workspaceGit(t, sdk, "commit", "-m", "fix: the provider's work")
+	work := strings.TrimSpace(workspaceGit(t, sdk, "rev-parse", "HEAD"))
+	choreoLink(t, api, sdk, "sdk")
+	choreoLink(t, sdk, api, "api")
+	choreoFollowRemote(t, api, DefaultLinkPath("sdk"))
+
+	tuple := func(revision string) []RepositoryBaselineConfig {
+		return []RepositoryBaselineConfig{{
+			Consumer: "api-pkg", ReleaseTag: "api-pkg@1.0.0", Repository: "sdk", Revision: revision}}
+	}
+	state := func(root, identity, peer string, baselines []RepositoryBaselineConfig) {
+		cfg := choreoConfig(identity, peer)
+		cfg.RepositoryBaselines = baselines
+		choreoWriteConfig(t, root, cfg)
+	}
+	// Each peer's own file is what its checkout holds, so both ends read the
+	// same two statements: api's own and the one in the sdk checkout.
+	stateEverywhere := func(fromAPI, fromSDK []RepositoryBaselineConfig) {
+		state(api, "api", "sdk", fromAPI)
+		state(filepath.Join(api, DefaultLinkPath("sdk")), "sdk", "api", fromSDK)
+		state(sdk, "sdk", "api", fromSDK)
+		state(filepath.Join(sdk, DefaultLinkPath("api")), "api", "sdk", fromAPI)
+	}
+
+	stateEverywhere(tuple(before), tuple(work))
+	for _, entry := range []string{api, sdk} {
+		_, _, err := choreoCompose(t, entry, LinkedOptions{})
+		requireWorkspaceDiagnostic(t, err, DiagnosticBoundary)
+		for _, named := range []string{`"api"`, `"sdk"`, before, work, "conflicting baselines"} {
+			assert.ErrorContains(t, err, named)
+		}
+	}
+
+	stateEverywhere(tuple(before), tuple(before[:12]))
+	_, cfg, err := choreoCompose(t, api, LinkedOptions{})
+	require.NoError(t, err)
+	require.Len(t, cfg.RepositoryBaselines, 1, "two spellings of one commit are one boundary")
+	assert.Equal(t, before, cfg.RepositoryBaselines[0].Revision)
+
+	stateEverywhere(nil, append(tuple(work), tuple(work)...))
+	_, _, err = choreoCompose(t, api, LinkedOptions{})
+	requireWorkspaceDiagnostic(t, err, DiagnosticBoundary)
+	assert.ErrorContains(t, err, `repository "sdk" repositoryBaselines[1] duplicates baseline`)
 }
 
 // TestChoreographyKeepsSameNamedGroupsRepositoryLocal: every peer is an
