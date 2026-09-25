@@ -661,7 +661,15 @@ func autoVersionPackagesCtx(ctx context.Context, p *plan.Plan, pkgs []string, po
 	v := NewAutoVersioner(context.Background(), p, nil, log)
 	changed := map[string]bool{}
 	for _, pkg := range pkgs {
-		if err := v.Package(ctx, p.Releases[pkg], policy); err != nil {
+		rel := p.Releases[pkg]
+		av := rel.Pkg.Space.AutoVersion
+		if policy != nil {
+			av = policy(rel)
+		}
+		if av == nil {
+			continue // the sweep skips a package with no autoVersion block
+		}
+		if err := v.Package(ctx, rel, av); err != nil {
 			return changed, err
 		}
 	}

@@ -107,13 +107,14 @@ func (w *autoVersionWork) resolve(_ context.Context, rel *plan.Release) (task, e
 	if !w.app.releasing(rel) {
 		return nil, nil
 	}
-	if w.policy(rel) == nil {
+	av := w.policy(rel)
+	if av == nil {
 		w.app.log.Debug().Str("package", rel.Pkg.Name).
 			Msg("space has no autoVersion block, nothing to reconcile")
 		return nil, nil
 	}
 	return func(ctx context.Context) error {
-		return w.versioner.Package(ctx, rel, w.policy)
+		return w.versioner.Package(ctx, rel, av)
 	}, nil
 }
 

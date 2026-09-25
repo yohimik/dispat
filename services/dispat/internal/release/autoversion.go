@@ -338,19 +338,11 @@ func NewAutoVersioner(ctx context.Context, p *plan.Plan, sc scanner.Scannerx, lo
 	return &AutoVersioner{run: r, log: log}
 }
 
-// Package reconciles one package's manifests under the given policy. A nil
-// policy means the package's own space block; a policy that answers nil skips
-// the package, which is what a space with no autoVersion block does.
-func (v *AutoVersioner) Package(ctx context.Context, rel *plan.Release, policy func(*plan.Release) *model.AutoVersion) error {
+// Package reconciles one package's manifests under av, the package's
+// effective autoVersion block. The caller resolves it and skips a package
+// that has none.
+func (v *AutoVersioner) Package(ctx context.Context, rel *plan.Release, av *model.AutoVersion) error {
 	pkg := rel.Pkg.Name
-	av := rel.Pkg.Space.AutoVersion
-	if policy != nil {
-		av = policy(rel)
-	}
-	if av == nil {
-		v.log.Debug().Str("package", pkg).Msg("space has no autoVersion block, nothing to reconcile")
-		return nil
-	}
 	tc := &taskCtx{run: v.run, t: task{pkg, taskVersion}, rel: rel,
 		log: v.log.With().Str("package", pkg).Str("stage", "version").Logger()}
 	if err := tc.autoVersion(ctx, av); err != nil {
