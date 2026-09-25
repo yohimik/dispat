@@ -22,75 +22,130 @@ function unwrap(lines: string[]): string {
 
 const BULLET = /^([-*]|\d+\.)\s+/;
 
-/** Splits a markdown document into blocks, in order. */
-export function parseBlocks(src: string): Block[] {
-  const lines = src.split('\n');
-  const blocks: Block[] = [];
-  let i = 0;
+/** A position in a document's lines, which the block readers advance. */
+class LineCursor {
+  private readonly lines: string[];
+  private index = 0;
 
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (line.trim() === '') {
-      i += 1;
-      continue;
-    }
-
-    const fence = /^```(\S*)\s*$/.exec(line);
-    if (fence) {
-      const code: string[] = [];
-      i += 1;
-      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
-        code.push(lines[i]);
-        i += 1;
-      }
-      if (i === lines.length) {
-        throw new Error(`unclosed code fence opened with ${JSON.stringify(line)}`);
-      }
-      blocks.push({kind: 'fence', lang: fence[1], code: code.join('\n')});
-      i += 1;
-      continue;
-    }
-
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
-      blocks.push({kind: 'heading', level: heading[1].length, text: heading[2].trim()});
-      i += 1;
-      continue;
-    }
-
-    if (BULLET.test(line)) {
-      // One list runs until a blank line. Continuation lines are indented,
-      // which is the only thing telling them from the next item.
-      const items: string[] = [];
-      let current: string[] = [];
-      const ordered = /^\d/.test(line);
-      while (i < lines.length && lines[i].trim() !== '') {
-        const marker = BULLET.exec(lines[i]);
-        if (marker && !/^\s/.test(lines[i])) {
-          if (current.length > 0) {
-            items.push(unwrap(current));
-          }
-          current = [lines[i].slice(marker[0].length)];
-        } else {
-          current.push(lines[i].trim());
-        }
-        i += 1;
-      }
-      items.push(unwrap(current));
-      blocks.push({kind: 'list', ordered, items});
-      continue;
-    }
-
-    const para: string[] = [];
-    while (i < lines.length && lines[i].trim() !== '' && !BULLET.test(lines[i]) && !/^```/.test(lines[i]) && !/^#/.test(lines[i])) {
-      para.push(lines[i].trim());
-      i += 1;
-    }
-    blocks.push({kind: 'para', text: unwrap(para)});
+  constructor(lines: string[]) {
+    this.lines = lines;
   }
 
+  isDone(): boolean {
+    return this.index >= this.lines.length;
+  }
+
+  line(): string {
+    return this.lines[this.index];
+  }
+
+  advance(): void {
+    this.index += 1;
+  }
+}
+
+interface BlockReaderOptions {
+  cursor: LineCursor;
+}
+
+/** Splits a markdown document into blocks, in order. */
+export function parseBlocks(src: string): Block[] {
+  const cursor = new LineCursor(src.split('\n'));
+  const blocks: Block[] = [];
+  while (!cursor.isDone()) {
+    if (cursor.line().trim() === '') {
+      cursor.advance();
+      continue;
+    }
+    blocks.push(readBlock({cursor}));
+  }
   return blocks;
+}
+
+/** Reads the block starting at the cursor's non-blank line. */
+function readBlock(options: BlockReaderOptions): Block {
+  const {cursor} = options;
+  const line = cursor.line();
+
+  const fence = /^```(\S*)\s*$/.exec(line);
+  if (fence) {
+    return readFence({cursor, lang: fence[1]});
+  }
+
+  const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+  if (heading) {
+    cursor.advance();
+    return {kind: 'heading', level: heading[1].length, text: heading[2].trim()};
+  }
+
+  if (BULLET.test(line)) {
+    return readList({cursor});
+  }
+
+  return readParagraph({cursor});
+}
+
+interface ReadFenceOptions extends BlockReaderOptions {
+  lang: string;
+}
+
+/** Reads a fenced code block, which has to be closed. */
+function readFence(options: ReadFenceOptions): Block {
+  const {cursor, lang} = options;
+  const opening = cursor.line();
+  const code: string[] = [];
+  cursor.advance();
+  while (!cursor.isDone() && !/^```\s*$/.test(cursor.line())) {
+    code.push(cursor.line());
+    cursor.advance();
+  }
+  if (cursor.isDone()) {
+    throw new Error(`unclosed code fence opened with ${JSON.stringify(opening)}`);
+  }
+  cursor.advance();
+  return {kind: 'fence', lang, code: code.join('\n')};
+}
+
+/** Reads a list, which runs until a blank line. */
+function readList(options: BlockReaderOptions): Block {
+  const {cursor} = options;
+  const ordered = /^\d/.test(cursor.line());
+  const lines: string[] = [];
+  while (!cursor.isDone() && cursor.line().trim() !== '') {
+    lines.push(cursor.line());
+    cursor.advance();
+  }
+  return {kind: 'list', ordered, items: groupListItems({lines})};
+}
+
+interface GroupListItemsOptions {
+  lines: string[];
+}
+
+/**
+ * Groups a list's lines into its items. Continuation lines are indented,
+ * which is the only thing telling them from the next item.
+ */
+function groupListItems(options: GroupListItemsOptions): string[] {
+  const {lines} = options;
+  const starts = lines.flatMap((line, index) => (BULLET.test(line) && !/^\s/.test(line) ? [index] : []));
+  return starts.map((start, index) => {
+    const end = starts[index + 1] ?? lines.length;
+    const marker = BULLET.exec(lines[start]) as RegExpExecArray;
+    const continuation = lines.slice(start + 1, end).map((line) => line.trim());
+    return unwrap([lines[start].slice(marker[0].length), ...continuation]);
+  });
+}
+
+/** Reads a paragraph, which runs until a blank line or another block. */
+function readParagraph(options: BlockReaderOptions): Block {
+  const {cursor} = options;
+  const para: string[] = [];
+  while (!cursor.isDone() && cursor.line().trim() !== '' && !BULLET.test(cursor.line()) && !/^```/.test(cursor.line()) && !/^#/.test(cursor.line())) {
+    para.push(cursor.line().trim());
+    cursor.advance();
+  }
+  return {kind: 'para', text: unwrap(para)};
 }
 
 /** The blocks under a `## <heading>`, up to the next heading of the same level. */
