@@ -734,6 +734,10 @@ operation that writes it:
 - **A tag the remote holds at another commit is a published record.** It is left exactly where it is, reported as
   `E221`, and the package stays `published`, because what failed is this run's recording and not its release. Correct
   the tag that is wrong and run again; dispat will not choose for you.
+- **A tag the remote declines without holding it is a push that failed.** A hook, a tag rule or a missing permission
+  refused the write and the remote records nothing, so the run reports `E224` with the reason the remote gave, and the
+  package stays `published`. The tag is already in this checkout: push it from there (`git push <remote> <tag>`) once
+  the remote accepts it.
 - **Only an alias declared [`moving`](./alias-tags.md) is replaced on the remote.** Moving is what it is for.
 
 Three things `force` deliberately does not do:

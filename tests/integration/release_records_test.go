@@ -572,6 +572,29 @@ func TestReleaseRecordsLostTagPushIsPlannedAgain(t *testing.T) {
 		remoteRecord(t, bare, "core@0.1.0"), "and records it on its own release commit")
 }
 
+// TestReleaseRecordsTagRefusedByTheRemoteIsAFailedPush: a server rule that
+// declines the release tag, a pre-receive hook here as a tag ruleset would be
+// on a hosted remote, leaves no record on the remote. That is a push that
+// failed, reported as E224 with the reason the remote gave, and never E221,
+// which would send the operator looking for a release another run recorded
+// at another commit when no record is in the way at all.
+func TestReleaseRecordsTagRefusedByTheRemoteIsAFailedPush(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	r, bare := newRecordsOrigin(t, recordsConfig(registry))
+	hook := "#!/bin/sh\nwhile read old new ref; do\n  case \"$ref\" in\n  refs/tags/core@*)\n" +
+		"    echo \"release tags are created by the release team\" >&2\n    exit 1 ;;\n  esac\ndone\n"
+	require.NoError(t, os.WriteFile(filepath.Join(bare, "hooks", "pre-receive"), []byte(hook), 0o755))
+
+	res := r.Release()
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry), "the package published")
+	assert.Contains(t, res.Stdout, `"status":"published"`, "and is reported published")
+	assert.True(t, harness.IsCodePresent(res.Events, "E224"), "the push failed: %s", res.Stdout)
+	assert.False(t, harness.IsCodePresent(res.Events, "E221"), "no record is in the way: %s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "pre-receive hook declined", "the remote's reason is named")
+	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"), "and the remote holds no record")
+}
+
 // TestReleaseRecordsInAComposedWorkspace: a fleet plans from several stores at
 // once, so a stale checkout of any one of them plans a version that
 // repository has already published. The comparison covers every participating

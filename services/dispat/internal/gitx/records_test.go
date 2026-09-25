@@ -6,7 +6,9 @@ package gitx
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -89,6 +91,31 @@ func TestPushReleaseRefsAnswersARewrittenAnnotationAsAlreadyRecorded(t *testing.
 	assert.Equal(t, RefExisting, outcomes[0].Result, "the same commit is the same record")
 	assert.Equal(t, stored, remoteTagObject(t, bare, "core@0.1.0"),
 		"and the annotation the remote published is not replaced by the retry")
+}
+
+// TestPushReleaseRefsReportsARecordTheRemoteDeclinedAsAFailedPush: an update
+// hook that declines one release tag leaves the remote without it, which is
+// no record at another commit but the push failing: the error wraps
+// ErrRemoteRefused and names the remote's reason, while the alias the same
+// push carried is still answered as created.
+func TestPushReleaseRefsReportsARecordTheRemoteDeclinedAsAFailedPush(t *testing.T) {
+	root, cli := initRepo(t)
+	ctx := context.Background()
+	bare := addBareRemote(t, root)
+	hook := "#!/bin/sh\ncase \"$1\" in refs/tags/core@*) echo \"no release tags here\" >&2; exit 1 ;; esac\n"
+	require.NoError(t, os.WriteFile(filepath.Join(bare, "hooks", "update"), []byte(hook), 0o755))
+
+	require.NoError(t, cli.CreateTag(ctx, "core@0.1.0", "release core@0.1.0", ""))
+	require.NoError(t, cli.CreateTag(ctx, "v0", "moving alias", ""))
+	outcomes, err := cli.PushReleaseRefs(ctx, "origin", []ReleaseRef{{Name: "core@0.1.0"}, {Name: "v0", IsMoving: true}})
+	require.ErrorIs(t, err, ErrRemoteRefused)
+	assert.ErrorContains(t, err, "refs/tags/core@0.1.0")
+	assert.ErrorContains(t, err, "[remote rejected] (hook declined)", "the remote's reason is named")
+	assert.Equal(t, []RefOutcome{{Name: "v0", Result: RefCreated}}, outcomes,
+		"the alias landed and is answered, and the declined record is no outcome at all")
+	listed, err := exec.Command("git", "-C", bare, "tag", "--list", "core@*").Output()
+	require.NoError(t, err)
+	assert.Empty(t, strings.TrimSpace(string(listed)), "the remote holds no record")
 }
 
 // TestPushReleaseRefsRefusesANameGitWouldNotTake: a ref name is built from

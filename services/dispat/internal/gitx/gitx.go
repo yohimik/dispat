@@ -2426,10 +2426,9 @@ func (c *LocalGitx) Push(ctx context.Context, remote string, refs []ReleaseRef) 
 	if len(refs) == 0 {
 		return report, nil
 	}
+	// A remote that declined one record still answers for the others, so the
+	// report carries what did land beside the error that names what did not.
 	outcomes, err := c.PushReleaseRefs(ctx, remote, refs)
-	if err != nil {
-		return report, err
-	}
 	for _, outcome := range outcomes {
 		switch outcome.Result {
 		case RefExisting:
@@ -2440,5 +2439,5 @@ func (c *LocalGitx) Push(ctx context.Context, remote string, refs []ReleaseRef) 
 			report.Conflicts = append(report.Conflicts, outcome)
 		}
 	}
-	return report, nil
+	return report, err
 }

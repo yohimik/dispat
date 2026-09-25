@@ -16,6 +16,7 @@ package gitx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -171,7 +172,9 @@ type RefOutcome struct {
 // Moving aliases travel in the same push, forced, because moving is what they
 // are for. One push rather than one per ref: a release writes a record and its
 // aliases together, and git updates each ref independently, so one refusal
-// fails its own ref and no other.
+// fails its own ref and no other. A ref the remote declined without holding
+// the name is that push failing (resolveRefusedRef): the outcomes of the other
+// refs are still answered, beside the error that names it.
 func (c *LocalGitx) PushReleaseRefs(ctx context.Context, remote string, refs []ReleaseRef) ([]RefOutcome, error) {
 	if len(refs) == 0 {
 		return nil, nil
@@ -193,6 +196,7 @@ func (c *LocalGitx) PushReleaseRefs(ctx context.Context, remote string, refs []R
 	args = append(args, "--", remote)
 	out, runErr := c.runStream(ctx, gitStream{}, append(args, specs...)...)
 	outcomes := make([]RefOutcome, 0, len(refs))
+	var declined []error
 	for _, ref := range refs {
 		name := "refs/tags/" + ref.Name
 		status, isReported := findPushStatus(out, name)
@@ -203,13 +207,17 @@ func (c *LocalGitx) PushReleaseRefs(ctx context.Context, remote string, refs []R
 			outcomes = append(outcomes, RefOutcome{Name: ref.Name, Result: refResultOf(status.flag)})
 			continue
 		}
-		outcome, err := c.resolveRefusedRef(ctx, remote, ref.Name)
+		outcome, err := c.resolveRefusedRef(ctx, remote, ref.Name, status)
+		if errors.Is(err, ErrRemoteRefused) {
+			declined = append(declined, err)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
 		outcomes = append(outcomes, outcome)
 	}
-	return outcomes, nil
+	return outcomes, errors.Join(declined...)
 }
 
 // refResultOf reads the porcelain flag of a ref git did write. A flag this
@@ -229,10 +237,20 @@ func refResultOf(status rune) RefResult {
 // resolveRefusedRef reads the store's answer for a name whose create-only push
 // was refused, and tells the retry of an uncertain write from a published
 // record this run may not touch.
-func (c *LocalGitx) resolveRefusedRef(ctx context.Context, remote, tag string) (RefOutcome, error) {
+//
+// A refusal that leaves the store without the name was about no record at
+// all: a hook, a tag rule or a missing permission declined the write. That is
+// the push failing, with the reason the remote gave, and never a record at
+// another commit, which would send the operator looking for a release nobody
+// made.
+func (c *LocalGitx) resolveRefusedRef(ctx context.Context, remote, tag string, status pushStatus) (RefOutcome, error) {
 	stored, err := c.RemoteTagCommit(ctx, remote, tag)
 	if err != nil {
 		return RefOutcome{}, err
+	}
+	if stored == "" {
+		return RefOutcome{}, fmt.Errorf("gitx: pushing refs/tags/%s to %s ended as %s, and the remote holds no tag by that name: %w",
+			tag, RedactURL(remote), status.formatReason(), ErrRemoteRefused)
 	}
 	local, err := c.ResolveCommit(ctx, "refs/tags/"+tag)
 	if err != nil {
