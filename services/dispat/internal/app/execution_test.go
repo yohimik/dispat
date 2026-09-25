@@ -482,6 +482,21 @@ func TestWorkerLinksRefuseARemoteNoMailboxCouldBe(t *testing.T) {
 	}
 }
 
+// TestWorkerLinksNeverEchoACommitRemoteURL: `commit.remote` may be a URL
+// rather than a remote's name, and one carrying a token is written redacted
+// wherever the link that reaches it is refused or described.
+func TestWorkerLinksNeverEchoACommitRemoteURL(t *testing.T) {
+	const secret = "ghs_itFAKE"
+	a, logs := linkedEntry(t, "", public.ExecutionWorkerConfig{Name: "build-a"})
+	a.cfg.Commit = &config.CommitConfig{Remote: "https://x-access-token:" + secret + "@example.invalid/acme/project.git"}
+
+	err := a.checkExecutionEntry(t.Context(), runRelease)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "carries credentials")
+	assert.NotContains(t, err.Error()+logs.String(), secret, "the token is never written")
+}
+
 // TestWorkerLinksWithEndpointsResolveNothing: a run whose links all state an
 // endpoint asks no remote anything, so a repository with no remote at all
 // still starts it.

@@ -197,13 +197,13 @@ func TestOwnershipIsAskedAgainAndRememberedOnce(t *testing.T) {
 	asked := 0
 	lost := false
 	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop()}
-	coordinator.VerifyOwnershipWith(func(context.Context) error {
+	coordinator.UseOwnership(NewOwnershipGate(coordinator.Run, func(context.Context) error {
 		asked++
 		if lost {
 			return errors.New("the release lock is no longer on the remote")
 		}
 		return nil
-	})
+	}, coordinator.Log))
 
 	inFlight, settled := coordinator.watchOwnership(t.Context())
 	defer settled()
@@ -250,7 +250,7 @@ func TestOwnershipLossNamesItsReason(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var logs bytes.Buffer
 			coordinator := &Coordinator{Run: "run-1", Log: zerolog.New(&logs)}
-			coordinator.VerifyOwnershipWith(func(context.Context) error { return tc.answer })
+			coordinator.UseOwnership(NewOwnershipGate(coordinator.Run, func(context.Context) error { return tc.answer }, coordinator.Log))
 
 			err := coordinator.checkOwnership(t.Context())
 
@@ -301,7 +301,7 @@ func TestANilGateAsksNothing(t *testing.T) {
 
 func TestCancelledOwnershipLookupDoesNotReportLockLoss(t *testing.T) {
 	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop()}
-	coordinator.VerifyOwnershipWith(func(ctx context.Context) error { return ctx.Err() })
+	coordinator.UseOwnership(NewOwnershipGate(coordinator.Run, func(ctx context.Context) error { return ctx.Err() }, coordinator.Log))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -315,14 +315,14 @@ func TestOwnershipVerificationWaitCanBeCancelled(t *testing.T) {
 	release := make(chan struct{})
 	checks := 0
 	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop()}
-	coordinator.VerifyOwnershipWith(func(context.Context) error {
+	coordinator.UseOwnership(NewOwnershipGate(coordinator.Run, func(context.Context) error {
 		checks++
 		if checks == 1 {
 			close(entered)
 			<-release
 		}
 		return nil
-	})
+	}, coordinator.Log))
 	first := make(chan error, 1)
 	go func() { first <- coordinator.checkOwnership(t.Context()) }()
 	<-entered

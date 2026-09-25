@@ -829,8 +829,14 @@ var gitOutputURL = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"<>]+`)
 // RedactURL removes user information, query strings and fragments from a
 // remote URL before it is recorded. Named remotes are returned unchanged, and
 // so is the scp-like host:path form unless its user half carries a password.
+// A value that names a scheme and still does not parse, a password holding a
+// stray `%` or `#` above all, has everything up to its last `@` cut instead:
+// what could not be parsed cannot be trusted to hold no credential.
 func RedactURL(value string) string {
 	u, err := url.Parse(value)
+	if isMalformedURL(value, u, err) {
+		return redactMalformedURL(value)
+	}
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return redactScpPassword(value)
 	}
@@ -844,6 +850,35 @@ func RedactURL(value string) string {
 		u.Fragment = "REDACTED"
 	}
 	return u.String()
+}
+
+// isMalformedURL reports whether a value names a scheme and an authority and
+// Go's parser could not read an authority out of it. A path after the scheme,
+// `file:///srv/app.git`, has no authority to hold a credential and is not one.
+func isMalformedURL(value string, u *url.URL, err error) bool {
+	scheme, rest, hasScheme := strings.Cut(value, "://")
+	if !hasScheme || scheme == "" || strings.ContainsAny(scheme, "/@:") || strings.HasPrefix(rest, "/") {
+		return false
+	}
+	return err != nil || u.Host == ""
+}
+
+// redactMalformedURL cuts the user information of a scheme-carrying value Go
+// could not parse, the way RedactEndpoint does, and its query and fragment
+// after it. The cut is at the last `@`, because a password is exactly where a
+// stray `@`, `/` or `#` would be.
+func redactMalformedURL(value string) string {
+	scheme, rest, _ := strings.Cut(value, "://")
+	if at := strings.LastIndex(rest, "@"); at >= 0 {
+		rest = "REDACTED@" + rest[at+1:]
+	}
+	if head, _, hasQuery := strings.Cut(rest, "?"); hasQuery {
+		rest = head + "?REDACTED"
+	}
+	if head, _, hasFragment := strings.Cut(rest, "#"); hasFragment {
+		rest = head + "#REDACTED"
+	}
+	return scheme + "://" + rest
 }
 
 // redactScpPassword masks the user half of the scp-like user:password@host:path

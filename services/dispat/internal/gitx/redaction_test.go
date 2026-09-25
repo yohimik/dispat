@@ -50,6 +50,23 @@ func TestRedactURLKeepsTheDestinationAndDropsTheSecret(t *testing.T) {
 	assert.Equal(t, "git@github.com:acme/app.git", RedactURL("git@github.com:acme/app.git"))
 }
 
+// TestRedactURLCutsTheUserOfAMalformedURL: a scheme-carrying value Go cannot
+// parse, because its password holds a stray `%` or `#`, is still redacted, up
+// to its last `@`, and a path after the scheme is left as it is.
+func TestRedactURLCutsTheUserOfAMalformedURL(t *testing.T) {
+	for value, want := range map[string]string{
+		"https://user:pa%ss@host/r.git":     "https://REDACTED@host/r.git",
+		"https://user:pa#ss@host/r":         "https://REDACTED@host/r",
+		"https://user:pa/ss@host/r":         "https://REDACTED@host/r",
+		"https://user:p%zz@host/r?x=1#frag": "https://REDACTED@host/r?REDACTED",
+	} {
+		assert.Equal(t, want, RedactURL(value), value)
+		assert.NotContains(t, RedactURL(value), "pa")
+	}
+	assert.Equal(t, "file:///srv/pkg@1.0/app.git", RedactURL("file:///srv/pkg@1.0/app.git"),
+		"a path is not an authority")
+}
+
 // TestRedactURLMasksAPasswordInTheScpForm: the scp-like form is not a URL to
 // Go's parser, so a password written into its user half would otherwise pass
 // through untouched. The address stays legible; a bare account and the refspecs

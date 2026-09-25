@@ -150,10 +150,10 @@ func TestPreflightRefusesALostLockBeforeAnyProbe(t *testing.T) {
 	limits := TransferLimits{MaxFiles: 10, MaxBytes: 20, MaxManifestBytes: 1 << 20}
 	fixture := newCoordinatorFixture(t, limits, answeredPreflight)
 	asked := 0
-	fixture.coordinator.VerifyOwnershipWith(func(context.Context) error {
+	fixture.coordinator.UseOwnership(NewOwnershipGate(fixture.coordinator.Run, func(context.Context) error {
 		asked++
 		return fmt.Errorf("verifying: %w", release.ErrLockLost)
-	})
+	}, fixture.coordinator.Log))
 
 	err := fixture.coordinator.Preflight(t.Context(),
 		[]PackagePlatforms{{Package: "core", Platforms: []string{"linux/amd64"}}})

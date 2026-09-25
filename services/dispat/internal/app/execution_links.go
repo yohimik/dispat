@@ -60,7 +60,7 @@ func (a *App) resolveWorkerLinks(ctx context.Context, started runKind) error {
 		if worker.Endpoint != "" {
 			continue
 		}
-		a.log.Debug().Str("worker", worker.Name).Str("remote", remote.name).
+		a.log.Debug().Str("worker", worker.Name).Str("remote", gitx.RedactEndpoint(remote.name)).
 			Str("endpoint", gitx.RedactEndpoint(remote.url)).
 			Msg("worker link reaches the release remote")
 	}
@@ -143,22 +143,50 @@ func (a *App) formatWorkerLinks(remote coordinationRemote) ([]execution.Link, er
 }
 
 // requireCoordinationEndpoint refuses, for the link that would reach it, a push
-// URL no mailbox may be. The URL is written into the refusal redacted, and a
-// URL refused for what it carries is told apart from one refused for its
-// shape, because the remedy differs: a credential belongs in a credential
-// helper or an extra header, never in an address every message is pushed to.
+// URL no mailbox may be.
 func requireCoordinationEndpoint(worker string, remote coordinationRemote) error {
+	return requireReleaseRemoteEndpoint(releaseRemoteUse{
+		subject: fmt.Sprintf("worker link %s states no endpoint, so it", worker),
+		credentialRemedy: "state a credential-free endpoint, " +
+			"or keep the credential in a credential helper or http.extraheader",
+	}, remote)
+}
+
+// releaseRemoteUse is who reaches the release remote in place of an endpoint,
+// and what they can do instead: when its push URL carries a credential, and,
+// when there is anything to say, when it cannot be a mailbox at all.
+type releaseRemoteUse struct {
+	subject          string
+	credentialRemedy string
+	shapeRemedy      string
+}
+
+// requireReleaseRemoteEndpoint refuses a release remote's push URL no mailbox
+// may be, for whichever party would reach it: an orchestrator's link with no
+// endpoint, or a worker that states none of its own.
+//
+// Both the remote's name and its URL are written into the refusal redacted,
+// because `commit.remote` may name a URL rather than a remote, and a URL
+// refused for what it carries is told apart from one refused for its shape,
+// because the remedy differs: a credential belongs in a credential helper or
+// an extra header, never in an address every message is pushed to.
+func requireReleaseRemoteEndpoint(use releaseRemoteUse, remote coordinationRemote) error {
 	err := gitx.RequireTransportEndpoint(remote.url)
 	if err == nil {
 		return nil
 	}
+	name := gitx.RedactEndpoint(remote.name)
 	if redacted := gitx.RedactEndpoint(remote.url); redacted != remote.url {
 		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
-			"worker link %s states no endpoint, so it reaches the release remote %s, whose push URL %s carries credentials: "+
-				"state a credential-free endpoint, or keep the credential in a credential helper or http.extraheader",
-			worker, remote.name, redacted)
+			"%s reaches the release remote %s, whose push URL %s carries credentials: %s",
+			use.subject, name, redacted, use.credentialRemedy)
+	}
+	if use.shapeRemedy != "" {
+		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			"%s reaches the release remote %s, whose push URL cannot be a mailbox (%s): %w",
+			use.subject, name, use.shapeRemedy, err)
 	}
 	return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
-		"worker link %s states no endpoint, so it reaches the release remote %s, whose push URL cannot be a mailbox: %w",
-		worker, remote.name, err)
+		"%s reaches the release remote %s, whose push URL cannot be a mailbox: %w",
+		use.subject, name, err)
 }

@@ -199,12 +199,6 @@ func (c *Coordinator) UseOwnership(gate *OwnershipGate) {
 	c.ownership = gate
 }
 
-// VerifyOwnershipWith gives the coordinator a gate of its own over one
-// verification, for a caller that has the question and no gate yet.
-func (c *Coordinator) VerifyOwnershipWith(verify func(context.Context) error) {
-	c.ownership = NewOwnershipGate(c.Run, verify, c.Log)
-}
-
 // checkOwnership answers whether a new assignment may start, and remembers a
 // loss.
 func (c *Coordinator) checkOwnership(ctx context.Context) error {
