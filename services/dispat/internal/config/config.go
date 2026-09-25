@@ -1010,6 +1010,31 @@ func validate(c *File, allowEmpty bool) error {
 	if err := validateLinkedConfiguration(c); err != nil {
 		return err
 	}
+	if err := validateRootKeys(c); err != nil {
+		return err
+	}
+	if err := validateEnvs(c); err != nil {
+		return err
+	}
+	if err := validateSpaces(c); err != nil {
+		return err
+	}
+	if err := validateRootScripts(c); err != nil {
+		return err
+	}
+	if err := validateCommitInclude(c); err != nil {
+		return err
+	}
+	if err := resolveInitials(c); err != nil {
+		return err
+	}
+	return resolveParserConfig(c)
+}
+
+// validateRootKeys validates the root's own keys and fills their defaults:
+// commitErrors, nonPackageScopes, tagFormat, versioning, aliasTags, the build
+// keys and run.allowBranch.
+func validateRootKeys(c *File) error {
 	if c.CommitErrors == "" {
 		c.CommitErrors = CommitErrorsWarn
 	}
@@ -1047,6 +1072,11 @@ func validate(c *File, allowEmpty bool) error {
 			return errors.New("run.allowBranch contains an empty pattern")
 		}
 	}
+	return nil
+}
+
+// validateEnvs validates the root's env and every space's.
+func validateEnvs(c *File) error {
 	if err := validateEnv("env", c.Env); err != nil {
 		return err
 	}
@@ -1055,6 +1085,12 @@ func validate(c *File, allowEmpty bool) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// validateSpaces validates and normalizes every space, then checks the
+// versionGroup references between them.
+func validateSpaces(c *File) error {
 	for _, name := range sortedSpaceNames(c) {
 		stated := c.Spaces[name].Versioning
 		validated, err := validateSpace(name, c.Spaces[name])
@@ -1085,6 +1121,12 @@ func validate(c *File, allowEmpty bool) error {
 			return fmt.Errorf("space %q: %w", name, err)
 		}
 	}
+	return nil
+}
+
+// validateRootScripts validates the root's scripts, the hooks that name them,
+// the root dependencies and the shell.
+func validateRootScripts(c *File) error {
 	if err := checkScriptValues("config", c.Scripts); err != nil {
 		return err
 	}
@@ -1097,8 +1139,13 @@ func validate(c *File, allowEmpty bool) error {
 	if len(c.Shell) > 0 && c.Shell[0] == "" {
 		return errors.New("shell: first element (the interpreter) must not be empty")
 	}
-	// commit.include paths are staged relative to the monorepo root; anything
-	// absolute or escaping the root would stage files outside the repository.
+	return nil
+}
+
+// validateCommitInclude checks the commit.include paths, which are staged
+// relative to the monorepo root: anything absolute or escaping the root
+// would stage files outside the repository.
+func validateCommitInclude(c *File) error {
 	for i, p := range c.Commit.Include {
 		if p == "" || filepath.IsAbs(p) {
 			return fmt.Errorf("commit.include[%d]: %q must be a repository-relative path", i, p)
@@ -1107,9 +1154,12 @@ func validate(c *File, allowEmpty bool) error {
 			return fmt.Errorf("commit.include[%d]: %q escapes the repository root", i, p)
 		}
 	}
-	if err := resolveInitials(c); err != nil {
-		return err
-	}
+	return nil
+}
+
+// resolveParserConfig resolves the parser configuration, folding in the
+// bumps custom sections declare.
+func resolveParserConfig(c *File) error {
 	parserCfg, err := resolveParser(c.Parser)
 	if err != nil {
 		return err
