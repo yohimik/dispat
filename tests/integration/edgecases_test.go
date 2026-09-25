@@ -767,3 +767,30 @@ func TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted(t *testing.T) {
 	assert.Equal(t, "packages/core 0.0.0\npackages/util 0.1.0\n", readFileString(t, r.Path("lock.txt")),
 		"the remedy regenerates the file from what published")
 }
+
+// TestEdgeDirtyGuardReadsARenameAsOneEntry: git's machine-readable status
+// writes a rename as the destination followed by the source, and only the
+// first of the two carries a status prefix. Reading the second as an entry of
+// its own would report a path with its first three characters eaten — a file
+// nobody has, in a refusal telling somebody to go and commit it.
+func TestEdgeDirtyGuardReadsARenameAsOneEntry(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.RevertOnFail = models.Bool(true)
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/renameable.txt", "work in progress\n")
+	r.Commit("feat(core): bootstrap")
+
+	// git mv stages the rename, which is the shape porcelain reports as R.
+	r.Git("mv", "packages/core/renameable.txt", "packages/core/renamed.txt")
+
+	res := r.Release()
+	require.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "pre-existing local changes")
+	assert.Contains(t, res.Stdout, "packages/core/renamed.txt", "the destination the rename created")
+	assert.NotContains(t, res.Stdout, "kages/core/renameable.txt",
+		"the source is the rename's second half, not an entry with a status prefix to strip")
+	assert.Empty(t, r.TagList(), "the guard refuses before anything is released")
+	assert.FileExists(t, r.Path("packages", "core", "renamed.txt"), "and the work is untouched")
+}

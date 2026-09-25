@@ -30,6 +30,6 @@ func TestPolyrepoAdmitsANativePreparatoryCommitBeforePublication(t *testing.T) {
 	assert.Contains(t, res.Stdout, "admitted nested source revision into fleet snapshot")
 	assert.Equal(t, after, r.Git("-C", "sources/lib", "rev-parse", "core@0.1.0^{commit}"))
 	assert.Equal(t, "prepared", r.Git("-C", "sources/lib", "show", "core@0.1.0:packages/core/generated.txt"))
-	assert.Equal(t, "published\n", covReadFile(t, r.Path("publish-count")))
+	assert.Equal(t, "published\n", readAbs(t, r.Path("publish-count")))
 	assert.False(t, harness.IsCodePresent(res.Events, "E330"), "the source revision was explicitly admitted")
 }

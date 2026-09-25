@@ -657,6 +657,22 @@ repeated runs under `-count` and `-race`.
 | `TestAdmissionCatchesUpAConsumerThatOvertookAHeldProvider` | Vector 82b1: the same debt arrived at by `Release-As: none`. A held provider propagates nothing, so the consumer releases for its own fix and tags past the provider's pending commit naming the provider's baseline; the run that lifts the hold releases the provider and catches the consumer up. |
 | `TestAdmissionLeavesPlansWithoutOvertakingUnchanged`      | The false-positive fence: a provider that released alone, a consumer that then released for its own change, and a third run that plans nothing at all, because the provider's release carried the commit and the consumer's release reached it, so nothing is owed and `--require-release` refuses. |
 | `TestAdmissionOwesEveryConsumerThatOvertookOnePendingCommit` | The same debt owed to two consumers at once, with a never-released package keeping the union of pending windows over the provider's earlier release: the delivery test reads a real release of the provider, finds it does not carry the pending commit, and plans both consumers again. |
+| `TestPlanDirectChannelDirectivesReportWhatTheyProposedNothingFor` | A direct channel directive is written by hand, so one that proposes nothing is reported: graduating a package already stable, naming the channel it is already on, and a transition whose two sides are the same. A transition that does not match the package's channel stays silent, because that is the mechanism working. |
+| `TestPlanAnyPrereleaseTransitionEndsWhateverTrainItFinds` | The `*` from-side matches any prerelease and never matches stable, so one directive ends whichever train a package landed on and is inert for the package that already graduated. |
+| `TestPlanPrereleaseBaselineWithoutACounterStopsTheTrain` | A prerelease counter is a separate numeric identifier because numeric identifiers compare numerically, so a hand-written baseline with no counter, or one whose counter is not a number, stops the train instead of having a counter invented for it. |
+| `TestPlanComputedVersionMustExceedItsBaseline` | Versions are computed from the stable baseline, so a repository whose newest tag is a prerelease of a higher core computes something SemVer ranks below what the package published, and releasing that would make the tag order lie about which release came last. |
+| `TestPlanChannelPropagationHonoursItsScope` | `Propagate-Channel-Scope` restricts the channel axis the way `Propagate-Scope` restricts the bump axis: a scope naming one dependent reaches that one alone, and a scope naming a package the traversal never reaches is reported rather than silent. |
+| `TestPlanBumpPropagationScopeThatExcludesEveryone` | The same finding on the bump axis, which has its own code because the two scopes are written separately and a repository may restrict one without the other. |
+| `TestPlanPropagatedStableLeavesADependentOnItsTrain` | Graduation publishes under the version consumers resolve by default, so it never happens because an unrelated package's commit propagated stable down an edge, and the suppression is reported because it is a decision. |
+| `TestPlanPropagatedTransitionNoDependentIsOnIsReportedOnce` | A propagated transition is matched against each dependent's own baseline, and when none of them is on the train it names the unit is told once rather than once per dependent. |
+| `TestPlanInheritedChannelFromDisagreeingSourcesTakesTheFirst` | "Inherit" means the channel of the originating package, and a unit naming two packages on different channels has two answers; the run takes the first by name and says which, since choosing silently would make the result depend on an ordering the message does not show. |
+| `TestPlanPropagationIsTraceableEndToEnd` | A run at trace level accounts for every step: the scope the commit's own files decided, each edge the walk crossed, and where each package's channel came from, which is where an operator goes when a release did not bump what they expected. |
+| `TestPlanChannelPropagationSkipsWhatItCannotAdmit` | A propagated channel is admitted against the target's window: a unit whose scope resolves to no package proposes nothing, a target whose window is past the proposal does not move, and a target behind a cancel barrier has had the commit discarded. |
+| `TestPlanTwoProvidersProposeDifferentChannels` | A dependent of two providers can be handed two channels in one run: the newer commit wins and the conflict is reported against the dependent. |
+| `TestPlanPropagationScopeExcludesByName` | A scope-set may be written as the workspace less a package, and the exclusion is applied after the inclusion and wins. |
+| `TestPlanTwoReleaseAsDirectivesInOneWindow` | A hold and a later resume are both in force until one of them is released: the newest wins, the pair is reported, and a resume that did lift a hold is not the redundant kind. |
+| `TestPlanScopeTermsReachTheirPackages` | Every shape a scope term takes in one history: a glob reaching what it matches and reported when it matches none, `.` for the commit's own files, `*` for the workspace, an exclusion naming nothing as a warning and an inclusion naming nothing as an error. |
+| `TestPlanBaselineIgnoresARefShorterThanTheTagPrefix` | The listing is dispatched to package matchers through a trie over their literal prefixes, so a ref shorter than the prefix it shares characters with runs the walk off the end of the name, belongs to no package, and leaves the real release tag as the baseline. |
 
 ### Goal 54: the edges a propagation walks (`propagation_kinds_test.go`)
 
@@ -709,6 +725,10 @@ package.
 | `TestIgnoreScopeFileAndKeyAgree`                    | A `.dispatignore` file at the repository root or package folder behaves identically to the `ignore` configuration key at those levels. |
 | `TestIgnoreScopeAppliesToSince`                     | The `--since` flag uses the same file resolution logic, so packages with only ignored changes are skipped and their scripts never run. |
 | `TestIgnoreScopeRefusesAPatternItCannotCarryOut` | A pattern that means nothing as written (a bare `!`, a `/` naming nothing) fails configuration loading with exit 1 instead of releasing packages, whether it is the package's `ignore` key or a `.dispatignore` file at the repository, a space or a package; a `.dispatignore` that is a folder is refused the same way rather than read as "no patterns". |
+| `TestIgnoreScopeBareNameReachesAnyDepth` | A change-scope pattern with no separator matches a path's last segment at any depth, and nothing else. |
+| `TestIgnoreScopeNestedFolderPatternCoversEverythingUnderIt` | A folder named with a path excludes that folder and everything below it while its siblings keep counting. |
+| `TestIgnoreScopeEscapedBangNamesALiteralCharacter` | A pattern beginning with an escaped bang names a file whose name begins with one rather than re-including anything. |
+| `TestIgnoreScopeCommentsAloneSayNothing` | A pattern list of nothing but comments and blank lines compiles to no rules, so the level is dropped and every file keeps counting. |
 
 ### Goal 5: release edge cases (`edgecases_test.go`)
 
@@ -734,6 +754,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestEdgeReleaseCommitLockOmitsASkippedConsumer` | A root `commit.include` lock file regenerated from every workspace manifest by each package's `syncLock` holds a consumer's planned version when its provider's failure skips it; the closing phase restores the file and runs the published package's `syncLock` again, so the release commit's lock lists only published versions and the published package is committed and tagged. |
 | `TestEdgeReleaseCommitLockOmitsAFailedWriter` | The same lock file after a package fails its build past its version stage: its tracked files return to HEAD before the regeneration, so the release commit's lock lists only published versions, and its untracked build output stays for inspection. |
 | `TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted` | An interrupt while the regeneration runs half-writes the lock file; dispat restores it to HEAD, reports `E223`, leaves it out of the release commit that still records and tags the published package, and the documented `dispat run <script> --since all` remedy regenerates it from what published. |
+| `TestEdgeDirtyGuardReadsARenameAsOneEntry` | Machine-readable status writes a rename as the destination followed by the source, and only the first carries a status prefix; reading the second as an entry of its own would name a file nobody has in a refusal telling somebody to go and commit it. |
 
 ### Goal 6: concurrency (`concurrency_test.go`)
 
@@ -1691,6 +1712,16 @@ packages, which is what makes "the correction reached exactly this far" assertab
 | `TestCorrectionEditOfPublishedTrainWorkIsANoOp`         | In release trains, any prerelease counts as published history. Editing a unit shipped in `beta.0` acts as a no-op (W209), fixes bump to the next train step, and existing records remain unchanged.  |
 | `TestCorrectionDeleteStopsATrainAdvance`                | Deleting the only new record driving a versioning group stops train advancement. No packages release, no W234 warnings appear, and prerelease counters remain in place.                                   |
 | `TestRevertPairOnATrainRendersCancelLine`               | Reverting a feature within the same train step removes both from changelog notes (W212) while counting toward targets (§7.3). Prerelease notes state the work cancelled out rather than leaving an empty body.                       |
+| `TestRevertLeavesTheRestOfTheChangelogAlone` | The suppression is a pair of entries and not a release's notes: everything else the window carries is still documented in the entry the release writes. |
+| `TestCorrectionWildcardDeleteSkipsWhatIsAlreadyClaimed` | `Deletes: *` discards every pending record its commit descends from, except a record a newer narrower correction already claimed and except control units, which carry no record and whose directives the later phases run on. |
+| `TestCorrectionUnitSelectorNamesOneRecordInsideACommit` | The `#n` selector corrects one record of a commit carrying several, visible as the bump when the breaking third record is restated as a fix; a selector past the end of the commit is an error naming how many records there are. |
+| `TestCorrectionRestatementThatChangesNothingIsReported` | An `Edits` restating its target as the same type, marker and description leaves the record as it was, which is almost always an author who edited the footer and forgot the subject line. |
+| `TestRevertOfPublishedOrForeignWorkLeavesTheChangelogAlone` | `Reverts` is informational, so a target on the other side of a release and a target whose records belong to another package each leave the changelog alone rather than failing, while both still count toward the bump. |
+| `TestCorrectionTwoInOneCommit` | A correction is a record like any other, so one commit can carry two of them, correcting two different targets in one message. |
+| `TestCorrectionWildcardEditStandsInForEverythingItClaimed` | `Edits: *` is a restatement rather than a discard, so the carrying unit stands in for every record the wildcard reached, under the type the correction was written as. |
+| `TestCorrectionOfACommitThatCarriesNoRecord` | A commit whose message is not a release record is still in the window, and naming it as a target is a no-op rather than an error: there is nothing there to correct. |
+| `TestCorrectionDiagnosticsNameWhatTheyCouldNotReach` | A correction whose targets have all left the pending window addresses no package at all, and reporting it against nothing is the whole point of the no-op diagnostic being unsuppressible; a correction that does reach its target names the targets it resolved at trace. |
+| `TestCorrectionReachesATargetAcrossAMerge` | A merge gives the commit graph two paths to the same commit, and a correction naming a commit both paths reach gets the answer a linear history would have given rather than a repeated walk or a refusal. |
 
 ### Goal 32: references naming several files (`multiref_test.go`)
 
@@ -1782,6 +1813,7 @@ script-only members, and per-member tag spellings.
 | `TestVersionGroupPartialReleaseNewerWorkMovesOn` | The mask reaches exactly as far as the published tag: work landing after the partial release moves the prefix, the laggard releases everything at the next minor without ever landing on the version it skipped past, and the erstwhile holder rides up (W234). |
 | `TestVersionGroupOwedCatchUpKeepsThePlannedVersion` | A fixed group member `app1` consumes `core1` outside the group and proceeds past core1's failed publish, with `lib1` riding to 0.2.0. When the next run publishes core1 and moves the group to 0.2.1 for the debt but app1's catch-up fails, the retry releases app1 at 0.2.1, the version it was planned at, and lib1 is not re-released and no W234 is reported; when `--package lib1` instead releases lib1 alone at 0.3.0 on its own feature, the next full run releases core1 and app1 at 0.3.0, not 0.3.1 (SPEC 13.7c G3). |
 | `TestVersionGroupTrainPartialReleaseAdvancesTheTrain` | On a prerelease train the stable-line masking stays out (§11.4 owns the window): the retry advances the train, the laggard boards at the next prerelease and the holder rides beside it.                       |
+| `TestVersionGroupsRefuseAGroupTheyCannotResolve` | A versionGroup shares one namespace with the spaces and may name only a group or a space that versions as one: a nameless group, a group named after a space, a space that versions independently and a space already in a group are each refused, and a space that does version as one is accepted. |
 
 ### Goal 56: a version group's sharing axes (`versiongroupaxes_test.go`)
 
@@ -1941,6 +1973,10 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsCorrectionsAndSuppression`     | A restatement is attributed to whoever restated it, not to the commit it corrects (§7.4.2); a revert takes both entries and their attribution out of the notes (§7.3).                                                                       |
 | `TestAuthorsPrereleaseFreshWindow`         | Attribution narrows exactly as the notes do: each prerelease credits its own changeset, and the stable graduation collecting the train credits the whole train.                                                                             |
 | `TestAuthorsPreviewRendersTheBlocks`       | `dispat preview` prints the record bodies a release would write, so it gains both blocks by construction.                                                                                                                                    |
+| `TestAuthorsNamedOnceByEveryPackageOfOneWindow` | Two packages released at the same boundaries ask the same question of every commit, so the attribution is computed once and shared; over a history long enough for the sharing to engage, the shared answer is the one an unshared scan would have given. |
+| `TestAuthorsAcrossAComposedFleet` | The same sharing where a window is one boundary per repository the package's history was attached from, so two packages whose windows differ only in a source repository's boundary are not given each other's authors. |
+| `TestAuthorsCoAuthorTrailersInEveryShape` | `Co-authored-by` is free text, so a bare name and a bare address are both accepted while empty angle brackets are dropped, the trailer naming the git author again is deduplicated, and the username format renders a name when there is no address to take a part of. |
+| `TestAuthorsIdentityWithNoAddress` | Git accepts a commit whose author has a name and no address, and the attribution survives it in what it renders and in deciding that two such commits are by one person. |
 
 ### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`)
 
@@ -2245,10 +2281,6 @@ ordinary authoring paths; nothing here repeats them.
 | `TestCovConfigPackageOverridesReplaceEveryInheritedRecordField` | Every field of the changelog and GitHub objects overlays independently: one package restates them all, including its file name and its release destination, while its sibling keeps the root's. |
 | `TestCovConfigScalarSpellingsRelease` | A configuration written entirely in the one-value spellings, and with a list of built-in section names each written as its name alone, loads, discovers, plans and releases exactly as its long-form twin does. |
 | `TestCovConfigRefusesValuesNeitherSpellingCanRead` | A value that is neither the one thing nor a list of them names the key it was written under, and an element holding nothing at all is read as the empty thing it is and refused rather than decoded into whatever came next. |
-| `TestCovIgnoreBareNameReachesAnyDepth` | A change-scope pattern with no separator matches a path's last segment at any depth, and nothing else. |
-| `TestCovIgnoreNestedFolderPatternCoversEverythingUnderIt` | A folder named with a path excludes that folder and everything below it while its siblings keep counting. |
-| `TestCovIgnoreEscapedBangNamesALiteralCharacter` | A pattern beginning with an escaped bang names a file whose name begins with one rather than re-including anything. |
-| `TestCovIgnoreCommentsAloneSayNothing` | A pattern list of nothing but comments and blank lines compiles to no rules, so the level is dropped and every file keeps counting. |
 | `TestCovAtomicWriteRefusesToReplaceASymlink` | A record or config file that is a symlink is refused by name, the link survives, and what it points at is never written through. |
 | `TestAtomicChangelogSurvivesPartialDiskWrite` | A filesystem quota interrupts the temporary changelog write. The original history and permissions survive, the partial file is removed, and an unrestricted retry adds exactly one entry without losing prior notes. |
 | `TestAtomicManifestSurvivesPartialDiskWrite` | A filesystem quota interrupts the CLI's manifest rewrite after a temporary file exists. Even when the runtime reports a short count without an error, the original bytes and mode survive, the partial file is removed, and an unrestricted retry changes only the version. |
@@ -2354,7 +2386,6 @@ silently did nothing both read as success in a log.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailConfigRefusesAVersionGroupItCannotResolve` | A versionGroup shares one namespace with the spaces and may name only a group or a space that versions as one: a nameless group, a group named after a space, a space that versions independently and a space already in a group are each refused, and a space that does version as one is accepted. |
 | `TestCovTailConfigRefusesAnAutoVersionOnlyNamingNoPackage` | `autoVersion.only` narrows a rewrite to named providers, so a name that is no package narrows it to nothing and is refused wherever the block was written, on the space or on one package of it. |
 | `TestCovTailConfigRefusesACommitTypeWithTwoBumps` | A section's bump merges into the one commit parser the whole repository shares, so the fold runs across every layer that may declare one and a type two of them disagree about is refused naming the layer it was read in. |
 
@@ -2407,47 +2438,21 @@ did nothing and a directive that worked produce the same version.
 | `TestCovTailAliasFormatKeepsItsOwnStructuralRules` | An alias is written and never read back, which lets it spell a fragment of the version and keeps only the rules about rendering: one of each placeholder, a channel and a counter together or not at all, and a name git will accept. |
 | `TestCovTailPrereleaseSpellingFormatRendersBothShapes` | One format renders both shapes without being told which: a stable release drops the channel, the counter and the separators around them from the tag and from the version a script is handed, while the prerelease carries all three and the alias beside it still names the version's parts. |
 | `TestCovTailTagInventoryIsNotTheGlobThatFetchedIt` | The glob a format produces is a filter and not a decision: dispat's own release-lock ref and a ref that is the format's literal prefix with nothing where the version goes both come back from it, and neither may become a package's baseline. |
-| `TestCovTailTagInventoryWalksRefsShorterThanAPrefix` | The listing is dispatched to package matchers through a trie over their literal prefixes, so a ref shorter than the prefix it shares characters with runs the walk off the end of the name, belongs to no package, and leaves the real release tag as the baseline. |
-| `TestCovTailAncestryAcrossAMergeVisitsEachCommitOnce` | A merge gives the commit graph two paths to the same commit, and a correction naming a commit both paths reach gets the answer a linear history would have given rather than a repeated walk or a refusal. |
 
 ### The planner's channel axis
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailDirectChannelDirectivesReportWhatTheyProposedNothingFor` | A direct channel directive is written by hand, so one that proposes nothing is reported: graduating a package already stable, naming the channel it is already on, and a transition whose two sides are the same. A transition that does not match the package's channel stays silent, because that is the mechanism working. |
-| `TestCovTailAnyPrereleaseTransitionEndsWhateverTrainItFinds` | The `*` from-side matches any prerelease and never matches stable, so one directive ends whichever train a package landed on and is inert for the package that already graduated. |
-| `TestCovTailPrereleaseBaselineWithoutACounterStopsTheTrain` | A prerelease counter is a separate numeric identifier because numeric identifiers compare numerically, so a hand-written baseline with no counter, or one whose counter is not a number, stops the train instead of having a counter invented for it. |
-| `TestCovTailComputedVersionMustExceedItsBaseline` | Versions are computed from the stable baseline, so a repository whose newest tag is a prerelease of a higher core computes something SemVer ranks below what the package published, and releasing that would make the tag order lie about which release came last. |
-| `TestCovTailPropagatedStableWouldGraduateADependent` | Graduation publishes under the version consumers resolve by default, so it never happens because an unrelated package's commit propagated stable down an edge, and the suppression is reported because it is a decision. |
-| `TestCovTailPropagatedTransitionThatMatchesNoDependent` | A propagated transition is matched against each dependent's own baseline, and when none of them is on the train it names the unit is told once rather than once per dependent. |
-| `TestCovTailInheritedChannelFromDisagreeingSources` | "Inherit" means the channel of the originating package, and a unit naming two packages on different channels has two answers; the run takes the first by name and says which, since choosing silently would make the result depend on an ordering the message does not show. |
-| `TestCovTailTwoProvidersProposeDifferentChannels` | A dependent of two providers can be handed two channels in one run: the newer commit wins and the conflict is reported against the dependent. |
 
 ### Corrections and reverts
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailWildcardDeleteSkipsWhatIsAlreadyClaimed` | `Deletes: *` discards every pending record its commit descends from, except a record a newer narrower correction already claimed and except control units, which carry no record and whose directives the later phases run on. |
-| `TestCovTailUnitSelectorNamesOneRecordInsideACommit` | The `#n` selector corrects one record of a commit carrying several, visible as the bump when the breaking third record is restated as a fix; a selector past the end of the commit is an error naming how many records there are. |
-| `TestCovTailRestatementThatChangesNothingIsReported` | An `Edits` restating its target as the same type, marker and description leaves the record as it was, which is almost always an author who edited the footer and forgot the subject line. |
-| `TestCovTailTwoCorrectionsInOneCommit` | A correction is a record like any other, so one commit can carry two of them, correcting two different targets in one message. |
-| `TestCovTailWildcardEditStandsInForEverythingItClaimed` | `Edits: *` is a restatement rather than a discard, so the carrying unit stands in for every record the wildcard reached, under the type the correction was written as. |
-| `TestCovTailCorrectionOfACommitThatCarriesNoRecord` | A commit whose message is not a release record is still in the window, and naming it as a target is a no-op rather than an error: there is nothing there to correct. |
-| `TestCovTailRevertsFooterDegradedForms` | `Reverts` is informational, so a target on the other side of a release and a target whose records belong to another package each leave the changelog alone rather than failing, while both still count toward the bump. |
-| `TestCovTailRevertLeavesTheRestOfTheChangelogAlone` | The suppression is a pair of entries and not a release's notes: everything else the window carries is still documented in the entry the release writes. |
 
 ### Propagation, holds and version groups
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailPropagationIsTraceableEndToEnd` | A run at trace level accounts for every step: the scope the commit's own files decided, each edge the walk crossed, and where each package's channel came from, which is where an operator goes when a release did not bump what they expected. |
-| `TestCovTailChannelPropagationSkipsWhatItCannotAdmit` | A propagated channel is admitted against the target's window: a unit whose scope resolves to no package proposes nothing, a target whose window is past the proposal does not move, and a target behind a cancel barrier has had the commit discarded. |
-| `TestCovTailChannelPropagationHonoursItsScope` | `Propagate-Channel-Scope` restricts the channel axis the way `Propagate-Scope` restricts the bump axis: a scope naming one dependent reaches that one alone, and a scope naming a package the traversal never reaches is reported rather than silent. |
-| `TestCovTailPropagationScopeExcludesByName` | A scope-set may be written as the workspace less a package, and the exclusion is applied after the inclusion and wins. |
-| `TestCovTailBumpPropagationScopeThatExcludesEveryone` | The same finding on the bump axis, which has its own code because the two scopes are written separately and a repository may restrict one without the other. |
-| `TestCovTailTwoReleaseAsDirectivesInOneWindow` | A hold and a later resume are both in force until one of them is released: the newest wins, the pair is reported, and a resume that did lift a hold is not the redundant kind. |
-| `TestCovTailCoAuthorTrailersInEveryShape` | `Co-authored-by` is free text, so a bare name and a bare address are both accepted while empty angle brackets are dropped, the trailer naming the git author again is deduplicated, and the username format renders a name when there is no address to take a part of. |
-| `TestCovTailAuthorIdentityWithNoAddress` | Git accepts a commit whose author has a name and no address, and the attribution survives it in what it renders and in deciding that two such commits are by one person. |
 
 ### Two repositories deciding one package
 
@@ -2793,15 +2798,10 @@ is failure that must be legible.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestGitDirtyGuardReadsARenameAsOneEntry` | Machine-readable status writes a rename as the destination followed by the source, and only the first carries a status prefix; reading the second as an entry of its own would name a file nobody has in a refusal telling somebody to go and commit it. |
 | `TestGitReleaseCommitIsSkippedWhenNothingWasStaged` | With the changelog off and no manifest to rewrite the release commit would hold nothing, so none is made and the tag names the commit the release was planned on, which is where it would have pointed with no commit stage at all. |
 | `TestPolyrepoRefGuardWatchesAliasNamespaces` | The guard reads every ref a configured package may write before planning, so a space that writes alias tags widens that namespace beyond the release tag and an alias is not a ref nobody was watching. |
 | `TestPolyrepoCheckpointVerifiesTheSourceBranchItPinsTo` | A control checkpoint is a gitlink, and a gitlink to a revision the source's own remote does not carry is a pointer into nothing for everybody who clones the fleet next. A checkpoint made with no release tag has only the source branch to prove the revision is durable, so that is what it reads before the control push makes the pointer permanent. |
 | `TestReleaseSettlesAConflictOverAFileItDeleted` | The conflict with no file to take: this side removed what the commits that landed mid-release edited, so this side is the absence and the path is removed from the merge, with their edit kept on the quarantine branch and both halves named in the record. |
-| `TestPlanAuthorsShareOneWindowAcrossPackages` | Two packages released at the same boundaries ask the same question of every commit, so the attribution is computed once and shared; over a history long enough for the sharing to engage, the shared answer is the one an unshared scan would have given. |
-| `TestPlanAuthorsAcrossAComposedFleet` | The same sharing where a window is one boundary per repository the package's history was attached from, so two packages whose windows differ only in a source repository's boundary are not given each other's authors. |
-| `TestPlanCorrectionDiagnosticsNameWhatTheyCouldNotReach` | A correction whose targets have all left the pending window addresses no package at all, and reporting it against nothing is the whole point of the no-op diagnostic being unsuppressible; a correction that does reach its target names the targets it resolved at trace. |
-| `TestPlanScopeTermsReachTheirPackages` | Every shape a scope term takes in one history: a glob reaching what it matches and reported when it matches none, `.` for the commit's own files, `*` for the workspace, an exclusion naming nothing as a warning and an inclusion naming nothing as an error. |
 | `TestRunQuotesForwardedArgumentsTheShellWouldOtherwiseRead` | Arguments typed after `--` are appended to a script's command text, so an ordinary flag goes through verbatim while an argument a shell would split, unquote or lose entirely is quoted and arrives as the one word it was typed as. |
 
 ## Regression fences

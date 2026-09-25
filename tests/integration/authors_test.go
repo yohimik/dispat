@@ -10,6 +10,8 @@ package integration
 // keep their own.
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -491,3 +493,160 @@ func TestAuthorsPreviewRendersTheBlocks(t *testing.T) {
 	assert.Contains(t, res.Stdout, "- add streaming (by "+adaName+")")
 	assert.Contains(t, res.Stdout, "### Authors")
 }
+
+// TestAuthorsNamedOnceByEveryPackageOfOneWindow: two packages released at the
+// same boundaries ask the same question of every commit, so the attribution is
+// computed once and shared. The answer has to be the same one an unshared scan
+// would have given, which is what this asserts: both records name both people,
+// in commit order, over a history long enough for the sharing to engage.
+func TestAuthorsNamedOnceByEveryPackageOfOneWindow(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(authorsConfig(&models.AuthorsConfig{Placement: "section"}))
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "utils")
+	for i := range windowSharingCommits {
+		name, mail := adaName, adaMail
+		if i%2 == 1 {
+			name, mail = graceMsg, graceMl
+		}
+		r.WriteFile(fmt.Sprintf("packages/core/change-%d.txt", i), "work\n")
+		r.WriteFile(fmt.Sprintf("packages/utils/change-%d.txt", i), "work\n")
+		r.CommitAs(name, mail, fmt.Sprintf("feat(core,utils): change %d", i))
+	}
+
+	r.ReleaseOK()
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	require.True(t, r.IsTagged("utils@0.1.0"), "tags: %v", r.TagList())
+
+	for _, pkg := range []string{"core", "utils"} {
+		entry := changelogOf(t, r, pkg)
+		assert.Contains(t, entry, "### Authors", "%s carries the section", pkg)
+		assert.Contains(t, entry, adaName, "%s names the first author", pkg)
+		assert.Contains(t, entry, graceMsg, "%s names the second", pkg)
+		assert.Equal(t, 1, strings.Count(entry, adaName),
+			"%s names each person once however many commits they wrote", pkg)
+	}
+}
+
+// TestAuthorsAcrossAComposedFleet: the same sharing, where a window is not
+// one boundary but one per repository the package's history was attached from.
+// The identity has to name every one of them, so that two packages whose
+// windows differ only in a source repository's boundary are not given each
+// other's authors.
+func TestAuthorsAcrossAComposedFleet(t *testing.T) {
+	libSource := harness.New(t)
+	libSource.SeedPackage("packages", "lib")
+	libSource.Commit("feat(lib): bootstrap library")
+
+	appSource := harness.New(t)
+	appSource.SeedPackage("packages", "app")
+	appSource.Commit("feat(app): bootstrap application")
+
+	control := harness.New(t)
+	addPolyrepoSource(t, control, "lib-source", "sources/lib", libSource)
+	addPolyrepoSource(t, control, "app-source", "sources/app", appSource)
+	cfg := polyrepoFile()
+	cfg["spaces"] = centralSpaces(map[string]string{
+		"libraries":    "sources/lib/packages",
+		"applications": "sources/app/packages",
+	})
+	cfg["changelog"] = map[string]any{
+		"enabled": true,
+		"authors": map[string]any{"placement": "section"},
+	}
+	writePolyrepoJSON(t, control, "dispat.json", cfg)
+	control.Commit("chore: assemble the control repository")
+
+	// Each source's own history, long enough that the planner identifies the
+	// window instead of rescanning it per package.
+	for i := range windowSharingCommits {
+		name, mail := adaName, adaMail
+		if i%2 == 1 {
+			name, mail = graceMsg, graceMl
+		}
+		for _, src := range []struct{ path, pkg string }{
+			{"sources/lib", "lib"}, {"sources/app", "app"},
+		} {
+			control.WriteFile(fmt.Sprintf("%s/packages/%s/change-%d.txt", src.path, src.pkg, i), "work\n")
+			control.Git("-C", src.path, "add", "-A")
+			control.Git("-C", src.path, "-c", "user.name="+name, "-c", "user.email="+mail,
+				"commit", "-q", "-m", fmt.Sprintf("feat(%s): change %d", src.pkg, i))
+		}
+	}
+	control.Git("add", "sources")
+	control.Commit("chore: update the source pointers")
+
+	control.ReleaseOK()
+	assert.Contains(t, polyrepoTags(control, "sources/lib"), "lib@0.1.0")
+	assert.Contains(t, polyrepoTags(control, "sources/app"), "app@0.1.0")
+
+	for _, src := range []struct{ path, pkg string }{
+		{"sources/lib", "lib"}, {"sources/app", "app"},
+	} {
+		data := readAbs(t, control.Path(src.path, "packages", src.pkg, "CHANGELOG.md"))
+		assert.Contains(t, data, "### Authors", "%s carries the section", src.pkg)
+		assert.Contains(t, data, adaName)
+		assert.Contains(t, data, graceMsg)
+	}
+}
+
+// TestAuthorsCoAuthorTrailersInEveryShape: the conventional "Name <email>"
+// beside the four degenerate ones. A bare name and a bare address are both
+// accepted — inventing nothing beats attributing to nobody — while a pair of
+// empty angle brackets carries neither and is dropped. The identity with no
+// address is rendered from its name even under the username format, which
+// takes the local part of an address there is none of, so that the list never
+// renders an empty author.
+func TestAuthorsCoAuthorTrailersInEveryShape(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(authorsConfig(&models.AuthorsConfig{
+		Placement: "section", Format: "username",
+	}))
+	r.SeedPackage("packages", "core")
+	r.CommitAs(adaName, adaMail, "feat(core): add streaming\n\n"+
+		"Co-authored-by: Grace Hopper\n"+
+		"Co-authored-by: alan@example.com\n"+
+		"Co-authored-by: <>\n"+
+		"Co-authored-by: "+adaName+" <"+adaMail+">\n")
+
+	r.ReleaseOK()
+	entry := changelogOf(t, r, "core")
+
+	assert.Contains(t, entry, "### Authors")
+	assert.Contains(t, entry, "ada", "the git author, as the local part of the address")
+	assert.Contains(t, entry, "alan", "the bare address, as its local part")
+	assert.Contains(t, entry, graceMsg,
+		"and the bare name whole, since there is no address to take a part of")
+	assert.Equal(t, 1, strings.Count(entry, "ada"),
+		"the trailer naming the git author again is deduplicated away: %s", entry)
+	assert.NotContains(t, entry, "<>", "the empty identity is dropped rather than rendered")
+}
+
+// TestAuthorsIdentityWithNoAddress: git accepts a commit whose author
+// has a name and no address at all, and the attribution has to survive it —
+// both in what it renders and in how it decides two commits are by the same
+// person, which is the address whenever there is one and the name otherwise.
+func TestAuthorsIdentityWithNoAddress(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(authorsConfig(&models.AuthorsConfig{
+		Placement: "section", Format: "username", Commits: "all",
+	}))
+	r.SeedPackage("packages", "core")
+	r.CommitAs("Nameless Contributor", "", "feat(core): work by somebody with no address")
+	r.WriteFile("packages/core/second.txt", "work\n")
+	r.CommitAs("Nameless Contributor", "", "fix(core): more work by the same person")
+
+	r.ReleaseOK()
+	entry := changelogOf(t, r, "core")
+
+	assert.Contains(t, entry, "Nameless Contributor",
+		"the identity renders from its name: %s", entry)
+	assert.Equal(t, 1, strings.Count(entry, "Nameless Contributor"),
+		"and two commits by that name are one person: %s", entry)
+}
+
+// windowSharingCommits is comfortably past the union length from which the
+// planner stops scanning a window per package and starts identifying it. Below
+// that length the identity costs more than the scan it replaces, so a fixture
+// that wants the sharing has to be long enough to earn it.
+const windowSharingCommits = 20

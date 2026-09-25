@@ -686,3 +686,84 @@ func TestVersionGroupTrainPartialReleaseAdvancesTheTrain(t *testing.T) {
 	assert.Zero(t, r.TagCount("app1@0.2.0-beta.0"),
 		"the published prerelease is the holder's alone; tags: %v", r.TagList())
 }
+
+// TestVersionGroupsRefuseAGroupTheyCannotResolve: a versionGroup is a
+// name in the same namespace as the spaces, and it may name a group or a space
+// that versions as one. Each way of naming something else is refused with the
+// name that was written, because a group silently resolving to nothing is a
+// release train nobody is on.
+func TestVersionGroupsRefuseAGroupTheyCannotResolve(t *testing.T) {
+	base := func() models.File {
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Spaces["apps"] = models.SpaceConfig{Path: models.PathList{"apps"}, Flow: buildPublish()}
+		return cfg
+	}
+
+	t.Run("a group with no name", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := base()
+		cfg.VersionGroups = map[string]models.VersionGroupConfig{"": {Versioning: "fixed"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		covTailRefused(t, r, "group name must not be empty")
+	})
+
+	t.Run("a group named after a space", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := base()
+		cfg.VersionGroups = map[string]models.VersionGroupConfig{"libs": {Versioning: "fixed"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		covTailRefused(t, r, "group and space names share one namespace")
+	})
+
+	t.Run("a space that versions independently", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := base()
+		cfg.Spaces["apps"] = models.SpaceConfig{
+			Path: models.PathList{"apps"}, Flow: buildPublish(), VersionGroup: "libs",
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("apps", "site")
+		r.Commit("feat(core,site): bootstrap")
+		covTailRefused(t, r, "does not version as a group")
+	})
+
+	t.Run("a space that is itself in a group", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := base()
+		cfg.VersionGroups = map[string]models.VersionGroupConfig{"train": {Versioning: "fixed"}}
+		cfg.Spaces["libs"] = models.SpaceConfig{
+			Path: models.PathList{"packages"}, Flow: buildPublish(), VersionGroup: "train",
+		}
+		cfg.Spaces["apps"] = models.SpaceConfig{
+			Path: models.PathList{"apps"}, Flow: buildPublish(), VersionGroup: "libs",
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("apps", "site")
+		r.Commit("feat(core,site): bootstrap")
+		covTailRefused(t, r, "name that group directly")
+	})
+
+	t.Run("a space that does version as one is the accepted shape", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := base()
+		cfg.Spaces["libs"] = models.SpaceConfig{
+			Path: models.PathList{"packages"}, Flow: buildPublish(), Versioning: "fixed",
+		}
+		cfg.Spaces["apps"] = models.SpaceConfig{
+			Path: models.PathList{"apps"}, Flow: buildPublish(), VersionGroup: "libs",
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("apps", "site")
+		r.Commit("feat(core,site): bootstrap")
+
+		res := r.StatusOK()
+		assert.NotEmpty(t, res.Events, "the two spaces share one train; stdout:\n%s", res.Stdout)
+	})
+}

@@ -19,33 +19,6 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// TestGitDirtyGuardReadsARenameAsOneEntry: git's machine-readable status
-// writes a rename as the destination followed by the source, and only the
-// first of the two carries a status prefix. Reading the second as an entry of
-// its own would report a path with its first three characters eaten — a file
-// nobody has, in a refusal telling somebody to go and commit it.
-func TestGitDirtyGuardReadsARenameAsOneEntry(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.RevertOnFail = models.Bool(true)
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.WriteFile("packages/core/renameable.txt", "work in progress\n")
-	r.Commit("feat(core): bootstrap")
-
-	// git mv stages the rename, which is the shape porcelain reports as R.
-	r.Git("mv", "packages/core/renameable.txt", "packages/core/renamed.txt")
-
-	res := r.Release()
-	require.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout, "pre-existing local changes")
-	assert.Contains(t, res.Stdout, "packages/core/renamed.txt", "the destination the rename created")
-	assert.NotContains(t, res.Stdout, "kages/core/renameable.txt",
-		"the source is the rename's second half, not an entry with a status prefix to strip")
-	assert.Empty(t, r.TagList(), "the guard refuses before anything is released")
-	assert.FileExists(t, r.Path("packages", "core", "renamed.txt"), "and the work is untouched")
-}
-
 // TestGitReleaseCommitIsSkippedWhenNothingWasStaged: with the changelog off
 // and no manifest to rewrite, the release commit would have nothing in it. An
 // empty commit is not a record of anything, so none is made, and the tag then
