@@ -1903,6 +1903,7 @@ packages, which is what makes "the correction reached exactly this far" assertab
 | `TestCorrectionDiagnosticsNameWhatTheyCouldNotReach` | A correction whose targets have all left the pending window addresses no package at all, and reporting it against nothing is the whole point of the no-op diagnostic being unsuppressible; a correction that does reach its target names the targets it resolved at trace. |
 | `TestCorrectionReachesATargetAcrossAMerge` | A merge gives the commit graph two paths to the same commit, and a correction naming a commit both paths reach is still an ancestor: the restatement decides the bump with no E210, as on a linear history. |
 | `TestFinalPlanFaultDoesNotDegradeAncestryToHistoryOrder` | Correction ancestry about a released commit, the one question no pending window answers, requires the repository DAG and never falls back to log order. |
+| `TestFinalPlanRefusesAMalformedChangedFilesListing` | The changed-files listing a commit naming no package takes its scope from is a framed protocol: a read Git could not give, a reply with no framing, a path that never ends and a listing that leaves one of the two asked commits out each refuse `dispat status` naming the fault, never a plan in which the commit changed nothing; a healthy retry derives the package from the file. |
 
 ### Goal 32: references naming several files (`multiref_test.go`)
 
@@ -2404,7 +2405,7 @@ timestamps to relate histories.
 | `TestFinalPolyrepoCompositionFaultsNameTheUntrustedBoundary` | Each control/source identity, completeness, inventory, pin, and HEAD inquiry fails closed and a healed retry composes the same fleet. |
 | `TestFinalPolyrepoFaultDoesNotDegradeSourceAncestryToHistoryOrder` | Source correction ancestry about a released source commit remains repository-scoped and fail-closed. |
 | `TestFinalPolyrepoImportedConfigFaultRefusesUnattributedOwnership` | Imported configuration ownership requires a successful Git-root proof and a healed retry converges. |
-| `TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex` | Corrupt control-history framing cannot become an empty checkpoint index. |
+| `TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex` | Corrupt control-history framing cannot become an empty checkpoint index: a reply with no marker, a header cut short, an object id of the wrong length or not hexadecimal, a parent that is not an object id, and a raw diff record with no colon or with the wrong fields are each refused by name while checkpoints are indexed. |
 | `TestFinalPolyrepoMalformedRepositoryFactsFailClosed` | Invalid completeness booleans, HEAD object ids, and blank control logs fail at their trust boundary. |
 | `TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow` | Truncated framing and invalid commit or parent identities are rejected without shrinking the pending release window; healthy retries retain it. |
 | `TestFinalPolyrepoMalformedSubmoduleInventoryCannotEraseARepository` | Corrupt successful git-config output cannot shrink the source inventory. |

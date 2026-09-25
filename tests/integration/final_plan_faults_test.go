@@ -12,6 +12,7 @@ package integration
 // so each case reaches the same process boundary as an operator's command.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,6 +66,54 @@ func TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot(t *testing.T) {
 			assert.NotContains(t, combined, "release plan ready")
 			assert.Equal(t, 1, fault.Matches(), "the one snapshot inquiry was attempted once")
 			assert.Empty(t, r.TagList(), "status never records a release")
+		})
+	}
+}
+
+// TestFinalPlanRefusesAMalformedChangedFilesListing: a commit that names no
+// package takes its scope from the files it changed, and that listing is a
+// framed protocol between Git and the planner. A reply Git could not give, one
+// whose framing is broken, one with a path that never ends, and one that lists
+// fewer commits than were asked for are each a refusal naming what was wrong,
+// never a commit that changed nothing and so released nothing. A healthy
+// retry plans the derived scope. Both commits are asked about in one listing.
+func TestFinalPlanRefusesAMalformedChangedFilesListing(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{name: "a failed read", want: harness.GitFaultMarker},
+		{name: "a reply with no framing", output: "packages/core/change.txt\n", want: "malformed changed files record"},
+		{name: "a path that never ends", output: "\x1e%s\x1f\x00\npackages/core/change.txt",
+			want: "an unterminated path"},
+		{name: "a listing without the commit", output: " ", want: "malformed changed files record"},
+		{name: "a listing that leaves a commit out", output: "\x1e%s\x1f\x00\npackages/core/change.txt\x00",
+			want: "changed files listed 1 of 2 commits"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := finalPlanRepo(t)
+			r.Git("tag", "-a", "core@0.1.0", "-m", "the bootstrap, released")
+			r.WriteFile("packages/core/change.txt", "pending\n")
+			r.Commit("fix: a change that names no package")
+			r.WriteFile("packages/core/change.txt", "pending, and more\n")
+			r.Commit("fix: another change that names no package")
+			head := r.Git("rev-parse", "HEAD")
+			fault := harness.GitFault{Pattern: "*log --no-walk=unsorted --stdin*"}
+			if tc.output != "" {
+				fault.Output = strings.ReplaceAll(tc.output, "%s", head)
+			}
+			injected := harness.NewGitFault(t, fault)
+
+			res := r.CommandEnv(injected.Env(), "status")
+			require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			combined := res.Stdout + res.Stderr
+			assert.Contains(t, combined, tc.want)
+			assert.NotContains(t, combined, "release plan ready")
+			assert.Equal(t, 1, injected.Matches(), "the listing was asked for once")
+			healed := r.StatusOK()
+			assert.Equal(t, "0.1.0 -> 0.1.1", harness.GraphLine(healed.Events, "core").Str("version"),
+				"the real listing derives the package from the file")
 		})
 	}
 }

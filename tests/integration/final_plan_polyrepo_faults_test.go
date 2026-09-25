@@ -286,22 +286,43 @@ func TestFinalPolyrepoPlanningFaultsDoNotShrinkTheFleetSnapshot(t *testing.T) {
 // TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex: the
 // control log is a framed protocol between Git and the planner. A successful
 // process with corrupt framing is an error, never an empty checkpoint index
-// that would change every source boundary.
+// that would change every source boundary: a reply with no marker, a header
+// cut short, an object id or a parent that is not one, and a raw diff record
+// with no colon or with the wrong number of fields are each refused by name.
 func TestFinalPolyrepoMalformedControlHistoryIsNotAnEmptyCheckpointIndex(t *testing.T) {
-	f := finalPolyrepo(t)
-	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*log --topo-order*",
-		Output:  "unexpected-control-history",
-	})
+	const marker = "\x00dispat-control-gitlink-history-v1\x00"
+	sha := strings.Repeat("a", 40)
+	header := marker + sha + "\x00\x00Author\x00author@example.test\x00chore: record\x00\x00"
+	for _, tc := range []struct {
+		name, output, want string
+	}{
+		{name: "no marker", output: "unexpected-control-history", want: "malformed control history marker"},
+		{name: "a header cut short", output: marker + sha + "\x00", want: "truncated control history header"},
+		{name: "an object id of the wrong length", output: marker + "abc\x00\x00A\x00a@x\x00m\x00",
+			want: "malformed control history object id"},
+		{name: "an object id that is not hexadecimal", output: marker + strings.Repeat("z", 40) + "\x00\x00A\x00a@x\x00m\x00",
+			want: "malformed control history object id"},
+		{name: "a parent that is not an object id", output: marker + sha + "\x00not-a-parent\x00A\x00a@x\x00m\x00",
+			want: "malformed control history parent"},
+		{name: "a raw record with no colon", output: header + "\n100644 100644\x00path\x00",
+			want: "malformed control history raw record"},
+		{name: "raw metadata with the wrong fields", output: header + "\n:100644 100644 abc\x00path\x00",
+			want: "malformed control history raw metadata"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := finalPolyrepo(t)
+			fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*log --topo-order*", Output: tc.output})
 
-	res := f.control.CommandEnv(fault.Env(), "status")
-	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	combined := res.Stdout + res.Stderr
-	assert.Contains(t, combined, "malformed control history marker")
-	assert.Contains(t, combined, "indexing control checkpoints")
-	assert.NotContains(t, combined, "release plan ready")
-	assert.Equal(t, 1, fault.Matches(), "the corrupt control history reply was consumed once")
-	assert.Empty(t, polyrepoTags(f.control, "sources/lib"), "planning failure records no release")
+			res := f.control.CommandEnv(fault.Env(), "status")
+			require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			combined := res.Stdout + res.Stderr
+			assert.Contains(t, combined, tc.want)
+			assert.Contains(t, combined, "indexing control checkpoints")
+			assert.NotContains(t, combined, "release plan ready")
+			assert.Equal(t, 1, fault.Matches(), "the corrupt control history reply was consumed once")
+			assert.Empty(t, polyrepoTags(f.control, "sources/lib"), "planning failure records no release")
+		})
+	}
 }
 
 // TestFinalPolyrepoMalformedSourceHistoryCannotShrinkThePendingWindow: Git may
