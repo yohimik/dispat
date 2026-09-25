@@ -1,5 +1,1027 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.6 (2026-09-25)
+
+### Features
+
+- add an optional sign stage that writes each package's own version ([13b321c](https://github.com/yohimik/dispat/commit/13b321ccd6f60ccc7fc2f0b9721e9b311119a429)) (by yohimik, Claude Opus 5.5)
+  A release can run a sign stage before the propagate (version) stage and the
+  build. `autoSign` enables its native step, which writes the version the plan
+  computed for each package into the package's own manifests (`manifests: root`
+  by default, or `all` to reach a format such as Unity's
+  ProjectSettings/ProjectSettings.asset), and `flow.sign`, `flow.beforeSign` and
+  `flow.postSign` name its scripts and hooks. The stage is the package's first
+  task: beforeAll runs before it, it waits for the providers the way the version
+  stage does when it comes first, it shares the build budget, and it stays on the
+  orchestrator when worker nodes are configured. A failure there is reported as
+  the `sign` stage, logged as "auto-signing failed" for the native step, and
+  reverted under revertOnFail.
+
+  The sign stage owns the own version. Beside an enabled autoSign, autoVersion
+  (or autoPropagate) writes dependency ranges and replace rules alone:
+  writeVersion defaults to false, an explicit `writeVersion: true` is refused at
+  load, and `dispat autoversion` writes the ranges only unless --write-version
+  asks otherwise. W192 is reported by the stage that writes the version, and
+  syncLock still runs after a change only the sign stage made.
+
+  A package whose configuration names neither autoSign nor a sign entry has no
+  sign stage: no task, no hooks, no events, and its release runs exactly as
+  before. The plan digest carries the sign commands and the autoSign policy, so
+  its schema is dispat-plan-digest/2.
+
+- accept propagate as the version stage's name and autoPropagate as autoVersion's ([d0a281f](https://github.com/yohimik/dispat/commit/d0a281fb8a8356ee4a4357180b7befb595feb628)) (by yohimik, Claude Opus 5.5)
+  The version stage is also the propagate stage: it propagates the versions a
+  package takes from its providers into its files. The configuration accepts
+  that name beside the existing one. `autoPropagate` is `autoVersion` with the
+  same options, and `flow.propagate`, `flow.beforePropagate` and
+  `flow.postPropagate` are `flow.version`, `flow.beforeVersion` and
+  `flow.postVersion`.
+
+  Each pair is one setting. A level stating either spelling replaces what a
+  level above stated under the other, and one object stating both spellings of
+  a pair is refused when the configuration loads, at the root, in a space entry,
+  in a space folder's file and in every package layer. Messages about the block
+  name the key the file wrote. The stage keeps its runtime name whichever key
+  configured it: DISPAT_STAGE, DISPAT_FAILED_STAGE, the webhook fields and the
+  log say `version`. A configuration that uses neither new key loads and runs
+  exactly as before.
+
+- let a worker find its mailbox from the repository it runs in ([fdb7133](https://github.com/yohimik/dispat/commit/fdb7133b9cf0b54749484e1177ce6e55e0bec6c5)) (by yohimik, Claude Opus 5.5)
+  `dispat worker` no longer requires `execution.endpoint`. A worker started in
+  a checkout of the repository being released, with none stated, reads its
+  work from that checkout's release remote, `commit.remote` or `origin`, at the
+  push URL Git resolves for it, which is where an orchestrator's link with no
+  endpoint sends the work. A pool that coordinates through the repository
+  itself then names its mailbox nowhere.
+
+  The resolution is strict. A folder that is not a Git repository, a remote
+  that is not configured or pushes to more than one URL, and a push URL that
+  carries a credential or cannot be a mailbox are refused with E225 before the
+  worker opens its state folder, naming both remedies: state
+  `execution.endpoint`, or start the worker in a checkout of that repository.
+  The push URL is held to the rules of an endpoint by the same check an
+  orchestrator's link is held to.
+
+- reach workers through the repository being released by default ([b1674f1](https://github.com/yohimik/dispat/commit/b1674f109f588ae16997b711c3abc7341ee1ccac)) (by yohimik, Claude Opus 5.5)
+  A worker link now needs only the node's name. A link with no endpoint, in
+  execution.workers or as `--worker name` on release, run and status, reaches
+  the remote the release takes its lock on, at the push URL Git resolves for
+  it, which in a composed workspace is the entry repository's, and the worker
+  names that repository as its own endpoint. A pool needs no mailbox
+  repository of its own, and a snapshot sends only what the remote does not
+  already hold. An endpoint a link states still names another mailbox. The
+  push URL is held to the endpoint rules when a run that dispatches starts,
+  before any lock: one that carries a credential is refused with E225, naming
+  the link and the remote and never the credential, and a release checks it
+  again at the destination its lock was taken on. `status --worker` resolves
+  nothing. A `--worker` value that is neither a node name alone nor
+  name=endpoint with both halves stated is a usage error and is never echoed.
+  The configuration tests that refused a link with no endpoint now accept it.
+  The docs describe the repository as the mailbox and what follows from it:
+  whatever travels is readable by whoever can read the repository, and the
+  host's branch and tag rules keep worker credentials away from release
+  branches, release tags and the lock tag.
+
+### Fixes
+
+- name the linked peer whose beforeAll hook refused a release ([c79f732](https://github.com/yohimik/dispat/commit/c79f7326f1e2b5bea199a57f80e2b27f6426860d)) (by yohimik, Claude Opus 5.5)
+  In a linked fleet every peer's run.beforeAll gates the release. When the
+  entry's hook failed the run logged "beforeAll hook failed, refusing to
+  release", but when a peer's hook failed the release exited 1 with no
+  error line at all, leaving nothing in the log to say why. A peer's
+  failure is now logged the same way, as an error that names the
+  repository whose hook failed. Nothing is built or tagged, as before.
+
+- refuse a pushing release from a detached HEAD before it starts ([4659f22](https://github.com/yohimik/dispat/commit/4659f221c4a00d9741a3fc0fd53bcb26c56e5e10)) (by yohimik, Claude Opus 5.5)
+  A single repository pushes its release commit as the branch it has
+  checked out. With commit.push on and a detached HEAD there is no such
+  branch, and the run went on to take the lock, build and publish every
+  package, and only then failed its push with E224, leaving a published
+  release whose commit and tags never reached the remote. The release now
+  refuses a detached HEAD with E337 at its entry, before the lock, any hook
+  or any package work, and the error says to check out a branch (for
+  example actions/checkout with a ref). commit.branch does not change this
+  in a single repository; it names a fleet source's branch.
+
+  The recovery merge after a rejected push no longer carries its own
+  detached-HEAD refusal, and the behind-remote check no longer skips a
+  detached HEAD: neither can meet one now. The unit test that expected the
+  behind check to pass a detached HEAD is replaced by one for the refusal,
+  and the recovery test that fails the run's branch reads counts the entry
+  check's read before the one it fails.
+
+- refuse a changed-files listing that names a commit not asked about ([bd81c7a](https://github.com/yohimik/dispat/commit/bd81c7a2819ba0c847ced5e83c6eb7aac67fa15c)) (by yohimik, Claude Opus 5.5)
+  A commit that names no package takes its packages from the files it
+  changed, and dispat asks Git for those files of every such commit in one
+  listing. A listing was accepted whenever it held as many records as
+  commits were asked about, so a record naming some other commit left an
+  asked commit with no files: it derived no package, W131 called it inert,
+  and its fix never released. The listing is now refused as malformed, and
+  status and release stop before planning, when a record names a commit
+  that was not asked about, when a commit is listed twice, or when an asked
+  commit has no record; the error names the commit.
+
+- report a release tag the remote declined as a failed push, not E221 ([10eb970](https://github.com/yohimik/dispat/commit/10eb9707fd56be5b5b401ec19f93b9f5b38e4bc2)) (by yohimik, Claude Opus 5.5)
+  A release tag is pushed create-only, and a refusal is read back from the
+  remote to tell a record at another commit (E221) from this run's own write
+  arriving twice. A remote that declined the tag for a reason of its own, a
+  hook, a tag rule or a missing permission, holds no tag by that name, and
+  that answer was read as a record at another commit: the run reported E221
+  naming an empty commit, which sends the operator looking for a release
+  nobody made, and then logged that it had pushed the release commit and
+  tags. Such a refusal is now the push failing: E224 names the tag and the
+  reason the remote gave, the other refs of the same push are still reported,
+  and the package stays published. Once the remote accepts the tag, push it
+  from the checkout that holds it.
+
+- refuse conflicting boundaries two peers of a linked fleet state ([0cf0af8](https://github.com/yohimik/dispat/commit/0cf0af8b89192387bf784dd523da746cb427b801)) (by yohimik, Claude Opus 5.5)
+  A linked fleet merges the repositoryBaselines of every peer, and the merge
+  kept the first tuple for a consumer, release tag and repository and dropped
+  any later one without reading it. Two peers stating one boundary at different
+  commits therefore planned from whichever tuple the entry repository's own file
+  held: a run from one peer released a catch-up that a run from the other peer
+  did not, and no E333 was reported from either.
+
+  Every peer's tuple is resolved. Tuples that resolve to one commit are
+  one boundary and are kept once; tuples that resolve to different commits are
+  E333 naming both peers and both revisions, from whichever peer the run starts
+  in. A duplicate within one file keeps its own refusal.
+
+- refuse an install asset pattern that can never expand before any request ([4537f25](https://github.com/yohimik/dispat/commit/4537f252b118eb3b75d8880441095c198e208493)) (by yohimik, Claude Opus 5.5)
+  `dispat install --asset 'tool-{arch64}'` asked the release API for the
+  release, then failed with exit 1 naming the placeholder, while the install
+  page promises that a mistake in the command line exits 2 before any request
+  is made. Whether a pattern names only the placeholders dispat knows, and
+  closes every brace, does not depend on the release, so such a pattern is now
+  refused as a usage mistake: exit 2, the placeholder named, nothing asked.
+
+- name an ambiguous release-lock destination E336 in one repository ([043ca59](https://github.com/yohimik/dispat/commit/043ca597f1b6f64fd9c427258e11016549a84fec)) (by yohimik, Claude Opus 5.5)
+  A repository whose release remote pushes to more than one URL cannot hold a
+  release lock that coordinates anything, and dispat refuses the release before
+  any package work. A fleet named that refusal E336, as the release-lock page
+  promises for any lock that cannot be taken, but a single repository logged it
+  with no code. The single-repository refusal now carries E336 on its log line
+  and in its error, like the fleet's, and the error still says that the lock
+  needs exactly one push destination.
+
+- count both paths of a moved file and every name unquoted in derived scopes ([f55b9f3](https://github.com/yohimik/dispat/commit/f55b9f3bba66b6962ba43f25b54a515042c3b5f4)) (by yohimik, Claude Opus 5.5)
+  A unit with no scope-set addresses the packages owning the paths its commit
+  changed (CCME §6.2). The list came from `git log --name-only` under the
+  operator's rename detection, which names a moved file by its new path alone,
+  so a file moved from one package to another released only the package it
+  reached, against §6.2 and its vector 29. Git also quotes a path holding a
+  letter outside ASCII or a tab, so such a file belonged to no package and a
+  scopeless unit touching only it was inert (W131). The list is now read with
+  rename detection off, which gives both paths of a move, and separated by NUL
+  bytes, which gives every path as the repository records it; the root
+  commit's paths are asked for outright rather than left to `log.showRoot`.
+  The plan of a history without such commits is unchanged.
+
+- write each release tag without first listing the package's tags ([3583297](https://github.com/yohimik/dispat/commit/3583297553c92780006d6df3b687232f770d578d)) (by yohimik, Claude Opus 5.5)
+  Writing a release tag listed every tag of the package that HEAD reaches,
+  sorted, with a reachability walk per tag, and only then wrote the tag: two
+  git processes per releasing package, and a listing that grows with every
+  release the package has made. The write is create-only, so it is itself the
+  existence check. The tag is now written first, and only a refused write
+  looks the name up, as the one exact ref HEAD reaches. The outcomes are the
+  ones the listing gave: a tag at the release commit is skipped (W223), one
+  HEAD reaches elsewhere is left alone (E221) with or without force, one HEAD
+  cannot reach is rewritten under force and is the write's failure without,
+  and a write refused with no tag of that name anywhere is reported as it is
+  and not retried.
+
+  The integration test of a failing post-publication tag listing now proves
+  the listing is not made at all: the executor reads no tag inventory before
+  its write.
+
+  BenchmarkCreateReleaseTags (64 packages with 30 releases each, one new tag
+  per package per iteration), Apple M5 Pro, darwin/arm64, go1.26.5,
+  -benchtime 3x, through `testreport bench`, run back to back; columns
+  e73d72ce -> this commit:
+
+      gitcalls/tag   ns/tag            B/op              allocs/op
+      2 -> 1         58.7 ms -> 8.2 ms  5.04 MB -> 1.37 MB  33,750 -> 8,457
+
+- index the control history's parents once per plan ([e73d72c](https://github.com/yohimik/dispat/commit/e73d72ceaca9bfb086a46eec3215643938637b29)) (by yohimik, Claude Opus 5.5)
+  A composed workspace reads the control repository's pending windows from
+  the one control inventory, and every distinct control boundary rebuilt a
+  map of the whole inventory's parents and walked the boundary's ancestors
+  into another map. The parent graph is now indexed by position once, when
+  the inventory is read, and each window's excluded commits are a bitset
+  walked over it. Windows and plans are unchanged.
+
+  BenchmarkControlWindows (a 20,000-commit control history, 64 distinct
+  boundaries), Apple M5 Pro, darwin/arm64, go1.26.5, -benchtime 3x, through
+  `testreport bench`, run back to back; columns 8b421058 -> this commit:
+
+      ns/op               B/op                allocs/op
+      143.0 ms -> 11.4 ms  368.8 MB -> 12.4 MB  73,536 -> 80,274
+
+- read the owed windows in one history walk ([8b42105](https://github.com/yohimik/dispat/commit/8b421058f4fd67edabaca0c7c2b17dfa60c2c08f)) (by yohimik, Claude Opus 5.5)
+  The owed windows of §13.3 were read one `git log <tag>..HEAD` per
+  boundary, each a separate process listing mostly the same commits, in a
+  single history and in each repository of a composed workspace. They are
+  now read like the ordinary windows: one union walk over all of their
+  boundaries, each window recovered from it by the marker pass of CCME
+  §13.11 in the order git lists it. Once an owed window is the whole
+  history no further one is read, since it holds them all. And in a single
+  history, a consumer on a prerelease train no longer makes the planner load
+  the whole commit graph to learn that a provider release outside the pending
+  union is behind its baseline: the release is behind every boundary the
+  union was read from, among them the consumer's own stable release, which
+  its baseline reaches, and the marker index says so. Plans are unchanged.
+
+  BenchmarkComputeRealHistory, Apple M5 Pro, darwin/arm64, go1.26.5,
+  -benchtime 3x, through `testreport bench`, run back to back; columns
+  43c8cbc9 -> this commit:
+
+      shape/commits    gitcalls/op  gitOutputBytes/op     peakHeap_MiB   ns/op
+      bounded/10000    26 -> 9      5,825,134 -> 567,230      18.5 -> 6.4    428 ms -> 144 ms
+      bounded/50000    30 -> 9      36,948,138 -> 2,916,496   125.4 -> 35.2  1547 ms -> 439 ms
+      composed/10000   27 -> 11     5,825,175 -> 1,399,284    14.9 -> 14.3   447 ms -> 223 ms
+      composed/50000   31 -> 11     36,948,179 -> 7,076,766   81.3 -> 82.3   1620 ms -> 742 ms
+
+- bound the single-source walk cache and list only distinct owed pairs ([f86878d](https://github.com/yohimik/dispat/commit/f86878d91a573b1ae70cf7e6d313801f2a222954)) (by yohimik, Claude Opus 5.5)
+  CCME §13.11 bounds what the planner's graph caches retain, and only the
+  cache of multi-source walks honoured it: the unbounded walk from every
+  single package was kept whatever its size, which over a dependency chain
+  is a quadratic number of targets. Both tiers are now charged to the one
+  budget; a walk past it is still answered in full and not kept, and once
+  the budget has turned one away a bounded walk is taken to its own depth
+  rather than read as a prefix of an unbounded one. The owed windows of
+  §13.3 listed every (provider, consumer) pair before keeping the first of
+  each (provider, baseline); they now keep only those while listing. Plans
+  are unchanged.
+
+  BenchmarkComputeChainTopology, Apple M5 Pro, darwin/arm64, go1.26.5,
+  -benchtime 3x, through `testreport bench`, run back to back; columns
+  c592e39e -> this commit:
+
+      packages   peakHeap_MiB    B/op                ns/op
+      1024       117.6 -> 47.8   342 MB -> 205 MB    127 ms -> 95 ms
+      4096       1742 -> 393.5   5458 MB -> 3439 MB  2087 ms -> 1579 ms
+
+- attribute authors only for releases that have an entry to render ([c592e39](https://github.com/yohimik/dispat/commit/c592e39e225fd4f4bdb72a826d59c12a46d8e550)) (by yohimik, Claude Opus 5.5)
+  Planning collected the window authors of every package, releasing or not,
+  and each distinct window scanned the whole pending union to find its own
+  commits. The attribution is read only by the release records, the preview
+  and a step's aligned plan, and each of those renders a changed package that
+  versions at all. The authors are now collected for those packages alone,
+  after the versions and fixed-group rides are settled, and a single
+  history's window is read from its own set of commits in history order
+  rather than by testing every commit of the union. A held package is still
+  changed and keeps its authors, because its preview shows its entry. The
+  releases' authors are unchanged; a package with nothing to release, and a
+  versioning none package, carry none.
+
+  On this repository the plan is identical; the debug log loses the five
+  "release authors collected" lines of the four none packages and the one
+  unchanged package, and the remaining lines follow the fixed-group lines.
+
+  BenchmarkComputeRealHistory, Apple M5 Pro, darwin/arm64, go1.26.5,
+  -benchtime 3x, through `testreport bench`; columns 16966fea -> this commit:
+
+      shape/commits   AuthorScans/op        ns/op
+      whole/10000     630000 -> 37783       189 ms -> 195 ms
+      whole/50000     3250000 -> 192366     919 ms -> 883 ms
+      bounded/10000   133308 -> 35929       426 ms -> 455 ms
+      bounded/50000   741056 -> 214965      1569 ms -> 2171 ms
+
+  The timings moved with other work on the machine (load average near 11):
+  run back to back in one session, bounded/10000 measured 601 and 636 ms
+  before and 571 and 577 ms after. The scan counts are exact.
+
+- stream the history read instead of buffering git's whole output ([16966fe](https://github.com/yohimik/dispat/commit/16966feab55ef6279937dd5fbd331ae70118d2ad)) (by yohimik, Claude Opus 5.5)
+  The planner's history read collected git's whole output in one buffer,
+  copied it into a string, split it into records and kept sub-slices of that
+  string, so every commit a plan kept held the entire output alive with it
+  for the whole run, and a read of several overlapping windows kept several.
+  The read now parses git's output as it arrives, one record at a time in a
+  buffer bounded by the largest record, and every field a commit keeps is a
+  copy of its own. The changed files of a commit are dropped once its derived
+  packages are known, since nothing after scope resolution reads them. Plans
+  are unchanged.
+
+  BenchmarkComputeRealHistory and BenchmarkParseCommits, Apple M5 Pro,
+  darwin/arm64, go1.26.5, -benchtime 3x, through `testreport bench`; columns
+  6e9766ba -> this commit (ParseCommits before: 62b3e8f4, whose parser
+  6e9766ba left as it was):
+
+      benchmark        B/op               peakHeap_MiB    retained_MiB   ns/op
+      whole/10000      52.4 MB -> 49.2 MB   30.3 -> 30.5    11.0 -> 11.0   195 ms -> 189 ms
+      whole/50000      252 MB -> 241 MB    149 -> 139     52.9 -> 53.2   895 ms -> 919 ms
+      bounded/10000    53.6 MB -> 42.7 MB   19.2 -> 18.3    2.76 -> 2.59   456 ms -> 426 ms
+      bounded/50000    351 MB -> 279 MB    126 -> 120     13.5 -> 12.7   1748 ms -> 1569 ms
+      ParseCommits     39.7 MB -> 54.0 MB   n/a             20.3 -> 20.1   15.5 ms -> 15.4 ms
+
+  The history now carries no paths, so a single read keeps nearly all of what
+  it reads and retention moves little; the gain is the buffer and the record
+  list no longer held at once, and the overlapping owed-window reads of the
+  bounded shape. The in-memory parse, which only tests use, allocates more
+  because it now copies what it keeps.
+
+- read changed files only for the commits whose scope derives from them ([6e9766b](https://github.com/yohimik/dispat/commit/6e9766bac20a3d3cc11e40d207ba5d8887cab7d3)) (by yohimik, Claude Opus 5.5)
+  Planning read every pending commit with the paths it changed, which makes
+  git diff each of those commits against its parent. Only a unit that leaves
+  its scope to the files (no scope-set, exclusions alone, or ".", in the
+  header or a Propagate-Scope footer) ever looks at them. The history is now
+  read without paths, and the paths of the commits that need them are read
+  afterwards in one git process. That read uses git log over exactly those
+  commits, so the lists are the ones the history read gave: a merge's changes
+  against its first parent, and a renamed file under its new name alone. A
+  package without a stable tag, such as every versioning none package, still
+  makes the pending union the whole history, and plans are unchanged.
+
+  On this repository `dispat status` diffs 362 commits instead of 1,451, and
+  ten runs take 1.03 to 1.07 s instead of 1.54 to 1.68 s. Its JSON output at
+  the default, debug and trace levels is identical apart from one new debug
+  line naming the commits whose files were read.
+
+  BenchmarkComputeRealHistory, Apple M5 Pro, darwin/arm64, go1.26.5,
+  -benchtime 3x, through `testreport bench`; columns 62b3e8f4 -> this commit:
+
+      shape/commits   commitsDiffed/op   ns/op                 gitcalls/op
+      whole/10000     10000 -> 3216      193.9 ms -> 195.3 ms  3 -> 4
+      whole/50000     50000 -> 16504     924.1 ms -> 894.5 ms  3 -> 4
+      bounded/10000   33318 -> 677       688.6 ms -> 456.3 ms  25 -> 26
+      bounded/50000   218841 -> 3803     3181 ms -> 1748 ms    29 -> 30
+
+- push the first snapshots of different nodes at once ([226f22c](https://github.com/yohimik/dispat/commit/226f22c7074a60018b123c90f994554c9cee8972)) (by yohimik, Claude Opus 5.5)
+  The orchestrator held one lock across the push of every input state, so the
+  first state a run sent to one node waited for the push of the same state to
+  every other node. With two mailboxes that take 200 ms to accept a push, a
+  run's first dispatch to two nodes waited about 565 ms instead of about 300 ms.
+  The pushes to different nodes now travel at once. Two dispatches that need one
+  state on one node still share a single push, and a dispatch that waited for a
+  push that failed pushes the state itself.
+
+- bound each poll of a worker's mailbox ([cbe3e83](https://github.com/yohimik/dispat/commit/cbe3e83745b7411510622c9357813401ab8395d5)) (by yohimik, Claude Opus 5.5)
+  A worker polled its mailbox on the goroutine that claims work with no
+  deadline of its own, so a listing or a fetch that hung on a dead connection
+  stopped the node until the process was restarted. Each poll is now bounded by
+  execution.transfer.timeout, the window the operator allowed for moving a
+  task's inputs, which is what a poll fetches. A poll that runs out of time is
+  reported as a warning and the next poll asks again, without reopening the
+  cache.
+
+- keep git maintenance out of a worker's polls ([5b1f5cc](https://github.com/yohimik/dispat/commit/5b1f5cccc3757d9c9a279a722daf3f84f7f0542b)) (by yohimik, Claude Opus 5.5)
+  Every fetch a worker's poll made started git's automatic maintenance in the
+  foreground, so a busy worker could stall on a repack in the middle of a poll,
+  and the objects of closed coordination branches stayed in its cache: each
+  task left its messages and fetched inputs behind, 18 objects and 136 KiB per
+  probe with a 64 KiB input state in the measured case, growing without bound.
+  A worker now turns git's automatic maintenance off in its cache, and compacts
+  the cache itself after a minute with nothing claimed and nothing in flight,
+  once per idle stretch and never while a task runs. The cache now stays at the
+  size of what the open branches reach.
+
+- start a worker with an empty coordination cache ([5698442](https://github.com/yohimik/dispat/commit/5698442f70e444a4183ddee1da604fbcbf188acd)) (by yohimik, Claude Opus 5.5)
+  A worker removes the coordination refs it fetched when their branches close,
+  but it only knows the refs its own process fetched. A worker that was killed
+  or restarted left the refs of its earlier process in its cache for ever, and
+  each one kept a task's inputs or an output set on disk. A worker now removes
+  every coordination ref in its cache the first time it opens the cache, before
+  its first poll. It does this only in its own bare cache, never in a checkout
+  where another dispat process may be using its refs.
+
+- refuse a space file stating both versioning and versionGroup ([951d3f4](https://github.com/yohimik/dispat/commit/951d3f4fa55b8bf74ace51027d3fb0581c28befc)) (by yohimik, Claude Opus 5.5)
+  A space folder's own configuration file that stated both `versioning` and
+  `versionGroup` loaded without a word: the merge folds the two into one axis
+  and kept the group, so the versioning the file wrote was silently dropped.
+  Every other layer already refuses the pair as a contradiction. The file is
+  now checked before it is merged, and the error names the file.
+
+- recover self-update backups a crash left parked and refuse a blocked slot before downloading ([144c870](https://github.com/yohimik/dispat/commit/144c870e0d762cbc330f6cc4f17a3f5f831592e9)) (by yohimik, Claude Opus 5.5)
+  An update parks the previous rollback copy in a staging directory until the
+  new binary is in place. A process killed in between left that copy there for
+  good, so `self-update --rollback` reported that there was no backup, and a
+  download staged beside the binary kept its 15 MiB. The next update, rollback
+  or restore now puts a parked copy older than an hour back in the backup's
+  place, drops it when a newer backup already holds that place, and removes a
+  staged download of the same age; younger leftovers belong to an update that
+  may still be running.
+
+  A folder, link or other special file where the backup is kept is now named
+  with its remedy (move or remove it, then re-run) before anything is
+  downloaded, and `self-update --check` reports the same obstruction. A first
+  install, which writes nothing there, no longer refuses because of it. A
+  rollback, including `dispat install --rollback`, refuses to move anything but
+  a file, or a link to one, into the tool's place, and `--rollback --check`
+  says so rather than offering a restore.
+
+- treat author spellings that differ only by case as one author ([30ff0e9](https://github.com/yohimik/dispat/commit/30ff0e9b08d59ede570c49ea4df65be845a1e049)) (by yohimik, Claude Opus 5.5)
+  Release records deduplicate and filter authors with the same Unicode fold
+  every other name comparison in dispat uses, rather than with lowercasing.
+  Two spellings of one identity are now one author exactly when they are equal
+  ignoring case: a name or address with a final sigma, a micro sign or a long s
+  no longer splits into two authors, and a dotted capital I is no longer merged
+  with a plain i. An include or exclude pattern such as `*ς` reaches a name that
+  ends in a capital sigma. The changelog section deduplicates through the
+  planner's own function, so the two cannot disagree about who one person is.
+
+- keep versions that did not publish out of the release commit's shared files ([dd240aa](https://github.com/yohimik/dispat/commit/dd240aa9f15e68e83c97efab2b97f3868ee9d34d)) (by yohimik, Claude Opus 5.5)
+  When a package whose version or syncLock stage ran does not publish while
+  another package does, a single history re-synchronizes the commit.include
+  paths before the release commit. The unpublished packages' tracked files and
+  the include paths return to HEAD, leaving every published folder and
+  changelog alone, and the published packages' syncLock scripts run again with
+  the unpublished packages listed at their previous versions and left out of
+  DISPAT_UPDATED_*. A whole-workspace regenerator such as pnpm install
+  otherwise left a failed or skipped package's planned version in a root lock
+  file, and the release commit recorded a version that never published.
+
+  If a script run for the re-synchronization fails, or the run is interrupted
+  during it, the include paths return to HEAD and stay out of the release
+  commit, E223 names the paths and the remedy, and the published packages are
+  still committed and tagged. A run in which every prepared package published
+  is unchanged. A fleet commits include paths into each source commit while
+  the run is going, so the re-synchronization covers a single history, and the
+  recovery guide describes the fleet case.
+
+- restore a skipped consumer's folder in commit mode ([eeeac8d](https://github.com/yohimik/dispat/commit/eeeac8d0aaf73366fbd4ec59de9748072baf77f9)) (by yohimik, Claude Opus 5.5)
+  In commit mode a package skipped after its version stage ran has its folder
+  restored whether or not revertOnFail is set. The run proves every releasing
+  folder clean before it starts and the release commit never stages a skipped
+  folder, so its edits named a version that did not publish and made the next
+  release refuse to start over pre-existing local changes.
+
+  The repository root and a folder holding another package's folder keep their
+  edits, because a restore there would reach another package's files. A failed
+  package keeps the revertOnFail rule, and a run without release commits is
+  unchanged. In a fleet the policy of the repository that owns the folder
+  decides. Reverts in one checkout take the repository's mutation lock in turn,
+  so skipped siblings no longer race on Git's index lock, and in a run that
+  delegates work a restore holds the snapshot guard, so no node is handed a
+  folder half restored.
+
+- authenticate the image builds' release lookup and wait out a rate limit ([ef5a0a3](https://github.com/yohimik/dispat/commit/ef5a0a329cf2d0d96fbfda70e4a525502c6acf4a)) (by yohimik, Claude Opus 5.5)
+  The four images' fetch stages ran install.sh anonymously, so every image
+  build shared the runner address's small hourly quota, and install.sh read
+  any refused lookup, a spent rate limit included, as "no release for TAG".
+  The fetch stages now install curl and mount the build's GITHUB_TOKEN as the
+  github_token secret, which the compose files declare from the environment and
+  the docker space exports on every compose call (empty means anonymous, as
+  before). install.sh and install.ps1 wait out a rate-limited 403 or 429 for up
+  to three attempts, as retry-after or x-ratelimit-reset asks and at most a
+  minute each, call a release missing only on a 404, and otherwise report the
+  HTTP status with GitHub's own message.
+
+- let a restarted worker reclaim a state folder its own process id names ([46fdded](https://github.com/yohimik/dispat/commit/46fdded74b62bbf7f9cb313f897c47979246ee10)) (by yohimik, Claude Opus 5.5)
+  A worker restarted in a container is process 1 every time, so the
+  `worker.lock` its crashed predecessor left names the restarted process
+  itself. The lock read that id as a live owner, since the process asking is
+  running, and every restart was refused with E225 until somebody deleted the
+  file, although the documentation promises that a crashed worker restarts
+  without that. A process has not written its claim when it reads the lock, so
+  its own id there can only be an earlier process's, and the folder is now
+  taken over as from any process that is gone.
+
+  The state tests that stood in for a second live process with the test's own
+  id now use the process that started the test, which is alive and is another
+  process.
+
+- keep credentials out of worker refusals and redacted remotes ([2c6b18f](https://github.com/yohimik/dispat/commit/2c6b18ff0eb1b51d73cd72485a9790532054eaa2)) (by yohimik, Claude Opus 5.5)
+  A run whose worker link reaches the release remote no longer writes that
+  remote's name as it is configured. `commit.remote` may be a URL rather than
+  a remote's name, and the refusal of a push URL no mailbox may be, like the
+  debug line saying where a link reaches, printed it raw, token included.
+
+  Redaction itself no longer lets a malformed URL through. A value with a
+  scheme that Go cannot parse, such as a password holding a stray `%` or `#`,
+  was returned unchanged; it now has everything up to its last `@` cut, and its
+  query and fragment, as an endpoint already does.
+
+  The coordinator's test-only ownership setter is gone; its tests use the gate
+  a release hands the coordinator.
+
+- bound and contain coordination cleanup and task panics ([20fdf8f](https://github.com/yohimik/dispat/commit/20fdf8f6e15ad1648ca973bd5407c30d5ea8fe65)) (by yohimik, Claude Opus 5.5)
+  A distributed run's cleanup now ends within a bound whatever its mailbox
+  does. Revoking an attempt that passed its deadline waited on a detached
+  context with no deadline, and closing the run's coordination branches did
+  the same, so a mailbox that hung after preflight kept the release, and every
+  lock it gives back afterwards, waiting for ever. The revocation now waits at
+  most `timeouts.cancel`, and the close at most `timeouts.cancel` and never
+  less than 30 seconds; the branches a hung mailbox kept are reported with
+  W244, and the refs the run fetched are removed on a bound of their own.
+
+  A failure inside dispat's handling of what a mailbox carries no longer ends
+  the process. A panic reading one branch quarantines that branch and the poll
+  goes on; one during a probe fails that node's preflight; one in a node's task
+  reports a failure when its command never started and nothing when it did;
+  and one in a delegated publication after the run authorized it is settled as
+  an unanswered publication, never as a failure.
+
+- stop holding the mailbox across network transfers and fetch only this run's branches ([d07b0b2](https://github.com/yohimik/dispat/commit/d07b0b2f0625cc23e1ac7a3cf2b3bc31ab97d9c3)) (by yohimik, Claude Opus 5.5)
+  A distributed run no longer serializes its mailbox behind one git call. The
+  mailbox held one lock across every push, fetch and listing, so a node pushing
+  a large result blocked its own polls, withdrawals and the read of another
+  task's publication authorization, which expires two minutes after it is
+  written, and a waiter could not leave when its context ended. The lock now
+  guards the mailbox's memo alone; the writes to its own transport refs are
+  ordered by a wait that ends with the caller's context, and pushes, listings,
+  object writes and reads run at once.
+
+  An orchestrator polling a mailbox other runs share fetches only the branches
+  of its own attempts, instead of every moved branch addressed to the node, and
+  does not remember the others, so another run's output trees never reach the
+  repository being released. The refs a process fetched are removed when their
+  branch disappears from the remote and, on close, all of them, on a bounded
+  context of their own.
+
+- keep what a publisher reported when its authorization is withdrawn ([acd4678](https://github.com/yohimik/dispat/commit/acd46786c0fc95b7aa82bcbfa672fb34a7d003cb)) (by yohimik, Claude Opus 5.5)
+  A run that withdraws a delegated publication, because its authorization was
+  refused, lost, left unanswered or overtaken by an interrupt or a lost lock,
+  now reads what the node already wrote in the withdrawal's place. The node's
+  own success result is a publication and is recorded as usual, which is also
+  how a publication authorized before a lost lock is still recorded; its own
+  failure is an ordinary publish failure. Before, any terminal message found
+  there was read as "stopped after the command started", so a publisher that
+  had succeeded, or failed cleanly, was reported as E228 and kept its lock.
+
+  An acknowledgement found there is read for its phase and command flag rather
+  than assumed. A publisher withdrawn because its authorization was refused
+  whose acknowledgement says the command had started, with no result, is now
+  reported as E228 instead of as a publication withheld.
+
+- tell a refused coordination push from a lost one ([d9606e9](https://github.com/yohimik/dispat/commit/d9606e9bdd7b2f3a8cab788de1b5a8bfced09362)) (by yohimik, Claude Opus 5.5)
+  A distributed run now tells the three answers a coordination push can get
+  apart. A lease the remote refused and an update a server rule or hook
+  declined never landed; a `[remote failure]`, an unnamed refusal or a push
+  that reported nothing may have. Before, every refusal read as a lost lease
+  and every missing answer as a failure, so a claim, a ready or an assignment
+  whose push applied but whose response was lost stranded the task until
+  `timeouts.task`, raised a false E228 or left a branch nobody closed.
+
+  A push that did not report success is settled by reading the branch and
+  never by pushing again: the message on the tip, or on the tip's first-parent
+  chain, landed; a refused message the branch does not carry did not; anything
+  else is unknown after three reads. Every branch the orchestrator creates is
+  recorded for cleanup before it is pushed. An assignment whose create stays
+  unknown is revoked under a lease on itself and offered again when the branch
+  is gone. A node adopts its own claim when it surfaces, and reports a result
+  a server rule refused once more without its outputs, as a failure naming
+  `transfer-refused`, so the run hears an answer long before its deadline. A
+  lease over a branch that is already gone closes it.
+
+  TestExecutionLostAuthorizationResponseRetainsExclusion changes by design:
+  an authorization found on the branch, or under the result the node wrote on
+  top of it, landed, so the "visible" row now publishes, records the package
+  and gives the lock back. A deleted or rewound branch still proves nothing and
+  stays E228. A cancel test wrote an "earlier" withdrawal identical to the one
+  the run writes in the same second; it now issues it a minute earlier, since
+  an identical object on the chain is one that landed.
+
+- contain a panicking task so its run records and unlocks ([176cd31](https://github.com/yohimik/dispat/commit/176cd318c8e61cb919a97e34d31b835f442e01ed)) (by yohimik, Claude Opus 5.5)
+  A panic inside one package's task ended the whole process: whatever else was
+  in flight, the records of what had already published and the release lock
+  all went with it, and the next run met a lock nobody would give back.
+
+  A task that panics is now contained where it starts. A package whose publish
+  had not returned success fails at its stage with the internal error as its
+  reason; a package that had published stays published, with the panic as a
+  critical of its record and its consumers blocked. The rest of the graph stops
+  as it does on an interrupt, while the run itself goes on to postAll, its
+  records and its unlock, and exits 1. No onFail or onSkip script runs for it,
+  and every lock a task can hold is now given back through defer, so the
+  containment cannot wait on a lock the panic left behind.
+
+- let only the control configuration unlock an orchestrated source ([043b51b](https://github.com/yohimik/dispat/commit/043b51b06fd1687d2c754d32df707e3c033d6a74)) (by yohimik, Claude Opus 5.5)
+  A source of an orchestrated fleet whose own imported configuration set
+  unsafeDisableLock released without its remote lock, although an orchestrated
+  fleet runs under the control configuration's policy. One source could take
+  the fleet's exclusion apart for itself, and a distributed run was refused for
+  a bypass its control configuration never asked for.
+
+  Only the control configuration or DISPAT_UNSAFE_DISABLE_LOCK now releases an
+  orchestrated source without its lock. A source whose own configuration sets
+  the key is locked like any other, and one warning line names the ignored
+  setting and the repositories; it is not W331, which names repositories that
+  release without a lock. A peer of a choreographed fleet keeps its own setting.
+
+- settle a release lock push or delete whose answer was lost ([9532a0b](https://github.com/yohimik/dispat/commit/9532a0be315b754469123be0f34bd141a75ce145)) (by yohimik, Claude Opus 5.5)
+  A lock push that reported a failure was settled by one read of the lock
+  tag's message. When that read failed as well, a push that had in fact
+  landed left a lock nobody owned, and every later release was refused until
+  somebody deleted it by hand. On the way out, any failed delete was E336 with
+  the advice to delete the tag, even when the delete had landed and only its
+  answer was lost, or when the lock on the remote belonged to another run by
+  then, which that advice would hand to a third run.
+
+  A failed push is now read back from the remote object by object: this
+  attempt's object is a lock this run owns, another object is a refusal naming
+  its holder, no lock is a push that did not land, and a remote that answers no
+  read gets the push removed under a lease on this attempt's own object and an
+  E336 refusal naming the attempt and the object, so a lock the delete could
+  not reach is recognisable. A failed delete is read back once: no lock is a
+  clean release; another run's lock is left alone and fails the run with E336
+  and a remedy that says not to delete it, because the run cannot show it held
+  the exclusion to its end; this run's own object or a read that failed is E336
+  with the remedy that clears it. A publication refused because the lock is
+  another run's now carries the same do-not-delete remedy, and every refusal to
+  take the lock now carries E336. Giving the lock back still fits a fleet's 30
+  seconds per repository.
+
+  TestReleaseLockCleanupPreservesAReplacedLock keeps its E336 and now asserts
+  the do-not-delete remedy instead of the advice to delete the tag.
+
+- close coordination branches within a bound before the locks go back ([e33a7a2](https://github.com/yohimik/dispat/commit/e33a7a2565c2eefd75e450529c9d1e2e1c9555fe)) (by yohimik, Claude Opus 5.5)
+  A distributed run closes the coordination branches it created on its way
+  out, and that close pushed to every mailbox with no deadline. On an early
+  return it ran before the release locks were given back, so a mailbox push
+  that never answered held every lock of the run for as long as it hung; on
+  normal completion it ran after the locks were already given back, although
+  nothing of a distributed run should outlive the exclusion it ran under.
+
+  The close now has two minutes, detached from the run's cancellation, and the
+  closing phase closes the coordinator explicitly just before it gives the
+  locks back. The deferred close that covers every earlier return does nothing
+  once that has happened. A close that runs out of time is the W244 warning a
+  branch that could not be closed has always been, and never costs the locks.
+
+- record completed releases when an interrupt reaches the closing phase ([b19c0a7](https://github.com/yohimik/dispat/commit/b19c0a70fb4feb7490cfc847cf0db9c66e153b5d)) (by yohimik, Claude Opus 5.5)
+  An interrupt that arrived after the packages published, during postAll or
+  the finalize phase, reached the release commit, the tags and the push: the
+  run decided once, at the start of its closing phase, whether it had been
+  interrupted, and ran the records on its own live context when it had not.
+  A Ctrl-C during postAll, a commit hook or the release push therefore left
+  published packages with no release commit, no tag and no push, which the
+  next run releases again.
+
+  The records now run on a context of their own that the run's cancellation
+  never reaches and that gets five minutes from the moment the run is
+  interrupted; an uninterrupted run is not bounded by it. The operator's hooks
+  stay on the live run, in finalize exactly as in a fleet's source records: a
+  hook running when the interrupt arrives is stopped and no later hook starts,
+  while the commit, the tags and the push go on. Whether the run was
+  interrupted is read once the records and the lock cleanup are done, so the
+  closing webhook says interrupted whenever the interrupt came. The record
+  written after each publish is bounded by the same five minutes, so a remote
+  that stops answering cannot hold the run and its lock for good.
+
+- name a fixed group by its authored name in every diagnostic ([e8b3d64](https://github.com/yohimik/dispat/commit/e8b3d64e9201774847f5ec2a516827bef5ecb4c4)) (by yohimik, Claude Opus 5.5)
+  A diagnostic raised against a whole versioning group local to one repository
+  of a polyrepository workspace carried the planner's internal identity as its
+  package, the repository and the group joined by a NUL, so the log line read
+  package=group:web followed by an invisible byte and the group name. The
+  package field now names the group as its author wrote it and the repository
+  it belongs to, as in group:platform of repository web; a group of a single
+  history still reads group:<name>. The same change drops an unreachable
+  fallback from the planner.
+
+- accept a live pin equal to the control pin ([9b814d5](https://github.com/yohimik/dispat/commit/9b814d537e2d8cb5cb054414502f98bae2a250be)) (by yohimik, Claude Opus 5.5)
+  A nested command in a composed workspace validates each source checkout
+  against control HEAD and the live pins of the release around it. A checkout
+  sitting exactly at the revision control pins was accepted only when two reads
+  of the live pin agreed, so while the enclosing release kept publishing
+  revisions the command read ten times and refused a correctly pinned checkout
+  with E330. Such a checkout needs nothing from the run and is accepted on the
+  first read again; a checkout past the control pin still needs a stable live
+  pin that admits it.
+
+- refuse a standalone tag that would release a provider on a consumer's release commit ([adf3346](https://github.com/yohimik/dispat/commit/adf3346fe0d1594de198d4929cca78ffe6704dd5)) (by yohimik, Claude Opus 5.5)
+  A hand-built pipeline that ran `dispat commit --tag --package core` on the
+  release commit of a consumer core still owed tagged core there with no
+  refusal, although `dispat release` refuses the same selection with E201: both
+  tags then sit on one commit, the consumer reads as served, and it keeps the
+  provider's old version with nothing left to find the debt. Outside a release
+  stage script, `dispat commit --tag` now refuses such a provider before it
+  commits or tags anything, unless the same invocation tags the consumer after
+  it, and names the consumer, the provider and both remedies. A nested
+  invocation inside a release stage is unchanged, since the run that started
+  it has already checked its whole selection.
+
+- report every error the owed-consumer check meets ([7d0f45b](https://github.com/yohimik/dispat/commit/7d0f45bb05d90dfc556675ee19d3f219a82db6a2)) (by yohimik, Claude Opus 5.5)
+  After a run publishes a provider, E201 checks that no consumer it still owes
+  was left at or ahead of the provider's release. That check read any failure
+  to resolve the provider's tag as a tag never written, and a failed ancestry
+  comparison only as a warning, so a cancelled run or a Git error could skip it
+  and exit 0 with a debt no later plan can find. Only a tag known to be absent
+  is skipped now; every other failure is a critical naming the consumer and the
+  provider.
+
+  Before publication, a composed workspace compared the head a provider would be
+  tagged at with the consumer's baseline by equality, while that baseline is a
+  recorded pin or tuple which need not be behind the head. The check now asks
+  whether the head is behind the baseline, as the check after publication does,
+  so a provider tagged behind a consumer's pin is refused with E201 too, and a
+  head that cannot be read or compared stops the release instead of admitting
+  it.
+
+- keep a fixed group's planned version across failed catch-ups ([f4aecdd](https://github.com/yohimik/dispat/commit/f4aecdd30e9935ec392f314df8737656b2c35160)) (by yohimik, Claude Opus 5.5)
+  A shared-version group member that got ahead of a failed provider is owed that
+  provider's release, and the group moves once to deliver it. When that
+  catch-up then failed, or the member sat out a run that released the rest of
+  the group, every later run counted the same debt again: the group moved to a
+  new version each time, the members that had already published re-released
+  with nothing new (W234), and the owed member landed one version later than it
+  was planned at. The group's version already accounts for a debt its member
+  still owes when the member is behind that version, so the member now catches
+  up at the version it was planned at (G3) and nobody rides again. A member
+  that holds the group's version itself still moves the group, since that
+  version carries the commit but never the provider's release.
+
+- catch up a prerelease consumer that overtook a provider's failed release ([19b47cc](https://github.com/yohimik/dispat/commit/19b47cc6657e6fcab71a0e61f22f76b8904bda3c)) (by yohimik, Claude Opus 5.5)
+  A consumer that released a prerelease on a change of its own while its
+  provider's publish failed kept the provider's old version for ever. Its train
+  window still held the shared commit, and the planner read a commit its train
+  carried as already delivered, so the consumer was never owed the provider's
+  release: a provider-only run then published on the consumer's release commit
+  without E201, and every later prerelease stayed on the old version with no
+  W193. The train published the commit, not the provider's version, so such a
+  consumer is now owed exactly as a stable one is: it releases its next
+  prerelease after the provider, with the provider in its record, a
+  provider-only run on its release commit is refused with E201, and a provider
+  shipped alone later leaves a W193 catch-up. What the train published still
+  counts toward its version, and a cancel of the consumer discards only the
+  owed catch-up.
+
+- let a worker lose a stale state-lock race under the TinyGo build ([cee16f5](https://github.com/yohimik/dispat/commit/cee16f5fa3ad84ef6f4810be868ebcf96cc43451)) (by yohimik, Claude Opus 5.5)
+  Two workers taking over one stale worker.lock at once race on renaming it
+  aside, and the loser's rename fails because the file is already gone. The
+  takeover read that with os.IsNotExist, which in the TinyGo runtime does not
+  look into the *os.LinkError a rename returns, so the TinyGo binary reported a
+  raw rename error instead of settling the claim (a refusal naming the owner,
+  or the folder when the winner never wrote). errors.Is(err, fs.ErrNotExist)
+  reads the same answer in both runtimes. The TinyGo acceptance gate caught it
+  in TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner.
+
+- say in the help that --require-release exits 3 ([d76e97c](https://github.com/yohimik/dispat/commit/d76e97c2231f620493bd275d1fdd8fb88917d84d)) (by yohimik, Claude Opus 5.5)
+  The flag list said release and status exit 1 when the plan releases nothing;
+  both exit 3, as their own descriptions and the documentation say, so a
+  pipeline can tell "nothing to do" from a failure.
+
+- leave a coordination branch alone when a stopping poll cut its fetch ([c3cbe21](https://github.com/yohimik/dispat/commit/c3cbe2114b8e63e177ec6b6086295c382067280d)) (by yohimik, Claude Opus 5.5)
+  A worker or orchestrator stopped by a signal while a poll was fetching read
+  the interrupted fetch as a branch nobody can fetch: it retried the branches
+  one by one, quarantined each, and warned W244 that a coordination branch was
+  left alone for the run. A fetch the stopping poll cut short says nothing about
+  the branch, so the poll now returns the cancellation, quarantines nothing and
+  reads the branch again next time. This also removes the spurious W244 that
+  made TestExecutionTerminalMessageRacesWithdrawalLease fail about one run in
+  five.
+
+- say in the help that --config takes an absolute path ([d1b26de](https://github.com/yohimik/dispat/commit/d1b26de432ed6a6ff129f571fa7c2c31cd3d3fb5)) (by yohimik, Claude Opus 5.5)
+  The flag has accepted an absolute path for a while, and the reference says
+  so; the help still called it a name relative to --root.
+
+- name a repository-local versioning group by its repository ([7204ab0](https://github.com/yohimik/dispat/commit/7204ab03a1ea3538f4dfa7300a8cf537851a1696)) (by yohimik, Claude Opus 5.5)
+  A diagnostic about a versioning group local to one repository of a composed
+  workspace printed the planner's internal identity, the repository and the
+  group joined by a NUL, as in versioning group "web\x00platform". It now names
+  the group as its author wrote it and the repository it belongs to, as in
+  versioning group "platform" of repository "web"; a group of a single history
+  reads exactly as before.
+
+- mask a remote's password in two more places it was written ([5abae21](https://github.com/yohimik/dispat/commit/5abae2198cbb6e5c66c57b7d30cd89705e15dd97)) (by yohimik, Claude Opus 5.5)
+  An HTTP request that its context or timeout ended reported its full URL,
+  password included, in an error that reaches the log; it now reports the URL
+  with the password masked, as net/http does. A remote written in the scp-like
+  form with a password, user:password@host:path, is not a URL to Go's parser
+  and passed through the redaction of git's arguments and of every remote a
+  log line names; its user half is now replaced, while a bare account such as
+  git@host:path and a refspec or a tag name that merely contains an @ stay as
+  written. The documentation comment of the scp-form endpoint check sits on
+  its function again.
+
+- correct when execution refusals happen and who sends stage events ([81af8bd](https://github.com/yohimik/dispat/commit/81af8bdd7e4d67cb5b7380b2ad0aa752c28c04ca)) (by yohimik, Claude Opus 5.5)
+  The distributed execution page still described an ownership answer cached for
+  five seconds and a single failed lock read counted as a loss; it now says the
+  lock is read before the first probe, every assignment and every publication,
+  local or delegated, and that a failed read is bounded and retried before the
+  run stops. Several pages and the E225 comment said every E225 refusal happens
+  before any lock, plan or command, which is wrong for a node that fails
+  preflight, an unsatisfiable buildPlatforms and a stage pinned to a worker with
+  no worker links: those are refused once the plan is fixed, before any hook or
+  stage, and a release gives its locks back. The page said a delegated stage
+  raises its events from the worker; the orchestrator raises them and names the
+  node in `worker`, and only a `dispat trigger` inside a delegated script is
+  sent from the worker. The webhook page now lists the `role`, `node` and
+  `worker` format tokens and says what the three fields carry.
+
+- check fleet remotes before planning ([4f74333](https://github.com/yohimik/dispat/commit/4f74333a725c3254ecb1a35a5ca15a9d43fac6d1)) (by yohimik, Claude Opus 5.5)
+  A release in a composed workspace planned first and only then checked that
+  the repositories it selected could reach their remotes and were not behind
+  them, so a stale participant produced a plan computed from outdated tags,
+  and hooks, builds and planning time were spent before the refusal. A single
+  history has always made this check before its plan. Every participating
+  repository that pushes with commit.verify on is now checked before anything
+  is planned: its remote must answer and the branch it has checked out must
+  not be behind it. A detached checkout has no branch to compare and is not
+  refused for it. After the plan, each selected repository settles the branch
+  its release commit is pushed to, refuses an invalid name with E337, and
+  reads that branch from the remote only when it is not the one already
+  compared, so no branch is read twice. The standalone commit step still makes
+  both checks together. One unit test asserted that a stale checkout had
+  already settled its push branch; it now asserts the branch that was compared
+  and that no push branch was settled. The release lock and choreographed
+  repositories pages describe when each check runs.
+
+- give back a lock when the authorization push was refused ([d7aa56a](https://github.com/yohimik/dispat/commit/d7aa56a94de75ccabaea72ebcf68d1daa1093eb7)) (by yohimik, Claude Opus 5.5)
+  An authorization push that the remote refused was reported as a publication
+  whose outcome is unknown: the package failed with E228 and the repository's
+  release lock was left on the remote for an operator. A refused push, a
+  porcelain rejection of its lease, proves that the branch never took the
+  authorization, so no node can have read it. The run now withdraws the waiting
+  publisher, as it does when it refuses an authorization itself, fails the
+  package at the pre-publish check and gives the lock back. The attempt stays
+  marked authorized, so no second authorization follows, and a push that got no
+  answer at all is still E228 with the lock retained.
+
+- check the lock before the first worker probe ([4d8da55](https://github.com/yohimik/dispat/commit/4d8da551260cfb0e6a65247046fe95ea9502607f)) (by yohimik, Claude Opus 5.5)
+  A distributed release planned under its locks and then probed every worker
+  node before it asked the remote whether it still held those locks, so a run
+  that lost its lock while it planned still pushed a probe branch to every
+  mailbox. The coordinator now asks the run's ownership gate before the first
+  probe: a lost lock refuses the run with E336 before any branch is offered.
+  A sweep holds no lock, so its preflight asks nothing.
+
+- check the lock before every publication, local or distributed ([56103b1](https://github.com/yohimik/dispat/commit/56103b1b952ecbfa74832175020bff9fd85e0585)) (by yohimik, Claude Opus 5.5)
+  Only a release that delegated work to worker nodes asked, before a
+  publication, whether it still held its release lock. A release that ran
+  everything on one machine took the lock before planning and never read it
+  again, so a run whose lock another run had taken over published anyway.
+  Every release that holds a lock now opens one ownership gate right after the
+  locks are taken, and every publication, local or delegated, passes it: a
+  remote that carries another lock object or none refuses the publication with
+  E336 and the native-recording-or-lock category before its command starts,
+  and a distributed run's assignments borrow the same gate, so one loss is one
+  decision. A repository with `commit.verify: false` skips the read with one
+  warning, as its records comparison does, and a release with worker links
+  refuses that setting with E225, because it reads its lock back before every
+  assignment. The release lock, records and execution pages say so.
+
+- retry a lock read before calling the lock lost ([8733c32](https://github.com/yohimik/dispat/commit/8733c32afcaf3d28c5b86e37a2d812a00b4daa57)) (by yohimik, Claude Opus 5.5)
+  A distributed release asks the remote, before every assignment and every
+  publication authorization, whether it still holds its release lock. One
+  failed read counted as a lost lock, and a read that never answered held
+  every later check of the run behind it. Each read is now bounded at fifteen
+  seconds, and a failed read is read again, up to three reads one and then two
+  seconds apart, with each retry logged at warn level. A remote that shows
+  another lock object, or none, is still a loss at once. A remote that no read
+  reached is a lock the run cannot show it owns: new effects stop exactly as
+  they do for a loss, the lost line names the reason `unverified` instead of
+  `lost`, and the lock, still the run's own, is given back. A cancelled lookup
+  is not a loss.
+
+- name the run in the release lock ([1ffb9af](https://github.com/yohimik/dispat/commit/1ffb9af8d07f1c6ba7d2cf0d8ffb650776f09ef3)) (by yohimik, Claude Opus 5.5)
+  A distributed release writes its run id into the release lock tag, on a
+  `run` line after the attempt, and a later run refused by that lock names the
+  run beside the host and the process that hold it. CCME §28.6 requires an
+  abandoned run to be findable from its lock: the run id is what every
+  coordination branch of that run carries, so an operator reading a lock that
+  was left behind can tell which branches to settle before removing it. A
+  release that delegates nothing has no run id and writes the message it
+  always wrote. The release lock page names the line as the documented place.
+
+- own a worker state folder by its process id file again ([ae3c294](https://github.com/yohimik/dispat/commit/ae3c2942ef5224fa105c3aeee332125ab0a6a7ee)) (by yohimik, Claude Opus 5.5)
+  dispat worker takes no operating-system lock on worker.lock any more. The
+  file holds the serving process's id, as it did before rc.5: a worker that
+  finds a live id refuses with E225, a worker that finds the id of a process
+  that is gone renames the lock aside, checks what it renamed and claims the
+  folder, and a normal stop removes the lock. Two changes close the window in
+  which workers started together could each finish a takeover they read as a
+  win. Every claim settles for one second and is trusted only if worker.lock
+  still names its process; any other claimant is refused with the E225 it
+  would have met a moment later. A serving worker also reads worker.lock again
+  before it claims each assignment, and when another process's id is written
+  there it leaves the assignment for that process, stops through its ordinary
+  exit path (reason disowned) and exits non-zero with E225. Release removes the
+  lock only while it names the releasing process. The answered-work retention
+  of 48 hours, pruning on write and complete writes stay as they are, and
+  oversized lock content is still refused.
+
+  Output staging no longer probes device identity. An admitted set is staged in
+  the checkout's private Git directory; when the final rename into the checkout
+  fails, as it does for a linked worktree whose Git directory is on another
+  filesystem, the set is staged again in the hidden folder beside the outermost
+  checkout and renamed from there, and a second failure is reported as before.
+  No build-tagged files remain in the execution package for either.
+
+  Tests: the PID-file takeover tests are restored, with new tests for the
+  settle, the per-claim check and the owner-only release; the kernel-lock inode
+  test is removed. The concurrent stale-claim integration test keeps "exactly
+  one serves" without its inode assertion, and a new integration test proves a
+  serving worker stops once another process's id is in its lock. Staging is
+  tested with a scripted rename failure and, where a second filesystem exists,
+  across a real mount boundary.
+
+- serialise Git transactions without operating-system locks ([25d0223](https://github.com/yohimik/dispat/commit/25d0223717e73ff6f09ff34e5e5a567e9525203b)) (by yohimik, Claude Opus 5.5)
+  dispat takes no file lock in the Git common directory any more, so no
+  dispat-mutation.lock file is created and nothing depends on how Windows or
+  macOS implement byte-range locks. Native Git transactions (release commits,
+  tags, pushes, control checkpoints, fleet-link settlements, snapshot checks
+  and fleet lock bookkeeping) are serialised per repository within one process
+  by an in-process lock keyed by the canonical Git common directory: several
+  repositories are taken in sorted order, linked worktrees of one repository
+  once, a waiter stops when its context ends, and a release is given back once
+  in reverse order. Other processes are not excluded: Git's own index and ref
+  lock files refuse a conflicting writer, every transaction re-proves the
+  revision it records before it writes, and releases are serialised by the
+  remote release lock.
+
+  A nested dispat command that validates an inherited live pin no longer
+  queues behind the outer release. It reads the pin, the source HEAD and the
+  pin again, and accepts only a HEAD that two agreeing reads admit, reading
+  again up to ten times a quarter of a second apart before the existing E330
+  refusal. An interrupt ends that wait.
+
+  The cross-process gitx test is replaced by in-process tests: one repository
+  serialises, linked worktrees share one lock, opposite orders never deadlock,
+  a cancelled waiter takes nothing, and release is idempotent. Tests that
+  damaged the lock file are re-aimed at the Git-level checks that now carry
+  their claims: a failing common-directory lookup before planning, a source
+  commit after publication, a control commit before the checkpoint, a source
+  commit between the release commit and its tag, and a source remote that
+  refuses to give back its release lock. The composition interrupt test now
+  interrupts the stable pin read. TestComposeWorkspaceRejectsUnpinnedSource
+  expects two pin reads, which the documented stable read requires.
+
+- refuse a provider release that would hide its consumer's debt ([bed0508](https://github.com/yohimik/dispat/commit/bed0508bda6d397c81638b4bfb25509f49a811b0)) (by yohimik, Claude Opus 5.5)
+  Two releases on one commit cannot be ordered afterwards. When a consumer
+  released a change of its own on the commit where its provider failed,
+  releasing the provider alone on that same commit would tag both there: the
+  consumer would read as served, and no later plan could find what it is still
+  owed. Such a release is now refused with E201 before any hook, build or
+  publish. The error names the consumer, the provider and the commit, and both
+  remedies: release the consumer in the same run (--package <provider>,<consumer>),
+  or commit first and release the provider alone, after which the next run
+  catches the consumer up. `dispat status` shows the same error and exits 0. In
+  commit mode the refusal is conservative, because a run cannot know before it
+  publishes whether its release commit will be empty.
+
+  When a run releases the provider and then the consumer on that commit and the
+  consumer fails, the run now ends with a critical E201 naming the one remedy
+  left: an empty commit `release(<consumer>)` with the footer
+  `Release-As: <version>`, the version the run planned for the consumer.
+
+  A run whose stages run on worker nodes refuses and picks a consumer up exactly
+  as a local run does. The deferred release experiment commits before releasing
+  its provider alone, as the refusal asks.
+
+- keep a debt visible to a consumer that sat out its provider's release ([fbf38bc](https://github.com/yohimik/dispat/commit/fbf38bc16d77dc3afa4adfa9e7dbf054358caa0c)) (by yohimik, Claude Opus 5.5)
+  A consumer that released a change of its own while its provider's publish
+  failed or was held is still owed the provider's version. Planning now finds
+  that debt even when the provider shipped later in a run the consumer sat out:
+  for every provider and every consumer it reaches, the plan also reads the
+  history after the newest provider release the consumer's own release reached,
+  so the next full run catches the consumer up (W193) at the version it was
+  owed, with no new commit and no provider republish. The extra history is read
+  only where a consumer actually got ahead of its provider. It works for any
+  release tag, lightweight or annotated, and for a consumer that was held while
+  its provider shipped.
+
+  Release tags no longer carry the provider receipt of 1.11.0-rc.5: a tag's
+  message is `release <tag>` again, the tag inventory reads three fields, and
+  publish steps no longer receive DISPAT_PROVIDER_RECEIPT, so a publish step
+  sees the same environment on the orchestrator and on a worker. Tags rc.5
+  wrote with a `dispat-seen-v1:` payload remain ordinary release tags whose
+  message is not read, and a malformed payload no longer stops planning. A
+  release no longer refuses a wide dependency fan-in for the size of a receipt.
+
+- move a shared-version group as one when a member got ahead of its provider ([bfc8832](https://github.com/yohimik/dispat/commit/bfc883203fb5b9f29db9389b1e7a2a2ec4c7e8a5)) (by yohimik, Claude Opus 5.5)
+  A member of a fixed versioning group that released on a change of its own
+  while its provider's publish failed is still owed the provider's version, and
+  the run that publishes the provider plans it again. The group measured its
+  members' pending work against the commit of the tag holding the group's
+  version, which is exactly where that owed contribution sits, so it treated the
+  contribution as work the group had already versioned: the member caught up
+  alone at the next patch while the rest of the group stayed on the old version
+  until a later run rode them up. An owed contribution is no longer masked, so
+  the whole group moves to the version the catch-up needs in one run.
+
+- keep each linked peer's version groups in its own repository ([bb0d049](https://github.com/yohimik/dispat/commit/bb0d0491fe4810f7835c066e5547eed1761088f1)) (by yohimik, Claude Opus 5.5)
+  Linked peers of an identity-linked fleet shared one case-insensitive
+  version-group namespace. Two peers with a fixed space called libs, one at
+  3.4.0 and the other at 1.2.0, became one group, so the second peer's
+  packages jumped to 3.4.x with "No changes: a version bump to keep the
+  versioning group on one version", and two peers stating different
+  policies for one group name refused every fleet command. Each peer is an
+  ordinary repository-local root (CCME §27.3, §27.11): the groups it
+  declares and the implicit groups of its shared spaces belong to it, a
+  same-named group in another peer releases on its own version, and an
+  unqualified --group still selects the matching group of every peer.
+
+  A versionGroup is checked against the peer's own configuration when it
+  loads, so a peer that referenced another peer's group needs its own
+  declaration again. The linked-fleet page, the versioning reference and
+  the agent guide describe repository-local groups, and the fleet tests
+  that asserted the shared namespace are replaced by one that holds each
+  peer's groups to its own repository.
+
+### Dependencies
+
+- [config](https://github.com/yohimik/dispat/releases/tag/pkg/config/v1.0.2-rc.1): 1.0.2-rc.0 -> 1.0.2-rc.1
+- [writer](https://github.com/yohimik/dispat/releases/tag/pkg/writer/v1.2.2-rc.1): 1.2.2-rc.0 -> 1.2.2-rc.1
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.2-rc.1): 1.2.2-rc.0 -> 1.2.2-rc.1
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.11.0-rc.5): 1.11.0-rc.4 -> 1.11.0-rc.5
+- [scanner](https://github.com/yohimik/dispat/releases/tag/pkg/scanner/v1.2.2-rc.1): 1.2.2-rc.0 -> 1.2.2-rc.1
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## services/dispat/v1.11.0-rc.5 (2026-09-23)
 
 ### Fixes
