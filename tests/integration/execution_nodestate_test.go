@@ -26,6 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
+
+	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
 // TestExecutionWorkerStateRefusals: the state folder unusable in each of the
@@ -90,7 +92,8 @@ func TestExecutionWorkerStateRefusals(t *testing.T) {
 // names no folder still has one. The node puts its cache and its record under
 // the user's cache directory, because everything there is reconstructible and
 // a node that lost it pays one fetch, and it says in its started line where
-// that was.
+// that was. An account with no cache directory at all has to name a folder,
+// and the node refuses to start with E225 saying so.
 func TestExecutionWorkerKeepsItsStateUnderTheCacheDirectory(t *testing.T) {
 	rig := newExecutionRig(t)
 	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
@@ -106,6 +109,15 @@ func TestExecutionWorkerKeepsItsStateUnderTheCacheDirectory(t *testing.T) {
 		"the node kept its folder under the cache directory of the account it runs as")
 	assert.Equal(t, executionNode, filepath.Base(started.Str("stateDir")),
 		"and named it after itself, so two nodes on one machine keep their records apart")
+
+	homeless := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret, "HOME=", "XDG_CACHE_HOME="},
+		"worker", "--root", root, "--idle-timeout", "1")
+	assert.NotEqual(t, 0, homeless.Code, "stdout:\n%s\nstderr:\n%s", homeless.Stdout, homeless.Stderr)
+	assert.True(t, harness.IsCodePresent(executionEvents(homeless), executionRefusalCode),
+		"stdout:\n%s", homeless.Stdout)
+	assert.Contains(t, diagnosticText(homeless), "so --state-dir has to name one")
+	_, isServing := executionLine(homeless, "worker started")
+	assert.False(t, isServing, "and it never served")
 }
 
 // TestExecutionWorkerCompactsItsCacheOnceWhenIdle: every message a node writes
