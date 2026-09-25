@@ -72,6 +72,93 @@ function fail(where: string, src: string, at: number, what: string): never {
   throw new Error(`${where}: ${what} at offset ${at}: …${around}…`);
 }
 
+/** The characters that open a construct; everything else is text. */
+const OPENERS = '`*[';
+
+interface InlineReaderOptions {
+  src: string;
+  where: string;
+  baseDir: string;
+}
+
+/** One pass over a run of inline markdown, token by token. */
+class InlineReader {
+  private readonly src: string;
+  private readonly where: string;
+  private readonly baseDir: string;
+  private position = 0;
+
+  constructor(options: InlineReaderOptions) {
+    const {src, where, baseDir} = options;
+    this.src = src;
+    this.where = where;
+    this.baseDir = baseDir;
+  }
+
+  read(): Inline[] {
+    const out: Inline[] = [];
+    while (this.position < this.src.length) {
+      out.push(this.readToken());
+    }
+    return out;
+  }
+
+  private readToken(): Inline {
+    const at = this.position;
+    const ch = this.src[at];
+    if (ch === '`') {
+      return {t: 'code', v: this.until('`', at + 1, '`code`')};
+    }
+    if (this.src.startsWith('**', at)) {
+      return {t: 'strong', v: this.parseNested(this.until('**', at + 2, '**strong**'))};
+    }
+    if (ch === '*') {
+      return {t: 'em', v: this.parseNested(this.until('*', at + 1, '*emphasis*'))};
+    }
+    if (ch === '[') {
+      return this.readLink();
+    }
+    return this.readText();
+  }
+
+  private readLink(): Inline {
+    const label = this.until(']', this.position + 1, '[link label]');
+    const afterLabel = this.position;
+    if (this.src[afterLabel] !== '(') {
+      fail(this.where, this.src, afterLabel, 'a bracketed span that is not a link');
+    }
+    const href = this.until(')', afterLabel + 1, '(link target)');
+    if (href.startsWith('#')) {
+      fail(this.where, this.src, afterLabel, `${href} is an anchor into the README, which this site does not publish`);
+    }
+    return {t: 'link', ...rewrite(href, this.baseDir), v: this.parseNested(label)};
+  }
+
+  /** Plain text runs up to the next character that opens a construct. */
+  private readText(): Inline {
+    const start = this.position;
+    while (this.position < this.src.length && !OPENERS.includes(this.src[this.position])) {
+      this.position += 1;
+    }
+    return {t: 'text', v: this.src.slice(start, this.position)};
+  }
+
+  // Consumes up to `close`, returning what was between. The delimiters here
+  // never nest inside themselves, so a plain search is the whole rule.
+  private until(close: string, from: number, what: string): string {
+    const end = this.src.indexOf(close, from);
+    if (end < 0) {
+      fail(this.where, this.src, from, `unclosed ${what}`);
+    }
+    this.position = end + close.length;
+    return this.src.slice(from, end);
+  }
+
+  private parseNested(inner: string): Inline[] {
+    return parseInline(inner, this.where, this.baseDir);
+  }
+}
+
 /**
  * Parses one run of inline markdown into tokens.
  *
@@ -80,60 +167,5 @@ function fail(where: string, src: string, at: number, what: string): never {
  * README sits in, which is what a relative link is relative to.
  */
 export function parseInline(src: string, where: string, baseDir: string): Inline[] {
-  const out: Inline[] = [];
-  let text = '';
-  let i = 0;
-
-  const flush = () => {
-    if (text) {
-      out.push({t: 'text', v: text});
-      text = '';
-    }
-  };
-  // Consumes up to `close`, returning what was between. The delimiters here
-  // never nest inside themselves, so a plain search is the whole rule.
-  const until = (close: string, from: number, what: string): [string, number] => {
-    const end = src.indexOf(close, from);
-    if (end < 0) {
-      fail(where, src, from, `unclosed ${what}`);
-    }
-    return [src.slice(from, end), end + close.length];
-  };
-
-  while (i < src.length) {
-    const ch = src[i];
-    if (ch === '`') {
-      const [code, next] = until('`', i + 1, '`code`');
-      flush();
-      out.push({t: 'code', v: code});
-      i = next;
-    } else if (src.startsWith('**', i)) {
-      const [inner, next] = until('**', i + 2, '**strong**');
-      flush();
-      out.push({t: 'strong', v: parseInline(inner, where, baseDir)});
-      i = next;
-    } else if (ch === '*') {
-      const [inner, next] = until('*', i + 1, '*emphasis*');
-      flush();
-      out.push({t: 'em', v: parseInline(inner, where, baseDir)});
-      i = next;
-    } else if (ch === '[') {
-      const [label, afterLabel] = until(']', i + 1, '[link label]');
-      if (src[afterLabel] !== '(') {
-        fail(where, src, afterLabel, 'a bracketed span that is not a link');
-      }
-      const [href, next] = until(')', afterLabel + 1, '(link target)');
-      flush();
-      if (href.startsWith('#')) {
-        fail(where, src, afterLabel, `${href} is an anchor into the README, which this site does not publish`);
-      }
-      out.push({t: 'link', ...rewrite(href, baseDir), v: parseInline(label, where, baseDir)});
-      i = next;
-    } else {
-      text += ch;
-      i += 1;
-    }
-  }
-  flush();
-  return out;
+  return new InlineReader({src, where, baseDir}).read();
 }
