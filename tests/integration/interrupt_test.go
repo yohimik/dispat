@@ -109,6 +109,52 @@ func TestInterruptStopsARunCommand(t *testing.T) {
 	assert.Empty(t, r.TagList(), "dispat run releases nothing, interrupted or not")
 }
 
+// TestInterruptTerminatesAPublishCommand: a SIGTERM, what a CI runner sends
+// when a job is cancelled, that arrives while a publish command runs stops
+// that command and nothing is recorded for it. A publication that never
+// reported success is not a completed publish, so the package is cancelled
+// rather than published or failed, its consumer never publishes, nothing is
+// tagged, and the lock the run held is given back rather than stranded. The
+// next run owes both packages the same release and completes it.
+func TestInterruptTerminatesAPublishCommand(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["publish"] = models.Script{r.TsmarkScript("publish.tsmark", "$DISPAT_PACKAGE", 30*time.Second)}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core,app): bootstrap both packages")
+	bare := r.AddBareRemote()
+	r.Git("push", "-q", "origin", "HEAD")
+
+	proc := r.StartReleaseEnv(harness.LockEnabled)
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(r.Path("publish.tsmark"))
+		return err == nil && strings.Contains(string(data), "core start")
+	}, 30*time.Second, 20*time.Millisecond, "core's publish never started")
+	proc.Signal(syscall.SIGTERM)
+	res := proc.Wait()
+
+	assert.NotEqual(t, 0, res.Code, "a terminated run does not exit 0\nstdout:\n%s", res.Stdout)
+	statuses := summaryStatuses(res.Events)
+	assert.Equal(t, "cancelled", statuses["core"], "a publish that never reported success is not a publication")
+	assert.Equal(t, "cancelled", statuses["app"], "and its consumer never publishes")
+	data, err := os.ReadFile(r.Path("publish.tsmark"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "core end", "the publish command was stopped")
+	assert.NotContains(t, string(data), "app start")
+	assert.Empty(t, r.TagList(), "nothing is recorded for work that did not finish")
+	assert.False(t, remoteHoldsLock(t, bare), "the lock is given back, not stranded")
+
+	cfg.Scripts["publish"] = models.Script{r.TsmarkScript("publish.tsmark", "$DISPAT_PACKAGE", 0)}
+	r.WriteConfigModel(cfg)
+	r.Commit("chore: publish without the dwell")
+	r.ReleaseOK()
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
+}
+
 // closingPhaseHooks are the run hooks of the closing phase in the order a
 // release commit fires them: postAll, then the finalize brackets.
 var closingPhaseHooks = []string{"postAll", "beforeCommit", "afterCommit", "postCommit", "beforePush", "afterPush"}
