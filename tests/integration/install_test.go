@@ -986,24 +986,24 @@ func TestInstallTracesTheDecisionsItMade(t *testing.T) {
 
 // TestInstallRefusesABadCommandLineBeforeAnyRequest: a usage mistake must
 // cost nothing, so each of these exits 2 with the sentence naming the mistake
-// without the fake being asked a single question. An asset placeholder
-// nobody defines is the one refusal that is not decided by the command line
-// alone today: it is read against the release, so it costs the listing and
-// exits 1.
+// without the fake being asked a single question. An asset pattern that can
+// never expand is one of them: whether `{arch64}` is a placeholder does not
+// depend on the release, so it is refused before the listing is asked for.
 func TestInstallRefusesABadCommandLineBeforeAnyRequest(t *testing.T) {
 	r := newToolRepo(t)
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"a URL naming only a host":  {[]string{"install", "https://github.com/onlyowner"}, "names a host but no repository"},
-		"no repository at all":      {[]string{"install"}, "install requires a repository"},
-		"two repositories":          {[]string{"install", "acme/tool", "acme/other"}, "install takes one repository"},
-		"a name that is a path":     {[]string{"install", "acme/tool", "--as", "../evil"}, "--as takes a file name, not a path"},
-		"a rollback that installs":  {[]string{"install", "acme/tool", "--rollback", "--release", "1.0.0"}, "--release means nothing beside it"},
-		"an owner beside the URL":   {[]string{"install", "acme/tool", "--owner", "other"}, "--owner means nothing beside it"},
-		"a repo beside the URL":     {[]string{"install", "acme/tool", "--repo", "other"}, "--repo means nothing beside it"},
-		"a flag of another command": {[]string{"install", "acme/tool", "--tag", "1.2.0"}, "--tag is not an install flag"},
+		"a URL naming only a host":     {[]string{"install", "https://github.com/onlyowner"}, "names a host but no repository"},
+		"no repository at all":         {[]string{"install"}, "install requires a repository"},
+		"two repositories":             {[]string{"install", "acme/tool", "acme/other"}, "install takes one repository"},
+		"a name that is a path":        {[]string{"install", "acme/tool", "--as", "../evil"}, "--as takes a file name, not a path"},
+		"a rollback that installs":     {[]string{"install", "acme/tool", "--rollback", "--release", "1.0.0"}, "--release means nothing beside it"},
+		"an owner beside the URL":      {[]string{"install", "acme/tool", "--owner", "other"}, "--owner means nothing beside it"},
+		"a repo beside the URL":        {[]string{"install", "acme/tool", "--repo", "other"}, "--repo means nothing beside it"},
+		"a flag of another command":    {[]string{"install", "acme/tool", "--tag", "1.2.0"}, "--tag is not an install flag"},
+		"a placeholder nobody defines": {[]string{"install", "acme/tool", "--asset", "tool-{arch64}"}, "{arch64}"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			before := len(r.requests())
@@ -1014,13 +1014,6 @@ func TestInstallRefusesABadCommandLineBeforeAnyRequest(t *testing.T) {
 			assert.NoFileExists(t, r.installed(), "and installs nothing")
 		})
 	}
-
-	t.Run("a placeholder nobody defines", func(t *testing.T) {
-		res := r.Command("install", "acme/tool", "--asset", "tool-{arch64}", "--api-url", r.api, "--bin-dir", r.bin)
-		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout+res.Stderr, "{arch64}")
-		assert.NoFileExists(t, r.installed(), "and installs nothing")
-	})
 }
 
 // TestInstallNamesAFlagThatIsNotIts: the refusal a provisioning script's
@@ -1306,8 +1299,9 @@ func TestInstallRefusesWhatItCannotResolve(t *testing.T) {
 		r := newToolRepo(t)
 		res := r.Command("install", "acme/tool", "--api-url", r.api,
 			"--asset", "tool-{os}-{arch", "--check")
-		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Equal(t, 2, res.Code, "stdout:\n%s", res.Stdout)
 		assert.Contains(t, res.Stdout+res.Stderr, "never closed")
+		assert.Empty(t, r.requests(), "the pattern is refused before the release is asked for")
 	})
 
 	t.Run("a destination it cannot even look at", func(t *testing.T) {

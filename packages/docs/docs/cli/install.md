@@ -86,7 +86,9 @@ The value also matches as a glob, which reaches an asset whose exact spelling no
 dispat install acme/tool --asset '*linux-amd64'
 ```
 
-An exact name always wins over a glob, and a pattern matching two files is refused with both listed.
+An exact name always wins over a glob, and a pattern matching two files is refused with both listed. Any other name in
+braces, and a brace that is never closed, is a mistake in the command line: it exits `2` before any request is made
+and names what is wrong.
 
 Without `--asset`, dispat looks for the name most projects publish under: `{name}-{os}-{arch}`, the repository's own
 name and the platform, with `.exe` appended on Windows. That is the convention dispat's own releases follow, so

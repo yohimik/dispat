@@ -834,6 +834,11 @@ func (r *runner) validateInstall() (int, bool) {
 		r.usage(cmdInstall)
 		return 2, true
 	}
+	if err := install.ValidatePattern(*r.o.instAsset); err != nil {
+		r.boot.Error().Err(err).Msg("invalid --asset")
+		r.usage(cmdInstall)
+		return 2, true
+	}
 	if r.inv.repository == "" {
 		if !*r.o.suRollback {
 			r.boot.Error().Msg("install requires a repository: dispat install https://github.com/owner/repo")

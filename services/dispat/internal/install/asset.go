@@ -64,6 +64,15 @@ func Expand(pattern string, f Fields) (string, error) {
 	}
 }
 
+// ValidatePattern refuses a pattern Expand would refuse against any release:
+// a brace that is never closed, or a placeholder nobody defines, named. The
+// fields are not needed to decide either, so a command line carrying such a
+// pattern is refused as the usage mistake it is, before any request is made.
+func ValidatePattern(pattern string) error {
+	_, err := Expand(pattern, Fields{})
+	return err
+}
+
 // placeholderNames lists what a pattern may write, in a fixed order so the
 // refusal reads the same every time.
 func placeholderNames(values map[string]string) []string {

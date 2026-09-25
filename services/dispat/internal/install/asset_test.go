@@ -55,6 +55,25 @@ func TestExpandRefusesAPlaceholderNobodyDefines(t *testing.T) {
 	assert.Contains(t, err.Error(), "never closed")
 }
 
+// TestValidatePatternDecidesWithoutARelease: whether a pattern can expand at
+// all does not depend on the release, so the command line is refused before a
+// request with the same sentence Expand would give, and a pattern Expand
+// accepts is accepted.
+func TestValidatePatternDecidesWithoutARelease(t *testing.T) {
+	for _, pattern := range []string{"", "tool", "tool-{os}-{arch}", "gh_{version}_{os}_{arch}.tar.gz", "{tag}/{name}", "*{arch}*"} {
+		assert.NoError(t, ValidatePattern(pattern), pattern)
+	}
+
+	err := ValidatePattern("tool-{arch64}")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "{arch64}")
+	assert.Contains(t, err.Error(), "{arch}", "and it says what it does know")
+
+	err = ValidatePattern("tool-{os")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "never closed")
+}
+
 // TestSelectAssetNeedsNoPatternForAnUnambiguousRelease: a release carrying one
 // file has one answer, and asking for a pattern to state the obvious would be
 // ceremony.
