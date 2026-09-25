@@ -27,8 +27,8 @@ import (
 	lib "github.com/yohimik/dispat/pkg/config"
 	public "github.com/yohimik/dispat/pkg/models"
 
+	"github.com/yohimik/dispat/services/dispat/internal/envname"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
-	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // The execution models under this package's own names, beside the tables that
@@ -212,7 +212,7 @@ func validateExecutionNode(x *ExecutionConfig) error {
 			return fmt.Errorf("execution.endpoint: %w", err)
 		}
 	}
-	if x.SecretEnv != "" && !release.IsValidEnvName(x.SecretEnv) {
+	if x.SecretEnv != "" && !envname.IsValid(x.SecretEnv) {
 		return fmt.Errorf("execution.secretEnv %q is not an environment variable name: it names the variable holding the signing secret, never the secret itself", x.SecretEnv)
 	}
 	if x.IsWorker() && x.IsDistributed() {

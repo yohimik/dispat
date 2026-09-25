@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/yohimik/dispat/services/dispat/internal/envname"
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
-	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // The conditions `dispat if` branches on. A condition is a value: parsing it
@@ -137,7 +137,7 @@ func checkCondName(name, spec string) error {
 	if name == "" {
 		return fmt.Errorf("condition %q names no variable", spec)
 	}
-	if !release.IsValidEnvName(name) {
+	if !envname.IsValid(name) {
 		return fmt.Errorf("condition %q: %q is not a variable name ([A-Za-z_][A-Za-z0-9_]*)", spec, name)
 	}
 	return nil

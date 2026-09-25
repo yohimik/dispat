@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/yohimik/dispat/services/dispat/internal/envname"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
@@ -77,7 +78,7 @@ func normalizeOutputName(name string) (string, bool) {
 	case strings.HasPrefix(name, plan.ReservedEnvPrefix):
 		return "", false
 	}
-	return name, IsValidEnvName(name)
+	return name, envname.IsValid(name)
 }
 
 // MergeOutputs folds exports onto the release: first-export order is kept, a
@@ -101,23 +102,6 @@ func MergeOutputs(rel *plan.Release, outs []plan.Output) {
 			rel.Outputs = append(rel.Outputs, o)
 		}
 	}
-}
-
-// IsValidEnvName reports whether s is a portable environment variable name:
-// [A-Za-z_][A-Za-z0-9_]*. Exported because the conditions `dispat if` tests
-// name variables the same way, and one definition is what keeps a name dispat
-// accepts in an output and a name it accepts in a condition the same set.
-func IsValidEnvName(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, c := range s {
-		letter := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_'
-		if !letter && (i == 0 || c < '0' || c > '9') {
-			return false
-		}
-	}
-	return true
 }
 
 // capture runs the sequence with an output file attached — the environment is
