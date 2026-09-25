@@ -319,6 +319,26 @@ func TestRemoteBuildCancellationCancelsThePackage(t *testing.T) {
 	assert.Equal(t, 0, runner.countPrefix("onfail"), "an interruption runs no outcome script")
 }
 
+// TestRevertTakesTheSnapshotGuard: restoring a failed package's folder writes
+// the working tree a dispatched build is snapshotted from, so it runs inside
+// the same guard as the orchestrator's writing stages and gives it back.
+func TestRevertTakesTheSnapshotGuard(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.RevertOnFail = true
+	remote := &fakeRemote{failBuild: "a", failPart: PartCommands}
+	reverter := &fakeReverter{}
+	executor := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 1, Publish: 1})
+	executor.Remote = remote
+	executor.Reverter = reverter
+
+	results := executor.Run(context.Background(), p)
+
+	require.Equal(t, StatusFailed, results["a"].Status)
+	assert.Equal(t, []string{p.Releases["a"].Pkg.Dir}, reverter.dirs)
+	assert.Contains(t, remote.guards, "revert", "the restore ran inside the snapshot guard")
+	assert.Equal(t, 0, remote.held, "and gave it back")
+}
+
 // TestGuardBracketsTheOrchestratorsOwnFrames: the version and syncLock stages
 // are the writers of the working tree a dispatched build is snapshotted from,
 // so each of them runs inside the guard, and a guard that cannot be taken

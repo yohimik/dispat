@@ -178,6 +178,23 @@ old range until its own next release, when the version stage reconciles the rang
 [the auto-version reconciliation](../../configuration/autoversion.md#picking-up-providers-released-without-you), not a
 release triggered by the provider.
 
+## What a failed run leaves in the working tree
+
+With release commits enabled, a package that is skipped after an earlier stage of it ran has its folder restored
+before the run ends, whether or not `revertOnFail` is set. The run proved that folder clean when it started, so every
+change in it names a version that did not publish, and the release commit does not stage it. Tracked files are
+restored from HEAD and untracked files are removed, exactly as `revertOnFail` does, so the retry starts without
+refusing that folder over pre-existing changes. Two folders are left as the run left them, because restoring them
+would reach files another package owns: a package rooted at the repository root, and a package whose folder holds
+another package's folder.
+
+A package that failed keeps the [`revertOnFail`](../../configuration/spaces.md#space-options) rule: its folder is
+restored only when the setting is on, so you can inspect what its stages wrote. Without release commits nothing is
+restored by default, because nothing proved the folders clean before the run.
+
+In a fleet, the same rule applies to each repository that makes release commits, and the folder is restored inside
+the repository that owns it.
+
 ## Repair GitHub metadata after the package was recorded
 
 A GitHub API error can happen after a successful publish, source tag, and (in a fleet) control checkpoint. An ordinary

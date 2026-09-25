@@ -2902,3 +2902,52 @@ func TestPolyrepoImportedConsumerBaselineRequiresEvidence(t *testing.T) {
 	assert.Equal(t, "catch-up from lib", harness.GraphLine(recovered.Events, "app").Str("reason"))
 	assert.True(t, harness.IsCodePresentForPackage(recovered.Events, "W193", "app"))
 }
+
+// TestPolyrepoCommitModeSourceRestoresASkippedConsumer: the commit mode default
+// that restores a skipped package's folder holds in a fleet too, decided by
+// the policy of the repository that owns the folder. The source makes release
+// commits and sets no revertOnFail, so the consumer its failed provider skips
+// is restored inside the source repository, and the source checkout is left
+// with nothing of the skipped release in it.
+func TestPolyrepoCommitModeSourceRestoresASkippedConsumer(t *testing.T) {
+	source := harness.New(t)
+	source.SeedPackage("packages", "core")
+	source.SeedPackage("packages", "app")
+	source.Commit("feat(core)^: bootstrap the library, reaching its consumer")
+
+	control := harness.New(t)
+	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
+	// core fails only once app's version stage has edited its folder, so the
+	// skip always follows a stage that wrote.
+	appMark := harness.ShQuote(filepath.Join(t.TempDir(), "app"))
+	cfg := polyrepoFile()
+	cfg["spaces"] = centralSpaces(map[string]string{"libs": "sources/lib/packages"})
+	cfg["dependencies"] = map[string]any{"app": []any{"core"}}
+	cfg["scripts"] = map[string]any{
+		"build":  []string{"echo building"},
+		"mutate": []string{"echo dirty >> main.txt && echo extra > extra.txt && : > " + appMark},
+		"publish": []string{`if [ "$DISPAT_PACKAGE" = core ]; then while [ ! -e ` + appMark +
+			` ]; do sleep 0.05; done; exit 1; fi; echo publishing`},
+	}
+	cfg["flow"] = map[string]any{
+		"version": []string{"mutate"},
+		"build":   []string{"build"},
+		"publish": []string{"publish"},
+	}
+	cfg["repositoryOverrides"] = map[string]any{
+		"lib-source": map[string]any{"commit": map[string]any{"enabled": true}},
+	}
+	writePolyrepoJSON(t, control, "dispat.json", cfg)
+	control.Commit("chore: release a source in commit mode")
+
+	res := control.Release()
+	require.Equal(t, 1, res.Code, "the provider's publish failure fails the run\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "app"), "app is reported blocked")
+	assert.Empty(t, polyrepoTags(control, "sources/lib"))
+	assert.Equal(t, "app\n", readFileString(t, control.Path("sources", "lib", "packages", "app", "main.txt")),
+		"the tracked edit is restored in the source repository")
+	assert.NoFileExists(t, control.Path("sources", "lib", "packages", "app", "extra.txt"),
+		"the untracked file is removed")
+	assert.Empty(t, control.Git("-C", "sources/lib", "status", "--porcelain"),
+		"nothing of the skipped release is left in the source checkout")
+}

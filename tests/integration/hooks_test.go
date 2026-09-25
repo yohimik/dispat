@@ -286,6 +286,166 @@ func TestHooksRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, "extra.txt"), "the version script's untracked file must be removed")
 }
 
+// skippedConsumerRepo is a provider whose first publish fails and consumers
+// whose version script edits their folder, a tracked file and an untracked
+// one, before the provider's failure skips them: the failing publish waits
+// until every consumer's edit is made. Nothing sets revertOnFail;
+// isCommitEnabled decides whether the run makes a release commit. The markers
+// that order the two, and make the provider fail only once, live outside the
+// repository.
+func skippedConsumerRepo(t *testing.T, isCommitEnabled bool, consumers ...string) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	marks := t.TempDir()
+	failedMark := harness.ShQuote(filepath.Join(marks, "provider-failed"))
+	cfg := harness.BaseFile(len(consumers) + 1)
+	cfg.Scripts = map[string]models.Script{
+		"build": {"echo building"},
+		"fail-publish-once": {"if [ ! -e " + failedMark + " ]; then " + waitForMarks(marks, consumers...) +
+			"touch " + failedMark + "; exit 1; fi"},
+		"mutate":  {"echo dirty >> main.txt && echo extra > extra.txt && : > " + harness.ShQuote(marks) + `/"$DISPAT_PACKAGE"`},
+		"publish": {"echo publishing"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"provider": {Path: models.PathList{"packages/provider"}, Flow: &models.SpaceFlowConfig{
+			Build: []string{"build"}, Publish: []string{"fail-publish-once"}}},
+		"consumers": {Path: models.PathList{"packages/consumers"}, Flow: &models.SpaceFlowConfig{
+			Version: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
+	}
+	for _, consumer := range consumers {
+		cfg.Dependencies = append(cfg.Dependencies, models.DependencyConfig{Consumer: consumer, Provider: "provider"})
+		r.SeedPackage("packages/consumers", consumer)
+	}
+	if isCommitEnabled {
+		cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages/provider", "provider")
+	r.Commit("feat(provider)^: reaches its consumers, but fails to publish once")
+	return r
+}
+
+// waitForMarks is shell text that waits until a marker named after each
+// package exists in marks.
+func waitForMarks(marks string, packages ...string) string {
+	var waits strings.Builder
+	for _, name := range packages {
+		waits.WriteString("while [ ! -e " + harness.ShQuote(filepath.Join(marks, name)) + " ]; do sleep 0.05; done; ")
+	}
+	return waits.String()
+}
+
+// assertConsumerFolderRestored checks that a skipped consumer's folder is
+// exactly as the last commit left it.
+func assertConsumerFolderRestored(t *testing.T, r *harness.Repo, consumer string) {
+	t.Helper()
+	dir := r.Path("packages", "consumers", consumer)
+	data, err := os.ReadFile(filepath.Join(dir, "main.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, consumer+"\n", string(data), "%s: the version script's edit to the tracked file is restored", consumer)
+	assert.NoFileExists(t, filepath.Join(dir, "extra.txt"), "%s: the version script's untracked file is removed", consumer)
+	assert.Empty(t, r.Git("status", "--porcelain", "--", "packages/consumers/"+consumer),
+		"%s: nothing of the skipped release is left in the folder", consumer)
+}
+
+// TestHooksCommitModeRestoresASkippedConsumer: in commit mode a consumer
+// skipped after its version stage ran has its folder restored without
+// revertOnFail. The run proved the folder clean before it started, so every
+// edit in it is one for a version that did not publish, and the release commit
+// never stages it. Left in place, those edits made the next release refuse to
+// start over pre-existing local changes; restored, the retry releases both.
+func TestHooksCommitModeRestoresASkippedConsumer(t *testing.T) {
+	r := skippedConsumerRepo(t, true, "consumer")
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "the provider's publish failure fails the run\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "consumer"), "the consumer is reported blocked")
+	assert.Zero(t, r.TagCount("consumer@"))
+	assertConsumerFolderRestored(t, r, "consumer")
+
+	retry := r.Release()
+	require.Equal(t, 0, retry.Code, "the retry starts and releases\nstdout:\n%s", retry.Stdout)
+	assert.NotContains(t, retry.Stdout, "pre-existing local changes")
+	assert.True(t, r.IsTagged("provider@0.1.0"), "tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("consumer@"), "the consumer catches up; tags: %v", r.TagList())
+}
+
+// TestHooksCommitModeRestoresSkippedConsumersConcurrently: consumers skipped
+// by one provider failure are admitted, and restored, from their own tasks at
+// the same moment. Their restores share one checkout, so they take the
+// repository's mutation lock in turn instead of racing on Git's index lock.
+func TestHooksCommitModeRestoresSkippedConsumersConcurrently(t *testing.T) {
+	consumers := []string{"alpha", "beta", "gamma"}
+	r := skippedConsumerRepo(t, true, consumers...)
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.NotContains(t, res.Stdout, "index.lock", "no restore collided with another")
+	assert.NotContains(t, res.Stdout, "reverting package folder failed")
+	for _, consumer := range consumers {
+		assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", consumer), "%s is reported blocked", consumer)
+		assertConsumerFolderRestored(t, r, consumer)
+	}
+}
+
+// TestHooksSkippedConsumerKeepsItsEditsWithoutReleaseCommits: without release
+// commits nothing proved the folder clean before the run, so a skipped
+// consumer's folder is left exactly as its stages left it, as it always was.
+func TestHooksSkippedConsumerKeepsItsEditsWithoutReleaseCommits(t *testing.T) {
+	r := skippedConsumerRepo(t, false, "consumer")
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "consumer"))
+	dir := r.Path("packages", "consumers", "consumer")
+	data, err := os.ReadFile(filepath.Join(dir, "main.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "consumer\ndirty\n", string(data), "the tracked edit stays")
+	assert.FileExists(t, filepath.Join(dir, "extra.txt"), "the untracked file stays")
+}
+
+// TestHooksSkippedNestedParentLeavesItsPublishedChildAlone: a skipped package
+// whose folder holds another package's folder is not restored by the commit
+// mode default, because restoring it would reach the child's release edits.
+// The child publishes beside it, and its changelog reaches the release commit.
+func TestHooksSkippedNestedParentLeavesItsPublishedChildAlone(t *testing.T) {
+	r := harness.New(t)
+	marks := t.TempDir()
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]models.Script{
+		"build":   {"echo building"},
+		"fail":    {waitForMarks(marks, "outer") + "exit 1"},
+		"mutate":  {"echo extra > extra.txt && : > " + harness.ShQuote(filepath.Join(marks, "outer"))},
+		"publish": {"echo publishing"},
+	}
+	cfg.Flow = &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"provider": {Path: models.PathList{"packages/provider"}, Flow: &models.SpaceFlowConfig{
+			Build: []string{"build"}, Publish: []string{"fail"}}},
+		"libs": {Path: models.PathList{"packages/libs"}, Flow: &models.SpaceFlowConfig{
+			Version: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
+	}
+	cfg.Packages = map[string]models.PackageConfig{"inner": {Path: "packages/libs/outer/inner"}}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "outer", Provider: "provider"}}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages/provider", "provider")
+	r.SeedPackage("packages/libs", "outer")
+	r.WriteFile("packages/libs/outer/inner/main.txt", "inner\n")
+	r.Commit("feat(provider)^: reaches outer, but fails to publish")
+	r.WriteFile("packages/libs/outer/inner/main.txt", "inner\nchanged\n")
+	r.Commit("feat(inner): a change of the nested package's own")
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "outer"), "outer is reported blocked")
+	require.True(t, r.IsTagged("inner@0.1.0"), "tags: %v", r.TagList())
+	assert.FileExists(t, r.Path("packages", "libs", "outer", "extra.txt"),
+		"the parent holding a published child is not restored")
+	assert.Contains(t, r.Git("show", "HEAD:packages/libs/outer/inner/CHANGELOG.md"), "0.1.0",
+		"the child's changelog reaches the release commit")
+}
+
 // TestHooksScriptOutputsCarryAcrossStagesAndHooks pins the whole
 // DISPAT_OUTPUT accumulation contract through the real binary, hooks
 // included: a beforeBuild *hook* export reaches the build and publish, the

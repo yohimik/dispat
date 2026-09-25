@@ -115,8 +115,9 @@ integration suite itself.
    per-package hooks around the version, build and publish stages, the announce frame after a publish, the
    `flow.onFail` / `flow.onSkip` outcome scripts, the once-per-space login gate, and the run-level bracket around the
    whole thing. What these prove is *authority* rather than mere ordering: a hook before the point of no return may
-   fail its package, one after it may only warn, and the same split decides where `revertOnFail` applies, how far a
-   login failure reaches, and how script outputs accumulate across stages and hooks.
+   fail its package, one after it may only warn, and the same split decides where `revertOnFail` applies, which
+   skipped folders commit mode restores on its own, how far a login failure reaches, and how script outputs
+   accumulate across stages and hooks.
 57. **Distributed execution across worker nodes** (`execution_*_test.go`): the optional execution profile, where one
     orchestrator owns the locks, the plan and the finalization while worker nodes execute the build and publish tasks
     it authorizes. The first claim is the one everything else is measured against: with the `execution` key absent, or
@@ -773,6 +774,10 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksLoginOfAStandalonePackageRunsInItsOwnFolder` | A standalone package acts as its own space, so its login runs inside its own package directory rather than an unowned parent folder. The hook resolves through the root `flow` because `flow.login` cannot be declared on package entries. |
 | `TestHooksOnFailAndOnSkipOutcomeScripts`              | When a run fails, `flow.onFail` runs for the failed package with `DISPAT_FAILED_STAGE` and `DISPAT_ERROR`, `flow.onSkip` runs for blocked consumers with `DISPAT_BLOCKED_BY`, and published packages trigger neither. An `onFail` sequence continues even if its initial command fails. |
 | `TestHooksRevertOnFailAppliesAfterVersionStageOnSkip` | When a consumer version script modifies its folder and the provider publish fails, dispat rolls back the skipped consumer directory. |
+| `TestHooksCommitModeRestoresASkippedConsumer` | In commit mode, without `revertOnFail`, a consumer skipped after its version stage ran has its folder restored, so the retry starts without a pre-existing-changes refusal and releases the provider and the consumer. |
+| `TestHooksCommitModeRestoresSkippedConsumersConcurrently` | Three consumers skipped by one provider failure are restored from their own tasks at once, serialized by the repository's mutation lock, with no `index.lock` collision and every folder clean. |
+| `TestHooksSkippedConsumerKeepsItsEditsWithoutReleaseCommits` | Without release commits a skipped consumer keeps its tracked edit and its untracked file, because nothing proved its folder clean before the run. |
+| `TestHooksSkippedNestedParentLeavesItsPublishedChildAlone` | A skipped package whose folder holds another package's folder is not restored by the commit-mode default, so the nested child that published keeps its changelog and it reaches the release commit. |
 | `TestHooksScriptOutputsCarryAcrossStagesAndHooks`     | Environment variables export across stages and hooks: a `beforeBuild` *hook* export passes to build and publish stages, build exports pass to publish with `DISPAT_OUTPUTS` preserving order, and `onFail` receives the hook export **and** exports from the failed build. |
 | `TestHooksRunLevelHooks`                              | Run-level hooks execute in order from the monorepo root against a real remote. The `postAll` hook inspects run outcomes and workspaces, while quiet runs skip commit and push hooks because those phases never execute. |
 | `TestHooksRunLevelHooksAreTheReleasesOwn` | Running `dispat commit --tag --push` creates commits, tags, and pushes without triggering run-level hooks, while `dispat release` executes all seven hooks once. Run hooks attach to the release lifecycle, whereas step commands are directly invoked by external flows. |
@@ -2073,6 +2078,7 @@ timestamps to relate histories.
 | `TestPolyrepoCustomCheckpointMessageProvesNoBaseline` | A control commit that moves matching provider and consumer gitlinks under an opaque custom message is not automatic release-checkpoint evidence and reports E333 when later provider work needs a consumer boundary. |
 | `TestPolyrepoReleaseCheckpointProvidesNextConsumerBaseline` | A normal control release checkpoint that names exact source tags and carries their matching gitlink transitions is sufficient evidence for the consumer's next cross-repository baseline after the bootstrap tuple is removed. |
 | `TestPolyrepoImportedConsumerBaselineRequiresEvidence` | Importing an already-tagged standalone consumer after the provider pointer advanced does not prove the old consumer release adopted that provider snapshot; ambiguity is refused until an explicit baseline tuple identifies its actual provider revision. |
+| `TestPolyrepoCommitModeSourceRestoresASkippedConsumer` | A source repository that makes release commits restores a consumer its failed provider skipped inside that source, without `revertOnFail`, and leaves the source checkout clean. |
 
 ### Goal 55: choreographed fleets (`choreography_*_test.go`)
 

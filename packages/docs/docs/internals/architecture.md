@@ -548,7 +548,11 @@ context of its own.
 For spaces with `revertOnFail: true`, a failing package has its folder rolled back via the `Reverter` interface. dispat
 runs `git checkout -- <dir>` and `git clean -fd <dir>` using `gitx.CLI`. This restores tracked files from HEAD and
 removes untracked files, scoped to the package folder. The same rollback runs when a package is skipped after its
-version stage already modified files. dispat logs a revert error, but the package keeps its original failure status.
+version stage already modified files. In commit mode that skipped case applies without `revertOnFail` as well, to
+every folder the run owns: the start-of-run check proved it clean, and it is neither the root of the repository that
+owns it nor a folder holding another package's folder (`Executor.IsRunOwnedFolder`). Reverts in one checkout take the
+repository's mutation lock in turn, because two `git checkout` processes there would race on its index lock. dispat
+logs a revert error, but the package keeps its original failure status.
 Nothing is ever reverted after a successful publish, for the reason the next section gives.
 
 ### After the point of no return

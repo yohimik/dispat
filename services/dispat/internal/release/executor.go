@@ -119,7 +119,8 @@ type postPublishRecorder interface {
 }
 
 // Reverterx rolls back local changes inside a package folder; *gitx.LocalGitx
-// satisfies it. Used for spaces with revertOnFail.
+// satisfies it. Used for spaces with revertOnFail, and for a skipped package
+// whose folder the run owns (see Executor.IsRunOwnedFolder).
 type Reverterx interface {
 	RevertDir(ctx context.Context, dir string) error
 }
@@ -182,6 +183,13 @@ type Executor struct {
 	// a missing source record or control checkpoint invalidates consumption.
 	BlockOnRecordFailure bool
 	Reverter             Reverterx // rolls back package folders for revertOnFail spaces
+	// IsRunOwnedFolder reports whether everything in a package's folder at
+	// the end of its stages was written by this run, so that restoring the
+	// folder can discard nothing else. A package skipped after an earlier
+	// stage of it ran has its folder restored when this answers true, whatever
+	// revertOnFail says: the folder then holds only edits for a version that
+	// will not publish. nil answers false for every package.
+	IsRunOwnedFolder func(*plan.Release) bool
 	// Force rewrites a tag the repository already carries instead of failing
 	// on it (commit.force, default true). The pre-existing-tag rules still
 	// come first: a tag already at the release commit is a skip, and one at a
@@ -825,7 +833,7 @@ func (r *run) reportBlocked(ctx context.Context, tc *taskCtx, verdict admission)
 	ev := packageEvent(t.pkg, rel, EventPackageSkipped)
 	ev.Status, ev.Code, ev.BlockedBy = StatusSkipped.String(), plan.CodeBlocked, verdict.blocker
 	r.notify(ev)
-	if verdict.isStarted && rel.Pkg.Space.RevertOnFail {
+	if verdict.isStarted && r.isRevertedOnSkip(rel) {
 		r.revert(ctx, rel, log)
 	}
 	// onSkip observes a skip that has already settled, so it only warns;
@@ -1522,13 +1530,37 @@ func loginEnv(space string, static, wsVars []string) []string {
 	return StaticEnv(static, append(env, wsVars...))
 }
 
-// revert rolls back all local changes inside the package folder. Used for
-// revertOnFail spaces when a package fails at any stage — or is skipped after
-// an earlier stage already ran (e.g. version succeeded, then a provider's
-// publish failure skipped the package before its build).
+// isRevertedOnSkip reports whether a package skipped after an earlier stage
+// of it ran has its folder restored: under revertOnFail, and wherever the run
+// owns the folder (see IsRunOwnedFolder). A failed package keeps the
+// revertOnFail rule alone.
+func (e *Executor) isRevertedOnSkip(rel *plan.Release) bool {
+	if rel.Pkg.Space.RevertOnFail {
+		return true
+	}
+	return e.IsRunOwnedFolder != nil && e.IsRunOwnedFolder(rel)
+}
+
+// revert rolls back all local changes inside the package folder. It runs for
+// revertOnFail spaces when a package fails at any stage, and when a package is
+// skipped after an earlier stage already ran (the version stage succeeded,
+// then a provider's publish failure skipped the package before its build),
+// which a folder the run owns reverts without revertOnFail as well.
+//
+// A run that delegates work snapshots this working tree for its nodes, and a
+// restore writes it, so the restore takes the guard the orchestrator's own
+// writing stages take: a snapshot never catches a folder half restored.
 func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Logger) {
 	if e.Reverter == nil {
 		return
+	}
+	if e.Remote != nil {
+		releaseGuard, err := e.Remote.Guard(ctx, "revert")
+		if err != nil {
+			log.Error().Err(err).Msg("reverting package folder failed: the working tree could not be guarded")
+			return
+		}
+		defer releaseGuard()
 	}
 	if err := e.Reverter.RevertDir(ctx, rel.Pkg.Dir); err != nil {
 		log.Error().Err(err).Msg("reverting package folder failed")

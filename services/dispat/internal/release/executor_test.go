@@ -977,6 +977,64 @@ func TestRunRevertErrorKeepsFailedStatus(t *testing.T) {
 	assert.Len(t, rv.dirs, 1, "revert was attempted")
 }
 
+// gatedRunner holds one command until another has run, bounded so that a
+// schedule that never runs the other fails the test instead of hanging it.
+type gatedRunner struct {
+	*fakeRunner
+	gated, after string
+	passed       chan struct{}
+	once         sync.Once
+}
+
+func (g *gatedRunner) Run(ctx context.Context, dir, command string, env []string, stdout, stderr io.Writer) error {
+	if command+" "+dir == g.gated {
+		select {
+		case <-g.passed:
+		case <-time.After(10 * time.Second):
+		}
+	}
+	err := g.fakeRunner.Run(ctx, dir, command, env, stdout, stderr)
+	if command+" "+dir == g.after {
+		g.once.Do(func() { close(g.passed) })
+	}
+	return err
+}
+
+// TestRunRevertsASkippedFolderTheRunOwns: a consumer skipped after its version
+// stage ran is restored when the run owns its folder, whatever revertOnFail
+// says, and keeps its edits otherwise. The failed provider keeps the
+// revertOnFail rule alone, so it is not restored in either case.
+func TestRunRevertsASkippedFolderTheRunOwns(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		isOwned bool
+		want    []string
+	}{
+		{name: "a folder the run owns is restored", isOwned: true, want: []string{"b"}},
+		{name: "any other folder keeps its edits", isOwned: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+			p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
+			rv := &fakeReverter{}
+			r := &fakeRunner{fail: map[string]bool{"publish a": true}}
+			ex := newExecutor(execSpec{Runner: r, Build: 4, Publish: 4})
+			// The provider's publish fails only once the consumer's version
+			// stage has run, so the skip always follows a stage that wrote.
+			ex.Runner = &gatedRunner{fakeRunner: r, gated: "publish a", after: "version b", passed: make(chan struct{})}
+			ex.Tagger, ex.Recorders = &fakeTagger{}, []ReleaseRecorderx{&fakeChangelog{}}
+			ex.Reverter = rv
+			ex.IsRunOwnedFolder = func(*plan.Release) bool { return tc.isOwned }
+			res := ex.Run(context.Background(), p)
+
+			require.Equal(t, StatusFailed, res["a"].Status)
+			require.Equal(t, StatusSkipped, res["b"].Status)
+			require.Less(t, r.indexOf("version b"), r.indexOf("publish a"), "the consumer's version stage ran first")
+			assert.Equal(t, tc.want, rv.dirs)
+		})
+	}
+}
+
 func TestRunNoRevertOnPlainSkip(t *testing.T) {
 	// b is skipped before anything ran in its folder: nothing to revert.
 	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
