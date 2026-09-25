@@ -46,6 +46,9 @@ type scaleShape struct {
 	commits   int
 	packages  int
 	isNoneSet bool
+	// isComposed plans the repository as the one source of a composed
+	// workspace (§27), whose windows are read per repository.
+	isComposed bool
 }
 
 // scaleRepo is a built fixture: the repository folder and the workspace that
@@ -223,7 +226,7 @@ func (c gitCounters) sub(o gitCounters) gitCounters {
 
 // BenchmarkComputeRealHistory plans over a real repository of 10,000 and
 // 50,000 commits, with and without a package whose window is the whole
-// history. Beside the timing it reports what a run pays git for: every git
+// history, and as the source of a composed workspace. Beside the timing it reports what a run pays git for: every git
 // process planning starts (gitcalls/op, ancestry and resolution included), the
 // bytes those processes write (gitOutputBytes/op), and the commits git diffs to
 // list their changed paths (commitsDiffed/op); and what the planner does with
@@ -236,16 +239,28 @@ func BenchmarkComputeRealHistory(b *testing.B) {
 		{name: "whole", commits: 50_000, packages: 64, isNoneSet: true},
 		{name: "bounded", commits: 10_000, packages: 64},
 		{name: "bounded", commits: 50_000, packages: 64},
+		{name: "composed", commits: 10_000, packages: 64, isComposed: true},
+		{name: "composed", commits: 50_000, packages: 64, isComposed: true},
 	}
 	for _, shape := range shapes {
 		b.Run(fmt.Sprintf("shape=%s/commits=%d", shape.name, shape.commits), func(b *testing.B) {
 			repo := buildScaleRepo(b, shape)
+			if shape.isComposed {
+				for _, p := range repo.pkgs {
+					p.Repository, p.RepoRoot = "source", repo.dir
+				}
+			}
 			compute := func(stats *HistoryStats) *Plan {
 				b.Helper()
 				// A fresh repository handle per plan, as every run makes one:
 				// LocalGitx keeps the ancestry DAG it loads for its lifetime.
-				p, err := Compute(context.Background(), &gitx.LocalGitx{Dir: repo.dir}, Options{
-					Packages: repo.pkgs, Dependencies: repo.deps, Root: repo.dir, HistoryStats: stats})
+				git := &gitx.LocalGitx{Dir: repo.dir}
+				opts := Options{Packages: repo.pkgs, Dependencies: repo.deps, Root: repo.dir, HistoryStats: stats}
+				if shape.isComposed {
+					opts.Repositories = map[string]RepositoryHistory{
+						"source": {Name: "source", Root: repo.dir, Git: git}}
+				}
+				p, err := Compute(context.Background(), git, opts)
 				if err != nil {
 					b.Fatal(err)
 				}
