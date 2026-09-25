@@ -728,6 +728,52 @@ func TestEdgeReleaseCommitLockOmitsAFailedWriter(t *testing.T) {
 	assert.FileExists(t, r.Path("packages", "core", "out.txt"), "its untracked build output stays for inspection")
 }
 
+// TestEdgeReleaseCommitLockLeftOutWhenItsRestoreFails: the closing phase
+// restores the failed package's tracked files and the shared include paths
+// before it regenerates them. When Git cannot list or restore them, the
+// re-synchronization stops there: the release commit still records the
+// published package and leaves the shared file out, exactly as HEAD has it,
+// and E223 names the remedy. A restore that fails again after that is named
+// in the same report.
+func TestEdgeReleaseCommitLockLeftOutWhenItsRestoreFails(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		fault harness.GitFault
+		want  string
+	}{
+		{name: "listing what to restore", fault: harness.GitFault{Pattern: "*diff --name-only -z --no-renames HEAD*", Nth: 1},
+			want: "listing the files to restore"},
+		{name: "restoring the failed package", fault: harness.GitFault{Pattern: "*restore --source=HEAD*", Nth: 1},
+			want: "restoring the packages that did not publish"},
+		{name: "restoring the include paths", fault: harness.GitFault{Pattern: "*restore --source=HEAD*", Nth: 2},
+			want: "restoring the include paths:"},
+		{name: "restoring the include paths twice", fault: harness.GitFault{Pattern: "*restore --source=HEAD*", Nth: 2, Onward: true},
+			want: "restoring the include paths again"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := sharedLockRepo(t, func(cfg *models.File) {
+				cfg.Scripts["build"] = models.Script{`if [ "$DISPAT_PACKAGE" = core ]; then exit 1; fi`}
+			})
+			seedManifest(r, "packages", "core")
+			seedManifest(r, "packages", "util")
+			seed := "packages/core 0.0.0\npackages/util 0.0.0\n"
+			r.WriteFile("lock.txt", seed)
+			r.Commit("feat(core,util): one of them fails its build")
+			fault := harness.NewGitFault(t, tc.fault)
+
+			res := r.CommandEnv(fault.Env(), "release")
+			require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+			require.True(t, harness.IsCodePresent(res.Events, "E223"), "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout, harness.GitFaultMarker)
+			assert.Contains(t, res.Stdout, tc.want)
+			require.True(t, r.IsTagged("util@0.1.0"), "the published package is tagged; tags: %v", r.TagList())
+			assert.Zero(t, r.TagCount("core@"))
+			assert.Contains(t, r.Git("log", "-1", "--format=%s"), "util@0.1.0", "the release commit is made")
+			assert.Equal(t, seed, r.Git("show", "HEAD:lock.txt")+"\n", "and leaves the shared file out")
+		})
+	}
+}
+
 // TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted: the run is
 // interrupted while the published package's syncLock runs again and has left
 // lock.txt half written. The file goes back to HEAD, the release commit leaves
