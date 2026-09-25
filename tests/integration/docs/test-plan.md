@@ -2858,8 +2858,10 @@ there names its assertions by test function name, qualified with the repository-
 the two documents cannot drift into disagreeing about which test carries which requirement.
 
 `go run ./tools/testreport testplan .` reads both and fails on a reference to a test that does not exist, an ambiguous
-bare name, an integration test with no goal here, and a matrix row whose recorded status its own references do not
-support. It is the `repo-checks` target of `Dockerfile.gotest` in CI and `scripts/check-test-plan.sh` locally.
+bare name, an integration test with no goal here, one named more than once, one named anywhere but under a numbered
+goal heading, and a matrix row whose recorded status its own references do not support. The Regression fences and Bug
+fences sections are the exception, stated in the gate: they cite the tests that guard a defect, integration and unit
+alike, beside the goal row that names each one. It is the `repo-checks` target of `Dockerfile.gotest` in CI and `scripts/check-test-plan.sh` locally.
 
 | Matrix section | Goals that carry it |
 | --- | --- |

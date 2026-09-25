@@ -1,7 +1,9 @@
 #!/bin/sh
 # The traceability gate, for a shell that has a Go toolchain: the integration
-# test plan must name every integration test exactly once and name nothing that
-# does not exist, and the requirement matrix must agree with the tree.
+# test plan must name every integration test exactly once, under a numbered
+# goal heading, and name nothing that does not exist, and the requirement
+# matrix must agree with the tree. The Regression fences and Bug fences
+# sections cite tests, integration and unit alike, without naming them again.
 #
 # The checking itself is `testreport testplan`, in Go, because the same gate
 # runs in CI on a machine with no ripgrep and because the matrix percentages

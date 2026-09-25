@@ -39,12 +39,19 @@ const (
 )
 
 // testRef is one reference as a document wrote it: the optional
-// repository-relative file, the function name, and where it was read from.
+// repository-relative file, the function name, where it was read from, and
+// the part of the plan it sits in.
 type testRef struct {
 	file   string
 	name   string
 	source string
 	line   int
+	// goal is true when the reference sits under a numbered goal heading
+	// (`### Goal N: ...`), which is the only place a test is given its goal.
+	goal bool
+	// citation is true inside a section that cites tests rather than
+	// assigning them (see citationSections).
+	citation bool
 }
 
 func (r testRef) String() string {
@@ -57,6 +64,19 @@ func (r testRef) String() string {
 // refPattern matches a reference inside backticks: a bare `TestName`, or a
 // `path/to/file_test.go::TestName` qualified by the file that defines it.
 var refPattern = regexp.MustCompile("`(?:([^`\\s]+_test\\.go)::)?(Test[A-Za-z0-9_]+)")
+
+// goalHeading matches the heading that gives the tests below it their goal.
+var goalHeading = regexp.MustCompile(`^###\s+Goal\s+[0-9]+:`)
+
+// citationSections are the top-level plan sections that cite tests instead of
+// assigning them: each fence names the defect, the tests that would now fail
+// and, in a "Where" column, the module that holds them, which is often a unit
+// suite outside this module. A test cited there still has its one goal
+// elsewhere, so a citation neither counts as its naming nor as a second one.
+var citationSections = map[string]bool{
+	"Regression fences": true,
+	"Bug fences":        true,
+}
 
 // funcPattern matches a test function declaration at the start of a line.
 var funcPattern = regexp.MustCompile(`^func (Test[A-Za-z0-9_]+)\s*\(`)
@@ -134,7 +154,9 @@ func collectDefinitions(root string) (definitions, error) {
 	return defs, nil
 }
 
-// readRefs extracts every backticked test reference from a document.
+// readRefs extracts every backticked test reference from a document, with
+// the heading each one sits under. Headings inside a fenced code block are
+// text, not structure.
 func readRefs(root, rel string) ([]testRef, error) {
 	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 	if errors.Is(err, os.ErrNotExist) {
@@ -144,9 +166,26 @@ func readRefs(root, rel string) ([]testRef, error) {
 		return nil, err
 	}
 	var refs []testRef
+	fenced, goal, citation := false, false, false
 	for i, line := range strings.Split(string(body), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			fenced = !fenced
+			continue
+		}
+		if !fenced {
+			switch {
+			case strings.HasPrefix(line, "## "):
+				goal = false
+				citation = citationSections[strings.TrimSpace(strings.TrimPrefix(line, "## "))]
+			case strings.HasPrefix(line, "### "):
+				goal = goalHeading.MatchString(line)
+			}
+		}
 		for _, match := range refPattern.FindAllStringSubmatch(line, -1) {
-			refs = append(refs, testRef{file: match[1], name: match[2], source: rel, line: i + 1})
+			refs = append(refs, testRef{
+				file: match[1], name: match[2], source: rel, line: i + 1,
+				goal: goal, citation: citation,
+			})
 		}
 	}
 	return refs, nil
@@ -174,11 +213,17 @@ func resolve(defs definitions, ref testRef) (covered []string, missing bool, amb
 
 // planReport is what the gate found in the two documents.
 type planReport struct {
-	References   int
-	Integration  int
-	Missing      []string
-	Ambiguous    []string
-	Unassigned   []string
+	References  int
+	Integration int
+	Missing     []string
+	Ambiguous   []string
+	Unassigned  []string
+	// Repeated lists the integration tests the plan names more than once
+	// outside its citation sections, with every line that names them.
+	Repeated []string
+	// OutsideGoal lists the integration tests whose one naming sits outside
+	// every numbered goal heading.
+	OutsideGoal  []string
 	Requirements requirementReport
 }
 
@@ -293,34 +338,31 @@ func checkDocuments(root, planPath, requirementsPath string) (planReport, error)
 	}
 
 	report := planReport{}
-	assigned := map[string]bool{}
 	seenRef := map[string]bool{}
 	note := func(set *[]string, text string) { *set = append(*set, text) }
 
-	consider := func(ref testRef, assign bool) {
+	// consider reports a reference that resolves to nothing or to more than
+	// one declaration, once per document and spelling.
+	consider := func(ref testRef) {
 		key := ref.source + "\t" + ref.String()
 		if seenRef[key] {
 			return
 		}
 		seenRef[key] = true
-		covered, missing, ambiguous := resolve(defs, ref)
+		_, missing, ambiguous := resolve(defs, ref)
 		switch {
 		case missing:
 			note(&report.Missing, fmt.Sprintf("%s:%d: %s", ref.source, ref.line, ref))
 		case ambiguous:
 			note(&report.Ambiguous, fmt.Sprintf("%s:%d: %s is declared in %s",
 				ref.source, ref.line, ref.name, strings.Join(defs.files[ref.name], ", ")))
-		case assign:
-			for _, key := range covered {
-				assigned[key] = true
-			}
 		}
 	}
 
 	unique := map[string]bool{}
 	for _, ref := range planRefs {
 		unique[ref.String()] = true
-		consider(ref, true)
+		consider(ref)
 	}
 	report.References = len(unique)
 
@@ -353,7 +395,7 @@ func checkDocuments(root, planPath, requirementsPath string) (planReport, error)
 		}
 		mapped := false
 		for _, ref := range req.Refs {
-			consider(ref, false)
+			consider(ref)
 			if _, missing, ambiguous := resolve(defs, ref); !missing && !ambiguous {
 				mapped = true
 			}
@@ -386,15 +428,53 @@ func checkDocuments(root, planPath, requirementsPath string) (planReport, error)
 	}
 	sort.Strings(integration)
 	report.Integration = len(integration)
-	for _, key := range integration {
-		if !assigned[key] {
-			report.Unassigned = append(report.Unassigned, strings.ReplaceAll(key, "\t", "::"))
-		}
-	}
+	judgeNamings(&report, integration, namingsOf(defs, planRefs))
 	sort.Strings(report.Missing)
 	sort.Strings(report.Ambiguous)
-	sort.Strings(report.Unassigned)
 	return report, nil
+}
+
+// namingsOf holds, per declaration, every plan reference that names it outside
+// the citation sections, in document order.
+func namingsOf(defs definitions, refs []testRef) map[string][]testRef {
+	namings := map[string][]testRef{}
+	for _, ref := range refs {
+		if ref.citation {
+			continue
+		}
+		if covered, missing, ambiguous := resolve(defs, ref); !missing && !ambiguous {
+			for _, key := range covered {
+				namings[key] = append(namings[key], ref)
+			}
+		}
+	}
+	return namings
+}
+
+// judgeNamings holds each integration test to one naming under a numbered goal
+// heading: none means it has no goal, more than one that the plan says two
+// things about it, and one anywhere else that it has a mention but no goal.
+func judgeNamings(report *planReport, integration []string, namings map[string][]testRef) {
+	for _, key := range integration {
+		name := strings.ReplaceAll(key, "\t", "::")
+		refs := namings[key]
+		switch {
+		case len(refs) == 0:
+			report.Unassigned = append(report.Unassigned, name)
+		case len(refs) > 1:
+			lines := make([]string, len(refs))
+			for i, ref := range refs {
+				lines[i] = fmt.Sprintf("%s:%d", ref.source, ref.line)
+			}
+			report.Repeated = append(report.Repeated, name+" is named on "+strings.Join(lines, ", "))
+		case !refs[0].goal:
+			report.OutsideGoal = append(report.OutsideGoal,
+				fmt.Sprintf("%s:%d: %s", refs[0].source, refs[0].line, name))
+		}
+	}
+	sort.Strings(report.Unassigned)
+	sort.Strings(report.Repeated)
+	sort.Strings(report.OutsideGoal)
 }
 
 // testPlanCheck is the verb: it reports what the documents claim and fails on
@@ -435,6 +515,14 @@ func testPlanCheck(args []string, out io.Writer) error {
 	if len(report.Unassigned) > 0 {
 		problems = append(problems, fmt.Errorf("integration tests without an explicit test-plan goal:\n  %s",
 			strings.Join(report.Unassigned, "\n  ")))
+	}
+	if len(report.Repeated) > 0 {
+		problems = append(problems, fmt.Errorf("integration tests the plan names more than once outside its fences:\n  %s",
+			strings.Join(report.Repeated, "\n  ")))
+	}
+	if len(report.OutsideGoal) > 0 {
+		problems = append(problems, fmt.Errorf("integration tests named outside every numbered goal heading (### Goal N: ...):\n  %s",
+			strings.Join(report.OutsideGoal, "\n  ")))
 	}
 	if len(report.Requirements.Problems) > 0 {
 		problems = append(problems, fmt.Errorf("requirement matrix:\n  %s",
