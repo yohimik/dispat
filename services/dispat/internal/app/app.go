@@ -495,11 +495,9 @@ func (a *App) releaseBlocked(pl *plan.Plan) string {
 
 // initialVersions maps the configured initials onto discovered package names.
 // Matching is case-insensitive, like every other name in the configuration;
-// keys that match no discovered package are warned about and ignored. Two
-// packages differing only in case would leave an entry with no single package
-// to route to, so their entries are refused with the candidates named —
-// discovery refuses such a pair outright, and this stays as the reading that
-// cannot be surprised by one.
+// keys that match no discovered package are warned about and ignored. Each
+// folded name is one package: discovery refuses two packages differing only
+// in case before any entry is read.
 func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
 	if a.workspace != nil {
 		return a.workspaceInitialVersions(pkgs)
@@ -508,22 +506,12 @@ func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
 		return nil
 	}
 	byLower := make(map[string]string, len(pkgs)) // lowercase -> real name
-	collided := make(map[string][]string)
 	for _, p := range pkgs {
-		low := globx.Fold(p.Name)
-		if prev, dup := byLower[low]; dup {
-			collided[low] = append(collided[low], prev, p.Name)
-		}
-		byLower[low] = p.Name
+		byLower[globx.Fold(p.Name)] = p.Name
 	}
 	out := make(map[string]ccme.Version, len(a.cfg.InitialVersions))
 	for key, v := range a.cfg.InitialVersions {
 		low := globx.Fold(key)
-		if names := collided[low]; len(names) > 0 {
-			a.log.Warn().Str("initial", key).Strs("candidates", names).
-				Msg("initials entry is ambiguous between case-colliding packages, ignoring")
-			continue
-		}
 		if real, ok := byLower[low]; ok {
 			out[real] = v
 		} else {
