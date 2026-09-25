@@ -21,8 +21,11 @@ package integration
 // fails.
 
 import (
+	"slices"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -99,6 +102,58 @@ func TestExecutionInterruptedPublisherIsQuiescedAndGivesTheLockBack(t *testing.T
 	require.Len(t, branches, 1, "the unknown publication's branch remains for reconciliation")
 	assert.Contains(t, branches[0], "-publish-", "the unrelated preflight branch was cleaned")
 	stopAll(t, []*executionWorker{worker})
+}
+
+// TestExecutionResultThatLandedAsTheRunStoppedIsRecorded: the run authorized
+// a publication, and the node published and wrote its result while the run
+// was not looking; the run is interrupted before it reads that result. The
+// withdrawal it then writes loses its lease to the result, so the run reads
+// the node's own answer instead of guessing: the publication succeeded, and it
+// is recorded as it would have been a moment earlier, with nothing reported
+// unknown and the lock given back.
+func TestExecutionResultThatLandedAsTheRunStoppedIsRecorded(t *testing.T) {
+	rig := newExecutionPushOutcomeRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyBoth, models.RunOnlyWorker)
+		cfg.Scripts["publish"] = models.Script{executionPublishProbe}
+	})
+	// The run's first poll of the node after it authorized the publication is
+	// held, so the result lands unread; the authorization is the one push on
+	// the publish branch leased on an object rather than on nothing.
+	unread := harness.NewGitFault(t, harness.GitFault{
+		Pattern:  "*ls-remote --heads -- *refs/heads/dispat-worker-*[*]",
+		ArmAfter: "*push --porcelain --force-with-lease=refs/heads/*[0-9]-publish-*:[0-9a-f]*",
+		Nth:      1, Hold: true})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	started := rig.repo.StartReleaseEnv(rig.env(unread.Env()...), "release")
+
+	require.Eventually(t, unread.IsHeld, 120*time.Second, 50*time.Millisecond,
+		"the run never polled after authorizing the publication")
+	require.Eventually(t, func() bool {
+		for _, ref := range executionMailboxBranches(t, rig.mailbox) {
+			branch := strings.TrimPrefix(ref, "refs/heads/")
+			if strings.Contains(branch, "-publish-") &&
+				slices.Contains(executionReadChain(rig.mailbox, branch), "result") {
+				return true
+			}
+		}
+		return false
+	}, 60*time.Second, 50*time.Millisecond, "the node never reported its publication")
+	started.Signal(syscall.SIGINT)
+	// The run's own withdrawal settles the attempt from the branch alone; the
+	// held poll is let go after the run has had time to try it. A run slower
+	// than that reads the result through the poll instead, which the
+	// assertions below accept alike: either way the result is what is recorded.
+	time.Sleep(2 * time.Second)
+	unread.Resume()
+	res := started.Wait()
+	stopAll(t, []*executionWorker{worker})
+
+	assert.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero")
+	assert.Equal(t, []string{"core"}, executionProbedPackages(rig, "publish"), "the command ran once")
+	assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
+		"the node's own result is what became of the publication\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, []string{"core@0.1.0"}, executionReleaseTags(rig), "and it is recorded")
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
 }
 
 // TestExecutionUnansweredPublisherRetainsTheLock: the same class, decided the
