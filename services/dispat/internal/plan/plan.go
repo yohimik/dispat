@@ -795,10 +795,6 @@ type Release struct {
 // unit (§7.4, §13.10).
 func (r *Release) UnitCorrects(u *ccme.Unit) []string { return r.Corrects[u] }
 
-// IsUnitSuppressed reports a unit whose changelog entry a revert suppressed
-// (§7.3).
-func (r *Release) IsUnitSuppressed(u *ccme.Unit) bool { return r.SuppressedNotes[u] }
-
 // AuthorsFor returns who the unit is by, empty for a unit nothing attributed.
 func (r *Release) AuthorsFor(u *ccme.Unit) []Author { return r.UnitAuthors[u] }
 
