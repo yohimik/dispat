@@ -27,6 +27,19 @@ func (s *commitSet) len() int {
 	return s.size
 }
 
+// each calls yield with every rank of the set, lowest first: for a pending
+// window, its commits newest first.
+func (s *commitSet) each(yield func(rank int)) {
+	if s == nil {
+		return
+	}
+	for w, word := range s.bits {
+		for ; word != 0; word &= word - 1 {
+			yield(w<<6 + bits.TrailingZeros64(word))
+		}
+	}
+}
+
 // commitSetOf builds the set holding exactly the given ranks, of n commits.
 func commitSetOf(n int, ranks func(yield func(int))) *commitSet {
 	s := &commitSet{bits: make([]uint64, (n+63)/64)}

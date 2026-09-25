@@ -3297,11 +3297,6 @@ func (cp *computation) finalise() {
 		// packages is by the same people in both.
 		rel.UnitAuthors = cp.unitAuthors
 		rel.UnitCommits = cp.unitCommits
-		rel.WindowAuthors, rel.FreshWindowAuthors = cp.collectWindowAuthors(name)
-		if len(rel.WindowAuthors) > 0 {
-			cp.log.Debug().Str("package", name).Int("window", len(rel.WindowAuthors)).
-				Int("fresh", len(rel.FreshWindowAuthors)).Msg("release authors collected")
-		}
 		rel.Channel = cp.channel[name]
 		if rel.Channel == "" {
 			rel.Channel = rel.BaselineChannel
@@ -3322,6 +3317,9 @@ func (cp *computation) finalise() {
 	for _, gn := range groupNames {
 		cp.applyFixedGroup(gn, groups[gn])
 	}
+	// After every version, fixed rides included: whether a release has an
+	// entry to attribute is decided by then.
+	cp.collectReleaseAuthors()
 
 	// Provider version movements, resolved after every version is final. The
 	// topological order already guarantees a provider's Next is computed

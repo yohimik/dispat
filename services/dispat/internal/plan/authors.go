@@ -162,6 +162,26 @@ func (cp *computation) resolveAuthors(rec *commitRec) {
 		Int("coauthors", len(distinct)-primary).Msg("authors resolved")
 }
 
+// collectReleaseAuthors fills in the window attribution of every release that
+// has an entry to attribute: a changed package that versions at all. Those are
+// the only releases anything renders, a record, a preview or a step's aligned
+// plan, and every one of them is changed. A package with nothing to release,
+// and a versioning none package, which never has a record, is not scanned: in
+// a large workspace that is most packages, and the scan is its whole window.
+func (cp *computation) collectReleaseAuthors() {
+	for _, name := range cp.order {
+		rel := cp.rel[name]
+		if rel == nil || !rel.IsReleasable() || !rel.IsChanged() {
+			continue
+		}
+		rel.WindowAuthors, rel.FreshWindowAuthors = cp.collectWindowAuthors(name)
+		if len(rel.WindowAuthors) > 0 {
+			cp.log.Debug().Str("package", name).Int("window", len(rel.WindowAuthors)).
+				Int("fresh", len(rel.FreshWindowAuthors)).Msg("release authors collected")
+		}
+	}
+}
+
 // collectWindowAuthors aggregates the authors of every commit in a package's
 // pending window, and of the fresh part of it.
 //
@@ -193,28 +213,39 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 	}
 	windowSeen := make(map[string]bool)
 	freshSeen := make(map[string]bool)
-	reachable := cp.windowRepositories(name)
-	if cp.stats != nil {
-		cp.stats.AuthorScans.Add(int64(len(cp.commits)))
-	}
-	for _, rec := range cp.commits {
-		// A commit from a repository the package's window cannot reach is not
-		// pending for it, whatever its key says. Deciding that from the
-		// repository alone saves consulting every shared window view for
-		// every commit of every other repository in the fleet.
-		if reachable != nil && !reachable[globx.Fold(rec.repository)] {
-			continue
-		}
-		if !cp.inWindow(name, rec.key) {
-			continue
-		}
+	attribute := func(rec *commitRec) {
 		a := Author{Name: rec.commit.AuthorName, Email: rec.commit.AuthorEmail}
 		if a.empty() {
-			continue
+			return
 		}
 		window = appendUniqueAuthor(window, windowSeen, a)
 		if !cp.containedInBaseline(name, rec.key) {
 			fresh = appendUniqueAuthor(fresh, freshSeen, a)
+		}
+	}
+	if len(cp.histories) == 0 {
+		// A single history's window is a set of ranks, and a rank is a
+		// position in the union: reading the set in rank order visits
+		// exactly the window's commits, newest first, and nothing else.
+		set := cp.window[name]
+		if cp.stats != nil {
+			cp.stats.AuthorScans.Add(int64(set.len()))
+		}
+		set.each(func(rank int) { attribute(cp.commits[rank]) })
+	} else {
+		reachable := cp.windowRepositories(name)
+		if cp.stats != nil {
+			cp.stats.AuthorScans.Add(int64(len(cp.commits)))
+		}
+		for _, rec := range cp.commits {
+			// A commit from a repository the package's window cannot reach
+			// is not pending for it, whatever its key says. Deciding that
+			// from the repository alone saves consulting every shared window
+			// view for every commit of every other repository in the fleet.
+			if !reachable[globx.Fold(rec.repository)] || !cp.inWindow(name, rec.key) {
+				continue
+			}
+			attribute(rec)
 		}
 	}
 	// Clipped, so a consumer that appends to a shared list reallocates rather

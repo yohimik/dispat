@@ -4,6 +4,7 @@
 package plan
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
 // Unit tests of the attribution the planner resolves: who a unit is by, who a
@@ -252,6 +254,44 @@ func TestComputeWindowAuthorsForAPackageWhoseOnlyCommitIsInvalid(t *testing.T) {
 	assert.Equal(t, []Author{{"Ada", "ada@example.com"}}, rel.WindowAuthors)
 	assert.Equal(t, rel.WindowAuthors, rel.AllAuthors(),
 		"a stable release is attributed to its whole window")
+}
+
+// TestComputeWindowAuthorsOnlyForAReleaseWithAnEntry: the window attribution
+// is read by the records, the preview and a step's aligned plan, and each of
+// them renders a changed release only. A held package is changed and keeps its
+// authors, because its preview still shows the entry it would write; a package
+// with nothing to release, and a versioning none package, which never has a
+// record, are not scanned at all.
+func TestComputeWindowAuthorsOnlyForAReleaseWithAnEntry(t *testing.T) {
+	git := newFakeGit(
+		commit{sha: "c1", message: "chore(utils): not a release record",
+			files: []string{"libs/utils/a.txt"}, author: "Ada", email: "ada@example.com"},
+		commit{sha: "c2", message: "fix(core): held\n\nRelease-As: none",
+			files: []string{"libs/core/b.txt"}, author: "Grace", email: "grace@example.com"},
+		commit{sha: "c3", message: "fix(scripts): none",
+			files: []string{"tools/scripts/c.txt"}, author: "Linus", email: "linus@example.com"},
+		commit{sha: "c4", message: "fix(app): released",
+			files: []string{"apps/app/d.txt"}, author: "Barbara", email: "barbara@example.com"},
+	).tag("core", "1.0.0", "").tag("utils", "1.0.0", "").tag("app", "1.0.0", "")
+	pkgs, deps := testPackages()
+	pkgs = append(pkgs, &model.Package{Name: "scripts", Dir: "/r/tools/scripts",
+		Space: &model.Space{Name: "tools", Versioning: model.VersioningNone}})
+	stats := &HistoryStats{}
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Dependencies: deps, Root: "/r",
+		HistoryStats: stats})
+	require.NoError(t, err)
+
+	app, core, utils, scripts := p.Releases["app"], p.Releases["core"], p.Releases["utils"], p.Releases["scripts"]
+	require.True(t, app.IsReleasing())
+	assert.NotEmpty(t, app.WindowAuthors)
+	require.True(t, core.Held)
+	require.True(t, core.IsChanged())
+	assert.NotEmpty(t, core.WindowAuthors, "a held release still previews its entry")
+	require.False(t, utils.IsChanged())
+	assert.Nil(t, utils.WindowAuthors, "nothing to release, nothing to attribute")
+	require.True(t, scripts.IsChanged())
+	assert.Nil(t, scripts.WindowAuthors, "a none package has no record")
+	assert.Equal(t, int64(2*4), stats.AuthorScans.Load(), "two windows of the whole history, and no more")
 }
 
 func TestComputeFreshWindowAuthorsNarrowOnAPrerelease(t *testing.T) {
