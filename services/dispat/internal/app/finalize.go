@@ -238,8 +238,9 @@ func (a *App) pushRelease(ctx context.Context, fin finalizer, rc releaseCommit) 
 	a.recordRecordConflicts(fin.crit, report, fin.remote)
 	if err != nil {
 		// The commit and the tags are local records already; the remote
-		// copy is what is missing, and a later push sends it. The GitHub
-		// releases below still go out — they document the release, and
+		// copy is what is missing, and the operator pushes it, because a
+		// later run from this checkout finds the version recorded and sends
+		// nothing. The GitHub releases below still go out — they document the release, and
 		// withholding them would lose the second record too.
 		fin.crit.record(a.log, plan.CodePushFailed, err, "push failed",
 			func(e *zerolog.Event) *zerolog.Event { return e.Str("remote", gitx.RedactURL(fin.remote)) })

@@ -467,8 +467,9 @@ const (
 	// which is where they would have pointed anyway.
 	CodeCommitFailed = "E223"
 	// CodePushFailed marks a failed push. The commit and the tags exist
-	// locally, so the release is recorded; what is missing is the copy on the
-	// remote, and a later push sends it.
+	// locally, so the release is recorded here; what is missing is the copy on
+	// the remote, which the operator pushes: a later run from this checkout
+	// finds the version recorded and has nothing to send.
 	CodePushFailed = "E224"
 
 	// --- the manifest-command gates ---
