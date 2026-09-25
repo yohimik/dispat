@@ -207,6 +207,47 @@ func TestReleaseLockBlocksConcurrentRuns(t *testing.T) {
 	assert.Equal(t, 1, second.TagCount("core@"))
 }
 
+// TestReleaseLockBlocksASecondRunInTheSameCheckout: two releases started in
+// one working directory share its tags, its index and its files, and the lock
+// is the only thing that keeps them apart. Each attempt offers a tag object of
+// its own under the one remote name, so the second run cannot retarget the
+// first run's claim: it is refused with E336, and it leaves the checkout
+// exactly as it found it, the first run's own attempt tag included. The first
+// run is held by a stand-in git on its first call after the lock is on the
+// remote, so the second starts inside that window by construction.
+func TestReleaseLockBlocksASecondRunInTheSameCheckout(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(markerBuild, 1))
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+	bare := r.AddBareRemote()
+	r.Git("push", "-q", "origin", "HEAD")
+	hold := harness.NewGitFault(t, harness.GitFault{
+		ArmAfter: "*push*refs/tags/" + lockTag + "*", Pattern: "*", Nth: 1, Hold: true})
+
+	first := r.StartReleaseEnv(append(hold.Env(), harness.LockEnabled...))
+	require.Eventually(t, func() bool { return hold.IsHeld() && remoteHoldsLock(t, bare) },
+		20*time.Second, 20*time.Millisecond, "the first run never held the lock")
+	held := lockObject(t, bare)
+	tagsBefore, headBefore := r.TagList(), r.Git("rev-parse", "HEAD")
+
+	second := releaseLocked(r)
+	assert.Equal(t, 1, second.Code, "stdout:\n%s\nstderr:\n%s", second.Stdout, second.Stderr)
+	assert.True(t, harness.IsCodePresent(second.Events, "E336"), "stdout:\n%s", second.Stdout)
+	assert.Equal(t, held, lockObject(t, bare), "the first run's lock is untouched")
+	assert.Equal(t, tagsBefore, r.TagList(), "the refused run leaves every tag as it found it")
+	assert.Equal(t, headBefore, r.Git("rev-parse", "HEAD"))
+	assert.Empty(t, r.Git("status", "--porcelain"), "and no file of the checkout")
+	assert.Zero(t, buildRuns(r), "nothing was built while the first run was held")
+
+	hold.Resume()
+	out := first.Wait()
+	require.Equal(t, 0, out.Code, "stdout:\n%s\nstderr:\n%s", out.Stdout, out.Stderr)
+	assert.Equal(t, 1, buildRuns(r), "only the run that held the lock built")
+	assert.Equal(t, 1, r.TagCount("core@"), "and released")
+	assertLockCleared(t, r, bare)
+}
+
 // TestReleaseLockIndependentOfPush: the lock is not the release push. A
 // repository that pushes nothing — no release commit, no tags on the remote —
 // still takes it, because two such runs race over the same versions just as
