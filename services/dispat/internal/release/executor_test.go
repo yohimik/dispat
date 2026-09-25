@@ -136,6 +136,16 @@ func (f *fakeTagger) CreateTag(_ context.Context, name, _ string, target string)
 	return nil
 }
 
+// FindTag, TagExists and ResolveCommit answer for a repository that carries
+// no tags yet: a refused write is then always the write's own failure.
+func (f *fakeTagger) FindTag(context.Context, string) (gitx.Tag, bool, error) {
+	return gitx.Tag{}, false, nil
+}
+
+func (f *fakeTagger) TagExists(context.Context, string) (bool, error) { return false, nil }
+
+func (f *fakeTagger) ResolveCommit(_ context.Context, rev string) (string, error) { return rev, nil }
+
 type fakeChangelog struct {
 	mu      sync.Mutex
 	entries []string
@@ -1758,10 +1768,10 @@ func TestRunLaunchOrderDeterministic(t *testing.T) {
 	assert.Equal(t, first, runOnce(), "identical plans launch identically")
 }
 
-// errTagger refuses every tag.
-type errTagger struct{}
+// errTagger refuses every tag, in a repository that carries none.
+type errTagger struct{ fakeTagger }
 
-func (errTagger) CreateTag(context.Context, string, string, string) error {
+func (*errTagger) CreateTag(context.Context, string, string, string) error {
 	return errors.New("tag refused")
 }
 
@@ -1774,7 +1784,7 @@ func (errTagger) CreateTag(context.Context, string, string, string) error {
 func TestTaggingFailureIsCriticalNotAFailure(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a", "b"}, Deps: map[string][]string{"b": {"a"}}})
 	e := newExecutor(execSpec{Runner: &fakeRunner{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
-	e.Tagger = errTagger{}
+	e.Tagger = &errTagger{}
 	res := e.Run(context.Background(), p)
 
 	assert.Equal(t, StatusPublished, res["a"].Status)
@@ -1787,16 +1797,34 @@ func TestTaggingFailureIsCriticalNotAFailure(t *testing.T) {
 		"the consumer has a published provider to build against and must not be skipped")
 }
 
-// inspectingTagger is a Tagger with the tagInspector extension: it reports a
-// preset existing tag and records whether CreateTag was reached.
+// inspectingTagger is a Tagger over a repository that already carries preset
+// tags: a write of one of their names is refused, as git's create-only write
+// is, and records nothing.
 type inspectingTagger struct {
 	fakeTagger
 	existing gitx.Tags
 	resolved map[string]string // rev -> sha
 }
 
-func (f *inspectingTagger) Tags(_ context.Context, _ string, _ gitx.TagFormat) (gitx.Tags, error) {
-	return f.existing, nil
+func (f *inspectingTagger) CreateTag(ctx context.Context, name, message, target string) error {
+	if _, found, _ := f.FindTag(ctx, name); found {
+		return errors.New("tag " + name + " already exists")
+	}
+	return f.fakeTagger.CreateTag(ctx, name, message, target)
+}
+
+func (f *inspectingTagger) FindTag(_ context.Context, name string) (gitx.Tag, bool, error) {
+	for _, tag := range f.existing {
+		if tag.Name == name {
+			return tag, true, nil
+		}
+	}
+	return gitx.Tag{}, false, nil
+}
+
+func (f *inspectingTagger) TagExists(ctx context.Context, name string) (bool, error) {
+	_, found, err := f.FindTag(ctx, name)
+	return found, err
 }
 
 func (f *inspectingTagger) ResolveCommit(_ context.Context, rev string) (string, error) {
@@ -1834,9 +1862,9 @@ func TestCreateReleaseTagRejectsTagAtDifferentCommit(t *testing.T) {
 	assert.Empty(t, tg.tags)
 }
 
-func TestCreateReleaseTagWithoutInspectorUnchanged(t *testing.T) {
-	// A plain Tagger keeps the strict behaviour: no probe, straight to
-	// CreateTag — the right default for fakes and custom taggers.
+func TestCreateReleaseTagWritesANewName(t *testing.T) {
+	// A name the repository does not carry is written straight away: the
+	// create-only write is the existence check.
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	tg := &fakeTagger{}
 	require.NoError(t, CreateReleaseTag(context.Background(), tg, p.Releases["a"], false, zerolog.Nop()))

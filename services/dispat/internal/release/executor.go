@@ -108,8 +108,15 @@ type Result struct {
 // Executor defers tagging to a later phase (release-commit mode, where tags
 // must point at the end-of-run commit). target is the commit the tag points
 // at; empty means HEAD.
+//
+// Besides the write it looks one tag HEAD reaches up by its exact name, which
+// is how a refused create-only write is told apart: the flow's own early tag
+// (W223), a record at another commit (E221), or a failure of the write itself.
 type Taggerx interface {
 	CreateTag(ctx context.Context, name, message, target string) error
+	FindTag(ctx context.Context, name string) (gitx.Tag, bool, error)
+	TagExists(ctx context.Context, name string) (bool, error)
+	ResolveCommit(ctx context.Context, rev string) (string, error)
 }
 
 // ReleaseRecorderx records a successful release somewhere: a changelog file
@@ -1530,15 +1537,6 @@ func TagFailureCode(err error) string {
 	return plan.CodeTagFailed
 }
 
-// tagInspector is the optional Taggerx extension the same-commit tag skip
-// needs; *gitx.LocalGitx implements it. A Taggerx without it keeps the strict
-// pre-existing-tag-is-an-error behaviour, which is the right default for test
-// doubles and custom taggers.
-type tagInspector interface {
-	Tags(ctx context.Context, pkg string, format gitx.TagFormat) (gitx.Tags, error)
-	ResolveCommit(ctx context.Context, rev string) (string, error)
-}
-
 // forceTagger is the optional Taggerx extension that can rewrite a tag the
 // repository already carries; *gitx.LocalGitx implements it. A Taggerx without it
 // simply never forces, which is the right default for a test double or a
@@ -1584,48 +1582,7 @@ func CreateReleaseTagAs(ctx context.Context, tagger Taggerx, rel *plan.Release, 
 	if name != "" {
 		tag = name
 	}
-	if finder, ok := tagger.(tagFinder); ok {
-		return createFoundTag(ctx, finder, tagger, rel, tagWrite{name: tag, isForced: force}, log)
-	}
-	if insp, ok := tagger.(tagInspector); ok {
-		tags, err := insp.Tags(ctx, rel.Pkg.Name, rel.TagFormat())
-		if err != nil {
-			// Listing the tags is how the already-tagged case is told from a
-			// wrong tag. Failing to list them is not a reason to fail a
-			// package that has published, but it is the reason the write
-			// below may report a plain collision, so it is said out loud
-			// rather than dropped.
-			log.Warn().Err(err).Str("tag", tag).
-				Msg("existing tags could not be listed before tagging")
-		}
-		if err == nil {
-			for _, t := range tags {
-				if t.Name != tag {
-					continue
-				}
-				target := rel.ExportedCommit()
-				if target == "" {
-					target = "HEAD"
-				}
-				sha, err := insp.ResolveCommit(ctx, target)
-				if err != nil {
-					return fmt.Errorf("tag %s already exists and the release target %q cannot be resolved: %w", tag, target, err)
-				}
-				if sha == t.Commit {
-					log.Warn().Str("code", plan.CodeTagExists).Str("tag", tag).
-						Msg("tag already exists at the release commit, skipped")
-					return nil
-				}
-				return fmt.Errorf("%w: %s is at %s, not at the release commit %s",
-					ErrTagAtOtherCommit, tag, t.Commit, sha)
-			}
-		}
-	}
-	if err := writeTag(ctx, tagger, force, tag, "release "+tag, rel.ExportedCommit()); err != nil {
-		return err
-	}
-	createAliasTags(ctx, tagger, rel, log)
-	return nil
+	return createFoundTag(ctx, tagger, rel, tagWrite{name: tag, isForced: force}, log)
 }
 
 // createAliasTags writes the extra names a release is published under, after
