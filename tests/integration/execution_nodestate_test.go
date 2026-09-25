@@ -20,9 +20,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/pkg/models"
 )
 
 // TestExecutionWorkerStateRefusals: the state folder unusable in each of the
@@ -103,4 +106,42 @@ func TestExecutionWorkerKeepsItsStateUnderTheCacheDirectory(t *testing.T) {
 		"the node kept its folder under the cache directory of the account it runs as")
 	assert.Equal(t, executionNode, filepath.Base(started.Str("stateDir")),
 		"and named it after itself, so two nodes on one machine keep their records apart")
+}
+
+// TestExecutionWorkerCompactsItsCacheOnceWhenIdle: every message a node writes
+// and every branch it fetches leaves objects in its cache that nothing reaches
+// once the run closes its branches, and git's own maintenance is off there. So
+// after a minute with nothing claimed and nothing in flight the node compacts
+// the cache itself: the loose objects the release left behind are gone, the
+// compaction is logged once for the idle stretch, and the node goes on serving
+// until it is stopped.
+func TestExecutionWorkerCompactsItsCacheOnceWhenIdle(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	res := rig.release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.Equal(t, executionNode, rig.nodesByPackage()["core"], "the build ran on the node: %v", rig.runs())
+
+	caches, err := filepath.Glob(filepath.Join(worker.stateDir, executionNode, "cache", "*.git"))
+	require.NoError(t, err)
+	require.Len(t, caches, 1, "one cache for the one endpoint")
+	loose := func() string {
+		for _, line := range strings.Split(gitIn(t, caches[0], "", "count-objects", "-v"), "\n") {
+			if count, isCount := strings.CutPrefix(line, "count: "); isCount {
+				return count
+			}
+		}
+		return ""
+	}
+	require.NotEqual(t, "0", loose(), "the release left loose objects in the cache")
+	// The node compacts after a minute of idleness, at its next poll.
+	require.Eventually(t, func() bool { return loose() == "0" }, 150*time.Second, time.Second,
+		"the idle node never compacted its cache")
+
+	served := worker.stop(t)
+	assert.Equal(t, 1, strings.Count(served.Stdout, `"message":"the idle node's cache was compacted"`),
+		"once per idle stretch\nworker:\n%s", served.Stdout)
 }
