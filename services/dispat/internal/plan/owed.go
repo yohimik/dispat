@@ -398,17 +398,22 @@ type OwedPair struct {
 
 // OwedAtHead lists, in plan order, the pairs §19.3 refuses before anything is
 // published: the provider releases after Narrow, the consumer has it among
-// the sources it is owed and does not release, and the consumer's newest
-// release in the provider's repository is that repository's head, which is
-// where the provider's tag would land. Two releases on one commit have no
-// ancestry order, so the consumer would then read as served and stay on the
-// provider's old version with nothing left to detect it. head answers a
-// repository's head commit, "" naming the single history.
+// the sources it is owed and does not release, and a release of the provider
+// made at its repository's head would sit at or behind the consumer's newest
+// release in that repository, where ancestry reads the consumer as served.
+// Two releases on one commit have no ancestry order, so the consumer would
+// then stay on the provider's old version with nothing left to detect it.
+//
+// isHeadReached answers whether a repository's head is an ancestor-or-self of
+// a commit in it, "" naming the single history. It is ancestry rather than
+// equality because a consumer's boundary in a composed workspace is a pin or
+// a tuple, which need not be behind the head, and the check after
+// publication asks the same question of the tag it wrote.
 //
 // The test is conservative where a release commit moves the provider's tag
 // off the head: a run cannot know before it publishes whether that commit will
 // be empty, and an empty one leaves the tag on the head.
-func (p *Plan) OwedAtHead(head func(repository string) string) []OwedPair {
+func (p *Plan) OwedAtHead(isHeadReached func(repository, commit string) bool) []OwedPair {
 	position := make(map[string]int, len(p.Order))
 	for i, name := range p.Order {
 		position[name] = i
@@ -430,7 +435,7 @@ func (p *Plan) OwedAtHead(head func(repository string) string) []OwedPair {
 				continue
 			}
 			boundary := consumer.owedBoundaries[providerName]
-			if boundary != head(provider.Pkg.Repository) {
+			if !isHeadReached(provider.Pkg.Repository, boundary) {
 				continue
 			}
 			pairs = append(pairs, OwedPair{Provider: providerName, Consumer: consumerName, Commit: boundary})

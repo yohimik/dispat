@@ -27,10 +27,10 @@ import (
 // status reports that it would be. None of it enters the plan's diagnostics,
 // so the plan digest and the commitErrors policy read the same plan either way.
 func (a *App) reportOwedAtHead(ctx context.Context, pl *plan.Plan) error {
-	head, headErr := a.resolvePlanHeads(ctx, pl)
-	pairs := pl.OwedAtHead(head)
-	if err := headErr(); err != nil {
-		a.log.Error().Err(err).Msg("cannot read the head the plan releases from")
+	isHeadReached, readErr := a.resolveHeadReach(ctx, pl)
+	pairs := pl.OwedAtHead(isHeadReached)
+	if err := readErr(); err != nil {
+		a.log.Error().Err(err).Msg("cannot compare the head the plan releases from with a consumer's baseline")
 		return err
 	}
 	for _, pair := range pairs {
@@ -44,33 +44,76 @@ func (a *App) reportOwedAtHead(ctx context.Context, pl *plan.Plan) error {
 	return nil
 }
 
-// resolvePlanHeads answers each repository's head as the plan read it: the
-// snapshot a composed plan records, and in one history the checkout's HEAD,
-// read once and only when some pair needs it. The second function reports a
-// failed read.
-func (a *App) resolvePlanHeads(ctx context.Context, pl *plan.Plan) (func(string) string, func() error) {
-	var singleHead string
+// resolveHeadReach answers, per repository, whether the head the plan releases
+// from is an ancestor-or-self of a commit: where a provider's tag written now
+// would sit against a consumer's baseline. The head is the snapshot a composed
+// plan records, and in one history the checkout's HEAD, read once and only
+// when some pair needs it. The second function reports the first failed read,
+// after which every question is answered as reached, so a failure can only
+// add a refusal the caller then replaces with the error.
+func (a *App) resolveHeadReach(ctx context.Context, pl *plan.Plan) (func(repository, commit string) bool, func() error) {
 	var readErr error
-	isRead := false
-	head := func(repository string) string {
-		if a.workspace != nil {
-			if sha, ok := pl.RepositoryHeads[repository]; ok {
-				return sha
-			}
-			for name, sha := range pl.RepositoryHeads {
-				if globx.Fold(name) == globx.Fold(repository) {
-					return sha
-				}
-			}
-			return ""
+	heads := make(map[string]string)
+	gits := make(map[string]*gitx.LocalGitx)
+	isHeadReached := func(repository, commit string) bool {
+		if readErr != nil {
+			return true
 		}
+		key := globx.Fold(repository)
+		head, isRead := heads[key]
 		if !isRead {
-			isRead = true
-			singleHead, readErr = a.git.HeadSHA(ctx)
+			head, readErr = a.readPlanHead(ctx, pl, repository)
+			heads[key] = head
 		}
-		return singleHead
+		if readErr != nil || head == "" || commit == "" {
+			return readErr != nil
+		}
+		if head == commit {
+			return true
+		}
+		git, isOpen := gits[key]
+		if !isOpen {
+			git = a.openRepositoryGit(repository)
+			gits[key] = git
+		}
+		var isReached bool
+		isReached, readErr = git.IsAncestor(ctx, head, commit)
+		return isReached || readErr != nil
 	}
-	return head, func() error { return readErr }
+	return isHeadReached, func() error { return readErr }
+}
+
+// readPlanHead is the head a plan releases one repository from: the snapshot
+// a composed plan records, and the checkout's HEAD in one history.
+func (a *App) readPlanHead(ctx context.Context, pl *plan.Plan, repository string) (string, error) {
+	if a.workspace == nil {
+		head, err := a.git.HeadSHA(ctx)
+		if err != nil {
+			return "", fmt.Errorf("reading HEAD: %w", err)
+		}
+		return head, nil
+	}
+	if sha, ok := pl.RepositoryHeads[repository]; ok {
+		return sha, nil
+	}
+	for name, sha := range pl.RepositoryHeads {
+		if globx.Fold(name) == globx.Fold(repository) {
+			return sha, nil
+		}
+	}
+	return "", nil
+}
+
+// openRepositoryGit is a Git client for a repository of the workspace, the
+// run's own in one history or where the repository is not a participant.
+func (a *App) openRepositoryGit(repository string) *gitx.LocalGitx {
+	if a.workspace == nil {
+		return a.git
+	}
+	if repo := a.workspace.RepositoryByName(repository); repo != nil {
+		return &gitx.LocalGitx{Dir: repo.Root, Log: a.log}
+	}
+	return a.git
 }
 
 // publicationOutcome is what a run did with its plan: the plan, what became of
@@ -87,7 +130,9 @@ type publicationOutcome struct {
 // is the consumer's baseline or behind it. Ancestry now reads the consumer as
 // served, so no later plan can compute the debt, and the one remedy is an
 // explicit Release-As on the consumer at the version this run planned (§8.6).
-// Each such pair is a critical, so the run fails naming it.
+// Each such pair is a critical, so the run fails naming it, and so is a pair
+// the check cannot answer: a debt it could not rule out is as invisible to the
+// next plan as one it found.
 //
 // Commit mode moves a tag onto the release commit, past the consumer's
 // baseline, so this can only fire where the provider's tag stayed on the head
@@ -106,30 +151,77 @@ func (a *App) reportOwedAfterPublication(ctx context.Context, outcome publicatio
 				continue
 			}
 			git := a.selectRepositoryGit(provider.Pkg.Repository, outcome.fleet)
-			released, err := git.ResolveCommit(ctx, "refs/tags/"+provider.TagName())
+			pair := owedPairCheck{consumer: consumer, provider: provider, boundary: boundary}
+			released, isBehind, err := locateProviderRelease(ctx, git, provider.TagName(), boundary)
 			if err != nil {
-				continue // a tag that was never written is reported where it failed
-			}
-			isBehind, err := git.IsAncestor(ctx, released, boundary)
-			if err != nil {
-				a.log.Warn().Err(err).Str("package", consumerName).Str("provider", providerName).
-					Msg("cannot compare the provider's release commit with the consumer's baseline")
+				pair.recordUnanswered(a.log, crit, err)
 				continue
 			}
-			if !isBehind {
-				continue
+			if isBehind {
+				pair.recordStranded(a.log, crit, released)
 			}
-			err = fmt.Errorf("%s was released at %s, which %s's baseline %s reaches, and %s did not release after it",
-				provider.TagName(), released, consumerName, boundary, consumerName)
-			crit.record(a.log, plan.CodeOwedAtBaseline, err,
-				"a consumer did not publish after its provider was released at its baseline commit",
-				func(e *zerolog.Event) *zerolog.Event {
-					return e.Str("package", consumerName).Str("provider", providerName).Str("commit", released).
-						Str("remedy", fmt.Sprintf("commit release(%s) with the footer Release-As: %s",
-							consumerName, consumer.Next.String()))
-				})
 		}
 	}
+}
+
+// owedPairCheck is one consumer and one provider it is owed, with the
+// consumer's baseline in the provider's repository.
+type owedPairCheck struct {
+	consumer, provider *plan.Release
+	boundary           string
+}
+
+// recordStranded records the pair E201 reports after publication: the
+// provider's release sits at or behind the consumer's baseline.
+func (c owedPairCheck) recordStranded(log zerolog.Logger, crit *criticals, released string) {
+	consumerName, providerName := c.consumer.Pkg.Name, c.provider.Pkg.Name
+	err := fmt.Errorf("%s was released at %s, which %s's baseline %s reaches, and %s did not release after it",
+		c.provider.TagName(), released, consumerName, c.boundary, consumerName)
+	crit.record(log, plan.CodeOwedAtBaseline, err,
+		"a consumer did not publish after its provider was released at its baseline commit",
+		func(e *zerolog.Event) *zerolog.Event {
+			return e.Str("package", consumerName).Str("provider", providerName).Str("commit", released).
+				Str("remedy", fmt.Sprintf("commit release(%s) with the footer Release-As: %s",
+					consumerName, c.consumer.Next.String()))
+		})
+}
+
+// recordUnanswered records a pair the check could not answer.
+func (c owedPairCheck) recordUnanswered(log zerolog.Logger, crit *criticals, err error) {
+	crit.record(log, plan.CodeOwedAtBaseline, err,
+		"cannot tell whether a consumer was left behind a provider released at its baseline commit",
+		func(e *zerolog.Event) *zerolog.Event {
+			return e.Str("package", c.consumer.Pkg.Name).Str("provider", c.provider.Pkg.Name).
+				Str("commit", c.boundary)
+		})
+}
+
+// releaseAncestry is what locateProviderRelease asks Git.
+type releaseAncestry interface {
+	ResolveCommit(ctx context.Context, rev string) (string, error)
+	TagExists(ctx context.Context, name string) (bool, error)
+	IsAncestor(ctx context.Context, a, b string) (bool, error)
+}
+
+// locateProviderRelease reads the commit a provider's release tag sits on and
+// whether a consumer's baseline reaches it. A tag known to be absent is no
+// release, and answers with no error: it was never written, and the failure
+// that stopped it is reported where it happened. Every other failure is
+// returned, a cancelled context included, because the question stays open.
+func locateProviderRelease(ctx context.Context, git releaseAncestry, tag, boundary string) (string, bool, error) {
+	released, err := git.ResolveCommit(ctx, "refs/tags/"+tag)
+	if err != nil {
+		isWritten, existsErr := git.TagExists(ctx, tag)
+		if existsErr == nil && !isWritten && ctx.Err() == nil {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("reading the commit of %s: %w", tag, err)
+	}
+	isBehind, err := git.IsAncestor(ctx, released, boundary)
+	if err != nil {
+		return "", false, fmt.Errorf("comparing %s at %s with the consumer's baseline %s: %w", tag, released, boundary, err)
+	}
+	return released, isBehind, nil
 }
 
 // isPublished reports whether a package's result is a publication.

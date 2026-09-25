@@ -45,10 +45,10 @@ func TestTrainConsumerIsStillOwedTheProviderItOvertook(t *testing.T) {
 		app.Sources[0])
 	assert.False(t, app.CatchUp, "core releases in this plan, so app's release is an ordinary propagation")
 	assert.Equal(t, "c2", app.OwedBoundary("core"))
-	assert.Empty(t, p.OwedAtHead(headOf(git)), "with both in the run, app is released after core")
+	assert.Empty(t, p.OwedAtHead(isHeadReachedIn(git)), "with both in the run, app is released after core")
 
 	p.Narrow([]string{"core"})
-	assert.Equal(t, []OwedPair{{Provider: "core", Consumer: "app", Commit: "c2"}}, p.OwedAtHead(headOf(git)),
+	assert.Equal(t, []OwedPair{{Provider: "core", Consumer: "app", Commit: "c2"}}, p.OwedAtHead(isHeadReachedIn(git)),
 		"core alone would land on app's release commit and read as delivered")
 }
 
