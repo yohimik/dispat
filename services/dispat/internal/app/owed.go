@@ -116,7 +116,9 @@ func (a *App) resolveHeadReach(ctx context.Context, pl *plan.Plan) (func(reposit
 }
 
 // readPlanHead is the head a plan releases one repository from: the snapshot
-// a composed plan records, and the checkout's HEAD in one history.
+// a composed plan records, and the checkout's HEAD in one history. The
+// repository is a package's own, which is the exact name the snapshot is
+// recorded under; one the snapshot does not carry has no head.
 func (a *App) readPlanHead(ctx context.Context, pl *plan.Plan, repository string) (string, error) {
 	if a.workspace == nil {
 		head, err := a.git.HeadSHA(ctx)
@@ -125,15 +127,7 @@ func (a *App) readPlanHead(ctx context.Context, pl *plan.Plan, repository string
 		}
 		return head, nil
 	}
-	if sha, ok := pl.RepositoryHeads[repository]; ok {
-		return sha, nil
-	}
-	for name, sha := range pl.RepositoryHeads {
-		if globx.Fold(name) == globx.Fold(repository) {
-			return sha, nil
-		}
-	}
-	return "", nil
+	return pl.RepositoryHeads[repository], nil
 }
 
 // openRepositoryGit is a Git client for a repository of the workspace, the
