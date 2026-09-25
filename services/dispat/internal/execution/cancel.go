@@ -472,7 +472,12 @@ func (c *Coordinator) revokeAttempt(ctx context.Context, node, task string, atte
 func (c *Coordinator) settleAbandonedAttempt(ctx context.Context, lease *Lease, task string,
 	attempt int, offer taskOffer, tipOID string) error {
 	lease.Leak(LeakTaskDeadline)
-	if !c.revokeAttempt(context.WithoutCancel(ctx), lease.Node, task, attempt, offer.branch, tipOID) {
+	// Detached, because the fence matters most when the run is ending, and
+	// bounded by the cancel wait, because a mailbox that stopped answering
+	// must not hold the run's own cleanup and its locks for ever.
+	fencing, done := context.WithTimeout(context.WithoutCancel(ctx), c.Timeouts.Cancel)
+	defer done()
+	if !c.revokeAttempt(fencing, lease.Node, task, attempt, offer.branch, tipOID) {
 		return c.refuseTask(task, lease.Node, attempt, fmt.Errorf(
 			"the node did not report within %s: the coordination ref could not be revoked and is retained for investigation, and the node is not used again by this run",
 			c.Timeouts.Task))

@@ -20,6 +20,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -289,4 +291,70 @@ case "$*" in
  ;;
 esac
 exec "$DISPAT_IT_HELD_GIT" "$@"
+`
+
+// TestExecutionHungMailboxStillGivesTheLockBack: the mailbox stops answering
+// after preflight, while a node is building, and the release is interrupted.
+// The withdrawal is bounded by the cancel wait and the run's close by its own
+// bound, so the release ends and gives its lock back instead of waiting on a
+// remote that will never answer.
+func TestExecutionHungMailboxStillGivesTheLockBack(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hung-mailbox fixture uses a POSIX shell")
+	}
+	rig := newExecutionPushOutcomeRig(t, func(cfg *models.File) {
+		cfg.Scripts["build"] = models.Script{executionRecordingScript, "sleep 60"}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 300, Cancel: 5}
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	shim := t.TempDir()
+	realGit, err := exec.LookPath("git")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(executionHungMailboxScript), 0o755))
+	t.Cleanup(func() { _ = os.WriteFile(filepath.Join(shim, "release"), nil, 0o600) })
+	started := rig.repo.StartReleaseEnv(rig.env(
+		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DISPAT_IT_HANG_GIT="+realGit, "DISPAT_IT_HANG_DIR="+shim,
+		"DISPAT_IT_HANG_MAILBOX="+rig.mailbox), "release")
+
+	executionAwaitProbe(t, rig, executionNode)
+	require.NoError(t, os.WriteFile(filepath.Join(shim, "hang"), nil, 0o600))
+	interrupted := time.Now()
+	started.Signal(syscall.SIGINT)
+	res := started.Wait()
+	elapsed := time.Since(interrupted)
+	stopAll(t, []*executionWorker{worker})
+
+	require.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero\nstdout:\n%s", res.Stdout)
+	assert.Less(t, elapsed, 150*time.Second, "the withdrawal and the close ended within their bounds")
+	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock went back\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresent(executionEvents(res), executionRetainedCode),
+		"the branch the hung mailbox kept is reported\nstdout:\n%s", res.Stdout)
+	assert.Empty(t, executionTransportRefs(t, rig.repo.Root), "no fetched transport ref is left behind")
+}
+
+// executionTransportRefs are the fetched coordination refs a repository holds.
+func executionTransportRefs(t *testing.T, dir string) []string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "for-each-ref", "--format=%(refname)",
+		"refs/dispat-transport/").CombinedOutput()
+	require.NoError(t, err, "for-each-ref: %s", out)
+	return strings.Fields(string(out))
+}
+
+// Every git invocation naming the mailbox hangs once the test says so, until
+// it is released or killed. Only the orchestrator receives this shim.
+const executionHungMailboxScript = `#!/bin/sh
+case "$*" in
+*"$DISPAT_IT_HANG_MAILBOX"*)
+ if [ -f "$DISPAT_IT_HANG_DIR/hang" ]; then
+  ticks=0
+  while [ ! -f "$DISPAT_IT_HANG_DIR/release" ] && [ "$ticks" -lt 3000 ]; do
+   ticks=$((ticks + 1))
+   sleep 0.1
+  done
+ fi
+ ;;
+esac
+exec "$DISPAT_IT_HANG_GIT" "$@"
 `

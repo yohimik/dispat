@@ -556,9 +556,49 @@ func (w *Worker) startClaimedTask(ctx context.Context, tip ChainTip, assignment 
 		defer func() { <-w.slots }()
 		defer forget()
 		defer stop()
+		defer w.recoverTask(ctx, task)
 		w.answerTask(ctx, bounded, task)
 	}()
 	return true, nil
+}
+
+// recoverTask contains a panic of one task to that task.
+//
+// The node carries on serving its other tasks. What the run hears depends on
+// how far the task got: a task whose command never started reports a failure,
+// or acknowledges a withdrawal it was sent, because nothing irreversible
+// happened; a task whose command started reports nothing, because only the
+// orchestrator's own unknown-outcome path may decide what a started
+// publication came to.
+func (w *Worker) recoverTask(ctx context.Context, task *claimedTask) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	assignment := task.assignment
+	log := w.Log.With().Str("run", assignment.Run).Str("task", assignment.Task).
+		Int("attempt", assignment.Attempt).Str("branch", task.tip.Branch).Logger()
+	log.Error().Str("panic", fmt.Sprint(recovered)).Str("code", CodeIntegrity).
+		Str("category", CategoryIntegrity).Msg("the task failed unexpectedly")
+	cancel, _, isCommandStarted := task.readProgress()
+	if isCommandStarted {
+		return
+	}
+	if cancel != "" {
+		w.acknowledgeCancellation(ctx, task, log)
+		return
+	}
+	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+	defer done()
+	_, err := w.advance(reportCtx, task.tip, task.readExpectedTip(), MessageResult, Result{
+		Header: w.formatReplyHeader(assignment.Header), Assignment: task.tip.OID,
+		Status: StatusFailed, FailedPart: resolveCancelledPhase(task.readPhase()),
+		Platform: Platform{OS: w.Report.OS, Arch: w.Report.Arch, Dispat: w.Report.Dispat},
+	}, nil)
+	if err != nil {
+		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
+			Msg("the failed task could not be reported")
+	}
 }
 
 // settleUnansweredClaim decides what a claim push that did not land means.

@@ -195,6 +195,16 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 		waiting.Add(1)
 		go func() {
 			defer waiting.Done()
+			// A panic reading what a node wrote is that node failing
+			// preflight, and never the process: the mailbox is written to by
+			// other machines.
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					c.Log.Error().Str("worker", link.Name).Str("panic", fmt.Sprint(recovered)).
+						Msg("probing the node panicked")
+					failures[index] = fmt.Errorf("probing the node failed unexpectedly: %v", recovered)
+				}
+			}()
 			probeCtx, done := context.WithTimeout(ctx, c.Timeouts.Preflight)
 			defer done()
 			report, err := c.probe(probeCtx, link)
@@ -560,6 +570,13 @@ func (c *Coordinator) isFirstParentSuccessor(ctx context.Context, node, earlier,
 // deliberately. A different ref left behind by failed cleanup is reported as
 // a warning with the retained code; the run's own error stays its error.
 func (c *Coordinator) Close(ctx context.Context) error {
+	// Bounded here whatever the caller handed in: close runs detached from the
+	// run's cancellation, and a mailbox that hangs must not keep a finished
+	// run, and the locks it gives back afterwards, waiting for ever. Every
+	// batch still gets its attempt within the bound, and the fetched refs are
+	// removed on a bound of their own.
+	ctx, done := context.WithTimeout(ctx, c.resolveCloseBound())
+	defer done()
 	if c.stopWatching != nil {
 		// The pollers go first: a poll that ran while the refs were being
 		// deleted would be fetching objects nobody owns any more.
@@ -612,6 +629,18 @@ func (c *Coordinator) Close(ctx context.Context) error {
 	return NewIdentifiedDiagnostic(Identity{Run: c.Run}, CodeTransportRetained, CategoryTransportCleanup,
 		"%d coordination branches of this run could not be closed (%v): they carry no release record; inspect each current tip and ownership before deletion",
 		len(retained)+len(failures), append(retained, formatFailures(failures)...))
+}
+
+// minimumCloseBound is the least a run's close is given, for a run whose cancel
+// wait is shorter than one round trip to a slow remote. A variable so that a
+// test can wait out a hanging mailbox in less than that.
+var minimumCloseBound = 30 * time.Second
+
+// resolveCloseBound is how long a run's close may take: the run's own cancel
+// wait, which is the bound it already holds every other closing write to, and
+// never less than one slow round trip.
+func (c *Coordinator) resolveCloseBound() time.Duration {
+	return max(c.Timeouts.Cancel, minimumCloseBound)
 }
 
 // formatFailures is what a batch that could not be pushed at all contributes

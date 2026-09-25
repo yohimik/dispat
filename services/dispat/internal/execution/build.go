@@ -991,13 +991,25 @@ func (w *watcher) tick(ctx context.Context) bool {
 
 // inspect reads one moved branch and reports whether it answered an attempt.
 //
+// A panic while reading it is contained to the branch: what a branch carries
+// is written by other machines, so the branch is quarantined, said once, and
+// left until it moves, and every other attempt on the endpoint goes on. A
+// recovery around the whole poll would fire again on the same branch every
+// tick.
+//
 // The tip is tried first because that is where an attempt's answer is in every
 // ordinary run. When the tip carries nothing this attempt can act on, the
 // chain below it is read: a mailbox is writable by whoever can push to it, so
 // an authentic result can be sitting under a commit somebody else put on top,
 // and waiting the deadline out over that would turn one push into a lost
 // attempt and a node taken out of the pool.
-func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) bool {
+func (w *watcher) inspect(ctx context.Context, head gitx.RemoteHead) (isAnswered bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			w.mailbox.quarantineBranch(head, fmt.Errorf("reading the branch failed unexpectedly: %v", recovered))
+			isAnswered = false
+		}
+	}()
 	waiting := w.find(head.Name)
 	if waiting == nil {
 		return false

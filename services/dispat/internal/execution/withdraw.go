@@ -140,6 +140,13 @@ func (t *claimedTask) readProgress() (cancel, phase string, isCommandStarted boo
 	return t.withdrawn, t.phase, t.isCommandStarted
 }
 
+// readPhase answers the part of the frame the work has reached.
+func (t *claimedTask) readPhase() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.phase
+}
+
 // readExpectedTip answers the object the attempt's next message follows.
 func (t *claimedTask) readExpectedTip() string {
 	if t == nil {

@@ -192,11 +192,16 @@ func resolveAnchoredPath(sources []Source, repository, dir string) string {
 // outcome with a code of its own.
 func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task string,
 	attempt int, repository string, outcome release.StageOutcome, offer taskOffer,
-	authorize func(context.Context) error) (release.StageOutcome, error) {
+	authorize func(context.Context) error) (ended release.StageOutcome, err error) {
 	deadline := time.NewTimer(c.Timeouts.Task)
 	defer deadline.Stop()
 	state := publicationState{tip: offer.offered}
 	pub := publicationAttempt{lease: lease, task: task, attempt: attempt, repository: repository, offer: offer}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			ended, err = c.recoverPublication(ctx, pub, outcome, state, recovered)
+		}
+	}()
 	offeredAt, claimedAt := time.Now(), time.Time{}
 	for {
 		select {
@@ -250,6 +255,29 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 			return c.resolveUnansweredPublication(ctx, pub, outcome, state.tip)
 		}
 	}
+}
+
+// recoverPublication settles a publication whose own coordination panicked.
+//
+// It must never read as a failure once the run has authorized the effect: an
+// authorization may have been read and acted on, so a panic after it is an
+// unanswered publication and is asked about exactly as one. Before it, the
+// attempt is abandoned as one that stopped answering, with its slot held.
+func (c *Coordinator) recoverPublication(ctx context.Context, pub publicationAttempt,
+	outcome release.StageOutcome, state publicationState, recovered any) (release.StageOutcome, error) {
+	c.Log.Error().Str("run", c.Run).Str("task", pub.task).Str("worker", pub.lease.Node).
+		Int("attempt", pub.attempt).Str("panic", fmt.Sprint(recovered)).
+		Msg("the publication's coordination failed unexpectedly")
+	isAuthorized := state.isAuthorized
+	if waiting := pub.offer.observer.find(pub.offer.branch); waiting != nil && waiting.isAuthorized {
+		isAuthorized = true
+	}
+	if isAuthorized {
+		return c.resolveUnansweredPublication(context.WithoutCancel(ctx), pub, outcome, state.tip)
+	}
+	pub.lease.Leak(LeakTransport)
+	return outcome, c.refuseTask(pub.task, pub.lease.Node, pub.attempt,
+		fmt.Errorf("the publication's coordination failed unexpectedly before it was authorized: %v", recovered))
 }
 
 // publicationAttempt is one delegated publication as the steps that settle it

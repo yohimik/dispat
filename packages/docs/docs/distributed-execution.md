@@ -447,10 +447,18 @@ may end with a lock retained and no release record at all, so the registry is th
 ordinary run plans what is still owed and publishes it, exactly as it does after an interrupted local publish. Read
 [recovering from a failed run](./reference/releasing/recovery.md) for the general shape of that.
 
+**Cleanup is bounded.** Revoking an attempt that passed its deadline, and withdrawing one when the run ends, each wait
+at most `timeouts.cancel`. Closing the run's coordination branches waits at most `timeouts.cancel`, never less than 30
+seconds and never more than two minutes, and happens before the run gives its release locks back. A mailbox that stops
+answering therefore costs the run its branches, reported with `W244`, and never its locks: the release still ends and
+gives back every lock it would have given back. The refs the run fetched into its own repository are removed however
+the close went. A failure inside dispat's own handling of a coordination branch is contained to that branch, to that
+node's preflight or to that task, and a publication the run had already authorized is then settled as one that never
+answered, never as a failure.
+
 **Leftover coordination branches need classification before deletion.** A completed run deletes its own refs before
-it gives its release locks back, within two minutes, and reports `W244` when one survives, with exit code `0`, because
-a coordination branch carries no release record. A mailbox that does not answer within that bound costs the refs, never
-the locks. An
+it gives its release locks back and reports `W244` when one survives, with exit code `0`, because a coordination
+branch carries no release record. An
 `E228` run retains the uncertain publication's authorization as evidence; follow the recovery order above before
 deleting it. For other branches of a crashed run, confirm that no process still uses them and that their current tips
 belong to that run's authenticated chain. Investigate a ref whose tip changed unexpectedly or cannot be authenticated

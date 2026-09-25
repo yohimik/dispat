@@ -501,8 +501,8 @@ func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHea
 	return fetched, nil
 }
 
-// quarantineBranch remembers a branch whose objects could not be fetched, and
-// says so once.
+// quarantineBranch remembers a branch whose objects could not be fetched or
+// read, and says so once.
 //
 // The tip is remembered as observed so that the poll stops offering the same
 // unreadable object every tick; the branch itself is not forgotten, so a
@@ -520,7 +520,7 @@ func (m *GitMailbox) quarantineBranch(head gitx.RemoteHead, err error) {
 	m.quarantined[head.Name] = true
 	m.log.Warn().Err(err).Str("branch", head.Name).Str("commit", head.OID).
 		Str("code", CodeTransportRetained).Str("category", CategoryTransportCleanup).
-		Msg("a coordination branch could not be fetched and is left alone for this run")
+		Msg("a coordination branch could not be read and is left alone for this run")
 }
 
 // Reconsider forgets what one branch was last seen at, so that the next poll
