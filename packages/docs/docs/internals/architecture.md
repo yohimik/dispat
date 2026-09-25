@@ -494,7 +494,8 @@ changes which releases get cancelled or contained.
 remote and GitHub verification, the `beforeAll` hooks, and the source-history fleet revalidation after those hooks.
 Those refuse while nothing has happened yet. From the first build script onward, the task graph continues: a package
 can fail, its consumers can be skipped behind it, and independent packages still run. The finalize phase records what
-published. Only an interrupt stops the graph early, and even then dispat records what already published.
+published. Only an interrupt or a task's internal error stops the graph early, and even then dispat records what
+already published.
 
 Source-history mode also has a package-local refusal point after work begins. Immediately before a package's publish
 command, dispat revalidates the repositories whose history supplies that package's plan. Relevant drift is `E330`: the
@@ -533,6 +534,16 @@ plan may expose a finite follow-up; dispat must surface it for review before pub
 
 dispat records a skipped package as *blocked* with the responsible dependency. It is never silently absent from the
 summary. A package that was in the plan and produced nothing has to be accounted for.
+
+A task that panics does not take the process with it. The executor contains the panic where the task starts and
+turns it into that task's outcome: a package whose publish frame had not returned success fails at the stage the task
+was running, with `internal error` and the panic's value as its reason (the stack is logged at debug level). A package
+whose publish frame had returned success stays published, the panic becomes a critical of its record, and its
+consumers are blocked as they are behind any incomplete record. The panic then stops the graph the way an interrupt
+does: tasks in flight end cancelled and nothing new starts. The run itself is not interrupted, so `postAll`, the
+finalize phase and the lock cleanup still run, and the run ends failed with exit `1`. No `onFail` or `onSkip` script
+runs for a panicked package, and its folder is reverted only under the ordinary `revertOnFail` rule, on a bounded
+context of its own.
 
 For spaces with `revertOnFail: true`, a failing package has its folder rolled back via the `Reverter` interface. dispat
 runs `git checkout -- <dir>` and `git clean -fd <dir>` using `gitx.CLI`. This restores tracked files from HEAD and

@@ -171,8 +171,16 @@ func (tc *taskCtx) reconcileManifests(ctx context.Context, av *model.AutoVersion
 // modified a manifest, which is what its syncLock task keys off.
 func (tc *taskCtx) markManifestsChanged() {
 	tc.mu.Lock()
+	defer tc.mu.Unlock()
 	tc.avChanged[tc.t.pkg] = true
-	tc.mu.Unlock()
+}
+
+// isManifestChanged reports, under mu, whether a package's version stage
+// modified a manifest.
+func (r *run) isManifestChanged(pkg string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.avChanged[pkg]
 }
 
 // manifestEdits derives one manifest's range rewrites under the policy,
@@ -259,6 +267,15 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 	return edits
 }
 
+// isProviderDead reports, under mu, whether a provider this run releases has
+// failed, been skipped or had its records blocked.
+func (tc *taskCtx) isProviderDead(name string) bool {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	res, ok := tc.results[name]
+	return ok && (res.Status == StatusFailed || res.Status == StatusSkipped || res.RecordBlocked)
+}
+
 // providerVersion is the version the provider carries at the end of the run,
 // as the manifest should declare it: the planned version when the provider is
 // releasing and has not failed, its baseline otherwise. prerelease reports
@@ -272,11 +289,7 @@ func (tc *taskCtx) manifestEdits(av *model.AutoVersion, m scanner.Manifest) []wr
 // guarantee exists — which is exactly what W221 flags.
 func (tc *taskCtx) providerVersion(name string) (version string, prerelease, releasing bool) {
 	pr := tc.plan.Releases[name]
-	tc.mu.Lock()
-	res, ok := tc.results[name]
-	dead := ok && (res.Status == StatusFailed || res.Status == StatusSkipped || res.RecordBlocked)
-	tc.mu.Unlock()
-	if pr.IsReleasing() && !dead {
+	if pr.IsReleasing() && !tc.isProviderDead(name) {
 		return pr.Next.String(), pr.IsPrerelease(), true
 	}
 	if pr.HasBaseline {

@@ -295,12 +295,17 @@ func (w *workspaceRecorder) settleNode(ctx context.Context, hooks recordHooks, r
 		// the repository is taken and after it is given back, so no user
 		// script ever runs while this repository is held.
 		hooks.run(record.hooks, "beforeCommit", record.repo.Config.Run.BeforeCommit)
-		unlock, lockErr := gitx.AcquireMutations(ctx, record.git)
-		if lockErr != nil {
-			return lockErr
-		}
-		settled, err := w.commitLinks(ctx, record, rel, pins, paths)
-		unlock()
+		settled, err := func() (string, error) {
+			// Given back through defer, so a panic while the links are
+			// committed cannot leave the repository held for the rest of the
+			// process, the lock cleanup included.
+			unlock, lockErr := gitx.AcquireMutations(ctx, record.git)
+			if lockErr != nil {
+				return "", lockErr
+			}
+			defer unlock()
+			return w.commitLinks(ctx, record, rel, pins, paths)
+		}()
 		if err != nil {
 			return fmt.Errorf("repository %s: recording fleet links: %w", record.repo.Name, err)
 		}

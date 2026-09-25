@@ -445,7 +445,13 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		}
 	}
 
-	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins,
+	// The tasks run under a context of their own, so that a task that
+	// panicked can stop the rest of the graph without cancelling the run that
+	// owns it: the run still has its closing phase, its records and its locks
+	// to see to (see containPanic).
+	tasks, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins, stop: stop,
 		reachedProviders: reachedProviders,
 		results:          results, started: make(map[string]time.Time), scan: e.Scanner,
 		avChanged:           make(map[string]bool),
@@ -475,7 +481,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		taskPublish:  e.PublishConcurrency,
 		taskSyncLock: syncLockBudget(p, changed),
 	}
-	err := graph.Drain(ctx, sched,
+	err := graph.Drain(tasks, sched,
 		func(t task) taskKind {
 			switch t.kind {
 			case taskPublish, taskSyncLock:
@@ -499,34 +505,46 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 				return pkg.BuildWeight
 			}
 		},
-		func(t task) { r.execute(ctx, t) })
+		func(t task) { r.execute(tasks, t) })
 	if err != nil {
-		// Interrupted (or, impossibly after E200, cyclic): tasks that never
-		// launched left their packages pending. Cancelled, not failed — nothing
-		// about them went wrong, and the next run picks them up unchanged.
-		// The names are collected under the lock and announced after it: the
-		// observer is called outside the mutex everywhere.
-		var cancelled []string
-		r.mu.Lock()
-		for name, res := range results {
-			if res.Status == StatusPending {
-				res.Status = StatusCancelled
-				cancelled = append(cancelled, name)
-			}
-		}
-		r.mu.Unlock()
-		for _, name := range slices.Sorted(slices.Values(cancelled)) {
+		// Interrupted, stopped by a task's internal error, or (impossibly
+		// after E200) cyclic: tasks that never launched left their packages
+		// pending. Cancelled, not failed — nothing about them went wrong, and
+		// the next run picks them up unchanged. The names are collected under
+		// the lock and announced after it: the observer is called outside the
+		// mutex everywhere.
+		for _, name := range r.cancelPending() {
 			ev := packageEvent(name, p.Releases[name], EventPackageCancelled)
 			ev.Status = StatusCancelled.String()
 			e.notify(ev)
 		}
-		if ctx.Err() != nil {
+		switch {
+		case errors.Is(context.Cause(tasks), errTaskPanicked) && ctx.Err() == nil:
+			e.Log.Error().Msg("run stopped after an internal error: remaining packages cancelled; " +
+				"completed releases keep their records")
+		case ctx.Err() != nil:
 			e.Log.Warn().Msg("run interrupted: remaining packages cancelled; completed releases keep their records")
-		} else {
+		default:
 			e.Log.Error().Err(err).Msg("task graph stalled")
 		}
 	}
 	return results
+}
+
+// cancelPending marks every package still pending as cancelled and names
+// them, in name order, once the graph has stopped early.
+func (r *run) cancelPending() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var cancelled []string
+	for name, res := range r.results {
+		if res.Status == StatusPending {
+			res.Status = StatusCancelled
+			cancelled = append(cancelled, name)
+		}
+	}
+	slices.Sort(cancelled)
+	return cancelled
 }
 
 // run is the shared state of one Executor.Run invocation. Every task
@@ -540,6 +558,10 @@ type run struct {
 	plan   *plan.Plan
 	wsVars []string
 	logins map[spaceLoginKey]*spaceLogin
+	// stop cancels the tasks' own context with a cause, which is how a task
+	// that panicked ends every task in flight and lets Drain start nothing
+	// new, while the run's own context stays live for its closing phase.
+	stop context.CancelCauseFunc
 	// reachedProviders lists, per changed consumer, the changed providers it
 	// reaches only through packages this run does not release (§19.2, §19.3).
 	// Built with the task graph and never written again, so the task
@@ -625,6 +647,11 @@ type taskCtx struct {
 	// written before the frame's outcome is reported and read by the events
 	// that report it.
 	worker string
+	// isPublished records that the publish frame returned success, set before
+	// the first recorder runs. From then on the package is published whatever
+	// happens, a panic included (see containPanic). Owned by the task's own
+	// goroutine.
+	isPublished bool
 }
 
 // recordPlacement remembers where one task's frame was executed: on the task,
@@ -694,26 +721,54 @@ func (tc *taskCtx) hook(ctx context.Context, name string, commands []string, fai
 // It reports whether the caller should proceed. Every path that answers false
 // has already recorded the outcome and told the observers about it.
 func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
-	t, rel := tc.t, tc.rel
+	verdict := r.settleAdmission(ctx, tc, res)
+	switch {
+	case verdict.isAdmitted:
+		return true
+	case verdict.isCancelled:
+		ev := packageEvent(tc.t.pkg, tc.rel, EventPackageCancelled)
+		ev.Status = StatusCancelled.String()
+		r.notify(ev)
+	case verdict.blocker != "":
+		r.reportBlocked(ctx, tc, verdict)
+	}
+	return false
+}
+
+// admission is what settleAdmission decided about one task: that it runs, that
+// it was cancelled before it started, that a provider blocked it (with the
+// provider, the sentence and whether an earlier stage already ran), or, with
+// every field zero, that an earlier stage already settled the package.
+type admission struct {
+	isAdmitted  bool
+	isCancelled bool
+	blocker     string
+	reason      string
+	isStarted   bool
+}
+
+// settleAdmission asks admit's questions under mu and records the answer
+// before it lets go, so no other task can read a package whose outcome is
+// decided and not yet written. The lock is released through defer: a panic in
+// here must not leave it held, or the task's own containment and every other
+// task would wait on it for good.
+func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) admission {
+	t := tc.t
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if res.Status != StatusPending { // failed or skipped at an earlier stage
-		r.mu.Unlock()
-		return false
+		return admission{}
 	}
 	if ctx.Err() != nil {
 		// Interrupted between scheduling and start: no scripts, no hooks.
 		res.Status = StatusCancelled
-		r.mu.Unlock()
-		ev := packageEvent(t.pkg, rel, EventPackageCancelled)
-		ev.Status = StatusCancelled.String()
-		r.notify(ev)
-		return false
+		return admission{isCancelled: true}
 	}
 	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results, r.reachedProviders[t.pkg]); skip {
 		reason := formatSkipReason(blocker,
 			r.plan.Releases[blocker].Pkg.Space.ProviderRelation,
 			r.results[blocker].RecordBlocked)
-		return r.blockOn(ctx, tc, res, blocker, reason)
+		return r.markBlocked(tc, res, blocker, reason)
 	}
 	// A consumer proceeding past a provider that died after its version stage
 	// publishes what that provider actually published, never the planned
@@ -722,7 +777,7 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 	if t.kind == taskPublish {
 		if dead := r.resolveDeadPickups(t.pkg); len(dead) > 0 {
 			if r.builtPackages[t.pkg] {
-				return r.blockOn(ctx, tc, res, dead[0], formatEmbeddedSkipReason(dead[0]))
+				return r.markBlocked(tc, res, dead[0], formatEmbeddedSkipReason(dead[0]))
 			}
 			tc.deadPickups = dead
 		}
@@ -738,43 +793,45 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 	// per-task on purpose: a provider can fail between this package's build
 	// and its publish, and each stage must see the truth of its own moment.
 	tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
-	r.mu.Unlock()
-
-	return true
+	return admission{isAdmitted: true}
 }
 
-// blockOn records, with mu held and released on the way out, a package the run
-// planned and will not attempt, and tells every observer of it. It always
-// answers false, because it is the answer admit gives for the one thing it is
-// asked.
+// markBlocked records, with mu held, a package the run planned and will not
+// attempt. It answers what reportBlocked needs to tell every observer of it
+// once the lock is released.
 //
 // One function for both reasons a publish is blocked: the ordinary §19.3
 // cascade and the build that already embedded a version nobody published. They
 // differ in the sentence they carry and in nothing else, and a second copy of
 // the event, the hook and the revert is how the two would drift apart.
-func (r *run) blockOn(ctx context.Context, tc *taskCtx, res *Result, blocker, reason string) bool {
-	t, rel, log := tc.t, tc.rel, tc.log
+func (r *run) markBlocked(tc *taskCtx, res *Result, blocker, reason string) admission {
 	res.Status = StatusSkipped
 	res.Blocked, res.BlockedBy = true, blocker
 	res.RecordBlocked = r.results[blocker].RecordBlocked
-	_, ran := r.started[t.pkg] // earlier stages already modified the folder?
-	tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
-	r.mu.Unlock()
+	_, isStarted := r.started[tc.t.pkg] // earlier stages already modified the folder?
+	tc.updates = liveProviderUpdates(tc.t.pkg, r.plan, r.results)
+	return admission{blocker: blocker, reason: reason, isStarted: isStarted}
+}
+
+// reportBlocked tells every observer of a package markBlocked recorded, outside
+// the lock: the W194 line, the event, the revert of an earlier stage's edits
+// and the warn-only onSkip hook.
+func (r *run) reportBlocked(ctx context.Context, tc *taskCtx, verdict admission) {
+	t, rel, log := tc.t, tc.rel, tc.log
 	// Planned, but not attempted because a dependency failed to publish.
 	// Non-suppressible (§16): a package that was in the plan and produced
 	// nothing must be accounted for.
-	log.Warn().Str("code", plan.CodeBlocked).Str("reason", reason).Msg("skipped")
+	log.Warn().Str("code", plan.CodeBlocked).Str("reason", verdict.reason).Msg("skipped")
 	ev := packageEvent(t.pkg, rel, EventPackageSkipped)
-	ev.Status, ev.Code, ev.BlockedBy = StatusSkipped.String(), plan.CodeBlocked, blocker
+	ev.Status, ev.Code, ev.BlockedBy = StatusSkipped.String(), plan.CodeBlocked, verdict.blocker
 	r.notify(ev)
-	if ran && rel.Pkg.Space.RevertOnFail {
+	if verdict.isStarted && rel.Pkg.Space.RevertOnFail {
 		r.revert(ctx, rel, log)
 	}
 	// onSkip observes a skip that has already settled, so it only warns;
 	// DISPAT_BLOCKED_BY names the provider responsible.
 	_ = tc.hook(ctx, "onSkip", rel.Pkg.Space.OnSkipScript, false,
-		"DISPAT_BLOCKED_BY="+blocker)
-	return false
+		"DISPAT_BLOCKED_BY="+verdict.blocker)
 }
 
 // resolveDeadPickups lists, with mu held, the providers this package's version
@@ -899,10 +956,7 @@ func (tc *taskCtx) stageFor() stage {
 		// A space that configured neither reconciling strategy is the
 		// exception: it never produces that signal, so gating on one would
 		// mean its scripts never ran at all.
-		r.mu.Lock()
-		filesChanged := r.avChanged[t.pkg]
-		r.mu.Unlock()
-		if filesChanged || !space.AutoVersion.IsReconciling() {
+		if r.isManifestChanged(t.pkg) || !space.AutoVersion.IsReconciling() {
 			frame = stage{commands: space.AutoVersion.SyncLock}
 		} else {
 			log.Debug().Msg("syncLock: nothing was reconciled, nothing to regenerate")
@@ -936,6 +990,10 @@ func (r *run) execute(ctx context.Context, t task) {
 		Str("version", rel.Next.String()).
 		Logger()
 	tc := &taskCtx{run: r, t: t, rel: rel, log: log}
+	// The first defer, so it runs last: after the publish guard and the
+	// snapshot guard have been given back by their own defers, which a
+	// panic unwinds through like any other return.
+	defer tc.containPanic(ctx, res)
 
 	if !r.admit(ctx, tc, res) {
 		return
@@ -948,17 +1006,7 @@ func (r *run) execute(ctx context.Context, t task) {
 		// from the cancellation, because a half-modified folder is exactly what
 		// revertOnFail promises to clean up.
 		interrupted := ctx.Err() != nil
-		r.mu.Lock()
-		if interrupted {
-			res.Status = StatusCancelled
-			res.Err = err
-		} else {
-			res.Status = StatusFailed
-			res.FailedStage = t.kind.String()
-			res.Err = fmt.Errorf("%s: %w", t.kind, err)
-		}
-		res.Duration = time.Since(r.started[t.pkg])
-		r.mu.Unlock()
+		tc.settleFailure(res, err, interrupted)
 		if interrupted {
 			ev := packageEvent(t.pkg, rel, EventPackageCancelled)
 			ev.Status, ev.Error = StatusCancelled.String(), err.Error()
@@ -1067,6 +1115,22 @@ func (r *run) execute(ctx context.Context, t task) {
 	tc.publishTail(ctx, res)
 }
 
+// settleFailure records, under mu, how a task that stopped with err ended:
+// cancelled when the run was interrupted, failed at its stage otherwise.
+func (tc *taskCtx) settleFailure(res *Result, err error, isInterrupted bool) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	if isInterrupted {
+		res.Status = StatusCancelled
+		res.Err = err
+	} else {
+		res.Status = StatusFailed
+		res.FailedStage = tc.t.kind.String()
+		res.Err = fmt.Errorf("%s: %w", tc.t.kind, err)
+	}
+	res.Duration = time.Since(tc.started[tc.t.pkg])
+}
+
 // loginGate runs the space's once-per-space login before its first publish;
 // every other publish of the space waits inside the gate. A login failure
 // fails every publish of the space — none of them could have succeeded
@@ -1079,6 +1143,10 @@ func (tc *taskCtx) loginGate(ctx context.Context) error {
 		return nil
 	}
 	sl.once.Do(func() {
+		// Set first and replaced by the outcome: a login that panicked has
+		// not logged anybody in, and a Once that already ran would otherwise
+		// hand every later publish of the space a nil error.
+		sl.err = errLoginIncomplete
 		lg := tc.Log.With().Str("space", space.Name).Str("stage", "login").Logger()
 		lg.Info().Msg("login started")
 		// The login exports like any other script; a malformed export fails
@@ -1160,6 +1228,16 @@ func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err er
 	return "", nil
 }
 
+// markPublished flips a package's status to published under mu, blocking
+// its consumers when required records are missing.
+func (tc *taskCtx) markPublished(res *Result) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	res.Status = StatusPublished
+	res.RecordBlocked = tc.BlockOnRecordFailure && len(res.Critical) > 0
+	res.Duration = time.Since(tc.started[tc.t.pkg])
+}
+
 // RecordTimeout bounds the durable record of one published package, which is
 // written on a context detached from the run's cancellation: the changelog,
 // the tag, a fleet's source commit, push and checkpoint. It is generous on
@@ -1177,6 +1255,10 @@ const RecordTimeout = 5 * time.Minute
 // keeps going.
 func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	rel, space := tc.rel, tc.rel.Pkg.Space
+	// Before the first recorder: from this line the package is published,
+	// and even a panic below is reported as a published package with an
+	// incomplete record rather than a failed one.
+	tc.isPublished = true
 	// The publish succeeded, so from here to the status flip this leg of the
 	// transaction is committing: it must durably record its completion (§17).
 	// Recording and tagging therefore run detached from cancellation — a
@@ -1223,11 +1305,7 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 			tc.log.Debug().Str("tag", rel.TagName()).Msg("release tag written")
 		}
 	}
-	tc.mu.Lock()
-	res.Status = StatusPublished
-	res.RecordBlocked = tc.BlockOnRecordFailure && len(res.Critical) > 0
-	res.Duration = time.Since(tc.started[tc.t.pkg])
-	tc.mu.Unlock()
+	tc.markPublished(res)
 	ev := packageEvent(tc.t.pkg, rel, EventPackagePublished)
 	ev.Status, ev.Tag = StatusPublished.String(), rel.TagName()
 	// The node the package's delegated work ran on, so a published version

@@ -927,23 +927,8 @@ func (w *workspaceRecorder) checkpointWithHooks(ctx context.Context, hooks recor
 	controlPin, err := w.commitCheckpoint(ctx, hooks, control, source, rel, tag)
 	if err == nil && controlPin != "" && control.repo.Commit.IsPushEnabled() {
 		hooks.run(control.hooks, "beforePush", control.repo.Config.Run.BeforePush)
-		var unlock func()
-		unlock, err = gitx.AcquireMutations(ctx, source.git, control.git)
-		if err == nil {
-			err = verifyPinnedSource(ctx, source, rel, tag)
-		}
-		if err == nil {
-			err = verifyRemoteSource(ctx, source, tag, pin)
-		}
-		if err == nil {
-			err = verifyRepositoryPin(ctx, control, controlPin)
-		}
-		if err == nil {
-			err = control.git.PushRelease(ctx, control.remote(), control.branch, nil, nil)
-		}
-		if unlock != nil {
-			unlock()
-		}
+		err = pushCheckpoint(ctx, checkpointPush{source: source, control: control, rel: rel, tag: tag,
+			controlPin: controlPin})
 		if err == nil {
 			hooks.run(control.hooks, "afterPush", control.repo.Config.Run.AfterPush)
 		}
@@ -956,6 +941,39 @@ func (w *workspaceRecorder) checkpointWithHooks(ctx context.Context, hooks recor
 		return fmt.Errorf("control checkpoint failed after source %s recorded %s; preserve the source record and explicitly repair its control gitlink before retrying: %w", source.repo.Name, record, err)
 	}
 	return nil
+}
+
+// checkpointPush is one control checkpoint on its way to the remote: the
+// source it records, the control repository it is committed in, the release,
+// its tag and the checkpoint commit.
+type checkpointPush struct {
+	source, control *repositoryRecord
+	rel             *plan.Release
+	tag             string
+	controlPin      string
+}
+
+// pushCheckpoint verifies, with both repositories held, that the source record
+// and the checkpoint are still the ones this run wrote and the source record
+// is on its remote, then pushes the checkpoint. The repositories are given
+// back through defer: a panic in here must not leave them held, or the lock
+// cleanup at the end of the run could never take them.
+func pushCheckpoint(ctx context.Context, push checkpointPush) error {
+	unlock, err := gitx.AcquireMutations(ctx, push.source.git, push.control.git)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := verifyPinnedSource(ctx, push.source, push.rel, push.tag); err != nil {
+		return err
+	}
+	if err := verifyRemoteSource(ctx, push.source, push.tag, push.rel.ExportedCommit()); err != nil {
+		return err
+	}
+	if err := verifyRepositoryPin(ctx, push.control, push.controlPin); err != nil {
+		return err
+	}
+	return push.control.git.PushRelease(ctx, push.control.remote(), push.control.branch, nil, nil)
 }
 
 func (w *workspaceRecorder) commitCheckpoint(ctx context.Context, hooks recordHooks, control, source *repositoryRecord, rel *plan.Release, tag string) (string, error) {
