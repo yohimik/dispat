@@ -37,11 +37,6 @@ integration suite itself.
    the channel rules; a window where a provider and its consumer each changed for their own reasons with no propagation
    syntax written, which both auto-versioning strategies, the version scripts and the changelog have to account for
    with no `DueTo` link to follow; a package joining a versioning group with no version, and one joining with a version
-   that outranks the group's; the boundary where `revertOnFail` stops; and a shared `commit.include` lock file that a
-   package which did not publish wrote into. Each one fails by producing a *plausible* release rather than an error,
-   which is what makes them worth a file of their own.
-   `TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted` owns the dirty-tree boundary: existing work is preserved
-   for a package whose effective `revertOnFail` is false and refused only where rollback could overwrite it.
    that outranks the group's; and the boundary where `revertOnFail` stops. Each one fails by producing a *plausible*
    release rather than an error, which is what makes them worth a file of their own. The dirty-tree boundary sits here
    too: existing work is preserved for a package whose effective `revertOnFail` is false and refused only where
@@ -119,9 +114,8 @@ integration suite itself.
    per-package hooks around the version, build and publish stages, the announce frame after a publish, the
    `flow.onFail` / `flow.onSkip` outcome scripts, the once-per-space login gate, and the run-level bracket around the
    whole thing. What these prove is *authority* rather than mere ordering: a hook before the point of no return may
-   fail its package, one after it may only warn, and the same split decides where `revertOnFail` applies, which
-   skipped folders commit mode restores on its own, how far a login failure reaches, and how script outputs
-   accumulate across stages and hooks.
+   fail its package, one after it may only warn, and the same split decides where `revertOnFail` applies, how far a
+   login failure reaches, and how script outputs accumulate across stages and hooks.
 57. **Distributed execution across worker nodes** (`execution_*_test.go`): the optional execution profile, where one
     orchestrator owns the locks, the plan and the finalization while worker nodes execute the build and publish tasks
     it authorizes. The first claim is the one everything else is measured against: with the `execution` key absent, or
@@ -206,11 +200,11 @@ integration suite itself.
     fold a space and a package go through, so a space-shaped setting written once at the top reaches every space and
     every standalone package. Each level below can still say otherwise, including saying `false` against a `true`,
     which is what makes the boolean options three-state rather than plain.
-13. **Per-package overrides, versioning groups and `.dispatexclude`** (`overrides_test.go`): the layered configuration
-    through the binary: a `packages` entry replacing one flow entry while the sibling keeps the space's, the in-folder
-    config file beating the entry, `.dispatexclude` exclusions, per-package changelog/GitHub record policies, the
-    concurrency weight, the config ascent, and `scripts` defined at each of the three levels. A declared `versionGroups`
-    group spanning spaces is goal 36.
+13. **Per-package overrides and `.dispatexclude`** (`overrides_test.go`): the layered configuration through the binary:
+    a `packages` entry replacing one flow entry while the sibling keeps the space's, the in-folder config file beating
+    the entry, `.dispatexclude` exclusions, per-package changelog/GitHub record policies, the concurrency weight, the
+    config ascent, and `scripts` defined at each of the three levels. A declared `versionGroups` group spanning spaces
+    is goal 36.
 14. **The top-level `packages` section** (`packages_test.go`): a `packages` entry with a `path` releasing as a full
     package outside every space, the standalone path config errors, provider lists declared in an entry or an in-folder
     config file ordering the graph like top-level edges, `src` narrowing change detection, and `dispat compute` editing
@@ -240,8 +234,8 @@ integration suite itself.
     the package, which stays `published`, and none of them abandons the work the run still owed: the packages after it
     carry on and their records are written. Each one does fail the *run*. A critical recording failure exits non-zero
     and the completion webhook reports `release.finished` as `failed` with the published count preserved (goal 42),
-    because a publication nobody recorded is the state the next run cannot recover from on its own. The alias tag is the exception that proves the split: W232 counts no critical and
-    the run exits green.
+    because a publication nobody recorded is the state the next run cannot recover from on its own. The alias tag is
+    the exception that proves the split: W232 counts no critical and the run exits green.
 46. **Draft GitHub releases** (`draft_test.go`): `github.draft` and the `--draft` flag that overrides it either way.
     What is pinned here is the half a draft makes hard: a draft carries no tag ref, so GitHub's by-tag lookup cannot
     see one, and the re-run skip every other release relies on has to come from the release listing instead. The fake
@@ -761,12 +755,12 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestEdgeRevertOnFailStopsAtThePublish` | If a package fails its build while another publishes, dispat rolls back the failed package directory and keeps build artifacts in the published one. Once published, changes cannot be rolled back by later failures. |
 | `TestEdgeRevertOnFailIsThreeStateAtThePackageLevel` | When the root sets `true`, a package setting `revertOnFail: false` preserves its files while its unspecified sibling rolls back, exercising tri-state boolean inheritance. |
 | `TestEdgeRevertOnFailNeverReachesAFailedCommit` | If a release commit fails after all packages publish, `revertOnFail` leaves the working tree modified. Restoring files would mismatch published artifacts, so dispat logs E223, writes tags, and skips directory rollback. |
-| `TestEdgeReleaseCommitLockOmitsASkippedConsumer` | A root `commit.include` lock file regenerated from every workspace manifest by each package's `syncLock` holds a consumer's planned version when its provider's failure skips it; the closing phase restores the file and runs the published package's `syncLock` again, so the release commit's lock lists only published versions and the published package is committed and tagged. |
-| `TestEdgeReleaseCommitLockOmitsAFailedWriter` | The same lock file after a package fails its build past its version stage: its tracked files return to HEAD before the regeneration, so the release commit's lock lists only published versions, and its untracked build output stays for inspection. |
-| `TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted` | An interrupt while the regeneration runs half-writes the lock file; dispat restores it to HEAD, reports `E223`, leaves it out of the release commit that still records and tags the published package, and the documented `dispat run <script> --since all` remedy regenerates it from what published. |
 | `TestEdgeDirtyGuardReadsARenameAsOneEntry` | Machine-readable status writes a rename as the destination followed by the source, and only the first carries a status prefix; reading the second as an entry of its own would name a file nobody has in a refusal telling somebody to go and commit it. |
 | `TestFinalRollbackGitFailureLeavesVisibleRepairState` | If Git refuses a failing build's `revertOnFail` restore, the run reports the cleanup failure, retains tracked and untracked residue for review, creates no release tag, and succeeds only after explicit repair. |
 | `TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted` | The dirty-tree guard preserves existing work for a package whose effective `revertOnFail` is false and refuses only where a rollback could overwrite it. |
+| `TestEdgeReleaseCommitLockOmitsASkippedConsumer` | A root `commit.include` lock file regenerated from every workspace manifest by each package's `syncLock` holds a consumer's planned version when its provider's failure skips it; the closing phase restores the file and runs the published package's `syncLock` again, so the release commit's lock lists only published versions and the published package is committed and tagged. |
+| `TestEdgeReleaseCommitLockOmitsAFailedWriter` | The same lock file after a package fails its build past its version stage: its tracked files return to HEAD before the regeneration, so the release commit's lock lists only published versions, and its untracked build output stays for inspection. |
+| `TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted` | An interrupt while the regeneration runs half-writes the lock file; dispat restores it to HEAD, reports `E223`, leaves it out of the release commit that still records and tags the published package, and the documented `dispat run <script> --since all` remedy regenerates it from what published. |
 
 ### Goal 6: concurrency (`concurrency_test.go`)
 
@@ -813,21 +807,21 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksLoginOfAStandalonePackageRunsInItsOwnFolder` | A standalone package acts as its own space, so its login runs inside its own package directory rather than an unowned parent folder. The hook resolves through the root `flow` because `flow.login` cannot be declared on package entries. |
 | `TestHooksOnFailAndOnSkipOutcomeScripts`              | When a run fails, `flow.onFail` runs for the failed package with `DISPAT_FAILED_STAGE` and `DISPAT_ERROR`, `flow.onSkip` runs for blocked consumers with `DISPAT_BLOCKED_BY`, and published packages trigger neither. An `onFail` sequence continues even if its initial command fails. |
 | `TestHooksRevertOnFailAppliesAfterVersionStageOnSkip` | When a consumer version script modifies its folder and the provider publish fails, dispat rolls back the skipped consumer directory. |
-| `TestHooksCommitModeRestoresASkippedConsumer` | In commit mode, without `revertOnFail`, a consumer skipped after its version stage ran has its folder restored, so the retry starts without a pre-existing-changes refusal and releases the provider and the consumer. |
-| `TestHooksCommitModeRestoresSkippedConsumersConcurrently` | Three consumers skipped by one provider failure are restored from their own tasks at once, serialized by the repository's mutation lock, with no `index.lock` collision and every folder clean. |
-| `TestHooksSkippedConsumerKeepsItsEditsWithoutReleaseCommits` | Without release commits a skipped consumer keeps its tracked edit and its untracked file, because nothing proved its folder clean before the run. |
-| `TestHooksSkippedNestedParentLeavesItsPublishedChildAlone` | A skipped package whose folder holds another package's folder is not restored by the commit-mode default, so the nested child that published keeps its changelog and it reaches the release commit. |
 | `TestHooksScriptOutputsCarryAcrossStagesAndHooks`     | Environment variables export across stages and hooks: a `beforeBuild` *hook* export passes to build and publish stages, build exports pass to publish with `DISPAT_OUTPUTS` preserving order, and `onFail` receives the hook export **and** exports from the failed build. |
 | `TestHooksRunLevelHooks`                              | Run-level hooks execute in order from the monorepo root against a real remote. The `postAll` hook inspects run outcomes and workspaces, while quiet runs skip commit and push hooks because those phases never execute. |
 | `TestHooksRunLevelHooksAreTheReleasesOwn` | Running `dispat commit --tag --push` creates commits, tags, and pushes without triggering run-level hooks, while `dispat release` executes all seven hooks once. Run hooks attach to the release lifecycle, whereas step commands are directly invoked by external flows. |
 | `TestHooksRunLevelHookFailureSemantics`               | A failure in a warn-only hook like `postAll` logs a warning and allows the sequence to finish, whereas a failure in a gating hook like `beforeAll` halts the run before release work starts. |
 | `TestHooksAllStageHooksFireInOrder`                   | All nine per-package hooks and the announce stage run in documented order across a provider and consumer pair. The consumer also runs the version stage and its two hooks within that frame. |
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
-| `TestHooksSignFrameFiresFirst`                        | A space with a sign stage runs `beforeSign`, `sign` and `postSign` first in both a provider's and a consumer's frame, right after `beforeAll` and before the version stage and the build; a version stage configured under its propagate keys still reports `beforeVersion`, `version` and `postVersion`. |
 | `TestHooksRefuseAMalformedExport` | An export line dispat cannot read is an error of its own rather than a silently dropped export: a line that is not `NAME=value`, a name inside the reserved `DISPAT_` namespace, a line with no name and an export file the script removed each fail the package with exit 1 before the point of no return, quoting the line, and nothing is tagged; the same line from an announce hook, where nothing can be taken back, is a warning and the release stands. |
 | `TestHooksBeforeAllFailureEndsThePackageBeforeItsFirstStage` | beforeAll runs before a package has a stage at all, so its failure ends the package there, with no build, no publish and no tag, while the packages beside it release, and the outcome hook names the stage the package never entered. |
 | `TestHooksVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not skipped when its provider fails, but its version stage then has nothing to sync manifests to, so the stage's scripts and their hooks do not run; the same fixture with the provider alive runs both. |
 | `TestHooksStageOutputTruncatesAnOverlongLine` | A stage that writes a megabyte with no newline in it has its line cut with a marker, the rest of that line dropped rather than logged as a line of its own, and the stage's later output still arrives; a line that never ends is dropped on the flush. |
+| `TestHooksCommitModeRestoresASkippedConsumer` | In commit mode, without `revertOnFail`, a consumer skipped after its version stage ran has its folder restored, so the retry starts without a pre-existing-changes refusal and releases the provider and the consumer. |
+| `TestHooksCommitModeRestoresSkippedConsumersConcurrently` | Three consumers skipped by one provider failure are restored from their own tasks at once, serialized by the repository's mutation lock, with no `index.lock` collision and every folder clean. |
+| `TestHooksSkippedConsumerKeepsItsEditsWithoutReleaseCommits` | Without release commits a skipped consumer keeps its tracked edit and its untracked file, because nothing proved its folder clean before the run. |
+| `TestHooksSkippedNestedParentLeavesItsPublishedChildAlone` | A skipped package whose folder holds another package's folder is not restored by the commit-mode default, so the nested child that published keeps its changelog and it reaches the release commit. |
+| `TestHooksSignFrameFiresFirst`                        | A space with a sign stage runs `beforeSign`, `sign` and `postSign` first in both a provider's and a consumer's frame, right after `beforeAll` and before the version stage and the build; a version stage configured under its propagate keys still reports `beforeVersion`, `version` and `postVersion`. |
 
 ### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_preflight_reply_faults_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`, `execution_placement_test.go`, `execution_task_identity_test.go`, `execution_crossdevice_linux_test.go`, `execution_prepare_test.go`, `execution_publish_test.go`, `execution_publish_preparation_faults_test.go`, `execution_authorization_test.go`, `execution_unknown_test.go`, `execution_admission_rules_test.go`, `execution_capacity_test.go`, `execution_inputs_test.go`, `execution_nodestate_test.go`, `execution_ownership_test.go`, `execution_fleet_locks_test.go`, `execution_modes_test.go`, `execution_pickup_parity_test.go`, `execution_faults_test.go`, `execution_transport_protocol_test.go`, `execution_recovery_test.go`, `execution_cancel_lease_race_test.go`, `execution_authorized_cancel_ack_test.go`, `execution_result_cancel_race_test.go`, `execution_result_foreign_cancel_test.go`, `execution_cancel_foreign_predecessor_test.go`, `execution_fleet_run_outputs_test.go`, `execution_run_test.go`, `execution_default_mailbox_test.go`, `execution_push_outcomes_test.go`, `execution_authorization_fence_test.go`, `execution_cancel_push_loss_test.go`, `execution_lost_authorization_test.go`, `execution_publish_cancel_before_go_test.go`, `execution_publish_late_claim_test.go`, `execution_publish_unclaimed_test.go`, `execution_record_after_claim_test.go`, `execution_snapshot_index_test.go`, `execution_withdraw_unacked_test.go`, `publicapi/models_execution_test.go`)
 
@@ -1090,7 +1084,6 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConfigRefSplitsTheFile`                           | Splitting configuration across files with `$ref` produces identical releases to single-file setups. Running with `--log-level trace` outputs every referenced path. |
 | `TestConfigRefCycleFailsBeforeAnyWork`                 | Circular `$ref` references cause dispat to exit 1 and print the reference cycle before running scripts or tagging releases. |
 | `TestConfigRefMissingFragmentIsNamed`                  | A missing `$ref` target causes dispat to exit 1, naming the referencing file, the problematic key, and the missing file path. |
-| `TestConfigPropagateSynonymsInOneObjectAreRefused`     | One object stating both spellings of a propagate pair (`autoVersion` and `autoPropagate`, or `flow.version` and `flow.propagate`) stops the run before any tag, in JSON and in YAML, with both keys and the object named; a package naming one spelling beside its space's other replaces it, and the entry runs under the stage's runtime name, `version`. |
 | `TestConfigRefusesUnusableScriptsAndReferences` | A `scripts` entry that binds no command, and a reference to one, are refused at whichever level holds them, with the level and the entry named. |
 | `TestConfigRefusesInvalidRepositorySettings` | Each root-level setting is held to its own vocabulary, and a refused configuration releases nothing. |
 | `TestConfigRefusesInvalidSpaceSettings` | A space's path list, versioning selection, tag format, `src` and concurrency weights are each refused with the space named. |
@@ -1102,6 +1095,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConfigTagFormatIsRefusedWhenGitWouldRefuseTheName` | A format is only exercised after the artefact is published, so a rendered name git would reject is refused at load time instead: a leading slash, dash or dot, a `.lock` suffix, a doubled separator, an unknown placeholder left as text, and a character git reserves. |
 | `TestConfigAliasFormatKeepsItsOwnStructuralRules` | An alias is written and never read back, which lets it spell a fragment of the version and keeps only the rules about rendering: one of each placeholder, a channel and a counter together or not at all, and a name git will accept. |
 | `TestConfigAbsoluteFileKeepsTheRequestedRepositoryRoot` | An absolute configuration file outside the checkout is loaded exactly, preserving the requested package root and ignoring a broken default file. |
+| `TestConfigPropagateSynonymsInOneObjectAreRefused`     | One object stating both spellings of a propagate pair (`autoVersion` and `autoPropagate`, or `flow.version` and `flow.propagate`) stops the run before any tag, in JSON and in YAML, with both keys and the object named; a package naming one spelling beside its space's other replaces it, and the entry runs under the stage's runtime name, `version`. |
 
 ### Goal 11: the static `env` layers (`env_test.go`, `workspace_env_collision_test.go`)
 
@@ -1531,7 +1525,6 @@ binary-swapping flow on disk rather than mocking the filesystem.
 | `TestSelfUpdateWithoutPreviousBackupReportsNoRollback` | The same disappearing pathname with no older copy still permits a validated first install; the CLI reports success without inventing a backup path or rollback command. |
 | `TestSelfUpdateRefusesWhatItCannotTrust` | The checks stand between a download and the only binary the user has: a checksum that describes something else, a file that is not a program, a program answering with another version, a download shorter than the release states and an asset response that stops before its body ends are each refused with exit 1, the working binary untouched, no backup made and nothing staged beside it. |
 | `TestSelfUpdateInstallsANamedVersion` | `--release` reaches any published version, downgrades included, and refuses one nobody published. That is what makes a bad release recoverable after the backup's week is up. |
-| `TestSelfUpdateRollbackRecoversABackupACrashLeftParked` | An update killed after it parked the previous backup and before it discarded it leaves the only rollback copy in a staging directory and a download beside the binary; the next `--rollback` puts the copy back and restores it, and clears both leftovers. |
 | `TestSelfUpdateRollsBackAndBackAgain` | `--rollback` restores the backup and rotates, so a second rollback returns to where it started and the directory is never left holding a parked file. A restore is only safe if it is itself reversible. |
 | `TestSelfUpdateAndPrereleases` | A release candidate is not an update by default, `--prerelease` opts into the candidates, and `--force` is the way back off that line. |
 | `TestSelfUpdateBackupExpiresOnItsOwn` | The replaced binary survives six days and is cleared by the next command after eight, with nothing else in the directory touched. |
@@ -1565,6 +1558,7 @@ binary-swapping flow on disk rather than mocking the filesystem.
 | `TestFinalSelfUpdateRefusesIncompleteHTTPResponses` | A release listing that stops before its body ends is refused as the transport failure it is, without replacing the running binary or leaving a staged file. |
 | `TestFinalSelfUpdateReportsBothDownloadFailures` | Failure of both authenticated download and public fallback preserves both causes, keeps credentials out of the fallback and logs, and leaves the binary unchanged. |
 | `TestGoInstallBuildUsesTheGoToolchainForUpdates` | Go module metadata selects Go update instructions and prevents binary replacement, download or backup creation. |
+| `TestSelfUpdateRollbackRecoversABackupACrashLeftParked` | An update killed after it parked the previous backup and before it discarded it leaves the only rollback copy in a staging directory and a download beside the binary; the next `--rollback` puts the copy back and restores it, and clears both leftovers. |
 
 ### Goal 45: installing a tool (`install_test.go`, `final_api_boundaries_test.go`, `final_command_faults_test.go`, `install_target_edges_test.go`)
 
@@ -1659,9 +1653,6 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoVersionPolicyFlagsStillRunSyncLock` | A flag-overridden policy and the syncLock loop read the same resolved block, so a reconciliation the flags caused still regenerates the lock.                                                                                                                                                                                       |
 | `TestAutoVersionNoReplaceFlag`               | `--no-replace` skips the rules for one invocation and leaves the parsing strategy to do its half; without the flag the same invocation finishes the job.                                                                                                                                                                            |
 | `TestAutoVersionManifestsNoneFlag`           | `--manifests none` turns the parsing strategy off for one invocation, and a value outside the three is a usage error (2).                                                                                                                                                                                                          |
-| `TestAutoPropagateReleasesLikeAutoVersion`   | The same workspace released under `autoVersion` and under `autoPropagate` leaves identical manifests, tags and stage names: the block written under the propagate name reconciles ranges and own versions, its syncLock runs, and a `beforePropagate` hook runs as `beforeVersion`. |
-| `TestAutoSignWritesTheOwnVersionBeforePropagate` | With `autoSign` beside `autoPropagate`, the sign stage writes each own version and leaves the range, the propagate stage then writes the range and no own version (snapshots from `postSign` and `postPropagate`, and the log's stage labels), and syncLock runs after a change only the sign stage made. |
-| `TestAutoSignStandaloneAutoversionWritesRangesOnly` | `dispat autoversion` on a package whose sign stage owns the own version writes the ranges alone, and `--write-version` asks for the own version explicitly. |
 | `TestAutoVersionRefusesAnOnlyNamingNoPackage` | `autoVersion.only` narrows a rewrite to named providers, so a name that is no package narrows it to nothing and is refused wherever the block was written, on the space or on one package of it. |
 | `TestAutoVersionSyncLockSkippedWhenNothingWasReconciled` | A release that rewrote no manifest has no lock to regenerate, so syncLock is not run. |
 | `TestAutoVersionSubstringNameMatchReachesAPackageWithNoManifest` | The substring fallback connects a declared name's last segment to a package's folder name, which is what a workspace whose packages declare no name of their own needs; `exact`, the default, leaves the same declaration alone. |
@@ -1675,6 +1666,9 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoVersionReplaceRuleStepsOverAFolderItCannotEnter` | A replace rule reaches any file at all, so it also reaches what the filesystem will not let it read: the folder is named in a warning and skipped whole, and everything the rule could reach is still rewritten. |
 | `TestAutoVersionManifestSurvivesAPartialDiskWrite` | A filesystem quota interrupts the CLI's manifest rewrite after a temporary file exists. Even when the runtime reports a short count without an error, the original bytes and mode survive, the partial file is removed, and an unrestricted retry changes only the version. |
 | `TestReleaseAutoVersionKeepsANeverReleasedProviderAtCurrentVersion` | Consumer release preserves the current version of an unchanged, never-released provider and does not create a provider tag. |
+| `TestAutoPropagateReleasesLikeAutoVersion`   | The same workspace released under `autoVersion` and under `autoPropagate` leaves identical manifests, tags and stage names: the block written under the propagate name reconciles ranges and own versions, its syncLock runs, and a `beforePropagate` hook runs as `beforeVersion`. |
+| `TestAutoSignWritesTheOwnVersionBeforePropagate` | With `autoSign` beside `autoPropagate`, the sign stage writes each own version and leaves the range, the propagate stage then writes the range and no own version (snapshots from `postSign` and `postPropagate`, and the log's stage labels), and syncLock runs after a change only the sign stage made. |
+| `TestAutoSignStandaloneAutoversionWritesRangesOnly` | `dispat autoversion` on a package whose sign stage owns the own version writes the ranges alone, and `--write-version` asks for the own version explicitly. |
 
 ### Goal 25: the manifest commands (`manifests_test.go`, `aqua_test.go`, `command_release_edges_test.go`, `final_api_boundaries_test.go`, `final_command_faults_test.go`)
 
@@ -2108,11 +2102,11 @@ the command exits with — plus the wire details only a real HTTP server can wit
 | `TestWebhookTriggerCustomEvent`                     | `dispat trigger <word>` raises `script.<word>`: subscribable by exact name, attributed to the raising package and stage, and an unsubscribed word arrives nowhere.                                            |
 | `TestWebhookScriptProgressTrigger`                  | `dispat trigger progress` raised from a stage script lands its `script.progress` deliveries between the stage's own bracket events, attributed to the raising package, stage and version, with the value (including a genuine 0) and the message intact. |
 | `TestWebhookTriggerOutsideARunIsHarmless`           | The trigger command by hand: it delivers without the package fields, exits 0, and a dead endpoint is a W239 warning rather than an exit code — a script cannot fail its stage by reporting progress.          |
-| `TestWebhookSignStageOnlyWhenConfigured`            | A package with a sign stage reports `stage.started:sign` and `stage.succeeded:sign` before its build, a failed sign stage reports `failedStage: sign`, and a package with no sign configuration reports exactly the stages it always did. |
 | `TestWebhookGivesUpOnAStatusNoRetryWouldChange` | A 5xx and a 429 are answers a later attempt could outlive and a 400 is not, so the ladder stops at the first non-retryable status, reports the ordinary W239, and leaves the command's exit code alone. |
 | `TestWebhookFormatRendersTheProgressValue` | A rendered payload is for an endpoint that wants its own shape, and `progress` is the one event carrying a number: it renders as the number for that event and as nothing for every event without one, so the template stays valid JSON throughout a run. |
 | `TestWebhookTriggerFallsBackWhenTheWorkspaceCannotBeWalked` | A trigger is a leaf command and must not fail over what a release would refuse: with the workspace unreadable the top-level list is resolved unrestricted, the event is still delivered, and the run says why it could do no better. |
 | `TestWebhookWithoutItsSecretDeliversUnsigned` | A secret named in the configuration and missing from the environment still delivers, because a notification is not a security boundary, and the run says out loud that nothing is signing the deliveries rather than letting a receiver quietly stop verifying. |
+| `TestWebhookSignStageOnlyWhenConfigured`            | A package with a sign stage reports `stage.started:sign` and `stage.succeeded:sign` before its build, a failed sign stage reports `failedStage: sign`, and a package with no sign configuration reports exactly the stages it always did. |
 
 ### Goal 43: the key-features smoke walk (`smoke_features_test.go`)
 
@@ -2139,7 +2133,6 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsOffByDefault`                  | The feature is invisible until asked for. A repository configuring nothing records exactly what it recorded before, and an explicit `placement: off` produces a byte-identical file — which is what lets a package defeat a broader layer without a fourth spelling of absence. |
 | `TestAuthorsInlinePlacement`               | The per-line suffix names that line's own people, the git author first and the `Co-authored-by` trailers after, and `inline` alone writes no section.                                                                                       |
 | `TestAuthorsSectionPlacement`              | The section is one deduplicated list under its configured title, written into the changelog file and into the GitHub body after the sections it attributes and before the footer, so self-update's `---` cut is unmoved. A non-ASCII name survives the whole path from git to the record. |
-| `TestAuthorsFoldedSpellingsAreOnePerson`   | Two `Co-authored-by` trailers spelling one identity in two cases, differing by a final sigma that lowercasing keeps apart, credit one person on the line and in the section, under the fold every other name comparison uses. |
 | `TestAuthorsAllCommitsIncludeInvalid`      | `commits: ccme` names the people behind the entry's own lines; `commits: all` also credits the author of a commit whose message is not a release record at all.                                                                             |
 | `TestAuthorsOnlyInvalidCommitsStillCredits`| A package releasing on an exact pin has no grouped line to attribute, and under `all` still says who moved the repository.                                                                                                                  |
 | `TestAuthorsFiltersAndFormat`              | `exclude` wins over a wide-open `include`; patterns reach the full name, the username and the email alike; `format: username` writes the local part, and an address with no `@` is returned whole rather than attributed to nobody.          |
@@ -2154,6 +2147,7 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsAcrossAComposedFleet` | Where a window is one boundary per repository the package's history was attached from, two packages whose windows differ only in a source repository's boundary are not given each other's authors. |
 | `TestAuthorsCoAuthorTrailersInEveryShape` | `Co-authored-by` is free text, so a bare name and a bare address are both accepted while empty angle brackets are dropped, the trailer naming the git author again is deduplicated, and the username format renders a name when there is no address to take a part of. |
 | `TestAuthorsIdentityWithNoAddress` | Git accepts a commit whose author has a name and no address, and the attribution survives it in what it renders and in deciding that two such commits are by one person. |
+| `TestAuthorsFoldedSpellingsAreOnePerson`   | Two `Co-authored-by` trailers spelling one identity in two cases, differing by a final sigma that lowercasing keeps apart, credit one person on the line and in the section, under the fold every other name comparison uses. |
 
 ### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`, `internal/harness/gitfault_test.go`, `internal/harness/go_install_test.go`)
 
@@ -2321,7 +2315,6 @@ timestamps to relate histories.
 | `TestPolyrepoCustomCheckpointMessageProvesNoBaseline` | A control commit that moves matching provider and consumer gitlinks under an opaque custom message is not automatic release-checkpoint evidence and reports E333 when later provider work needs a consumer boundary. |
 | `TestPolyrepoReleaseCheckpointProvidesNextConsumerBaseline` | A normal control release checkpoint that names exact source tags and carries their matching gitlink transitions is sufficient evidence for the consumer's next cross-repository baseline after the bootstrap tuple is removed. |
 | `TestPolyrepoImportedConsumerBaselineRequiresEvidence` | Importing an already-tagged standalone consumer after the provider pointer advanced does not prove the old consumer release adopted that provider snapshot; ambiguity is refused until an explicit baseline tuple identifies its actual provider revision. |
-| `TestPolyrepoCommitModeSourceRestoresASkippedConsumer` | A source repository that makes release commits restores a consumer its failed provider skipped inside that source, without `revertOnFail`, and leaves the source checkout clean. |
 | `TestPolyrepoExclusionTakesTheDeclarationsItOwns` | A space path inside an excluded repository stops contributing while the space's other path keeps working; a space left with no path goes with its own package entries, and a top-level entry configuring one of those packages goes with it rather than being reported as matching no folder. |
 | `TestPolyrepoExcludedDependencyEndpointsSayWhatIsMissing` | An endpoint an exclusion accounts for names the repository to re-enable; one it cannot account for lists what this run excluded, so participation is never left as a guess. |
 | `TestPolyrepoNestedWorkspaceContextIsRefusedWhenItCannotBeRead` | A nested workspace context that does not decode is a usage refusal rather than a silent fall back to this folder's own configuration. |
@@ -2416,6 +2409,7 @@ timestamps to relate histories.
 | `TestRecordSourceChangeAfterCommitPreservesTheUnadvertisedRevision` | A source commit made by an `afterCommit` hook is refused by the tag transaction's pin check: the truthful release commit remains, but no tag, remote ref, or checkpoint advertises it; exact record repair prevents republishing. |
 | `TestReleaseRecordPostPublishHeadReadFailuresWithholdTheCheckpoint` | Source HEAD proof failures after upload preserve published status while withholding the source tag and control checkpoint. |
 | `TestReleaseRecordSnapshotHeadReadFailureRefusesPublication` | A source HEAD read failure during snapshot validation stops publication and records; a healthy retry publishes once. |
+| `TestPolyrepoCommitModeSourceRestoresASkippedConsumer` | A source repository that makes release commits restores a consumer its failed provider skipped inside that source, without `revertOnFail`, and leaves the source checkout clean. |
 
 ### Goal 55: choreographed fleets (`choreography_*_test.go`, `compute_release_failures_test.go`, `compute_topology_edges_test.go`, `final_history_boundaries_test.go`, `final_plan_config_faults_test.go`, `linked_config_edges_test.go`, `linked_settings_edges_test.go`, `planning_release_edges_test.go`)
 
@@ -2724,121 +2718,6 @@ The boundaries each module holds when its input is hostile, truncated or concurr
 | `TestPublicAPIConfigRejectsTruncatedNestedJSONWithoutWriting` | Truncated nested JSON and invalid key framing fail before partial edits reach disk. |
 | `TestPublicAPIConfigPrepareReportsDestinationDisappearingDuringMarshal` | Preparation reports a destination removed by a caller marshaler without writing a replacement. |
 | `TestPublicAPIConfigPreparedCommitRefusesAChangedDestination` | Replacing a prepared file with a directory makes commit refuse it as a non-regular file before the backup is saved, preserving the replacement and leaving neither a backup nor a temporary file. |
-| `TestPublicAPIConfigEditRefusesANamedPipe` | A configuration-shaped FIFO cannot block `config.ApplyEdits`: it is refused by its type before it is opened and nothing is written beside it; a bounded child process detects a regression. |
-
-### History boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalHistoryRejectsDuplicateVersionsInsideAComposedSource` | equal-precedence release refs on different commits are fatal in the composed LocalGitx tag path, with no package plan rows or release mutation. |
-| `TestFinalHistoryRefusesAnUnreadableFreshPrereleaseWindow` | an active prerelease requires its distinct fresh history window, read with the stable one as a single union walk; failure of that LocalGitx log read aborts planning and a healthy retry resumes the train correctly. |
-| `TestFinalHistoryRefusesMalformedMergeBaseBeforePublishing` | a malformed successful merge-base reply in a real composed prerelease history stops the release before publication and a healthy retry still sees the pending fix. |
-| `TestFinalHistoryRetainsWorkWhenBoundariesLeaveHEAD` | after an external branch rewrite leaves previously observed release tags off HEAD, the real history fallback keeps new work pending rather than silently treating it as shipped. |
-| `TestMergedIndependentHistoriesKeepTheirReleaseBoundaries` | Projects merged from unrelated Git roots retain their independent tagged baselines and pending bumps; a failed common-ancestor query refuses release before a healthy retry. |
-| `TestFinalHistoryRequiresTheLatestPrereleaseBoundarySeparately` | a valid stable cross-repository tuple cannot substitute for missing evidence at the consumer's newer prerelease tag. |
-| `TestFinalHistorySharesAControlCheckpointAcrossSourceReleases` | two source release tags recorded by one canonical control commit resolve through the same immutable fleet snapshot. |
-| `TestFinalHistoryAppliesControlCancellationWithoutPropagatingIt` | a bounded control cancel clears newer source work without becoming a cross-repository release proposal. |
-| `TestFinalHistoryExcludesBothParentsOfAReleasedControlMerge` | a source release checkpoint excludes both sides and the shared ancestry of an already-shipped control merge. |
-| `TestFinalHistoryUsesInitialVersionsForComposedSourceBaselines` | composed source planning uses configured initials for both an opaque newest tag and an untagged package while retaining the correct history windows. |
-| `TestFinalHistoryRequiresAControlBoundaryForControlIntent` | a source tag made before composition cannot bound later control intent without explicit control-snapshot evidence. |
-| `TestFinalHistoryReportsChoreographedLinkReads` | debug workload diagnostics count real release-subject and gitlink-tree reads while preserving the settled choreography plan. |
-
-### Ownership boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalOwnershipRefusesAControlUmbrellaContainingASource` | a configured control package may not wrap a composed source checkout, even when its own source scope does not directly enter that checkout; refusal preserves every repository HEAD and writes no tags or script markers. |
-| `TestFinalOwnershipCanonicalizesImportedPackageBoundaries` | an imported package path and its source scope are checked after symlink resolution; neither may claim a sibling source repository. |
-| `TestFinalOwnershipRefusesADanglingImportedSourceScope` | a dangling imported `src` symlink is rejected by package-folder validation before ownership planning, while all repository state remains unchanged. |
-| `TestFinalOwnershipRefusesNestedConfiguredScopes` | two configured package identities cannot own nested scopes in one composed history; the ambiguity is fatal before planning or mutation. |
-| `TestFinalOwnershipRefusesASymlinkedNestedGitMarker` | a symlink cannot impersonate a nested `.git` marker and alter the repository identity assigned to a configured package. |
-
-### GitHub step boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `tests/integration/final_github_step_boundaries_test.go::TestFinalGitHubStepRefusesForeignRunStateBeforeTheAPI` | The standalone GitHub step rejects an unparseable run version and a tag that disagrees with the run version before making even a verification request, so malformed inherited `DISPAT_*` state cannot create a plausible external release. |
-| `tests/integration/final_github_step_boundaries_test.go::TestFinalPolyrepoGitHubStepChecksTheOwnerForItsTag` | In a polyrepo stage, the GitHub step checks the package owner's source repository for the run tag. A tag present only in the source suppresses W229 while the command creates exactly one GitHub release; the control repository remains tag-free. |
-
-### Final lock cleanup
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalFleetUnlockFailureFailsAfterPublishing` | If one source repository's remote refuses to give back its release lock after publication and durable source/control recording, fleet cleanup reports E336, preserves the published result, source tag, source commit and control checkpoint, continues releasing the remaining control lock, leaves only the affected source lock visible for repair, exits nonzero, and emits one failed `release.finished` webhook with `published=1`. |
-
-### Command failure recovery
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalAuthorCommitPreservesWorkWhenValidationCannotStart` | Unavailable temporary storage or a non-directory hooks path refuses authoring before Git mutates HEAD, the index or the working copy. |
-| `TestFinalComputeRejectsBrokenInputBeforeApplyingAcceptedChanges` | An oversized interactive answer reports its read error and discards earlier accepted suggestions before changing configuration or backups. |
-| `TestFinalComputeRefusesAnUnavailableBackupAndCanRetry` | An occupied backup path refuses a compute write without changing configuration or existing backup data; moving the obstruction allows a convergent retry. |
-| `TestFinalStandaloneCommitRetainsItsRecordWhenPinExportFails` | A commit-pin export failure returns an error while preserving the completed release commit, tag and existing output-directory data. |
-
-### Remaining planning boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalRemainingExecUsesTheControlSpaceAuthority` | in a composed workspace where control and an imported source use the same local space name, `exec --for space:` resolves the control-owned folder layer, environment, and working directory rather than importing another repository's command authority. |
-| `TestFinalRemainingImportedFolderConfigFailsClosed` | a valid imported root configuration cannot hide a malformed space-folder layer; discovery refuses the complete package graph and preserves both repository heads and tags. |
-| `TestFinalRemainingExecCwdDiscoveryFailuresNameTheUnreadableLayer` | both inferred subject sites (`--for cwd` and `--script-from cwd`) fail before a root script can run when package discovery cannot read the current folder's layer. |
-| `TestFinalRemainingPrivatePinStoreCreationFailureStopsBeforeScripts` | an unusable TMPDIR/TMP/TEMP prevents creation of the private composed-release pin coordinator before build, publish, tags, or repository mutation. |
-| `TestFinalRemainingRepositoryInputClosureCrossesGroupsAndDependencies` | an indirect provider input carried through a dependency, a fixed group, and another dependency remains in the consumer's release guard; an unplanned provider advance stops that consumer before publication. |
-
-### Remaining release boundaries
-
-| Test | Claim proven |
-| --- | --- |
-| `TestFinalConflictInspectionFailureAbortsBeforeSettlement` | If Git cannot enumerate the unmerged paths of a real recovery conflict, dispat refuses to guess, aborts the merge, preserves the published local immutable tag and the exact foreign remote commit/file, and creates no quarantine branch. |
-| `TestFinalRecoveryAbortFailureReportsTheRetainedObstacle` | If an untracked local file makes recovery refuse before merging and `merge --abort` consequently fails, dispat reports the cleanup failure while E224 remains the release outcome; the published tag, untracked local input and foreign remote input remain reviewable. |
-| `TestFinalConflictQuarantineLookupRefusalsPreserveBothSides` | If the quarantine-name lookup fails or reports the generated name occupied, conflict settlement stops before any quarantine push, keeps the merge open, and preserves the exact published local file and foreign remote commit/file. |
-| `TestFinalSourceTagPushFailureKeepsTheAlreadyPushedBranch` | If an orchestrated source branch push succeeds and the following immutable-tag push fails, E335 preserves the advanced source remote branch and local release tag while withholding the remote tag and control checkpoint; explicitly pushing that exact tag and checkpoint makes retry a publication no-op. |
-
-### Configuration and diagnostics
-
-| Test | Claim proven |
-| --- | --- |
-| `TestChoreographyRefusesAmbiguousOrEscapingRoster` | Malformed own or peer identities, duplicate peer names and absolute or escaping link paths stop composition before any plan or repository mutation. |
-| `TestFinalPlanningWorkloadIsDebugOnlyAndPreservesThePlan` | Debug reports actual history workload counts for one repository and a source-history fleet while preserving versions, reasons and selected packages; info output remains quiet. |
-| `TestFinalStandaloneFolderPolicyControlsItsRelease` | A standalone package's folder config controls its case-insensitive build override, version rewrite, budget and changelog; the release and retry prove it runs once. |
-| `TestFinalSelfUpdateRefusesIncompleteHTTPResponses` | A release listing that stops before its body ends is refused as the transport failure it is, without replacing the running binary or leaving a staged file. |
-| `TestFinalSelfUpdateCannotInstallANamedDraftOrFailedLookup` | Naming a version does not allow installation of a draft or a failed API lookup. |
-| `TestFinalSelfUpdateReportsBothDownloadFailures` | Failure of both authenticated download and public fallback preserves both causes, keeps credentials out of the fallback and logs, and leaves the binary unchanged. |
-| `TestFinalSelfUpdateNotesPreserveUnicodeAndSkipBothFenceStyles` | Preview skips both Markdown fence styles and nested fence-like text, preserves visible notes, and clips long Unicode text at a complete rune. |
-| `TestFinalSharedMovingAliasRefusesBothOwners` | Two packages cannot share a moving alias; the refusal writes neither build outputs nor tags, and separate alias namespaces allow both releases. |
-| `TestFinalFolderRecordPresentationKeepsRootCommitPolicy` | A package may customize changelog sections and commit links while its release version follows the root commit policy. |
-| `TestFinalStandaloneFolderRefusalsPreventAnyRelease` | Invalid standalone folder policy stops both status and release before scripts or records, including syntax, types, nested ownership, versioning, budgets, script references, ignores and version rules. |
-
-
-### Release gate regressions
-
-| Test | Claim proven |
-| --- | --- |
-| `TestConfigReleaseRejectsAShallowImportedPolicyOwner` | Imported source policy requires complete Git history before planning. |
-| `TestConfigReleaseRejectsUnreadableExclusionPolicy` | A `.dispatexclude` that cannot be read, a looping link at the repository or a folder in a space, fails discovery naming the file instead of admitting excluded packages, and nothing is planned. |
-| `TestConfigAbsoluteFileKeepsTheRequestedRepositoryRoot` | An absolute configuration file outside the checkout is loaded exactly, preserving the requested package root and ignoring a broken default file. |
-| `TestPreviewRefusesAnIncompletePlan` | A fatal cyclic plan produces no partial release preview. |
-| `TestPreviewExplainsAnExplicitChangelogChannelMismatch` | Explicit changelog preview explains channel withholding while ordinary preview retains pending notes. |
-| `TestSelectionTraceAccountsForEverySafetyNarrowing` | Trace logs identify withheld dependencies and split groups while strict selection remains mutation-free. |
-| `TestReleaseLockRecoversItsOwnAcceptedPushAfterAResponseFailure` | A lost lock-push response is reconciled by attempt identity and the owned lock is cleaned after release. |
-| `TestReleaseLockCreationFailurePreventsPlanningAndPublication` | Local lock-tag creation failure prevents planning, package work and remote locking. |
-| `TestReleaseLockLocalCleanupFailurePreservesThePublishedOutcome` | Local cleanup failure returns E336 while retaining publication and successful remote lock cleanup. |
-| `TestRecordSourceChangeAfterCommitPreservesTheUnadvertisedRevision` | A source commit made by an `afterCommit` hook is refused by the tag transaction's pin check: the truthful release commit remains, but no tag, remote ref, or checkpoint advertises it; exact record repair prevents republishing. |
-| `TestReleaseBehindGuardRefusesUnreadableRemoteState` | Unreadable branch or remote evidence stops push-mode release before mutation; a healthy retry publishes once. |
-| `TestReleasePropagatesAnUnreadableAllowedBranchBeforeMutation` | An unreadable allowed branch prevents package work and release records. |
-| `TestScannerLinkGateRefusesALaxGoManifest` | Tolerant inventory cannot certify absence of local links when replacement directives are unreadable. |
-| `TestScannerPrintsAVersionWithoutAPackageName` | Human scanner output retains a nameless version and rejects a file supplied as a folder. |
-| `TestForRefusesAnUnknownWorkingPackageBeforeRunning` | An unknown package working directory prevents execution of the loop body. |
-| `TestComputeTOMLValueFragmentRefusalPreservesItsProvenance` | An unwritable TOML value fragment is named correctly and both source files remain unchanged. |
-| `TestComputeStarRequiresANamedFleetEntry` | Star topology refuses an ordinary repository before writing links or configuration. |
-| `TestComputeStarKeepsStagedRepairsWhenACloneRevealsAConflictingEdge` | A hidden peer edge stops incompatible star repair while preserving staged changes and existing links. |
-| `TestEngineDependencyReleaseUsesNativeExactRanges` | Unity and O3DE receive native exact ranges during release; unrelated dependencies remain unchanged. |
-| `TestStandaloneStepsRefuseAFatalPlanBeforeWriting` | Native changelog, version, commit and GitHub steps refuse a cyclic plan without scripts or records. |
-| `TestStandaloneAutoversionReportsSyncLockFailureAfterTruthfulWrites` | Lockfile generation failure retains completed manifest edits but creates no commit or tag. |
-| `TestStandaloneCommitNoForceOverridesConfiguredForce` | Explicit no-force protects a tag created between planning and commit despite configured force permission. |
-| `TestStandaloneCommandsPropagateAPlanningReadFailure` | Commit, GitHub, preview and unchanged selection propagate unreadable planning evidence without mutation. |
-| `TestCommitPropagatesAWindowReadFailureBeforeWriting` | An unreadable commit selection window preserves the index, HEAD and tags. |
-| `TestPublicAPIConfigPreparedCommitRefusesAChangedDestination` | Replacing a prepared file with a directory causes commit to fail, preserving the replacement, original backup, permissions and temporary-file cleanup. |
 | `TestPublicAPIManifestReadersRefuseSpecialFiles` | A manifest-shaped FIFO cannot block public scanning or writing; bounded child processes detect regressions. |
 | `TestPublicAPIWriterRefusesAManifestDirectory` | Writer admission refuses directories named like manifest files. |
 | `TestPublicAPIWriterKeepsOriginalBytesWhenItsDirectoryCannotBeWrittenTo` | Across JSON, Go module, Aqua, Gradle, Pubspec, Unity and Android counter writes, a real permission failure creating the replacement beside a readable manifest preserves its bytes and mode and leaves no temporary file. |
@@ -2848,6 +2727,7 @@ The boundaries each module holds when its input is hostile, truncated or concurr
 | `TestPublicAPIWriterRefusesAquaAliasesThatTheReaderCanFollow` | Scanning follows shared Aqua data while writing refuses to modify aliased source bytes. |
 | `TestPublicAPIWriterLeavesMetadataOnlyPlistsByteExact` | Plist metadata without a writable version remains byte-for-byte unchanged. |
 | `TestPublicAPIWriterHandlesEscapedPythonArraysAndLiteralKeysIdempotently` | Python TOML edits preserve escaped markers, literal keys and unrelated values and converge without rewriting again. |
+| `TestPublicAPIConfigEditRefusesANamedPipe` | A configuration-shaped FIFO cannot block `config.ApplyEdits`: it is refused by its type before it is opened and nothing is written beside it; a bounded child process detects a regression. |
 
 ## Requirement traceability
 
@@ -2861,7 +2741,8 @@ the two documents cannot drift into disagreeing about which test carries which r
 bare name, an integration test with no goal here, one named more than once, one named anywhere but under a numbered
 goal heading, and a matrix row whose recorded status its own references do not support. The Regression fences and Bug
 fences sections are the exception, stated in the gate: they cite the tests that guard a defect, integration and unit
-alike, beside the goal row that names each one. It is the `repo-checks` target of `Dockerfile.gotest` in CI and `scripts/check-test-plan.sh` locally.
+alike, beside the goal row that names each one. It is the `repo-checks` target of `Dockerfile.gotest` in CI and
+`scripts/check-test-plan.sh` locally.
 
 | Matrix section | Goals that carry it |
 | --- | --- |
