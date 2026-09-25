@@ -248,19 +248,26 @@ func TestHooksOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 // TestHooksRevertOnFailAppliesAfterVersionStageOnSkip covers the
 // documented but easy-to-miss half of revertOnFail: "the same rollback runs
 // when a package is skipped after its version stage already modified
-// files." The consumer's version script dirties its folder; the provider's
-// *publish* then fails (its build succeeded, so with isBuildWaitingPublish
-// at its default the consumer's version and build stages have already run);
-// the consumer is skipped at its own publish — after real damage — and
-// revertOnFail must still clean its folder up.
+// files." The consumer's version script dirties its folder and leaves a
+// marker; the provider's *publish* waits for that marker and then fails, so
+// the consumer is skipped at its own publish after real damage, and
+// revertOnFail must still clean its folder up. The marker is what makes the
+// order a fact rather than a likelihood: without it a provider that failed
+// before the consumer's version stage ran would leave nothing to revert and
+// the test would pass on a folder nobody touched.
 func TestHooksRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 	r := harness.New(t)
+	marks := t.TempDir()
+	mutated := filepath.Join(marks, "consumer")
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
-		"build":        {"echo building"},
-		"fail-publish": {"exit 1"},
-		"mutate":       {"echo dirty >> main.txt && echo extra > extra.txt"},
-		"publish":      {"echo publishing"},
+		"build": {"echo building"},
+		// Bounded, so a consumer whose version stage never runs fails the
+		// assertion below instead of holding the run open.
+		"fail-publish": {"attempts=0; while [ ! -e " + harness.ShQuote(mutated) + " ] && [ \"$attempts\" -lt 600 ]; " +
+			"do attempts=$((attempts + 1)); sleep 0.05; done; exit 1"},
+		"mutate":  {"echo dirty >> main.txt && echo extra > extra.txt && : > " + harness.ShQuote(mutated)},
+		"publish": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: models.PathList{"packages/provider"}, Flow: &models.SpaceFlowConfig{
@@ -276,6 +283,7 @@ func TestHooksRevertOnFailAppliesAfterVersionStageOnSkip(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "provider's publish failure must fail the run\nstdout:\n%s", res.Stdout)
+	require.FileExists(t, mutated, "the consumer's version stage ran before the provider failed")
 	assert.Zero(t, r.TagCount("provider@"))
 	assert.Zero(t, r.TagCount("consumer@"))
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "consumer"), "consumer must be reported blocked")
