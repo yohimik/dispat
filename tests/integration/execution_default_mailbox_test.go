@@ -206,6 +206,48 @@ func TestExecutionDefaultMailboxRefusesACredentialCarryingRemote(t *testing.T) {
 	})
 }
 
+// TestExecutionDefaultMailboxRefusesAPushURLNoMailboxCanBe: a push URL that
+// carries no credential can still be no mailbox at all, an http one above
+// all, which authenticates nobody. A release whose link states no endpoint is
+// refused with E225 naming the link and the remote before any lock, and a
+// worker that states none, started in a checkout whose remote is that URL, is
+// refused before it serves, naming what it can do instead.
+func TestExecutionDefaultMailboxRefusesAPushURLNoMailboxCanBe(t *testing.T) {
+	const pushURL = "http://git.example.invalid/acme/project.git"
+
+	t.Run("a release with a configured link", func(t *testing.T) {
+		rig := newExecutionRigOnOrigin(t, func(cfg *models.File) {
+			cfg.Scripts["build"] = models.Script{executionRecordingScript}
+		})
+		rig.repo.Git("remote", "set-url", "--push", "origin", pushURL)
+
+		res := rig.release()
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		requireExecutionRefusal(t, res, "E225", "execution-configuration")
+		assert.Contains(t, diagnosticText(res), "worker link "+executionNode+" states no endpoint")
+		assert.Contains(t, diagnosticText(res), "whose push URL cannot be a mailbox")
+		assert.False(t, remoteHoldsLock(t, rig.origin), "the refusal comes before any lock")
+		assert.Empty(t, rig.runs(), "no task ran anywhere")
+	})
+
+	t.Run("a worker started in a checkout of it", func(t *testing.T) {
+		rig := newExecutionRigOnOrigin(t)
+		checkout := t.TempDir()
+		gitIn(t, checkout, "", "init", "-q")
+		gitIn(t, checkout, "", "remote", "add", "origin", pushURL)
+		cfg := executionWorkerConfig(rig.origin, func(settings *models.ExecutionConfig) { settings.Endpoint = "" })
+		document, err := json.MarshalIndent(cfg, "", "  ")
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(checkout, "dispat.json"), document, 0o644))
+
+		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret}, "worker",
+			"--root", checkout, "--state-dir", t.TempDir(), "--idle-timeout", "5")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, diagnosticText(res), "whose push URL cannot be a mailbox (")
+		assert.NotContains(t, res.Stdout, `"message":"worker started"`, "it never served")
+	})
+}
+
 // executionCoordinationBranches are the coordination branches a remote holds,
 // without the release branches it holds beside them when it is the
 // repository's own remote.
