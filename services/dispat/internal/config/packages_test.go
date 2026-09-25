@@ -703,6 +703,20 @@ func TestVersionGroupSurvivesOverrideLayers(t *testing.T) {
 		assert.Equal(t, model.VersioningFixedMajor, byName["core"].Space.Versioning)
 		assert.Equal(t, "libs", byName["core"].Space.VersionGroup)
 	})
+	// A space file stating both is the contradiction a package layer stating
+	// both is. It is refused before the merge, which would otherwise keep the
+	// group and drop the versioning without a word, and the error names the
+	// file.
+	t.Run("a space file states both", func(t *testing.T) {
+		root := writeModelRepo(t, grouped(), dirs...)
+		writeSpaceFile(t, root, "packages/libs", SpaceFile{
+			Versioning: VersioningFixedMajor, VersionGroup: "wide"})
+		_, err := discoverPackages(t, root)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "versioning and versionGroup are mutually exclusive")
+		assert.Contains(t, err.Error(), filepath.Join("packages", "libs", "dispat.json"))
+		assert.Contains(t, err.Error(), `space "libs"`)
+	})
 }
 
 // TestVersionGroupUnifiesWhicheverSpellingReachesIt: a versionGroup reference

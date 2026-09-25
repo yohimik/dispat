@@ -107,4 +107,15 @@ func TestSpaceVersionGroupIsStillSupersededPerPackage(t *testing.T) {
 	assert.NotEqual(t, 0, res.Code)
 	assert.Contains(t, res.Stdout+res.Stderr, "mutually exclusive")
 	assert.Contains(t, res.Stdout+res.Stderr, "app1")
+
+	// A space folder's own file is a layer like any other: stating both axes
+	// there is the same contradiction, refused before the merge could keep one
+	// of them silently, and the message names the file.
+	packageFile(t, r, "services/app1", models.PackageConfig{Versioning: models.VersioningIndependent})
+	spaceFile(t, r, "packages", models.SpaceFile{
+		Versioning: models.VersioningFixedMajor, VersionGroup: "platform"})
+	res = r.Status("-p", "*")
+	assert.NotEqual(t, 0, res.Code)
+	assert.Contains(t, res.Stdout+res.Stderr, "versioning and versionGroup are mutually exclusive")
+	assert.Contains(t, res.Stdout+res.Stderr, "packages/dispat.json")
 }

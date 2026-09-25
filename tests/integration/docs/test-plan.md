@@ -1080,7 +1080,7 @@ version from one versioning mode, or a file preserved by one `revertOnFail` sett
 | `TestLevelsRootReachesAStandalonePackage` | Standalone packages outside spaces act as their own space, inheriting root `tagFormat` and `flow` configurations. |
 | `TestLevelsSpaceRecordsAndSrc`            | Spaces configure `changelog` defaults (which packages can override) and `src` boundaries (where changes outside the path leave the package inert with W131). |
 | `TestSpaceVersionGroupReachesPackagesWithOverrideLayers` | A space-level `versionGroup` reaches every member package, including one the space file configures and one that carries its own folder file: the plan loads, names the group for each member, and versions them as one instead of refusing a `versioning` nobody wrote. |
-| `TestSpaceVersionGroupIsStillSupersededPerPackage` | A package that states its own `versioning` leaves the space's group: the group still moves its remaining members while the detached package versions independently. |
+| `TestSpaceVersionGroupIsStillSupersededPerPackage` | A package that states its own `versioning` leaves the space's group: the group still moves its remaining members while the detached package versions independently. A layer stating both `versioning` and `versionGroup` is refused and named, a space folder's own file included. |
 
 ### Goal 13: per-package overrides, versioning groups and `.dispatexclude` (`overrides_test.go`)
 

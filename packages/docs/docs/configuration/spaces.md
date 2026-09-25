@@ -483,6 +483,9 @@ dispat refuses two keys:
 - **`spaces`**, because a file declaring spaces is a monorepo root of its own. Leave a nested or vendored repository
   out of the root config rather than half-merging it.
 
+Like every other layer, the file may not state `versioning` and `versionGroup` together. The two are one axis, so the
+pair is a contradiction, and the error names the file.
+
 `packages` is the one map key the file may hold. It is a layer of its own. It sits nearer than the space's `packages`
 map in the root file, and still under the package's own folder file. You can also write `dependencies` here. It adds to
 what the root file's space entry declares rather than replacing it. It follows the same rule: every edge must touch the

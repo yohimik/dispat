@@ -380,8 +380,8 @@ func validatePackageLayer(label string, po PackageConfig) error {
 	if po.Flow != nil && po.Flow.Login != nil {
 		return fmt.Errorf("%s: flow.login cannot be overridden per package: login runs once per space, in the space's own folder, gating every publish of the space", label)
 	}
-	if po.Versioning != "" && po.VersionGroup != "" {
-		return fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)
+	if err := refuseContradictoryKeys(label, po); err != nil {
+		return err
 	}
 	if err := validateWeights(label, po.Concurrency); err != nil {
 		return err
@@ -396,6 +396,20 @@ func validatePackageLayer(label string, po PackageConfig) error {
 		return err
 	}
 	return validateSrc(label, po.Src)
+}
+
+// refuseContradictoryKeys refuses one layer stating two keys that the merge
+// folds into one value, so that the value it would keep is never a choice
+// nobody made. It runs on each layer before the merge, which is the only moment
+// both keys of a pair still exist: the merge keeps one of them.
+//
+// Versioning and versionGroup are one axis, and a layer naming a group takes
+// its versioning from that group, so a layer stating both contradicts itself.
+func refuseContradictoryKeys(label string, layer PackageConfig) error {
+	if layer.Versioning != "" && layer.VersionGroup != "" {
+		return fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)
+	}
+	return nil
 }
 
 // validateWeights checks a stage-budget weight: at most a [build, publish]
@@ -1119,6 +1133,11 @@ func loadSpaceFile(dir string) (SpaceFile, string, error) {
 	}
 	if err := decodeSpaceFile(settings(raw), &sf); err != nil {
 		return sf, p, fmt.Errorf("invalid format in %s: %w", p, withSchemaHint(err))
+	}
+	// Before the merge, which keeps only one key of each pair: once merged,
+	// a file stating both would silently lose one of them.
+	if err := refuseContradictoryKeys(p, spaceOverride(sf)); err != nil {
+		return sf, p, err
 	}
 	if err := refuseFolderSectionBumps(p, formatsOf(sf.Changelog, sf.GitHub)...); err != nil {
 		return sf, p, err
