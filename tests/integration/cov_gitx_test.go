@@ -19,33 +19,6 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// TestGitRemoteCredentialsNeverReachTheLog: a release's error text reaches
-// hook scripts through DISPAT_ERROR and its log reaches whatever CI ingests,
-// so the remote a push names is recorded with its user information, query and
-// fragment taken out. The credential is in the URL because that is how a CI
-// runner is given one.
-func TestGitRemoteCredentialsNeverReachTheLog(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): bootstrap")
-	// Port 1 refuses immediately, so the run fails on the remote rather than
-	// waiting on one.
-	r.Git("remote", "add", "origin",
-		"https://ci-bot:s3cr3t@127.0.0.1:1/acme/mono.git?token=abc123#fragment")
-
-	res := r.Release()
-	require.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	out := res.Stdout + res.Stderr
-	assert.Contains(t, out, "REDACTED", "the remote is still named, without its secrets")
-	assert.NotContains(t, out, "s3cr3t", "the password must not be recorded anywhere")
-	assert.NotContains(t, out, "token=abc123", "nor a credential carried in the query")
-	assert.NotContains(t, out, "fragment", "nor anything after it")
-	assert.Empty(t, r.TagList(), "and the refusal came before any release work")
-}
-
 // TestGitDirtyGuardReadsARenameAsOneEntry: git's machine-readable status
 // writes a rename as the destination followed by the source, and only the
 // first of the two carries a status prefix. Reading the second as an entry of

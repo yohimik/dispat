@@ -810,3 +810,59 @@ func TestHooksSignFrameFiresFirst(t *testing.T) {
 		"beforeAnnounce", "announce", "postAnnounce",
 	}, hookSequence(t, r, "app"), "the consumer's version stage follows its sign stage")
 }
+
+// TestHooksRefuseAMalformedExport: an export line dispat cannot read would
+// otherwise silently drop the export, so it is an error of its own. A line
+// that is not NAME=value, a name inside the reserved DISPAT_ namespace (which
+// would redefine a computed variable a consumer reads), a line with no name,
+// and an export file the script removed each fail the package before the
+// point of no return, and nothing is tagged. After it, in the announce frame
+// where nothing can be taken back, the same line is a warning and the release
+// stands.
+func TestHooksRefuseAMalformedExport(t *testing.T) {
+	for _, row := range []struct {
+		name   string
+		script string
+		// announce runs the script as the announce hook, after the publish,
+		// instead of as the build.
+		announce bool
+		want     string
+	}{
+		{name: "a line that is not NAME=value", script: `echo 'this line exports nothing' >> "$DISPAT_OUTPUT"`,
+			want: "DISPAT_OUTPUT line 1"},
+		{name: "a name inside the reserved namespace", script: `echo "DISPAT_VERSION=9.9.9" >> "$DISPAT_OUTPUT"`,
+			want: "DISPAT_VERSION=9.9.9"},
+		{name: "a line with no name at all", script: `echo "=orphaned" >> "$DISPAT_OUTPUT"`, want: "=orphaned"},
+		{name: "an export file the script removed", script: `rm -f "$DISPAT_OUTPUT"`},
+		{name: "an announce hook past the point of no return", script: `echo 'this line exports nothing' >> "$DISPAT_OUTPUT"`,
+			announce: true, want: "script outputs invalid"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			r := singlePackageRepo(t, row.script)
+			if row.announce {
+				cfg := libsConfig(echoBuild, 1)
+				cfg.Scripts["announce"] = models.Script{row.script}
+				cfg.Spaces["libs"] = models.SpaceConfig{
+					Path: models.PathList{"packages"},
+					Flow: &models.SpaceFlowConfig{
+						Build: []string{"build"}, Publish: []string{"publish"},
+						Announce: []string{"announce"},
+					},
+				}
+				r.WriteConfigModel(cfg)
+			}
+			r.Commit("feat(core): bootstrap")
+
+			res := r.Release()
+			assert.Contains(t, res.Stdout, row.want, "the refusal quotes what it could not read")
+			if row.announce {
+				assert.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+				assert.True(t, r.IsTagged("core@0.1.0"),
+					"the release is past the point where anything can be taken back; tags: %v", r.TagList())
+				return
+			}
+			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Zero(t, r.TagCount("core@"), "the package failed before its tag; tags: %v", r.TagList())
+		})
+	}
+}

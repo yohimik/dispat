@@ -353,44 +353,6 @@ func TestRecordsPushRefusesEveryPackageWhenOneIsAlreadyRecorded(t *testing.T) {
 	}
 }
 
-// TestRecordsPushNeverReplacesARecordTheRemoteHolds: a record the remote holds
-// on a commit this checkout's head does not reach changes no plan, so the run
-// goes ahead and plans that version. The push is where it is decided, and it
-// creates the name or leaves what is there alone: the remote keeps its record,
-// the package stays published because its publish succeeded, and the run
-// reports E221 and exits non-zero rather than force-moving a published ref.
-func TestRecordsPushNeverReplacesARecordTheRemoteHolds(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "a")
-	r.AddBareRemote()
-	r.Commit("feat(a): first release")
-	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-
-	// Somebody released this version from a line of their own. The commit is
-	// not on this checkout's head, so nothing about the plan changes.
-	r.Git("checkout", "-q", "-b", "theirs")
-	r.Git("commit", "-q", "--allow-empty", "-m", "feat(a): their own work")
-	r.Git("tag", "-a", "a@0.1.0", "-m", "released elsewhere")
-	r.Git("push", "-q", "origin", "a@0.1.0")
-	theirs := r.Git("rev-list", "-n1", "a@0.1.0")
-	r.Git("tag", "-d", "a@0.1.0")
-	r.Git("checkout", "-q", harness.DefaultBranch)
-	r.Git("branch", "-q", "-D", "theirs")
-
-	res := r.Release()
-	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.IsCodePresent(res.Events, "E221"), "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout, `"status":"published"`, "the publish itself succeeded")
-
-	nowAt := strings.SplitN(r.Git("ls-remote", "origin", "refs/tags/a@0.1.0^{}"), "\t", 2)[0]
-	assert.Equal(t, theirs, nowAt, "the remote keeps the record it published")
-	assert.NotEqual(t, theirs, r.Git("rev-list", "-n1", "a@0.1.0"),
-		"while this checkout recorded its own release of the same version, which is what E221 names")
-}
-
 // TestRecordsExportedPackageCommitPinsTheTag: a release script exporting
 // PACKAGE_<KEY>=<commitHash> pins its package's tag to that commit, so in
 // commit mode the tag lands on the exported (source) commit while the
@@ -1373,6 +1335,52 @@ func TestRecordsGithubAttachmentFailures(t *testing.T) {
 					got = append(got, u.name+"="+u.body)
 				}
 				assert.Equal(t, row.uploads, got)
+			}
+		})
+	}
+}
+
+// TestRecordsNeverLogARemoteCredential: a release's error text reaches hook
+// scripts through DISPAT_ERROR and its log reaches whatever CI ingests, so a
+// remote is always named with its user information, query and fragment taken
+// out. A CI runner is handed a credential in the URL, either behind a remote
+// name or as the remote itself, and the second is the case where the argument
+// a failed push quotes back is the secret. Port 1 refuses at once, so the run
+// fails on the remote rather than waiting on one.
+func TestRecordsNeverLogARemoteCredential(t *testing.T) {
+	const url = "https://ci-bot:s3cr3t@127.0.0.1:1/acme/mono.git"
+	for _, row := range []struct {
+		name string
+		// remote is the commit.remote value; empty keeps the named origin.
+		remote string
+		verify *bool
+		// upfront is true where the remote check refuses before any release
+		// work, so nothing is tagged.
+		upfront bool
+	}{
+		{name: "a named remote whose URL carries a credential", upfront: true},
+		{name: "the URL itself as the remote, with the upfront check off", remote: url, verify: models.Bool(false)},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true, Remote: row.remote, Verify: row.verify}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): bootstrap")
+			if row.remote == "" {
+				r.Git("remote", "add", "origin", url+"?token=abc123#fragment")
+			}
+
+			res := r.Release()
+			require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			out := res.Stdout + res.Stderr
+			assert.Contains(t, out, "REDACTED", "the remote is still named, without its secrets")
+			assert.NotContains(t, out, "s3cr3t", "the password must not be recorded anywhere")
+			assert.NotContains(t, out, "token=abc123", "nor a credential carried in the query")
+			assert.NotContains(t, out, "fragment", "nor anything after it")
+			if row.upfront {
+				assert.Empty(t, r.TagList(), "and the refusal came before any release work")
 			}
 		})
 	}

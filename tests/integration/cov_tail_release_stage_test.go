@@ -154,44 +154,6 @@ func TestCovTailSyncLockSkippedWhenNothingWasReconciled(t *testing.T) {
 	})
 }
 
-// TestCovTailRefusesAnExportNameItReserves: the DISPAT_ namespace is dispat's
-// own, so a stage exporting a name inside it is refused rather than allowed to
-// redefine a computed variable its consumers read; a line with no name at all
-// is the same refusal. An export file the script removed is a third shape, and
-// none of them may be mistaken for a successful export.
-func TestCovTailRefusesAnExportNameItReserves(t *testing.T) {
-	for name, tc := range map[string]struct {
-		build string
-		want  string
-	}{
-		"a name inside the reserved namespace": {
-			build: `echo "DISPAT_VERSION=9.9.9" >> "$DISPAT_OUTPUT"`,
-			want:  "DISPAT_VERSION=9.9.9",
-		},
-		"a line with no name at all": {
-			build: `echo "=orphaned" >> "$DISPAT_OUTPUT"`,
-			want:  "=orphaned",
-		},
-		"an export file the script removed": {
-			build: `rm -f "$DISPAT_OUTPUT"`,
-			want:  "",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			r := singlePackageRepo(t, tc.build)
-			r.Commit("feat(core): bootstrap")
-
-			res := r.Release()
-			assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.False(t, r.IsTagged("core@0.1.0"),
-				"a refused export before the point of no return fails its package; tags: %v", r.TagList())
-			if tc.want != "" {
-				assert.Contains(t, res.Stdout, tc.want, "the refusal quotes the line back")
-			}
-		})
-	}
-}
-
 // TestCovTailStaticEnvExpandsAgainstTheComputedSet: a static env value is
 // never shell-expanded by exec, so dispat expands it itself — against the
 // computed release variables first, then the process environment, with `$$`

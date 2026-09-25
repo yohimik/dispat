@@ -16,9 +16,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -72,31 +69,4 @@ func TestCovTailTagInventoryWalksRefsShorterThanAPrefix(t *testing.T) {
 	res := r.StatusOK()
 	assert.Equal(t, "1.0.0 -> 1.0.1", harness.GraphLine(res.Events, "core").Str("version"),
 		"the release tag is the baseline and the short ref is nobody's: %s", res.Stdout)
-}
-
-// TestCovTailFailedPushRedactsTheCredentialInItsOwnArguments: a remote may be
-// a URL rather than a name, which is how a CI runner is handed a credential,
-// and the upfront remote check may be turned off for a remote that refuses
-// `ls-remote` and accepts pushes. The push then fails inside git with the URL
-// among the arguments — and those arguments are what the failure text quotes
-// back, into a log, a CI ingestion and a hook script's DISPAT_ERROR alike.
-func TestCovTailFailedPushRedactsTheCredentialInItsOwnArguments(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(echoBuild, 1)
-	// The remote is the URL itself rather than a name, which is how a CI
-	// runner is handed a credential, and is the case where the argument dispat
-	// logs is the secret.
-	cfg.Commit = &models.CommitConfig{
-		Enabled: models.Bool(true), Push: true, Verify: models.Bool(false),
-		Remote: "https://ci-bot:s3cr3t@127.0.0.1:1/acme/mono.git",
-	}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): bootstrap")
-	res := r.Release()
-	require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	out := res.Stdout + res.Stderr
-	assert.Contains(t, out, "REDACTED", "the remote is still named, without its secret")
-	assert.NotContains(t, out, "s3cr3t",
-		"and the password is nowhere in what the run said: %s", out)
 }
