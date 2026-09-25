@@ -983,20 +983,7 @@ func (r *runner) runConfigured() int {
 	cfgPath, resolvedRoot, err := config.ResolveFile(*r.o.root, *r.o.cfgName, r.fs.Changed("config"))
 	if err != nil {
 		if r.gitAuthoring && !r.fs.Changed("config") && errors.Is(err, configlib.ErrNoConfig) {
-			root, rootErr := filepath.Abs(*r.o.root)
-			if rootErr != nil {
-				r.boot.Error().Err(rootErr).Msg("cannot resolve repository root")
-				return 1
-			}
-			ctx, stop := signalCtx()
-			defer stop()
-			log := newLogger(orDefault(*r.o.logLevel, "info"), orDefault(*r.o.logFormat, "pretty"), r.stdout)
-			defaults := &config.File{LogLevel: orDefault(*r.o.logLevel, "info"), LogFormat: orDefault(*r.o.logFormat, "pretty")}
-			if authorErr := app.New(root, defaults, log).AuthorCommit(ctx, r.gitCommitArgs, r.stdout, r.stderr); authorErr != nil {
-				log.Error().Err(authorErr).Msg("git commit failed")
-				return 1
-			}
-			return 0
+			return r.authorCommitWithoutConfig()
 		}
 		r.boot.Error().Err(err).Msg("config file not found")
 		return 1
@@ -1023,34 +1010,13 @@ func (r *runner) runConfigured() int {
 	// Config imports add to the control file's list. They are intentionally
 	// resolved later, from resolvedRoot, while paths authored in a config are
 	// resolved from the declaring file.
-	if r.fs.Changed("polyrepo") {
-		cfg.Polyrepo = *r.o.polyrepo
-	}
-	if len(cfg.Configs)+len(*r.o.configs) > 0 {
-		if r.fs.Changed("polyrepo") && !*r.o.polyrepo {
-			r.boot.Error().Msg("--polyrepo=false conflicts with config imports, which require polyrepo mode")
-			return 2
-		}
-		cfg.Polyrepo = true
+	if !r.applyPolyrepoFlag(cfg) {
+		return 2
 	}
 	standalone := cfg.IsLinked() && !cfg.Polyrepo
-	var pins map[string][]string
-	var pinResolver config.SourcePinResolver
-	if r.o.nestedWorkspace {
-		env := os.Environ()
-		pins, err = workspaceenv.Pins(resolvedRoot, cfgPath, env)
-		if err != nil {
-			r.boot.Error().Err(err).Msg("cannot read enclosing release outputs")
-			return 1
-		}
-		live, liveErr := workspaceenv.OpenLivePins(resolvedRoot, cfgPath, env)
-		if liveErr != nil {
-			r.boot.Error().Err(liveErr).Msg("cannot validate enclosing live pin context")
-			return 1
-		}
-		if live != nil {
-			pinResolver = live.Pins
-		}
+	pins, pinResolver, isRead := r.readEnclosingPins(resolvedRoot, cfgPath)
+	if !isRead {
+		return 1
 	}
 	// The interruptible context of everything below, opened here rather than
 	// at each command because composition itself can wait: validating a live
@@ -1106,6 +1072,67 @@ func (r *runner) runConfigured() int {
 	*r.update = startUpdateCheck(r.checkCtx, r.o, r.fs, cfg.LogFormat, cfg.IsUpdateCheckEnabled())
 
 	return r.dispatch(ctx, command)
+}
+
+// authorCommitWithoutConfig is `dispat commit` standing in for `git commit`
+// in a repository with no dispat configuration: the commit is authored under
+// the default log settings and whatever --log-level and --log-format say.
+func (r *runner) authorCommitWithoutConfig() int {
+	root, rootErr := filepath.Abs(*r.o.root)
+	if rootErr != nil {
+		r.boot.Error().Err(rootErr).Msg("cannot resolve repository root")
+		return 1
+	}
+	ctx, stop := signalCtx()
+	defer stop()
+	log := newLogger(orDefault(*r.o.logLevel, "info"), orDefault(*r.o.logFormat, "pretty"), r.stdout)
+	defaults := &config.File{LogLevel: orDefault(*r.o.logLevel, "info"), LogFormat: orDefault(*r.o.logFormat, "pretty")}
+	if authorErr := app.New(root, defaults, log).AuthorCommit(ctx, r.gitCommitArgs, r.stdout, r.stderr); authorErr != nil {
+		log.Error().Err(authorErr).Msg("git commit failed")
+		return 1
+	}
+	return 0
+}
+
+// applyPolyrepoFlag lets --polyrepo state this invocation's mode, and turns
+// polyrepo mode on for config imports, which require it. It reports false,
+// already logged, when --polyrepo=false contradicts an import.
+func (r *runner) applyPolyrepoFlag(cfg *config.File) bool {
+	if r.fs.Changed("polyrepo") {
+		cfg.Polyrepo = *r.o.polyrepo
+	}
+	if len(cfg.Configs)+len(*r.o.configs) > 0 {
+		if r.fs.Changed("polyrepo") && !*r.o.polyrepo {
+			r.boot.Error().Msg("--polyrepo=false conflicts with config imports, which require polyrepo mode")
+			return false
+		}
+		cfg.Polyrepo = true
+	}
+	return true
+}
+
+// readEnclosingPins reads the run-scoped pins and the live pin resolver an
+// enclosing release hands a nested command; a command that is not nested gets
+// neither. isRead is false, already logged, when either cannot be read.
+func (r *runner) readEnclosingPins(root, cfgPath string) (pins map[string][]string, resolver config.SourcePinResolver, isRead bool) {
+	if !r.o.nestedWorkspace {
+		return nil, nil, true
+	}
+	env := os.Environ()
+	pins, err := workspaceenv.Pins(root, cfgPath, env)
+	if err != nil {
+		r.boot.Error().Err(err).Msg("cannot read enclosing release outputs")
+		return nil, nil, false
+	}
+	live, liveErr := workspaceenv.OpenLivePins(root, cfgPath, env)
+	if liveErr != nil {
+		r.boot.Error().Err(liveErr).Msg("cannot validate enclosing live pin context")
+		return nil, nil, false
+	}
+	if live != nil {
+		resolver = live.Pins
+	}
+	return pins, resolver, true
 }
 
 // dispatch runs the selected package-selecting command. The application does
