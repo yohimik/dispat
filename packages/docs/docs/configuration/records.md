@@ -699,7 +699,9 @@ GitHub releases move to the end of the run and document the release commit in th
 each mode is described under [`github`](#github).
 
 Pushing pushes the branch first and the run's tags after it. A single-repository run requires a checked-out branch (use
-`actions/checkout` with a `ref`). In polyrepository mode, an explicit `branch` lets a source use a detached,
+`actions/checkout` with a `ref`), and refuses a detached HEAD with
+[`E337`](../reference/plan-errors.md#polyrepository-snapshot-and-recording-diagnostics) before it takes the release lock
+or builds anything. In polyrepository mode, an explicit `branch` lets a source use a detached,
 pinned checkout while naming the branch that receives its release commit. When `push` is enabled, remote access is **verified before any release work starts**
 (`git ls-remote`, switched off by `verify: false`), so a misconfigured remote fails the run before anything is built.
 The same run also reads the remote's release tags once, under the release lock and before it plans, and refuses a

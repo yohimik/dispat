@@ -180,11 +180,38 @@ func (a *App) checkReleaseEntry(ctx context.Context) error {
 		a.log.Error().Err(err).Msg("cannot start release")
 		return err
 	}
+	if err := a.checkPushBranch(ctx); err != nil {
+		a.logError(err).Msg("refusing to release")
+		return err
+	}
 	// Who may start this release, and whether a run that delegates work could
 	// be coordinated at all. Both are refused before the first lock is pushed
 	// and report themselves; with no execution settings this returns nil
 	// without writing a line.
 	return a.checkExecutionEntry(ctx, runRelease)
+}
+
+// checkPushBranch refuses a single-repository release that pushes from a
+// detached HEAD. The release commit is pushed as the checked-out branch, and a
+// detached HEAD has none, so such a run would publish every package and only
+// then fail its push. It is refused with E337 before any lock, hook or package
+// work instead. A fleet settles each repository's push branch itself
+// (verifyPushBranch), where `commit.branch` may name one for a detached
+// source; a single repository always pushes the branch it has checked out.
+func (a *App) checkPushBranch(ctx context.Context) error {
+	if a.workspace != nil || !a.cfg.Commit.IsPushEnabled() {
+		return nil
+	}
+	branch, err := a.git.CurrentBranch(ctx)
+	if err != nil {
+		return fmt.Errorf("read the branch the release commit is pushed to: %w", err)
+	}
+	if branch != "" {
+		return nil
+	}
+	return config.WithDiagnostic("E337", errors.New("E337: HEAD is detached and commit.push is enabled, "+
+		"so the release commit has no branch to be pushed to; check out a branch before releasing "+
+		"(for example actions/checkout with a ref)"))
 }
 
 // releaseCleanup gives back what a release holds, each part exactly once: the
@@ -720,15 +747,12 @@ func (a *App) checkBranchAllowed(ctx context.Context) error {
 // the remote branch it would push to. The plan was computed against the tags
 // this clone can see, so a stale checkout schedules versions another run may
 // already have released — and the push at the end would be rejected anyway,
-// after the work. A detached HEAD skips the check: there is no branch to
-// compare, and the push fails on its own terms there.
+// after the work. A detached HEAD never reaches it: checkPushBranch refused
+// the run at its entry.
 func (a *App) checkNotBehind(ctx context.Context, remote string) error {
 	branch, err := a.git.CurrentBranch(ctx)
 	if err != nil {
 		return err
-	}
-	if branch == "" {
-		return nil
 	}
 	behind, err := a.git.BehindRemote(ctx, remote, branch)
 	if err != nil {

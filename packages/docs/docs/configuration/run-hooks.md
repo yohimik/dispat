@@ -93,6 +93,8 @@ dispat computes the plan from the tags your local clone can see. If someone else
 checkout plans versions that may already exist. The push at the end would fail after everything was built, published,
 and tagged. Failing at the start costs nothing. Failing at the end costs a release.
 
-Run `git pull` and try again. dispat ignores this check for a detached HEAD or a new branch the remote does not have
-yet. The check uses `ls-remote`. Set `commit.verify: false` to turn off this check if your remote rejects `ls-remote`
+Run `git pull` and try again. dispat ignores this check for a new branch the remote does not have yet and for a
+detached source of a fleet. A single repository never reaches it from a detached HEAD: a release that pushes refuses
+one with [`E337`](../reference/plan-errors.md#polyrepository-snapshot-and-recording-diagnostics) before it takes the
+lock. The check uses `ls-remote`. Set `commit.verify: false` to turn off this check if your remote rejects `ls-remote`
 but accepts pushes.

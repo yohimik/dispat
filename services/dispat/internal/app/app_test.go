@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
@@ -308,6 +309,29 @@ func TestCheckBranchAllowed(t *testing.T) {
 	})
 }
 
+// TestCheckPushBranch: a single repository pushes its release commit as the
+// checked-out branch, so a push-mode release from a detached HEAD is refused
+// with E337 at its entry. A release that does not push, and one on a branch,
+// pass. The behind-remote check that follows therefore never sees a detached
+// HEAD.
+func TestCheckPushBranch(t *testing.T) {
+	ctx := context.Background()
+	pushing := &config.File{Commit: &config.CommitConfig{Enabled: models.Bool(true), Push: true}}
+	root, a := guardRepo(t, pushing)
+	require.NoError(t, a.checkPushBranch(ctx), "a checked-out branch has somewhere to push")
+
+	out, err := exec.Command("git", "-C", root, "checkout", "-q", "--detach").CombinedOutput()
+	require.NoError(t, err, "git checkout --detach: %s", out)
+	err = a.checkPushBranch(ctx)
+	require.Error(t, err)
+	assert.Equal(t, "E337", config.DiagnosticCode(err))
+	assert.Contains(t, err.Error(), "HEAD is detached")
+	assert.Contains(t, err.Error(), "check out a branch before releasing")
+
+	a.cfg.Commit.Push = false
+	assert.NoError(t, a.checkPushBranch(ctx), "a release that does not push needs no branch")
+}
+
 func TestCheckNotBehind(t *testing.T) {
 	ctx := context.Background()
 	git := func(root string, args ...string) {
@@ -315,17 +339,6 @@ func TestCheckNotBehind(t *testing.T) {
 		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
 		require.NoError(t, err, "git %v: %s", args, out)
 	}
-
-	t.Run("detached HEAD is skipped", func(t *testing.T) {
-		// There is no branch to compare, and the push fails on its own terms
-		// there, so the guard has nothing honest to say.
-		root, a := guardRepo(t, &config.File{Run: &config.RunConfig{}})
-		head, err := a.git.HeadSHA(ctx)
-		require.NoError(t, err)
-		git(root, "checkout", "-q", head)
-		require.NoError(t, a.checkNotBehind(ctx, "origin"),
-			"no remote is even contacted for a detached HEAD")
-	})
 
 	t.Run("behind the remote is refused", func(t *testing.T) {
 		root, a := guardRepo(t, &config.File{Run: &config.RunConfig{}})

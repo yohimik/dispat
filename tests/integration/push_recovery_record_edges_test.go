@@ -20,14 +20,15 @@ import (
 )
 
 // TestPushRecoveryRefusesAnUnreadableBranchAfterPublication targets the
-// recovery-only branch read. The initial guard reads the branch successfully;
-// after a concurrent remote commit rejects the release push, losing that same
-// repository fact must preserve the local immutable record and report the
-// publication as incomplete rather than pretending it reached the remote.
+// recovery-only branch read. The entry check and the behind-remote guard read
+// the branch successfully; after a concurrent remote commit rejects the
+// release push, losing that same repository fact must preserve the local
+// immutable record and report the publication as incomplete rather than
+// pretending it reached the remote.
 func TestPushRecoveryRefusesAnUnreadableBranchAfterPublication(t *testing.T) {
 	r, remote := newFinalRecoveryRepo(t)
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*rev-parse --abbrev-ref HEAD*", Nth: 2, Code: 128,
+		Pattern: "*rev-parse --abbrev-ref HEAD*", Nth: 3, Code: 128,
 	})
 
 	failed := r.CommandEnv(fault.Env())
@@ -36,7 +37,7 @@ func TestPushRecoveryRefusesAnUnreadableBranchAfterPublication(t *testing.T) {
 	assert.Contains(t, combined, harness.GitFaultMarker)
 	assert.True(t, harness.IsCodePresent(failed.Events, "E224"), "stdout:\n%s", failed.Stdout)
 	assert.Contains(t, failed.Stdout, `"status":"published"`)
-	assert.Equal(t, 2, fault.Matches())
+	assert.Equal(t, 3, fault.Matches())
 	assert.True(t, r.IsTagged("core@0.1.0"))
 	assert.Empty(t, r.Git("-C", remote, "tag", "--list", "core@0.1.0"))
 

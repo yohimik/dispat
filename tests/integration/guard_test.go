@@ -93,6 +93,39 @@ func TestGuardAllowBranchRefusesDetachedHead(t *testing.T) {
 	assert.False(t, r.IsTagged("core@0.1.0"), "a refused run must not tag")
 }
 
+// TestGuardPushRefusesADetachedHead: a single repository pushes its release
+// commit as the branch it has checked out, and a detached HEAD has none, not
+// even with a commit.branch that only a fleet source reads. The push-mode run
+// is refused with E337 before it takes the lock, runs a hook or builds
+// anything, rather than publishing and then failing its push.
+func TestGuardPushRefusesADetachedHead(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(markerBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true, Branch: harness.DefaultBranch}
+	cfg.Scripts["gate"] = models.Script{"echo gate >> build.log"}
+	cfg.Run = &models.RunConfig{BeforeAll: []string{"gate"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first")
+	bare := r.AddBareRemote()
+	r.Git("push", "-q", "origin", harness.DefaultBranch)
+	tip := strings.TrimSpace(bareGit(t, bare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
+	r.Git("checkout", "-q", "--detach")
+
+	res := r.CommandEnv(harness.LockEnabled, "release")
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	refusal := findEvent(t, harness.ParseEvents(res.Stdout), "refusing to release")
+	assert.Equal(t, "E337", refusal.Str("code"))
+	assert.Contains(t, refusal.Str("error"), "HEAD is detached")
+	assert.Contains(t, refusal.Str("error"), "actions/checkout with a ref", "the refusal names the remedy")
+	assert.NotContains(t, res.Stdout, "release lock acquired", "the lock is never taken")
+	assert.False(t, remoteHoldsLock(t, bare))
+	assert.Zero(t, buildRuns(r), "neither the beforeAll hook nor the build ran")
+	assert.Empty(t, r.TagList(), "nothing is tagged")
+	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "tag")), "nothing is pushed")
+	assert.Equal(t, tip, strings.TrimSpace(bareGit(t, bare, "rev-parse", "refs/heads/"+harness.DefaultBranch)))
+}
+
 // TestGuardBehindRemote: in push mode a checkout whose branch tip is behind
 // the remote refuses *before the plan is computed at all* — a plan built on
 // stale tags is wrong rather than merely useless, because it recomputes

@@ -314,14 +314,11 @@ func (a *App) recordGitHubReleases(ctx context.Context, fin finalizer, rels []*p
 // records this run still has to write are about the commit underneath it.
 func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Release,
 	tags []string, pushTags []gitx.ReleaseRef) (gitx.PushReport, string, error) {
+	// A release that pushes has a checked-out branch: checkPushBranch
+	// refused a detached HEAD before the run began.
 	branch, err := a.git.CurrentBranch(ctx)
 	if err != nil {
 		return gitx.PushReport{}, "", err
-	}
-	if branch == "" {
-		return gitx.PushReport{}, "", fmt.Errorf(
-			"commits landed on %s during the release, and this is a detached HEAD with no branch to merge them into",
-			gitx.RedactURL(fin.remote))
 	}
 	// Read before the merge, because afterwards HEAD is the merge itself and
 	// the release commit is only its first parent.

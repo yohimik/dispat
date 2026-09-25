@@ -27,8 +27,9 @@ A release happens in five steps:
    has checked out is compared with the remote's tip of that branch. In a fleet every participating repository with
    both settings on is checked the same way. A plan built from a stale checkout recomputes versions somebody else has
    already published, so the check runs before the plan exists and under the lock that keeps its answer from going
-   stale. A detached checkout has no branch to compare; the branch a release commit is pushed to, when
-   `commit.branch` names another one, is compared once the plan says which repositories record.
+   stale. A detached fleet source has no branch to compare; the branch a release commit is pushed to, when
+   `commit.branch` names another one, is compared once the plan says which repositories record. A single repository
+   that pushes refuses a detached HEAD with `E337` before it takes the lock at all.
 3. Read the remote's release tags once, under the same conditions, and compare them with this checkout's. The lock
    decides who releases; it does not decide what the releasing run knows, and a checkout that is level with the branch
    can still be missing every record another run wrote. A tag the remote holds on a commit this run's head reaches and
