@@ -131,6 +131,9 @@ type Worker struct {
 	// left in the cache have been dropped, which happens once, before the
 	// first poll.
 	isCacheCleared bool
+	// lastMaintained is when the poll goroutine last compacted the cache, the
+	// only goroutine that reads or writes it.
+	lastMaintained time.Time
 	// slots is this node's capacity, one entry per task it may run at once.
 	// It is filled lazily by the poll goroutine, which is the only one that
 	// takes a slot; the task goroutines give theirs back.
@@ -247,6 +250,7 @@ func (w *Worker) poll(ctx context.Context) string {
 		if w.refusal != nil {
 			return StopDisowned
 		}
+		w.maintainIdleCache(ctx, time.Now())
 		next.Reset(interval)
 		for isWaiting := true; isWaiting; {
 			select {
@@ -310,6 +314,55 @@ func (w *Worker) resolveIdleRemainder() time.Duration {
 		return w.IdleTimeout
 	}
 	return w.IdleTimeout - time.Since(w.lastActive)
+}
+
+// The cache compaction rhythm. A node compacts its cache once per idle
+// stretch: after a minute with nothing claimed and nothing in flight, which is
+// twelve polls at the longest interval and long enough that the gaps between
+// the tasks of a busy run do not reach it. The bound keeps a compaction that
+// has run into a slow disk from holding up the poll for longer than that.
+const (
+	cacheMaintenanceIdle    = time.Minute
+	cacheMaintenanceTimeout = 10 * time.Minute
+)
+
+// maintainIdleCache compacts the cache when the node has been idle long
+// enough, and at most once per idle stretch.
+//
+// Every message a node writes and every branch it fetches leaves objects in
+// the cache that nothing reaches once the run closes its branches, and git's
+// own maintenance is turned off there, because it would otherwise start inside
+// a poll's fetch. So the node collects the garbage itself, on the poll
+// goroutine and with no task in flight: nothing else writes the cache then,
+// which is what makes deleting every unreachable object at once safe. A
+// failure costs disk and nothing else, so it is a debug line, and the next
+// idle stretch tries again.
+func (w *Worker) maintainIdleCache(ctx context.Context, now time.Time) {
+	if !w.isCacheMaintenanceDue(now) {
+		return
+	}
+	w.lastMaintained = now
+	bounded, done := context.WithTimeout(ctx, cacheMaintenanceTimeout)
+	defer done()
+	started := time.Now()
+	if err := w.Cache.CollectGarbage(bounded); err != nil {
+		w.Log.Debug().Err(err).Msg("the idle node's cache was not compacted")
+		return
+	}
+	w.Log.Debug().Dur("took", time.Since(started)).Msg("the idle node's cache was compacted")
+}
+
+// isCacheMaintenanceDue reports whether the cache is open, no task is in
+// flight, something happened since the last compaction, and nothing has
+// happened for cacheMaintenanceIdle.
+func (w *Worker) isCacheMaintenanceDue(now time.Time) bool {
+	if w.Cache == nil || !w.isStorePrepared {
+		return false
+	}
+	w.activity.Lock()
+	defer w.activity.Unlock()
+	return w.inFlight == 0 && w.lastActive.After(w.lastMaintained) &&
+		now.Sub(w.lastActive) >= cacheMaintenanceIdle
 }
 
 // resolvePollInterval is the back-off: straight back to the shortest wait

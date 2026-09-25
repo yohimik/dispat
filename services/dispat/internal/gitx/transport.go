@@ -447,8 +447,8 @@ func (c *LocalGitx) ResolveFetchedCommit(ctx context.Context, localRef, wantOID 
 		wantOID, maxDepth, localRef, ErrCommitNotOnRef)
 }
 
-// InitBareStore makes this handle's folder a bare repository, and leaves one
-// that is already there as it is.
+// InitBareStore makes this handle's folder a bare repository, leaves one that
+// is already there as it is, and turns git's automatic maintenance off in it.
 //
 // It is what a serving node opens its object cache with. The cache holds
 // nothing but fetched coordination objects, so it is dispensable by design: a
@@ -456,9 +456,38 @@ func (c *LocalGitx) ResolveFetchedCommit(ctx context.Context, localRef, wantOID 
 // one full fetch, which is why this is safe to call on every recovery rather
 // than only once. git init is idempotent, so no caller has to ask first
 // whether the folder is already a repository.
+//
+// Automatic maintenance is off because every fetch would otherwise start it,
+// in the foreground (see newCommand), and a poll would stall on a repack at
+// whatever moment the cache crossed git's threshold. The node compacts the
+// cache itself, with CollectGarbage, when it has nothing else to do.
 func (c *LocalGitx) InitBareStore(ctx context.Context) error {
 	if _, err := c.run(ctx, "init", "--bare", "--quiet"); err != nil {
 		return fmt.Errorf("gitx: opening the bare object store at %s: %w", c.Dir, err)
+	}
+	for _, setting := range [][2]string{{"gc.auto", "0"}, {"maintenance.auto", "false"}} {
+		if _, err := c.run(ctx, "config", setting[0], setting[1]); err != nil {
+			return fmt.Errorf("gitx: setting %s in the bare object store at %s: %w", setting[0], c.Dir, err)
+		}
+	}
+	return nil
+}
+
+// CollectGarbage packs what this handle's bare object store still reaches and
+// deletes everything else at once.
+//
+// Pruning with no grace period is only safe while nothing else writes the
+// store, because an object a concurrent fetch has written and not yet
+// referenced is unreachable too. A serving node's cache has exactly one
+// writer, the node itself, which calls this only while it runs no task and
+// polls nothing. It is refused anywhere but in a bare repository, for the
+// reason ClearTransportRefs is.
+func (c *LocalGitx) CollectGarbage(ctx context.Context) error {
+	if err := c.requireBareStore(ctx, "collecting garbage"); err != nil {
+		return err
+	}
+	if _, err := c.run(ctx, "gc", "--prune=now", "--quiet"); err != nil {
+		return fmt.Errorf("gitx: collecting the garbage of %s: %w", c.Dir, err)
 	}
 	return nil
 }

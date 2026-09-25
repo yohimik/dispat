@@ -363,6 +363,41 @@ func TestClearTransportRefsEmptiesOnlyABareCache(t *testing.T) {
 		"the checkout's own fetched ref is left for the process that fetched it")
 }
 
+// TestBareStoreLeavesMaintenanceToItsNode: a serving node's cache never runs
+// git's automatic maintenance, which a fetch would start in the foreground, and
+// the node's own collection deletes every object nothing reaches at once. The
+// collection is refused in a checkout and in a folder nobody initialized
+// inside one, where it would delete the checkout's own unreachable objects.
+func TestBareStoreLeavesMaintenanceToItsNode(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	cache := &LocalGitx{Dir: filepath.Join(t.TempDir(), "cache.git"), Log: zerolog.Nop()}
+	require.NoError(t, os.MkdirAll(cache.Dir, 0o755))
+	require.NoError(t, cache.InitBareStore(ctx))
+	require.NoError(t, cache.InitBareStore(ctx), "opening the store again changes nothing")
+	for setting, value := range map[string]string{"gc.auto": "0", "maintenance.auto": "false"} {
+		assert.Equal(t, value, strings.TrimSpace(runGit(t, cache.Dir, "config", "--get", setting)), setting)
+	}
+
+	for _, dir := range []string{cache.Dir, f.root} {
+		cmd := exec.Command("git", "-C", dir, "hash-object", "-w", "--stdin")
+		cmd.Stdin = strings.NewReader("an object nothing reaches\n")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "hash-object: %s", out)
+	}
+	require.NoError(t, cache.CollectGarbage(ctx))
+	assert.Contains(t, runGit(t, cache.Dir, "count-objects", "-v"), "count: 0\n")
+	assert.Contains(t, runGit(t, cache.Dir, "count-objects", "-v"), "in-pack: 0\n")
+
+	nested := filepath.Join(f.root, "never-initialized")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	held := runGit(t, f.root, "count-objects", "-v")
+	for _, dir := range []string{f.root, nested} {
+		require.Error(t, (&LocalGitx{Dir: dir, Log: zerolog.Nop()}).CollectGarbage(ctx), dir)
+	}
+	assert.Equal(t, held, runGit(t, f.root, "count-objects", "-v"), "the checkout keeps every object it had")
+}
+
 // TestTransportReadsTheTagObjectTheRemoteAdvertises: the lock is an annotated
 // tag whose object id identifies one acquisition, so the tag object is what
 // comes back and never the commit it peels to.

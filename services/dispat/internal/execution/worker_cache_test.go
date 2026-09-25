@@ -160,3 +160,91 @@ func TestAWorkerStartsWithAnEmptyCoordinationCache(t *testing.T) {
 	restarted.tick(t.Context())
 	require.Zero(t, measureCache(t, fixture.node.store).refs)
 }
+
+// compactIdle gives the node the poll it makes once it has had nothing to do
+// for the whole idle stretch: everything it remembers the time of is moved
+// back by that long, which is that stretch passing.
+func compactIdle(t *testing.T, worker *Worker) {
+	t.Helper()
+	worker.activity.Lock()
+	worker.lastActive = worker.lastActive.Add(-cacheMaintenanceIdle)
+	worker.activity.Unlock()
+	if !worker.lastMaintained.IsZero() {
+		worker.lastMaintained = worker.lastMaintained.Add(-cacheMaintenanceIdle)
+	}
+	worker.maintainIdleCache(t.Context(), time.Now())
+}
+
+// TestAWorkerCacheStaysFlatAcrossTasks: twelve tasks through one node, each
+// bringing a probe and an input state of its own into the cache. The refs go
+// when the run closes the branches, and the objects go when the node next has
+// nothing to do, so the cache holds as much after the twelfth task as after
+// the first. Without the compaction it grows by every task's objects.
+func TestAWorkerCacheStaysFlatAcrossTasks(t *testing.T) {
+	fixture := newCacheFixture(t)
+	var first cacheSize
+	for attempt := 1; attempt <= 12; attempt++ {
+		branch, snapshot := fixture.offerTask(t, attempt)
+		require.True(t, fixture.worker.tick(t.Context()))
+		fixture.closeTask(t, branch, snapshot)
+		fixture.worker.tick(t.Context())
+		compactIdle(t, fixture.worker)
+
+		size := measureCache(t, fixture.node.store)
+		t.Logf("after task %d: %d refs, %d objects, %d KiB", attempt, size.refs, size.objects, size.kib)
+		if attempt == 1 {
+			first = size
+		}
+		require.Zero(t, size.refs, "task %d", attempt)
+		require.LessOrEqual(t, size.objects, first.objects, "task %d", attempt)
+		require.LessOrEqual(t, size.kib, first.kib, "task %d", attempt)
+	}
+	for _, setting := range [][2]string{{"gc.auto", "0"}, {"maintenance.auto", "false"}} {
+		require.Equal(t, setting[1], strings.TrimSpace(runGitIn(t, fixture.node.store, "config", "--get", setting[0])),
+			"git's own maintenance never starts inside a poll")
+	}
+}
+
+// TestAWorkerCompactsItsCacheOnlyWhenIdle: the compaction deletes every object
+// nothing reaches, so it runs only when nothing else can be writing the cache:
+// never with a task in flight, never before the node has been idle for the
+// stated stretch, and once per stretch rather than on every poll.
+func TestAWorkerCompactsItsCacheOnlyWhenIdle(t *testing.T) {
+	now := time.Now()
+	for _, scenario := range []struct {
+		name       string
+		inFlight   int
+		idle       time.Duration
+		maintained time.Duration
+		isClosed   bool
+		isDue      bool
+	}{
+		{name: "idle for the whole stretch", idle: cacheMaintenanceIdle, isDue: true},
+		{name: "a task in flight", inFlight: 1, idle: time.Hour},
+		{name: "idle for less than the stretch", idle: cacheMaintenanceIdle - time.Second},
+		{name: "already compacted in this stretch", idle: time.Hour, maintained: time.Minute},
+		{name: "the store is not open", idle: time.Hour, isClosed: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			worker := &Worker{Cache: &gitx.LocalGitx{}, isStorePrepared: !scenario.isClosed,
+				inFlight: scenario.inFlight, lastActive: now.Add(-scenario.idle)}
+			if scenario.maintained > 0 {
+				worker.lastMaintained = now.Add(-scenario.maintained)
+			}
+			require.Equal(t, scenario.isDue, worker.isCacheMaintenanceDue(now))
+		})
+	}
+
+	fixture := newCacheFixture(t)
+	branch, snapshot := fixture.offerTask(t, 1)
+	require.True(t, fixture.worker.tick(t.Context()))
+	fixture.closeTask(t, branch, snapshot)
+	fixture.worker.tick(t.Context())
+	held := measureCache(t, fixture.node.store)
+	fixture.worker.beginTask()
+	compactIdle(t, fixture.worker)
+	require.Equal(t, held, measureCache(t, fixture.node.store), "nothing is collected under a running task")
+	fixture.worker.endTask()
+	compactIdle(t, fixture.worker)
+	require.Zero(t, measureCache(t, fixture.node.store).objects, "the idle node collects what the task left")
+}
