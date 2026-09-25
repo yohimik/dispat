@@ -48,6 +48,30 @@ func importedPackages(res harness.RunResult) map[string]bool {
 	return found
 }
 
+// TestPolyrepoInitialsBelongToTheConfigThatOwnsThePackage: an initials entry
+// is read against the packages its own configuration declares. The control
+// configuration naming a package an imported source declares warns that the
+// entry matches none of its packages, names the repository, and the package
+// plans from its own history rather than from the entry.
+func TestPolyrepoInitialsBelongToTheConfigThatOwnsThePackage(t *testing.T) {
+	control := importFleet(t)
+	control.WriteConfigRaw(map[string]any{
+		"polyrepo": true, "logFormat": "json", "logLevel": "info", "updateCheck": false,
+		"github":   map[string]any{"enabled": false},
+		"configs":  []string{"sources/one/dispat.json", "sources/two/dispat.json"},
+		"initials": map[string]any{"one": "5.0.0"},
+	})
+	control.Commit("chore: state an initial for a package a source declares")
+
+	res := control.StatusOK()
+	warned := findEvent(t, res.Events, "initials entry matches no discovered package owned by this config, ignoring")
+	assert.Equal(t, "warn", warned.Str("level"))
+	assert.Equal(t, "one", warned.Package())
+	assert.Equal(t, "control", warned.Str("repository"))
+	assert.Equal(t, "0.0.0 -> 0.1.0", harness.GraphLine(res.Events, "one").Str("version"),
+		"the package plans from its own history")
+}
+
 // TestPolyrepoImportListComposesFromEverySpelling: the same two imports
 // reach the same two repositories whether they are written as a list or as
 // one value carrying both, and a value naming no file is refused.
