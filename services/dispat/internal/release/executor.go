@@ -1108,57 +1108,12 @@ func (r *run) execute(ctx context.Context, t task) {
 	if !r.admit(ctx, tc, res) {
 		return
 	}
-	fail := func(err error, msg string) {
-		// A task dying while the context is cancelled died *of* the
-		// cancellation (its script was killed mid-run): that is an
-		// interruption, not a package failure, and it must not spawn more
-		// scripts — no onFail, no announce. The revert still happens, detached
-		// from the cancellation, because a half-modified folder is exactly what
-		// revertOnFail promises to clean up.
-		interrupted := ctx.Err() != nil
-		tc.settleFailure(res, err, interrupted)
-		if interrupted {
-			ev := packageEvent(t.pkg, rel, EventPackageCancelled)
-			ev.Status, ev.Error = StatusCancelled.String(), err.Error()
-			r.notify(ev)
-			log.Warn().Err(err).Msg(t.kind.String() + " interrupted")
-			if rel.Pkg.Space.RevertOnFail {
-				r.revert(context.WithoutCancel(ctx), rel, log)
-			}
-			return
-		}
-		ev := packageEvent(t.pkg, rel, EventPackageFailed)
-		ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), t.kind.String(), err.Error()
-		// Where the package's work was placed, which the reader of a failure
-		// needs first: a build that failed on one node of several is a
-		// failure somebody has to go and look at on that node.
-		ev.Worker = res.Worker
-		var diagnostic interface{ DiagnosticCode() string }
-		if errors.As(err, &diagnostic) {
-			ev.Code = diagnostic.DiagnosticCode()
-		}
-		r.notify(ev)
-		event := log.Error().Err(err)
-		if ev.Code != "" {
-			event.Str("code", ev.Code)
-		}
-		event.Msg(msg)
-		if rel.Pkg.Space.RevertOnFail {
-			r.revert(ctx, rel, log)
-		}
-		// onFail observes a failure that has already settled — it runs after
-		// the status and the revert, in the folder's final state, and only
-		// warns. It fires once: later tasks of a failed package return before
-		// reaching any script.
-		_ = tc.hook(ctx, "onFail", rel.Pkg.Space.OnFailScript, false,
-			"DISPAT_FAILED_STAGE="+t.kind.String(), "DISPAT_ERROR="+err.Error())
-	}
 
 	// beforeAll runs at the package's first task: sign when the package has
 	// one, then version, then build.
 	if t.kind == resolveFirstTask(rel) {
 		if err := tc.hook(ctx, "beforeAll", rel.Pkg.Space.BeforeAllScript, true); err != nil {
-			fail(err, "beforeAll hook failed")
+			tc.failTask(ctx, res, err, "beforeAll hook failed")
 			return
 		}
 	}
@@ -1180,20 +1135,20 @@ func (r *run) execute(ctx context.Context, t task) {
 		// run delegates: the reconciliation writes the checkout a placed frame
 		// is snapshotted from, exactly as the version stage does.
 		if err := tc.reconcileToPublished(ctx); err != nil {
-			fail(err, "reconciling to the providers that published failed")
+			tc.failTask(ctx, res, err, "reconciling to the providers that published failed")
 			return
 		}
 	}
 
 	if t.kind == taskPublish {
 		if err := tc.loginGate(ctx); err != nil {
-			fail(err, "login failed")
+			tc.failTask(ctx, res, err, "login failed")
 			return
 		}
 		if tc.AcquirePublish != nil {
 			releasePublish, err := tc.AcquirePublish(ctx, rel)
 			if err != nil {
-				fail(err, "acquiring publish repository guard failed")
+				tc.failTask(ctx, res, err, "acquiring publish repository guard failed")
 				return
 			}
 			tc.publishRelease = releasePublish
@@ -1202,7 +1157,7 @@ func (r *run) execute(ctx context.Context, t task) {
 	}
 
 	if what, err := tc.runStage(ctx, frame); err != nil {
-		fail(err, what)
+		tc.failTask(ctx, res, err, what)
 		return
 	}
 	if (t.kind == taskSign || t.kind == taskVersion) && len(frame.commands) > 0 {
@@ -1222,6 +1177,55 @@ func (r *run) execute(ctx context.Context, t task) {
 		return
 	}
 	tc.publishTail(ctx, res)
+}
+
+// failTask settles a task of execute that stopped with err, msg being what
+// the log reports as having failed: the status, the event, the revert and
+// the onFail hook.
+func (tc *taskCtx) failTask(ctx context.Context, res *Result, err error, msg string) {
+	// A task dying while the context is cancelled died *of* the
+	// cancellation (its script was killed mid-run): that is an
+	// interruption, not a package failure, and it must not spawn more
+	// scripts — no onFail, no announce. The revert still happens, detached
+	// from the cancellation, because a half-modified folder is exactly what
+	// revertOnFail promises to clean up.
+	interrupted := ctx.Err() != nil
+	tc.settleFailure(res, err, interrupted)
+	if interrupted {
+		ev := packageEvent(tc.t.pkg, tc.rel, EventPackageCancelled)
+		ev.Status, ev.Error = StatusCancelled.String(), err.Error()
+		tc.notify(ev)
+		tc.log.Warn().Err(err).Msg(tc.t.kind.String() + " interrupted")
+		if tc.rel.Pkg.Space.RevertOnFail {
+			tc.revert(context.WithoutCancel(ctx), tc.rel, tc.log)
+		}
+		return
+	}
+	ev := packageEvent(tc.t.pkg, tc.rel, EventPackageFailed)
+	ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), tc.t.kind.String(), err.Error()
+	// Where the package's work was placed, which the reader of a failure
+	// needs first: a build that failed on one node of several is a
+	// failure somebody has to go and look at on that node.
+	ev.Worker = res.Worker
+	var diagnostic interface{ DiagnosticCode() string }
+	if errors.As(err, &diagnostic) {
+		ev.Code = diagnostic.DiagnosticCode()
+	}
+	tc.notify(ev)
+	event := tc.log.Error().Err(err)
+	if ev.Code != "" {
+		event.Str("code", ev.Code)
+	}
+	event.Msg(msg)
+	if tc.rel.Pkg.Space.RevertOnFail {
+		tc.revert(ctx, tc.rel, tc.log)
+	}
+	// onFail observes a failure that has already settled — it runs after
+	// the status and the revert, in the folder's final state, and only
+	// warns. It fires once: later tasks of a failed package return before
+	// reaching any script.
+	_ = tc.hook(ctx, "onFail", tc.rel.Pkg.Space.OnFailScript, false,
+		"DISPAT_FAILED_STAGE="+tc.t.kind.String(), "DISPAT_ERROR="+err.Error())
 }
 
 // settleFailure records, under mu, how a task that stopped with err ended:
