@@ -1978,6 +1978,7 @@ claim, and a single run makes it without depending on anything between runs.
 | `TestSpacePathsAscentFromSecondPath`    | Config-file resolution from inside a later folder finds the monorepo root even when that folder's space file carries a `packages` map, the shape that would otherwise read as a nested monorepo root.               |
 | `TestSpacePathsFilterAndLocate`         | `--space` covers every folder's packages; standing in a later folder infers the space, and standing inside one of its packages narrows to that package.                                                             |
 | `TestSpacePathsNoneCombined`            | A versioning-none space spanning two folders runs scripts under both and never tags anything, while the releasable space next to it releases normally.                                                              |
+| `TestSpacePathsReadANumberAsAFolderName` | A space path written as a number reads as the folder of that name and its packages release; a path list entry that is not a folder name is refused naming the entry. |
 | `TestDiscoveryNamesOneIdentityRepeatedAcrossSpacePaths` | One package identity found under two folders of a space, spelled the same or folding onto one name, is refused with no partial plan, and an identical spelling is named once rather than as two names. |
 
 ### Goal 36: declared version groups across spaces (`versiongroups_test.go`, `npm_distribution_test.go`)

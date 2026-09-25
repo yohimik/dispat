@@ -216,3 +216,31 @@ func TestSpacePathsNoneCombined(t *testing.T) {
 	assert.FileExists(t, r.Path("sandboxes", "probe", "ran.log"),
 		"the none space's second folder runs scripts too")
 }
+
+// TestSpacePathsReadANumberAsAFolderName: a folder named by digits alone is
+// what a YAML or JSON number spells, so a space path written as a number
+// reads as the folder of that name and its packages release. A list entry
+// that is not a folder name at all is refused, naming the entry.
+func TestSpacePathsReadANumberAsAFolderName(t *testing.T) {
+	space := func(path any) map[string]any {
+		return map[string]any{
+			"logFormat": "json", "updateCheck": false, "github": map[string]any{"enabled": false},
+			"scripts": map[string]any{"build": []string{"echo building"}, "publish": []string{"echo publishing"}},
+			"spaces": map[string]any{"libs": map[string]any{
+				"path": path, "flow": map[string]any{"build": []string{"build"}, "publish": []string{"publish"}},
+			}},
+		}
+	}
+	r := harness.New(t)
+	r.WriteConfigRaw(space(2024))
+	r.SeedPackage("2024", "core")
+	r.Commit("feat(core): a package under a folder named by a year")
+	r.ReleaseOK()
+	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+
+	r.WriteConfigRaw(space([]any{"2024", map[string]any{"folder": "more"}}))
+	r.Commit("chore: name a folder by something that is not a name")
+	res := r.Status()
+	require.NotZero(t, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "path[1]")
+}
