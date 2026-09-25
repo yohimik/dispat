@@ -1,5 +1,77 @@
 # Changelog
 
+## pkg/models/v1.11.0-rc.5 (2026-09-25)
+
+### Features
+
+- add an optional sign stage that writes each package's own version ([13b321c](https://github.com/yohimik/dispat/commit/13b321ccd6f60ccc7fc2f0b9721e9b311119a429)) (by yohimik, Claude Opus 5.5)
+  A release can run a sign stage before the propagate (version) stage and the
+  build. `autoSign` enables its native step, which writes the version the plan
+  computed for each package into the package's own manifests (`manifests: root`
+  by default, or `all` to reach a format such as Unity's
+  ProjectSettings/ProjectSettings.asset), and `flow.sign`, `flow.beforeSign` and
+  `flow.postSign` name its scripts and hooks. The stage is the package's first
+  task: beforeAll runs before it, it waits for the providers the way the version
+  stage does when it comes first, it shares the build budget, and it stays on the
+  orchestrator when worker nodes are configured. A failure there is reported as
+  the `sign` stage, logged as "auto-signing failed" for the native step, and
+  reverted under revertOnFail.
+
+  The sign stage owns the own version. Beside an enabled autoSign, autoVersion
+  (or autoPropagate) writes dependency ranges and replace rules alone:
+  writeVersion defaults to false, an explicit `writeVersion: true` is refused at
+  load, and `dispat autoversion` writes the ranges only unless --write-version
+  asks otherwise. W192 is reported by the stage that writes the version, and
+  syncLock still runs after a change only the sign stage made.
+
+  A package whose configuration names neither autoSign nor a sign entry has no
+  sign stage: no task, no hooks, no events, and its release runs exactly as
+  before. The plan digest carries the sign commands and the autoSign policy, so
+  its schema is dispat-plan-digest/2.
+
+- accept propagate as the version stage's name and autoPropagate as autoVersion's ([d0a281f](https://github.com/yohimik/dispat/commit/d0a281fb8a8356ee4a4357180b7befb595feb628)) (by yohimik, Claude Opus 5.5)
+  The version stage is also the propagate stage: it propagates the versions a
+  package takes from its providers into its files. The configuration accepts
+  that name beside the existing one. `autoPropagate` is `autoVersion` with the
+  same options, and `flow.propagate`, `flow.beforePropagate` and
+  `flow.postPropagate` are `flow.version`, `flow.beforeVersion` and
+  `flow.postVersion`.
+
+  Each pair is one setting. A level stating either spelling replaces what a
+  level above stated under the other, and one object stating both spellings of
+  a pair is refused when the configuration loads, at the root, in a space entry,
+  in a space folder's file and in every package layer. Messages about the block
+  name the key the file wrote. The stage keeps its runtime name whichever key
+  configured it: DISPAT_STAGE, DISPAT_FAILED_STAGE, the webhook fields and the
+  log say `version`. A configuration that uses neither new key loads and runs
+  exactly as before.
+
+- reach workers through the repository being released by default ([b1674f1](https://github.com/yohimik/dispat/commit/b1674f109f588ae16997b711c3abc7341ee1ccac)) (by yohimik, Claude Opus 5.5)
+  A worker link now needs only the node's name. A link with no endpoint, in
+  execution.workers or as `--worker name` on release, run and status, reaches
+  the remote the release takes its lock on, at the push URL Git resolves for
+  it, which in a composed workspace is the entry repository's, and the worker
+  names that repository as its own endpoint. A pool needs no mailbox
+  repository of its own, and a snapshot sends only what the remote does not
+  already hold. An endpoint a link states still names another mailbox. The
+  push URL is held to the endpoint rules when a run that dispatches starts,
+  before any lock: one that carries a credential is refused with E225, naming
+  the link and the remote and never the credential, and a release checks it
+  again at the destination its lock was taken on. `status --worker` resolves
+  nothing. A `--worker` value that is neither a node name alone nor
+  name=endpoint with both halves stated is a usage error and is never echoed.
+  The configuration tests that refused a link with no endpoint now accept it.
+  The docs describe the repository as the mailbox and what follows from it:
+  whatever travels is readable by whoever can read the repository, and the
+  host's branch and tag rules keep worker credentials away from release
+  branches, release tags and the lock tag.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## pkg/models/v1.11.0-rc.4 (2026-09-23)
 
 ### Features
