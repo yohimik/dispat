@@ -1,5 +1,37 @@
 # Changelog
 
+## pkg/writer/v1.2.2-rc.1 (2026-09-25)
+
+### Fixes
+
+- describe how links treat every package.json override field ([cf5a1f7](https://github.com/yohimik/dispat/commit/cf5a1f7de84a60c92f51bb6bf1c5df5411159c19)) (by yohimik, Claude Opus 5.5)
+  1.2.2-rc.0 changed how the writer reads and rewrites several manifests
+  without a changelog line. In package.json, linking a name repoints every
+  file: or link: copy of it across overrides, resolutions and
+  pnpm.overrides, and removing it deletes every copy, while a registry
+  override of the same name in another field stays as written; removing a
+  name that only a registry override declares changes nothing and reports
+  it in Missing. In Cargo.toml, a dependency version is found under a
+  dotted key such as core.version = "1.0", under quoted or literal keys and
+  table headers, and under a quoted key holding a literal dot, which stays
+  apart from the dotted path it resembles. In every TOML manifest, text
+  inside a multiline string is never read as a table header or a key, and
+  an inline table rewrites only its own top-level member.
+
+  The package README and the Go writer page describe the package.json
+  behaviour, including a new link taking the place of a registry override
+  in the chosen field, and a test holds the registry override cases.
+
+### Dependencies
+
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.2-rc.1): 1.2.2-rc.0 -> 1.2.2-rc.1
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## pkg/writer/v1.2.2-rc.0 (2026-09-23)
 
 ### Fixes
