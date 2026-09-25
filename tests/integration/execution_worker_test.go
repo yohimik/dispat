@@ -521,6 +521,18 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		assert.Contains(t, res.Stdout+res.Stderr, "config file not found")
 	})
 
+	t.Run("a node whose configuration file does not parse", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(`{"execution":`), 0o644))
+
+		res := runWorker(t, rig, nil, "worker", "--root", root, "--idle-timeout", "1")
+
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "invalid configuration")
+		_, isStarted := executionLine(res, "worker started")
+		assert.False(t, isStarted, "a node that could not read its configuration never starts")
+	})
+
 	t.Run("a task may not start a node of its own", func(t *testing.T) {
 		root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
 
