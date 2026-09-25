@@ -216,24 +216,18 @@ func (c centralComposition) importRepositories(cliConfigs []string) ([]Repositor
 	return repos, importedRepo, nil
 }
 
-// checkRepositoryOverrides refuses an override naming no source repository,
-// and a commit override of a repository whose own imported configuration
-// states its commit settings.
+// checkRepositoryOverrides refuses a commit override of a repository whose own
+// imported configuration states its commit settings. An override naming no
+// source repository never reaches it: loadSubmodules refused that name
+// against the declared inventory.
 func (c centralComposition) checkRepositoryOverrides(importedRepo map[string]string) error {
-	modulesByName := make(map[string]submodule, len(c.modules))
 	for _, module := range c.modules {
-		modulesByName[module.Name] = module
-	}
-	for key := range c.cfg.RepositoryOverrides {
-		if !c.cfg.RepositoryOverrides[key].IsEnabled() {
+		override, ok := c.cfg.RepositoryOverrides[module.Name]
+		if !ok || !override.IsEnabled() {
 			continue
 		}
-		module, ok := modulesByName[key]
-		if !ok {
-			return WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides names unknown source repository %q", key))
-		}
-		if importedRepo[module.Name] != "" && c.cfg.RepositoryOverrides[key].Commit != nil {
-			return WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides[%q] cannot override imported repository config %s", key, importedRepo[module.Name]))
+		if importedRepo[module.Name] != "" && override.Commit != nil {
+			return WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides[%q] cannot override imported repository config %s", module.Name, importedRepo[module.Name]))
 		}
 	}
 	return nil
