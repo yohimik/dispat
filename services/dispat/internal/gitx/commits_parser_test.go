@@ -13,17 +13,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestParseCommitsRefusesMalformedNonemptyRecords: a successful Git process
+// parseCommitLog reads a whole commit log through the streaming parser in one
+// write, the way the history read hands it git's output.
+func parseCommitLog(out string) ([]Commit, error) {
+	var log commitLog
+	_, _ = log.Write([]byte(out)) // Write never refuses: close reports.
+	return log.close()
+}
+
+// TestCommitLogRefusesMalformedNonemptyRecords: a successful Git process
 // with a truncated framed record is not an empty history window. Treating it
 // as empty would erase pending work from a release plan.
-func TestParseCommitsRefusesMalformedNonemptyRecords(t *testing.T) {
+func TestCommitLogRefusesMalformedNonemptyRecords(t *testing.T) {
 	for _, raw := range []string{
 		"nonempty output without the framed fields",
 		logRecordSep + "not-an-object-id" + strings.Repeat(logFieldSep, logCommitFields),
 		logRecordSep + strings.Repeat("1", 40) + logFieldSep + "not-a-parent" +
 			strings.Repeat(logFieldSep, logCommitFields-1),
 	} {
-		commits, err := parseCommits(raw)
+		commits, err := parseCommitLog(raw)
 		require.Error(t, err)
 		assert.Nil(t, commits)
 		assert.ErrorContains(t, err, "malformed commit log")
@@ -38,7 +46,7 @@ func TestParseCommitsRefusesMalformedNonemptyRecords(t *testing.T) {
 func TestCommitLogParsesAStreamAsItParsesTheWhole(t *testing.T) {
 	out := syntheticCommitLog(40) + logRecordSep + strings.Repeat("a", 40) + logFieldSep + logFieldSep +
 		"Zoé" + logFieldSep + "zoe@example.com" + logFieldSep + "fix: ünïcode\n\nbody" + logFieldSep
-	want, err := parseCommits(out)
+	want, err := parseCommitLog(out)
 	require.NoError(t, err)
 	require.Len(t, want, 41)
 
@@ -64,22 +72,6 @@ func TestCommitLogParsesAStreamAsItParsesTheWhole(t *testing.T) {
 				at := uintptr(unsafe.Pointer(unsafe.StringData(field)))
 				assert.False(t, at >= first && at <= last, "a kept field aliases the stream")
 			}
-		}
-	}
-}
-
-// TestParseCommitsKeepsNoneOfItsInput: the in-memory parse copies what a
-// commit keeps too, so a caller holding commits does not hold the log.
-func TestParseCommitsKeepsNoneOfItsInput(t *testing.T) {
-	out := syntheticCommitLog(3)
-	commits, err := parseCommits(out)
-	require.NoError(t, err)
-	first := uintptr(unsafe.Pointer(unsafe.StringData(out)))
-	last := first + uintptr(len(out))
-	for _, c := range commits {
-		for _, field := range append(append([]string{c.SHA, c.Message}, c.Parents...), c.Files...) {
-			at := uintptr(unsafe.Pointer(unsafe.StringData(field)))
-			assert.False(t, at >= first && at < last, "a kept field aliases the log output")
 		}
 	}
 }

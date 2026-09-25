@@ -122,7 +122,7 @@ func referenceTagsForPackage(out, pkg string, format TagFormat) Tags {
 				tag.Commit = peeled
 			}
 		}
-		if version, ok := format.ParseVersion(pkg, name); ok {
+		if version, ok := format.Reader(pkg).ParseVersion(name); ok {
 			tag.Version, tag.Parsed = version, true
 		}
 		tags = append(tags, tag)

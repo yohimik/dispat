@@ -45,12 +45,12 @@ func TestTagFormatPrereleasePlaceholders(t *testing.T) {
 		assert.Equal(t, tc.preTag, tc.format.Render(tc.pkg, pre), "prerelease render %q", tc.format)
 		assert.Equal(t, tc.stableTag, tc.format.Render(tc.pkg, stable), "stable render %q", tc.format)
 
-		got, ok := tc.format.ParseVersion(tc.pkg, tc.preTag)
+		got, ok := tc.format.Reader(tc.pkg).ParseVersion(tc.preTag)
 		require.True(t, ok, "parse %q under %q", tc.preTag, tc.format)
 		assert.Equal(t, pre.String(), got.String(),
 			"the version is rebuilt in SemVer's shape whatever the tag spells")
 
-		got, ok = tc.format.ParseVersion(tc.pkg, tc.stableTag)
+		got, ok = tc.format.Reader(tc.pkg).ParseVersion(tc.stableTag)
 		require.True(t, ok, "parse %q under %q", tc.stableTag, tc.format)
 		assert.Equal(t, stable.String(), got.String())
 
@@ -80,7 +80,7 @@ func TestTagFormatCounterBeyondTheSpec(t *testing.T) {
 		{"{name}@{version}.{channel}.{counter}", "core@2.0.0.rc.1.hotfix"},
 	} {
 		assert.Equal(t, tc.tag, tc.format.Render("core", v), "render %q", tc.format)
-		got, ok := tc.format.ParseVersion("core", tc.tag)
+		got, ok := tc.format.Reader("core").ParseVersion(tc.tag)
 		require.True(t, ok, "parse %q under %q", tc.tag, tc.format)
 		assert.Equal(t, v.String(), got.String(), "round trip %q", tc.format)
 	}
@@ -88,7 +88,7 @@ func TestTagFormatCounterBeyondTheSpec(t *testing.T) {
 	// The greedy split keeps the channel a whole identifier: "beta10" is
 	// beta/10, never b/eta10 — which is also what keeps counters ordering
 	// numerically instead of restarting a train at every tenth release.
-	got, ok := TagFormat("{name}@{version}-{channel}{counter}").ParseVersion("core", "core@1.2.3-beta10")
+	got, ok := TagFormat("{name}@{version}-{channel}{counter}").Reader("core").ParseVersion("core@1.2.3-beta10")
 	require.True(t, ok)
 	assert.Equal(t, "1.2.3-beta.10", got.String())
 }
@@ -257,7 +257,7 @@ func TestAliasFormatMatchesTheNamesItWrites(t *testing.T) {
 		"the suffix missing":                    {format: "v{major}-latest", pkg: "core", tag: "v1"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, tc.format.IsMatch(tc.pkg, tc.tag))
+			assert.Equal(t, tc.want, tc.format.Matcher(tc.pkg).IsMatch(tc.tag))
 		})
 	}
 }
@@ -280,13 +280,13 @@ func TestAliasFormatMatchesItsOwnPrereleaseRenders(t *testing.T) {
 		{Major: 2, Prerelease: []string{"rc", "0"}},
 	} {
 		rendered := alias.Render("core", v)
-		assert.True(t, alias.IsMatch("core", rendered), "%s is a name this alias writes", rendered)
+		assert.True(t, alias.Matcher("core").IsMatch(rendered), "%s is a name this alias writes", rendered)
 	}
 
-	assert.False(t, alias.IsMatch("core", "core-vgarbage"),
+	assert.False(t, alias.Matcher("core").IsMatch("core-vgarbage"),
 		"the version has to be a version, not merely bytes the class allows")
-	assert.False(t, alias.IsMatch("core", "core-v1.0.0.0"), "nor a release tag somebody mistyped")
-	assert.False(t, alias.IsMatch("core", "other-v1.4.2"), "nor another package's")
+	assert.False(t, alias.Matcher("core").IsMatch("core-v1.0.0.0"), "nor a release tag somebody mistyped")
+	assert.False(t, alias.Matcher("core").IsMatch("other-v1.4.2"), "nor another package's")
 }
 
 // TestAliasFormatMatchesAPrereleaseSpellingFormat: a format writing the
@@ -297,16 +297,16 @@ func TestAliasFormatMatchesAPrereleaseSpellingFormat(t *testing.T) {
 	stable := alias.Render("core", ccme.Version{Major: 1, Minor: 4, Patch: 2})
 	pre := alias.Render("core", ccme.Version{Major: 1, Minor: 4, Patch: 2, Prerelease: []string{"beta", "4"}})
 	assert.Equal(t, "v1.4.2", stable, "the stable render drops the section it cannot fill")
-	assert.True(t, alias.IsMatch("core", stable))
-	assert.True(t, alias.IsMatch("core", pre))
-	assert.False(t, alias.IsMatch("core", "v1.0.0.0"))
+	assert.True(t, alias.Matcher("core").IsMatch(stable))
+	assert.True(t, alias.Matcher("core").IsMatch(pre))
+	assert.False(t, alias.Matcher("core").IsMatch("v1.0.0.0"))
 }
 
 // TestAliasFormatMatchesNothingWithoutAPlaceholder: a format that writes a
 // constant has no shape to recognise, only a name. The alias validation
 // refuses those, so this is the guard rather than a case with behaviour.
 func TestAliasFormatMatchesNothingWithoutAPlaceholder(t *testing.T) {
-	assert.False(t, AliasFormat("latest").IsMatch("core", "latest"))
+	assert.False(t, AliasFormat("latest").Matcher("core").IsMatch("latest"))
 }
 
 // TestCompiledReadersOfAFormatThatDoesNotCompile: both compiled halves answer
@@ -318,9 +318,7 @@ func TestCompiledReadersOfAFormatThatDoesNotCompile(t *testing.T) {
 	broken := TagFormat("{version}-{version}")
 	require.Error(t, broken.Validate())
 	_, ok := broken.Reader("core").ParseVersion("1.2.3-1.2.3")
-	assert.False(t, ok)
-	_, ok = broken.ParseVersion("core", "1.2.3-1.2.3")
-	assert.False(t, ok, "the compiled reader and the format agree")
+	assert.False(t, ok, "the compiled reader reads nothing")
 
 	assert.False(t, AliasMatcher{}.IsMatch("v1"), "a matcher of nothing matches nothing")
 }

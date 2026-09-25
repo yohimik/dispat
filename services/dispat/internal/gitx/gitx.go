@@ -237,23 +237,6 @@ func (f TagFormat) split(pkg string) (prefix, suffix string, ok bool) {
 	return tpl.split(pkg)
 }
 
-// ParseVersion extracts the version from a tag name.
-//
-// The tag is matched against the format itself rather than split on a
-// separator. That matters for the reason §12.1 gives about splitting at the
-// last "@": package names may contain the separator and versions never do, and
-// a format-driven match is right for every convention rather than for one. A
-// format spelling the prerelease out is tried in its prerelease shape first
-// and its stable shape second, so "core@1.2.3" and "core@1.2.3-beta4" both
-// read back under one format.
-func (f TagFormat) ParseVersion(pkg, tag string) (ccme.Version, bool) {
-	tpl, err := f.template()
-	if err != nil {
-		return ccme.Version{}, false
-	}
-	return tpl.parseVersion(pkg, tag)
-}
-
 // Reader compiles this format for one package, so that a caller asking the
 // same format about many names pays for the compile once. It is TagFormat's
 // half of the pair AliasFormat.Matcher is the other half of.
@@ -272,9 +255,16 @@ type VersionReader struct {
 	pkg string
 }
 
-// ParseVersion extracts the version from a tag name. See
-// TagFormat.ParseVersion. A reader built from a format that does not compile
-// reads nothing, which is what that format's own ParseVersion answers too.
+// ParseVersion extracts the version from a tag name.
+//
+// The tag is matched against the format itself rather than split on a
+// separator. That matters for the reason §12.1 gives about splitting at the
+// last "@": package names may contain the separator and versions never do, and
+// a format-driven match is right for every convention rather than for one. A
+// format spelling the prerelease out is tried in its prerelease shape first
+// and its stable shape second, so "core@1.2.3" and "core@1.2.3-beta4" both
+// read back under one format. A reader built from a format that does not
+// compile reads nothing.
 func (r VersionReader) ParseVersion(tag string) (ccme.Version, bool) {
 	if r.tpl == nil {
 		return ccme.Version{}, false
@@ -330,18 +320,6 @@ func (f AliasFormat) Render(pkg string, v ccme.Version) string {
 	return compileTagFormat(string(f)).render(pkg, v)
 }
 
-// IsMatch reports whether a name is one this alias format could have written
-// for a package: its literal text in place, and a number where it writes one.
-//
-// It exists so that a reader of a tag listing can tell an alias apart from a
-// release that nobody can parse. The two look identical otherwise, and they
-// call for opposite answers: an alias is not a release and belongs out of the
-// listing, while a release tag carrying an unreadable version is exactly what
-// the initials fallback is for and has to stay in.
-func (f AliasFormat) IsMatch(pkg, tag string) bool {
-	return f.Matcher(pkg).IsMatch(tag)
-}
-
 // Matcher compiles this format for one package, so that a caller reading a tag
 // listing pays for the compile once rather than once per tag it looks at.
 func (f AliasFormat) Matcher(pkg string) AliasMatcher {
@@ -355,8 +333,15 @@ type AliasMatcher struct {
 	pkg string
 }
 
-// IsMatch reports whether the name is one this package's alias could have
-// written. See AliasFormat.IsMatch.
+// IsMatch reports whether a name is one this package's alias could have
+// written: the format's literal text in place, and a number where it writes
+// one.
+//
+// It exists so that a reader of a tag listing can tell an alias apart from a
+// release that nobody can parse. The two look identical otherwise, and they
+// call for opposite answers: an alias is not a release and belongs out of the
+// listing, while a release tag carrying an unreadable version is exactly what
+// the initials fallback is for and has to stay in.
 func (m AliasMatcher) IsMatch(tag string) bool {
 	if m.tpl == nil {
 		return false
@@ -1710,22 +1695,6 @@ func parseChangedFiles(out string, asked []string) (map[string][]string, error) 
 	return files, nil
 }
 
-// parseCommits reads a whole commit log held in memory. The history read
-// itself streams (commitLog); this is the same parse over a string.
-func parseCommits(out string) ([]Commit, error) {
-	var log commitLog
-	for {
-		i := strings.Index(out, logRecordSep)
-		if i < 0 {
-			log.addRecord(out, false)
-			break
-		}
-		log.addRecord(out[:i], false)
-		out = out[i+len(logRecordSep):]
-	}
-	return log.close()
-}
-
 // commitLog parses the commit log as git writes it, one record at a time.
 //
 // The output is never held whole: a record is collected in a buffer bounded
@@ -1762,18 +1731,17 @@ func (l *commitLog) Write(p []byte) (int, error) {
 // flush parses the buffered record and empties the buffer for the next one.
 func (l *commitLog) flush() {
 	if len(l.record) > 0 {
-		l.addRecord(string(l.record), true)
+		l.addRecord(string(l.record))
 	}
 	l.record = l.record[:0]
 }
 
-// addRecord parses one record. isOwned says the string is a copy made for
-// this record alone, which the commit may keep as it is.
-func (l *commitLog) addRecord(record string, isOwned bool) {
+// addRecord parses one record, a string copied for this record alone.
+func (l *commitLog) addRecord(record string) {
 	if l.err != nil || strings.TrimSpace(record) == "" {
 		return
 	}
-	commit, err := parseCommitRecord(record, isOwned)
+	commit, err := parseCommitRecord(record)
 	if err != nil {
 		l.err = err
 		return
@@ -1795,7 +1763,9 @@ func (l *commitLog) close() ([]Commit, error) {
 // parseCommitRecord reads one record: the fixed fields, then the path list
 // when the log listed paths. The fixed fields are everything a commit keeps
 // of the record, and they are one string of their own; each path is another.
-func parseCommitRecord(record string, isOwned bool) (Commit, error) {
+// The record is a copy of its own, so the fixed fields keep it as it is
+// unless paths follow them.
+func parseCommitRecord(record string) (Commit, error) {
 	end, separators := len(record), 0
 	for i := 0; i < len(record); i++ {
 		if record[i] != logFieldSep[0] {
@@ -1811,7 +1781,7 @@ func parseCommitRecord(record string, isOwned bool) (Commit, error) {
 			logCommitFields, separators+1)
 	}
 	kept := record[:end]
-	if !isOwned || end < len(record) {
+	if end < len(record) {
 		kept = strings.Clone(kept)
 	}
 	fields := strings.SplitN(kept, logFieldSep, logCommitFields)
@@ -1883,19 +1853,6 @@ func (c *LocalGitx) DeleteTag(ctx context.Context, name string) error {
 	return err
 }
 
-// PushTag pushes one tag ref and nothing else: no branch moves, and no other
-// tag travels with it.
-//
-// **It never forces, and must never learn to.** Unlike Push, whose tags are
-// this run's own records and may be rewritten under commit.force, the caller
-// here is contending for a name someone else may already hold. A rejection is
-// the answer the caller asked for, not an obstacle to push through: forcing it
-// would overwrite the holder's ref and tell both of them they won.
-func (c *LocalGitx) PushTag(ctx context.Context, remote, name string) error {
-	_, err := c.run(ctx, "push", remote, "refs/tags/"+name)
-	return err
-}
-
 // PushObjectToTag creates name on remote from the immutable object oid. The
 // destination is never forced: an existing lock must make acquisition fail.
 // Naming the source object, rather than a mutable local ref, also makes this
@@ -1909,15 +1866,6 @@ func (c *LocalGitx) PushObjectToTag(ctx context.Context, remote, oid, name strin
 func (c *LocalGitx) TagObject(ctx context.Context, name string) (string, error) {
 	out, err := c.run(ctx, "rev-parse", "refs/tags/"+name)
 	return strings.TrimSpace(out), err
-}
-
-// DeleteRemoteTag removes a tag from the remote. Deleting a ref the remote
-// does not have succeeds: git warns and reports the deletion, because the
-// fully qualified refspec leaves nothing to guess about. Cleanup is therefore
-// idempotent on this side, unlike DeleteTag.
-func (c *LocalGitx) DeleteRemoteTag(ctx context.Context, remote, name string) error {
-	_, err := c.run(ctx, "push", remote, "--delete", "refs/tags/"+name)
-	return err
 }
 
 // DeleteRemoteTagLease deletes name only while it still names expectedOID.

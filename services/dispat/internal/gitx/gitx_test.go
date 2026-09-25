@@ -211,7 +211,7 @@ func TestTagFormatRenderParseGlob(t *testing.T) {
 		assert.Equal(t, tc.tag, tc.format.Render(tc.pkg, v), "render %q", tc.format)
 		assert.Equal(t, tc.glob, tc.format.Glob(tc.pkg), "glob %q", tc.format)
 
-		got, ok := tc.format.ParseVersion(tc.pkg, tc.tag)
+		got, ok := tc.format.Reader(tc.pkg).ParseVersion(tc.tag)
 		require.True(t, ok, "parse %q from %q", tc.tag, tc.format)
 		assert.Equal(t, v.String(), got.String(), "round trip %q", tc.format)
 	}
@@ -224,7 +224,7 @@ func TestTagFormatRejectsForeignTags(t *testing.T) {
 
 	// A plain "core@1.2.3" does not carry the "v", so it belongs to a
 	// different convention and must not be read as this package's baseline.
-	_, ok := f.ParseVersion("core", "core@1.2.3")
+	_, ok := f.Reader("core").ParseVersion("core@1.2.3")
 	assert.False(t, ok, "a tag missing the format's literal text is not ours")
 
 	// A tag for a different package never matches the shape at all.
@@ -234,7 +234,7 @@ func TestTagFormatRejectsForeignTags(t *testing.T) {
 	// questions: this is the tag that puts a package on the initials fallback
 	// rather than out of the listing entirely.
 	assert.True(t, matcher.matches("core@v0.0.1.0"), "the shape matches")
-	_, ok = f.ParseVersion("core", "core@v0.0.1.0")
+	_, ok = f.Reader("core").ParseVersion("core@v0.0.1.0")
 	assert.False(t, ok, "but the version does not parse")
 }
 
@@ -743,63 +743,17 @@ func TestPushNeverForcesTheBranch(t *testing.T) {
 	assert.Equal(t, theirs, strings.TrimSpace(string(out)), "their commit is still the remote tip")
 }
 
-// TestPushTagCarriesOneRefAndNeverForces: the ref-level primitive the release
-// lock is built on. It delivers exactly one tag, moves no branch, and a name
-// the remote already holds at another object is a rejection — which is what
-// makes it usable as a mutex.
-func TestPushTagCarriesOneRefAndNeverForces(t *testing.T) {
+// TestDeleteTagRefusesATagThatIsNotThere: the local half of the cleanup,
+// including what happens when there is nothing to delete, the case a caller
+// tidying up after a half-finished run walks into: a second delete fails.
+func TestDeleteTagRefusesATagThatIsNotThere(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
-	bare := addBareRemote(t, root)
-
-	require.NoError(t, cli.CreateTag(ctx, "dispat-release-lock", "held by us", ""))
-	require.NoError(t, cli.PushTag(ctx, "origin", "dispat-release-lock"))
-
-	assert.Contains(t, runGit(t, bare, "tag"), "dispat-release-lock")
-	assert.Empty(t, strings.TrimSpace(runGit(t, bare, "branch", "--list")),
-		"the tag travels on its own: no branch moves with it")
-
-	// Somebody else's tag of the same name, at a different object. A second
-	// push of ours has to bounce off it rather than replace it.
-	theirs := t.TempDir()
-	runGit(t, theirs, "clone", "-q", bare, ".")
-	runGit(t, theirs, "config", "user.email", "other@example.com")
-	runGit(t, theirs, "config", "user.name", "Other")
-	runGit(t, theirs, "tag", "-f", "-a", "dispat-release-lock", "-m", "held by them",
-		"dispat-release-lock^{commit}") // the clone has the tag but no branch: name the commit
-
-	runGit(t, theirs, "push", "--force", "origin", "refs/tags/dispat-release-lock")
-	held := remoteTagObject(t, bare, "dispat-release-lock")
-
-	require.NoError(t, cli.CreateTagForce(ctx, "dispat-release-lock", "held by us, again", ""))
-	require.Error(t, cli.PushTag(ctx, "origin", "dispat-release-lock"),
-		"a name the remote already holds is a rejection, not an overwrite")
-	assert.Equal(t, held, remoteTagObject(t, bare, "dispat-release-lock"),
-		"their tag is untouched")
-}
-
-// TestDeleteTagLocalAndRemote: both halves of the cleanup, including what
-// happens when there is nothing to delete — the case a caller tidying up after
-// a half-finished run walks into.
-func TestDeleteTagLocalAndRemote(t *testing.T) {
-	root, cli := initRepo(t)
-	ctx := context.Background()
-	bare := addBareRemote(t, root)
 
 	require.NoError(t, cli.CreateTag(ctx, "dispat-release-lock", "held", ""))
-	require.NoError(t, cli.PushTag(ctx, "origin", "dispat-release-lock"))
-
-	require.NoError(t, cli.DeleteRemoteTag(ctx, "origin", "dispat-release-lock"))
-	assert.NotContains(t, runGit(t, bare, "tag"), "dispat-release-lock")
 	require.NoError(t, cli.DeleteTag(ctx, "dispat-release-lock"))
 	assert.NotContains(t, runGit(t, root, "tag"), "dispat-release-lock")
-
-	// The two halves differ on the second attempt, and callers cleaning up
-	// after a half-finished run depend on knowing which: the local delete
-	// fails on a tag that is not there, the remote one does not.
 	assert.Error(t, cli.DeleteTag(ctx, "dispat-release-lock"))
-	assert.NoError(t, cli.DeleteRemoteTag(ctx, "origin", "dispat-release-lock"),
-		"a fully qualified refspec makes the remote delete idempotent")
 }
 
 func TestImmutableLockObjectAndLeasedDelete(t *testing.T) {
@@ -1101,7 +1055,7 @@ func TestGlobAndMatchesUnsplittableFormat(t *testing.T) {
 	assert.Equal(t, "core*", f.Glob("core"), "an uncompilable format degrades to a name prefix")
 	_, matched := newPackageTagMatcher("core", f)
 	assert.False(t, matched)
-	if _, ok := f.ParseVersion("core", "core@1.0.0"); ok {
+	if _, ok := f.Reader("core").ParseVersion("core@1.0.0"); ok {
 		t.Error("an uncompilable format parses nothing")
 	}
 }
@@ -1273,7 +1227,7 @@ func TestRemoteTagMessage(t *testing.T) {
 	addBareRemote(t, root)
 
 	require.NoError(t, cli.CreateTag(ctx, "dispat-release-lock", "dispat release lock\n\nhost ci-7\npid 42\n", ""))
-	require.NoError(t, cli.PushTag(ctx, "origin", "dispat-release-lock"))
+	runGit(t, root, "push", "-q", "origin", "refs/tags/dispat-release-lock")
 	require.NoError(t, cli.DeleteTag(ctx, "dispat-release-lock"))
 
 	msg, err := cli.RemoteTagMessage(ctx, "origin", "dispat-release-lock")

@@ -39,7 +39,7 @@ func BenchmarkParseCommits(b *testing.B) {
 	b.SetBytes(int64(len(out)))
 	b.ReportAllocs()
 	for b.Loop() {
-		parsed, err := parseCommits(out)
+		parsed, err := parseCommitLog(out)
 		if err != nil || len(parsed) != commits {
 			b.Fatalf("parsed %d commits: %v", len(parsed), err)
 		}
@@ -50,7 +50,7 @@ func BenchmarkParseCommits(b *testing.B) {
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	kept := func() []Commit {
-		parsed, err := parseCommits(syntheticCommitLog(commits))
+		parsed, err := parseCommitLog(syntheticCommitLog(commits))
 		if err != nil {
 			b.Fatal(err)
 		}
