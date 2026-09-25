@@ -13,13 +13,22 @@ const modules = ['ccme', 'config', 'manifest', 'models', 'scanner', 'writer'] as
 
 export type PlannedModuleVersions = Record<(typeof modules)[number], string>;
 
-export function parsePlannedModuleVersions(value: string): PlannedModuleVersions {
-  let parsed: unknown;
+interface ParseModuleVersionsJsonOptions {
+  value: string;
+}
+
+/** The planned module versions' JSON, or a failure naming the variable. */
+function parseModuleVersionsJson(options: ParseModuleVersionsJsonOptions): unknown {
+  const {value} = options;
   try {
-    parsed = JSON.parse(value);
+    return JSON.parse(value);
   } catch {
     throw new Error(`${MODULE_VERSIONS} must be a JSON object`);
   }
+}
+
+export function parsePlannedModuleVersions(value: string): PlannedModuleVersions {
+  const parsed = parseModuleVersionsJson({value});
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`${MODULE_VERSIONS} must be a JSON object`);
   }
@@ -57,14 +66,24 @@ export async function updateReleaseRef(siteDir: string, version: string, commit:
   }
 }
 
-export async function updateReleaseModules(siteDir: string, version: string, planned: PlannedModuleVersions): Promise<void> {
-  const modulesPath = path.join(siteDir, 'plugins', 'historical-links', 'modules.json');
-  let recorded: Record<string, PlannedModuleVersions> = {};
+interface ReadRecordedModulesOptions {
+  modulesPath: string;
+}
+
+/** The module versions recorded per release so far; none before the first. */
+async function readRecordedModules(options: ReadRecordedModulesOptions): Promise<Record<string, PlannedModuleVersions>> {
+  const {modulesPath} = options;
   try {
-    recorded = JSON.parse(await fs.readFile(modulesPath, 'utf8')) as Record<string, PlannedModuleVersions>;
+    return JSON.parse(await fs.readFile(modulesPath, 'utf8')) as Record<string, PlannedModuleVersions>;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return {};
   }
+}
+
+export async function updateReleaseModules(siteDir: string, version: string, planned: PlannedModuleVersions): Promise<void> {
+  const modulesPath = path.join(siteDir, 'plugins', 'historical-links', 'modules.json');
+  const recorded = await readRecordedModules({modulesPath});
   recorded[version] = planned;
   const ordered = Object.fromEntries(Object.entries(recorded).sort(([a], [b]) =>
     a.localeCompare(b, undefined, {numeric: true}),
