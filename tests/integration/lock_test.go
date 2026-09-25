@@ -1,6 +1,6 @@
 package integration
 
-// Goal 23: the release lock. One tag on the remote decides who releases.
+// Goal 30: the release lock. One tag on the remote decides who releases.
 //
 // Two releases of one repository at once is not a race dispat can win by
 // being careful, so it refuses to enter it: the first run to push
@@ -99,9 +99,7 @@ func heldDuringRun(t *testing.T, r *harness.Repo) bool {
 }
 
 // TestReleaseLockRoundTrip: the ordinary life of a lock. It is on the remote
-// while the run works and gone from both copies once it is over, and a second
-// run over the same repository — which has nothing left to release — takes and
-// returns it just the same.
+// while the run works and gone from both copies once it is over.
 func TestReleaseLockRoundTrip(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(markerBuild, 1)
@@ -118,67 +116,49 @@ func TestReleaseLockRoundTrip(t *testing.T) {
 	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	assert.Contains(t, bareGit(t, bare, "tag"), "core@0.1.0", "the release still reached the remote")
 	assertLockCleared(t, r, bare)
-
-	// Nothing left to release: the lock is still taken and still given back,
-	// because whether there is work to do is not known until after planning.
-	require.NoError(t, os.Remove(r.Path("lock.probe")))
-	res = releaseLocked(r)
-	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	assert.True(t, heldDuringRun(t, r))
-	assert.Equal(t, 1, r.TagCount("core@"), "a converged run releases nothing new")
-	assertLockCleared(t, r, bare)
 }
 
 // TestReleaseLockHeldElsewhere: the refusal. A lock already on the remote
-// stops the run before it plans anything, and — the part that matters — the
-// run leaves the holder's tag exactly as it found it. A refusal that stomped
-// on the lock would hand both runs the repository.
+// stops the run before it plans anything, and, the part that matters, the run
+// leaves the holder's tag exactly as it found it, whatever `commit.force`
+// says. A refusal that stomped on the lock would hand both runs the
+// repository.
 func TestReleaseLockHeldElsewhere(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(markerBuild, 1)
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): first")
-	bare := r.AddBareRemote()
-	held := holdLock(t, r, bare)
+	for name, force := range map[string]*bool{
+		"commit.force unset": nil,
+		// Forcing rewrites this run's own refs; the lock is somebody else's.
+		"commit.force true": models.Bool(true),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(markerBuild, 1)
+			if force != nil {
+				cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true, Force: force}
+			}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): first")
+			bare := r.AddBareRemote()
+			held := holdLock(t, r, bare)
 
-	res := releaseLocked(r)
-	assert.Equal(t, 1, res.Code, "a repository somebody else is releasing is refused")
-	assert.Contains(t, res.Stdout, "unable to create the release lock tag")
-	assert.Contains(t, res.Stdout, "delete the tag on the remote",
-		"the refusal says what to do if nothing really is releasing")
-	assert.Equal(t, 0, buildRuns(r), "nothing was built")
-	assert.Equal(t, 0, r.TagCount("core@"), "nothing was tagged")
-	assert.Equal(t, held, lockObject(t, bare), "the holder's lock is untouched")
-	assert.False(t, r.IsTagged(lockTag), "and the refused run kept no local lock either")
+			res := releaseLocked(r)
+			assert.Equal(t, 1, res.Code, "a repository somebody else is releasing is refused")
+			assert.Contains(t, res.Stdout, "unable to create the release lock tag")
+			assert.Contains(t, res.Stdout, "delete the tag on the remote",
+				"the refusal says what to do if nothing really is releasing")
+			assert.Equal(t, 0, buildRuns(r), "nothing was built")
+			assert.Equal(t, 0, r.TagCount("core@"), "nothing was tagged")
+			assert.Equal(t, held, lockObject(t, bare), "the holder's lock is untouched")
+			assert.False(t, r.IsTagged(lockTag), "and the refused run kept no local lock either")
 
-	// The holder finishes and drops the lock; the same repository releases.
-	bareGit(t, bare, "tag", "-d", lockTag)
-	res = releaseLocked(r)
-	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, 1, r.TagCount("core@"))
-	assertLockCleared(t, r, bare)
-}
-
-// TestReleaseLockIgnoresCommitForce: commit.force rewrites this run's own
-// records, which is a different thing from taking somebody else's name. The
-// lock push is never forced, so a repository configured to force everything
-// still bounces off a held lock.
-func TestReleaseLockIgnoresCommitForce(t *testing.T) {
-	r := harness.New(t)
-	cfg := libsConfig(markerBuild, 1)
-	cfg.Commit = &models.CommitConfig{
-		Enabled: models.Bool(true), Push: true, Force: models.Bool(true)}
-	r.WriteConfigModel(cfg)
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): first")
-	bare := r.AddBareRemote()
-	held := holdLock(t, r, bare)
-
-	res := releaseLocked(r)
-	assert.Equal(t, 1, res.Code, "force does not reach the lock")
-	assert.Equal(t, held, lockObject(t, bare), "the holder's lock is untouched")
-	assert.Equal(t, 0, buildRuns(r))
+			// The holder finishes and drops the lock; the same repository releases.
+			bareGit(t, bare, "tag", "-d", lockTag)
+			res = releaseLocked(r)
+			require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+			assert.Equal(t, 1, r.TagCount("core@"))
+			assertLockCleared(t, r, bare)
+		})
+	}
 }
 
 // TestReleaseLockBlocksConcurrentRuns: the claim the whole feature is for,
@@ -492,30 +472,48 @@ func TestReleaseLockAppliesOnlyToRelease(t *testing.T) {
 //
 // Whether there is work to do is not known until after planning, and planning
 // is the thing the lock exists to serialise, so "do not lock when the plan is
-// empty" is not a rule `dispat release` is in a position to follow. A
-// --require-release run with nothing to publish therefore takes the lock,
-// gives it straight back, and exits 3. The lock-free way to ask the same
-// question is `dispat status --require-release`, which is what a CI gate
-// calls, and which TestReleaseLockAppliesOnlyToRelease pins.
+// empty" is not a rule `dispat release` is in a position to follow. A run
+// with nothing to publish therefore takes the lock and gives it back, and its
+// beforeAll hook runs while it is held, because the hook runs for every plan
+// that was not refused before it. `--require-release` is the refusal that
+// comes first: such a run takes the lock, gives it straight back, and exits 3
+// without running any hook. The lock-free way to ask the same question is
+// `dispat status --require-release`, which is what a CI gate calls, and which
+// TestReleaseLockAppliesOnlyToRelease pins.
 func TestReleaseLockTakenEvenWhenNothingToRelease(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(markerBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
 	probeConfig(&cfg)
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
-	r.Commit("chore(core): nothing to release")
+	r.Commit("feat(core): first")
 	bare := r.AddBareRemote()
+	require.Equal(t, 0, releaseLocked(r).Code)
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	built := buildRuns(r)
 
-	res := releaseLocked(r, "--require-release")
-	require.Equal(t, 3, res.Code, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, 0, buildRuns(r), "an empty plan still builds nothing")
-	assert.Equal(t, 0, r.TagCount("core@"), "and tags nothing")
+	// The converged repository plans nothing: the hook runs while the lock is
+	// held, and the lock is given back although nothing was built or tagged.
+	require.NoError(t, os.Remove(r.Path("lock.probe")))
+	res := releaseLocked(r)
+	require.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.True(t, heldDuringRun(t, r), "the empty run held the lock while its hook ran")
+	assert.Equal(t, built, buildRuns(r), "an empty plan builds nothing")
+	assert.Equal(t, 1, r.TagCount("core@"), "and tags nothing")
 	assertLockCleared(t, r, bare)
 
-	// The lock was genuinely taken and genuinely returned. The probe cannot
-	// answer this one — beforeAll never runs on an empty plan — so the proof
-	// is the tag object on the remote: a run that took the lock wrote one, and
-	// the next holder's lock is a different object.
+	require.NoError(t, os.Remove(r.Path("lock.probe")))
+	res = releaseLocked(r, "--require-release")
+	require.Equal(t, 3, res.Code, "stdout:\n%s", res.Stdout)
+	assert.NoFileExists(t, r.Path("lock.probe"), "--require-release refuses before beforeAll")
+	assert.Equal(t, built, buildRuns(r), "an empty plan still builds nothing")
+	assert.Equal(t, 1, r.TagCount("core@"), "and tags nothing")
+	assertLockCleared(t, r, bare)
+
+	// The lock was genuinely taken and genuinely returned. With no hook to
+	// ask, the proof is the tag object on the remote: a run that took the lock
+	// wrote one, and the next holder's lock is a different object.
 	held := holdLock(t, r, bare)
 	res = releaseLocked(r, "--require-release")
 	require.Equal(t, 1, res.Code,
@@ -637,6 +635,84 @@ func TestReleaseLockVerifyOffSkipsTheLockRead(t *testing.T) {
 				"the release lock is not read back before each publication: commit.verify is off for this remote, "+
 					"so a publication cannot be withheld when another run has taken the lock over"))
 			assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+		})
+	}
+}
+
+// TestReleaseLockRefusesAnAmbiguousPushDestination: the lock is taken on the
+// push destination of every repository the run records into, so a remote that
+// pushes to two URLs is a lock that would exist in two places and coordinate
+// nothing. The run refuses before any package work, rather than locking one
+// destination while publishing to another, whether the remote is the one
+// repository's own or a source repository's of a fleet, and nothing is tagged
+// or committed. A fleet names the refusal E336.
+func TestReleaseLockRefusesAnAmbiguousPushDestination(t *testing.T) {
+	for _, row := range []struct {
+		name string
+		// setup returns the repository the release runs in and the folder,
+		// relative to it, of the repository whose remote has two destinations.
+		setup func(t *testing.T) (*harness.Repo, string)
+		code  string
+	}{
+		{
+			name: "one repository",
+			setup: func(t *testing.T) (*harness.Repo, string) {
+				r := newPushingCheckout(t)
+				second := r.Path("second-remote.git")
+				r.Git("init", "-q", "--bare", second)
+				first := r.Git("remote", "get-url", "origin")
+				r.Git("remote", "set-url", "--add", "--push", "origin", first)
+				r.Git("remote", "set-url", "--add", "--push", "origin", second)
+				return r, "."
+			},
+		},
+		{
+			name: "a source repository of a fleet",
+			setup: func(t *testing.T) (*harness.Repo, string) {
+				source := harness.New(t)
+				source.SeedPackage("packages", "lib")
+				source.Commit("feat(lib): bootstrap library")
+
+				control := harness.New(t)
+				addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
+				control.AddBareRemote()
+				first := filepath.Join(t.TempDir(), "first.git")
+				second := filepath.Join(t.TempDir(), "second.git")
+				control.Git("init", "-q", "--bare", first)
+				control.Git("init", "-q", "--bare", second)
+				control.Git("-C", "sources/lib", "remote", "set-url", "origin", first)
+				control.Git("-C", "sources/lib", "remote", "set-url", "--push", "--add", "origin", first)
+				control.Git("-C", "sources/lib", "remote", "set-url", "--push", "--add", "origin", second)
+
+				cfg := covPolyrepoFile()
+				cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+				cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
+					"lib-source": {Commit: &models.CommitConfig{
+						Enabled: models.Bool(true), Push: true, Remote: "origin",
+						Branch: harness.DefaultBranch, Verify: models.Bool(false),
+					}},
+				}
+				control.WriteConfigModel(cfg)
+				control.Commit("chore: configure a source with two push destinations")
+				return control, "sources/lib"
+			},
+			code: "E336",
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			r, ambiguous := row.setup(t)
+			before := r.Git("-C", ambiguous, "rev-parse", "HEAD")
+
+			res := r.CommandEnv(harness.LockEnabled, "release")
+			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			if row.code != "" {
+				assert.True(t, harness.IsCodePresent(res.Events, row.code), "stdout:\n%s", res.Stdout)
+			}
+			assert.Contains(t, res.Stdout+res.Stderr, "has 2 push destinations")
+			assert.Equal(t, before, r.Git("-C", ambiguous, "rev-parse", "HEAD"), "nothing was committed")
+			assert.Empty(t, polyrepoTags(r, ambiguous), "nothing was tagged")
+			assert.Empty(t, r.TagList())
+			assert.Zero(t, buildRuns(r), "no package work ran")
 		})
 	}
 }

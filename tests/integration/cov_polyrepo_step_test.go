@@ -156,45 +156,6 @@ func TestCovPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
 	})
 }
 
-// TestCovPolyrepoCheckpointRefusesARevisionTheSourceRemoteLacks: a control
-// branch that names a source revision nobody else can fetch is a broken
-// checkout for everyone who clones it, so the checkpoint push is preceded by
-// proof that the source tag is on the source remote. With the source's own
-// push disabled that proof cannot exist, and the run says so while the source
-// record stays exactly as truthful as it was.
-func TestCovPolyrepoCheckpointRefusesARevisionTheSourceRemoteLacks(t *testing.T) {
-	control, sourceBare, controlBare := covPolyrepoPushableFleet(t)
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
-	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
-	cfg.Commit = &models.CommitConfig{
-		Enabled: models.Bool(true), Push: true, Remote: "origin",
-		Branch: harness.DefaultBranch, Verify: models.Bool(false),
-	}
-	cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
-		// The source records locally and publishes nothing.
-		"lib-source": {Commit: &models.CommitConfig{Enabled: models.Bool(true)}},
-	}
-	control.WriteConfigModel(cfg)
-	control.Commit("chore: configure a source that records without publishing")
-	control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-	controlBefore := control.Git("rev-parse", "HEAD")
-
-	res := control.Release()
-	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.IsCodePresent(res.Events, "E335"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	out := covPolyrepoOutput(res)
-	assert.Contains(t, out, "is not available from")
-	assert.Contains(t, out, "lib@0.1.0")
-
-	assert.Contains(t, polyrepoTags(control, "sources/lib"), "lib@0.1.0",
-		"the source record the run did write stays where it is")
-	assert.NotContains(t, control.Git("-C", sourceBare, "tag", "--list"), "lib@0.1.0")
-	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"),
-		"no checkpoint is written for a revision the source remote has never seen")
-	assert.Equal(t, controlBefore, control.Git("-C", controlBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
-}
-
 // TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision: the hooks around
 // a push are user scripts, and a script that commits in the repository about
 // to be pushed would make the push publish something the release never
@@ -231,37 +192,4 @@ func TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision(t *testing.T) {
 	assert.Equal(t, control.Git("-C", "sources/lib", "rev-parse", "HEAD~1"),
 		control.Git("-C", "sources/lib", "rev-parse", "lib@0.1.0^{commit}"),
 		"the tag still names the planned revision rather than the hook's commit")
-}
-
-// TestCovPolyrepoCheckpointRefusesASourceRemoteItCannotAsk: proving the source
-// tag is published means asking the source remote, and a remote that cannot be
-// asked is not proof of anything. The checkpoint is withheld and the run says
-// which repository it could not reach, rather than pushing a control branch
-// that names a revision nobody can fetch.
-func TestCovPolyrepoCheckpointRefusesASourceRemoteItCannotAsk(t *testing.T) {
-	control, _, controlBare := covPolyrepoPushableFleet(t)
-	control.Git("-C", "sources/lib", "remote", "set-url", "origin",
-		filepath.Join(t.TempDir(), "not-a-repository"))
-
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
-	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
-	cfg.Commit = &models.CommitConfig{
-		Enabled: models.Bool(true), Push: true, Remote: "origin",
-		Branch: harness.DefaultBranch, Verify: models.Bool(false),
-	}
-	cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
-		"lib-source": {Commit: &models.CommitConfig{Enabled: models.Bool(true)}},
-	}
-	control.WriteConfigModel(cfg)
-	control.Commit("chore: configure a source whose remote is not there")
-	control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-	controlBefore := control.Git("rev-parse", "HEAD")
-
-	res := control.Release()
-	assert.Equal(t, 1, res.Code)
-	assert.True(t, harness.IsCodePresent(res.Events, "E335"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, covPolyrepoOutput(res), "lib-source")
-	assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
-	assert.Equal(t, controlBefore, control.Git("-C", controlBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
 }

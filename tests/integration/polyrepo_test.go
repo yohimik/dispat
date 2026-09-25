@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
@@ -2279,6 +2280,119 @@ func TestPolyrepoSourcePushFailureDoesNotAdvanceControl(t *testing.T) {
 		"the control checkpoint never advances to an unreachable source commit")
 	assert.Equal(t, pinnedBefore, control.Git("-C", bare, "rev-parse", "refs/heads/main"))
 	assert.Empty(t, control.Git("-C", bare, "tag", "--list"), "the rejected remote received no source tag")
+}
+
+// TestPolyrepoCheckpointRefusesASourceRevisionItCannotProve: a control branch
+// that names a source revision nobody else can fetch is a broken checkout for
+// everyone who clones it, so the checkpoint push waits for proof that the
+// source tag is on the source remote. A source that records without
+// publishing, and a source remote that cannot be asked, both leave that proof
+// impossible: the run refuses with E335 naming the source, the source record
+// the run did write stays where it is, and no checkpoint is written or pushed.
+func TestPolyrepoCheckpointRefusesASourceRevisionItCannotProve(t *testing.T) {
+	for _, row := range []struct {
+		name string
+		// unreachable points the source at a remote that cannot be asked.
+		unreachable bool
+		want        []string
+	}{
+		{name: "the source remote lacks the revision", want: []string{"is not available from", "lib@0.1.0", "lib-source"}},
+		{name: "the source remote cannot be asked", unreachable: true, want: []string{"lib-source"}},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			control, sourceBare, controlBare := covPolyrepoPushableFleet(t)
+			if row.unreachable {
+				control.Git("-C", "sources/lib", "remote", "set-url", "origin",
+					filepath.Join(t.TempDir(), "not-a-repository"))
+			}
+			cfg := covPolyrepoFile()
+			cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+			cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+			cfg.Commit = &models.CommitConfig{
+				Enabled: models.Bool(true), Push: true, Remote: "origin",
+				Branch: harness.DefaultBranch, Verify: models.Bool(false),
+			}
+			cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
+				// The source records locally and publishes nothing.
+				"lib-source": {Commit: &models.CommitConfig{Enabled: models.Bool(true)}},
+			}
+			control.WriteConfigModel(cfg)
+			control.Commit("chore: configure a source that records without publishing")
+			control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+			controlBefore := control.Git("rev-parse", "HEAD")
+
+			res := control.Release()
+			assert.Equal(t, 1, res.Code)
+			assert.True(t, harness.IsCodePresent(res.Events, "E335"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			for _, want := range row.want {
+				assert.Contains(t, res.Stdout+res.Stderr, want)
+			}
+			assert.Contains(t, polyrepoTags(control, "sources/lib"), "lib@0.1.0",
+				"the source record the run did write stays where it is")
+			if !row.unreachable {
+				assert.NotContains(t, control.Git("-C", sourceBare, "tag", "--list"), "lib@0.1.0")
+			}
+			assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"),
+				"no checkpoint is written for a revision the source remote cannot be shown to carry")
+			assert.Equal(t, controlBefore, control.Git("-C", controlBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
+		})
+	}
+}
+
+// TestRevertOnFailRestoresThroughTheOwningRepository: `revertOnFail` puts a
+// failed package's folder back the way the run found it, and in a composed
+// workspace that folder belongs to a repository other than the checkout that
+// contains it. The rollback runs in the owning repository in both history
+// modes that have more than one: in a control repository, a source package
+// reverts inside its source and a control package inside the control, neither
+// reaching into the other; in a choreographed fleet, a provider's package
+// reverts through the provider's own repository.
+func TestRevertOnFailRestoresThroughTheOwningRepository(t *testing.T) {
+	t.Run("a control repository and its source", func(t *testing.T) {
+		source := harness.New(t)
+		source.SeedPackage("packages", "lib")
+		source.Commit("feat(lib): bootstrap library")
+
+		control := harness.New(t)
+		control.SeedPackage("packages", "tool")
+		addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
+		cfg := covPolyrepoFile()
+		cfg.Spaces = map[string]models.SpaceConfig{
+			"libs":  {Path: models.PathList{"sources/lib/packages"}, RevertOnFail: models.Bool(true)},
+			"tools": {Path: models.PathList{"packages"}, RevertOnFail: models.Bool(true)},
+		}
+		cfg.Scripts["publish"] = models.Script{"echo scribbled >> main.txt", "exit 3"}
+		control.WriteConfigModel(cfg)
+		control.Commit("chore: configure a fleet that reverts a failed publish")
+
+		res := control.Release()
+		assert.Equal(t, 1, res.Code)
+		assert.Equal(t, "lib\n", readAbs(t, control.Path("sources", "lib", "packages", "lib", "main.txt")),
+			"the source package folder is restored inside the source repository")
+		assert.Equal(t, "tool\n", readAbs(t, control.Path("packages", "tool", "main.txt")),
+			"and the control-owned package folder in the control repository")
+		assert.Empty(t, polyrepoTags(control, "sources/lib"))
+		assert.Empty(t, control.TagList())
+	})
+
+	t.Run("a choreographed fleet", func(t *testing.T) {
+		fleet := crossRepositoryFleet(t)
+		fleet.writeConfig("sdk", func(cfg *models.File) {
+			cfg.Scripts = releaseFlow("echo building", "printf 'half written\\n' > packages/sdk-pkg/main.txt; exit 1")
+			cfg.Flow = &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+			cfg.RevertOnFail = models.Bool(true)
+		})
+		fleet.peer("sdk").Commit("fix(sdk-pkg): fail while publishing")
+		fleet.push("sdk")
+		fleet.follow("api", "sdk")
+		api := fleet.peer("api")
+
+		res := api.Release("--package", "*")
+		assert.Equal(t, 1, res.Code)
+		assert.Equal(t, "sdk-pkg\n", readAbs(t, api.Path(".links", "sdk", "packages", "sdk-pkg", "main.txt")),
+			"the provider's own repository restored its own file")
+		assert.Empty(t, tagsIn(api.Repo, ".links/sdk"))
+	})
 }
 
 // TestPolyrepoReleaseLockGuardsAndCleansSourceWork acquires every repository

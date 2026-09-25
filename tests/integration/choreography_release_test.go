@@ -265,28 +265,6 @@ func TestChoreographyRunsTheEntryHooksOnce(t *testing.T) {
 	assert.Equal(t, "x", data, "the entry's beforeAll ran exactly once")
 }
 
-// TestChoreographyRevertsInTheRepositoryThatOwnsTheFolder: a failed package
-// is rolled back through its own repository, not through whichever checkout
-// happens to contain it.
-func TestChoreographyRevertsInTheRepositoryThatOwnsTheFolder(t *testing.T) {
-	fleet := crossRepositoryFleet(t)
-	fleet.writeConfig("sdk", func(cfg *models.File) {
-		cfg.Scripts = releaseFlow("echo building", "printf 'half written\\n' > packages/sdk-pkg/main.txt; exit 1")
-		cfg.Flow = &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
-		cfg.RevertOnFail = models.Bool(true)
-	})
-	fleet.peer("sdk").Commit("fix(sdk-pkg): fail while publishing")
-	fleet.push("sdk")
-	fleet.follow("api", "sdk")
-	api := fleet.peer("api")
-
-	res := api.Release("--package", "*")
-	assert.NotZero(t, res.Code)
-	assert.Equal(t, "sdk-pkg\n", readAbs(t, api.Path(".links", "sdk", "packages", "sdk-pkg", "main.txt")),
-		"the provider's own repository restored its own file")
-	assert.Empty(t, tagsIn(api.Repo, ".links/sdk"))
-}
-
 // TestChoreographyBypassesTheLockPerRepository: an unsafe setting is the
 // repository's own, and one peer cannot unlock another.
 func TestChoreographyBypassesTheLockPerRepository(t *testing.T) {
