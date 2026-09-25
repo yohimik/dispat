@@ -621,12 +621,13 @@ func requirePinnedModuleResolved(ctx context.Context, controlRoot, controlRevisi
 }
 
 // requireStableLivePin reads the live pin, then HEAD, then the live pin again,
-// and accepts HEAD only when the two pin reads agree and admit it. Two reads
-// that disagree are the enclosing release publishing a revision while HEAD was
-// read, and a HEAD they do not admit is that release between its commit and
-// its pin: either is read again after policy.interval, at most
-// policy.attempts times, and the last refusal is the one reported. A pin that
-// cannot be read, and a checkout Git cannot answer for, are refused at once.
+// and accepts HEAD when it is the revision control pins, or when the two pin
+// reads agree and admit it. Two reads that disagree are the enclosing release
+// publishing a revision while HEAD was read, and a HEAD they do not admit is
+// that release between its commit and its pin: either is read again after
+// policy.interval, at most policy.attempts times, and the last refusal is the
+// one reported. A pin that cannot be read, and a checkout Git cannot answer
+// for, are refused at once.
 func requireStableLivePin(ctx context.Context, check livePinCheck, policy livePinPolicy) (string, error) {
 	for attempt := 1; ; attempt++ {
 		before, err := check.readLivePin()
@@ -641,9 +642,11 @@ func requireStableLivePin(ctx context.Context, check livePinCheck, policy livePi
 		if err != nil {
 			return "", err
 		}
+		// A checkout at control's own pin needs nothing from the run, so the
+		// live pin moving around it says nothing about it either.
 		isStable := slices.Equal(before, after)
 		isAdmitted := isAdmittedHead(head, pinned, append(slices.Clone(check.runPins), before...))
-		if isStable && isAdmitted {
+		if head == pinned || (isStable && isAdmitted) {
 			return head, nil
 		}
 		refusal := refuseUnpinnedModule(check.module, head, pinned)

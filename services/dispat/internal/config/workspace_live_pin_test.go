@@ -143,6 +143,26 @@ func TestStableLivePinNeedsTwoReadsThatAgree(t *testing.T) {
 	})
 }
 
+// TestStableLivePinAcceptsTheControlPinWhileTheLivePinMoves: a checkout at
+// the revision control pins is admitted whatever the run pins, so a live pin
+// that keeps moving around it is no reason to read again or to refuse it.
+func TestStableLivePinAcceptsTheControlPinWhileTheLivePinMoves(t *testing.T) {
+	fixture := newLivePinFixture(t)
+	workspaceGit(t, fixture.check.module.Root, "checkout", "-q", fixture.pinned)
+	reads := 0
+	check := fixture.check
+	check.resolve = func(string) ([]string, error) {
+		reads++
+		return []string{strings.Repeat(string(rune('a'+reads%6)), 40)}, nil
+	}
+
+	head, err := requireStableLivePin(t.Context(), check, fastLivePinReads)
+
+	require.NoError(t, err)
+	assert.Equal(t, fixture.pinned, head)
+	assert.Equal(t, 2, reads, "one attempt is enough")
+}
+
 // TestStableLivePinRefusesACheckoutNobodyAdmitted: a checkout at a revision
 // neither control nor the run admitted is the existing E330 refusal, reported
 // after the bounded reads rather than on the first one.
