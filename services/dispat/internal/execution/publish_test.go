@@ -170,9 +170,10 @@ func TestARefusedAuthorizationPushIsNoUnknownPublication(t *testing.T) {
 			require.NoError(t, err)
 			branch := FormatBranch("build-a", KindPublish, time.Now())
 
-			err = fixture.coordinator.reportLostAuthorization(t.Context(), lease, "core:publish", 1, "web",
-				taskOffer{branch: branch, kind: KindPublish, offered: "assignment-oid"},
-				taskReply{kind: MessageReady, commit: "ready-oid"}, tc.failure)
+			_, err = fixture.coordinator.reportLostAuthorization(t.Context(), publicationAttempt{
+				lease: lease, task: "core:publish", attempt: 1, repository: "web",
+				offer: taskOffer{branch: branch, kind: KindPublish, offered: "assignment-oid"},
+			}, release.StageOutcome{}, taskReply{kind: MessageReady, commit: "ready-oid"}, tc.failure)
 
 			require.Error(t, err)
 			if tc.retained == nil {

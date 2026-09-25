@@ -196,6 +196,7 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 	deadline := time.NewTimer(c.Timeouts.Task)
 	defer deadline.Stop()
 	state := publicationState{tip: offer.offered}
+	pub := publicationAttempt{lease: lease, task: task, attempt: attempt, repository: repository, offer: offer}
 	offeredAt, claimedAt := time.Now(), time.Time{}
 	for {
 		select {
@@ -217,10 +218,11 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 			}
 			outcome.Exports = formatOutputs(reply.ready.Exports)
 			state.tip = reply.commit
-			if err := c.authorizePublication(ctx, lease, task, attempt, repository,
-				offer, reply, authorize); err != nil {
-				outcome.FailedPart = release.PartAuthorization
-				return outcome, err
+			if ended, isEnded, err := c.authorizePublication(ctx, pub, outcome, reply, authorize); isEnded {
+				if err != nil && ended.FailedPart == "" {
+					ended.FailedPart = release.PartAuthorization
+				}
+				return ended, err
 			}
 			// The wait starts again, now for the only message that can say
 			// what became of an effect this run authorized.
@@ -239,17 +241,26 @@ func (c *Coordinator) awaitPublication(ctx context.Context, lease *Lease, task s
 			if !state.isAuthorized {
 				return outcome, c.settleAbandonedAttempt(ctx, lease, task, attempt, offer, state.tip)
 			}
-			return outcome, c.resolveUnansweredPublication(ctx, lease, task, attempt,
-				repository, offer, state.tip)
+			return c.resolveUnansweredPublication(ctx, pub, outcome, state.tip)
 		case <-ctx.Done():
 			if !state.isAuthorized {
 				return outcome, c.settleInterruptedAttempt(ctx, lease, task, attempt,
 					KindPublish, offer, state.tip)
 			}
-			return outcome, c.resolveUnansweredPublication(ctx, lease, task, attempt,
-				repository, offer, state.tip)
+			return c.resolveUnansweredPublication(ctx, pub, outcome, state.tip)
 		}
 	}
+}
+
+// publicationAttempt is one delegated publication as the steps that settle it
+// share it: the slot it holds, the work it is, the repository it publishes
+// into, and the branch it was offered on.
+type publicationAttempt struct {
+	lease      *Lease
+	task       string
+	attempt    int
+	repository string
+	offer      taskOffer
 }
 
 // publicationState is how far one delegated publication has got:
@@ -296,40 +307,47 @@ func (c *Coordinator) readPublicationOutcome(task string, attempt int,
 // the message is written rather than after, so a push whose response is lost
 // cannot become a second authorization: the mark is what makes it single use,
 // and the compare-and-swap is what makes it one message.
-func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, task string,
-	attempt int, repository string, offer taskOffer, reply taskReply,
-	authorize func(context.Context) error) error {
+//
+// It reports whether the attempt ended here, with what it ended as. An
+// authorization that landed does not end it: the result is still to come.
+func (c *Coordinator) authorizePublication(ctx context.Context, pub publicationAttempt,
+	outcome release.StageOutcome, reply taskReply,
+	authorize func(context.Context) error) (release.StageOutcome, bool, error) {
+	lease, offer := pub.lease, pub.offer
 	waiting := offer.observer.find(offer.branch)
 	if waiting == nil || waiting.isAuthorized {
 		// No second withdrawal and no second authorization: an attempt this
 		// run has already answered is an attempt whose effect may already have
 		// happened, and the one thing that must not follow it is another
 		// message telling a node to start.
-		return NewIdentifiedDiagnostic(Identity{Run: c.Run, Worker: lease.Node, Task: task, Attempt: attempt},
+		return outcome, true, NewIdentifiedDiagnostic(
+			Identity{Run: c.Run, Worker: lease.Node, Task: pub.task, Attempt: pub.attempt},
 			CodeAuthority, CategoryAuthority,
 			"%s asked to be authorized twice and an authorization is single use: no second effect may start under it",
-			task)
+			pub.task)
 	}
 	if authorize != nil {
 		if err := authorize(ctx); err != nil {
-			return c.withdrawPublication(ctx, lease, task, attempt, offer, reply, err)
+			ended, err := c.withdrawPublication(ctx, pub, outcome, reply, err)
+			return ended, true, err
 		}
 	}
 	waiting.isAuthorized = true
 	authorized, err := c.advance(ctx, lease.Node, offer.branch, reply.commit, MessageGo,
 		c.formatGo(reply, lease.Node, offer.branch))
 	if err != nil {
-		return c.reportLostAuthorization(ctx, lease, task, attempt, repository, offer, reply, err)
+		ended, err := c.reportLostAuthorization(ctx, pub, outcome, reply, err)
+		return ended, true, err
 	}
 	c.recordOwnedRef(ctx, ownedRefStep{node: lease.Node, branch: offer.branch,
 		oid: authorized, parent: reply.commit})
 	// The authorization is what a withdrawal of a running publisher is leased
 	// against, so the object is remembered where the waiting task can read it.
 	waiting.authorizedTip = authorized
-	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
+	c.Log.Info().Str("run", c.Run).Str("task", pub.task).Str("worker", lease.Node).
 		Str("package", reply.ready.Task).Str("commit", authorized).
 		Int("attempt", reply.ready.Attempt).Msg("publication authorized")
-	return nil
+	return outcome, false, nil
 }
 
 // reportLostAuthorization settles an authorization whose push did not
@@ -345,16 +363,16 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 // instead, exactly as it asks a publisher that never answered: a withdrawal
 // leased on the ready commit, and an unknown outcome unless the node says
 // its command never started.
-func (c *Coordinator) reportLostAuthorization(ctx context.Context, lease *Lease, task string,
-	attempt int, repository string, offer taskOffer, reply taskReply, err error) error {
+func (c *Coordinator) reportLostAuthorization(ctx context.Context, pub publicationAttempt,
+	outcome release.StageOutcome, reply taskReply, err error) (release.StageOutcome, error) {
 	if resolvePushError(err) == pushNotLanded {
-		return c.withdrawPublication(ctx, lease, task, attempt, offer, reply, err)
+		return c.withdrawPublication(ctx, pub, outcome, reply, err)
 	}
-	c.Log.Debug().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
-		Int("attempt", attempt).Str("code", CodePublicationUnknown).
+	c.Log.Debug().Err(err).Str("run", c.Run).Str("task", pub.task).Str("worker", pub.lease.Node).
+		Int("attempt", pub.attempt).Str("code", CodePublicationUnknown).
 		Str("category", CategoryPublicationUnknown).
 		Msg("the publication authorization push returned no usable answer")
-	return c.resolveUnansweredPublication(ctx, lease, task, attempt, repository, offer, reply.commit)
+	return c.resolveUnansweredPublication(ctx, pub, outcome, reply.commit)
 }
 
 // formatGo is the authorization document: the work it belongs to, the exact
@@ -396,21 +414,49 @@ func (c *Coordinator) advance(ctx context.Context, node, branch, expectedOld str
 //
 // The acknowledgement is what returns the node's capacity: a publisher that
 // confirmed it stopped is a machine with nothing of this run running on it,
-// and one that never answered is a machine this run will not use again. Either
-// way the package fails with the error that refused the authorization, because
-// that is what an operator has to read first.
-func (c *Coordinator) withdrawPublication(ctx context.Context, lease *Lease, task string,
-	attempt int, offer taskOffer, reply taskReply, refused error) error {
-	settled := c.withdrawAttempt(ctx, lease.Node, task, attempt, KindPublish, offer, reply.commit)
+// and one that never answered is a machine this run will not use again. The
+// package fails with the error that refused the authorization, because that
+// is what an operator has to read first, unless the node's own answer says
+// more: a result it reported on its own is what became of the publication,
+// and an acknowledgement saying its command had started is an outcome nobody
+// can establish from here.
+func (c *Coordinator) withdrawPublication(ctx context.Context, pub publicationAttempt,
+	outcome release.StageOutcome, reply taskReply, refused error) (release.StageOutcome, error) {
+	lease := pub.lease
+	settled := c.withdrawAttempt(ctx, lease.Node, pub.task, pub.attempt, KindPublish, pub.offer, reply.commit)
+	if settled.result != nil {
+		lease.Release()
+		return c.readPublicationOutcome(pub.task, pub.attempt, outcome, *settled.result)
+	}
+	if settled.isCommandStarted {
+		settleWithdrawnLease(lease, settled)
+		return outcome, c.reportUnknownPublication(pub.formatUnknown(), settled)
+	}
 	if !settled.isAcknowledged {
 		lease.Leak(LeakUnacknowledgedCancel)
-		return refused
+		return outcome, refused
 	}
 	lease.Release()
-	c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
-		Int("attempt", attempt).Str("code", CodeAuthority).Str("category", CategoryAuthority).
+	c.Log.Warn().Str("run", c.Run).Str("task", pub.task).Str("worker", lease.Node).
+		Int("attempt", pub.attempt).Str("code", CodeAuthority).Str("category", CategoryAuthority).
 		Msg("publication withheld")
-	return refused
+	return outcome, refused
+}
+
+// settleWithdrawnLease gives a withdrawn attempt's slot back when the node said
+// it stopped, and keeps it, with the node out of the pool, when it did not.
+func settleWithdrawnLease(lease *Lease, settled cancellation) {
+	if settled.isAcknowledged {
+		lease.Release()
+		return
+	}
+	lease.Leak(LeakUnacknowledgedCancel)
+}
+
+// formatUnknown is the record an unknown outcome of this publication leaves.
+func (p publicationAttempt) formatUnknown() unknownPublication {
+	return unknownPublication{Task: p.task, Attempt: p.attempt, Node: p.lease.Node,
+		Repository: p.repository, Branch: p.offer.branch}
 }
 
 // resolveUnansweredPublication is what this run says about a publication it
@@ -420,41 +466,43 @@ func (c *Coordinator) withdrawPublication(ctx context.Context, lease *Lease, tas
 // decides is an ordering rather than a verdict. The run first asks the one
 // question that can still be answered: it withdraws the attempt and waits, for
 // the cancel wait and no longer, for the node to say what the publisher had
-// got to. That answer, and nothing else, tells the two cases apart. A node
-// that stopped before its publish command began published nothing, so the
-// package simply failed. A node that stopped in the middle of it, or never
-// answered at all, leaves an outcome nobody here can establish, and §28.6 is
-// explicit that neither a missing reply nor a missing tag proves failure.
+// got to. That answer, and nothing else, tells the cases apart. A node whose
+// own result was already on the branch said what became of the publication,
+// success included, and that is recorded as it would have been had it arrived
+// a moment earlier: a success authorized before a lost lock is still recorded,
+// since a create-only record of an effect that already happened is not a new
+// effect. A node that stopped before its publish command began published
+// nothing, so the package simply failed. A node that stopped in the middle of
+// it, or never answered at all, leaves an outcome nobody here can establish,
+// and §28.6 is explicit that neither a missing reply nor a missing tag proves
+// failure.
 //
-// Whichever of the two it is, no second attempt is authorized under this
-// authorization in this run. The difference is what happens to the exclusion:
-// a publisher that acknowledged is quiesced, so the locks go back as usual,
-// and one that did not is still possibly running, so the repository it was
-// publishing into stays locked for an operator.
-func (c *Coordinator) resolveUnansweredPublication(ctx context.Context, lease *Lease, task string,
-	attempt int, repository string, offer taskOffer, tipOID string) error {
-	settled := c.withdrawAttempt(ctx, lease.Node, task, attempt, KindPublish, offer, tipOID)
-	if settled.isAcknowledged {
-		lease.Release()
-	} else {
-		lease.Leak(LeakUnacknowledgedCancel)
+// Whichever it is, no second attempt is authorized under this authorization in
+// this run. The difference is what happens to the exclusion: a publisher that
+// acknowledged is quiesced, so the locks go back as usual, and one that did
+// not is still possibly running, so the repository it was publishing into
+// stays locked for an operator.
+func (c *Coordinator) resolveUnansweredPublication(ctx context.Context, pub publicationAttempt,
+	outcome release.StageOutcome, tipOID string) (release.StageOutcome, error) {
+	lease := pub.lease
+	settled := c.withdrawAttempt(ctx, lease.Node, pub.task, pub.attempt, KindPublish, pub.offer, tipOID)
+	settleWithdrawnLease(lease, settled)
+	if settled.result != nil {
+		return c.readPublicationOutcome(pub.task, pub.attempt, outcome, *settled.result)
 	}
 	if isPublicationOutcomeKnown(settled) {
 		// A known outcome after all: the node was still before its own
 		// command, so the package failed at the publish stage exactly as a
 		// publisher that reported its own failure would have.
-		c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
-			Int("attempt", attempt).Str("phase", settled.phase).
+		c.Log.Warn().Str("run", c.Run).Str("task", pub.task).Str("worker", lease.Node).
+			Int("attempt", pub.attempt).Str("phase", settled.phase).
 			Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
 			Msg("the authorized publication was withdrawn before its command started")
-		return c.refuseTask(task, lease.Node, attempt, fmt.Errorf(
+		return outcome, c.refuseTask(pub.task, lease.Node, pub.attempt, fmt.Errorf(
 			"the node was authorized to publish and stopped in the %s phase without starting the publish command, so nothing was published",
 			settled.phase))
 	}
-	return c.reportUnknownPublication(unknownPublication{
-		Task: task, Attempt: attempt, Node: lease.Node, Repository: repository,
-		Branch: offer.branch,
-	}, settled)
+	return outcome, c.reportUnknownPublication(pub.formatUnknown(), settled)
 }
 
 // isPublicationOutcomeKnown is the decision of §28.6, as one sentence.

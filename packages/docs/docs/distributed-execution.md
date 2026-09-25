@@ -404,10 +404,14 @@ under an exact lease on that assignment provides this proof without a worker ack
 simply stopped answering leaves its slot where it is, because the work may still be running on that machine.
 
 **A publication whose outcome cannot be established is reported as such.** When a publication was authorized and no
-result came back, the run withdraws it and waits `timeouts.cancel` for an acknowledgement. An acknowledgement saying
-the publish command had not started is an ordinary publish failure. An acknowledgement from after the command
-started, or no acknowledgement at all, is `E228`: the package failed at its publish stage, no second attempt is made
-in this run, its dependents are blocked, and the run exits non-zero.
+result came back, the run withdraws it and waits `timeouts.cancel` for an acknowledgement. A result the node had
+already written where the withdrawal was to go is the answer: its success is a publication, recorded as usual, which
+is also how a publication authorized before a lost lock is still recorded, and its failure is an ordinary publish
+failure. An acknowledgement saying the publish command had not started is an ordinary publish failure. An
+acknowledgement from after the command started, or no acknowledgement at all, is `E228`: the package failed at its
+publish stage, no second attempt is made in this run, its dependents are blocked, and the run exits non-zero. The same
+holds for a publisher withdrawn because its authorization was refused: an acknowledgement saying its command had
+started, with no result, is `E228` rather than a publication withheld.
 
 An authorization push that did not report success is settled by reading the branch, never by pushing it again.
 Found on the branch, or under the result the node wrote on top of it, the authorization landed, and the run reads the

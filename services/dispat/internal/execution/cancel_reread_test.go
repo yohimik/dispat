@@ -5,12 +5,16 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/services/dispat/internal/config"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // A cancellation placed directly on the assignment fences the only claim a
@@ -215,4 +219,158 @@ func TestWithdrawalRetryAcceptsOwnLiveTip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWithdrawalKeepsWhatAPublisherReported: a run that withdraws a
+// publication it authorized reads what the node already wrote in its place.
+// The node's own success is a publication, recorded as if it had arrived a
+// moment earlier, and its own failure is a known failure; an acknowledgement
+// of an earlier withdrawal says whether the command had started, and only a
+// started command without a result leaves the outcome unknown.
+func TestWithdrawalKeepsWhatAPublisherReported(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		terminal   func(*publishChain) (MessageKind, string, any)
+		isWithheld bool
+		isUnknown  bool
+		isFailure  bool
+	}{
+		{name: "a success the node reported", terminal: func(c *publishChain) (MessageKind, string, any) {
+			return MessageResult, c.authorized, Result{Header: c.reply(), Assignment: c.offered,
+				Status: StatusSucceeded}
+		}},
+		{name: "a failure the node reported", isFailure: true,
+			terminal: func(c *publishChain) (MessageKind, string, any) {
+				return MessageResult, c.authorized, Result{Header: c.reply(), Assignment: c.offered,
+					Status: StatusFailed, FailedPart: "commands"}
+			}},
+		{name: "an acknowledgement after the command started", isUnknown: true,
+			terminal: func(c *publishChain) (MessageKind, string, any) {
+				cancel := c.withdrawEarlier(c.authorized)
+				return MessageAck, cancel, Ack{Header: c.reply(), Assignment: c.offered, Cancel: cancel,
+					Phase: "commands", CommandStarted: true}
+			}},
+		{name: "an acknowledgement before the command started", isFailure: true,
+			terminal: func(c *publishChain) (MessageKind, string, any) {
+				cancel := c.withdrawEarlier(c.authorized)
+				return MessageAck, cancel, Ack{Header: c.reply(), Assignment: c.offered, Cancel: cancel,
+					Phase: PhaseAuthorizationWait}
+			}},
+		{name: "a withheld publisher whose command started", isWithheld: true, isUnknown: true,
+			terminal: func(c *publishChain) (MessageKind, string, any) {
+				cancel := c.withdrawEarlier(c.ready)
+				return MessageAck, cancel, Ack{Header: c.reply(), Assignment: c.offered, Cancel: cancel,
+					Phase: "commands", CommandStarted: true}
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chain := newPublishChain(t, !tc.isWithheld)
+			kind, previous, message := tc.terminal(chain)
+			_, err := chain.fixture.node.mailbox.Reread(t.Context(), chain.branch)
+			require.NoError(t, err)
+			_, err = chain.fixture.node.mailbox.Advance(t.Context(), chain.branch, previous, kind,
+				mustMarshalValue(message), nil)
+			require.NoError(t, err)
+			pub := publicationAttempt{lease: chain.lease, task: chain.assignment.Task, attempt: 1,
+				repository: "web", offer: taskOffer{branch: chain.branch, kind: KindPublish, offered: chain.offered}}
+
+			var outcome release.StageOutcome
+			if tc.isWithheld {
+				refused := errors.New("the inputs moved")
+				outcome, err = chain.fixture.coordinator.withdrawPublication(t.Context(), pub,
+					release.StageOutcome{}, taskReply{kind: MessageReady, commit: chain.ready}, refused)
+			} else {
+				outcome, err = chain.fixture.coordinator.resolveUnansweredPublication(t.Context(), pub,
+					release.StageOutcome{}, chain.authorized)
+			}
+
+			unknown := chain.fixture.coordinator.UnknownPublications()
+			if tc.isUnknown {
+				require.Error(t, err)
+				assert.Equal(t, CodePublicationUnknown, config.DiagnosticCode(err))
+				require.Len(t, unknown, 1)
+				assert.True(t, unknown[0].IsQuiesced, "the node answered, so it has stopped")
+				return
+			}
+			assert.Empty(t, unknown, "the node said what became of it")
+			assert.Empty(t, chain.fixture.coordinator.RetainedRepositories())
+			if tc.isFailure {
+				require.Error(t, err)
+				assert.NotEqual(t, CodePublicationUnknown, config.DiagnosticCode(err))
+				return
+			}
+			require.NoError(t, err, "a success the node reported is a publication")
+			assert.Empty(t, outcome.FailedPart)
+		})
+	}
+}
+
+// publishChain is one delegated publication on a real mailbox, written up to
+// the authorization: assignment, claim, ready and go.
+type publishChain struct {
+	t          *testing.T
+	fixture    *coordinatorFixture
+	assignment *Assignment
+	lease      *Lease
+	branch     string
+	offered    string
+	ready      string
+	authorized string
+}
+
+func newPublishChain(t *testing.T, isAuthorized bool) *publishChain {
+	t.Helper()
+	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, answeredPreflight)
+	fixture.coordinator.Timeouts.Cancel = 500 * time.Millisecond
+	pool := NewPool([]Link{{Name: "build-a", Endpoint: fixture.orchestrator.endpoint}},
+		[]*NodeReport{linuxNode(1)}, LocalNode{Name: "here", Capacity: 1}, zerolog.Nop())
+	lease, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
+	require.NoError(t, err)
+	chain := &publishChain{t: t, fixture: fixture, lease: lease,
+		branch: FormatBranch("build-a", KindPublish, time.Now())}
+	chain.assignment = probeAssignment("build-a", chain.branch)
+	chain.assignment.Kind, chain.assignment.Task = KindPublish, "core:publish"
+	chain.offered, err = assign(t.Context(), fixture.orchestrator.mailbox, chain.assignment)
+	require.NoError(t, err)
+	_, err = fixture.node.mailbox.Reread(t.Context(), chain.branch)
+	require.NoError(t, err)
+	claimed, err := fixture.node.mailbox.Advance(t.Context(), chain.branch, chain.offered, MessageClaim,
+		mustMarshalValue(Claim{Header: chain.reply(), Assignment: chain.offered}), nil)
+	require.NoError(t, err)
+	chain.ready, err = fixture.node.mailbox.Advance(t.Context(), chain.branch, claimed, MessageReady,
+		mustMarshalValue(Ready{Header: chain.reply(), Assignment: chain.offered, Claim: claimed}), nil)
+	require.NoError(t, err)
+	_, err = fixture.orchestrator.mailbox.Reread(t.Context(), chain.branch)
+	require.NoError(t, err)
+	if !isAuthorized {
+		return chain
+	}
+	chain.authorized, err = fixture.orchestrator.mailbox.Advance(t.Context(), chain.branch, chain.ready,
+		MessageGo, mustMarshalValue(Go{Header: chain.orchestratorHeader(0), Assignment: chain.offered,
+			Ready: chain.ready, NotAfter: time.Now().Add(time.Minute).UTC().Format(time.RFC3339)}), nil)
+	require.NoError(t, err)
+	return chain
+}
+
+// reply is the header the node writes back.
+func (c *publishChain) reply() Header { return replyHeader(*c.assignment) }
+
+// orchestratorHeader is the run's own header, issued the given time ago so
+// that two withdrawals of one second are two objects.
+func (c *publishChain) orchestratorHeader(ago time.Duration) Header {
+	header := c.fixture.coordinator.formatOrchestratorHeader(KindPublish, c.assignment.Task, 1,
+		"build-a", c.branch)
+	header.IssuedAt = time.Now().Add(-ago).UTC().Format(time.RFC3339)
+	return header
+}
+
+// withdrawEarlier writes an earlier withdrawal of this run's on top of tip, as
+// a run whose response to it was lost would have left it.
+func (c *publishChain) withdrawEarlier(tip string) string {
+	c.t.Helper()
+	cancel, err := c.fixture.orchestrator.mailbox.Advance(c.t.Context(), c.branch, tip, MessageCancel,
+		mustMarshalValue(Withdrawal{Header: c.orchestratorHeader(time.Minute), Assignment: c.offered,
+			Tip: tip}), nil)
+	require.NoError(c.t, err)
+	return cancel
 }

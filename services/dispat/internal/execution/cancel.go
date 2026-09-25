@@ -67,6 +67,10 @@ type cancellation struct {
 	isAcknowledged   bool
 	phase            string
 	isCommandStarted bool
+	// result is the node's own terminal result, found where the withdrawal was
+	// to be written: the attempt ended by itself, and for a publication what it
+	// reported is the answer, a success included.
+	result *Result
 }
 
 // withdrawAttempt writes the withdrawal on the attempt's tip and waits,
@@ -95,13 +99,14 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 			Str("category", CategoryTransportCleanup).Msg("the attempt could not be withdrawn")
 		return cancellation{}
 	}
-	if withdrawn.oid == "" {
+	if withdrawn.terminal != nil {
 		// The attempt ended by itself while the withdrawal was being written.
 		// The node has provably stopped, since it wrote the terminal message
-		// itself, and nothing here may say what its command did or did not do.
+		// itself, and what that message says is the answer.
 		c.Log.Debug().Str("run", c.Run).Str("task", task).Str("worker", node).
-			Int("attempt", attempt).Msg("the attempt ended before it could be withdrawn")
-		return cancellation{isAcknowledged: true, isCommandStarted: true}
+			Int("attempt", attempt).Str("message", string(withdrawn.terminal.Kind)).
+			Msg("the attempt ended before it could be withdrawn")
+		return c.readOwnTerminal(settling, node, *withdrawn.terminal)
 	}
 	c.recordOwnedRef(settling, ownedRefStep{
 		node: node, branch: offer.branch, oid: withdrawn.oid, parent: withdrawn.parent,
@@ -120,8 +125,40 @@ func (c *Coordinator) withdrawAttempt(ctx context.Context, node, task string, at
 	return c.awaitAcknowledgement(settling, node, task, attempt, offer, withdrawn.oid)
 }
 
+// withdrawalAdvance is what writing a withdrawal came to: the cancellation
+// this run wrote and the object it was leased on, or the node's own terminal
+// message found in its place.
 type withdrawalAdvance struct {
 	oid, parent string
+	terminal    *ChainTip
+}
+
+// readOwnTerminal reads what an attempt's own terminal message says, once it
+// has been proven to be this attempt's: the result itself, or the phase and
+// the command flag of an acknowledgement. A message that cannot be read a
+// second time says only that the node stopped, which for a publication is the
+// answer that leaves its outcome unknown.
+func (c *Coordinator) readOwnTerminal(ctx context.Context, node string, tip ChainTip) cancellation {
+	stopped := cancellation{isAcknowledged: true, isCommandStarted: true}
+	document, err := c.mailboxes[node].Read(ctx, tip, c.Limits.MaxManifestBytes)
+	if err != nil {
+		return stopped
+	}
+	switch tip.Kind {
+	case MessageResult:
+		var result Result
+		if json.Unmarshal(document, &result) != nil {
+			return stopped
+		}
+		return cancellation{isAcknowledged: true, result: &result}
+	case MessageAck:
+		var ack Ack
+		if json.Unmarshal(document, &ack) != nil {
+			return stopped
+		}
+		return cancellation{isAcknowledged: true, phase: ack.Phase, isCommandStarted: ack.CommandStarted}
+	}
+	return stopped
 }
 
 // writeWithdrawal pushes the withdrawal, re-reading the branch when a lease
@@ -135,7 +172,7 @@ type withdrawalAdvance struct {
 // arriving inside that window is leased against the assignment. The worker
 // can move again before the retry push, so every failed push gets another
 // authenticated re-read, bounded by the protocol's maximum chain depth. A
-// terminal message needs no withdrawal at all, and an empty oid says so.
+// terminal message needs no withdrawal at all, and is answered in its place.
 func (c *Coordinator) writeWithdrawal(ctx context.Context, node, task string, attempt int,
 	kind string, offer taskOffer, tipOID string) (withdrawalAdvance, error) {
 	expected := attemptIdentity{
@@ -174,7 +211,7 @@ func (c *Coordinator) writeWithdrawal(ctx context.Context, node, task string, at
 			}
 			c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: offer.branch,
 				oid: tip.OID, parent: tip.PreviousOID})
-			return withdrawalAdvance{}, nil
+			return withdrawalAdvance{terminal: &tip}, nil
 		}
 		if !c.isOwnCancellationPredecessor(ctx, tip, expected) {
 			// A foreign or unreadable tip authorizes neither cancellation nor cleanup.
