@@ -601,6 +601,44 @@ func TestReleaseLockReplacedBeforePublishWithholdsThePublication(t *testing.T) {
 	assert.Contains(t, bareGit(t, bare, "cat-file", "tag", lockTag), "held by another release")
 }
 
+// TestReleaseLockDeletedBetweenPublicationsWithholdsTheSecond: a lock that
+// disappears from the remote while a run is publishing is gone rather than
+// replaced, and a run that no longer holds it may start no new effect. The
+// provider's publication runs under the lock and its command deletes the tag
+// on the remote; the consumer's publication, read back first, finds no lock and
+// is refused with E336 before its command starts. What already published
+// stays published and recorded, and the run fails.
+func TestReleaseLockDeletedBetweenPublicationsWithholdsTheSecond(t *testing.T) {
+	r := harness.New(t)
+	bare := r.AddBareRemote()
+	cfg := libsConfig(markerBuild, 1)
+	cfg.Scripts["publish"] = models.Script{
+		`echo "$DISPAT_PACKAGE" >> ../../publish.log`,
+		`if [ "$DISPAT_PACKAGE" = core ]; then git -C ` + harness.ShQuote(bare) + " tag -d " + lockTag + "; fi",
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core,app): first")
+	r.Git("push", "-q", "origin", "HEAD")
+
+	res := releaseLocked(r)
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	refused, isRefused := executionLine(res, "publication not authorized")
+	require.True(t, isRefused, "stdout:\n%s", res.Stdout)
+	assert.Equal(t, executionLockCode, refused.Code())
+	assert.Equal(t, "app", refused.Package())
+	published, err := os.ReadFile(r.Path("publish.log"))
+	require.NoError(t, err)
+	assert.Equal(t, "core\n", string(published), "the consumer's publish command never started")
+	assert.True(t, r.IsTagged("core@0.1.0"), "the provider stays published and recorded: %v", r.TagList())
+	assert.Zero(t, r.TagCount("app@"), "the consumer is not tagged")
+	assert.Equal(t, []string{"core"}, executionReleasedPackages(res), "the summary counts the provider published")
+	assert.False(t, remoteHoldsLock(t, bare), "nothing put a lock back")
+}
+
 // TestReleaseLockVerifyOffSkipsTheLockRead: `commit.verify: false` is the
 // setting for a remote that rejects `ls-remote` and accepts pushes, and reading
 // the lock back before a publication is another `ls-remote`. With the setting
