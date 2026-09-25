@@ -176,12 +176,10 @@ export const CommitPill: React.FC<{
   if (progress <= 0) return null;
   const prefix = '$ git commit -m ';
   const total = prefix.length + parts.reduce((n, p) => n + p.text.length, 0);
-  let budget = Math.ceil(total * Math.min(1, progress));
-  const take = (text: string) => {
-    const shown = text.slice(0, Math.max(0, budget));
-    budget -= text.length;
-    return shown;
-  };
+  const budget = Math.ceil(total * Math.min(1, progress));
+  // Each part starts typing where the text before it ends.
+  const offsets = parts.reduce<number[]>((starts, p) => [...starts, starts[starts.length - 1] + p.text.length], [prefix.length]);
+  const typed = (text: string, offset: number) => text.slice(0, Math.max(0, budget - offset));
   return (
     <div
       style={{
@@ -199,10 +197,10 @@ export const CommitPill: React.FC<{
         whiteSpace: 'pre',
       }}
     >
-      <span style={{color: colors.dim}}>{take(prefix)}</span>
+      <span style={{color: colors.dim}}>{typed(prefix, 0)}</span>
       {parts.map((p, i) => (
         <span key={i} style={{color: p.color ?? colors.fg, fontWeight: p.weight ?? 400}}>
-          {take(p.text)}
+          {typed(p.text, offsets[i])}
         </span>
       ))}
       {progress < 1 ? <span style={{color: colors.green}}>█</span> : null}
@@ -236,6 +234,31 @@ export const cmdRow = (start: number, text: string): TermRow => ({
 /** A printed line: on screen whole the moment the graph shows its state. */
 export const outRow = (start: number, segs: CapSeg[]): TermRow => ({kind: 'out', start, segs});
 
+interface FitTerminalRowsOptions {
+  /** The rows still to place, newest first. */
+  newestFirst: TermRow[];
+  /** The physical lines left. */
+  remaining: number;
+  /** The rows placed so far, oldest first. */
+  fitted: TermRow[];
+  columns: number;
+}
+
+/**
+ * The newest rows that fit the terminal's physical lines at the fixed
+ * monospace canvas width, and the lines left over. The newest row is shown
+ * even when it alone overflows.
+ */
+function fitTerminalRows(options: FitTerminalRowsOptions): {visible: TermRow[]; remaining: number} {
+  const {newestFirst, remaining, fitted, columns} = options;
+  const [row, ...older] = newestFirst;
+  if (row === undefined) return {visible: fitted, remaining};
+  const text = row.kind === 'cmd' ? `$ ${row.text}█` : row.segs.map((segment) => segment.text).join('');
+  const physicalLines = text.split('\n').reduce((total, line) => total + Math.max(1, Math.ceil(line.length / columns)), 0);
+  if (physicalLines > remaining && fitted.length) return {visible: fitted, remaining};
+  return fitTerminalRows({newestFirst: older, remaining: remaining - physicalLines, fitted: [row, ...fitted], columns});
+}
+
 /**
  * The scene's terminal, a block under the diagram: commands type, output
  * prints at the moment the diagram shows the state it reports, the last few
@@ -250,16 +273,7 @@ export const SceneTerminal: React.FC<{rows: TermRow[]; f: number; lines?: number
   const shownCount = available.length;
   // Reserve whole physical lines at the fixed monospace canvas width. Drop
   // complete older rows when a command wraps, rather than clipping half a row.
-  const visible: TermRow[] = [];
-  let remaining = lineBudget;
-  for (let index = available.length - 1; index >= 0; index--) {
-    const row = available[index];
-    const text = row.kind === 'cmd' ? `$ ${row.text}█` : row.segs.map((segment) => segment.text).join('');
-    const physicalLines = text.split('\n').reduce((total, line) => total + Math.max(1, Math.ceil(line.length / columns)), 0);
-    if (physicalLines > remaining && visible.length) break;
-    visible.unshift(row);
-    remaining -= physicalLines;
-  }
+  const {visible, remaining} = fitTerminalRows({newestFirst: [...available].reverse(), remaining: lineBudget, fitted: [], columns});
   const last = visible[visible.length - 1];
   const typing = last !== undefined && last.kind === 'cmd' && f < last.typeEnd;
   // The prompt only comes back once the running command's output is

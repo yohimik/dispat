@@ -18,6 +18,20 @@ import {useDemoLayout} from './layout';
 /** One run of manifest text, or the value the write replaces. */
 type Tok = {t: string; c?: string; w?: number} | {edit: [before: string, after: string]};
 
+interface NumberEditsOptions {
+  lines: Tok[][];
+}
+
+/** Each token's position among its beat's edits, in reading order. */
+function numberEdits(options: NumberEditsOptions): number[][] {
+  const {lines} = options;
+  const editCounts = lines.map((line) => line.filter((tok) => 'edit' in tok).length);
+  return lines.map((line, li) => {
+    const before = editCounts.slice(0, li).reduce((sum, count) => sum + count, 0);
+    return line.map((_, ti) => before + line.slice(0, ti).filter((tok) => 'edit' in tok).length);
+  });
+}
+
 type Beat = {
   file: string;
   example: string;
@@ -189,7 +203,7 @@ export const Polyglot: React.FC = () => {
         const b = f - start;
         const opacity = fadeIO(f, start, start + 6, start + BEAT - 6, start + BEAT);
         if (opacity <= 0) return null;
-        let edits = 0;
+        const editOrder = numberEdits({lines: beat.lines});
         return (
           <div key={beat.file} style={{opacity}}>
             <div
@@ -232,7 +246,7 @@ export const Polyglot: React.FC = () => {
                   <div key={li} style={{minHeight: 42, height: mobile ? undefined : 42}}>
                     {line.map((tok, ti) =>
                       'edit' in tok ? (
-                        <Edit key={ti} before={tok.edit[0]} after={tok.edit[1]} b={b} order={edits++} />
+                        <Edit key={ti} before={tok.edit[0]} after={tok.edit[1]} b={b} order={editOrder[li][ti]} />
                       ) : (
                         <span key={ti} style={{color: tok.c ?? colors.fg, fontWeight: tok.w ?? 400}}>
                           {tok.t}

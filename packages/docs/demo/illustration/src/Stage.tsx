@@ -20,17 +20,16 @@ const portraitPkgs = (graphPkgs: Pkg[], graphEdges: Edge[]): Pkg[] => {
     outgoing.get(edge.from)?.push(edge.to);
   }
   const queue = graphPkgs.filter(({id}) => indegree.get(id) === 0).map(({id}) => id);
-  let visited = 0;
-  for (let cursor = 0; cursor < queue.length; cursor++) {
-    const id = queue[cursor];
-    visited++;
+  // The queue grows while it is walked, and the array iterator reads its
+  // length on every step, so every package that becomes ready is visited.
+  for (const id of queue) {
     for (const next of outgoing.get(id) ?? []) {
       rank.set(next, Math.max(rank.get(next) ?? 0, (rank.get(id) ?? 0) + 1));
       indegree.set(next, (indegree.get(next) ?? 1) - 1);
       if (indegree.get(next) === 0) queue.push(next);
     }
   }
-  if (visited !== graphPkgs.length) graphPkgs.forEach(({id}) => rank.set(id, 0));
+  if (queue.length !== graphPkgs.length) graphPkgs.forEach(({id}) => rank.set(id, 0));
 
   // Isolated packages sit after the dependency chain so its edges never
   // appear to run through an unrelated package card.
@@ -41,7 +40,7 @@ const portraitPkgs = (graphPkgs: Pkg[], graphEdges: Edge[]): Pkg[] => {
   const rows: Pkg[][] = [];
   for (const level of levels) {
     const layer = graphPkgs.filter(({id}) => rank.get(id) === level);
-    for (let index = 0; index < layer.length; index += 2) rows.push(layer.slice(index, index + 2));
+    rows.push(...layer.flatMap((_, index) => (index % 2 === 0 ? [layer.slice(index, index + 2)] : [])));
   }
   const gap = rows.length > 1 ? Math.min(360, (MOBILE_GRAPH_BOTTOM - MOBILE_GRAPH_TOP) / (rows.length - 1)) : 0;
   const span = gap * Math.max(0, rows.length - 1);
@@ -102,9 +101,7 @@ export const Stage: React.FC<{
             // Ramp to green when the configured prerequisite is ready and hold,
             // dropping only at an explicit `off`: the lit edges accumulate
             // into the release's path.
-            let hot = 0;
-            for (const p of pulses) {
-              if (p.edge !== i) continue;
+            const hot = pulses.filter((p) => p.edge === i).reduce((strongest, p) => {
               const on = interpolate(frame, [p.start, p.start + 8], [0, 1], {
                 extrapolateLeft: 'clamp',
                 extrapolateRight: 'clamp',
@@ -116,8 +113,8 @@ export const Stage: React.FC<{
                       extrapolateLeft: 'clamp',
                       extrapolateRight: 'clamp',
                     });
-              hot = Math.max(hot, on * kept);
-            }
+              return Math.max(strongest, on * kept);
+            }, 0);
             const anchors = mobile
               ? {
                   x1: nodeLookup[e.from].x,
