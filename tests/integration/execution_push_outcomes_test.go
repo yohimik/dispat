@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -64,25 +65,100 @@ func executionBuildsOf(rig *executionRig, name string) int {
 }
 
 // TestExecutionLostClaimResponseRunsTheTaskOnce: the node's claim push applies
-// and its answer is lost. The node reads the branch, finds its own claim there
-// and runs the task; it neither leaves the work for the orchestrator to wait
-// out nor claims it a second time.
+// and its answer is lost, on a build branch and on a publish branch alike. The
+// node reads the branch, finds its own claim there and runs the task; it
+// neither leaves the work for the orchestrator to wait out nor claims it a
+// second time. A publication whose claim answer was lost is no unknown
+// outcome: the node goes on to its ready, the run authorizes it once, and the
+// command runs once.
 func TestExecutionLostClaimResponseRunsTheTaskOnce(t *testing.T) {
-	rig := newExecutionPushOutcomeRig(t)
+	for _, row := range []struct {
+		name    string
+		adjust  func(*models.File)
+		pattern string
+		ranOnce func(*executionRig) bool
+	}{
+		{
+			name:    "a build claim",
+			pattern: "*push*[0-9]-build-*",
+			ranOnce: func(rig *executionRig) bool { return executionBuildsOf(rig, "core") == 1 },
+		},
+		{
+			name: "a publish claim",
+			adjust: func(cfg *models.File) {
+				cfg.RunOnly = placedOn(models.RunOnlyBoth, models.RunOnlyWorker)
+				cfg.Scripts["publish"] = models.Script{executionPublishProbe}
+			},
+			// The node's first push onto the publish branch is its claim.
+			pattern: "*push*[0-9]-publish-*",
+			ranOnce: func(rig *executionRig) bool {
+				return slices.Equal([]string{"core"}, executionProbedPackagesOn(rig, executionNode))
+			},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var adjust []func(*models.File)
+			if row.adjust != nil {
+				adjust = append(adjust, row.adjust)
+			}
+			rig := newExecutionPushOutcomeRig(t, adjust...)
+			fault := harness.NewGitFault(t, harness.GitFault{
+				Pattern: row.pattern, Nth: 1, After: true, Output: executionLostPushReply})
+			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
+
+			started := time.Now()
+			res := rig.release()
+			stopAll(t, []*executionWorker{worker})
+
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Positive(t, fault.Matches(), "the fault reached the claim push")
+			assert.True(t, row.ranOnce(rig), "the task ran exactly once: %v", rig.runs())
+			assert.Less(t, time.Since(started), 150*time.Second, "and nobody waited out the task deadline")
+			assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
+				"a claim that landed leaves nothing unknown\nstdout:\n%s", res.Stdout)
+			assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+			assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
+			assert.Empty(t, rig.branches(), "the run closed the branches it created")
+		})
+	}
+}
+
+// TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal: the release
+// is interrupted while a node builds, the node stops the build and pushes its
+// acknowledgement, and the push applies while its answer is lost. The node
+// reads the branch instead of pushing again, so the run hears the
+// acknowledgement it wrote: the withdrawn attempt is settled as acknowledged,
+// with the phase the frame had reached, nothing is reported unknown, nothing is
+// recorded and the lock goes back.
+func TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript + " && sleep 600"}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 600, Cancel: 60}
+		cfg.LogLevel = "debug"
+	})
+	// The node's second push onto the build branch: the first is its claim,
+	// and the build never finishes, so the second is its acknowledgement.
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*[0-9]-build-*", Nth: 1, After: true, Output: executionLostPushReply})
+		Pattern: "*push*[0-9]-build-*", Nth: 2, After: true, Output: executionLostPushReply})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
+	started := rig.repo.StartReleaseEnv(rig.env(), "release")
 
-	started := time.Now()
-	res := rig.release()
-	stopAll(t, []*executionWorker{worker})
+	executionAwaitProbe(t, rig, executionNode)
+	started.Signal(syscall.SIGINT)
+	res := started.Wait()
+	served := worker.stop(t)
 
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Positive(t, fault.Matches(), "the fault reached the claim push")
-	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the task ran exactly once: %v", rig.runs())
-	assert.Less(t, time.Since(started), 150*time.Second, "and nobody waited out the task deadline")
-	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
-	assert.Empty(t, rig.branches(), "the run closed the branches it created")
+	assert.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero")
+	assert.Equal(t, 2, fault.Matches(), "the fault reached the acknowledgement push, and nothing pushed it again")
+	settled, isSettled := executionLine(res, "the withdrawn attempt was acknowledged")
+	require.True(t, isSettled, "the run heard the acknowledgement whose answer was lost\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, "commands", settled.Str("phase"))
+	assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
+		"an acknowledged withdrawal leaves nothing unknown\nstdout:\n%s", res.Stdout)
+	assert.Contains(t, served.Stdout, `"message":"cancellation acknowledged"`)
+	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
+	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock went back")
 }
 
 // TestExecutionLostReadyResponsePublishes: a publishing node's ready push
