@@ -367,7 +367,7 @@ func TestComputeVersionsItCannotUse(t *testing.T) {
 // would make there, the initials, the root dependency object and a package
 // entry's provider list, becomes the block to paste, naming the key it
 // replaces and the file it belongs in, and an error instead of a half-applied
-// edit.
+// edit. The root object's block carries every authored edge whole.
 func TestComputeInitialsInYAMLAndTOMLConfigs(t *testing.T) {
 	t.Run("yaml", func(t *testing.T) {
 		r := harness.New(t)
@@ -417,17 +417,32 @@ build = ["build"]
 			wants: []string{"# paste over the initials in dispat.toml:", "[initials]", "core = '1.4.2'"},
 		},
 		{
+			// The authored edges travel with the suggestion: the block replaces
+			// the whole table, so what each one states about itself, its kind,
+			// that compute must keep it, and that its provider may be absent,
+			// is written back into it.
 			name: "toml root dependency object",
-			body: tomlWorkspace,
+			body: tomlWorkspace + `
+[[dependencies.web]]
+provider = "tools"
+kind = "devDependencies"
+keep = true
+
+[[dependencies.web]]
+provider = "sdk"
+external = true
+`,
 			seed: func(r *harness.Repo) {
 				r.SeedPackage("packages", "core")
 				r.SeedPackage("packages", "web")
+				r.SeedPackage("packages", "tools")
 				r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
 				r.WriteFile("packages/web/package.json",
 					`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
 			},
 			wants: []string{"paste over the [dependencies] table in dispat.toml", "[dependencies]",
-				"[[dependencies.web]]", "provider = 'core'"},
+				"[[dependencies.web]]", "provider = 'core'", "provider = 'tools'", "kind = 'devDependencies'",
+				"keep = true", "provider = 'sdk'", "external = true"},
 		},
 		{
 			name: "toml package entry provider list",

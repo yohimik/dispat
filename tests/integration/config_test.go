@@ -215,10 +215,10 @@ func TestConfigFusedPrereleaseTagFormatRoundTrips(t *testing.T) {
 
 // TestConfigParserOptions: the top-level `parser` object reconfigures the
 // commit-message parser end to end. A custom type table makes `docs` release
-// a patch, the configured default propagation depth carries it to the direct
-// consumer with no caret written, strictTypes turns an unknown type into an
-// error (E140) that commitErrors' default policy tolerates, and an invalid
-// parser value fails the load rather than the first release.
+// a patch, the configured default propagation depth and bump carry a minor to
+// the direct consumer with no caret written, strictTypes turns an unknown type
+// into an error (E140) that commitErrors' default policy tolerates, and an
+// invalid parser value fails the load rather than the first release.
 func TestConfigParserOptions(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
@@ -226,7 +226,7 @@ func TestConfigParserOptions(t *testing.T) {
 	cfg.Parser = &models.ParserConfig{
 		Types:       map[string]string{"feat": "minor", "fix": "patch", "docs": "patch"},
 		StrictTypes: true,
-		Propagation: &models.ParserPropagationConfig{Depth: "1"},
+		Propagation: &models.ParserPropagationConfig{Depth: "1", Bump: "minor"},
 	}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -237,8 +237,8 @@ func TestConfigParserOptions(t *testing.T) {
 	r.Commit("docs(core): documentation now ships")
 	r.ReleaseOK()
 	assert.True(t, r.IsTagged("core@0.0.1"), "docs bumps patch under the custom table; tags: %v", r.TagList())
-	assert.True(t, r.IsTagged("app@0.0.1"),
-		"the configured propagation depth carries the bump with no caret; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("app@0.1.0"),
+		"the configured propagation depth and bump carry a minor with no caret; tags: %v", r.TagList())
 
 	// strictTypes: an unknown type is an error, not a shrug — reported, and
 	// under the default commitErrors policy the unit just contributes nothing.
