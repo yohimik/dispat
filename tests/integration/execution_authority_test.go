@@ -376,16 +376,16 @@ func TestExecutionLinkedPeerExecutionKeysAreIgnored(t *testing.T) {
 			t.Helper()
 			source := harness.New(t)
 			source.SeedPackage("packages", "lib")
-			sourceCfg := covPolyrepoFile()
+			sourceCfg := polyrepoModelFile()
 			sourceCfg.Polyrepo = false
-			sourceCfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "packages"})
+			sourceCfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "packages"})
 			sourceCfg.Execution = execution
 			source.WriteConfigModel(sourceCfg)
 			source.Commit("feat(lib): bootstrap library")
 
 			control := harness.New(t)
 			addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-			cfg := covPolyrepoFile()
+			cfg := polyrepoModelFile()
 			cfg.Configs = []string{"sources/lib/dispat.json"}
 			control.WriteConfigModel(cfg)
 			control.Commit("chore: import the source configuration")

@@ -15,7 +15,7 @@ import (
 // missing fragment must refuse the whole workspace rather than quietly use
 // the source whose path was already resolved.
 func TestConfigNestedImportFragmentsKeepOriginsAndFailClosed(t *testing.T) {
-	control := covPolyrepoImportFleet(t)
+	control := importFleet(t)
 	control.WriteFile("cfg/one.json", `["../sources/one/dispat.json"]`+"\n")
 	control.WriteFile("cfg/two.json", `["../sources/two/dispat.json"]`+"\n")
 	control.WriteFile("cfg/list.json", `{"$ref":["one.json","missing.json"]}`+"\n")
@@ -34,7 +34,7 @@ func TestConfigNestedImportFragmentsKeepOriginsAndFailClosed(t *testing.T) {
 
 	control.WriteFile("cfg/list.json", `{"$ref":["one.json","two.json"]}`+"\n")
 	good := control.StatusOK()
-	found := covPolyrepoImported(good)
+	found := importedPackages(good)
 	assert.True(t, found["one"], "the first import resolves from cfg/one.json")
 	assert.True(t, found["two"], "the second import resolves from cfg/two.json")
 }

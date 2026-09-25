@@ -355,3 +355,11 @@ func jsonLine(t *testing.T, res harness.RunResult, msg string) harness.Event {
 	t.Fatalf("no %q line in:\n%s\nstderr:\n%s", msg, res.Stdout, res.Stderr)
 	return nil
 }
+
+// readFileString reads a file a scenario expects to exist, whole.
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(data)
+}

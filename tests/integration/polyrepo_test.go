@@ -345,7 +345,7 @@ func TestPolyrepoConfigImportResolvesFromDeclaringFragment(t *testing.T) {
 	// entitled to produce. Each fragment's paths are read relative to the
 	// fragment, which is why the list is resolved before it is decoded.
 	t.Run("a list of fragments, one named by an absolute path", func(t *testing.T) {
-		control := covPolyrepoImportFleet(t)
+		control := importFleet(t)
 		// Each fragment lives beside the sources it names, and names them
 		// relative to itself rather than to the control file.
 		control.WriteFile("fragments/first.json", `["../sources/one/dispat.json"]`+"\n")
@@ -366,7 +366,7 @@ func TestPolyrepoConfigImportResolvesFromDeclaringFragment(t *testing.T) {
 		})
 		control.Commit("chore: import both sources through fragments")
 
-		found := covPolyrepoImported(control.StatusOK())
+		found := importedPackages(control.StatusOK())
 		assert.True(t, found["one"], "a fragment's relative path is read from the fragment")
 		assert.True(t, found["two"], "and a fragment may be named by an absolute path")
 	})
@@ -2332,13 +2332,13 @@ func TestPolyrepoCheckpointRefusesASourceRevisionItCannotProve(t *testing.T) {
 		{name: "the source remote cannot be asked", unreachable: true, want: []string{"lib-source"}},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			control, sourceBare, controlBare := covPolyrepoPushableFleet(t)
+			control, sourceBare, controlBare := pushableFleet(t)
 			if row.unreachable {
 				control.Git("-C", "sources/lib", "remote", "set-url", "origin",
 					filepath.Join(t.TempDir(), "not-a-repository"))
 			}
-			cfg := covPolyrepoFile()
-			cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+			cfg := polyrepoModelFile()
+			cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 			cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
 			cfg.Commit = &models.CommitConfig{
 				Enabled: models.Bool(true), Push: true, Remote: "origin",
@@ -2388,7 +2388,7 @@ func TestRevertOnFailRestoresThroughTheOwningRepository(t *testing.T) {
 		control := harness.New(t)
 		control.SeedPackage("packages", "tool")
 		addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.Spaces = map[string]models.SpaceConfig{
 			"libs":  {Path: models.PathList{"sources/lib/packages"}, RevertOnFail: models.Bool(true)},
 			"tools": {Path: models.PathList{"packages"}, RevertOnFail: models.Bool(true)},

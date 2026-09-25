@@ -3,7 +3,7 @@
 
 package integration
 
-// Coverage scenarios for the shapes a `configs` declaration is written in.
+// Goal 52: the shapes a `configs` declaration is written in.
 // The list of imported source configurations decides which repositories
 // participate, and it is read before the control configuration is decoded, so
 // every spelling the ordinary config reader accepts has to reach the same
@@ -18,18 +18,18 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// covPolyrepoImportFleet links two sources, each carrying its own
+// importFleet links two sources, each carrying its own
 // configuration, and returns the control repository. Nothing declares the
 // imports yet: that is what each scenario writes.
-func covPolyrepoImportFleet(t *testing.T) *harness.Repo {
+func importFleet(t *testing.T) *harness.Repo {
 	t.Helper()
 	control := harness.New(t)
 	for _, pkg := range []string{"one", "two"} {
 		source := harness.New(t)
 		source.SeedPackage("packages", pkg)
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.Polyrepo = false
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{pkg + "s": "packages"})
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{pkg + "s": "packages"})
 		source.WriteConfigModel(cfg)
 		source.Commit("feat(" + pkg + "): bootstrap " + pkg)
 		addPolyrepoSource(t, control, pkg+"-source", "sources/"+pkg, source)
@@ -37,8 +37,8 @@ func covPolyrepoImportFleet(t *testing.T) *harness.Repo {
 	return control
 }
 
-// covPolyrepoImported reads back which packages a composed run found.
-func covPolyrepoImported(res harness.RunResult) map[string]bool {
+// importedPackages reads back which packages a composed run found.
+func importedPackages(res harness.RunResult) map[string]bool {
 	found := map[string]bool{}
 	for _, e := range res.Events {
 		if pkg := e.Package(); pkg != "" {
@@ -48,12 +48,12 @@ func covPolyrepoImported(res harness.RunResult) map[string]bool {
 	return found
 }
 
-// TestCovPolyrepoImportListComposesFromEverySpelling: the same two imports
+// TestPolyrepoImportListComposesFromEverySpelling: the same two imports
 // reach the same two repositories whether they are written as a list or as
 // one value carrying both, and a value naming no file is refused.
-func TestCovPolyrepoImportListComposesFromEverySpelling(t *testing.T) {
+func TestPolyrepoImportListComposesFromEverySpelling(t *testing.T) {
 	t.Run("a list written out", func(t *testing.T) {
-		control := covPolyrepoImportFleet(t)
+		control := importFleet(t)
 		control.WriteConfigRaw(map[string]any{
 			"polyrepo":    true,
 			"logFormat":   "json",
@@ -64,13 +64,13 @@ func TestCovPolyrepoImportListComposesFromEverySpelling(t *testing.T) {
 		})
 		control.Commit("chore: import both sources as a list")
 
-		found := covPolyrepoImported(control.StatusOK())
+		found := importedPackages(control.StatusOK())
 		assert.True(t, found["one"])
 		assert.True(t, found["two"])
 	})
 
 	t.Run("one value carrying both", func(t *testing.T) {
-		control := covPolyrepoImportFleet(t)
+		control := importFleet(t)
 		control.WriteConfigRaw(map[string]any{
 			"polyrepo":    true,
 			"logFormat":   "json",
@@ -81,13 +81,13 @@ func TestCovPolyrepoImportListComposesFromEverySpelling(t *testing.T) {
 		})
 		control.Commit("chore: import both sources as one value")
 
-		found := covPolyrepoImported(control.StatusOK())
+		found := importedPackages(control.StatusOK())
 		assert.True(t, found["one"])
 		assert.True(t, found["two"])
 	})
 
 	t.Run("a value that names no file at all", func(t *testing.T) {
-		control := covPolyrepoImportFleet(t)
+		control := importFleet(t)
 		control.WriteConfigRaw(map[string]any{
 			"polyrepo":    true,
 			"logFormat":   "json",
@@ -100,7 +100,7 @@ func TestCovPolyrepoImportListComposesFromEverySpelling(t *testing.T) {
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, `config \"7\"`)
 		// The refusal is dispat's own: the operating system's wording for a
 		// missing file differs between runtimes ("no such file or directory"

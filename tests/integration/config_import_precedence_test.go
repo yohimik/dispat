@@ -22,7 +22,7 @@ func TestConfigImportReferencesRespectMergePrecedence(t *testing.T) {
 		{name: "root declaration wins", second: `{"configs":"../sources/two/dispat.json"}`, direct: "sources/one/dispat.json", wanted: "one"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			control := covPolyrepoImportFleet(t)
+			control := importFleet(t)
 			control.WriteFile("cfg/first.json", `{"configs":"../sources/one/dispat.json"}`+"\n")
 			control.WriteFile("cfg/second.json", tc.second+"\n")
 			root := map[string]any{
@@ -36,7 +36,7 @@ func TestConfigImportReferencesRespectMergePrecedence(t *testing.T) {
 			control.WriteConfigRaw(root)
 			control.Commit("chore: choose workspace imports")
 
-			found := covPolyrepoImported(control.StatusOK())
+			found := importedPackages(control.StatusOK())
 			assert.True(t, found[tc.wanted], "winning declaration must compose %s: %v", tc.wanted, found)
 			other := "one"
 			if tc.wanted == "one" {

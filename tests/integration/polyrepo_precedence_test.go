@@ -3,7 +3,7 @@
 
 package integration
 
-// Coverage scenarios: two repositories deciding one package.
+// Goal 52: two repositories deciding one package.
 //
 // In a composed workspace a package can be addressed both from the repository
 // that holds it and from the control repository that composes the fleet, and
@@ -23,10 +23,10 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// covTailComposedOwner builds a control repository composing one source that
+// composedOwner builds a control repository composing one source that
 // owns the package named. Both repositories can address the package, which is
 // what every scenario in this file needs.
-func covTailComposedOwner(t *testing.T, pkg string) *harness.Repo {
+func composedOwner(t *testing.T, pkg string) *harness.Repo {
 	t.Helper()
 	source := harness.New(t)
 	source.SeedPackage("packages", pkg)
@@ -51,15 +51,15 @@ func covTailComposedOwner(t *testing.T, pkg string) *harness.Repo {
 	return control
 }
 
-// TestCovTailIncomparableExactPinsNeedCausalControlResolution: an exact
+// TestPolyrepoIncomparableExactPinsNeedCausalControlResolution: an exact
 // version written in the package's own source and another written in the
 // control repository are two answers to the same question. Neither history
 // observes the other, so neither is newer, and the run says so instead of
 // releasing whichever it happened to read last. A later control directive,
 // written once the source revision is in its gitlink snapshot, does observe
 // both and settles it.
-func TestCovTailIncomparableExactPinsNeedCausalControlResolution(t *testing.T) {
-	control := covTailComposedOwner(t, "a")
+func TestPolyrepoIncomparableExactPinsNeedCausalControlResolution(t *testing.T) {
+	control := composedOwner(t, "a")
 
 	control.WriteFile("sources/a/packages/a/pin.txt", "source\n")
 	commitPolyrepoSource(t, control, "sources/a", "release(a): the source names a version\n\nRelease-As: 1.5.0")
@@ -83,13 +83,13 @@ func TestCovTailIncomparableExactPinsNeedCausalControlResolution(t *testing.T) {
 		"the resolving control directive decides the version: %s", resolved.Stdout)
 }
 
-// TestCovTailIncomparableDirectChannelsNeedCausalControlResolution: the same
+// TestPolyrepoIncomparableDirectChannelsNeedCausalControlResolution: the same
 // rule on the channel axis, and for the directives a package writes about
 // itself rather than the ones propagated to it. Two direct channel choices
 // from two repositories conflict exactly when no control revision observes
 // both.
-func TestCovTailIncomparableDirectChannelsNeedCausalControlResolution(t *testing.T) {
-	control := covTailComposedOwner(t, "a")
+func TestPolyrepoIncomparableDirectChannelsNeedCausalControlResolution(t *testing.T) {
+	control := composedOwner(t, "a")
 
 	control.WriteFile("sources/a/packages/a/channel.txt", "rc\n")
 	commitPolyrepoSource(t, control, "sources/a", "release(a)%rc: the source chooses rc")
@@ -109,13 +109,13 @@ func TestCovTailIncomparableDirectChannelsNeedCausalControlResolution(t *testing
 		"the resolving control directive decides the channel: %s", resolved.Stdout)
 }
 
-// TestCovTailIncomparableFixedGroupPinsNeedCausalControlResolution: a fixed
+// TestPolyrepoIncomparableFixedGroupPinsNeedCausalControlResolution: a fixed
 // version group holds one shared version, so an exact pin written for any
 // member is a pin on the group. Two members pinned to different versions from
 // two repositories are the same standoff as above, one level up: the group
 // cannot take both, and nothing ranks the two revisions until a control
 // revision observes them.
-func TestCovTailIncomparableFixedGroupPinsNeedCausalControlResolution(t *testing.T) {
+func TestPolyrepoIncomparableFixedGroupPinsNeedCausalControlResolution(t *testing.T) {
 	newSource := func(pkg string) *harness.Repo {
 		source := harness.New(t)
 		source.SeedPackage("packages", pkg)
@@ -166,14 +166,14 @@ func TestCovTailIncomparableFixedGroupPinsNeedCausalControlResolution(t *testing
 		"both members alike: %s", resolved.Stdout)
 }
 
-// TestCovTailControlDirectivesProjectPropagationOntoSources: a directive
+// TestPolyrepoControlDirectivesProjectPropagationOntoSources: a directive
 // written in the control repository can reach a package it does not hold, and
 // through that package's dependents. The guard that keeps such a directive
 // honest has to account for every package it reaches — the ones its scope
 // names and the ones its propagation walks to — because a control revision
 // that pins a source older than the work it is addressing would otherwise
 // publish something nobody looked at.
-func TestCovTailControlDirectivesProjectPropagationOntoSources(t *testing.T) {
+func TestPolyrepoControlDirectivesProjectPropagationOntoSources(t *testing.T) {
 	newSource := func(pkg string) *harness.Repo {
 		source := harness.New(t)
 		source.SeedPackage("packages", pkg)

@@ -14,7 +14,7 @@ import (
 // access beyond the control workspace. This checks a fragment-declared path,
 // rather than a path supplied by --configs on the command line.
 func TestConfigImportFragmentCannotEscapeControlRoot(t *testing.T) {
-	control := covPolyrepoImportFleet(t)
+	control := importFleet(t)
 	control.WriteFile("cfg/list.json", `["../../outside/dispat.json"]`+"\n")
 	control.WriteConfigRaw(map[string]any{
 		"polyrepo": true, "logFormat": "json", "updateCheck": false,

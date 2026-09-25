@@ -38,7 +38,7 @@ func TestExecutionFleetRunOutputsRefuseASourcePackageFolder(t *testing.T) {
 	writePolyrepoJSON(t, control, "dispat.json", cfg)
 	control.Commit("chore: move the sweep root outside source packages")
 	good := control.StatusOK()
-	assert.Contains(t, covPolyrepoImported(good), "core", "a safe root lets the source release plan form")
+	assert.Contains(t, importedPackages(good), "core", "a safe root lets the source release plan form")
 	assert.Empty(t, control.TagList(), "status remains read-only")
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))
 }

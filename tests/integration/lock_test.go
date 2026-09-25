@@ -684,8 +684,8 @@ func TestReleaseLockRefusesAnAmbiguousPushDestination(t *testing.T) {
 				control.Git("-C", "sources/lib", "remote", "set-url", "--push", "--add", "origin", first)
 				control.Git("-C", "sources/lib", "remote", "set-url", "--push", "--add", "origin", second)
 
-				cfg := covPolyrepoFile()
-				cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+				cfg := polyrepoModelFile()
+				cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 				cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 					"lib-source": {Commit: &models.CommitConfig{
 						Enabled: models.Bool(true), Push: true, Remote: "origin",

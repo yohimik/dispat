@@ -3,7 +3,7 @@
 
 package integration
 
-// Coverage scenarios for composing the fleet: the submodule inventory a
+// Goal 52: composing the fleet: the submodule inventory a
 // control repository is read from, the explicit boundaries a configuration may
 // supply for it, and the record destinations each source resolves from its own
 // remote. Everything here happens before a plan exists, so each refusal is
@@ -23,33 +23,33 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// covPolyrepoWriteGitmodules replaces the control repository's submodule
+// writeGitmodules replaces the control repository's submodule
 // inventory with hand-written text. `.gitmodules` is an ordinary tracked file
 // that a merge, a rebase or an editor can leave in any of these states, and
 // dispat reads it before it is allowed to touch a single repository.
-func covPolyrepoWriteGitmodules(t *testing.T, control *harness.Repo, text string) {
+func writeGitmodules(t *testing.T, control *harness.Repo, text string) {
 	t.Helper()
 	control.WriteFile(".gitmodules", text)
 }
 
-// TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead: the `.gitmodules`
+// TestPolyrepoRefusesASubmoduleInventoryItCannotRead: the `.gitmodules`
 // inventory decides which repositories exist, so every shape that would make
 // that answer ambiguous stops composition. A control repository with no
 // inventory at all, two names that fold together, a path that leaves the
 // control workspace, and two submodules whose checkouts nest are each named
 // back with the identity that caused them.
-func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
+func TestPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 	t.Run("a control repository with no inventory", func(t *testing.T) {
 		control := harness.New(t)
 		control.SeedPackage("packages", "tool")
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"tools": "packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"tools": "packages"})
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: ask for a composed workspace with nothing linked")
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "has no .gitmodules")
+		assert.Contains(t, combinedOutput(res), "has no .gitmodules")
 	})
 
 	t.Run("two identities that fold together", func(t *testing.T) {
@@ -59,21 +59,21 @@ func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 
 		control := harness.New(t)
 		addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-		covPolyrepoWriteGitmodules(t, control, `[submodule "lib-source"]
+		writeGitmodules(t, control, `[submodule "lib-source"]
 	path = sources/lib
 	url = `+source.Root+`
 [submodule "LIB-SOURCE"]
 	path = sources/lib
 	url = `+source.Root+`
 `)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: link one repository under two spellings")
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "duplicate submodule name")
 		assert.Contains(t, out, "case-insensitive")
 	})
@@ -85,14 +85,14 @@ func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 
 		control := harness.New(t)
 		addPolyrepoSource(t, control, "Σ", "sources/Σ", source)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/Σ/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/Σ/packages"})
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: pin one Unicode-named source")
 		valid := control.Status()
 		require.Equal(t, 0, valid.Code, "stdout:\n%s\nstderr:\n%s", valid.Stdout, valid.Stderr)
 
-		covPolyrepoWriteGitmodules(t, control, `[submodule "Σ"]
+		writeGitmodules(t, control, `[submodule "Σ"]
 	path = sources/Σ
 	url = `+source.Root+`
 [submodule "ς"]
@@ -102,7 +102,7 @@ func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 		control.Commit("chore: repeat source under Unicode alias")
 		ambiguous := control.Status()
 		require.Equal(t, 1, ambiguous.Code, "stdout:\n%s\nstderr:\n%s", ambiguous.Stdout, ambiguous.Stderr)
-		assert.Contains(t, covPolyrepoOutput(ambiguous), "duplicate submodule name")
+		assert.Contains(t, combinedOutput(ambiguous), "duplicate submodule name")
 		assert.Empty(t, control.TagList())
 	})
 
@@ -119,15 +119,15 @@ func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 		require.NoError(t, os.RemoveAll(control.Path("sources", "lib")))
 		require.NoError(t, os.Symlink(source.Root, control.Path("sources", "lib")))
 
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		control.WriteConfigModel(cfg)
 		control.Git("add", "-A")
 		control.Git("commit", "-q", "-m", "chore: point a submodule path out of the workspace")
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "resolves outside the control workspace")
+		assert.Contains(t, combinedOutput(res), "resolves outside the control workspace")
 	})
 
 	t.Run("two checkouts that nest", func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 		// itself refuses to register that as a submodule, so the inventory
 		// entry is the hand-written one a merge or an editor leaves behind.
 		control.Git("clone", "-q", inner.Root, control.Path("sources", "outer", "nested"))
-		covPolyrepoWriteGitmodules(t, control, `[submodule "outer-source"]
+		writeGitmodules(t, control, `[submodule "outer-source"]
 	path = sources/outer
 	url = `+outer.Root+`
 [submodule "inner-source"]
@@ -152,34 +152,34 @@ func TestCovPolyrepoRefusesASubmoduleInventoryItCannotRead(t *testing.T) {
 	url = `+inner.Root+`
 `)
 
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"outers": "sources/outer/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"outers": "sources/outer/packages"})
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: link one source inside another")
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "submodule roots overlap")
 		assert.Contains(t, out, "outer-source")
 		assert.Contains(t, out, "inner-source")
 	})
 }
 
-// TestCovPolyrepoRefusesAnImportItCannotAttributeToARepository: an imported
+// TestPolyrepoRefusesAnImportItCannotAttributeToARepository: an imported
 // configuration establishes its declaring repository as a participant, so
 // dispat has to be able to say which linked repository owns the file. A file
 // outside every repository, a file in a nested repository nobody linked, two
 // files claiming the same repository, and a file that imports further
 // configurations of its own are each refused with the path named.
-func TestCovPolyrepoRefusesAnImportItCannotAttributeToARepository(t *testing.T) {
+func TestPolyrepoRefusesAnImportItCannotAttributeToARepository(t *testing.T) {
 	newFleet := func(t *testing.T) (*harness.Repo, *harness.Repo) {
 		t.Helper()
 		source := harness.New(t)
 		source.SeedPackage("packages", "lib")
-		sourceCfg := covPolyrepoFile()
+		sourceCfg := polyrepoModelFile()
 		sourceCfg.Polyrepo = false
-		sourceCfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "packages"})
+		sourceCfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "packages"})
 		source.WriteConfigModel(sourceCfg)
 		source.Commit("feat(lib): bootstrap library")
 
@@ -192,40 +192,40 @@ func TestCovPolyrepoRefusesAnImportItCannotAttributeToARepository(t *testing.T) 
 		control, _ := newFleet(t)
 		outside := filepath.Join(t.TempDir(), "dispat.json")
 		require.NoError(t, os.WriteFile(outside, []byte("{}\n"), 0o644))
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.Configs = []string{"sources/lib/dispat.json"}
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: import the source configuration")
 
 		res := control.Status("--configs", outside)
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "path escapes control root")
+		assert.Contains(t, combinedOutput(res), "path escapes control root")
 	})
 
 	t.Run("a configuration inside the control metadata", func(t *testing.T) {
 		control, _ := newFleet(t)
 		control.WriteFile(filepath.Join(".git", "imported.json"), "{}\n")
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.Configs = []string{"sources/lib/dispat.json"}
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: import the source configuration")
 
 		res := control.Status("--configs", ".git/imported.json")
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "not inside an initialized Git repository")
+		assert.Contains(t, combinedOutput(res), "not inside an initialized Git repository")
 	})
 
 	t.Run("a configuration owned by no linked repository", func(t *testing.T) {
 		control, _ := newFleet(t)
 		control.WriteFile("release/extra.json", "{}\n")
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.Configs = []string{"sources/lib/dispat.json", "release/extra.json"}
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: import a configuration the control repository owns")
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "not an initialized .gitmodules repository")
+		assert.Contains(t, combinedOutput(res), "not an initialized .gitmodules repository")
 	})
 
 	t.Run("two configurations claiming one repository", func(t *testing.T) {
@@ -233,45 +233,45 @@ func TestCovPolyrepoRefusesAnImportItCannotAttributeToARepository(t *testing.T) 
 		control.WriteFile("sources/lib/release/dispat.json", "{}\n")
 		commitPolyrepoSource(t, control, "sources/lib", "chore: add a second configuration")
 		checkpointPolyrepoSource(t, control, "sources/lib")
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.Configs = []string{"sources/lib/dispat.json", "sources/lib/release/dispat.json"}
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: import one repository twice")
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "conflicting imported configs")
 		assert.Contains(t, out, "lib-source")
 	})
 
 	t.Run("an import that imports further configurations", func(t *testing.T) {
 		control, _ := newFleet(t)
-		nested := covPolyrepoFile()
+		nested := polyrepoModelFile()
 		nested.Polyrepo = false
 		nested.Configs = []string{"packages/lib"}
-		nested.Spaces = covPolyrepoSpaces(map[string]string{"libs": "packages"})
+		nested.Spaces = polyrepoModelSpaces(map[string]string{"libs": "packages"})
 		data := control.Path("sources", "lib", "dispat.json")
-		require.NoError(t, os.WriteFile(data, covPolyrepoJSON(t, nested), 0o644))
+		require.NoError(t, os.WriteFile(data, polyrepoModelJSON(t, nested), 0o644))
 		commitPolyrepoSource(t, control, "sources/lib", "chore: let the source import more configurations")
 		checkpointPolyrepoSource(t, control, "sources/lib")
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.Configs = []string{"sources/lib/dispat.json"}
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: import a configuration that imports more")
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "nested workspace imports are not allowed")
+		assert.Contains(t, combinedOutput(res), "nested workspace imports are not allowed")
 	})
 }
 
-// TestCovPolyrepoRefusesABaselineTupleItCannotResolve: an explicit
+// TestPolyrepoRefusesABaselineTupleItCannotResolve: an explicit
 // `repositoryBaselines` entry is the recovery for a boundary dispat cannot
 // infer, so every part of it is resolved while the configuration is still
 // loading: all four fields present, the repository a participant of this run,
 // and the revision an actual commit reachable from that repository's HEAD.
-func TestCovPolyrepoRefusesABaselineTupleItCannotResolve(t *testing.T) {
+func TestPolyrepoRefusesABaselineTupleItCannotResolve(t *testing.T) {
 	newFleet := func(t *testing.T) *harness.Repo {
 		t.Helper()
 		source := harness.New(t)
@@ -288,8 +288,8 @@ func TestCovPolyrepoRefusesABaselineTupleItCannotResolve(t *testing.T) {
 	}
 
 	base := func() models.File {
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 			"legacy-source": {Enabled: models.Bool(false)},
 		}
@@ -338,7 +338,7 @@ func TestCovPolyrepoRefusesABaselineTupleItCannotResolve(t *testing.T) {
 
 			res := control.Status()
 			assert.Equal(t, 1, res.Code)
-			assert.Contains(t, covPolyrepoOutput(res), tc.says)
+			assert.Contains(t, combinedOutput(res), tc.says)
 			assert.Empty(t, polyrepoTags(control, "sources/lib"))
 		})
 	}
@@ -362,17 +362,17 @@ func TestCovPolyrepoRefusesABaselineTupleItCannotResolve(t *testing.T) {
 
 		res := control.Status()
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "is not reachable from repository")
+		assert.Contains(t, combinedOutput(res), "is not reachable from repository")
 	})
 }
 
-// TestCovPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes: the release
+// TestPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes: the release
 // records of a source package are published against that source's repository,
 // so each source resolves its own coordinates from its own remote before the
 // plan is reported. Every spelling a remote is written in reaches the same two
 // path segments, and a remote that names no repository on the expected host
 // resolves to nothing rather than borrowing the control repository's identity.
-func TestCovPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes(t *testing.T) {
+func TestPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes(t *testing.T) {
 	type link struct {
 		name, pkg, url string
 		owner, repo    string
@@ -381,7 +381,7 @@ func TestCovPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes(t *testing.T
 	run := func(t *testing.T, apiURL string, links []link) map[string]harness.Event {
 		t.Helper()
 		control := harness.New(t)
-		cfg := covPolyrepoFile()
+		cfg := polyrepoModelFile()
 		cfg.LogLevel = "debug"
 		cfg.GitHub = &models.GitHubConfig{Enabled: models.Bool(false), APIURL: apiURL}
 		spaces := map[string]string{}
@@ -397,7 +397,7 @@ func TestCovPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes(t *testing.T
 			}
 			spaces[l.pkg+"s"] = "sources/" + l.pkg + "/packages"
 		}
-		cfg.Spaces = covPolyrepoSpaces(spaces)
+		cfg.Spaces = polyrepoModelSpaces(spaces)
 		control.WriteConfigModel(cfg)
 		control.Commit("chore: assemble sources with their own remotes")
 
@@ -456,9 +456,9 @@ func TestCovPolyrepoSourceRecordDestinationsComeFromTheirOwnRemotes(t *testing.T
 	})
 }
 
-// covPolyrepoJSON marshals a config model the way the harness writes one, for
+// polyrepoModelJSON marshals a config model the way the harness writes one, for
 // the files a scenario has to place somewhere other than the control root.
-func covPolyrepoJSON(t *testing.T, cfg models.File) []byte {
+func polyrepoModelJSON(t *testing.T, cfg models.File) []byte {
 	t.Helper()
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)

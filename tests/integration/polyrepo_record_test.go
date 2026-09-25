@@ -3,11 +3,10 @@
 
 package integration
 
-// Coverage scenarios for the recorder that writes a composed fleet's release
+// Goal 52: the recorder that writes a composed fleet's release
 // records: what it stages beside a package, where it refuses to write, which
 // refs it is allowed to move, and what a repository looks like afterwards when
-// one of those steps failed. Goal 52 owns what the composition means; nothing
-// here repeats it.
+// one of those steps failed.
 
 import (
 	"os"
@@ -23,11 +22,11 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// covPolyrepoFile is the typed twin of polyrepoFile: inert release stages,
+// polyrepoModelFile is the typed twin of polyrepoFile: inert release stages,
 // every external recorder off, and the composed mode switched on. A test adds
 // spaces, packages and policy to the returned value, so what it is actually
 // configuring stays visible in the test.
-func covPolyrepoFile() models.File {
+func polyrepoModelFile() models.File {
 	cfg := harness.BaseFile(2)
 	cfg.Polyrepo = true
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(false)}
@@ -40,9 +39,9 @@ func covPolyrepoFile() models.File {
 	return cfg
 }
 
-// covPolyrepoSpaces builds the central space declarations, whose paths keep
+// polyrepoModelSpaces builds the central space declarations, whose paths keep
 // their ordinary control-relative spelling.
-func covPolyrepoSpaces(paths map[string]string) map[string]models.SpaceConfig {
+func polyrepoModelSpaces(paths map[string]string) map[string]models.SpaceConfig {
 	spaces := make(map[string]models.SpaceConfig, len(paths))
 	for name, path := range paths {
 		spaces[name] = models.SpaceConfig{Path: models.PathList{path}}
@@ -50,18 +49,18 @@ func covPolyrepoSpaces(paths map[string]string) map[string]models.SpaceConfig {
 	return spaces
 }
 
-// covPolyrepoOutput returns the combined output of one invocation, which is
+// combinedOutput returns the combined output of one invocation, which is
 // where a composition refusal is printed before the JSON event stream starts.
-func covPolyrepoOutput(res harness.RunResult) string { return res.Stdout + res.Stderr }
+func combinedOutput(res harness.RunResult) string { return res.Stdout + res.Stderr }
 
-// TestCovPolyrepoCommitIncludeIsHeldToItsOwner: `commit.include` names the
+// TestPolyrepoCommitIncludeIsHeldToItsOwner: `commit.include` names the
 // shared artifacts a release stages beside its package folders, and in a
 // composed fleet each of those paths has an owner. A path inside its own
 // repository is staged in that repository's release commit; a path that leaves
 // its owner, names another repository, or is written absolutely is refused
 // before any package work, because staging it would put one repository's files
 // into another repository's history.
-func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
+func TestPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 	t.Run("a path inside the source is staged with the package", func(t *testing.T) {
 		source := harness.New(t)
 		source.SeedPackage("packages", "lib")
@@ -70,8 +69,8 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 
 		control := harness.New(t)
 		addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.Scripts["publish"] = models.Script{"echo regenerated > ../../shared/lock.txt"}
 		cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 			"lib-source": {Commit: &models.CommitConfig{
@@ -98,8 +97,8 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 
 		control := harness.New(t)
 		addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 			"lib-source": {Commit: &models.CommitConfig{
 				Enabled: models.Bool(true),
@@ -111,7 +110,7 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 
 		res := control.Release()
 		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "escapes its owner")
 		assert.Contains(t, out, "lib-source")
 		assert.Empty(t, polyrepoTags(control, "sources/lib"), "a refused include stages nothing")
@@ -124,8 +123,8 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 
 		control := harness.New(t)
 		addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 			"lib-source": {Commit: &models.CommitConfig{
 				Enabled: models.Bool(true),
@@ -137,7 +136,7 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 
 		res := control.Release()
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "escapes its owner")
+		assert.Contains(t, combinedOutput(res), "escapes its owner")
 		assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	})
 
@@ -149,8 +148,8 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 		control := harness.New(t)
 		control.SeedPackage("packages", "tool")
 		addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{
 			"libs":  "sources/lib/packages",
 			"tools": "packages",
 		})
@@ -165,7 +164,7 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 
 		res := control.Release()
 		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "spans repository")
 		assert.Contains(t, out, "lib-source")
 		assert.Empty(t, polyrepoTags(control, "sources/lib"))
@@ -173,20 +172,20 @@ func TestCovPolyrepoCommitIncludeIsHeldToItsOwner(t *testing.T) {
 	})
 }
 
-// TestCovPolyrepoChangelogPathIsHeldToItsOwner: a package's changelog is
+// TestPolyrepoChangelogPathIsHeldToItsOwner: a package's changelog is
 // written by its owning repository, so a `changelog.file` spelling that climbs
 // out of that repository would have one repository's release write a record
 // into another's working tree. It is refused while the run is still preparing,
 // before any package is built or tagged.
-func TestCovPolyrepoChangelogPathIsHeldToItsOwner(t *testing.T) {
+func TestPolyrepoChangelogPathIsHeldToItsOwner(t *testing.T) {
 	source := harness.New(t)
 	source.SeedPackage("packages", "lib")
 	source.Commit("feat(lib): bootstrap library")
 
 	control := harness.New(t)
 	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+	cfg := polyrepoModelFile()
+	cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg.Changelog = &models.ChangelogConfig{
 		Enabled: models.Bool(true),
 		File:    "../../../../CHANGELOG.md",
@@ -196,21 +195,21 @@ func TestCovPolyrepoChangelogPathIsHeldToItsOwner(t *testing.T) {
 
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
-	out := covPolyrepoOutput(res)
+	out := combinedOutput(res)
 	assert.Contains(t, out, "changelog path")
 	assert.Contains(t, out, "escapes its owner")
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	assert.NoFileExists(t, filepath.Join(filepath.Dir(control.Root), "CHANGELOG.md"))
 }
 
-// TestCovPolyrepoDetachedSourcePushesOnlyWhatItCanName: a detached source may
+// TestPolyrepoDetachedSourcePushesOnlyWhatItCanName: a detached source may
 // still push the immutable release tag, because a tag names the commit it was
 // created at and needs no branch destination. The branch requirement becomes
 // real only when the run actually has to create a commit: a publish stage that
 // writes into the package folder turns a tag-only release into one, and the
 // release is refused at that point rather than committing to a destination
 // nobody named.
-func TestCovPolyrepoDetachedSourcePushesOnlyWhatItCanName(t *testing.T) {
+func TestPolyrepoDetachedSourcePushesOnlyWhatItCanName(t *testing.T) {
 	newFleet := func(t *testing.T, publish string) (*harness.Repo, string) {
 		t.Helper()
 		source := harness.New(t)
@@ -226,8 +225,8 @@ func TestCovPolyrepoDetachedSourcePushesOnlyWhatItCanName(t *testing.T) {
 		control.Git("-C", "sources/lib", "push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 		control.Git("-C", "sources/lib", "checkout", "-q", "--detach")
 
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.Scripts["publish"] = models.Script{publish}
 		cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 			"lib-source": {Commit: &models.CommitConfig{
@@ -263,7 +262,7 @@ func TestCovPolyrepoDetachedSourcePushesOnlyWhatItCanName(t *testing.T) {
 		// step that meets the commit this publish created. A recording failure
 		// is reported in its own right (E335) and never becomes a tag.
 		assert.True(t, harness.IsCodePresent(res.Events, "E335"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "E337")
 		assert.Contains(t, out, "commit.branch")
 		assert.Equal(t, before, control.Git("-C", "sources/lib", "rev-parse", "HEAD"))
@@ -273,13 +272,13 @@ func TestCovPolyrepoDetachedSourcePushesOnlyWhatItCanName(t *testing.T) {
 	})
 }
 
-// TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush: the control
+// TestPolyrepoDetachedControlRefusesACheckpointItCannotPush: the control
 // repository's checkpoint is an ordinary branch commit, so a detached control
 // checkout configured to push has no destination for it. dispat says so before
 // the source package publishes, rather than after publication has made the
 // missing checkpoint a repair job. A gitlink that already names the recorded
 // source revision needs no checkpoint at all, and that release proceeds.
-func TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush(t *testing.T) {
+func TestPolyrepoDetachedControlRefusesACheckpointItCannotPush(t *testing.T) {
 	newFleet := func(t *testing.T) *harness.Repo {
 		t.Helper()
 		source := harness.New(t)
@@ -297,8 +296,8 @@ func TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush(t *testing.T) 
 
 	t.Run("a checkpoint the control cannot push is refused before publication", func(t *testing.T) {
 		control := newFleet(t)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.Scripts["publish"] = models.Script{"echo published > ../../published.txt"}
 		// The source writes and commits its own changelog, so this release
 		// moves the gitlink and the control repository owes a checkpoint.
@@ -318,7 +317,7 @@ func TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush(t *testing.T) 
 		res := control.Release()
 		assert.Equal(t, 1, res.Code)
 		assert.True(t, harness.IsCodePresent(res.Events, "E337"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "control")
 		assert.Contains(t, out, "commit.branch")
 		assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"))
@@ -329,8 +328,8 @@ func TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush(t *testing.T) 
 
 	t.Run("a gitlink that already names the recorded revision needs no branch", func(t *testing.T) {
 		control := newFleet(t)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.Commit = &models.CommitConfig{
 			Enabled: models.Bool(true), Push: true, Remote: "origin", Verify: models.Bool(false),
 		}
@@ -347,15 +346,15 @@ func TestCovPolyrepoDetachedControlRefusesACheckpointItCannotPush(t *testing.T) 
 	})
 }
 
-// TestCovPolyrepoBeforeCommitHookCannotReplaceThePlannedSource proves the
+// TestPolyrepoBeforeCommitHookCannotReplaceThePlannedSource proves the
 // post-publication record checks the source HEAD after user hooks. If a hook
 // commits there, the recorder must not tag that unplanned revision or advance
 // the control gitlink. Once the stray commit and generated record are repaired,
 // the unchanged source work can be released normally.
-func TestCovPolyrepoBeforeCommitHookCannotReplaceThePlannedSource(t *testing.T) {
-	control, sourceBare, _ := covPolyrepoPushableFleet(t)
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+func TestPolyrepoBeforeCommitHookCannotReplaceThePlannedSource(t *testing.T) {
+	control, sourceBare, _ := pushableFleet(t)
+	cfg := polyrepoModelFile()
+	cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(false)}
 	cfg.Scripts["sneak"] = models.Script{"git commit -q --allow-empty -m 'chore: a hook moved source HEAD'"}
@@ -374,7 +373,7 @@ func TestCovPolyrepoBeforeCommitHookCannotReplaceThePlannedSource(t *testing.T) 
 	res := control.Release()
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, harness.IsCodePresent(res.Events, "E335"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, covPolyrepoOutput(res), "repository changed after planning")
+	assert.Contains(t, combinedOutput(res), "repository changed after planning")
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	assert.Equal(t, sourceBefore, control.Git("-C", sourceBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
 	assert.Equal(t, sourceBefore, control.Git("rev-parse", "HEAD:sources/lib"))
@@ -391,13 +390,13 @@ func TestCovPolyrepoBeforeCommitHookCannotReplaceThePlannedSource(t *testing.T) 
 	assert.Equal(t, []string{"lib@0.1.0"}, polyrepoTags(control, "sources/lib"))
 }
 
-// TestCovPolyrepoAliasTagsFollowTheirOwnForcePolicy: a moving alias must
+// TestPolyrepoAliasTagsFollowTheirOwnForcePolicy: a moving alias must
 // replace the ref it already occupies and a fixed alias must not, so the push
 // separates them: the release tag and the fixed aliases go as ordinary refs
 // and only the explicitly moving ones are allowed to overwrite. Both halves
 // have to reach the source remote, and the second release has to leave the
 // first one's fixed alias exactly where it was.
-func TestCovPolyrepoAliasTagsFollowTheirOwnForcePolicy(t *testing.T) {
+func TestPolyrepoAliasTagsFollowTheirOwnForcePolicy(t *testing.T) {
 	source := harness.New(t)
 	source.SeedPackage("packages", "lib")
 	source.Commit("feat(lib): bootstrap library")
@@ -410,7 +409,7 @@ func TestCovPolyrepoAliasTagsFollowTheirOwnForcePolicy(t *testing.T) {
 	control.Git("-C", "sources/lib", "remote", "set-url", "origin", bare)
 	control.Git("-C", "sources/lib", "push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 
-	cfg := covPolyrepoFile()
+	cfg := polyrepoModelFile()
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {
 			Path: models.PathList{"sources/lib/packages"},
@@ -449,20 +448,20 @@ func TestCovPolyrepoAliasTagsFollowTheirOwnForcePolicy(t *testing.T) {
 	assert.Equal(t, second, control.Git("-C", bare, "rev-parse", "lib-exactly-0.2.0^{commit}"))
 }
 
-// TestCovPolyrepoSourceRecordReportsEveryFailureItCollected: a changelog the
+// TestPolyrepoSourceRecordReportsEveryFailureItCollected: a changelog the
 // recorder cannot write is not a reason to withhold the release tag, which is
 // the only durable statement that the package published. The tag is written,
 // the run still fails, the failure names the repository and the tag, and the
 // control checkpoint is withheld because the source record is incomplete.
-func TestCovPolyrepoSourceRecordReportsEveryFailureItCollected(t *testing.T) {
+func TestPolyrepoSourceRecordReportsEveryFailureItCollected(t *testing.T) {
 	source := harness.New(t)
 	source.SeedPackage("packages", "lib")
 	source.Commit("feat(lib): bootstrap library")
 
 	control := harness.New(t)
 	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+	cfg := polyrepoModelFile()
+	cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
 	control.WriteConfigModel(cfg)
@@ -474,7 +473,7 @@ func TestCovPolyrepoSourceRecordReportsEveryFailureItCollected(t *testing.T) {
 
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
-	out := covPolyrepoOutput(res)
+	out := combinedOutput(res)
 	assert.Contains(t, out, "lib-source")
 	assert.Contains(t, out, "lib@0.1.0")
 	assert.Contains(t, polyrepoTags(control, "sources/lib"), "lib@0.1.0",
@@ -483,12 +482,12 @@ func TestCovPolyrepoSourceRecordReportsEveryFailureItCollected(t *testing.T) {
 		"an incomplete source record withholds the control checkpoint")
 }
 
-// TestCovPolyrepoRemoteVerificationRefusesWhatItCannotPushTo: with pushing on,
+// TestPolyrepoRemoteVerificationRefusesWhatItCannotPushTo: with pushing on,
 // each participating repository's remote is checked once before any release
 // work. A remote that answers nothing and a checkout that is behind its remote
 // branch are both refused there, naming the repository, because discovering
 // either after publication would leave a package tagged and unreachable.
-func TestCovPolyrepoRemoteVerificationRefusesWhatItCannotPushTo(t *testing.T) {
+func TestPolyrepoRemoteVerificationRefusesWhatItCannotPushTo(t *testing.T) {
 	t.Run("a remote that cannot be reached", func(t *testing.T) {
 		source := harness.New(t)
 		source.SeedPackage("packages", "lib")
@@ -499,8 +498,8 @@ func TestCovPolyrepoRemoteVerificationRefusesWhatItCannotPushTo(t *testing.T) {
 		control.Git("-C", "sources/lib", "remote", "set-url", "origin",
 			filepath.Join(t.TempDir(), "not-a-repository"))
 
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 			"lib-source": {Commit: &models.CommitConfig{
 				Enabled: models.Bool(true), Push: true, Remote: "origin",
@@ -511,7 +510,7 @@ func TestCovPolyrepoRemoteVerificationRefusesWhatItCannotPushTo(t *testing.T) {
 
 		res := control.Release()
 		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, covPolyrepoOutput(res), "lib-source")
+		assert.Contains(t, combinedOutput(res), "lib-source")
 		assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	})
 
@@ -539,8 +538,8 @@ func TestCovPolyrepoRemoteVerificationRefusesWhatItCannotPushTo(t *testing.T) {
 		other.Git("push", "-q", "upstream", "HEAD:refs/heads/"+harness.DefaultBranch)
 		control.Git("-C", "sources/lib", "fetch", "-q", "origin")
 
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.RepositoryOverrides = map[string]models.RepositoryOverrideConfig{
 			"lib-source": {Commit: &models.CommitConfig{
 				Enabled: models.Bool(true), Push: true, Remote: "origin",
@@ -552,16 +551,9 @@ func TestCovPolyrepoRemoteVerificationRefusesWhatItCannotPushTo(t *testing.T) {
 
 		res := control.Release()
 		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
+		out := combinedOutput(res)
 		assert.Contains(t, out, "behind remote branch")
 		assert.Contains(t, out, "lib-source")
 		assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	})
-}
-
-func readFileString(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	require.NoError(t, err)
-	return string(data)
 }

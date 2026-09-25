@@ -3,7 +3,7 @@
 
 package integration
 
-// Coverage scenarios for the standalone `dispat commit` step inside a composed
+// Goal 52: the standalone `dispat commit` step inside a composed
 // fleet. Outside a release stage the step owns the whole transaction: it
 // writes the source commit under whatever identity the invocation names, tags
 // and pushes it, and then advances the control gitlink itself, because nothing
@@ -22,10 +22,10 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// covPolyrepoPushableFleet assembles one source and one control repository,
+// pushableFleet assembles one source and one control repository,
 // each with its own bare remote and its branch already published, which is
 // what any scenario that pushes needs before it starts.
-func covPolyrepoPushableFleet(t *testing.T) (control *harness.Repo, sourceBare, controlBare string) {
+func pushableFleet(t *testing.T) (control *harness.Repo, sourceBare, controlBare string) {
 	t.Helper()
 	source := harness.New(t)
 	source.SeedPackage("packages", "lib")
@@ -47,17 +47,17 @@ func covPolyrepoPushableFleet(t *testing.T) (control *harness.Repo, sourceBare, 
 	return control, sourceBare, controlBare
 }
 
-// TestCovPolyrepoCommitStepOwnsItsWholeTransaction: invoked from a shell
+// TestPolyrepoCommitStepOwnsItsWholeTransaction: invoked from a shell
 // rather than from a release stage, `dispat commit` is the whole record. Its
 // overrides replace the configured commit policy for that one invocation, the
 // push covers the branch it wrote and the tags it created, and because no
 // enclosing release is going to do it afterwards the step also moves and
 // pushes the control gitlink, which it may only do once the source tag is
 // reachable from the source remote.
-func TestCovPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
+func TestPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
 	t.Run("a tagged step commits, tags, pushes and checkpoints", func(t *testing.T) {
-		control, sourceBare, controlBare := covPolyrepoPushableFleet(t)
-		cfg := covPolyrepoFile()
+		control, sourceBare, controlBare := pushableFleet(t)
+		cfg := polyrepoModelFile()
 		cfg.Spaces = map[string]models.SpaceConfig{
 			"libs": {
 				Path:      models.PathList{"sources/lib/packages"},
@@ -108,9 +108,9 @@ func TestCovPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
 	})
 
 	t.Run("an untagged step checkpoints against the pushed branch", func(t *testing.T) {
-		control, sourceBare, controlBare := covPolyrepoPushableFleet(t)
-		cfg := covPolyrepoFile()
-		cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+		control, sourceBare, controlBare := pushableFleet(t)
+		cfg := polyrepoModelFile()
+		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 		cfg.Commit = &models.CommitConfig{
 			Enabled: models.Bool(true), Remote: "origin", Branch: harness.DefaultBranch,
 		}
@@ -133,8 +133,8 @@ func TestCovPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
 	})
 
 	t.Run("a step told not to force leaves a moving alias unforced", func(t *testing.T) {
-		control, sourceBare, _ := covPolyrepoPushableFleet(t)
-		cfg := covPolyrepoFile()
+		control, sourceBare, _ := pushableFleet(t)
+		cfg := polyrepoModelFile()
 		cfg.Spaces = map[string]models.SpaceConfig{
 			"libs": {
 				Path:      models.PathList{"sources/lib/packages"},
@@ -156,16 +156,16 @@ func TestCovPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
 	})
 }
 
-// TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision: the hooks around
+// TestPolyrepoBeforePushHookCannotMoveTheRecordedRevision: the hooks around
 // a push are user scripts, and a script that commits in the repository about
 // to be pushed would make the push publish something the release never
 // planned. The pin is re-proved inside the push transaction, after the hook and
 // before the push, so the push does not happen and the run says which revision
 // it recorded.
-func TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision(t *testing.T) {
-	control, sourceBare, _ := covPolyrepoPushableFleet(t)
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+func TestPolyrepoBeforePushHookCannotMoveTheRecordedRevision(t *testing.T) {
+	control, sourceBare, _ := pushableFleet(t)
+	cfg := polyrepoModelFile()
+	cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(false)}
 	cfg.Scripts["sneak"] = models.Script{"git commit -q --allow-empty -m 'chore: a hook that moved HEAD'"}
 	cfg.Run = &models.RunConfig{BeforePush: []string{"sneak"}}
@@ -181,7 +181,7 @@ func TestCovPolyrepoBeforePushHookCannotMoveTheRecordedRevision(t *testing.T) {
 	res := control.Release()
 	assert.Equal(t, 1, res.Code)
 	assert.True(t, harness.IsCodePresent(res.Events, "E335"), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	out := covPolyrepoOutput(res)
+	out := combinedOutput(res)
 	assert.Contains(t, out, "HEAD moved from recorded source revision")
 	assert.Contains(t, out, "lib-source")
 

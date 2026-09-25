@@ -3,7 +3,7 @@
 
 package integration
 
-// Coverage scenarios for the private live-pin coordinator a composed release
+// Goal 52: the private live-pin coordinator a composed release
 // hands to its package scripts. It is transient run state rather than
 // repository state, so a nested command has to prove the context it inherited
 // belongs to this workspace before it may admit a source revision from it.
@@ -23,11 +23,11 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// covPolyrepoLivePinProbe is the publish stage of the later package in a
+// livePinProbe is the publish stage of the later package in a
 // dependency pair. By the time it runs, the provider has recorded and the
 // coordinator holds one real pin, so each case below can copy that directory
 // and break exactly one thing about the copy.
-const covPolyrepoLivePinProbe = `
+const livePinProbe = `
 if [ "$DISPAT_PACKAGE" != beta ]; then
   echo publishing
   exit 0
@@ -124,7 +124,7 @@ probe context-is-intact DISPAT_PROBE=intact
 echo publishing
 `
 
-// TestCovPolyrepoNestedCommandRefusesALivePinContextItCannotTrust: the live
+// TestPolyrepoNestedCommandRefusesALivePinContextItCannotTrust: the live
 // coordinator is the one thing in a composed run that lets a nested command
 // accept a source revision no control gitlink names yet, so every part of it
 // is checked before it is believed: the directory itself, the context that
@@ -132,7 +132,7 @@ echo publishing
 // Anything that does not hold refuses the nested command by name rather than
 // silently admitting an unpinned checkout, and a pin that is simply not there
 // is no refusal at all.
-func TestCovPolyrepoNestedCommandRefusesALivePinContextItCannotTrust(t *testing.T) {
+func TestPolyrepoNestedCommandRefusesALivePinContextItCannotTrust(t *testing.T) {
 	source := harness.New(t)
 	source.SeedPackage("packages", "alpha")
 	source.SeedPackage("packages", "beta")
@@ -146,10 +146,10 @@ func TestCovPolyrepoNestedCommandRefusesALivePinContextItCannotTrust(t *testing.
 		"@LOG@", harness.ShQuote(logPath),
 		"@SCRATCH@", harness.ShQuote(scratch),
 		"@DISPAT@", control.DispatCommand(),
-	).Replace(covPolyrepoLivePinProbe)
+	).Replace(livePinProbe)
 
-	cfg := covPolyrepoFile()
-	cfg.Spaces = covPolyrepoSpaces(map[string]string{"libs": "sources/lib/packages"})
+	cfg := polyrepoModelFile()
+	cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg.Dependencies = models.Dependencies{{Consumer: "beta", Provider: "alpha"}}
 	cfg.Scripts["publish"] = models.Script{probe}
 	control.WriteConfigModel(cfg)
@@ -188,29 +188,29 @@ func TestCovPolyrepoNestedCommandRefusesALivePinContextItCannotTrust(t *testing.
 	}
 	for _, tc := range cases {
 		t.Run(tc.probe, func(t *testing.T) {
-			section := covPolyrepoLogSection(t, log, tc.probe)
+			section := logSection(t, log, tc.probe)
 			assert.Contains(t, section, tc.says)
 			assert.Contains(t, section, ">>> "+tc.probe+" exit "+tc.exit)
 		})
 	}
 
 	t.Run("a pin that is simply absent is no refusal", func(t *testing.T) {
-		section := covPolyrepoLogSection(t, log, "pin-has-vanished")
+		section := logSection(t, log, "pin-has-vanished")
 		assert.Contains(t, section, ">>> pin-has-vanished exit 0",
 			"an owner with no record yet has published nothing to admit")
 	})
 
 	t.Run("the untouched coordinator is accepted", func(t *testing.T) {
-		section := covPolyrepoLogSection(t, log, "context-is-intact")
+		section := logSection(t, log, "context-is-intact")
 		assert.Contains(t, section, ">>> context-is-intact exit 0")
 		assert.Contains(t, section, `"package":"alpha"`,
 			"the nested command still composes the whole fleet")
 	})
 }
 
-// covPolyrepoLogSection returns one probe's slice of the shared log, so a
+// logSection returns one probe's slice of the shared log, so a
 // message from a neighbouring case cannot satisfy an assertion.
-func covPolyrepoLogSection(t *testing.T, log, name string) string {
+func logSection(t *testing.T, log, name string) string {
 	t.Helper()
 	start := strings.Index(log, "=== "+name+"\n")
 	require.GreaterOrEqual(t, start, 0, "probe %s did not run; log:\n%s", name, log)

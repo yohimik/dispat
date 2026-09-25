@@ -3,10 +3,8 @@
 
 package integration
 
-// Two more of the git layer's shapes, each driven by the flow that reaches it:
-// the ref namespaces a composed run's guard has to watch when a space writes
-// alias tags, and the conflict git cannot answer with a file at all, because
-// one side deleted what the other edited.
+// Goal 52: the ref namespaces a composed run's guard has to watch when a
+// space writes alias tags, and the source branch a checkpoint pins to.
 
 import (
 	"path/filepath"
