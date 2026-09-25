@@ -82,9 +82,9 @@ func TestCovPolyrepoRefusesAControlCheckoutItCannotRead(t *testing.T) {
 // TestCovPolyrepoRefusesADeclaredSourceItCannotUse: a `.gitmodules` entry is a
 // claim about a repository, and each part of that claim is checked before the
 // repository is allowed to own a package: the path stays inside the control
-// workspace, something is actually checked out there, what is checked out is a
-// repository of its own, that repository has a HEAD, and the control HEAD
-// pins it. Each refusal names the declared identity.
+// workspace, what is checked out there is a repository of its own, that
+// repository has a HEAD, and the control HEAD pins it. Each refusal names the
+// declared identity.
 func TestCovPolyrepoRefusesADeclaredSourceItCannotUse(t *testing.T) {
 	newControl := func(t *testing.T) *harness.Repo {
 		t.Helper()
@@ -106,18 +106,6 @@ func TestCovPolyrepoRefusesADeclaredSourceItCannotUse(t *testing.T) {
 		out := covPolyrepoOutput(res)
 		assert.Contains(t, out, "escaping-source")
 		assert.Contains(t, out, "escapes control root")
-	})
-
-	t.Run("a path with nothing checked out", func(t *testing.T) {
-		control := newControl(t)
-		covPolyrepoLinkOnly(t, control, "absent-source", "sources/absent", "https://example.invalid/x.git")
-		control.Commit("chore: declare a source nobody checked out")
-
-		res := control.Status()
-		assert.Equal(t, 1, res.Code)
-		out := covPolyrepoOutput(res)
-		assert.Contains(t, out, "absent-source")
-		assert.Contains(t, out, "missing or uninitialized")
 	})
 
 	t.Run("a path that is an ordinary folder", func(t *testing.T) {

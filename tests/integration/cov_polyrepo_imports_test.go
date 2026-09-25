@@ -11,12 +11,9 @@ package integration
 // fragments that each contribute part of it.
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
@@ -52,11 +49,8 @@ func covPolyrepoImported(res harness.RunResult) map[string]bool {
 }
 
 // TestCovPolyrepoImportListComposesFromEverySpelling: the same two imports
-// reach the same two repositories whether they are written as a list, as one
-// value carrying both, or assembled from `$ref` fragments — including a
-// fragment named by an absolute path, which a generated configuration is
-// entitled to produce. A fragment's own paths are read relative to the
-// fragment, which is the whole reason the list is resolved before decoding.
+// reach the same two repositories whether they are written as a list or as
+// one value carrying both, and a value naming no file is refused.
 func TestCovPolyrepoImportListComposesFromEverySpelling(t *testing.T) {
 	t.Run("a list written out", func(t *testing.T) {
 		control := covPolyrepoImportFleet(t)
@@ -90,33 +84,6 @@ func TestCovPolyrepoImportListComposesFromEverySpelling(t *testing.T) {
 		found := covPolyrepoImported(control.StatusOK())
 		assert.True(t, found["one"])
 		assert.True(t, found["two"])
-	})
-
-	t.Run("fragments composed through a reference", func(t *testing.T) {
-		control := covPolyrepoImportFleet(t)
-		// Each fragment lives beside the sources it names, and names them
-		// relative to itself rather than to the control file.
-		control.WriteFile("fragments/first.json", `["../sources/one/dispat.json"]`+"\n")
-		absolute := filepath.Join(t.TempDir(), "second.json")
-		// The control root is canonicalized before paths are held against it,
-		// so the fragment names the same canonical spelling.
-		canonicalRoot, err := filepath.EvalSymlinks(control.Root)
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(absolute,
-			[]byte(`["`+filepath.Join(canonicalRoot, "sources", "two", "dispat.json")+`"]`+"\n"), 0o644))
-		control.WriteConfigRaw(map[string]any{
-			"polyrepo":    true,
-			"logFormat":   "json",
-			"logLevel":    "info",
-			"updateCheck": false,
-			"github":      map[string]any{"enabled": false},
-			"configs":     map[string]any{"$ref": []string{"fragments/first.json", absolute}},
-		})
-		control.Commit("chore: import both sources through fragments")
-
-		found := covPolyrepoImported(control.StatusOK())
-		assert.True(t, found["one"], "a fragment's relative path is read from the fragment")
-		assert.True(t, found["two"], "and a fragment may be named by an absolute path")
 	})
 
 	t.Run("a value that names no file at all", func(t *testing.T) {

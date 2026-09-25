@@ -76,52 +76,6 @@ func TestCovTailStepCommandsSummariseForAPerson(t *testing.T) {
 	}
 }
 
-// TestCovTailAutoWriterDropsWhatThisRunDoesNotUpdate: --only-updated is what a
-// job wired to run after every commit uses, and it drops every edit and every
-// link naming a package this run leaves where it is. Without it the same
-// command line writes both, which is what says the flag did the dropping.
-func TestCovTailAutoWriterDropsWhatThisRunDoesNotUpdate(t *testing.T) {
-	fixture := func(t *testing.T) *harness.Repo {
-		t.Helper()
-		r := harness.New(t)
-		cfg := libsConfig(echoBuild, 1)
-		cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
-		r.WriteConfigModel(cfg)
-		r.SeedPackage("packages", "core")
-		r.SeedPackage("packages", "web")
-		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.1.0"}`)
-		r.WriteFile("packages/web/package.json",
-			`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "^0.0.1"}}`)
-		r.Commit("feat(core,web): bootstrap")
-		// core is released at this commit and has nothing pending, so no run
-		// from here updates it.
-		r.Git("tag", "core@0.1.0")
-		return r
-	}
-
-	args := []string{"autowriter", "--set", "@acme/core=^9.9.9",
-		"--link", "@acme/core=../core", "--since", "all"}
-
-	t.Run("the flag drops both", func(t *testing.T) {
-		r := fixture(t)
-		res := r.Command(append(append([]string{}, args...), "--only-updated", "--log-level", "debug")...)
-		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout, "edit dropped: it does not name a package this run updates")
-		assert.Contains(t, res.Stdout, "link dropped: it does not name a package this run updates")
-		assert.NotContains(t, covTailReadFile(t, r, "packages", "web", "package.json"), "9.9.9",
-			"nothing the flag dropped reached the manifest")
-	})
-
-	t.Run("without it the same command line writes both", func(t *testing.T) {
-		r := fixture(t)
-		res := r.Command(args...)
-		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		web := covTailReadFile(t, r, "packages", "web", "package.json")
-		assert.Contains(t, web, "9.9.9", "the edit the flag was dropping")
-		assert.Contains(t, web, "../core", "and the link with it")
-	})
-}
-
 // TestCovTailAutoWriterLeavesTheVersionOfAPackageNobodyVersions: {version}
 // resolves to the planned version of the covered package, and a package under
 // versioning "none" has none. Writing the zero version instead would put

@@ -415,6 +415,16 @@ func TestConfigGitRepositoryGuard(t *testing.T) {
 	out, runErr = exec.Command(dispat, "init", "--root", t.TempDir()).CombinedOutput()
 	require.Error(t, runErr, "init outside a repository root must fail\n%s", out)
 	assert.Contains(t, string(out), "not a git repository root")
+
+	// A folder inside a repository is not its root either, and init writes
+	// nothing there rather than a configuration nothing would read.
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+	res := r.CommandAt("packages", "init")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "is not a git repository root")
+	assert.NoFileExists(t, r.Path("packages", "dispat.json"))
 }
 
 // TestConfigDispatexcludeSelectsTheConfigFile: a folder holding two config

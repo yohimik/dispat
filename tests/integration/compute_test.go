@@ -363,8 +363,11 @@ func TestComputeVersionsItCannotUse(t *testing.T) {
 
 // TestComputeInitialsInYAMLAndTOMLConfigs: the baselines are written the way
 // every other config edit is. A YAML config gains the key and keeps its
-// comments; a TOML config cannot be rewritten in place, so it gets the block
-// to paste and an error instead of a half-applied edit.
+// comments; a TOML config cannot be rewritten in place, so every edit compute
+// would make there, the initials, the root dependency object and a package
+// entry's provider list, becomes the block to paste, naming the key it
+// replaces and the file it belongs in, and an error instead of a half-applied
+// edit.
 func TestComputeInitialsInYAMLAndTOMLConfigs(t *testing.T) {
 	t.Run("yaml", func(t *testing.T) {
 		r := harness.New(t)
@@ -390,9 +393,15 @@ spaces:
 		r.StatusOK()
 	})
 
-	t.Run("toml", func(t *testing.T) {
-		r := harness.New(t)
-		const body = `[scripts]
+	for _, row := range []struct {
+		name  string
+		body  string
+		seed  func(r *harness.Repo)
+		wants []string
+	}{
+		{
+			name: "toml initials",
+			body: `[scripts]
 build = "echo building"
 
 [spaces.libs]
@@ -400,22 +409,58 @@ path = "packages"
 
 [spaces.libs.flow]
 build = ["build"]
-`
-		r.WriteFile("dispat.toml", body)
-		r.SeedPackage("packages", "core")
-		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "1.4.2"}`)
-		r.Commit("feat(core): bootstrap")
+`,
+			seed: func(r *harness.Repo) {
+				r.SeedPackage("packages", "core")
+				r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "1.4.2"}`)
+			},
+			wants: []string{"# paste over the initials in dispat.toml:", "[initials]", "core = '1.4.2'"},
+		},
+		{
+			name: "toml root dependency object",
+			body: tomlWorkspace,
+			seed: func(r *harness.Repo) {
+				r.SeedPackage("packages", "core")
+				r.SeedPackage("packages", "web")
+				r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+				r.WriteFile("packages/web/package.json",
+					`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+			},
+			wants: []string{"paste over the [dependencies] table in dispat.toml", "[dependencies]",
+				"[[dependencies.web]]", "provider = 'core'"},
+		},
+		{
+			name: "toml package entry provider list",
+			body: tomlWorkspace + "\n[packages.web]\ndependencies = [\"extra\"]\n",
+			seed: func(r *harness.Repo) {
+				r.SeedPackage("packages", "core")
+				r.SeedPackage("packages", "web")
+				r.SeedPackage("packages", "extra")
+				r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+				r.WriteFile("packages/extra/package.json", `{"name": "@acme/extra", "version": "0.0.0"}`)
+				r.WriteFile("packages/web/package.json",
+					`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*", "@acme/extra": "workspace:*"}}`)
+			},
+			wants: []string{"paste over the dependencies in dispat.toml", "core"},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			r := harness.New(t)
+			r.WriteFile("dispat.toml", row.body)
+			row.seed(r)
+			r.Commit("feat(core): bootstrap")
 
-		res := r.Command("compute", "--write")
-		assert.Equal(t, 1, res.Code, "a refused edit fails rather than reporting changes it did not make")
-		assert.Contains(t, res.Stdout, "# paste over the initials in dispat.toml:")
-		assert.Contains(t, res.Stdout, "[initials]")
-		assert.Contains(t, res.Stdout, "core = '1.4.2'")
-		after, err := os.ReadFile(r.Path("dispat.toml"))
-		require.NoError(t, err)
-		assert.Equal(t, body, string(after), "the config is left as it was found")
-		assert.NoFileExists(t, r.Path("dispat.toml.backup"))
-	})
+			res := r.Command("compute", "--write", "--config", "dispat.toml")
+			assert.Equal(t, 1, res.Code, "a refused edit fails rather than reporting changes it did not make")
+			for _, want := range row.wants {
+				assert.Contains(t, res.Stdout, want)
+			}
+			after, err := os.ReadFile(r.Path("dispat.toml"))
+			require.NoError(t, err)
+			assert.Equal(t, row.body, string(after), "the config is left as it was found")
+			assert.NoFileExists(t, r.Path("dispat.toml.backup"), "a refused edit writes no backup")
+		})
+	}
 }
 
 // TestComputeSeedsInitialsBeforeTheFirstCommit: adopting dispat often starts

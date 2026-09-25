@@ -15,7 +15,6 @@ package integration
 // where the block goes.
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,53 +43,6 @@ path = "packages"
 build = "build"
 publish = "publish"
 `
-
-// TestCovComputeRendersAPasteableBlockForTOMLConfigs: a TOML config is never
-// rewritten. compute prints the block to paste, names the key it replaces and
-// the file it belongs in, and exits non-zero with the file byte-identical.
-func TestCovComputeRendersAPasteableBlockForTOMLConfigs(t *testing.T) {
-	t.Run("the root dependency object", func(t *testing.T) {
-		r := harness.New(t)
-		r.WriteFile("dispat.toml", tomlWorkspace)
-		r.SeedPackage("packages", "core")
-		r.SeedPackage("packages", "web")
-		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
-		r.WriteFile("packages/web/package.json",
-			`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
-		r.Commit("feat(core,web): bootstrap")
-		before := readRepoFile(t, r, "dispat.toml")
-
-		res := r.Command("compute", "--write", "--config", "dispat.toml")
-		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout, "paste over the [dependencies] table in dispat.toml")
-		assert.Contains(t, res.Stdout, "[dependencies]")
-		assert.Contains(t, res.Stdout, "[[dependencies.web]]")
-		assert.Contains(t, res.Stdout, "provider = 'core'")
-		assert.Equal(t, before, readRepoFile(t, r, "dispat.toml"), "the config is untouched")
-		_, err := os.Stat(r.Path("dispat.toml.backup"))
-		assert.True(t, os.IsNotExist(err), "a refused edit writes no backup")
-	})
-
-	t.Run("a package entry's provider list", func(t *testing.T) {
-		r := harness.New(t)
-		r.WriteFile("dispat.toml", tomlWorkspace+"\n[packages.web]\ndependencies = [\"extra\"]\n")
-		r.SeedPackage("packages", "core")
-		r.SeedPackage("packages", "web")
-		r.SeedPackage("packages", "extra")
-		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
-		r.WriteFile("packages/extra/package.json", `{"name": "@acme/extra", "version": "0.0.0"}`)
-		r.WriteFile("packages/web/package.json",
-			`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*", "@acme/extra": "workspace:*"}}`)
-		r.Commit("feat(core,web,extra): bootstrap")
-		before := readRepoFile(t, r, "dispat.toml")
-
-		res := r.Command("compute", "--write", "--config", "dispat.toml")
-		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout, "paste over the dependencies in dispat.toml")
-		assert.Contains(t, res.Stdout, "core")
-		assert.Equal(t, before, readRepoFile(t, r, "dispat.toml"), "the config is untouched")
-	})
-}
 
 // TestCovComputeTOMLRefusalStillReportsTheSuggestion: the refusal is about
 // writing, not about detecting. The suggestion itself is printed exactly as

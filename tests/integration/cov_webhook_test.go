@@ -12,10 +12,7 @@ package integration
 // must not be able to fail its stage by reporting progress.
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -55,37 +52,6 @@ func TestWebhookTriggerFallsBackWhenTheWorkspaceCannotBeWalked(t *testing.T) {
 	payload := sink.find(t, "script.smoke-passed")
 	assert.Equal(t, "all green", payload["message"])
 	assert.Nil(t, payload["package"], "outside a run there is no package to name")
-}
-
-// TestWebhookAbandonsDeliveriesAtTheFlushDeadline: an endpoint whose own
-// timeout is longer than the flush deadline is what the deadline exists for. A
-// listener that misses a notification is never worth holding a command open
-// for, so the deliveries in flight are abandoned, counted, and reported under
-// the ordinary webhook warning — and the command still exits 0.
-func TestWebhookAbandonsDeliveriesAtTheFlushDeadline(t *testing.T) {
-	hang := make(chan struct{})
-	defer close(hang)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		<-hang
-	}))
-	t.Cleanup(srv.Close)
-
-	r := harness.New(t)
-	// A minute is longer than any attempt the flush will wait out, so the
-	// deadline rather than the attempt is what ends the command.
-	r.WriteConfigModel(webhooksConfig(echoBuild,
-		models.WebhookConfig{URL: srv.URL, Timeout: 60}))
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): bootstrap")
-
-	start := time.Now()
-	res := r.Command("trigger", "smoke-passed")
-	elapsed := time.Since(start)
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.IsCodePresent(res.Events, "W239"), "stdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout+res.Stderr, "abandoned")
-	assert.Less(t, elapsed, 50*time.Second, "the deadline is what the command waited out, not the attempt")
-	assert.GreaterOrEqual(t, elapsed, 10*time.Second, "and it did wait for the flush it bounds")
 }
 
 // TestWebhookWithoutItsSecretDeliversUnsigned: a secret named in the

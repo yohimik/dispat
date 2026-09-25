@@ -339,6 +339,38 @@ func TestPolyrepoConfigImportResolvesFromDeclaringFragment(t *testing.T) {
 	require.Equal(t, 0, fromCLI.Code, "stdout:\n%s\nstderr:\n%s", fromCLI.Stdout, fromCLI.Stderr)
 	assert.NotEmpty(t, harness.GraphLine(fromCLI.Events, "lib").Str("message"),
 		"the CLI import resolves from the control root")
+
+	// The import list may itself be assembled from `$ref` fragments, one of
+	// them named by an absolute path, which a generated configuration is
+	// entitled to produce. Each fragment's paths are read relative to the
+	// fragment, which is why the list is resolved before it is decoded.
+	t.Run("a list of fragments, one named by an absolute path", func(t *testing.T) {
+		control := covPolyrepoImportFleet(t)
+		// Each fragment lives beside the sources it names, and names them
+		// relative to itself rather than to the control file.
+		control.WriteFile("fragments/first.json", `["../sources/one/dispat.json"]`+"\n")
+		absolute := filepath.Join(t.TempDir(), "second.json")
+		// The control root is canonicalized before paths are held against it,
+		// so the fragment names the same canonical spelling.
+		canonicalRoot, err := filepath.EvalSymlinks(control.Root)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(absolute,
+			[]byte(`["`+filepath.Join(canonicalRoot, "sources", "two", "dispat.json")+`"]`+"\n"), 0o644))
+		control.WriteConfigRaw(map[string]any{
+			"polyrepo":    true,
+			"logFormat":   "json",
+			"logLevel":    "info",
+			"updateCheck": false,
+			"github":      map[string]any{"enabled": false},
+			"configs":     map[string]any{"$ref": []string{"fragments/first.json", absolute}},
+		})
+		control.Commit("chore: import both sources through fragments")
+
+		found := covPolyrepoImported(control.StatusOK())
+		assert.True(t, found["one"], "a fragment's relative path is read from the fragment")
+		assert.True(t, found["two"], "and a fragment may be named by an absolute path")
+	})
+
 }
 
 // TestPolyrepoCanonicalConfigImportsAreDeduplicated proves that two spellings
@@ -2644,21 +2676,36 @@ func TestPolyrepoRefusesUninitializedPinnedMismatchAndShallowSources(t *testing.
 		return control
 	}
 
+	// refusedBeforePlanning holds every refusal to the same shape: exit 1
+	// naming the declared identity, and not one package planned.
+	refusedBeforePlanning := func(t *testing.T, res harness.RunResult, want string) {
+		t.Helper()
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "lib-source", "the refusal names the declared source")
+		assert.Contains(t, strings.ToLower(res.Stdout+res.Stderr), want)
+		assert.Empty(t, plannedPackages(res), "the source is refused before anything is planned")
+	}
+
 	t.Run("uninitialized", func(t *testing.T) {
+		// A deinitialized submodule leaves an empty folder of the control
+		// repository behind, which is the control repository, not a source.
 		control := setup(t)
 		control.Git("submodule", "deinit", "-q", "-f", "sources/lib")
-		res := control.Status()
-		assert.NotZero(t, res.Code)
-		assert.Contains(t, strings.ToLower(res.Stdout+res.Stderr), "sources/lib")
+		refusedBeforePlanning(t, control.Status(), "resolves to git root")
+	})
+
+	t.Run("nothing checked out", func(t *testing.T) {
+		control := setup(t)
+		control.Git("submodule", "deinit", "-q", "-f", "sources/lib")
+		require.NoError(t, os.RemoveAll(control.Path("sources", "lib")))
+		refusedBeforePlanning(t, control.Status(), "missing or uninitialized")
 	})
 
 	t.Run("working tree does not match pinned gitlink", func(t *testing.T) {
 		control := setup(t)
 		control.WriteFile("sources/lib/packages/lib/later.txt", "later\n")
 		commitPolyrepoSource(t, control, "sources/lib", "fix(lib): not checkpointed")
-		res := control.Status()
-		assert.NotZero(t, res.Code)
-		assert.Contains(t, strings.ToLower(res.Stdout+res.Stderr), "control head pins")
+		refusedBeforePlanning(t, control.Status(), "control head pins")
 	})
 
 	t.Run("shallow", func(t *testing.T) {
@@ -2670,9 +2717,7 @@ func TestPolyrepoRefusesUninitializedPinnedMismatchAndShallowSources(t *testing.
 		assert.Empty(t, out)
 		require.Equal(t, "true", control.Git("-C", "sources/lib", "rev-parse", "--is-shallow-repository"),
 			"the fixture itself must be shallow before it asks dispat to reject it")
-		res := control.Status()
-		assert.NotZero(t, res.Code)
-		assert.Contains(t, strings.ToLower(res.Stdout+res.Stderr), "shallow")
+		refusedBeforePlanning(t, control.Status(), "shallow")
 	})
 }
 

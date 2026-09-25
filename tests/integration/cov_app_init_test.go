@@ -21,8 +21,8 @@ import (
 )
 
 // TestCovInitWritesJSONByDefaultAndRefusesTheRest: with no format asked for,
-// the starter is JSON; a format dispat cannot write, and a folder that is not
-// a repository root, are refused with nothing created.
+// the starter is JSON, and a format dispat cannot write is refused with
+// nothing created.
 func TestCovInitWritesJSONByDefaultAndRefusesTheRest(t *testing.T) {
 	t.Run("no format is JSON", func(t *testing.T) {
 		r := harness.New(t)
@@ -46,15 +46,5 @@ func TestCovInitWritesJSONByDefaultAndRefusesTheRest(t *testing.T) {
 		assert.Contains(t, res.Stdout+res.Stderr, "unknown config format")
 		assert.Empty(t, r.Git("status", "--porcelain", "--untracked-files=all", "--", "dispat.*"),
 			"nothing was written")
-	})
-
-	t.Run("a folder that is not a repository root", func(t *testing.T) {
-		r := harness.New(t)
-		r.SeedPackage("packages", "core")
-		r.Commit("feat(core): bootstrap")
-
-		res := r.CommandAt("packages", "init")
-		assert.Equal(t, 1, res.Code)
-		assert.Contains(t, res.Stdout+res.Stderr, "is not a git repository root")
 	})
 }

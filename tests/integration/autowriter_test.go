@@ -144,6 +144,43 @@ func TestAutoWriterOnlyUpdatedFollowsThePlan(t *testing.T) {
 	assert.Contains(t, res.Stdout, "nothing to write")
 	assert.NotContains(t, arRead(t, r, "packages", "web", "package.json"), "9.9.9",
 		"a run that updates nothing writes nothing")
+
+	// A provider released at this very commit while its consumer never was:
+	// the flag drops every edit and every link naming the provider, and
+	// without it the same command line writes both, which is what says the
+	// flag did the dropping.
+	provider := func(t *testing.T) *harness.Repo {
+		t.Helper()
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("packages", "web")
+		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.1.0"}`)
+		r.WriteFile("packages/web/package.json",
+			`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "^0.0.1"}}`)
+		r.Commit("feat(core,web): bootstrap")
+		r.Git("tag", "core@0.1.0")
+		return r
+	}
+	args := []string{"autowriter", "--set", "@acme/core=^9.9.9", "--link", "@acme/core=../core", "--since", "all"}
+	t.Run("a provider released at this commit", func(t *testing.T) {
+		r := provider(t)
+		res := r.Command(append(append([]string{}, args...), "--only-updated", "--log-level", "debug")...)
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "edit dropped: it does not name a package this run updates")
+		assert.Contains(t, res.Stdout, "link dropped: it does not name a package this run updates")
+		assert.NotContains(t, arRead(t, r, "packages", "web", "package.json"), "9.9.9",
+			"nothing the flag dropped reached the manifest")
+
+		r = provider(t)
+		res = r.Command(args...)
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		web := arRead(t, r, "packages", "web", "package.json")
+		assert.Contains(t, web, "9.9.9", "the edit the flag was dropping")
+		assert.Contains(t, web, "../core", "and the link with it")
+	})
 }
 
 // TestAutoWriterManifestScope: root stops at the package folder, all descends

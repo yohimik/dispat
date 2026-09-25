@@ -241,28 +241,65 @@ func TestWebhookUnreachableEndpointNeverAffectsTheRelease(t *testing.T) {
 	assert.True(t, harness.IsCodePresent(res.Events, "W239"))
 }
 
+// TestWebhookSlowEndpointIsBounded: a hanging endpoint is bounded twice, and
+// neither bound reaches the exit code, because a listener that misses a
+// notification is never worth holding a command open for. Each attempt is
+// bounded by the webhook's own timeout, so a release against an endpoint that
+// never answers finishes promptly and tagged; and the end-of-run flush is
+// bounded by the dispatcher's deadline, so an endpoint whose own timeout is
+// longer than that deadline has its deliveries abandoned, counted and
+// reported under W239, and the command still exits 0 after waiting the flush
+// out rather than the attempt.
 func TestWebhookSlowEndpointIsBounded(t *testing.T) {
-	// A hanging endpoint is bounded twice: each attempt by the webhook's own
-	// timeout, and the end-of-run flush by the dispatcher's deadline. The
-	// command finishes promptly either way.
-	hang := make(chan struct{})
-	defer close(hang)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		<-hang
-	}))
-	t.Cleanup(srv.Close)
+	for _, row := range []struct {
+		name    string
+		timeout int
+		// release runs a release; otherwise a trigger, a leaf command.
+		release  bool
+		want     string
+		atLeast  time.Duration
+		atMost   time.Duration
+		released bool
+	}{
+		{name: "each attempt by the webhook's own timeout", timeout: 1, release: true,
+			atMost: 30 * time.Second, released: true},
+		// A minute is longer than any attempt the flush will wait out, so the
+		// deadline rather than the attempt is what ends the command.
+		{name: "the flush by the dispatcher's deadline", timeout: 60, want: "abandoned",
+			atLeast: 10 * time.Second, atMost: 50 * time.Second},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			hang := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				<-hang
+			}))
+			t.Cleanup(func() { close(hang); srv.Close() })
 
-	r := harness.New(t)
-	r.WriteConfigModel(webhooksConfig(echoBuild,
-		models.WebhookConfig{URL: srv.URL, Events: []string{"release.started"}, Timeout: 1}))
-	r.SeedPackage("packages", "core")
-	r.Commit("feat(core): bootstrap")
+			r := harness.New(t)
+			hook := models.WebhookConfig{URL: srv.URL, Timeout: row.timeout}
+			if row.release {
+				hook.Events = []string{"release.started"}
+			}
+			r.WriteConfigModel(webhooksConfig(echoBuild, hook))
+			r.SeedPackage("packages", "core")
+			r.Commit("feat(core): bootstrap")
 
-	start := time.Now()
-	res := r.ReleaseOK()
-	assert.Less(t, time.Since(start), 30*time.Second, "the flush must not wait out a hanging endpoint")
-	assert.True(t, r.IsTagged("core@0.1.0"))
-	assert.True(t, harness.IsCodePresent(res.Events, "W239"))
+			start := time.Now()
+			var res harness.RunResult
+			if row.release {
+				res = r.Release()
+			} else {
+				res = r.Command("trigger", "smoke-passed")
+			}
+			elapsed := time.Since(start)
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.True(t, harness.IsCodePresent(res.Events, "W239"), "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout+res.Stderr, row.want)
+			assert.Less(t, elapsed, row.atMost, "the command is not held open by the endpoint")
+			assert.GreaterOrEqual(t, elapsed, row.atLeast, "and it did wait for the flush it bounds")
+			assert.Equal(t, row.released, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+		})
+	}
 }
 
 // A successful status line is not a completed delivery. The body and its
