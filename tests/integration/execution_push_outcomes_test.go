@@ -123,6 +123,46 @@ func TestExecutionLostClaimResponseRunsTheTaskOnce(t *testing.T) {
 	}
 }
 
+// TestExecutionUnreadableClaimIsAdoptedWhenItSurfaces: the node's claim push
+// applies and its answer is lost, and the three reads that would settle it
+// fail as well, so the node cannot tell whether the claim landed. It neither
+// claims the work a second time nor gives it up: it remembers the claim, and
+// the next poll, with the remote readable again, finds that claim on the
+// branch and runs the build under it. The package is built exactly once and
+// the release succeeds well inside the task deadline with nothing unknown.
+func TestExecutionUnreadableClaimIsAdoptedWhenItSurfaces(t *testing.T) {
+	rig := newExecutionPushOutcomeRig(t)
+	// The claim push is the first command naming the build branch after a
+	// lease or a space: the poll lists the node's namespace by a wildcard and
+	// fetches with a `+` refspec, and neither matches. The three reads of the
+	// branch's tip that follow the push are the next three matches; the
+	// result push after them is the real Git's again. Each of the four runs
+	// and answers with a line naming no ref, which is how a lost response
+	// reads to the process that asked.
+	fault := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*[= ]refs/heads/*[0-9]-build-*", Nth: 1, Onward: true, Through: 4, After: true,
+		Output: executionLostPushReply})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
+
+	started := time.Now()
+	res := rig.release()
+	served := worker.stop(t)
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.GreaterOrEqual(t, fault.Matches(), 5, "the claim, its three reads and the result push")
+	assert.Contains(t, served.Stdout, "the claim push has no known outcome",
+		"the node could not settle its claim\nworker:\n%s", served.Stdout)
+	assert.Contains(t, served.Stdout, "a claim whose push had no known outcome is on the branch and is adopted",
+		"and adopted it once it surfaced\nworker:\n%s", served.Stdout)
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the build ran once: %v", rig.runs())
+	assert.Less(t, time.Since(started), 150*time.Second, "and nobody waited out the task deadline")
+	assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
+		"an adopted claim leaves nothing unknown\nstdout:\n%s", res.Stdout)
+	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
+	assert.Empty(t, rig.branches(), "the run closed the branches it created")
+}
+
 // TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal: the release
 // is interrupted while a node builds, the node stops the build and pushes its
 // acknowledgement, and the push applies while its answer is lost. The node

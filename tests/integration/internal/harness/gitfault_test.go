@@ -49,6 +49,9 @@ func TestGitFaultSelectsMatchesAndPassesTheRestThrough(t *testing.T) {
 			failed: []int{2}, code: 128},
 		{name: "from the second match onward", fault: GitFault{Pattern: "*--version*", Nth: 2, Onward: true},
 			failed: []int{2, 3}, code: 1},
+		{name: "from the first match through the second",
+			fault:  GitFault{Pattern: "*--version*", Nth: 1, Onward: true, Through: 2},
+			failed: []int{1, 2}, code: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fault := NewGitFault(t, tc.fault)

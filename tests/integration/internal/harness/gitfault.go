@@ -63,6 +63,11 @@ type GitFault struct {
 	Nth int
 	// Onward extends a positive Nth to every later match as well.
 	Onward bool
+	// Through ends an Onward range at this ordinal, inclusive: the matches
+	// from Nth to Through fail and every one after them is the real Git's
+	// again. It is how a scenario models a remote that fails for a while and
+	// then recovers. Zero leaves the range open.
+	Through int
 	// Output is what the stand-in writes on standard output in place of
 	// running Git at all. A fault with an Output succeeds — it is how a
 	// scenario hands the code under test a reply it cannot parse, or a
@@ -156,6 +161,7 @@ func (f *GitFault) Env() []string {
 		"DISPAT_IT_GIT_FAULT_CODE=" + strconv.Itoa(code),
 		"DISPAT_IT_GIT_FAULT_NTH=" + strconv.Itoa(f.Nth),
 		"DISPAT_IT_GIT_FAULT_ONWARD=" + onward,
+		"DISPAT_IT_GIT_FAULT_THROUGH=" + strconv.Itoa(f.Through),
 		"DISPAT_IT_GIT_FAULT_AFTER=" + after,
 		"DISPAT_IT_GIT_FAULT_OUTPUT=" + output,
 		"DISPAT_IT_GIT_FAULT_OUTPUT_FILE=" + outputFile,
@@ -221,6 +227,9 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 	elif [ "$DISPAT_IT_GIT_FAULT_ONWARD" -eq 1 ]; then
 		if [ "$ordinal" -ge "$DISPAT_IT_GIT_FAULT_NTH" ]; then
 			selected=1
+		fi
+		if [ "$DISPAT_IT_GIT_FAULT_THROUGH" -gt 0 ] && [ "$ordinal" -gt "$DISPAT_IT_GIT_FAULT_THROUGH" ]; then
+			selected=0
 		fi
 	elif [ "$ordinal" -eq "$DISPAT_IT_GIT_FAULT_NTH" ]; then
 		selected=1
