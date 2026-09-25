@@ -57,6 +57,16 @@ func executionDigestConfig(buildScript string, outputs []string, execution *mode
 	return cfg
 }
 
+// executionDigestSpace is the fixture's configuration with its one space
+// adjusted.
+func executionDigestSpace(adjust func(*models.SpaceConfig)) models.File {
+	cfg := executionDigestConfig(echoBuild, models.PathList{"dist"}, executionWorkers(1, "build-a"))
+	space := cfg.Spaces["libs"]
+	adjust(&space)
+	cfg.Spaces["libs"] = space
+	return cfg
+}
+
 // planDigestOf reads the one `plan fixed` line a distributed run writes.
 func planDigestOf(t *testing.T, res harness.RunResult) string {
 	t.Helper()
@@ -115,7 +125,9 @@ func executionDigestRepo(t *testing.T, cfg models.File) *harness.Repo {
 // names one plan, however many workers it is configured with, whatever they
 // are called, in whatever order, at whatever capacity, from whichever
 // checkout and at whatever time; and a change to what would be released or to
-// the command that releases it names a different one.
+// the command that releases it names a different one: the commands, the
+// outputs and the history, and also the names a release is tagged under, the
+// stages that write its manifests and the parser that reads its commits.
 func TestExecutionPlanDigestIgnoresPlacementAndTime(t *testing.T) {
 	outputs := models.PathList{"dist"}
 	r := executionDigestRepo(t, executionDigestConfig(echoBuild, outputs, executionWorkers(1, "build-a")))
@@ -156,6 +168,28 @@ func TestExecutionPlanDigestIgnoresPlacementAndTime(t *testing.T) {
 		"a new commit": func(r *harness.Repo) {
 			r.WriteFile("packages/core/main.txt", "core changed\n")
 			r.Commit("fix(core): one more change")
+		},
+		"an alias tag format": func(r *harness.Repo) {
+			r.WriteConfigModel(executionDigestSpace(func(space *models.SpaceConfig) {
+				space.AliasTags = []models.AliasTagConfig{{Format: "{name}-v{major}", Moving: true, Force: models.Bool(true)}}
+			}))
+		},
+		"the sign stage switched on": func(r *harness.Repo) {
+			r.WriteConfigModel(executionDigestSpace(func(space *models.SpaceConfig) {
+				space.AutoSign = &models.AutoSignConfig{Enabled: models.Bool(true)}
+			}))
+		},
+		"a replace rule narrowed to one provider": func(r *harness.Repo) {
+			r.WriteConfigModel(executionDigestSpace(func(space *models.SpaceConfig) {
+				space.AutoVersion = &models.AutoVersionConfig{Only: []string{"core"},
+					Replace: []models.AutoVersionReplaceConfig{{Files: []string{"*.txt"}, Find: "{from}", Write: "{to}"}}}
+			}))
+		},
+		"a parser type and the kinds propagation follows": func(r *harness.Repo) {
+			cfg := executionDigestConfig(echoBuild, outputs, executionWorkers(1, "build-a"))
+			cfg.Parser = &models.ParserConfig{Types: map[string]string{"feat": "minor", "fix": "patch", "tune": "patch"},
+				Propagation: &models.ParserPropagationConfig{Kinds: []string{"dependencies"}}}
+			r.WriteConfigModel(cfg)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
