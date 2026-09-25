@@ -342,6 +342,32 @@ func TestInstallRollbackNeedsNoRelease(t *testing.T) {
 	assert.Contains(t, err.Error(), "--release")
 }
 
+// TestInstallRollbackRefusesAFolderAtTheBackup: a rollback renames the
+// backup into the tool's place, so a folder standing where the backup is kept
+// would end up on PATH. --check names it rather than promising a restore, and
+// the rollback refuses it with the remedy and moves nothing.
+func TestInstallRollbackRefusesAFolderAtTheBackup(t *testing.T) {
+	opts, out := instOpts(t, selfupdate.Source{APIURL: "http://example.invalid"})
+	opts.Rollback, opts.Check = true, true
+	installed := filepath.Join(opts.BinDir, "tool")
+	require.NoError(t, os.WriteFile(installed, []byte("current"), 0o755))
+	require.NoError(t, os.Mkdir(selfupdate.BackupPath(installed), 0o755))
+
+	pending, err := Install(context.Background(), *opts)
+	require.Error(t, err)
+	assert.False(t, pending)
+	assert.Contains(t, err.Error(), "is a folder where the previous binary is kept; move or remove it, then re-run")
+	assert.NotContains(t, out.String(), "restore it with")
+
+	opts.Check = false
+	_, err = Install(context.Background(), *opts)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, selfupdate.ErrNoBackup)
+	assert.Contains(t, err.Error(), "move or remove it, then re-run")
+	assert.Equal(t, "current", readFile(t, installed), "the tool never moved")
+	assert.DirExists(t, selfupdate.BackupPath(installed))
+}
+
 // TestInstallRollbackSpeaksJSON: the same three answers as fields, for the
 // job that has to record what it did to a runner.
 func TestInstallRollbackSpeaksJSON(t *testing.T) {

@@ -378,7 +378,7 @@ func TestReplaceReportsAFirstRenameThatFails(t *testing.T) {
 // TestReplaceInstallsWhereNothingWasBefore: a path nothing occupies yet is a
 // first install rather than a replacement. There is nothing to step aside, so
 // the single rename is the whole of it and no backup is reported: `dispat
-// download` puts a tool somewhere for the first time through exactly this.
+// install` puts a tool somewhere for the first time through exactly this.
 func TestReplaceInstallsWhereNothingWasBefore(t *testing.T) {
 	requireExec(t)
 	dir := t.TempDir()
@@ -465,8 +465,107 @@ func TestReplaceReportsAnUnremovableBackup(t *testing.T) {
 
 	_, err := Replace(exe, filepath.Join(dir, "incoming"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "previous backup")
+	assert.Contains(t, err.Error(), BackupPath(exe)+" is a folder where the previous binary is kept; "+
+		"move or remove it, then re-run", "the message names what is in the way and the remedy")
 	assert.FileExists(t, exe, "the working binary never moved")
+	assert.DirExists(t, BackupPath(exe), "and what stood in the way is still there")
+}
+
+// TestInstallRefusesABlockedBackupBeforeDownloading: a replacement has to
+// keep the outgoing binary where the backup belongs, so anything but a file
+// standing there is refused before the first request, with the remedy, rather
+// than after fifteen megabytes and a smoke test.
+func TestInstallRefusesABlockedBackupBeforeDownloading(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "dispat")
+	fakeBinary(t, exe, "1.0.0")
+	require.NoError(t, os.Mkdir(BackupPath(exe), 0o755))
+
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits++ }))
+	defer srv.Close()
+
+	i := &Installer{Exe: exe, Validator: VersionValidator{Want: "1.1.0"}}
+	_, err := i.Install(context.Background(), Asset{Name: "dispat", URL: srv.URL})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "selfupdate: "+BackupPath(exe)+" is a folder")
+	assert.Contains(t, err.Error(), "move or remove it, then re-run")
+	assert.Zero(t, hits, "the refusal costs no download")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "nothing was staged beside the binary: %v", names(entries))
+
+	// The same folder beside a path nothing occupies yet stops nothing: a
+	// first install keeps no backup, so it never writes there.
+	assert.NoError(t, CheckBackupSlot(filepath.Join(dir, "absent")))
+}
+
+// TestReplaceIgnoresABlockedBackupOnAFirstInstall: a first install is one
+// rename onto a free path and writes nothing where a backup would go, so what
+// stands there is neither refused nor reported as a rollback copy.
+func TestReplaceIgnoresABlockedBackupOnAFirstInstall(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "tool")
+	require.NoError(t, os.Mkdir(BackupPath(exe), 0o755))
+	incoming := filepath.Join(dir, "incoming")
+	fakeBinary(t, incoming, "1.1.0")
+
+	backup, err := Replace(exe, incoming)
+	require.NoError(t, err)
+	assert.Empty(t, backup, "a folder is no rollback copy")
+	assert.Contains(t, string(read(t, exe)), "1.1.0")
+	assert.DirExists(t, BackupPath(exe), "and it is left as it was")
+}
+
+// TestRestoreRefusesABackupThatIsNotAFile: a restore renames the backup into
+// the tool's place, so a folder standing where the backup belongs would end up
+// on PATH. It is refused with the remedy, and nothing moves.
+func TestRestoreRefusesABackupThatIsNotAFile(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "tool")
+	require.NoError(t, os.WriteFile(exe, []byte("current"), 0o755))
+	require.NoError(t, os.Mkdir(BackupPath(exe), 0o755))
+
+	err := Restore(exe)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoBackup, "something is there, and it is named")
+	assert.Contains(t, err.Error(), BackupPath(exe)+" is a folder where the previous binary is kept; "+
+		"move or remove it, then re-run")
+	assert.Equal(t, "current", string(read(t, exe)), "the tool never moved")
+	assert.DirExists(t, BackupPath(exe))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "nothing was parked: %v", names(entries))
+
+	// The version a rollback checks first is refused the same way, rather
+	// than by trying to run a folder.
+	_, err = BackupVersion(context.Background(), exe)
+	assert.ErrorContains(t, err, "move or remove it, then re-run")
+}
+
+// TestRestoreFollowsALinkToAFile: an install that replaced a link on PATH
+// keeps that link as its backup, so a restore puts the link back, while a link
+// to anything but a file is refused like the thing it points at.
+func TestRestoreFollowsALinkToAFile(t *testing.T) {
+	requireExec(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "tool")
+	require.NoError(t, os.WriteFile(exe, []byte("current"), 0o755))
+	real := filepath.Join(dir, "real-tool")
+	require.NoError(t, os.WriteFile(real, []byte("previous"), 0o755))
+	require.NoError(t, os.Symlink(real, BackupPath(exe)))
+
+	require.NoError(t, Restore(exe))
+	assert.Equal(t, "previous", string(read(t, exe)))
+	assert.Equal(t, "current", string(read(t, BackupPath(exe))))
+
+	folder := filepath.Join(dir, "folder")
+	require.NoError(t, os.Mkdir(folder, 0o755))
+	require.NoError(t, os.Remove(BackupPath(exe)))
+	require.NoError(t, os.Symlink(folder, BackupPath(exe)))
+	assert.ErrorContains(t, Restore(exe), "is a link to something that is not a file")
 }
 
 // TestRollbackRefusesWhenItCannotWrite: the rotate needs somewhere to park the

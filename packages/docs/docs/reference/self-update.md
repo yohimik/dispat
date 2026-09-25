@@ -51,9 +51,11 @@ Here is what happens to your binary during an update:
 5. **Only then does it swap.** dispat keeps any previous rollback copy while it
    renames your existing binary to `dispat.backup` and puts the new one in its
    place. Once the replacement succeeds, it removes the older rollback copy.
-   If no binary occupies the destination, it installs with one rename. A
-   regular `dispat.backup` already there remains available for rollback and
-   gets a fresh one-week retention period; without one, no rollback is offered.
+
+Before it downloads anything, dispat checks that `dispat.backup` is either
+absent or a regular file. Anything else there, such as a folder, is named with
+its remedy: move or remove it, then run the update again. `--check` reports the
+same obstruction, so it costs no download to find out.
 
 No files move until every check passes. If the final replacement fails, dispat
 restores both the working binary and its previous backup. If restoration itself
@@ -62,7 +64,15 @@ the older rollback copy could not be cleaned up means the new binary was
 installed and its immediate backup is available; the warning names the older
 copy or staging directory left behind.
 If a failed update cannot remove its staged download, a separate warning names
-that file for manual cleanup. The warning does not change directory permissions.
+that file for manual cleanup.
+
+An update that is interrupted, for example by a killed process, can leave the
+older rollback copy in a `dispat-previous-backup-*` staging directory and the
+download as a `dispat-download-*` file beside the binary. The next update or
+rollback that finds them at least an hour old moves the copy back to
+`dispat.backup`, or removes it when a newer backup already holds that place,
+and removes the download. Anything younger belongs to an update that may still
+be running, and is left alone.
 
 Your binary path stays the same, so your `PATH` configuration remains valid.
 You do not need to re-link binaries or restart your shell.
@@ -154,7 +164,9 @@ Rolling back swaps the active binary and the backup file. Running `--rollback`
 a second time restores the newer version again.
 
 dispat tests the backup binary before restoring it to ensure it executes
-properly. If the backup fails to start, dispat aborts the rollback.
+properly. If the backup fails to start, dispat aborts the rollback. If
+something other than a file, such as a folder, stands at `dispat.backup`, the
+rollback names it and moves nothing.
 
 Run `dispat self-update --check --rollback` to inspect the backup version
 without changing files.
@@ -166,9 +178,7 @@ after seven days. This gives you time to detect issues while preventing old
 binaries from accumulating on disk.
 
 The cleanup check inspects only the backup timestamp. If the backup has been
-kept while an absent binary path was installed, its timestamp is renewed at
-that install. If the backup has been purged, download an older release
-explicitly using `--release`:
+purged, download an older release explicitly using `--release`:
 
 ```sh
 dispat self-update --release 1.0.0

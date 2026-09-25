@@ -17,8 +17,8 @@ import (
 // before a rollback, and what a rollback verifies before committing to one.
 func BackupVersion(ctx context.Context, exe string) (string, error) {
 	backup := BackupPath(exe)
-	if _, err := os.Stat(backup); err != nil {
-		return "", fmt.Errorf("%w at %s", ErrNoBackup, backup)
+	if err := CheckRestorableBackup(exe); err != nil {
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, smokeTimeout)
 	defer cancel()
@@ -56,13 +56,15 @@ func parseVersionOutput(out string) string {
 //
 // The backup is run before any of that, for the same reason a download is: a
 // corrupt file must not be discovered after it is the only dispat left. The
-// rotation itself is Restore's, which the download command shares.
+// rotation itself is Restore's, which the install command shares. A backup a
+// crashed update left parked is put back before the backup is looked for.
 func Rollback(ctx context.Context, exe string) (from, to string, err error) {
 	if exe == "" {
 		if exe, err = Executable(); err != nil {
 			return "", "", fmt.Errorf("selfupdate: locating the running binary: %w", err)
 		}
 	}
+	recoverParkedBackups(BackupPath(exe), time.Now())
 	to, err = BackupVersion(ctx, exe)
 	if err != nil {
 		return "", "", err

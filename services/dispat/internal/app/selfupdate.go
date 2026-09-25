@@ -101,6 +101,9 @@ func SelfUpdate(ctx context.Context, opts SelfUpdateOptions) (pending bool, err 
 
 	if opts.Check {
 		report(opts, rel, notes, change)
+		if change && opts.Build.Origin == selfupdate.OriginRelease {
+			reportBackupSlot(opts)
+		}
 		return change, nil
 	}
 	if !change {
@@ -281,6 +284,26 @@ func report(opts SelfUpdateOptions, rel selfupdate.Release, notes selfupdate.Not
 			fmt.Fprint(opts.Out, note)
 		}
 	}
+}
+
+// reportBackupSlot is the part of --check that looks at the disk: something
+// other than a file standing where the backup is kept stops the install it
+// just offered, so the blocker and its remedy are named before the download
+// the install would otherwise spend finding out.
+func reportBackupSlot(opts SelfUpdateOptions) {
+	exe, err := selfupdate.Executable()
+	if err != nil {
+		return
+	}
+	blocked := selfupdate.CheckBackupSlot(exe)
+	if blocked == nil {
+		return
+	}
+	if opts.JSON {
+		opts.Log.Warn().Err(blocked).Msg("the update cannot be installed until the backup's place is cleared")
+		return
+	}
+	fmt.Fprintf(opts.Out, "\nself-update cannot install it yet: %v\n", blocked)
 }
 
 // rollback restores the kept binary, or reports that there is one to restore.

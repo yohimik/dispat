@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -362,7 +361,8 @@ func sameDirPath(a, b string) bool {
 func installRollback(opts InstallOptions, target install.Target) (bool, error) {
 	backup := selfupdate.BackupPath(target.Path())
 	if opts.Check {
-		if _, err := os.Stat(backup); err != nil {
+		switch err := selfupdate.CheckRestorableBackup(target.Path()); {
+		case errors.Is(err, selfupdate.ErrNoBackup):
 			if opts.JSON {
 				opts.Log.Info().Str("path", target.Path()).Bool("pending", false).
 					Msg("no backup to roll back to")
@@ -370,6 +370,12 @@ func installRollback(opts InstallOptions, target install.Target) (bool, error) {
 				fmt.Fprintf(opts.Out, "there is no backup of %s to roll back to\n", target.Path())
 			}
 			return false, nil
+		case err != nil:
+			// Something other than a binary stands where the backup is kept,
+			// which the rollback itself refuses; saying one is available
+			// would promise a restore that cannot happen.
+			opts.Log.Error().Err(err).Msg("the backup cannot be restored")
+			return false, err
 		}
 		if opts.JSON {
 			opts.Log.Info().Str("backup", backup).Bool("pending", true).Msg("a backup is available")

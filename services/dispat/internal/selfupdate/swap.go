@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Replace puts incoming where exe is, keeping the outgoing binary as exe's
@@ -16,14 +17,18 @@ import (
 // new one in works identically on every platform dispat ships for. Neither
 // rename crosses a filesystem, since incoming was created in exe's own
 // directory, and the path never changes, so nothing on PATH has to be told.
+//
+// Whatever an earlier update left parked by a crash is put back or cleared
+// first (see recoverParkedBackups), so the backup it finds is the one a
+// completed update would have left.
 func Replace(exe, incoming string) (string, error) {
 	backup := BackupPath(exe)
+	recoverParkedBackups(backup, time.Now())
 	if _, err := os.Lstat(exe); os.IsNotExist(err) {
-		exists, checkErr := inspectPreviousBackup(backup)
-		if checkErr != nil {
-			return "", checkErr
-		}
-		if !exists {
+		// A first install writes nothing at the backup's path, so what stands
+		// there decides only whether a rollback copy is reported, never
+		// whether the install may happen.
+		if present, err := isPreviousBackupPresent(backup); err != nil || !present {
 			backup = ""
 		}
 		return installFirst(exe, incoming, backup)
@@ -87,11 +92,14 @@ type previousBackup struct {
 
 func parkPreviousBackup(path string) (previousBackup, error) {
 	b := previousBackup{path: path}
-	exists, err := inspectPreviousBackup(path)
-	if err != nil || !exists {
-		return b, err
+	present, err := isPreviousBackupPresent(path)
+	if err != nil {
+		return b, fmt.Errorf("selfupdate: %w", err)
 	}
-	b.dir, err = os.MkdirTemp(filepath.Dir(path), "dispat-previous-backup-*")
+	if !present {
+		return b, nil
+	}
+	b.dir, err = os.MkdirTemp(filepath.Dir(path), parkedBackupPrefix+"*")
 	if err != nil {
 		return b, fmt.Errorf("selfupdate: parking the previous backup %s: %w", path, err)
 	}
@@ -103,18 +111,81 @@ func parkPreviousBackup(path string) (previousBackup, error) {
 	return b, nil
 }
 
-func inspectPreviousBackup(path string) (bool, error) {
+// isPreviousBackupPresent reports whether a rollback copy stands at path. A
+// path holding anything but a regular file is an error naming what is in the
+// way and the remedy, because an update would otherwise have to move somebody's
+// folder, link or device aside to keep its own backup there.
+func isPreviousBackupPresent(path string) (bool, error) {
 	prior, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("selfupdate: checking the previous backup %s: %w", path, err)
+		return false, fmt.Errorf("checking the previous backup %s: %w", path, err)
 	}
 	if !prior.Mode().IsRegular() {
-		return false, fmt.Errorf("selfupdate: previous backup %s is not a regular file", path)
+		return false, blockedBackup(path, slotKind(prior.Mode()))
 	}
 	return true, nil
+}
+
+// CheckBackupSlot reports what would stop a replacement of exe from keeping
+// the outgoing binary as its backup, before anything is downloaded. A path
+// nothing occupies yet is a first install, which keeps no backup, so only a
+// replacement is ever refused.
+func CheckBackupSlot(exe string) error {
+	if _, err := os.Lstat(exe); os.IsNotExist(err) {
+		return nil
+	}
+	_, err := isPreviousBackupPresent(BackupPath(exe))
+	return err
+}
+
+// CheckRestorableBackup reports whether exe's backup is a binary a restore may
+// put in exe's place: ErrNoBackup when there is none, and the remedy when
+// something else stands there. A symbolic link to a regular file is accepted,
+// because an install that replaced a link on PATH keeps that link as its
+// backup, and restoring it puts back exactly what was there.
+func CheckRestorableBackup(exe string) error {
+	backup := BackupPath(exe)
+	info, err := os.Lstat(backup)
+	if err != nil {
+		return fmt.Errorf("%w at %s", ErrNoBackup, backup)
+	}
+	if info.Mode().IsRegular() {
+		return nil
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if resolved, err := os.Stat(backup); err == nil && resolved.Mode().IsRegular() {
+			return nil
+		}
+		return fmt.Errorf("selfupdate: %w", blockedBackup(backup, "link to something that is not a file"))
+	}
+	return fmt.Errorf("selfupdate: %w", blockedBackup(backup, slotKind(info.Mode())))
+}
+
+// blockedBackup names what stands where a backup belongs and what to do
+// about it.
+func blockedBackup(path, kind string) error {
+	return fmt.Errorf("%s is a %s where the previous binary is kept; move or remove it, then re-run", path, kind)
+}
+
+// slotKind names what occupies a backup's place, because "not a regular
+// file" tells a reader nothing they can act on.
+func slotKind(mode os.FileMode) string {
+	switch {
+	case mode.IsDir():
+		return "folder"
+	case mode&os.ModeSymlink != 0:
+		return "symbolic link"
+	case mode&os.ModeDevice != 0:
+		return "device"
+	case mode&os.ModeSocket != 0:
+		return "socket"
+	case mode&os.ModeNamedPipe != 0:
+		return "named pipe"
+	}
+	return "special file"
 }
 
 func (b previousBackup) restore(cause error) error {
@@ -160,13 +231,19 @@ func (b previousBackup) discard() error {
 //
 // It rotates rather than moves so that a restore is itself reversible and no
 // version is ever lost, which is what lets a second one return. Nothing here
-// asks what either file is, because the two callers ask different questions of
-// it: dispat restoring dispat runs the backup first, and a restore of some
-// other tool has nothing it could run it against.
+// runs either file, because the two callers ask different questions of it:
+// dispat restoring dispat runs the backup first, and a restore of some other
+// tool has nothing it could run it against.
+//
+// A backup a crash left parked is put back first, and only a backup that
+// CheckRestorableBackup accepts is rotated in: a folder standing at the
+// backup's path is somebody's, and moving it into exe's place would put it on
+// PATH.
 func Restore(exe string) (err error) {
 	backup := BackupPath(exe)
-	if _, err := os.Stat(backup); err != nil {
-		return fmt.Errorf("%w at %s", ErrNoBackup, backup)
+	recoverParkedBackups(backup, time.Now())
+	if err := CheckRestorableBackup(exe); err != nil {
+		return err
 	}
 	dir := filepath.Dir(exe)
 	parked, err := os.CreateTemp(dir, tempPattern(exe, "rollback"))

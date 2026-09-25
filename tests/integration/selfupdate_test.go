@@ -455,7 +455,9 @@ func TestSelfUpdateFailedSecondInstallPreservesBothBinaries(t *testing.T) {
 }
 
 // An occupied backup path is not ours to overwrite. The CLI must report the
-// obstruction while retaining the current release byte for byte.
+// obstruction and its remedy before it downloads anything, both under --check
+// and when asked to install, while retaining the current release byte for
+// byte.
 func TestSelfUpdateRefusesAnUnsafePreviousBackup(t *testing.T) {
 	const next = "1.2.0"
 	r := newSURepoVersions(t, map[string]string{
@@ -470,16 +472,32 @@ func TestSelfUpdateRefusesAnUnsafePreviousBackup(t *testing.T) {
 	marker := filepath.Join(r.backup, "owned-by-another-process")
 	require.NoError(t, os.WriteFile(marker, []byte("do not replace"), 0o600))
 
-	res := r.update("--release", next)
+	// The binary names its backup by its own resolved path, which a temporary
+	// folder behind a symbolic link spells differently, so the name is matched
+	// from the backup's base onwards.
+	remedy := filepath.Base(r.backup) + " is a folder where the previous binary is kept; move or remove it, then re-run"
+	downloads := func() int { return strings.Count(strings.Join(r.requests(), "\n"), "/dl/") }
+	before := downloads()
+
+	res := r.update("--check", "--release", next)
+	assert.Equal(t, 1, res.Code, "an update is still available")
+	assert.Contains(t, res.Stdout, "install it with: dispat self-update")
+	assert.Contains(t, res.Stdout, "self-update cannot install it yet: ")
+	assert.Contains(t, res.Stdout, remedy)
+
+	res = r.update("--release", next)
 	assert.NotEqual(t, 0, res.Code)
-	assert.Contains(t, res.Stdout+res.Stderr, "previous backup")
-	assert.Contains(t, res.Stdout+res.Stderr, "not a regular file")
+	assert.Contains(t, res.Stdout+res.Stderr, remedy)
+	assert.Equal(t, before, downloads(), "the refusal costs no download")
 	got, err := os.ReadFile(r.exe)
 	require.NoError(t, err)
 	assert.Equal(t, current, got)
 	markerBytes, err := os.ReadFile(marker)
 	require.NoError(t, err)
 	assert.Equal(t, []byte("do not replace"), markerBytes)
+	entries, err := os.ReadDir(filepath.Dir(r.exe))
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "no download is left behind: %v", entries)
 }
 
 // The downloaded candidate makes the executable directory unwritable during
@@ -676,6 +694,34 @@ func TestSelfUpdateRollsBackAndBackAgain(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(r.exe))
 	require.NoError(t, err)
 	assert.Len(t, entries, 2, "nothing is parked and forgotten between the renames")
+}
+
+// TestSelfUpdateRollbackRecoversABackupACrashLeftParked: an update killed
+// after it parked the previous backup and before it discarded it leaves the
+// only rollback copy in a staging directory and a download beside the
+// binary. The next rollback puts the copy back and restores it, and clears
+// the download, instead of reporting that there is nothing to roll back to.
+func TestSelfUpdateRollbackRecoversABackupACrashLeftParked(t *testing.T) {
+	r := newSURepo(t)
+	require.Equal(t, 0, r.update().Code)
+	dir := filepath.Dir(r.exe)
+	staging := filepath.Join(dir, "dispat-previous-backup-1234")
+	require.NoError(t, os.Mkdir(staging, 0o700))
+	require.NoError(t, os.Rename(r.backup, filepath.Join(staging, filepath.Base(r.backup))))
+	download := filepath.Join(dir, "dispat-download-5678"+exeSuffix())
+	require.NoError(t, os.WriteFile(download, []byte("half a binary"), 0o600))
+	crashed := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(staging, crashed, crashed))
+	require.NoError(t, os.Chtimes(download, crashed, crashed))
+
+	res := r.CommandBin(r.exe, "self-update", "--rollback")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "rolled back to dispat "+suOld)
+	assert.Equal(t, suOld, r.version(r.exe))
+	assert.Equal(t, suNew, r.version(r.backup))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "the staging directory and the download are gone: %v", entries)
 }
 
 // TestSelfUpdateInstallsANamedVersion: --release reaches any published

@@ -137,11 +137,16 @@ func (i *Installer) Fetch(ctx context.Context, a Asset, dir, target string) (pat
 // Nothing is moved until every download and validation check has passed. A
 // replacement failure then restores the working binary; the typed
 // ErrPreviousBackupCleanup is the exception that reports an installed binary
-// whose older rollback copy could not be discarded.
+// whose older rollback copy could not be discarded. A backup's place that
+// something other than a file occupies is refused before the download, so the
+// refusal names its remedy and costs no transfer.
 func (i *Installer) Install(ctx context.Context, a Asset) (backup string, err error) {
 	exe, err := i.exe()
 	if err != nil {
 		return "", fmt.Errorf("%s: locating the running binary: %w", i.what(), err)
+	}
+	if err := CheckBackupSlot(exe); err != nil {
+		return "", fmt.Errorf("%s: %w", i.what(), err)
 	}
 	dir := filepath.Dir(exe)
 
