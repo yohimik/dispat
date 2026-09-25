@@ -128,6 +128,25 @@ type options struct {
 // against the command table — without running a command.
 func declareFlags(fs *pflag.FlagSet) *options {
 	o := &options{}
+	o.declareGlobalFlags(fs)
+	o.declareSelectionFlags(fs)
+	o.declareSetupFlags(fs)
+	o.declareInstallFlags(fs)
+	o.declareCommitFlags(fs)
+	o.declareGitHubFlags(fs)
+	o.declareEntryFlags(fs)
+	o.declareAutoVersionFlags(fs)
+	o.declareHelperFlags(fs)
+	o.declareManifestFlags(fs)
+	o.declareReleaseFlags(fs)
+	o.declareHelpFlags(fs)
+	return o
+}
+
+// declareGlobalFlags declares the global flags every command reads: the root,
+// the configuration files, the environment files, the concurrency override and
+// the logging overrides.
+func (o *options) declareGlobalFlags(fs *pflag.FlagSet) {
 	o.root = fs.String("root", ".", "monorepo root folder")
 	o.cfgName = fs.String("config", "dispat.json",
 		"config file, a path relative to --root or an absolute path; when not set, the first of dispat.json, dispat.yaml, dispat.yml, dispat.toml that exists")
@@ -142,6 +161,11 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.logFormat = fs.String("log-format", "", "override the configured logFormat (pretty, json)")
 	o.quietParser = fs.Bool("quiet-parser", false,
 		"hide the commit-message parser's diagnostics; --quiet-parser=false shows them again when parser.quiet is set")
+}
+
+// declareSelectionFlags declares the flags of `dispat run` and the package
+// selection every package-selecting command shares.
+func (o *options) declareSelectionFlags(fs *pflag.FlagSet) {
 	o.onError = fs.String("on-error", app.OnErrorSkip,
 		"what a failed package does to its dependents (skip or continue)")
 	o.since = fs.String("since", "",
@@ -154,6 +178,11 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"narrow to every package of the named spaces (repeatable, comma-separated, '*' globs); a standalone package belongs to no space, so --package is the only way to name one")
 	o.groupFilter = fs.StringSliceP("group", "g", nil,
 		"narrow to every package of the named versioning groups (repeatable, comma-separated, '*' globs); a group is a versionGroups entry or a space that versions as one, so it may cross spaces")
+}
+
+// declareSetupFlags declares the flags of init, preview and compute, and
+// --check, which compute, self-update and install share.
+func (o *options) declareSetupFlags(fs *pflag.FlagSet) {
 	o.initFormat = fs.String("format", "json",
 		"config file format (json, yaml or toml)")
 	o.pvChangelog = fs.Bool("changelog", false,
@@ -167,6 +196,11 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"confirm each suggestion before applying it")
 	o.check = fs.Bool("check", false,
 		"report only, changing nothing, and exit 1 when there is something to do: for compute, config suggestions; for self-update, a release it would install; for install, a file the destination does not already hold (CI gate)")
+}
+
+// declareInstallFlags declares the flags of self-update and of install, which
+// asks the same questions of another repository's releases.
+func (o *options) declareInstallFlags(fs *pflag.FlagSet) {
 	o.suRelease = fs.String("release", "",
 		"self-update and install: install exactly this version instead of the latest one, downgrades included")
 	o.suForce = fs.Bool("force", false,
@@ -185,6 +219,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"install: hand the verified file to this command's standard input instead of installing it, run in --bin-dir, which is how an archive is unpacked ('tar -xz') or a release's install script run ('sh'); $DISPAT_ASSET names the same file by path")
 	o.instTagPrefix = fs.String("tag-prefix", "v",
 		"install: what a release tag carries before its version; empty considers every tag whose whole name is a version")
+}
+
+// declareCommitFlags declares the flags of the commit step command.
+func (o *options) declareCommitFlags(fs *pflag.FlagSet) {
 	o.commitTag = fs.Bool("tag", false,
 		"also create the annotated release tag at the resulting commit; an identical existing tag is skipped")
 	o.commitPush = fs.Bool("push", false,
@@ -203,6 +241,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override the commit.messageFormat template ({tags}, {packages})")
 	o.commitInclude = fs.StringSlice("include", nil,
 		"override the commit.include extra staged paths")
+}
+
+// declareGitHubFlags declares the flags of the github step command.
+func (o *options) declareGitHubFlags(fs *pflag.FlagSet) {
 	o.ghOwner = fs.String("owner", "",
 		"override the github.owner repository owner")
 	o.ghRepo = fs.String("repo", "",
@@ -215,6 +257,11 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"create the tag at this commit or branch (target_commitish); only safe once the commit is on the remote")
 	o.ghDraft = fs.Bool("draft", false,
 		"override github.draft: create the release as a draft for a human to publish (--draft=false publishes it)")
+}
+
+// declareEntryFlags declares the flags of the changelog step command and the
+// entry-format flags it shares with the github step command.
+func (o *options) declareEntryFlags(fs *pflag.FlagSet) {
 	o.clFile = fs.StringP("file", "f", "",
 		"changelog: override the changelog.file name; if: the leading condition holds when this path exists and is a regular file")
 	o.clFileTitle = fs.String("file-title", "",
@@ -235,7 +282,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override authors.exclude: authors matching one of these globs are dropped, after --authors-include has been applied")
 	o.authorsTitle = fs.String("authors-title", "",
 		"override authors.title, the heading of the authors section")
+}
 
+// declareAutoVersionFlags declares the flags of autoversion and autowriter.
+func (o *options) declareAutoVersionFlags(fs *pflag.FlagSet) {
 	o.avRange = fs.String("range", "",
 		"override the autoVersion.range write policy")
 	o.avMatch = fs.StringSlice("match", nil,
@@ -250,6 +300,11 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"override autoVersion.writeVersion")
 	o.avSyncLock = fs.Bool("sync-lock", true,
 		"run the space's syncLock scripts for changed packages")
+}
+
+// declareHelperFlags declares the flags of the shell helpers: if, for and
+// exec, and the two they share.
+func (o *options) declareHelperFlags(fs *pflag.FlagSet) {
 	o.ifThen = fs.StringArray("then", nil,
 		"the script a condition runs when it holds; repeatable, paired in order with the leading condition and each --elif")
 	o.ifElif = fs.StringArray("elif", nil,
@@ -280,6 +335,11 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"run this script when the chosen script fails, and exit with the failure script's code instead of the failed script's")
 	o.helperIn = fs.String("in", "",
 		"run the script in this folder: a path, or pkg:<name>, space:<name>, root or cwd; without it the script runs where the invocation stands (a folder actually called root or cwd is written ./root)")
+}
+
+// declareManifestFlags declares the flags of scanner, writer and the
+// replacers, and --strict, which release and status share.
+func (o *options) declareManifestFlags(fs *pflag.FlagSet) {
 	o.scanRootOnly = fs.Bool("root-only", false,
 		"read only the manifests sitting directly in the folder, without descending")
 	o.scVerifyUnlinked = fs.Bool("verify-unlinked", false,
@@ -314,6 +374,11 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"autoreplacer: which files of each covered package to rewrite, as globs relative to its folder (repeatable)")
 	o.strict = fs.Bool("strict", false,
 		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a replacement that matched nothing; for autowriter, an edit that matched no manifest anywhere")
+}
+
+// declareReleaseFlags declares the flags of release, run, status and worker:
+// the release gate, the added worker links and the worker node's own settings.
+func (o *options) declareReleaseFlags(fs *pflag.FlagSet) {
 	o.requireRelease = fs.Bool("require-release", false,
 		"release and status: exit 3 when the plan releases nothing, apart from exit 1's failures, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
 	o.workers = fs.StringArray(config.WorkerFlag, nil,
@@ -322,6 +387,10 @@ func declareFlags(fs *pflag.FlagSet) *options {
 		"worker: the folder this node keeps its object cache and its record of answered work in; without it, dispat/worker under the user cache directory")
 	o.workerIdleTimeout = fs.Int("idle-timeout", 0,
 		"worker: stop after this many seconds with nothing claimed and nothing in flight (0 serves until the process is signalled)")
+}
+
+// declareHelpFlags declares --version and --help, declared last.
+func (o *options) declareHelpFlags(fs *pflag.FlagSet) {
 	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
 	// Declaring help is what makes it a flag rather than pflag's own
 	// interception, which fires during Parse — before the command word has
@@ -329,7 +398,6 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	// command was asked for.
 	o.showHelp = fs.BoolP("help", "h", false,
 		"print help for the command and exit")
-	return o
 }
 
 // authorOptions collects the six authors flags into the overlay the changelog
