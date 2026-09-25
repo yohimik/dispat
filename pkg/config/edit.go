@@ -87,10 +87,7 @@ func PrepareEdits(ctx context.Context, path string, edits []Edit) (*PreparedEdit
 	if len(edits) == 0 {
 		return p, nil
 	}
-	if err := refuseEditSymlink(path); err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(path)
+	data, mode, err := readEditTarget(path)
 	if err != nil {
 		return nil, err
 	}
@@ -121,11 +118,13 @@ func PrepareEdits(ctx context.Context, path string, edits []Edit) (*PreparedEdit
 	if !changed {
 		return p, nil
 	}
-	info, err := os.Stat(path)
-	if err != nil {
+	// A caller's value renders itself between the read and here, and can
+	// remove or replace the file on the way. The mode is the one read with the
+	// bytes; this only asks whether the file is still one an edit may rewrite.
+	if err := requireEditTarget(path); err != nil {
 		return nil, err
 	}
-	return &PreparedEdit{Path: path, data: data, out: out, mode: info.Mode().Perm(), log: log}, nil
+	return &PreparedEdit{Path: path, data: data, out: out, mode: mode, log: log}, nil
 }
 
 // Commit writes the prepared replacement: the backup first, then the file.
@@ -135,12 +134,14 @@ func PrepareEdits(ctx context.Context, path string, edits []Edit) (*PreparedEdit
 // Both writes are atomic — the backup exists for the moment something goes
 // wrong, which is exactly when a truncated half-written copy would be found
 // instead — and the backup carries the config's own permissions: a 0600 config
-// must not leak through a world-readable copy.
+// must not leak through a world-readable copy. A target that became a symbolic
+// link or anything but a regular file after preparation is refused before the
+// backup is written, so a refused commit leaves nothing behind.
 func (p *PreparedEdit) Commit() error {
 	if p.noop {
 		return nil
 	}
-	if err := refuseEditSymlink(p.Path); err != nil {
+	if err := refuseEditTarget(p.Path); err != nil {
 		return err
 	}
 	if err := writeFileAtomic(p.Path+BackupSuffix, p.data, p.mode); err != nil {
@@ -556,7 +557,7 @@ func replaceValueYAML(data []byte, keyPath []string, value any) ([]byte, error) 
 // rename. The temp file lands beside the target so the rename never crosses a
 // filesystem, and it is removed on every failure.
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	if err := refuseEditSymlink(path); err != nil {
+	if err := refuseEditTarget(path); err != nil {
 		return err
 	}
 	dir := filepath.Dir(path)
@@ -594,16 +595,76 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-func refuseEditSymlink(path string) error {
+// maxEditBytes bounds the configuration file an edit reads, the cap the
+// manifest readers and writers of this workspace use for one file.
+const maxEditBytes = 16 << 20
+
+// readEditTarget reads the file an edit set rewrites, with its permissions.
+//
+// It admits a regular file only. A named pipe would block the open until a
+// writer appeared, a device would read without bound, and a directory has no
+// bytes to splice, so each is refused by its type before it is opened. The
+// open handle is checked again, because the path can be replaced between the
+// check and the open, and the read is capped for a regular file that grows
+// while it is read: reading one byte past the cap is what tells a file at the
+// cap from a longer one.
+func readEditTarget(path string) ([]byte, os.FileMode, error) {
 	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return nil
+	if err != nil {
+		return nil, 0, err
 	}
+	if err := refuseEditMode(path, info.Mode()); err != nil {
+		return nil, 0, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := refuseEditMode(path, opened.Mode()); err != nil {
+		return nil, 0, err
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxEditBytes+1))
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(data) > maxEditBytes {
+		return nil, 0, fmt.Errorf("%s: refusing to rewrite a file larger than %d bytes", path, maxEditBytes)
+	}
+	return data, opened.Mode().Perm(), nil
+}
+
+// refuseEditTarget refuses to write over anything but a regular file or an
+// absent path. It guards both destinations of a commit, the configuration file
+// and its backup, before a temporary file is renamed onto either.
+func refuseEditTarget(path string) error {
+	if err := requireEditTarget(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// requireEditTarget refuses anything at path but an existing regular file.
+func requireEditTarget(path string) error {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
+	return refuseEditMode(path, info.Mode())
+}
+
+// refuseEditMode is the one admission rule both the read and the writes apply,
+// worded as the manifest writer words it.
+func refuseEditMode(path string, mode os.FileMode) error {
+	if mode&os.ModeSymlink != 0 {
 		return fmt.Errorf("%s: refusing to rewrite a symbolic link", path)
+	}
+	if !mode.IsRegular() {
+		return fmt.Errorf("%s: refusing to rewrite a non-regular file", path)
 	}
 	return nil
 }

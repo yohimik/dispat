@@ -181,23 +181,19 @@ func TestPublicAPIConfigPreparedCommitRefusesAChangedDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The commit refuses the changed destination by its type before it saves
+	// the backup, as it refuses a symbolic link, so a refused commit writes
+	// nothing at all rather than a backup of a file that is no longer there.
 	err = prepared.Commit()
-	if err == nil {
-		t.Fatal("commit replaced a destination that became a directory")
+	if err == nil || !strings.Contains(err.Error(), "refusing to rewrite a non-regular file") {
+		t.Fatalf("commit = %v, want a non-regular refusal", err)
 	}
 	info, statErr := os.Stat(path)
 	if statErr != nil || !info.IsDir() {
 		t.Fatalf("changed destination was not preserved: info=%v err=%v", info, statErr)
 	}
-	backup, readErr := os.ReadFile(path + config.BackupSuffix)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if string(backup) != body {
-		t.Fatalf("backup = %q, want original %q", backup, body)
-	}
-	if info, err := os.Stat(path + config.BackupSuffix); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("backup mode = %v, err = %v", info.Mode().Perm(), err)
+	if _, err := os.Lstat(path + config.BackupSuffix); !os.IsNotExist(err) {
+		t.Fatalf("refused commit wrote a backup: %v", err)
 	}
 	leftovers, err := filepath.Glob(filepath.Join(dir, "dispat.json.tmp-*"))
 	if err != nil {

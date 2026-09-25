@@ -367,6 +367,115 @@ func TestPreparedEditRefusesTargetReplacedBySymlink(t *testing.T) {
 	}
 }
 
+// TestPrepareEditsRefusesASymbolicLink: an edit rewrites the file it read, so
+// an alias is refused before it is read rather than followed.
+func TestPrepareEditsRefusesASymbolicLink(t *testing.T) {
+	dir := t.TempDir()
+	target := writeFile(t, dir, "other.json", `{"tags":["kept"]}`)
+	path := filepath.Join(dir, "app.json")
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, err := PrepareEdits(t.Context(), path, []Edit{{KeyPath: []string{"tags"}, Value: []string{"new"}}})
+	if err == nil || !strings.Contains(err.Error(), "refusing to rewrite a symbolic link") {
+		t.Fatalf("prepare = %v, want a symlink refusal", err)
+	}
+}
+
+// TestPrepareEditsRefusesADirectory: a path that is not a regular file is
+// refused by its type, in the manifest writer's words, rather than with the
+// raw error reading a directory gives.
+func TestPrepareEditsRefusesADirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.json")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := PrepareEdits(t.Context(), path, []Edit{{KeyPath: []string{"tags"}, Value: []string{"new"}}})
+	if err == nil || !strings.Contains(err.Error(), path+": refusing to rewrite a non-regular file") {
+		t.Fatalf("prepare = %v, want a non-regular refusal", err)
+	}
+}
+
+// TestPrepareEditsRefusesAFileLargerThanTheCap: the read is bounded, so a
+// file past the cap is refused rather than held in memory twice over.
+func TestPrepareEditsRefusesAFileLargerThanTheCap(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"tags":["old"],"pad":"` + strings.Repeat("x", maxEditBytes) + `"}`
+	path := writeFile(t, dir, "app.json", body)
+	_, err := PrepareEdits(t.Context(), path, []Edit{{KeyPath: []string{"tags"}, Value: []string{"new"}}})
+	if err == nil || !strings.Contains(err.Error(), "refusing to rewrite a file larger than") {
+		t.Fatalf("prepare = %v, want a size refusal", err)
+	}
+}
+
+// replacingYAMLValue swaps the file for a directory while it renders, the one
+// moment between the read and the end of preparation a caller controls.
+type replacingYAMLValue struct{ path string }
+
+func (v replacingYAMLValue) MarshalYAML() (any, error) {
+	if err := os.Remove(v.path); err != nil {
+		return nil, err
+	}
+	return "new", os.Mkdir(v.path, 0o755)
+}
+
+// TestPrepareEditsRefusesATargetReplacedWhileItRenders: preparation asks
+// once more, after every value has rendered, whether the file is still one
+// an edit may rewrite.
+func TestPrepareEditsRefusesATargetReplacedWhileItRenders(t *testing.T) {
+	path := writeFile(t, t.TempDir(), "app.yaml", "name: app\n")
+	_, err := PrepareEdits(t.Context(), path, []Edit{{KeyPath: []string{"name"}, Value: replacingYAMLValue{path: path}}})
+	if err == nil || !strings.Contains(err.Error(), "refusing to rewrite a non-regular file") {
+		t.Fatalf("prepare = %v, want a non-regular refusal", err)
+	}
+}
+
+// TestPreparedEditRefusesTargetReplacedByADirectory: the symlink rule's twin.
+// A config replaced by anything but a regular file after preparation is
+// refused before the backup is written, so the refusal leaves nothing behind.
+func TestPreparedEditRefusesTargetReplacedByADirectory(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "app.json", `{"tags":["old"]}`)
+	p, err := PrepareEdits(t.Context(), path, []Edit{{KeyPath: []string{"tags"}, Value: []string{"new"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Commit(); err == nil || !strings.Contains(err.Error(), "refusing to rewrite a non-regular file") {
+		t.Fatalf("commit = %v, want a non-regular refusal", err)
+	}
+	if info, err := os.Lstat(path); err != nil || !info.IsDir() {
+		t.Fatalf("replacement = %v, %v; want the directory kept", info, err)
+	}
+	if _, err := os.Lstat(path + BackupSuffix); !os.IsNotExist(err) {
+		t.Errorf("backup was written before refusal: %v", err)
+	}
+}
+
+// TestCommitRefusesANonRegularBackupSlot: the backup is written the same way
+// as the file, so a directory where the backup goes is refused by type and
+// the config is left as it was.
+func TestCommitRefusesANonRegularBackupSlot(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "app.json", `{"tags":["old"]}`)
+	if err := os.Mkdir(path+BackupSuffix, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := applyEdits(t, path, Edit{KeyPath: []string{"tags"}, Value: []string{"new"}})
+	if err == nil || !strings.Contains(err.Error(), "saving backup") ||
+		!strings.Contains(err.Error(), "refusing to rewrite a non-regular file") {
+		t.Fatalf("apply = %v, want a backup refusal", err)
+	}
+	if got := readBack(t, path); got != `{"tags":["old"]}` {
+		t.Errorf("config changed: %s", got)
+	}
+}
+
 // TestCommitKeepsTheFilesPermissions: a 0600 config must not leak through a
 // world-readable backup.
 func TestCommitKeepsTheFilesPermissions(t *testing.T) {

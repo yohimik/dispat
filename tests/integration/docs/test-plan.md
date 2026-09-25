@@ -2600,7 +2600,8 @@ These cases extend the existing planning, configuration, publication, command an
 | `TestPublicAPIConfigDoesNotConvertCallerYAMLPanicsIntoErrors` | A caller panic retains its identity and leaves configuration bytes and backups untouched. |
 | `TestPublicAPIConfigRejectsTruncatedNestedJSONWithoutWriting` | Truncated nested JSON and invalid key framing fail before partial edits reach disk. |
 | `TestPublicAPIConfigPrepareReportsDestinationDisappearingDuringMarshal` | Preparation reports a destination removed by a caller marshaler without writing a replacement. |
-| `TestPublicAPIConfigPreparedCommitRefusesAChangedDestination` | Replacing a prepared file with a directory causes commit to fail, preserving the replacement, original backup, permissions and temporary-file cleanup. |
+| `TestPublicAPIConfigPreparedCommitRefusesAChangedDestination` | Replacing a prepared file with a directory makes commit refuse it as a non-regular file before the backup is saved, preserving the replacement and leaving neither a backup nor a temporary file. |
+| `TestPublicAPIConfigEditRefusesANamedPipe` | A configuration-shaped FIFO cannot block `config.ApplyEdits`: it is refused by its type before it is opened and nothing is written beside it; a bounded child process detects a regression. |
 
 ### History boundaries
 
