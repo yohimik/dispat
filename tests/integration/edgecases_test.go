@@ -27,6 +27,7 @@ package integration
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -806,6 +807,46 @@ func TestEdgeReleaseCommitLockStaysAtHeadWithNothingToRegenerateIt(t *testing.T)
 	assert.Contains(t, r.Git("log", "-1", "--format=%s"), "util@0.1.0", "the release commit is made")
 	assert.Equal(t, seed, r.Git("show", "HEAD:lock.txt")+"\n", "and records the shared file as HEAD had it")
 	assert.Equal(t, seed, readFileString(t, r.Path("lock.txt")), "the file core's sync wrote is restored")
+}
+
+// TestEdgeReleaseCommitLockResyncSeesOnlyWhatPublished: the syncLock scripts
+// the closing phase runs again read a settled environment. A consumer that
+// published beside its published provider still lists that provider among
+// its updates, while the package that failed after its own lock sync is
+// listed at the version it had, not releasing, so the regenerated lock file
+// the release commit records names only versions that exist.
+func TestEdgeReleaseCommitLockResyncSeesOnlyWhatPublished(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = map[string]models.Script{
+		"build":   {`if [ "$DISPAT_PACKAGE" = util ]; then exit 1; fi`},
+		"publish": {"echo publishing"},
+		"regen": {sharedLockRegenerator, `printf '%s updated=%s util-releasing=%s\n' "$DISPAT_PACKAGE" ` +
+			`"$DISPAT_UPDATED_PACKAGES" "$DISPAT_WORKSPACE_UTIL_RELEASING" >> ../../resync.log`},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(),
+			AutoVersion: &models.AutoVersionConfig{SyncLock: []string{"regen"}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Include: []string{"lock.txt", "resync.log"}}
+	r.WriteConfigModel(cfg)
+	seedManifest(r, "packages", "core")
+	seedManifest(r, "packages", "util")
+	seedManifest(r, "packages", "web")
+	r.WriteFile("lock.txt", "packages/core 0.0.0\npackages/util 0.0.0\npackages/web 0.0.0\n")
+	r.Commit("feat(core,util,web): util fails its build after its lock sync")
+
+	res := r.Release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	require.Subset(t, r.TagList(), []string{"core@0.1.0", "web@0.1.0"})
+	assert.Zero(t, r.TagCount("util@"))
+	assert.Equal(t, "packages/core 0.1.0\npackages/util 0.0.0\npackages/web 0.1.0\n",
+		r.Git("show", "HEAD:lock.txt")+"\n", "the release commit records only published versions")
+	lines := strings.Split(strings.TrimSpace(readFileString(t, r.Path("resync.log"))), "\n")
+	require.GreaterOrEqual(t, len(lines), 2, "the closing phase ran the published packages' syncLock again")
+	assert.Equal(t, []string{"core updated= util-releasing=false", "web updated=CORE util-releasing=false"},
+		lines[len(lines)-2:], "the re-runs read what published: web's published provider, util not releasing")
 }
 
 // TestEdgeDirtyGuardReadsARenameAsOneEntry: git's machine-readable status
