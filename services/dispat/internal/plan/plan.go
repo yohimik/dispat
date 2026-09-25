@@ -1431,10 +1431,15 @@ type computation struct {
 	parsers                 map[string]*ccme.Parser
 	repositoryHeads         map[string]string
 	controlHistory          []gitx.ControlHistoryCommit
-	controlIndexed          bool
-	controlStates           map[string]*controlGitlinkState
-	controlPathIndex        map[string]int
-	controlPathCount        int
+	// controlParents is controlHistory's parent graph by position, built
+	// once with the history so that every control window is a walk over it
+	// rather than a rebuilt map (controlCommitsAfter).
+	controlParents   [][]int32
+	controlPosition  map[string]int32
+	controlIndexed   bool
+	controlStates    map[string]*controlGitlinkState
+	controlPathIndex map[string]int
+	controlPathCount int
 	// evidence is how this computation proves a cross-repository boundary:
 	// the control checkpoints, or the fleet links. Chosen once at setup.
 	evidence boundaryEvidence

@@ -590,6 +590,7 @@ func (cp *computation) loadRepositoryWindows() error {
 	// interned by this point. Drop the bulk records so substring-backed fields
 	// cannot keep several overlapping git-log buffers live for the whole plan.
 	cp.controlHistory = nil
+	cp.controlParents, cp.controlPosition = nil, nil
 	return nil
 }
 
@@ -759,6 +760,7 @@ func (cp *computation) controlCheckpoints() (map[string]controlSnapshot, map[str
 		return nil, nil, fmt.Errorf("plan: indexing control checkpoints: %w", err)
 	}
 	cp.controlHistory = history
+	cp.indexControlParents()
 	cp.controlIndexed = true
 	cp.controlStates = make(map[string]*controlGitlinkState, len(history))
 	cp.controlPathIndex = make(map[string]int)
@@ -1175,30 +1177,49 @@ func IsControlUnitAffectingRelease(unit *ccme.Unit) bool {
 	return unit.Directives.ReleaseAs != nil && unit.Directives.ReleaseAs.Kind != ccme.ReleaseAsNone
 }
 
+// indexControlParents indexes the control inventory's parent graph by
+// position, once for every control window read from it.
+func (cp *computation) indexControlParents() {
+	cp.controlPosition = make(map[string]int32, len(cp.controlHistory))
+	for i, commit := range cp.controlHistory {
+		cp.controlPosition[commit.SHA] = int32(i)
+	}
+	cp.controlParents = make([][]int32, len(cp.controlHistory))
+	for i, commit := range cp.controlHistory {
+		for _, parent := range commit.Parents {
+			// A parent outside the inventory has nothing to exclude.
+			if at, ok := cp.controlPosition[parent]; ok {
+				cp.controlParents[i] = append(cp.controlParents[i], at)
+			}
+		}
+	}
+}
+
 // controlCommitsAfter reuses the single bulk control inventory. The excluded
 // set is the boundary's native ancestor closure, so branches merged after the
 // boundary remain in the window exactly as they do in boundary..HEAD.
 func (cp *computation) controlCommitsAfter(boundary string) []gitx.Commit {
-	excluded := make(map[string]bool)
-	if boundary != "" {
-		parents := make(map[string][]string, len(cp.controlHistory))
-		for _, commit := range cp.controlHistory {
-			parents[commit.SHA] = commit.Parents
-		}
-		queue := []string{boundary}
-		for len(queue) > 0 {
-			commit := queue[len(queue)-1]
-			queue = queue[:len(queue)-1]
-			if excluded[commit] {
+	if cp.controlPosition == nil {
+		cp.indexControlParents() // a computation assembled by hand
+	}
+	var excluded *commitSet
+	if at, ok := cp.controlPosition[boundary]; ok && boundary != "" {
+		excluded = &commitSet{bits: make([]uint64, (len(cp.controlHistory)+63)/64)}
+		stack := []int32{at}
+		for len(stack) > 0 {
+			i := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if excluded.has(int(i)) {
 				continue
 			}
-			excluded[commit] = true
-			queue = append(queue, parents[commit]...)
+			excluded.bits[i>>6] |= 1 << (uint(i) & 63)
+			excluded.size++
+			stack = append(stack, cp.controlParents[i]...)
 		}
 	}
-	out := make([]gitx.Commit, 0, len(cp.controlHistory))
-	for _, commit := range cp.controlHistory {
-		if excluded[commit.SHA] {
+	out := make([]gitx.Commit, 0, len(cp.controlHistory)-excluded.len())
+	for i, commit := range cp.controlHistory {
+		if excluded.has(i) {
 			continue
 		}
 		out = append(out, gitx.Commit{
