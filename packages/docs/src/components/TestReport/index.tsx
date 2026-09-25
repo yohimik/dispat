@@ -47,11 +47,11 @@ function useReportState(): ArchivedState {
   const isArchived = data.archivedVersions.includes(version);
   const [archive, setArchive] = useState<{version: string; value: ArchivedReport | null} | null>(null);
   useEffect(() => {
-    let mounted = true;
+    const lifetime = new AbortController();
     if (!isCurrent && isArchived) {
-      void archivedReport(version, archiveUrl).then((value) => { if (mounted) setArchive({version, value}); });
+      void archivedReport(version, archiveUrl).then((value) => { if (!lifetime.signal.aborted) setArchive({version, value}); });
     }
-    return () => { mounted = false; };
+    return () => lifetime.abort();
   }, [archiveUrl, isArchived, isCurrent, version]);
   if (isCurrent) return {report: data.report, evidence: null, status: data.report ? 'available' : 'unavailable'};
   return resolveArchivedState(version, isArchived, archive);

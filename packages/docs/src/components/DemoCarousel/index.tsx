@@ -571,28 +571,28 @@ export const DemoCarousel: FC<DemoCarouselProps> = (props) => {
   const sceneFailed = failedRequest !== null;
   React.useEffect(() => {
     if (!pending) return undefined;
-    let disposed = false;
+    const lifetime = new AbortController();
     const {index, revision} = pending;
     setFailedRequest(null);
     if (requestedAsset && SCENES[requestedAsset]) {
       void loadScene(requestedAsset)
         .then((loaded) => {
-          if (disposed || requestGeneration.current !== revision) return;
+          if (lifetime.signal.aborted || requestGeneration.current !== revision) return;
           setDisplayed({index, scene: loaded});
           setPending(null);
         })
         .catch(() => {
-          if (disposed || requestGeneration.current !== revision) return;
+          if (lifetime.signal.aborted || requestGeneration.current !== revision) return;
           setFailedRequest(index);
           setPending(null);
         });
     } else {
-      if (!disposed && requestGeneration.current === revision) {
+      if (!lifetime.signal.aborted && requestGeneration.current === revision) {
         setDisplayed({index});
         setPending(null);
       }
     }
-    return () => { disposed = true; };
+    return () => lifetime.abort();
   }, [pending, requestedAsset]);
 
   React.useEffect(() => {
