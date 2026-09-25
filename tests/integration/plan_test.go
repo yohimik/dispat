@@ -60,6 +60,22 @@ func TestPlanCancelSemantics(t *testing.T) {
 	assert.True(t, harness.IsCodePresent(res.Events, "W170"), "an empty cancel must be warned about")
 	assert.Equal(t, 1, r.TagCount("core@"), "no new tag from a no-op cancel")
 	assert.Equal(t, 1, buildRuns(r), "and no scripts either")
+
+	// A hold is a record like any other, so a cancel takes it with everything
+	// else it discards: work written after the barrier releases with nothing
+	// holding it.
+	r.WriteFile("packages/core/abandoned.txt", "x")
+	r.Commit("feat(core): work that was going to be held")
+	r.CommitEmpty("release(core): hold it back\n\nRelease-As: none")
+	r.CommitEmpty("cancel(core): start over from here")
+	r.WriteFile("packages/core/fresh.txt", "x")
+	r.Commit("fix(core): work written after the barrier")
+	line := harness.GraphLine(r.StatusOK().Events, "core")
+	assert.Equal(t, "0.0.1 -> 0.0.2", line.Str("version"), "only the work after the barrier counts")
+	assert.NotContains(t, line.Str("message"), "held", "and the discarded hold holds nothing")
+	r.ReleaseOK()
+	assert.True(t, r.IsTagged("core@0.0.2"), "tags: %v", r.TagList())
+	assert.Equal(t, 2, buildRuns(r), "one more release, one more build")
 }
 
 // TestPlanRequireRelease: --require-release is the CI/CD gate over the empty
@@ -171,6 +187,25 @@ func TestPlanExactPinGuards(t *testing.T) {
 		res := r.ReleaseOK()
 		assert.True(t, harness.IsCodePresent(res.Events, "E157"))
 		assert.Empty(t, r.TagList())
+	})
+
+	t.Run("E154_via_glob", func(t *testing.T) {
+		// Two written includes are refused by the parser; a glob's breadth
+		// is invisible in the text and needs the workspace. The rejected pin
+		// has a unit's blast radius: the work still releases as computed.
+		r := singlePackageRepo(t, echoBuild)
+		r.SeedPackage("packages", "coreutils")
+		r.Commit("feat(core,coreutils): bootstrap both packages")
+		r.ReleaseOK()
+		r.Commit("chore(release): record the changelog")
+		r.WriteFile("packages/core/work.txt", "work\n")
+		r.WriteFile("packages/coreutils/work.txt", "work\n")
+		r.Commit("feat(core*): work in both, pinned as if it were one\n\nRelease-As: 1.2.3")
+
+		res := r.Status()
+		assert.True(t, harness.IsCodePresent(res.Events, "E154"), "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout, "applies to 2 packages", "the run says how many it reached")
+		assert.Equal(t, "0.1.0 -> 0.2.0", harness.GraphLine(res.Events, "core").Str("version"))
 	})
 
 	t.Run("E154_multi_package_pin", func(t *testing.T) {

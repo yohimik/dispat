@@ -128,7 +128,9 @@ func TestCorrectionPrecedenceAndVoiding(t *testing.T) {
 
 	r.WriteFile("packages/core/main.txt", "the original\n")
 	r.Commit("feat(core)!: the original")
-	original := r.Git("rev-parse", "HEAD")
+	// Abbreviated, the way a person copies a sha out of a log: both
+	// corrections resolve it to the same record.
+	original := r.Git("rev-parse", "HEAD")[:9]
 
 	r.CommitEmpty("chore(core): drop it\n\nDeletes: " + original)
 	r.CommitEmpty("fix(core): restate it instead\n\nEdits: " + original)
@@ -247,6 +249,38 @@ func TestCorrectionTargetsMustResolve(t *testing.T) {
 		res := r.Release()
 		assert.True(t, harness.IsCodePresent(res.Events, "E212"), "events:\n%s", res.Stdout)
 	})
+
+	t.Run("a sha resolving to nothing is E210 once per correction naming it", func(t *testing.T) {
+		// A sha copied out of another clone is asked about once and
+		// remembered as unresolvable, and each correction naming it reports it.
+		r := covTailReleasedRepo(t)
+		missing := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+		r.CommitEmpty("fix(core): restate something absent\n\nEdits: " + missing)
+		r.CommitEmpty("fix(utils): restate the very same absent thing\n\nDeletes: " + missing)
+
+		res := r.Status()
+		assert.Equal(t, 2, countCode(res.Events, "E210"), "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout, "deadbeef", "and the target is named back")
+	})
+
+	t.Run("a commit that is not a proper ancestor is E210", func(t *testing.T) {
+		// A sha on a branch that was never merged into this one names a
+		// record this branch's plan does not contain, and is refused rather
+		// than reached across.
+		r := covTailReleasedRepo(t)
+		r.Git("checkout", "-q", "-b", "sidetrack")
+		r.WriteFile("packages/core/branch.txt", "work\n")
+		r.Commit("feat(core)!: work that only the branch has")
+		elsewhere := r.Git("rev-parse", "HEAD")
+		r.Git("checkout", "-q", harness.DefaultBranch)
+		r.WriteFile("packages/core/main.txt", "work\n")
+		r.Commit("feat(core): work this branch does have")
+		r.CommitEmpty("fix(core): restate what another branch carries\n\nEdits: " + elsewhere)
+
+		res := r.Status()
+		assert.True(t, harness.IsCodePresent(res.Events, "E210"), "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout, "is not a proper ancestor of this commit")
+	})
 }
 
 // TestCorrectionDiscardsWhatTheRecordPropagated: a deleted record takes its
@@ -310,9 +344,16 @@ func TestRevertTakesBothEntriesOutOfTheChangelog(t *testing.T) {
 
 	r.WriteFile("packages/core/main.txt", "a bad idea\n")
 	r.Commit("feat(core)!: a bad idea")
-	bad := r.Git("rev-parse", "HEAD")
+	// Written abbreviated, the way a person copies a sha out of a log, and
+	// named twice, which is resolved once.
+	bad := r.Git("rev-parse", "HEAD")[:9]
 	r.WriteFile("packages/core/main.txt", "")
 	r.Commit("revert(core): a bad idea\n\nReverts: " + bad)
+	r.CommitEmpty("chore(core): note the undo once more\n\nReverts: " + bad)
+
+	traced := r.StatusOK("--log-level", "trace")
+	assert.Contains(t, traced.Stdout, "reverted entries suppressed",
+		"the suppression is traceable: %s", traced.Stdout)
 	res := r.ReleaseOK()
 
 	assert.True(t, r.IsTagged("core@1.0.0"), "the major is still owed; tags: %v", r.TagList())
@@ -350,6 +391,7 @@ func TestRevertWithAnUnreachableTargetStaysInformational(t *testing.T) {
 
 	r.WriteFile("packages/utils/main.txt", "undone\n")
 	r.Commit("revert(utils): something\n\nReverts: not-a-sha")
+	r.CommitEmpty("revert(utils): something shorter than any sha\n\nReverts: abc")
 	res = r.ReleaseOK()
 	assert.True(t, harness.IsCodePresent(res.Events, "W214"), "the parser's diagnostic: %s", res.Stdout)
 	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W213", "utils"),

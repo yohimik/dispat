@@ -145,76 +145,11 @@ func TestCovTailRestatementThatChangesNothingIsReported(t *testing.T) {
 		"the restatement says the same thing as its target: %s", res.Stdout)
 }
 
-// TestCovTailCorrectionReachesOnlyProperAncestors: a correction rewrites a
-// record this commit descends from, which is what makes the result the same
-// for every reader of the history. A sha that exists in the repository but is
-// not an ancestor — a commit on a branch that was never merged into this one —
-// names a record this branch's plan does not contain, and is refused rather
-// than reached across.
-func TestCovTailCorrectionReachesOnlyProperAncestors(t *testing.T) {
-	r := covTailReleasedRepo(t)
-	r.Git("checkout", "-q", "-b", "sidetrack")
-	r.WriteFile("packages/core/branch.txt", "work\n")
-	r.Commit("feat(core)!: work that only the branch has")
-	elsewhere := r.Git("rev-parse", "HEAD")
-	r.Git("checkout", "-q", harness.DefaultBranch)
-
-	r.WriteFile("packages/core/main.txt", "work\n")
-	r.Commit("feat(core): work this branch does have")
-	r.CommitEmpty("fix(core): restate what another branch carries\n\nEdits: " + elsewhere)
-
-	res := r.Status()
-	assert.True(t, harness.IsCodePresent(res.Events, "E210"),
-		"a correction reaches only earlier commits: %s", res.Stdout)
-	assert.Contains(t, res.Stdout, "is not a proper ancestor of this commit",
-		"and says why the target was refused")
-}
-
-// TestCovTailAbbreviatedTargetsAreResolvedOnce: a target may be written
-// abbreviated, the way a person copies a sha out of a log, and the same
-// abbreviation written twice costs one lookup. The second correction is the
-// newer one and wins; the older one reports that it was superseded, which is
-// how a reader learns that both were written for the same record.
-func TestCovTailAbbreviatedTargetsAreResolvedOnce(t *testing.T) {
-	r := covTailReleasedRepo(t)
-	r.WriteFile("packages/core/work.txt", "work\n")
-	r.Commit("feat(core)!: a breaking change nobody wanted")
-	target := r.Git("rev-parse", "HEAD")
-	short := target[:9]
-
-	r.CommitEmpty("fix(core): restate it as a fix\n\nEdits: " + short)
-	r.CommitEmpty("fix(core): restate it again, more carefully\n\nEdits: " + short)
-
-	res := r.StatusOK()
-	assert.True(t, harness.IsCodePresent(res.Events, "W210"),
-		"the older correction of the same record was superseded: %s", res.Stdout)
-	assert.Equal(t, "0.1.0 -> 0.1.1", harness.GraphLine(res.Events, "core").Str("version"),
-		"and the surviving restatement decides the bump: %s", res.Stdout)
-}
-
-// TestCovTailUnresolvableTargetIsRememberedAsUnresolvable: a sha that resolves
-// to nothing is asked about once. Two corrections naming the same missing
-// commit — a sha copied out of another clone, or one whose branch was never
-// pushed here — both report it, and the second reads the remembered answer
-// rather than asking git again.
-func TestCovTailUnresolvableTargetIsRememberedAsUnresolvable(t *testing.T) {
-	r := covTailReleasedRepo(t)
-	missing := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-	r.CommitEmpty("fix(core): restate something absent\n\nEdits: " + missing)
-	r.CommitEmpty("fix(utils): restate the very same absent thing\n\nDeletes: " + missing)
-
-	res := r.Status()
-	assert.Equal(t, 2, countCode(res.Events, "E210"),
-		"the unresolvable target is reported once per correction that named it: %s", res.Stdout)
-	assert.Contains(t, res.Stdout, "deadbeef", "and the target is named back")
-}
-
-// TestCovTailRevertsFooterDegradedForms: `Reverts` is informational, so every
-// shape it can take resolves to "suppress both entries" or to "leave the
-// changelog alone", and never to an error. A value that is not a sha at all
-// stays informational; a target on the other side of a release is published
-// history and cannot be taken out of it; a target whose records belong to
-// another package leaves this one's changelog untouched.
+// TestCovTailRevertsFooterDegradedForms: `Reverts` is informational, so a
+// target it cannot take out of the changelog resolves to "leave the changelog
+// alone" and never to an error. A target on the other side of a release is
+// published history and cannot be taken out of it; a target whose records
+// belong to another package leaves this one's changelog untouched.
 func TestCovTailRevertsFooterDegradedForms(t *testing.T) {
 	r := covTailReleasedRepo(t)
 	r.WriteFile("packages/utils/theirs.txt", "work\n")
@@ -223,44 +158,15 @@ func TestCovTailRevertsFooterDegradedForms(t *testing.T) {
 	released := r.Git("rev-list", "--max-parents=0", "HEAD")
 
 	r.WriteFile("packages/core/mine.txt", "work\n")
-	r.Commit("feat(core): work of this package\n\nReverts: abc")
+	r.Commit("feat(core): work of this package")
 	r.CommitEmpty("fix(core): a revert of something already published\n\nReverts: " + released)
 	r.CommitEmpty("fix(core): a revert of another package's record\n\nReverts: " + theirs)
 
 	res := r.StatusOK()
 	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W212", "core"),
-		"none of these three suppressed an entry of this package: %s", res.Stdout)
+		"neither suppressed an entry of this package: %s", res.Stdout)
 	assert.Equal(t, "0.1.0 -> 0.2.0", harness.GraphLine(res.Events, "core").Str("version"),
-		"and every one of them still counts toward the bump: %s", res.Stdout)
-	assert.True(t, harness.IsCodePresent(res.Events, "W214"),
-		"the value that is not a sha is reported once, at parse: %s", res.Stdout)
-}
-
-// TestCovTailRevertsTakesBothEntriesOutTogether: the working form, which the
-// degraded ones above are measured against. A revert naming a record in the
-// same pending window takes that record's entry and its own out of the
-// changelog, while both still count toward the bump, and the same target
-// written twice is resolved once.
-func TestCovTailRevertsTakesBothEntriesOutTogether(t *testing.T) {
-	r := covTailReleasedRepo(t)
-	r.WriteFile("packages/core/regret.txt", "work\n")
-	r.Commit("feat(core): a feature that turned out wrong")
-	regretted := r.Git("rev-parse", "HEAD")
-	short := regretted[:9]
-
-	r.WriteFile("packages/core/undo.txt", "work\n")
-	r.Commit("fix(core): undo the feature\n\nReverts: " + short)
-	r.CommitEmpty("chore(core): note the undo once more\n\nReverts: " + short)
-
-	res := r.StatusOK()
-	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W212", "core"),
-		"the revert and its target leave the changelog together: %s", res.Stdout)
-	assert.Equal(t, "0.1.0 -> 0.2.0", harness.GraphLine(res.Events, "core").Str("version"),
-		"while both records still count toward the bump: %s", res.Stdout)
-
-	traced := r.StatusOK("--log-level", "trace")
-	assert.Contains(t, traced.Stdout, "reverted entries suppressed",
-		"and the suppression is traceable: %s", traced.Stdout)
+		"and both still count toward the bump: %s", res.Stdout)
 }
 
 // TestCovTailTwoCorrectionsInOneCommit: a commit may carry several records,

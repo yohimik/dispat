@@ -270,27 +270,64 @@ func TestVersioningCrossSpaceDependencyIntoFixedSpace(t *testing.T) {
 }
 
 // TestVersioningFixedHoldAndResume: Release-As: none on one member keeps
-// that member (and only it) out of the space's release; the resume run
-// aligns it back to the space's published version.
+// that member, and only it, out of the group's release, while the group's
+// alignment still runs for the rest. The two decisions are independent, which
+// is what makes the combination worth stating, whether the group is a fixed
+// space or a declared version group a space joins.
 func TestVersioningFixedHoldAndResume(t *testing.T) {
-	r := harness.New(t)
-	r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
-		"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
-	}))
-	r.SeedPackage("packages", "a")
-	r.SeedPackage("packages", "b")
-	r.Commit("feat(a): work\n---\nrelease(b): keep b back\n\nRelease-As: none\n")
+	t.Run("a fixed space keeps a held member off the ride and aligns it on resume", func(t *testing.T) {
+		r := harness.New(t)
+		r.WriteConfigModel(spacesConfig(echoBuild, map[string]models.SpaceConfig{
+			"libs": {Path: models.PathList{"packages"}, Versioning: models.VersioningFixed, Flow: buildPublish()},
+		}))
+		r.SeedPackage("packages", "a")
+		r.SeedPackage("packages", "b")
+		r.Commit("feat(a): work\n---\nrelease(b): keep b back\n\nRelease-As: none\n")
 
-	r.ReleaseOK()
-	assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
-	assert.Zero(t, r.TagCount("b@"), "the held member must not release, fixed space or not")
+		r.ReleaseOK()
+		assert.True(t, r.IsTagged("a@0.1.0"), "tags: %v", r.TagList())
+		assert.Zero(t, r.TagCount("b@"), "the held member must not release, fixed space or not")
 
-	r.CommitEmpty("release(b): resume\n\nRelease-As: auto\n")
-	res := r.ReleaseOK()
-	assert.True(t, r.IsTagged("b@0.1.0"),
-		"the resumed member aligns to the space's published version; tags: %v", r.TagList())
-	assert.Equal(t, 1, r.TagCount("a@"), "a must not move for b's resume")
-	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"))
+		r.CommitEmpty("release(b): resume\n\nRelease-As: auto\n")
+		res := r.ReleaseOK()
+		assert.True(t, r.IsTagged("b@0.1.0"),
+			"the resumed member aligns to the space's published version; tags: %v", r.TagList())
+		assert.Equal(t, 1, r.TagCount("a@"), "a must not move for b's resume")
+		assert.True(t, harness.IsCodePresentForPackage(res.Events, "W234", "b"))
+	})
+
+	t.Run("a declared fixed group moves while a member holds work of its own", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.VersionGroups = map[string]models.VersionGroupConfig{
+			"platform": {Versioning: models.VersioningFixed},
+		}
+		cfg.Spaces = map[string]models.SpaceConfig{
+			"libs": {Path: models.PathList{"packages"}, Flow: buildPublish(), VersionGroup: "platform"},
+		}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "alpha")
+		r.SeedPackage("packages", "beta")
+		r.Commit("feat(alpha,beta): bootstrap the group")
+		r.ReleaseOK()
+		r.Commit("chore(release): record the changelog")
+
+		r.WriteFile("packages/alpha/work.txt", "work\n")
+		r.Commit("feat(alpha): work that moves the group")
+		r.WriteFile("packages/beta/work.txt", "work\n")
+		r.Commit("feat(beta): work of its own, held back\n\nRelease-As: none")
+
+		traced := r.StatusOK("--log-level", "trace")
+		assert.Contains(t, traced.Stdout, "plan: fixed group unified",
+			"the group alignment still runs, and is traceable: %s", traced.Stdout)
+		plain := r.StatusOK()
+		assert.Equal(t, "0.1.0 -> 0.2.0", harness.GraphLine(plain.Events, "alpha").Str("version"),
+			"the group still moves: %s", plain.Stdout)
+		assert.Contains(t, harness.GraphLine(plain.Events, "beta").Str("message"), "held",
+			"while the held member stays where it is: %s", plain.Stdout)
+		assert.True(t, harness.IsCodePresentForPackage(plain.Events, "W154", "beta"),
+			"and the version it withholds is reported: %s", plain.Stdout)
+	})
 }
 
 // TestVersioningFixedExactPinMovesTheSpace: an exact Release-As naming one
