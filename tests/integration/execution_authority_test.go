@@ -320,6 +320,30 @@ func TestExecutionRefusesUnsafeLockBypass(t *testing.T) {
 	})
 }
 
+// TestExecutionRefusesAReleaseThatCannotReadItsLockBack: a release that
+// delegates work reads its release lock back before every assignment and
+// publication, so `commit.verify: false`, which switches that read off, is
+// refused beside worker links with E225 naming the setting, before any lock
+// is pushed and before anything is dispatched.
+func TestExecutionRefusesAReleaseThatCannotReadItsLockBack(t *testing.T) {
+	mailbox := executionMailbox(t)
+	r, bare := executionReleasableRepo(t, func(cfg *models.File) {
+		cfg.Execution = executionDistributedConfig(mailbox)
+		cfg.Commit = &models.CommitConfig{Verify: models.Bool(false)}
+	})
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: lockPushPattern})
+
+	res := r.CommandEnv(append(append(fault.Env(), harness.LockEnabled...), executionSecretEnv+"=hunter2"))
+
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
+	assert.Contains(t, diagnosticText(res), "commit.verify is off")
+	assert.Zero(t, fault.Matches(), "the refusal comes before any lock push")
+	assert.False(t, remoteHoldsLock(t, bare))
+	assert.Empty(t, r.TagList(), "a refused release tags nothing")
+	assert.Empty(t, executionMailboxBranches(t, mailbox), "and dispatches nothing")
+}
+
 // TestExecutionMissingSecretRefusesDistributedRelease: the configuration
 // requires the variable to be named, and the run requires it to hold
 // something. The refusal names the variable, never what it holds, which is
