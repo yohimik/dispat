@@ -37,6 +37,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
@@ -103,7 +104,8 @@ type Worker struct {
 	// TransferTimeout bounds the one push that carries a task's build outputs
 	// to the mailbox, the configured `transfer.timeout`. A result that carries
 	// nothing is bounded by taskReportTimeout instead, because writing one
-	// small document should never take that long.
+	// small document should never take that long. It also bounds each poll,
+	// which fetches a task's inputs (see observeMailbox).
 	TransferTimeout time.Duration
 	// Mailbox is the endpoint this node serves.
 	Mailbox mailboxx
@@ -396,6 +398,12 @@ func (w *Worker) tick(ctx context.Context) bool {
 		// reaching git, not a fault of the node.
 		return isProgress
 	}
+	if errors.Is(err, errPollExpired) {
+		// Nothing is wrong with the store: the memo still says what was last
+		// read, so the next poll asks for the same branches again.
+		w.Log.Warn().Err(err).Msg("the poll of the mailbox ran out of time; the next poll tries again")
+		return isProgress
+	}
 	w.isStorePrepared = false
 	w.Log.Error().Err(err).Msg("the mailbox could not be served")
 	return isProgress
@@ -417,7 +425,7 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 			w.clearLeftoverRefs(ctx)
 		}
 	}
-	heads, err := w.Mailbox.Observe(ctx, FormatBranchPattern(w.Node), nil)
+	heads, err := w.observeMailbox(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -435,6 +443,51 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 		}
 	}
 	return isProgress, nil
+}
+
+// errPollExpired is a poll that reached its own deadline before the mailbox
+// answered.
+var errPollExpired = errors.New("execution: the poll of the mailbox ran out of time")
+
+// observeMailbox is one poll of this node's branches under a deadline of its
+// own.
+//
+// The poll runs on the goroutine that claims work, so a listing or a fetch
+// that hangs on a dead connection would otherwise stop the node for as long as
+// the process lives. The bound is the configured transfer window rather than
+// something tied to the poll interval, because a poll fetches whatever moved
+// on this node's branches, and that includes a task's inputs: an input state
+// that carries a repository's whole source, and the output sets a build
+// consumes. The transfer window is what the operator allowed for moving
+// exactly those, and a shorter bound would cut a large first fetch at the same
+// point on every poll, since git keeps nothing of a fetch it did not finish.
+// No byte budget is applied here: git's fetch has no ceiling on what it
+// receives, and the ceilings on what a task consumes are enforced when its
+// inputs are read.
+func (w *Worker) observeMailbox(ctx context.Context) ([]gitx.RemoteHead, error) {
+	bound := w.resolvePollTimeout()
+	bounded, done := context.WithTimeout(ctx, bound)
+	defer done()
+	heads, err := w.Mailbox.Observe(bounded, FormatBranchPattern(w.Node), nil)
+	if err == nil || ctx.Err() != nil || bounded.Err() == nil {
+		return heads, err
+	}
+	// A poll cut off between two fetches has already remembered the branches
+	// it fetched as seen. They are handed to the next poll rather than
+	// dropped, since nothing is going to move them again for this node.
+	for _, head := range heads {
+		w.Mailbox.Reconsider(head.Name)
+	}
+	return nil, fmt.Errorf("%w after %s: %w", errPollExpired, bound, err)
+}
+
+// resolvePollTimeout is the bound on one poll: the configured transfer window,
+// and its default for a node assembled without one.
+func (w *Worker) resolvePollTimeout() time.Duration {
+	if w.TransferTimeout > 0 {
+		return w.TransferTimeout
+	}
+	return time.Duration(public.DefaultExecutionTransferTimeout) * time.Second
 }
 
 // clearLeftoverRefs drops every coordination ref the cache holds, once, the

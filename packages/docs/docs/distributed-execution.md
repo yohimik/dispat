@@ -656,7 +656,9 @@ The bounds come from `execution.transfer`: `maxFiles` (default 20000), `maxBytes
 `maxManifestBytes` (default 8 MiB) and `timeout` (default 1800 seconds). `maxManifestBytes` bounds every document of
 the protocol and not only an output manifest, so a value below the size of an ordinary assignment makes a profile
 unusable. `transfer.timeout` bounds the fetch and install of a task's inputs and the push of a result that carries
-outputs; a result that carries no outputs reports under a fixed 30 second bound.
+outputs; a result that carries no outputs reports under a fixed 30 second bound. It also bounds each poll of a
+worker's mailbox, because a poll fetches the input states and output sets addressed to the node: a poll that runs out
+of time is reported as a warning, and the next poll asks again.
 
 ## Diagnostics
 

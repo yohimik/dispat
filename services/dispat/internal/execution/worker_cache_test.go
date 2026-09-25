@@ -13,7 +13,10 @@ package execution
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -247,4 +250,62 @@ func TestAWorkerCompactsItsCacheOnlyWhenIdle(t *testing.T) {
 	fixture.worker.endTask()
 	compactIdle(t, fixture.worker)
 	require.Zero(t, measureCache(t, fixture.node.store).objects, "the idle node collects what the task left")
+}
+
+// sleepingMailbox is a mailbox whose first poll hangs until it is cut off, the
+// way a fetch over a dead connection does, and which answers as usual after.
+type sleepingMailbox struct {
+	*fakeMailbox
+	deadlines []time.Duration
+	// fetched are the branches the cut-off poll had already fetched, which
+	// a mailbox answers beside the error.
+	fetched []gitx.RemoteHead
+}
+
+func (m *sleepingMailbox) Observe(ctx context.Context, pattern string, isWanted func(string) bool) ([]gitx.RemoteHead, error) {
+	deadline, isBounded := ctx.Deadline()
+	if !isBounded {
+		return nil, errors.New("the poll has no deadline")
+	}
+	m.deadlines = append(m.deadlines, time.Until(deadline))
+	if len(m.deadlines) == 1 {
+		<-ctx.Done()
+		return m.fetched, fmt.Errorf("execution: fetching the mailbox: git fetch: signal: killed")
+	}
+	return m.fakeMailbox.Observe(ctx, pattern, isWanted)
+}
+
+// TestAWorkerPollEndsAtItsOwnDeadline: a poll that hangs is cut off at the
+// transfer window, reported, and retried by the next poll, which serves the
+// work as usual. The branches it fetched before it was cut off are offered to
+// the next poll again, and the store is not reopened, because nothing about
+// the store failed.
+func TestAWorkerPollEndsAtItsOwnDeadline(t *testing.T) {
+	branch := "dispat-worker-build-a-20260925-probe-abc"
+	tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
+	worker, fake := newWorkerFixture(t, branch, tip, validProbe(branch))
+	fetched := gitx.RemoteHead{Name: "dispat-worker-build-a-20260925-snapshot-def", OID: "snapshot-oid"}
+	mailbox := &sleepingMailbox{fakeMailbox: fake, fetched: []gitx.RemoteHead{fetched}}
+	worker.Mailbox = mailbox
+	worker.TransferTimeout = 200 * time.Millisecond
+	var logs bytes.Buffer
+	worker.Log = zerolog.New(&logs)
+
+	started := time.Now()
+	require.False(t, worker.tick(t.Context()), "the hanging poll answers nothing")
+	require.Less(t, time.Since(started), 10*time.Second, "and ends at its deadline")
+	require.Contains(t, logs.String(), "the poll of the mailbox ran out of time")
+	require.Contains(t, logs.String(), `"level":"warn"`)
+	require.NotContains(t, logs.String(), "could not be served")
+	require.Equal(t, []string{fetched.Name}, fake.reconsidered,
+		"what the cut-off poll had already fetched is offered to the next one")
+
+	require.True(t, worker.tick(t.Context()), "the next poll serves the work")
+	require.Equal(t, []MessageKind{MessageClaim, MessageResult}, fake.written)
+	require.Equal(t, 1, fake.forgotten, "the store was opened once and never reopened")
+	require.Len(t, mailbox.deadlines, 2)
+	for _, remaining := range mailbox.deadlines {
+		require.LessOrEqual(t, remaining, worker.TransferTimeout, "every poll carries the transfer window")
+		require.Greater(t, remaining, time.Duration(0))
+	}
 }
