@@ -130,6 +130,19 @@ func formatGroupLabel(identity string) string {
 	return fmt.Sprintf("%q of repository %q", group, repository)
 }
 
+// formatGroupPackage is the package a diagnostic raised against a whole
+// versioning group names: the group as its author wrote it, after a "group:"
+// prefix no member's name can collide with, and for a group local to one
+// repository of a composed workspace also that repository, never the
+// planner's NUL-joined identity.
+func formatGroupPackage(identity string) string {
+	repository, group, isRepositoryLocal := strings.Cut(identity, "\x00")
+	if !isRepositoryLocal {
+		return "group:" + identity
+	}
+	return "group:" + group + " of repository " + repository
+}
+
 // groupDepth is the shared depth the whole group versions at: the deepest any
 // of its members declares. A mode is each member's own — a group joined from
 // two spaces may mix them — and the deepest declaration satisfies all of them
@@ -528,7 +541,7 @@ func (cp *computation) reportMajorSpread(g *Release, groupName string, members [
 // caller knows.
 func (cp *computation) fixedGroupAggregate(groupName string, members []string) (*Release, []string) {
 	first := cp.rel[members[0]]
-	g := &Release{Pkg: &model.Package{Name: "group:" + groupName, Space: first.Pkg.Space}}
+	g := &Release{Pkg: &model.Package{Name: formatGroupPackage(groupName), Space: first.Pkg.Space}}
 	for _, name := range members {
 		rel := cp.rel[name]
 		if rel.HasBaseline && (!g.HasBaseline || versionLess(g.Baseline, rel.Baseline)) {

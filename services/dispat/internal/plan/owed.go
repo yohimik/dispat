@@ -108,9 +108,6 @@ func (cp *computation) resolveOwedKinds() map[model.DepKind]bool {
 			union[kind] = union[kind] || isTraversed
 		}
 	}
-	if len(parsers) == 0 {
-		return kindSet(ccme.DefaultPropagateKinds())
-	}
 	return union
 }
 

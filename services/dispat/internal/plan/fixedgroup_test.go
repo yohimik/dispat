@@ -855,3 +855,27 @@ func TestFormatGroupLabelNamesTheRepositoryOfALocalGroup(t *testing.T) {
 	assert.Equal(t, `"platform" of repository "web"`, formatGroupLabel("web\x00platform"))
 	assert.NotContains(t, formatGroupLabel("web\x00platform"), `\x00`)
 }
+
+// TestGroupDiagnosticsNameARepositoryLocalGroupAsWritten: a diagnostic raised
+// against a whole group carries the group as its package, and for a group local
+// to one repository of a composed workspace that is the authored name and the
+// repository, never the planner's NUL-joined identity.
+func TestGroupDiagnosticsNameARepositoryLocalGroupAsWritten(t *testing.T) {
+	assert.Equal(t, "group:libs", formatGroupPackage("libs"))
+	assert.Equal(t, "group:platform of repository web", formatGroupPackage("web\x00platform"))
+
+	shared := &model.Space{Name: "shared", Versioning: model.VersioningFixed, GroupIdentity: "web\x00platform"}
+	pkgs := []*model.Package{
+		{Name: "a", Dir: "/r/pkgs/a", Space: shared},
+		{Name: "b", Dir: "/r/pkgs/b", Space: shared},
+	}
+	git := newFakeGit(
+		commit{sha: "c1", message: "release(a): pin low\n\nRelease-As: 1.5.0\n"},
+		commit{sha: "c2", message: "release(b): pin high\n\nRelease-As: 2.0.0\n"},
+	).tag("a", "1.0.0", "").tag("b", "1.0.0", "")
+	p, err := Compute(context.Background(), git, Options{Packages: pkgs, Root: "/r"})
+	require.NoError(t, err)
+	d, found := findDiagnostic(p, CodeFixedPinConflict, "group:platform of repository web")
+	require.True(t, found, "W235 names the group as written: %v", p.Diagnostics)
+	assert.NotContains(t, d.Pkg, "\x00")
+}

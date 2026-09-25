@@ -356,7 +356,8 @@ The joining rules:
   resolution as `W237`.
 
 Group diagnostics name the group. These include `W234` rides, `W235` competing pins, `W236` channel conflicts, and
-`W237` mixed depths. The synthetic package they are raised against is `group:<name>`.
+`W237` mixed depths. The synthetic package they are raised against is `group:<name>`, and for a group local to one
+repository of a polyrepository workspace `group:<name> of repository <repository>`.
 
 ## `scripts` and `dispat run`
 
