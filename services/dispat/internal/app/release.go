@@ -65,17 +65,7 @@ type ReleaseOptions struct {
 // hook).
 func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*release.Result, error) {
 	a.logReleaseStarted(opts)
-	// checkGit runs first so a repository without git still fails in its own
-	// words rather than on a raw `git tag`.
-	if err := a.checkGit(); err != nil {
-		a.log.Error().Err(err).Msg("cannot start release")
-		return nil, err
-	}
-	// Who may start this release, and whether a run that delegates work could
-	// be coordinated at all. Both are refused before the first lock is pushed
-	// and report themselves; with no execution settings this returns nil
-	// without writing a line.
-	if err := a.checkExecutionEntry(ctx, runRelease); err != nil {
+	if err := a.checkReleaseEntry(ctx); err != nil {
 		return nil, err
 	}
 	// A distributed run is named here, before the plan is fixed, so that the
@@ -90,37 +80,19 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// and closing webhook while this defer still protects every earlier return.
 	// Cleanup detaches from cancellation inside: an interrupted run has more
 	// reason to give the lock back than a finished one.
-	unlocked := false
-	unlockOnce := func() error {
-		if unlocked {
-			return nil
-		}
-		unlocked = true
-		return unlock()
-	}
-	cleanupPins := func() {}
-	finishCleanup := func() error {
-		cleanupPins()
-		return unlockOnce()
-	}
-	defer func() { _ = finishCleanup() }()
+	cleanup := &releaseCleanup{unlock: unlock}
+	defer func() { _ = cleanup.finish() }()
 
 	pl, err := a.planUnderLock(ctx, opts, fleet)
 	if err != nil {
 		return nil, err
 	}
 	if fleet != nil {
-		cleanup, err := a.prepareFleetRelease(ctx, pl, fleet)
+		cleanupPins, err := a.prepareFleetRelease(ctx, pl, fleet)
 		if err != nil {
 			return nil, err
 		}
-		cleaned := false
-		cleanupPins = func() {
-			if !cleaned {
-				cleaned = true
-				cleanup()
-			}
-		}
+		cleanup.cleanPins = cleanupPins
 	}
 	if err := a.refuseDirtyReleasePaths(ctx, pl, fleet != nil); err != nil {
 		return nil, err
@@ -146,10 +118,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	}
 	// The runner every script of this run goes through, assembled before the
 	// dispatch because a prepared provider's build is one of them.
-	runner := a.packageRunner()
-	if fleet != nil {
-		runner = fleet.pins.runner(runner)
-	}
+	runner := a.releaseRunner(fleet)
 	if coordinator != nil {
 		// The pool passed: from here the run owns one poller per endpoint, and
 		// the deferred close above stops them before it deletes the refs.
@@ -200,7 +169,55 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if coordinator != nil {
 		a.reportPreparedProviders(coordinator)
 	}
-	return a.completeRelease(ctx, pl, results, hooks, gh, fleet, finishCleanup, wh, start)
+	return a.completeRelease(ctx, pl, results, hooks, gh, fleet, cleanup.finish, wh, start)
+}
+
+// checkReleaseEntry refuses a release that may not start here. checkGit runs
+// first so a repository without git still fails in its own words rather than
+// on a raw `git tag`.
+func (a *App) checkReleaseEntry(ctx context.Context) error {
+	if err := a.checkGit(); err != nil {
+		a.log.Error().Err(err).Msg("cannot start release")
+		return err
+	}
+	// Who may start this release, and whether a run that delegates work could
+	// be coordinated at all. Both are refused before the first lock is pushed
+	// and report themselves; with no execution settings this returns nil
+	// without writing a line.
+	return a.checkExecutionEntry(ctx, runRelease)
+}
+
+// releaseCleanup gives back what a release holds, each part exactly once: the
+// fleet's prepared pins, then the release locks.
+type releaseCleanup struct {
+	unlock     func() error
+	isUnlocked bool
+	// cleanPins is the fleet's pin cleanup, nil until the fleet prepared.
+	cleanPins    func()
+	arePinsClean bool
+}
+
+// finish runs the cleanup; a second call does nothing and returns nil.
+func (c *releaseCleanup) finish() error {
+	if c.cleanPins != nil && !c.arePinsClean {
+		c.arePinsClean = true
+		c.cleanPins()
+	}
+	if c.isUnlocked {
+		return nil
+	}
+	c.isUnlocked = true
+	return c.unlock()
+}
+
+// releaseRunner is the runner every script of a release goes through: the
+// package runner, behind the fleet's pins when a fleet is released.
+func (a *App) releaseRunner(fleet *workspaceRecorder) script.Runnerx {
+	runner := a.packageRunner()
+	if fleet != nil {
+		runner = fleet.pins.runner(runner)
+	}
+	return runner
 }
 
 // logReleaseStarted names the invocation before any work happens: an incident
