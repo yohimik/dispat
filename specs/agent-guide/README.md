@@ -1,6 +1,6 @@
 # Using dispat as a coding agent
 
-**Version:** 1.11.0-rc.5
+**Version:** 1.11.0-rc.6
 
 **License:** MIT. See [LICENSE](./LICENSE).
 
