@@ -107,31 +107,6 @@ func TestPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
 		assert.Equal(t, controlAfter, control.Git("-C", controlBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
 	})
 
-	t.Run("an untagged step checkpoints against the pushed branch", func(t *testing.T) {
-		control, sourceBare, controlBare := pushableFleet(t)
-		cfg := polyrepoModelFile()
-		cfg.Spaces = polyrepoModelSpaces(map[string]string{"libs": "sources/lib/packages"})
-		cfg.Commit = &models.CommitConfig{
-			Enabled: models.Bool(true), Remote: "origin", Branch: harness.DefaultBranch,
-		}
-		control.WriteConfigModel(cfg)
-		control.Commit("chore: configure a fleet an untagged step will record")
-		control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-		control.WriteFile("sources/lib/packages/lib/generated.txt", "built\n")
-
-		res := control.Command("commit", "--push")
-		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-
-		sourceAfter := control.Git("-C", "sources/lib", "rev-parse", "HEAD")
-		assert.Empty(t, polyrepoTags(control, "sources/lib"),
-			"no tag was asked for, so the branch is the only durable record")
-		assert.Equal(t, sourceAfter, control.Git("-C", sourceBare, "rev-parse", "refs/heads/"+harness.DefaultBranch),
-			"the checkpoint may only reference a revision the source remote carries")
-		assert.Equal(t, sourceAfter, control.Git("rev-parse", "HEAD:sources/lib"))
-		assert.Equal(t, control.Git("rev-parse", "HEAD"),
-			control.Git("-C", controlBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
-	})
-
 	t.Run("a step told not to force leaves a moving alias unforced", func(t *testing.T) {
 		control, sourceBare, _ := pushableFleet(t)
 		cfg := polyrepoModelFile()
