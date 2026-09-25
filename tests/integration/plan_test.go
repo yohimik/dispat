@@ -19,6 +19,7 @@ package integration
 // script is markerBuild and buildRuns() counts its executions.
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -929,6 +930,38 @@ func TestPlanScopeTermsReachTheirPackages(t *testing.T) {
 		assert.Equal(t, "0.1.0 -> 0.1.1", line.Str("version"),
 			"%s was reached by the terms above: %s", pkg, line.Str("message"))
 	}
+}
+
+// TestPlanDerivedScopeReadsEveryPathTheCommitChanged: a unit with no
+// scope-set is the packages owning the paths its commit changed (CCME §6.2),
+// read exactly as the repository records them. A file moved from one package
+// to another changed both, however similar git finds the two versions (vector
+// 29), so the package it left releases beside the package it reached; a file
+// whose name git would quote, with a letter outside ASCII, still belongs to
+// the package whose folder holds it.
+func TestPlanDerivedScopeReadsEveryPathTheCommitChanged(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(echoBuild, 1))
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "util")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/helper.txt", strings.Repeat("a helper worth moving\n", 40))
+	r.Commit("feat(core,util,web): bootstrap every package")
+	r.ReleaseOK()
+	r.Commit("chore(release): record the changelog")
+
+	r.Git("mv", "packages/core/helper.txt", "packages/util/helper.txt")
+	r.Commit("fix: move the helper where it is used")
+	r.WriteFile("packages/web/café.txt", "a page\n")
+	r.Commit("fix: add a page whose name git quotes")
+
+	res := r.StatusOK()
+	for _, pkg := range []string{"core", "util", "web"} {
+		line := harness.GraphLine(res.Events, pkg)
+		assert.Equal(t, "0.1.0 -> 0.1.1", line.Str("version"),
+			"%s owns a path its commit changed: %s", pkg, line.Str("message"))
+	}
+	assert.False(t, harness.IsCodePresent(res.Events, "W131"), "no scopeless unit was left inert: %s", res.Stdout)
 }
 
 // TestPlanBaselineIgnoresARefShorterThanTheTagPrefix: the tag listing is

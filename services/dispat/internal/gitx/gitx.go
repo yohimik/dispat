@@ -618,10 +618,10 @@ type UnionHistoryx interface {
 // AreFilesDeferred, and the caller asks ChangedFiles for the commits whose
 // scope derives from their files.
 //
-// The answer for a commit is exactly the Files the commit would have carried
-// had it been read with its paths: the changes against the first parent for a
-// merge, every path of a root commit, and a renamed file under its new name
-// alone.
+// The answer for a commit is its changed-file list of §6.2: the changes
+// against the first parent for a merge, every path of a root commit, both
+// paths of a rename, a deleted path and a path whose mode alone changed, each
+// spelled exactly as the repository records it.
 type ChangedFilesx interface {
 	ChangedFiles(ctx context.Context, commits []string) (map[string][]string, error)
 }
@@ -1619,12 +1619,14 @@ func (c *LocalGitx) log(ctx context.Context, revisions ...string) ([]Commit, err
 // number of commits.
 //
 // It is `git log` over exactly the named commits (--no-walk, fed on standard
-// input) rather than `git diff-tree`, because the paths must be the ones a
-// history read with --name-only lists, and the two commands disagree: log
-// detects renames as diff.renames configures it and lists a renamed file under
-// its new name, while diff-tree is plumbing, ignores that setting and lists
-// both names. §6.2 counts a merge commit's changes against its first parent,
-// which --diff-merges=first-parent selects here as it did in the history read.
+// input), with every setting §6.2 depends on stated rather than left to the
+// operator's configuration: --diff-merges=first-parent counts a merge's
+// changes against its first parent, --root lists a root commit's paths,
+// --no-renames lists both paths of a rename where rename detection would keep
+// the new one alone (vector 29: a file moved across packages derives both),
+// and -z hands every path over unquoted, so a name with a letter outside ASCII
+// or a tab in it reaches the package that owns it rather than a quoted string
+// no package folder is a prefix of.
 func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[string][]string, error) {
 	var stdin strings.Builder
 	seen := make(map[string]bool, len(commits))
@@ -1643,7 +1645,7 @@ func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[str
 	out, err := c.runStream(ctx, gitStream{stdin: strings.NewReader(stdin.String())},
 		"log", "--no-walk=unsorted", "--stdin",
 		"--format="+logRecordSep+"%H"+logFieldSep,
-		"--name-only", "--diff-merges=first-parent")
+		"--name-only", "--diff-merges=first-parent", "--root", "--no-renames", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -1658,25 +1660,36 @@ func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[str
 	return files, nil
 }
 
-// parseChangedFiles reads the ChangedFiles listing: per commit a record of its
-// id and the paths it changed, one per line.
+// parseChangedFiles reads the ChangedFiles listing, which -z frames: per
+// commit, a record separator, its id, a field separator and the format's NUL
+// terminator, then, when the commit changed anything, a newline and every path
+// NUL-terminated and raw. A path cannot hold a NUL, so the list ends where the
+// next record's separator follows a terminator; a listing that breaks this
+// framing is refused rather than read as fewer paths.
 func parseChangedFiles(out string) (map[string][]string, error) {
 	files := make(map[string][]string)
-	for _, record := range strings.Split(out, logRecordSep) {
-		if strings.TrimSpace(record) == "" {
-			continue
-		}
-		sha, list, ok := strings.Cut(record, logFieldSep)
-		if !ok || !fullObjectID(sha) {
+	for out != "" {
+		record, isRecord := strings.CutPrefix(out, logRecordSep)
+		sha, rest, isFramed := strings.Cut(record, logFieldSep+"\x00")
+		if !isRecord || !isFramed || !fullObjectID(sha) {
 			return nil, fmt.Errorf("gitx: malformed changed files record")
 		}
 		var paths []string
-		for line := range strings.Lines(list) {
-			if line = strings.TrimRight(line, "\r\n"); line != "" {
-				paths = append(paths, strings.Clone(line))
+		if list, isListed := strings.CutPrefix(rest, "\n"); isListed {
+			rest = list
+			for rest != "" && !strings.HasPrefix(rest, logRecordSep) {
+				path, after, isTerminated := strings.Cut(rest, "\x00")
+				if !isTerminated {
+					return nil, fmt.Errorf("gitx: malformed changed files record: an unterminated path")
+				}
+				if path != "" {
+					paths = append(paths, strings.Clone(path))
+				}
+				rest = after
 			}
 		}
 		files[strings.Clone(sha)] = paths
+		out = rest
 	}
 	return files, nil
 }

@@ -15,21 +15,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestChangedFilesListWhatTheNameOnlyHistoryListed pins ChangedFiles to the
-// paths a history read with --name-only lists, commit for commit, over the
-// shapes where a path list can differ: a root commit, a rename (log lists the
-// new name alone, where diff-tree would list both), a merge (its changes
-// against the first parent), a commit that changes nothing, and a path with
-// characters git quotes. The expectation is read with the exact command the
-// planner's history read ran before it stopped listing paths.
-func TestChangedFilesListWhatTheNameOnlyHistoryListed(t *testing.T) {
+// TestChangedFilesListTheChangesSection62Counts pins ChangedFiles to the
+// changed-file list of §6.2, one shape per commit: a root commit lists every
+// path, a rename both of its paths (vector 29) however similar git finds the
+// two versions, a deletion the deleted path, a mode-only change the path, a
+// merge its changes against the first parent, and a commit that changes
+// nothing no path at all. Names git would quote, a letter outside ASCII, a tab
+// or a space, come back exactly as the repository records them.
+func TestChangedFilesListTheChangesSection62Counts(t *testing.T) {
 	root, cli := initRepo(t)
 	ctx := context.Background()
 	git := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput()
 		require.NoError(t, err, "git %v: %s", args, out)
-		return string(out)
+		return strings.TrimSpace(string(out))
 	}
 	write := func(rel, content string) {
 		t.Helper()
@@ -37,36 +37,38 @@ func TestChangedFilesListWhatTheNameOnlyHistoryListed(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
 		require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
 	}
+	commit := func(msg string) string {
+		t.Helper()
+		git("add", "-A")
+		git("commit", "-q", "--allow-empty", "-m", msg)
+		return git("rev-parse", "HEAD")
+	}
 
+	rootCommit := git("rev-list", "--max-parents=0", "HEAD")
 	write("packages/core/big.txt", strings.Repeat("a line that survives the move\n", 40))
-	git("add", ".")
-	git("commit", "-qm", "feat(core): a file worth renaming")
+	write("packages/core/tool.sh", "#!/bin/sh\n")
+	commit("feat(core): a file worth moving")
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "util"), 0o755))
 	git("mv", "packages/core/big.txt", "packages/util/big.txt")
-	git("commit", "-qm", "refactor: move it to util")
+	moved := commit("refactor: move it to util")
+	require.NoError(t, os.Remove(filepath.Join(root, "packages", "core", "main.txt")))
+	deleted := commit("fix(core): drop the main file")
+	require.NoError(t, os.Chmod(filepath.Join(root, "packages", "core", "tool.sh"), 0o755))
+	modeOnly := commit("fix(core): make the tool executable")
 	git("checkout", "-q", "-b", "side")
 	write("packages/util/side.txt", "s")
-	git("add", ".")
-	git("commit", "-qm", "fix(util): side work")
+	commit("fix(util): side work")
 	git("checkout", "-q", "-")
 	write("packages/core/main two.txt", "m")
 	write("packages/core/naïve.txt", "n")
-	git("add", ".")
-	git("commit", "-qm", "fix: main work")
+	write("packages/core/tab\tname.txt", "t")
+	quoted := commit("fix: names git quotes")
 	git("merge", "-q", "--no-ff", "-m", "chore: merge side", "side")
-	git("commit", "-q", "--allow-empty", "-m", "chore: nothing changed")
-
-	// The history read as it was: one walk with the paths of every commit.
-	out := git("log", "--format="+logRecordSep+"%H"+logFieldSep+"%P"+logFieldSep+
-		"%an"+logFieldSep+"%ae"+logFieldSep+"%B"+logFieldSep,
-		"--name-only", "--diff-merges=first-parent", "HEAD")
-	want, err := parseCommits(out)
-	require.NoError(t, err)
-	require.Len(t, want, 7)
+	merge := git("rev-parse", "HEAD")
+	empty := commit("chore: nothing changed")
 
 	commits, err := cli.Commits(ctx, "")
 	require.NoError(t, err)
-	require.Len(t, commits, len(want))
 	shas := make([]string, len(commits))
 	for i, c := range commits {
 		assert.True(t, c.AreFilesDeferred)
@@ -75,14 +77,36 @@ func TestChangedFilesListWhatTheNameOnlyHistoryListed(t *testing.T) {
 	}
 	got, err := cli.ChangedFiles(ctx, shas)
 	require.NoError(t, err)
-	require.Len(t, got, len(want))
-	for _, c := range want {
-		assert.Equal(t, c.Files, got[c.SHA], "the paths of %q", strings.SplitN(c.Message, "\n", 2)[0])
+	require.Len(t, got, len(commits))
+
+	assert.Equal(t, []string{"packages/core/main.txt"}, got[rootCommit], "a root commit lists every path it adds")
+	assert.Equal(t, []string{"packages/core/big.txt", "packages/util/big.txt"}, got[moved],
+		"a rename lists the path it left and the path it made")
+	assert.Equal(t, []string{"packages/core/main.txt"}, got[deleted], "a deletion lists the deleted path")
+	assert.Equal(t, []string{"packages/core/tool.sh"}, got[modeOnly], "a mode-only change lists the path")
+	assert.Equal(t, []string{"packages/core/main two.txt", "packages/core/naïve.txt", "packages/core/tab\tname.txt"},
+		got[quoted], "every name as the repository records it, never quoted")
+	assert.Equal(t, []string{"packages/util/side.txt"}, got[merge], "a merge lists its first-parent diff")
+	assert.Nil(t, got[empty], "an empty commit lists nothing")
+}
+
+// TestChangedFilesRefusesABrokenListing: the listing's framing is what
+// separates one commit's paths from the next, so a record that breaks it is
+// an error rather than a shorter list of paths.
+func TestChangedFilesRefusesABrokenListing(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	for name, out := range map[string]string{
+		"no record separator":  sha + logFieldSep + "\x00",
+		"no field separator":   logRecordSep + sha + "\x00\npath\x00",
+		"a short id":           logRecordSep + "abc" + logFieldSep + "\x00",
+		"an unterminated path": logRecordSep + sha + logFieldSep + "\x00\npath",
+		// Read as the next record, which it cannot be: refused, never
+		// taken for another commit or dropped from this one.
+		"a path opening with the separator byte": logRecordSep + sha + logFieldSep + "\x00\n" + logRecordSep + "x\x00",
+	} {
+		_, err := parseChangedFiles(out)
+		assert.ErrorContains(t, err, "malformed changed files record", name)
 	}
-	// The shapes the comparison is about are really there.
-	assert.Equal(t, []string{"packages/util/big.txt"}, got[want[4].SHA], "a rename lists its new name")
-	assert.Equal(t, []string{"packages/util/side.txt"}, got[want[1].SHA], "a merge lists its first-parent diff")
-	assert.Nil(t, got[want[0].SHA], "an empty commit lists nothing")
 }
 
 // TestChangedFilesAnswersEachCommitOnceInOneProcess: a list naming a commit
