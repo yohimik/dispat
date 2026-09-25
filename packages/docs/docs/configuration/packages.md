@@ -102,7 +102,11 @@ The per-field rules follow from what each object means:
   [joining with a versioning of its own](../reference/releasing/versioning.md#joining-with-a-versioning-of-its-own).
 - `autoVersion` replaces **wholesale**. Its empty fields already carry meaning relative to their siblings (no `kinds`
   means all four), so a field-level overlay could never express them against a non-empty base. Write an override of
-  `{"enabled": false}` to switch the space's block off for the package.
+  `{"enabled": false}` to switch the space's block off for the package. `autoPropagate` is the same block under the
+  propagate stage's name, so a layer stating either replaces both inherited values, and the same holds for
+  `flow.propagate`, `flow.beforePropagate` and `flow.postPropagate` against their `version` twins. dispat rejects
+  both spellings of one pair in one layer as a contradiction, like `versioning` and `versionGroup`; see
+  [Two names for one block](./autoversion.md#two-names-for-one-block).
 - `manifestNames` replaces **wholesale**, like every other list. The layer nearest the package states what the package
   is called. Adding to an inherited list could never take a name away again.
 - `buildOutputs`, `buildPlatforms` and `runOnly` replace **wholesale** for the same reason. The nearest level that

@@ -55,7 +55,9 @@ that page, because they exist only inside that one command.
 `DISPAT_STAGE` carries `version`, `build`, `publish`, or `announce` for a stage script. It holds the hook's name
 (`beforeBuild`, `postPublish`, `postAll`, ...) for a hook. It holds `login` for the login, `syncLock` for an
 [`autoVersion.syncLock`](../configuration/autoversion.md) script, and `run:<name>` for
-[`dispat run <name>`](../configuration/spaces.md#scripts-and-dispat-run).
+[`dispat run <name>`](../configuration/spaces.md#scripts-and-dispat-run). The version stage keeps these runtime names
+when the configuration spells it `propagate`: a `flow.propagate` script sees `version`, and its hooks see
+`beforeVersion` and `postVersion`.
 
 `DISPAT_TAG_VERSION` is the version section of `DISPAT_TAG` without the name and its decoration. It has no `v` prefix
 and no path. It equals `DISPAT_NEW_VERSION` under formats that leave the prerelease inside `{version}`.

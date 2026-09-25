@@ -52,10 +52,19 @@ type discovery struct {
 }
 
 // onlyCheck is one autoVersion block whose `only` list is still to be held
-// against the discovered packages, with the label its error should carry.
+// against the discovered packages, with the label its error should carry and
+// the key the block was written under.
 type onlyCheck struct {
 	label string
+	key   string
 	av    *AutoVersionConfig
+}
+
+// newOnlyCheck is the check for a merged configuration's block, under the key
+// the configuration wrote it with.
+func newOnlyCheck(label string, sc SpaceConfig) onlyCheck {
+	av, key := resolveAutoVersionSetting(sc)
+	return onlyCheck{label: label, key: key, av: av}
 }
 
 // spaceScan is one space's resolved configuration together with what its
@@ -418,7 +427,7 @@ func (d *discovery) spacePackage(s *spaceScan, pi int, name string) (*model.Pack
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	if autoVersioned {
-		d.onlyChecks = append(d.onlyChecks, onlyCheck{label, merged.AutoVersion})
+		d.onlyChecks = append(d.onlyChecks, newOnlyCheck(label, merged))
 	}
 	applyMerged(pkg, merged, ex)
 	allowed := d.folderInputs(pkg.Dir)
@@ -568,7 +577,7 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 	if autoVersioned {
-		d.onlyChecks = append(d.onlyChecks, onlyCheck{label, merged.AutoVersion})
+		d.onlyChecks = append(d.onlyChecks, newOnlyCheck(label, merged))
 	}
 	applyMerged(pkg, merged, ex)
 	if pkg.Ignore, err = packageIgnoreWithFile(d.baseIgnore, pkg.Dir, ex.ignore, allowed); err != nil {
@@ -605,24 +614,17 @@ func (d *discovery) checkAll(spaceNames []string) error {
 // endpoint. Only enabled blocks are held to it, since a disabled block is
 // inert configuration.
 func (d *discovery) checkAutoVersionOnly(spaceNames []string) error {
+	checks := make([]onlyCheck, 0, len(spaceNames)+len(d.onlyChecks))
 	for _, sn := range spaceNames {
-		av := d.spaceConfigs[sn].AutoVersion
-		if av == nil || !av.IsEnabled() {
-			continue
-		}
-		for _, name := range av.Only {
-			if _, ok := d.ownerFold[globx.Fold(name)]; !ok {
-				return fmt.Errorf("config: space %q: autoVersion.only: unknown package %q", sn, name)
-			}
-		}
+		checks = append(checks, newOnlyCheck(fmt.Sprintf("space %q", sn), d.spaceConfigs[sn]))
 	}
-	for _, chk := range d.onlyChecks {
+	for _, chk := range append(checks, d.onlyChecks...) {
 		if !chk.av.IsEnabled() {
 			continue
 		}
 		for _, name := range chk.av.Only {
 			if _, ok := d.ownerFold[globx.Fold(name)]; !ok {
-				return fmt.Errorf("config: %s: autoVersion.only: unknown package %q", chk.label, name)
+				return fmt.Errorf("config: %s: %s.only: unknown package %q", chk.label, chk.key, name)
 			}
 		}
 	}

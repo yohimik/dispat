@@ -173,6 +173,11 @@ type File struct {
 	// autoVersion, a level that states one replaces it wholesale rather than
 	// merging into it: its empty fields carry meaning against their siblings.
 	AutoVersion *AutoVersionConfig `json:"autoVersion,omitempty"`
+	// AutoPropagate is AutoVersion under the propagate stage's name: the same
+	// object with the same meaning. The two keys are one setting, so a level
+	// stating either replaces both inherited values, and one object stating
+	// both is refused.
+	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
 	// IsBuildWaitingPublish is the default provider relation: what the
 	// consumers of a package wait for, written as a boolean or as the object
 	// StageRelation describes.
@@ -962,6 +967,9 @@ type SpaceConfig struct {
 	// before any flow.version script runs. nil means off. See
 	// AutoVersionConfig.
 	AutoVersion *AutoVersionConfig `json:"autoVersion,omitempty"`
+	// AutoPropagate is AutoVersion under the propagate stage's name; see
+	// File.AutoPropagate.
+	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
 	// Env is static environment for every script of the space's packages —
 	// its stages, hooks, run scripts and its login script — merged over the
 	// top-level map key by key; see File.Env.
@@ -1046,8 +1054,11 @@ type SpaceFile struct {
 	VersionGroup   string             `json:"versionGroup,omitempty"`
 	Scripts        map[string]Script  `json:"scripts,omitempty"`
 	AutoVersion    *AutoVersionConfig `json:"autoVersion,omitempty"`
-	Env            map[string]string  `json:"env,omitempty"`
-	Custom         map[string]any     `json:"custom,omitempty"`
+	// AutoPropagate is AutoVersion under the propagate stage's name; see
+	// File.AutoPropagate.
+	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
+	Env           map[string]string  `json:"env,omitempty"`
+	Custom        map[string]any     `json:"custom,omitempty"`
 	// Changelog, GitHub, Src and Concurrency are this space's; see
 	// SpaceConfig.
 	Changelog   *ChangelogConfig `json:"changelog,omitempty"`
@@ -1180,6 +1191,9 @@ type PackageConfig struct {
 	// other package with it.
 	Scripts     map[string]Script  `json:"scripts,omitempty"`
 	AutoVersion *AutoVersionConfig `json:"autoVersion,omitempty"`
+	// AutoPropagate is AutoVersion under the propagate stage's name; see
+	// File.AutoPropagate.
+	AutoPropagate *AutoVersionConfig `json:"autoPropagate,omitempty"`
 	// ManifestNames are the manifest names this package is known by, stated
 	// here rather than read from its files. They exist for the packages whose
 	// manifests declare no name the workspace can learn — a Gradle module, a
@@ -1390,6 +1404,12 @@ type SpaceFlowConfig struct {
 	Build   []string `json:"build,omitempty"`
 	Publish []string `json:"publish,omitempty"`
 	Version []string `json:"version,omitempty"`
+	// Propagate is Version under the stage's other name: the stage that
+	// writes the versions a package takes from its providers. The two keys are
+	// one entry, so a level stating either replaces both inherited values, and
+	// one object stating both is refused. The stage keeps its runtime name,
+	// `version`, whichever key configured it.
+	Propagate []string `json:"propagate,omitempty"`
 	// Login runs once per space before its first publish; every other
 	// publish of the space waits for it, and its failure fails them all.
 	Login []string `json:"login,omitempty"`
@@ -1400,15 +1420,21 @@ type SpaceFlowConfig struct {
 	// Hooks around the package stages. The before*/post* hooks up to
 	// beforePublish fail the package's release when they fail; postPublish and
 	// the announce hooks only warn, because by then the release is out.
-	BeforeAll      []string `json:"beforeAll,omitempty"`
-	BeforeVersion  []string `json:"beforeVersion,omitempty"`
-	PostVersion    []string `json:"postVersion,omitempty"`
-	BeforeBuild    []string `json:"beforeBuild,omitempty"`
-	PostBuild      []string `json:"postBuild,omitempty"`
-	BeforePublish  []string `json:"beforePublish,omitempty"`
-	PostPublish    []string `json:"postPublish,omitempty"`
-	BeforeAnnounce []string `json:"beforeAnnounce,omitempty"`
-	PostAnnounce   []string `json:"postAnnounce,omitempty"`
+	BeforeAll     []string `json:"beforeAll,omitempty"`
+	BeforeVersion []string `json:"beforeVersion,omitempty"`
+	PostVersion   []string `json:"postVersion,omitempty"`
+	// BeforePropagate and PostPropagate are BeforeVersion and PostVersion
+	// under the stage's other name, one entry each with its sibling, like
+	// Propagate. The hooks keep their runtime names, `beforeVersion` and
+	// `postVersion`.
+	BeforePropagate []string `json:"beforePropagate,omitempty"`
+	PostPropagate   []string `json:"postPropagate,omitempty"`
+	BeforeBuild     []string `json:"beforeBuild,omitempty"`
+	PostBuild       []string `json:"postBuild,omitempty"`
+	BeforePublish   []string `json:"beforePublish,omitempty"`
+	PostPublish     []string `json:"postPublish,omitempty"`
+	BeforeAnnounce  []string `json:"beforeAnnounce,omitempty"`
+	PostAnnounce    []string `json:"postAnnounce,omitempty"`
 	// Outcome scripts, both warn-only: onFail runs when a package of the
 	// space fails at any stage, onSkip when it is skipped because a provider
 	// failed.

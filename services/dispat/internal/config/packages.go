@@ -405,9 +405,38 @@ func validatePackageLayer(label string, po PackageConfig) error {
 //
 // Versioning and versionGroup are one axis, and a layer naming a group takes
 // its versioning from that group, so a layer stating both contradicts itself.
+// The synonyms are the other pairs: see refuseSynonymKeys.
 func refuseContradictoryKeys(label string, layer PackageConfig) error {
 	if layer.Versioning != "" && layer.VersionGroup != "" {
 		return fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)
+	}
+	return refuseSynonymKeys(label+": ", layer.AutoVersion, layer.AutoPropagate, layer.Flow)
+}
+
+// refuseSynonymKeys refuses one object stating both names of one setting: the
+// version stage is also called the propagate stage, and each key naming it has
+// a twin. A pair is one value, so an object stating both would ask the merge to
+// keep one of them and drop the other without a word. prefix locates the object
+// in the error ("space \"libs\": "), and is empty for the root file.
+func refuseSynonymKeys(prefix string, autoVersion, autoPropagate *AutoVersionConfig, flow *SpaceFlowConfig) error {
+	if autoVersion != nil && autoPropagate != nil {
+		return fmt.Errorf("%sautoVersion and autoPropagate are mutually exclusive (they are two names for one setting)", prefix)
+	}
+	if flow == nil {
+		return nil
+	}
+	for _, pair := range []struct {
+		canonical, synonym   string
+		isCanonical, isAlias bool
+	}{
+		{"flow.version", "flow.propagate", flow.Version != nil, flow.Propagate != nil},
+		{"flow.beforeVersion", "flow.beforePropagate", flow.BeforeVersion != nil, flow.BeforePropagate != nil},
+		{"flow.postVersion", "flow.postPropagate", flow.PostVersion != nil, flow.PostPropagate != nil},
+	} {
+		if pair.isCanonical && pair.isAlias {
+			return fmt.Errorf("%s%s and %s are mutually exclusive (they are two names for one entry)",
+				prefix, pair.canonical, pair.synonym)
+		}
 	}
 	return nil
 }
@@ -506,8 +535,12 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 		sc.Scripts = overlayScripts(sc.Scripts, po.Scripts)
 	}
 	sc.Env = MergeEnv(sc.Env, po.Env)
-	if po.AutoVersion != nil {
-		sc.AutoVersion = po.AutoVersion
+	// autoVersion and autoPropagate are one setting under two names, so a
+	// layer stating either replaces both, the way versioning and versionGroup
+	// do. Keeping the key the layer wrote is what lets every later message
+	// name it truthfully.
+	if po.AutoVersion != nil || po.AutoPropagate != nil {
+		sc.AutoVersion, sc.AutoPropagate = po.AutoVersion, po.AutoPropagate
 	}
 	// The record policies overlay field by field, so a level can flip enabled
 	// and keep the titles it inherited, or point at another repository and
@@ -564,6 +597,7 @@ func rootDefaults(c *File) SpaceConfig {
 		RunOnly:               c.RunOnly,
 		Versioning:            c.Versioning,
 		AutoVersion:           c.AutoVersion,
+		AutoPropagate:         c.AutoPropagate,
 		Changelog:             c.Changelog,
 		GitHub:                c.GitHub,
 		Src:                   c.Src,
@@ -590,6 +624,7 @@ func spaceAsOverride(sc SpaceConfig) PackageConfig {
 		VersionGroup:          sc.VersionGroup,
 		Scripts:               sc.Scripts,
 		AutoVersion:           sc.AutoVersion,
+		AutoPropagate:         sc.AutoPropagate,
 		Env:                   sc.Env,
 		Custom:                sc.Custom,
 		Changelog:             sc.Changelog,
@@ -636,6 +671,7 @@ func spaceOverride(f SpaceFile) PackageConfig {
 		VersionGroup:          f.VersionGroup,
 		Scripts:               f.Scripts,
 		AutoVersion:           f.AutoVersion,
+		AutoPropagate:         f.AutoPropagate,
 		Env:                   f.Env,
 		Custom:                f.Custom,
 		Changelog:             f.Changelog,
@@ -656,8 +692,8 @@ type overrideLayer struct {
 
 // applyLayers folds every present override layer onto a space-shaped base,
 // in order, and returns the merged configuration together with the
-// package-only knobs, whether any layer set an autoVersion block, and the
-// dependency declarations the layers contribute.
+// package-only knobs, whether any layer set an autoVersion block under either
+// of its names, and the dependency declarations the layers contribute.
 //
 // One loop serves both kinds of package: a space package folds its four
 // layers onto its space, a standalone package folds its two onto a synthetic
@@ -674,7 +710,7 @@ func applyLayers(c *File, base SpaceConfig, pkg string, layers []overrideLayer,
 		}
 		base = mergePackageOverride(base, l.po)
 		ex.apply(l.po)
-		autoVersioned = autoVersioned || l.po.AutoVersion != nil
+		autoVersioned = autoVersioned || l.po.AutoVersion != nil || l.po.AutoPropagate != nil
 		var err error
 		if declared, err = collectPackageDeps(declared, pkg, l.src, l.po.Dependencies); err != nil {
 			return base, ex, autoVersioned, declared, err
@@ -686,6 +722,10 @@ func applyLayers(c *File, base SpaceConfig, pkg string, layers []overrideLayer,
 // mergeFlow overlays flow entries one by one: a nil entry inherits, a
 // non-nil one — the explicit empty array included — replaces, which is how
 // an override clears an inherited stage.
+//
+// The version stage's entries have a second name each (propagate), and a pair
+// is one entry: a layer stating either spelling replaces both inherited values,
+// so at most one of the two is set once the ladder has merged.
 //
 // Login is merged like any other entry, and stays a space-level key by
 // validation rather than by omission: validatePackageLayer refuses it on a
@@ -705,14 +745,19 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 			*dst = src
 		}
 	}
+	pickPair := func(dst, dstSynonym *[]string, src, srcSynonym []string) {
+		if src != nil || srcSynonym != nil {
+			*dst, *dstSynonym = src, srcSynonym
+		}
+	}
 	pick(&out.Build, over.Build)
 	pick(&out.Publish, over.Publish)
-	pick(&out.Version, over.Version)
+	pickPair(&out.Version, &out.Propagate, over.Version, over.Propagate)
 	pick(&out.Login, over.Login)
 	pick(&out.Announce, over.Announce)
 	pick(&out.BeforeAll, over.BeforeAll)
-	pick(&out.BeforeVersion, over.BeforeVersion)
-	pick(&out.PostVersion, over.PostVersion)
+	pickPair(&out.BeforeVersion, &out.BeforePropagate, over.BeforeVersion, over.BeforePropagate)
+	pickPair(&out.PostVersion, &out.PostPropagate, over.PostVersion, over.PostPropagate)
 	pick(&out.BeforeBuild, over.BeforeBuild)
 	pick(&out.PostBuild, over.PostBuild)
 	pick(&out.BeforePublish, over.BeforePublish)

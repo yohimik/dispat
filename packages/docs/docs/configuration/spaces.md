@@ -26,6 +26,7 @@ every package.
 | `versionGroup`          | string                   | no         | Joins the space's packages to a shared-versioning group by name. This names a top-level [`versionGroups`](#versioning-groups) entry, or another space whose own versioning is shared. The group's versioning mode is authoritative, so a space naming one must not set `versioning` itself.                                                                                                        |
 | `scripts`               | map name → command or `[command, ...]` | no         | Named commands for this space's packages, sitting on top of the file's own [`scripts`](./README.md#top-level-options). A name binds one command or an array of them run in order. `flow` entries name them, and so does `dispat run <name>`. See [`scripts` and `dispat run`](#scripts-and-dispat-run).                                                                                                                                             |
 | `autoVersion`           | object                   | no         | Native manifest rewriting at the version stage. dispat itself reconciles declared workspace ranges and the package's own version, in every [manifest format it reads](../editing/manifests.md#supported-formats), before any `flow.version` script. Absent means off. See [`autoVersion`](./autoversion.md).                                                                                 |
+| `autoPropagate`         | object                   | no         | `autoVersion` under the propagate stage's name, with the same options. A space states one of the two, and a level stating either replaces both. See [Two names for one block](./autoversion.md#two-names-for-one-block). |
 | `env`                   | map name → value         | no         | Fixed environment variables for every script of the space's packages, its login script included. These merge over the top-level map key by key. See [Static env](./env.md).                                                                                                                                                                                                     |
 | `custom`                | object                   | no         | Free-form data dispat never reads. See [`custom`](./custom.md).                                                                                                                                                                                                                                                                                                                   |
 | `changelog`             | object                   | no         | Changelog options for this space's packages. These overlay the top-level object field by field, and a package's own overlay sits on top. See [`changelog`](./records.md#changelog).                                                                                                                            |
@@ -61,10 +62,10 @@ because you need them to understand the ordering.
 | # | Key | Kind | Runs |
 |---|-----|------|------|
 | 1 | `beforeAll` | hook | Before the package's first stage, whichever that is. This is its version stage when it has one, or its build otherwise. Fails the package's release. |
-| 2 | `beforeVersion` | hook | Before the version stage. Fails the release. |
+| 2 | `beforeVersion` or `beforePropagate` | hook | Before the version stage. Fails the release. |
 | 3 | *(native reconciliation)* | - | Not a script. When the space sets [`autoVersion`](./autoversion.md), dispat rewrites the manifests itself here, before any `version` script. |
-| 4 | `version` | stage | Manifest-sync stage command(s). Runs for every package that picks a version up from a provider moving in this run, and for every releasing package when the space has [`autoVersion`](./autoversion.md). |
-| 5 | `postVersion` | hook | After the version stage. Fails the release. |
+| 4 | `version` or `propagate` | stage | Manifest-sync stage command(s). Runs for every package that picks a version up from a provider moving in this run, and for every releasing package when the space has [`autoVersion`](./autoversion.md). |
+| 5 | `postVersion` or `postPropagate` | hook | After the version stage. Fails the release. |
 | 6 | `autoVersion.syncLock` | stage | Lock-file regeneration (`npm install`), between the version and the build. Lives on [`autoVersion`](./autoversion.md), not on `flow`. Runs only where a manifest actually changed. |
 | 7 | `beforeBuild` | hook | Before the build stage. Fails the release. |
 | 8 | `build` | stage | Build stage command(s). |
@@ -89,6 +90,12 @@ failure can take it back, so 14 to 17 only warn. Every one of them runs even aft
 the release irreversible. A tag or a record that cannot be written there is reported as a
 [critical](../internals/architecture.md#after-the-point-of-no-return) and the package stays published. That split is
 the whole reason there are two kinds of hook.
+
+The version stage is also called the propagate stage, and each of its three keys has a twin: `flow.propagate`,
+`flow.beforePropagate` and `flow.postPropagate` are `flow.version`, `flow.beforeVersion` and `flow.postVersion`. A pair
+is one entry, so a level stating either spelling replaces both inherited values, and one object stating both is
+refused. Whichever key configured it, the stage runs under its runtime name: `DISPAT_STAGE` carries `version`,
+`beforeVersion` or `postVersion`. See [Two names for one block](./autoversion.md#two-names-for-one-block).
 
 All script references are optional. A stage without a script still runs and preserves ordering, skip semantics,
 statuses, tags and release records. It just executes no shell command. An unconfigured hook is a no-op. Scripts run

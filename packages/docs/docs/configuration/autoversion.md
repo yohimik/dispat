@@ -4,7 +4,8 @@ Add an `autoVersion` object to let dispat keep a space's files in sync with rele
 `flow.version` script. If you run one anyway, it sees the already-reconciled files.
 
 Write this block on a space. You can also write it at the top level to set the default for every space, or on a single
-package that needs its own rules. Everything below describes one such block.
+package that needs its own rules. Everything below describes one such block. The block has a second name,
+`autoPropagate`; see [Two names for one block](#two-names-for-one-block).
 
 You can use the parsing strategy, the replacing strategy, both, or neither. They are independent.
 
@@ -39,6 +40,22 @@ Know two consequences before you turn this on. First, the reconciliation rule (Â
 dependency, including providers released by earlier runs, so an auto-versioning space runs a version task for **every**
 releasing package even when its providers are quiet. Second, a rewriting failure fails the version stage, and
 `revertOnFail` rolls the half-edited folder back.
+
+### Two names for one block
+
+The version stage is also called the propagate stage: it propagates the versions a package takes from its providers
+into its files. The block has a name to match, so `autoPropagate` is `autoVersion` with the same options and the same
+meaning, and the flow entries have twins too: `flow.propagate`, `flow.beforePropagate` and `flow.postPropagate` are
+`flow.version`, `flow.beforeVersion` and `flow.postVersion`.
+
+Each pair is one setting. Write either spelling. A level that states either one replaces what a level above it stated
+under the other, so a package's `autoPropagate` replaces the `autoVersion` its space states, and the other way round.
+One object that states both spellings of a pair is refused when the configuration loads, because the merge could keep
+only one of them. A message about the block names the key you wrote.
+
+The stage keeps its runtime name whichever key configured it. `DISPAT_STAGE` carries `version`, `beforeVersion` and
+`postVersion`, `DISPAT_FAILED_STAGE` and the webhook `stage` and `failedStage` fields carry `version`, and the log
+labels the stage `version`.
 
 ### Picking up providers released without you
 

@@ -582,7 +582,7 @@ not use a standalone release-step command to bypass CI/CD.
 
 ## Know the gating boundary
 
-Planning chooses versions before package work starts. Native `autoVersion` reconciliation, an optional `flow.version`, and lockfile synchronization prepare inputs. Build produces artifacts. Login authenticates once per configured space. Publish performs external publication. Native records then create the configured tags, changelog, GitHub release, commit, and push. Announce happens after publication.
+Planning chooses versions before package work starts. Native `autoVersion` reconciliation, an optional `flow.version`, and lockfile synchronization prepare inputs. The version stage is also called the propagate stage: `autoPropagate` and `flow.propagate` (with `flow.beforePropagate` and `flow.postPropagate`) are the same settings under that name, one spelling per object, and the stage still reports itself as `version` at runtime. Build produces artifacts. Login authenticates once per configured space. Publish performs external publication. Native records then create the configured tags, changelog, GitHub release, commit, and push. Announce happens after publication.
 
 | Work | Failure behavior |
 | --- | --- |

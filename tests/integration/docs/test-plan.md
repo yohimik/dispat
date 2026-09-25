@@ -1050,6 +1050,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestConfigRefSplitsTheFile`                           | Splitting configuration across files with `$ref` produces identical releases to single-file setups. Running with `--log-level trace` outputs every referenced path. |
 | `TestConfigRefCycleFailsBeforeAnyWork`                 | Circular `$ref` references cause dispat to exit 1 and print the reference cycle before running scripts or tagging releases. |
 | `TestConfigRefMissingFragmentIsNamed`                  | A missing `$ref` target causes dispat to exit 1, naming the referencing file, the problematic key, and the missing file path. |
+| `TestConfigPropagateSynonymsInOneObjectAreRefused`     | One object stating both spellings of a propagate pair (`autoVersion` and `autoPropagate`, or `flow.version` and `flow.propagate`) stops the run before any tag, in JSON and in YAML, with both keys and the object named; a package naming one spelling beside its space's other replaces it, and the entry runs under the stage's runtime name, `version`. |
 
 ### Goal 11: the static `env` layers (`env_test.go`)
 
@@ -1511,6 +1512,7 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoVersionPolicyFlagsStillRunSyncLock` | A flag-overridden policy and the syncLock loop read the same resolved block, so a reconciliation the flags caused still regenerates the lock.                                                                                                                                                                                       |
 | `TestAutoVersionNoReplaceFlag`               | `--no-replace` skips the rules for one invocation and leaves the parsing strategy to do its half; without the flag the same invocation finishes the job.                                                                                                                                                                            |
 | `TestAutoVersionManifestsNoneFlag`           | `--manifests none` turns the parsing strategy off for one invocation, and a value outside the three is a usage error (2).                                                                                                                                                                                                          |
+| `TestAutoPropagateReleasesLikeAutoVersion`   | The same workspace released under `autoVersion` and under `autoPropagate` leaves identical manifests, tags and stage names: the block written under the propagate name reconciles ranges and own versions, its syncLock runs, and a `beforePropagate` hook runs as `beforeVersion`. |
 
 ### Goal 25: the manifest commands (`manifests_test.go`)
 

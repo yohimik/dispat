@@ -449,3 +449,50 @@ func TestAutoVersionManifestsNoneFlag(t *testing.T) {
 	res = r.Command("autoversion", "--manifests", "sideways")
 	assert.Equal(t, 2, res.Code, "an unknown --manifests value is a usage error")
 }
+
+// TestAutoPropagateReleasesLikeAutoVersion: the same workspace released once
+// under `autoVersion` and once under `autoPropagate` leaves the same manifests,
+// the same tags and the same stage names behind. The hook written as
+// beforePropagate runs as the version stage's hook, and the syncLock script
+// the block names runs between it and the build.
+func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
+	release := func(t *testing.T, isPropagate bool) (web, core, stages string, tags []string) {
+		t.Helper()
+		r := harness.New(t)
+		cfg := libsConfig(`echo "build:$DISPAT_STAGE" >> ../../stages.log`, 1)
+		cfg.Scripts["locksync"] = models.Script{`echo "lock:$DISPAT_STAGE" >> ../../stages.log`}
+		cfg.Scripts["mark"] = models.Script{`echo "hook:$DISPAT_STAGE" >> ../../stages.log`}
+		policy := &models.AutoVersionConfig{Match: []string{"workspace:*"}, SyncLock: []string{"locksync"}}
+		space := models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish()}
+		if isPropagate {
+			space.AutoPropagate = policy
+			space.Flow.BeforePropagate = []string{"mark"}
+		} else {
+			space.AutoVersion = policy
+			space.Flow.BeforeVersion = []string{"mark"}
+		}
+		cfg.Spaces["libs"] = space
+		cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("packages", "web")
+		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+		r.WriteFile("packages/web/package.json",
+			`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+		r.Commit("feat(core,web): bootstrap")
+		r.ReleaseOK()
+		return readFile(t, r, "packages", "web", "package.json"), readFile(t, r, "packages", "core", "package.json"),
+			readFile(t, r, "stages.log"), r.TagList()
+	}
+	web, core, stages, tags := release(t, false)
+	pWeb, pCore, pStages, pTags := release(t, true)
+
+	assert.Contains(t, pWeb, `"@acme/core": "^0.1.0"`, "the range is reconciled")
+	assert.Contains(t, pWeb, `"version": "0.1.0"`, "the own version is written")
+	assert.Equal(t, web, pWeb)
+	assert.Equal(t, core, pCore)
+	assert.Equal(t, tags, pTags)
+	assert.Equal(t, stages, pStages, "the stage and hook names are the version stage's either way")
+	assert.Equal(t, 2, strings.Count(pStages, "hook:beforeVersion\n"), "stages:\n%s", pStages)
+	assert.Equal(t, 2, strings.Count(pStages, "lock:syncLock\n"), "stages:\n%s", pStages)
+}

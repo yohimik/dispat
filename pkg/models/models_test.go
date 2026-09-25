@@ -716,3 +716,47 @@ func TestSpaceFileCarriesEnvAndCustom(t *testing.T) {
 		t.Errorf("space file custom lost: %s", data)
 	}
 }
+
+// TestPropagateSynonymsMarshalUnderTheirOwnKeys: the propagate names are keys
+// of their own rather than aliases folded into the version names, so a model
+// that states one marshals it under that key and leaves its twin absent. That
+// is what lets a loader refuse an object stating both.
+func TestPropagateSynonymsMarshalUnderTheirOwnKeys(t *testing.T) {
+	policy := &AutoVersionConfig{Range: "exact"}
+	flow := &SpaceFlowConfig{Propagate: []string{"sync"}, BeforePropagate: []string{"pre"}, PostPropagate: []string{"post"}}
+	for _, c := range []struct {
+		name  string
+		value any
+	}{
+		{"File", File{AutoPropagate: policy, Flow: flow}},
+		{"SpaceConfig", SpaceConfig{AutoPropagate: policy, Flow: flow}},
+		{"SpaceFile", SpaceFile{AutoPropagate: policy, Flow: flow}},
+		{"PackageConfig", PackageConfig{AutoPropagate: policy, Flow: flow}},
+	} {
+		data, err := json.Marshal(c.value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := raw["autoPropagate"]; !ok {
+			t.Errorf("%s: autoPropagate must marshal under its own key: %s", c.name, data)
+		}
+		if _, ok := raw["autoVersion"]; ok {
+			t.Errorf("%s: an unset autoVersion must stay absent: %s", c.name, data)
+		}
+		stated := raw["flow"].(map[string]any)
+		for _, key := range []string{"propagate", "beforePropagate", "postPropagate"} {
+			if _, ok := stated[key]; !ok {
+				t.Errorf("%s: flow.%s must marshal under its own key: %s", c.name, key, data)
+			}
+		}
+		for _, key := range []string{"version", "beforeVersion", "postVersion"} {
+			if _, ok := stated[key]; ok {
+				t.Errorf("%s: an unset flow.%s must stay absent: %s", c.name, key, data)
+			}
+		}
+	}
+}

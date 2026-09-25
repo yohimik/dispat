@@ -158,22 +158,25 @@ func DefaultNonPackageScopes() []string { return public.DefaultNonPackageScopes(
 // error messages, so validation and resolution never disagree about the list.
 func scriptRefs(s *SpaceConfig) map[string][]string {
 	return map[string][]string{
-		"flow.build":          s.Flow.Build,
-		"flow.publish":        s.Flow.Publish,
-		"flow.version":        s.Flow.Version,
-		"flow.login":          s.Flow.Login,
-		"flow.announce":       s.Flow.Announce,
-		"flow.beforeAll":      s.Flow.BeforeAll,
-		"flow.beforeVersion":  s.Flow.BeforeVersion,
-		"flow.postVersion":    s.Flow.PostVersion,
-		"flow.beforeBuild":    s.Flow.BeforeBuild,
-		"flow.postBuild":      s.Flow.PostBuild,
-		"flow.beforePublish":  s.Flow.BeforePublish,
-		"flow.postPublish":    s.Flow.PostPublish,
-		"flow.beforeAnnounce": s.Flow.BeforeAnnounce,
-		"flow.postAnnounce":   s.Flow.PostAnnounce,
-		"flow.onFail":         s.Flow.OnFail,
-		"flow.onSkip":         s.Flow.OnSkip,
+		"flow.build":           s.Flow.Build,
+		"flow.publish":         s.Flow.Publish,
+		"flow.version":         s.Flow.Version,
+		"flow.propagate":       s.Flow.Propagate,
+		"flow.login":           s.Flow.Login,
+		"flow.announce":        s.Flow.Announce,
+		"flow.beforeAll":       s.Flow.BeforeAll,
+		"flow.beforeVersion":   s.Flow.BeforeVersion,
+		"flow.postVersion":     s.Flow.PostVersion,
+		"flow.beforePropagate": s.Flow.BeforePropagate,
+		"flow.postPropagate":   s.Flow.PostPropagate,
+		"flow.beforeBuild":     s.Flow.BeforeBuild,
+		"flow.postBuild":       s.Flow.PostBuild,
+		"flow.beforePublish":   s.Flow.BeforePublish,
+		"flow.postPublish":     s.Flow.PostPublish,
+		"flow.beforeAnnounce":  s.Flow.BeforeAnnounce,
+		"flow.postAnnounce":    s.Flow.PostAnnounce,
+		"flow.onFail":          s.Flow.OnFail,
+		"flow.onSkip":          s.Flow.OnSkip,
 	}
 }
 
@@ -264,17 +267,19 @@ func (s scriptScope) check(refs map[string][]string, prefix string) error {
 }
 
 // checkSpaceRefs verifies every script reference a space-shaped config makes
-// (its flow entries and its autoVersion.syncLock) against the scope of the
-// package it was merged for. It runs per package, not per space, because a
-// package may be the level that defines the script its space's flow names.
+// (its flow entries and its autoVersion.syncLock, under whichever name the
+// block was written) against the scope of the package it was merged for. It
+// runs per package, not per space, because a package may be the level that
+// defines the script its space's flow names.
 func (s scriptScope) checkSpaceRefs(label string, sc SpaceConfig) error {
 	if err := s.check(scriptRefs(&sc), label+": "); err != nil {
 		return err
 	}
-	if sc.AutoVersion == nil {
+	av, key := resolveAutoVersionSetting(sc)
+	if av == nil {
 		return nil
 	}
-	return s.check(map[string][]string{"autoVersion.syncLock": sc.AutoVersion.SyncLock}, label+": ")
+	return s.check(map[string][]string{key + ".syncLock": av.SyncLock}, label+": ")
 }
 
 // checkScriptValues rejects the ways a scripts map itself can be unusable, at
@@ -974,6 +979,9 @@ func validate(c *File, allowEmpty bool) error {
 	if err := validatePackageEntries(c); err != nil {
 		return err
 	}
+	if err := refuseSynonymKeys("", c.AutoVersion, c.AutoPropagate, c.Flow); err != nil {
+		return err
+	}
 	if err := validateRecords(c); err != nil {
 		return err
 	}
@@ -1512,6 +1520,9 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 	if s.VersionGroup != "" && s.Versioning != "" {
 		return s, fmt.Errorf("%s: versioning and versionGroup are mutually exclusive (the group's versioning is authoritative)", label)
 	}
+	if err := refuseSynonymKeys(label+": ", s.AutoVersion, s.AutoPropagate, s.Flow); err != nil {
+		return s, err
+	}
 	// Beside a group reference the absent versioning stays absent. Normalizing
 	// it would write the default next to the reference, and this same function
 	// validates the next level down — a package's merged override — where the
@@ -1530,8 +1541,10 @@ func validateSpaceAs(label string, s SpaceConfig) (SpaceConfig, error) {
 	if err := checkScriptValues(label, s.Scripts); err != nil {
 		return s, err
 	}
-	if err := validateAutoVersion(label, s.AutoVersion); err != nil {
-		return s, err
+	if av, key := resolveAutoVersionSetting(s); av != nil {
+		if err := validateAutoVersion(label, key, av); err != nil {
+			return s, err
+		}
 	}
 	return s, nil
 }
@@ -1580,14 +1593,12 @@ func validateSpacePath(label string, paths public.PathList) error {
 }
 
 // validateAutoVersion checks an autoVersion object's own values under the
-// owner's error label. The `only` names need the discovered packages and are
+// owner's error label and the key the object was written under (autoVersion
+// or autoPropagate). The `only` names need the discovered packages and are
 // checked in Discover instead; syncLock's references need a package's scope
-// and are checked in checkScriptScope.
-func validateAutoVersion(label string, av *public.AutoVersionConfig) error {
-	if av == nil {
-		return nil
-	}
-	prefix := label + ": autoVersion: "
+// and are checked in checkSpaceRefs.
+func validateAutoVersion(label, key string, av *public.AutoVersionConfig) error {
+	prefix := label + ": " + key + ": "
 	switch av.Manifests {
 	case "", "root", "all", "none":
 	default:
@@ -1632,6 +1643,27 @@ func validateAutoVersion(label string, av *public.AutoVersionConfig) error {
 		return fmt.Errorf("%ssyncLockConcurrency must be >= 0, got %d", prefix, av.SyncLockConcurrency)
 	}
 	return nil
+}
+
+// resolveAutoVersionSetting answers the autoVersion object a space-shaped
+// configuration carries and the key it was written under. The two keys are one
+// setting, and every layer states at most one of them (refuseSynonymKeys), so
+// at most one is set here; an absent block answers nil under the canonical
+// key.
+func resolveAutoVersionSetting(sc SpaceConfig) (*public.AutoVersionConfig, string) {
+	if sc.AutoPropagate != nil {
+		return sc.AutoPropagate, "autoPropagate"
+	}
+	return sc.AutoVersion, "autoVersion"
+}
+
+// resolveFlowEntry answers the entry a pair of flow synonyms resolved to: the
+// ladder leaves at most one of them set, and the stage runs whichever it is.
+func resolveFlowEntry(canonical, synonym []string) []string {
+	if synonym != nil {
+		return synonym
+	}
+	return canonical
 }
 
 // resolveAutoVersion maps a validated autoVersion object onto the domain
@@ -2203,6 +2235,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 	if err := checkRunOnlyAgainstLogin(label, sc.RunOnly, login); err != nil {
 		return nil, err
 	}
+	autoVersion, _ := resolveAutoVersionSetting(sc)
 	return &model.Space{
 		Name: spaceName,
 		Path: sc.Path.First(),
@@ -2221,12 +2254,12 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		Scripts:              scope.scripts,
 		BuildScript:          scope.commands(sc.Flow.Build),
 		PublishScript:        scope.commands(sc.Flow.Publish),
-		VersionScript:        scope.commands(sc.Flow.Version),
+		VersionScript:        scope.commands(resolveFlowEntry(sc.Flow.Version, sc.Flow.Propagate)),
 		LoginScript:          login,
 		AnnounceScript:       scope.commands(sc.Flow.Announce),
 		BeforeAllScript:      scope.commands(sc.Flow.BeforeAll),
-		BeforeVersionScript:  scope.commands(sc.Flow.BeforeVersion),
-		PostVersionScript:    scope.commands(sc.Flow.PostVersion),
+		BeforeVersionScript:  scope.commands(resolveFlowEntry(sc.Flow.BeforeVersion, sc.Flow.BeforePropagate)),
+		PostVersionScript:    scope.commands(resolveFlowEntry(sc.Flow.PostVersion, sc.Flow.PostPropagate)),
 		BeforeBuildScript:    scope.commands(sc.Flow.BeforeBuild),
 		PostBuildScript:      scope.commands(sc.Flow.PostBuild),
 		BeforePublishScript:  scope.commands(sc.Flow.BeforePublish),
@@ -2240,7 +2273,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		BuildOutputs:         sc.BuildOutputs,
 		BuildPlatforms:       sc.BuildPlatforms,
 		RunOnly:              sc.RunOnly,
-		AutoVersion:          resolveAutoVersion(scope, sc.AutoVersion),
+		AutoVersion:          resolveAutoVersion(scope, autoVersion),
 	}, nil
 }
 
