@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -150,7 +151,31 @@ type Worker struct {
 	// did: the refusal VerifyOwner answered. Only the poll goroutine writes
 	// it, and Err reads it once Serve has returned.
 	refusal error
+	// pending are the claims this node pushed without learning whether they
+	// landed, by coordination branch. Only the poll goroutine reads and writes
+	// them: a claim is pushed there and adopted there.
+	pending map[string]*pendingClaim
 }
+
+// pendingClaim is an assignment this node claimed by a push with no known
+// outcome: the assignment as it was read, and every claim commit pushed for it.
+//
+// A claim that landed after all is this node's work, and the orchestrator is
+// waiting for it: a node that forgot it would leave the attempt to wait out
+// the whole task deadline. So it is remembered until the branch shows what
+// became of it: the claim itself on the tip is adopted and run, and a
+// withdrawal on top of it is acknowledged.
+type pendingClaim struct {
+	tip        ChainTip
+	assignment Assignment
+	claims     []string
+	at         time.Time
+}
+
+// maxPendingClaimAge is how long a claim with no known outcome is remembered.
+// It is the acceptance horizon of the assignment it answers: past that, no
+// orchestrator is still waiting for it.
+const maxPendingClaimAge = 2 * replayWindow
 
 // Serve polls until the process is signalled or goes idle, and answers the
 // reason it stopped.
@@ -383,6 +408,13 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		w.Mailbox.Reconsider(head.Name)
 		return false, err
 	}
+	if tip.Kind == MessageClaim || (tip.Kind == MessageCancel && w.findClaim(tip.Branch) == nil) {
+		// A claim of this node's whose push never said it landed, or a
+		// withdrawal of one, is this node's own work surfacing.
+		if isAdopted, err := w.adoptPendingClaim(ctx, tip); isAdopted || err != nil {
+			return isAdopted, err
+		}
+	}
 	if tip.Kind == MessageCancel {
 		// A withdrawal is the one message of another party this node acts on
 		// outside a task's own wait: the work it names is running in a
@@ -490,8 +522,16 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 	}, nil)
 	if err != nil {
 		<-w.slots
-		return false, err
+		return false, w.settleUnansweredClaim(tip, assignment, err)
 	}
+	delete(w.pending, tip.Branch)
+	return w.startClaimedTask(ctx, tip, assignment, claimed)
+}
+
+// startClaimedTask records a claim this node holds and runs its task, in a
+// slot the caller already took.
+func (w *Worker) startClaimedTask(ctx context.Context, tip ChainTip, assignment Assignment,
+	claimed string) (bool, error) {
 	w.Log.Info().Str("branch", tip.Branch).Str("commit", claimed).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("kind", assignment.Kind).Msg("task claimed")
@@ -518,6 +558,119 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 		defer stop()
 		w.answerTask(ctx, bounded, task)
 	}()
+	return true, nil
+}
+
+// settleUnansweredClaim decides what a claim push that did not land means.
+//
+// A claim that provably did not land is no work of this node's, and no error
+// either: another node moved the branch first, or the mailbox refused the
+// push, and the second is said once with the server's reason, redacted,
+// because the orchestrator only ever sees a pool with no capacity. A claim
+// whose outcome is unknown is remembered so that it is adopted if it
+// surfaces, and the assignment is offered to the next poll again: if the claim
+// never landed, the next poll simply claims it afresh.
+func (w *Worker) settleUnansweredClaim(tip ChainTip, assignment Assignment, err error) error {
+	var pushed *messagePushError
+	if !errors.As(err, &pushed) {
+		return err
+	}
+	log := w.Log.With().Str("branch", tip.Branch).Str("run", assignment.Run).
+		Str("task", assignment.Task).Int("attempt", assignment.Attempt).Logger()
+	if pushed.resolution == pushNotLanded {
+		if errors.Is(err, gitx.ErrRemoteRefused) {
+			log.Warn().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
+				Msg("the mailbox refused this node's claim")
+			return nil
+		}
+		log.Debug().Err(err).Msg("the assignment was taken before this node could claim it")
+		return nil
+	}
+	w.rememberPendingClaim(tip, assignment, pushed.oid)
+	w.Mailbox.Reconsider(tip.Branch)
+	log.Warn().Err(err).Str("commit", pushed.oid).Str("code", CodeTransport).
+		Str("category", CategoryTransportCleanup).
+		Msg("the claim push has no known outcome; the claim is adopted if it is on the branch")
+	return nil
+}
+
+// rememberPendingClaim adds one claim commit to what this node is waiting to
+// see, and drops what nobody is waiting for any more.
+func (w *Worker) rememberPendingClaim(tip ChainTip, assignment Assignment, claim string) {
+	if w.pending == nil {
+		w.pending = map[string]*pendingClaim{}
+	}
+	now := time.Now()
+	for branch, pending := range w.pending {
+		if now.Sub(pending.at) > maxPendingClaimAge {
+			delete(w.pending, branch)
+		}
+	}
+	pending := w.pending[tip.Branch]
+	if pending == nil {
+		pending = &pendingClaim{tip: tip, assignment: assignment}
+		w.pending[tip.Branch] = pending
+	}
+	pending.claims = append(pending.claims, claim)
+	pending.at = now
+}
+
+// adoptPendingClaim takes on a claim of this node's that landed although its
+// push never said so, and reports whether the tip was one.
+//
+// Two tips are this node's own claim: the claim itself, which is work the
+// orchestrator is now waiting for and is run like any other; and a withdrawal
+// written on top of it, which is answered at once, since nothing of the task
+// has started on this node.
+func (w *Worker) adoptPendingClaim(ctx context.Context, tip ChainTip) (bool, error) {
+	pending := w.pending[tip.Branch]
+	if pending == nil {
+		return false, nil
+	}
+	claim := tip.OID
+	if tip.Kind == MessageCancel {
+		claim = tip.PreviousOID
+	}
+	if !slices.Contains(pending.claims, claim) {
+		return false, nil
+	}
+	if tip.Kind == MessageCancel {
+		delete(w.pending, tip.Branch)
+		return w.acknowledgePendingWithdrawal(ctx, tip, pending, claim)
+	}
+	select {
+	case w.slots <- struct{}{}:
+	default:
+		// The claim is this node's and has to run here; it waits for a slot
+		// rather than being given up.
+		w.Mailbox.Reconsider(tip.Branch)
+		return false, nil
+	}
+	delete(w.pending, tip.Branch)
+	w.Log.Info().Str("branch", tip.Branch).Str("commit", claim).
+		Msg("a claim whose push had no known outcome is on the branch and is adopted")
+	return w.startClaimedTask(ctx, pending.tip, pending.assignment, claim)
+}
+
+// acknowledgePendingWithdrawal answers a withdrawal of a claim this node
+// never knew had landed: nothing of the task ran here, so the acknowledgement
+// says so at once.
+func (w *Worker) acknowledgePendingWithdrawal(ctx context.Context, tip ChainTip, pending *pendingClaim,
+	claim string) (bool, error) {
+	assignment := pending.assignment
+	if reason := w.checkWithdrawal(ctx, tip, pending.tip, claim, assignment); reason != "" {
+		w.reportRejection(tip, reason)
+		return false, nil
+	}
+	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
+		return false, err
+	}
+	task := &claimedTask{assignment: assignment, tip: pending.tip, claimed: claim,
+		stop: func() {}, expectedTip: claim}
+	task.withdraw(tip.OID)
+	log := w.Log.With().Str("run", assignment.Run).Str("task", assignment.Task).
+		Int("attempt", assignment.Attempt).Str("branch", tip.Branch).Logger()
+	w.acknowledgeCancellation(ctx, task, log)
 	return true, nil
 }
 
@@ -577,19 +730,46 @@ func (w *Worker) answerTask(ctx context.Context, bounded context.Context, task *
 	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx),
 		w.resolveReportTimeout(len(carried) > 0))
 	defer done()
-	reported, err := w.advance(reportCtx, tip, resolveResultLease(task.claimed, outcome),
-		MessageResult, report, carried)
-	if err != nil {
-		if errors.Is(err, gitx.ErrLeaseRejected) &&
-			w.acknowledgeResultWithdrawal(reportCtx, task, resolveResultLease(task.claimed, outcome), log) {
+	lease := resolveResultLease(task.claimed, outcome)
+	reported, err := w.advance(reportCtx, tip, lease, MessageResult, report, carried)
+	if err != nil && resolvePushError(err) == pushNotLanded {
+		if errors.Is(err, gitx.ErrLeaseRejected) && w.acknowledgeResultWithdrawal(reportCtx, task, lease, log) {
 			return
 		}
+		if errors.Is(err, gitx.ErrRemoteRefused) {
+			reported, err = w.reportRefusedResult(reportCtx, task, report, lease, err, log)
+		}
+	}
+	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the task result could not be reported")
 		return
 	}
 	log.Info().Str("commit", reported).Str("status", outcome.status).
 		Int("strayWrites", outcome.strayWrites).Msg("task finished")
+}
+
+// reportRefusedResult reports once more, without what the mailbox refused,
+// after a server rule, a hook or a size limit declined the result.
+//
+// The orchestrator is waiting for this answer and would otherwise wait out the
+// whole task deadline. A build, a preparation or a sweep task reports a
+// failure that carries no outputs, because the outputs are what could not be
+// delivered; a publication keeps its status, which is the one thing the run
+// must not lose about an effect it authorized, and drops its exports. The
+// server's reason, redacted, is this node's own log line: the result carries
+// only the stable word.
+func (w *Worker) reportRefusedResult(ctx context.Context, task *claimedTask, report Result, lease string,
+	refused error, log zerolog.Logger) (string, error) {
+	log.Warn().Err(refused).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
+		Msg("the mailbox refused the task result; a result without it is reported instead")
+	fallback := report
+	fallback.Outputs, fallback.Exports = nil, nil
+	if task.assignment.Kind != KindPublish {
+		fallback.Status, fallback.FailedPart = StatusFailed, release.PartOutputs
+		fallback.Reason, fallback.Exit = string(ReasonTransferRefused), 0
+	}
+	return w.advance(ctx, task.tip, lease, MessageResult, fallback, nil)
 }
 
 // acknowledgeResultWithdrawal settles the one lease loss a finished task can

@@ -64,7 +64,7 @@ func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
 			fixture.coordinator.Timeouts.Cancel = 5 * time.Second
 			branch := FormatBranch("build-a", KindProbe, time.Now())
 			assignment := probeAssignment("build-a", branch)
-			offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+			offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 			require.NoError(t, err)
 			heads, err := fixture.node.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
 			require.NoError(t, err)
@@ -87,9 +87,15 @@ func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
 			previous := claimed
 			var document []byte
 			if tc.kind == MessageAck {
+				// An earlier withdrawal, issued a minute before the one the
+				// run writes below: identical content would be the identical
+				// object, and a message already on the chain is one that
+				// landed.
+				earlier := assignment.Header
+				earlier.IssuedAt = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 				cancel, err := fixture.orchestrator.mailbox.Advance(t.Context(), branch, claimed,
 					MessageCancel, mustMarshalValue(Withdrawal{
-						Header: assignment.Header, Assignment: offered, Tip: claimed,
+						Header: earlier, Assignment: offered, Tip: claimed,
 					}), nil)
 				require.NoError(t, err)
 				_, err = fixture.node.mailbox.Reread(t.Context(), branch)

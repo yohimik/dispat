@@ -144,20 +144,21 @@ func TestAPublisherPrefersTheNodeThatBuilt(t *testing.T) {
 // the remote refused provably never became the branch's value, so nobody can
 // have read it and nothing can have started under it. The run withdraws the
 // waiting publisher as it does after any refused authorization, reports no
-// unknown publication and retains no lock. A push with no answer is the case
-// that stays unknown: the authorization may already have been read, so its
-// repository's lock stays for an operator.
+// unknown publication and retains no lock. A push whose outcome the reads
+// could not establish is the case that stays unknown: the authorization may
+// already have been read, and a node that never acknowledges the withdrawal
+// leaves its repository's lock for an operator.
 func TestARefusedAuthorizationPushIsNoUnknownPublication(t *testing.T) {
 	for name, tc := range map[string]struct {
 		failure  error
 		retained []string
 	}{
 		"a push the remote refused": {
-			failure: &messagePushError{cause: errors.New("the lease was rejected"), isRejected: true}},
+			failure: &messagePushError{cause: errors.New("the lease was rejected"), resolution: pushNotLanded}},
 		"a failure preparing the message": {
 			failure: errors.New("writing the go document")},
 		"a push with no answer": {
-			failure:  &messagePushError{cause: errors.New("the connection was reset")},
+			failure:  &messagePushError{cause: errors.New("the connection was reset"), resolution: pushUnknown},
 			retained: []string{"web"}},
 	} {
 		t.Run(name, func(t *testing.T) {

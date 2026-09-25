@@ -23,9 +23,12 @@ func TestExecutionPublishInputPreparationFaults(t *testing.T) {
 		pattern      string
 		buildOutputs bool
 	}{
-		"snapshot cannot be committed":  {pattern: "*commit-tree*dispat transport snapshot*"},
-		"snapshot cannot be offered":    {pattern: "*push*[0-9]-snapshot-*"},
-		"own outputs cannot be relayed": {pattern: "*push*-relay-*", buildOutputs: true},
+		"snapshot cannot be committed": {pattern: "*commit-tree*dispat transport snapshot*"},
+		// The create push alone, whose lease expects no ref at all: the run
+		// records the branch before it pushes, so its own cleanup deletes it
+		// under a lease on the object and must not fail with it.
+		"snapshot cannot be offered":    {pattern: "*push*--force-with-lease=refs/heads/*-snapshot-*: --*"},
+		"own outputs cannot be relayed": {pattern: "*push*--force-with-lease=refs/heads/*-relay-*: --*", buildOutputs: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := newExecutionRig(t, func(cfg *models.File) {

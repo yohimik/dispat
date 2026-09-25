@@ -15,11 +15,15 @@ package gitx
 //
 // A rejection is told from a failure by machine-readable output rather than
 // by git's wording. `git push --porcelain` prints one status line per ref with
-// a flag in the first column — `!` rejected, `*` new, `=` already there, a
-// space for a fast-forward, `-` for a delete — and it prints them even when it
-// exits non-zero, which is what makes "somebody else holds this name" and "the
-// remote is unreachable" two different answers instead of two spellings of one
-// error.
+// a flag in the first column (`!` not updated, `*` new, `=` already there, a
+// space for a fast-forward, `-` for a delete) and the bracketed summary after
+// it, and it prints them even when it exits non-zero. Three answers follow from
+// that line and from its absence, and a coordination protocol needs all three
+// apart: `[rejected]` is a lease this push lost, so the ref never took the
+// update; `[remote rejected]` is a server rule or hook refusing it, so the ref
+// never took it either; and `[remote failure]`, any other refusal, or no line
+// at all is an update that may or may not have landed, which only a read of
+// the remote can settle.
 //
 // Three rules hold throughout. Every remote argument follows `--`, so a
 // mailbox address can never be read as an option. Every remote that reaches a
@@ -72,13 +76,29 @@ var _ Transportx = (*LocalGitx)(nil)
 
 // ErrLeaseRejected is the remote refusing a compare-and-swap push: the ref was
 // not what the pusher leased it against, because somebody else created it,
-// moved it, or removed it.
+// moved it, or removed it. Git reports it as `[rejected]`, and the ref never
+// took the update.
 //
-// It is a sentinel rather than a message because it is the one Git answer a
+// It is a sentinel rather than a message because it is the answer a
 // coordination protocol acts on: the caller re-reads the branch and follows
-// the state machine from wherever it now is, while any other failure is a
-// transport problem and stops the operation.
+// the state machine from wherever it now is.
 var ErrLeaseRejected = errors.New("gitx: the remote rejected a leased ref update")
+
+// ErrRemoteRefused is the remote declining an update for a reason of its own:
+// a hook, a protected-branch rule or a size limit, reported by git as
+// `[remote rejected] (reason)`. The ref never took the update. The reason is
+// carried in the error, redacted, because it is the one thing an operator can
+// act on: a token without push rights and a hook that refuses large pushes
+// look identical from anywhere else.
+var ErrRemoteRefused = errors.New("gitx: the remote refused a ref update")
+
+// ErrPushUnknown is a push whose outcome this process cannot state: git said
+// `[remote failure]`, reported a refusal it does not name, or never reported
+// the ref at all because the connection, the credential helper or the process
+// ended first. The update may have landed. A caller that has to know reads the
+// remote; a caller that treated this as a refusal would forget a message the
+// other party may already be acting on.
+var ErrPushUnknown = errors.New("gitx: the outcome of a ref update is unknown")
 
 // ErrTransportLimit is a documented ceiling refusing what it bounds: too many
 // remote refs, too many refs in one batch, or an object larger than the caller
@@ -143,13 +163,30 @@ type BranchLease struct {
 	ExpectedOld string
 }
 
+// BranchResult is what one ref of a batched delete ended as, in the three
+// answers a push can give plus the success.
+type BranchResult int
+
+const (
+	// BranchDeleted is a ref the remote removed.
+	BranchDeleted BranchResult = iota + 1
+	// BranchStale is a ref whose lease the remote refused: it held another
+	// value, or none at all. Git answers a lease over a ref that is already
+	// gone this way too, so a caller that has to know whether the ref still
+	// exists reads the remote.
+	BranchStale
+	// BranchRefused is a ref a server rule or hook would not let this push
+	// remove. It is still there.
+	BranchRefused
+	// BranchUnknown is a ref the push never reported on, or reported a
+	// failure it does not name for: it may or may not be gone.
+	BranchUnknown
+)
+
 // BranchOutcome is what one ref of a batched delete ended as.
 type BranchOutcome struct {
 	Branch string
-	// IsDeleted is false for a ref the remote refused because the lease was
-	// stale. Such a ref is not this run's to remove, and the caller reports
-	// it as retained rather than retrying.
-	IsDeleted bool
+	Result BranchResult
 }
 
 // RemoteHead is one branch a remote advertises.
@@ -182,6 +219,9 @@ func (c *LocalGitx) PushAdvance(ctx context.Context, remote, oid, branch, expect
 	return c.pushLeased(ctx, remote, oid, branch, expectedOld)
 }
 
+// pushLeased is one compare-and-swap push, answered as one of the three
+// outcomes the transport distinguishes: applied (nil), never applied
+// (ErrLeaseRejected or ErrRemoteRefused) and unknown (ErrPushUnknown).
 func (c *LocalGitx) pushLeased(ctx context.Context, remote, oid, branch, expectedOld string) error {
 	ref, err := transportBranchRef(branch)
 	if err != nil {
@@ -191,12 +231,20 @@ func (c *LocalGitx) pushLeased(ctx context.Context, remote, oid, branch, expecte
 		"--force-with-lease="+ref+":"+expectedOld, "--", remote, oid+":"+ref)
 	status, isReported := findPushStatus(out, ref)
 	if !isReported {
-		return transportError(runErr, remote, "pushing %s", ref)
+		return fmt.Errorf("%w: %w", ErrPushUnknown, transportError(runErr, remote, "pushing %s", ref))
 	}
-	if status == pushRejected {
+	switch status.resolve() {
+	case pushApplied:
+		return nil
+	case pushStale:
 		return fmt.Errorf("gitx: %s on %s: %w", ref, RedactURL(remote), ErrLeaseRejected)
+	case pushRefused:
+		return fmt.Errorf("gitx: %s on %s was refused (%s): %w",
+			ref, RedactURL(remote), status.formatReason(), ErrRemoteRefused)
+	default:
+		return fmt.Errorf("gitx: %s on %s ended as %s: %w",
+			ref, RedactURL(remote), status.formatReason(), ErrPushUnknown)
 	}
-	return nil
 }
 
 // DeleteRemoteBranchesLease closes several coordination branches in one push,
@@ -206,7 +254,10 @@ func (c *LocalGitx) pushLeased(ctx context.Context, remote, oid, branch, expecte
 // at the end, and a fork per branch would make cleanup cost grow with the
 // number of tasks. A stale lease fails its own ref and no other, which is the
 // behaviour the batch exists for: the branches this run still owns are closed
-// even when one of them was taken over.
+// even when one of them was taken over. A push that ended before git reported
+// on a ref, the connection lost for one, answers BranchUnknown for that ref
+// rather than an error for the batch: the caller settles it by reading the
+// remote, exactly as it settles a stale lease.
 func (c *LocalGitx) DeleteRemoteBranchesLease(ctx context.Context, remote string, leases []BranchLease) ([]BranchOutcome, error) {
 	if len(leases) == 0 {
 		return nil, nil
@@ -233,9 +284,12 @@ func (c *LocalGitx) DeleteRemoteBranchesLease(ctx context.Context, remote string
 	for i, ref := range refs {
 		status, isReported := findPushStatus(out, ref)
 		if !isReported {
-			return nil, transportError(runErr, remote, "deleting %s", ref)
+			c.Log.Debug().Err(transportError(runErr, remote, "deleting %s", ref)).
+				Msg("the remote reported nothing about a leased delete")
+			outcomes = append(outcomes, BranchOutcome{Branch: leases[i].Branch, Result: BranchUnknown})
+			continue
 		}
-		outcomes = append(outcomes, BranchOutcome{Branch: leases[i].Branch, IsDeleted: status != pushRejected})
+		outcomes = append(outcomes, BranchOutcome{Branch: leases[i].Branch, Result: status.resolveDelete()})
 	}
 	sort.Slice(outcomes, func(i, j int) bool { return outcomes[i].Branch < outcomes[j].Branch })
 	return outcomes, nil
@@ -488,36 +542,100 @@ func (c *LocalGitx) RemoteTagObject(ctx context.Context, remote, tag string) (st
 	return "", nil
 }
 
-// The porcelain status flags this package reads. Anything else git may print
-// is a successful update of some shape. The coordination protocol only has to
-// recognise the rejection; a release record additionally tells a name that was
-// already there from one this push created (see records.go).
+// The porcelain status flags this package reads. A release record tells a
+// name that was already there from one this push created (see records.go);
+// the coordination protocol reads the summary of a `!` line as well, because
+// that flag covers a lost lease, a server's refusal and a failure nobody can
+// read the outcome of.
 const (
 	pushRejected = '!'
 	pushUpToDate = '='
 	pushForced   = '+'
 )
 
-// findPushStatus reads the flag of one ref out of `git push --porcelain`
-// output, and reports whether the ref was mentioned at all.
+// The flags git prints for an update it made: a fast-forward, a forced
+// update, a new ref, a deletion and a ref that already held the object.
+const pushAppliedFlags = " +*-="
+
+// pushStatus is one ref's line of `git push --porcelain` output: the flag in
+// the first column and the summary after the refspec.
+type pushStatus struct {
+	flag    rune
+	summary string
+}
+
+// pushOutcome is what one status line says became of the update.
+type pushOutcome int
+
+const (
+	pushApplied pushOutcome = iota + 1
+	pushStale
+	pushRefused
+	pushUnknown
+)
+
+// resolve reads a status line as one of the transport's outcomes. `[rejected]`
+// with any reason (stale info, fetch first, non-fast-forward, already exists)
+// is an update the remote never applied because the ref was not what the push
+// expected; `[remote rejected]` is one a server rule declined; and every other
+// refusal, `[remote failure]` above all, may have landed.
+func (s pushStatus) resolve() pushOutcome {
+	if strings.ContainsRune(pushAppliedFlags, s.flag) {
+		return pushApplied
+	}
+	if s.flag != pushRejected {
+		return pushUnknown
+	}
+	switch {
+	case strings.HasPrefix(s.summary, "[rejected]"):
+		return pushStale
+	case strings.HasPrefix(s.summary, "[remote rejected]"):
+		return pushRefused
+	default:
+		return pushUnknown
+	}
+}
+
+// resolveDelete is resolve, in the words of a leased delete.
+func (s pushStatus) resolveDelete() BranchResult {
+	switch s.resolve() {
+	case pushApplied:
+		return BranchDeleted
+	case pushStale:
+		return BranchStale
+	case pushRefused:
+		return BranchRefused
+	default:
+		return BranchUnknown
+	}
+}
+
+// formatReason is the summary a refusal carries, redacted: a server's reason
+// is text a hook chose, and a hook can echo a URL with a credential in it.
+func (s pushStatus) formatReason() string {
+	return redactGitOutput(strings.TrimSpace(s.summary), nil)
+}
+
+// findPushStatus reads the status line of one ref out of `git push
+// --porcelain` output, and reports whether the ref was mentioned at all.
 //
 // A line is "<flag>\t<from>:<to>\t<summary>"; a deletion writes an empty or
 // "(delete)" source half. A ref with no line of its own means git never got as
-// far as deciding about it, which is a transport failure rather than a
-// rejection.
-func findPushStatus(out, ref string) (rune, bool) {
+// far as deciding about it, which says nothing about whether the remote took
+// the update.
+func findPushStatus(out, ref string) (pushStatus, bool) {
 	for line := range strings.Lines(out) {
 		line = strings.TrimRight(line, "\n")
 		flag, rest, isStatus := strings.Cut(line, "\t")
 		if !isStatus || len([]rune(flag)) != 1 {
 			continue
 		}
-		refspec, _, _ := strings.Cut(rest, "\t")
+		refspec, summary, _ := strings.Cut(rest, "\t")
 		if _, destination, isPair := strings.Cut(refspec, ":"); isPair && destination == ref {
-			return []rune(flag)[0], true
+			return pushStatus{flag: []rune(flag)[0], summary: summary}, true
 		}
 	}
-	return 0, false
+	return pushStatus{}, false
 }
 
 // transportError names the operation and the remote, redacted, around

@@ -22,7 +22,7 @@ func TestWithdrawalOfUnclaimedAssignmentNeedsNoWorkerAcknowledgement(t *testing.
 	branch := FormatBranch("build-a", KindBuild, time.Now())
 	assignment := probeAssignment("build-a", branch)
 	assignment.Kind, assignment.Task = KindBuild, "app:build"
-	offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+	offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 	require.NoError(t, err)
 	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
 		node: "build-a", branch: branch, oid: offered,
@@ -47,7 +47,7 @@ func TestWithdrawalSettlesAResultAfterTwoLeaseLosses(t *testing.T) {
 	branch := FormatBranch("build-a", KindBuild, time.Now())
 	assignment := probeAssignment("build-a", branch)
 	assignment.Kind, assignment.Task = KindBuild, "app:build"
-	offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+	offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 	require.NoError(t, err)
 	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
 		node: "build-a", branch: branch, oid: offered,
@@ -105,7 +105,7 @@ func TestWithdrawalRetryRefusesForeignLiveTip(t *testing.T) {
 			branch := FormatBranch("build-a", KindPublish, time.Now())
 			assignment := probeAssignment("build-a", branch)
 			assignment.Kind, assignment.Task = KindPublish, "core:publish"
-			offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+			offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 			require.NoError(t, err)
 			_, err = fixture.node.mailbox.Reread(t.Context(), branch)
 			require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestWithdrawalRetryAcceptsOwnLiveTip(t *testing.T) {
 			branch := FormatBranch("build-a", KindPublish, time.Now())
 			assignment := probeAssignment("build-a", branch)
 			assignment.Kind, assignment.Task = KindPublish, "core:publish"
-			offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+			offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 			require.NoError(t, err)
 			_, err = fixture.node.mailbox.Reread(t.Context(), branch)
 			require.NoError(t, err)

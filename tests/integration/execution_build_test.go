@@ -693,7 +693,7 @@ func TestExecutionLostResultPushIsRecognized(t *testing.T) {
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Positive(t, fault.Matches())
-	resolved, isResolved := executionLine(res, "the rejected update was already on the branch")
+	resolved, isResolved := executionLine(res, "the update landed although its push did not say so")
 	require.True(t, isResolved, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, branch, resolved.Str("branch"))
 	assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, branch),

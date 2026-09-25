@@ -185,7 +185,7 @@ func TestPreflightClaimWithoutReportKeepsOnlyAuthenticatedCleanupOwnership(t *te
 			fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, silentPreflight)
 			branch := FormatBranch("build-a", KindProbe, time.Now())
 			assignment := probeAssignment("build-a", branch)
-			offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+			offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 			require.NoError(t, err)
 			fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
 				node: "build-a", branch: branch, oid: offered,
@@ -254,7 +254,7 @@ func TestClosePreservesUnknownPublicationEvidence(t *testing.T) {
 	unknownBranch := FormatBranch("build-a", KindPublish, time.Now())
 	cleanBranch := FormatBranch("build-a", KindProbe, time.Now())
 	for _, branch := range []string{unknownBranch, cleanBranch} {
-		oid, err := mailbox.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+		oid, err := assign(t.Context(), mailbox.mailbox, probeAssignment("build-a", branch))
 		require.NoError(t, err)
 		coordinator.recordOwnedRef(t.Context(), ownedRefStep{node: "build-a", branch: branch, oid: oid})
 	}
@@ -386,7 +386,7 @@ func identityOf(err error) Identity {
 func TestPreflightReportsARetainedBranch(t *testing.T) {
 	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, silentPreflight)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
-	_, err := fixture.orchestrator.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+	_, err := assign(t.Context(), fixture.orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
 	// The run believes the branch is somewhere it is not, which is what a
 	// branch somebody else advanced looks like from here.

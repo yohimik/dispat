@@ -1654,7 +1654,11 @@ func TestExecutionRelayFailureFailsTheConsumer(t *testing.T) {
 		cfg.Execution.Workers[1].Endpoint = "file://" + second
 		cfg.Concurrency = []int{2, 1}
 	})
-	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*-relay-*", Onward: true, Nth: 1})
+	// The create push alone, whose lease expects no ref: the run records a
+	// relay branch before it pushes it, so its own cleanup deletes it under a
+	// lease on the object and must not fail with it.
+	fault := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*push*--force-with-lease=refs/heads/*-relay-*: --*", Onward: true, Nth: 1})
 	first := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0)
 	other := rig.startWorker(executionWorkerConfig(second,

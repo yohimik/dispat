@@ -198,19 +198,36 @@ func (c *Coordinator) placeTask(ctx context.Context, task string, placement Plac
 			return release.StageOutcome{}, c.refuseTask(task, "", attempt, err)
 		}
 		outcome, err := attemptOnce(ctx, lease, attempt)
-		if !errors.Is(err, errQueueExpired) {
+		if !isPlacedAgain(err) {
 			c.rememberPlacedTask(task, lease, attempt, placedOutcome{exports: len(outcome.Exports), err: err})
 			return outcome, err
 		}
 		if attempt >= maxPlacementAttempts {
-			return outcome, c.refuseTask(task, "", attempt, fmt.Errorf(
-				"no node claimed this task within %s on any of %d attempts: the pool had no capacity for it",
-				c.Timeouts.Task, attempt))
+			return outcome, c.refuseTask(task, "", attempt, formatPlacementExhausted(err, c.Timeouts.Task, attempt))
 		}
 		c.Log.Warn().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 			Int("attempt", attempt).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
 			Msg("the queued assignment was revoked and the task is placed again")
 	}
+}
+
+// isPlacedAgain reports whether an attempt ended without placing anything, so
+// that the task is offered again: an assignment nobody claimed and that was
+// revoked, or one the mailbox never took.
+func isPlacedAgain(err error) bool {
+	return errors.Is(err, errQueueExpired) || errors.Is(err, errOfferNotLanded)
+}
+
+// formatPlacementExhausted is why a task that was offered again as often as it
+// may be is refused: a pool with no capacity for it, or a mailbox that would
+// not take its assignment, which are different things for an operator to go
+// and look at.
+func formatPlacementExhausted(last error, wait time.Duration, attempts int) error {
+	if errors.Is(last, errOfferNotLanded) {
+		return fmt.Errorf("the mailbox did not take the assignment on any of %d attempts: %w", attempts, last)
+	}
+	return fmt.Errorf("no node claimed this task within %s on any of %d attempts: the pool had no capacity for it",
+		wait, attempts)
 }
 
 // placedOutcome is what one placed attempt ended with, as the summary records
@@ -322,12 +339,16 @@ type taskOffer struct {
 	offered string
 }
 
-// offerAssignment writes one assignment onto its node's mailbox and registers
-// the attempt with the poller before the push, so that a node quick enough to
-// answer between the two is still heard.
+// offerAssignment writes one assignment onto its node's mailbox, making the
+// attempt this run's own before anybody can see it: the branch is registered
+// with the poller, bound to the assignment and recorded for cleanup before the
+// push, so that a node quick enough to answer at once is still heard and a
+// push with no known outcome still leaves a ref this run closes.
 //
-// A failed offer settles the lease here: nothing was placed anywhere, so the
-// slot is free rather than held by an attempt that never existed.
+// A failed offer settles the lease here. An offer that provably never landed
+// placed nothing anywhere, so the slot is free and the task is offered again;
+// one whose outcome is unknown is settled by revoking it (see
+// settleUnknownOffer).
 func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task string,
 	assignment *Assignment) (taskOffer, error) {
 	// No new effect after lock loss (§28.6). An assignment is the first thing
@@ -338,21 +359,71 @@ func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task st
 		return taskOffer{}, err
 	}
 	attempt, kind := assignment.Attempt, assignment.Kind
-	observer := c.watchers[lease.Node]
-	replies := observer.watch(assignment.Branch)
-	offered, err := c.mailboxes[lease.Node].Assign(ctx, assignment)
+	mailbox := c.mailboxes[lease.Node]
+	offered, err := mailbox.PrepareAssignment(ctx, assignment)
 	if err != nil {
-		observer.forget(assignment.Branch)
 		lease.Release()
 		return taskOffer{}, c.refuseTask(task, lease.Node, attempt, err)
 	}
-	c.recordOwnedRef(ctx, ownedRefStep{node: lease.Node, branch: assignment.Branch, oid: offered})
+	observer := c.watchers[lease.Node]
+	offer := taskOffer{observer: observer, replies: observer.watch(assignment.Branch),
+		branch: assignment.Branch, kind: kind, offered: offered}
 	observer.bind(assignment.Branch, offered, assignment)
+	c.recordOwnedRef(ctx, ownedRefStep{node: lease.Node, branch: assignment.Branch, oid: offered})
+	resolution, err := mailbox.Offer(ctx, assignment.Branch, offered)
+	switch resolution {
+	case pushLanded:
+	case pushNotLanded:
+		observer.forget(assignment.Branch)
+		c.forgetOwnedRef(lease.Node, assignment.Branch)
+		lease.Release()
+		c.Log.Warn().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
+			Int("attempt", attempt).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
+			Msg("the mailbox did not take the assignment")
+		return taskOffer{}, fmt.Errorf("%w: %w", errOfferNotLanded, err)
+	default:
+		if settleErr := c.settleUnknownOffer(ctx, lease, task, attempt, offer, err); settleErr != nil {
+			return taskOffer{}, settleErr
+		}
+	}
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
 		Str("kind", kind).Msg("task assigned")
-	return taskOffer{observer: observer, replies: replies, branch: assignment.Branch, kind: kind,
-		offered: offered}, nil
+	return offer, nil
+}
+
+// errOfferNotLanded is an assignment the mailbox provably did not take: a
+// lease or a server rule refused the create, or it had no known outcome and
+// the revocation found no branch. Nothing was placed, so the caller offers
+// the task again under a new attempt, exactly as it does after errQueueExpired.
+var errOfferNotLanded = errors.New("execution: the assignment never reached the mailbox")
+
+// settleUnknownOffer decides an assignment push with no known outcome by the
+// one operation that settles it: a delete leased on the assignment itself.
+//
+// A branch the delete removed, or found already gone, held nothing anybody
+// claimed, so the slot is free and the task is offered again. A branch that
+// moved past the assignment is a push that landed and a node that already
+// answered it, so the attempt goes on and the poll is told to look again. A
+// branch that is still there, or a remote that cannot be read, is an
+// assignment a node may yet claim with nobody listening: the slot stays held,
+// the node leaves the pool and the task fails.
+func (c *Coordinator) settleUnknownOffer(ctx context.Context, lease *Lease, task string,
+	attempt int, offer taskOffer, pushErr error) error {
+	if c.revokeAttempt(ctx, lease.Node, task, attempt, offer.branch, offer.offered) {
+		offer.observer.forget(offer.branch)
+		lease.Release()
+		return fmt.Errorf("%w: %w", errOfferNotLanded, pushErr)
+	}
+	head, err := c.mailboxes[lease.Node].Reread(ctx, offer.branch)
+	if err == nil && head.OID != "" && head.OID != offer.offered {
+		offer.observer.reconsider(head.Name)
+		return nil
+	}
+	offer.observer.forget(offer.branch)
+	lease.Leak(LeakTransport)
+	return c.refuseTask(task, lease.Node, attempt, fmt.Errorf(
+		"the assignment push has no known outcome and the assignment could not be revoked: %w", pushErr))
 }
 
 // awaitResult waits for the node to report, for the task deadline, or for the
@@ -572,14 +643,41 @@ func (c *Coordinator) offerInput(ctx context.Context, node string, source Source
 		return state.branch, nil
 	}
 	branch := FormatBranch(node, KindSnapshot, time.Now())
-	if err := c.dispatch.OpenRepository(source.Dir).PushCreate(ctx, c.endpointOf(node), commit, branch); err != nil {
+	// Owned before it is pushed, so a push with no known outcome still leaves
+	// a ref this run closes.
+	c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: branch, oid: commit})
+	pushErr := c.dispatch.OpenRepository(source.Dir).PushCreate(ctx, c.endpointOf(node), commit, branch)
+	if err := c.settleCreate(ctx, node, branch, commit, pushErr); err != nil {
 		return "", fmt.Errorf("offering the input state of %s: %w", source.Dir, err)
 	}
-	c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: branch, oid: commit})
 	c.offered[key] = offeredState{commit: commit, branch: branch}
 	c.Log.Debug().Str("worker", node).Str("repository", source.Name).Str("branch", branch).
 		Str("commit", commit).Str("run", c.Run).Msg("input state pushed")
 	return branch, nil
+}
+
+// settleCreate decides a create-only push of an immutable branch, an input
+// state or a relayed output set, that this run made out of some other object
+// store than the mailbox's own.
+//
+// Landed is the only answer the task goes on with. A branch that provably
+// never landed is forgotten, since there is nothing to close; one whose
+// outcome is unknown stays owned, so the run's own close removes it if it
+// landed after all, and the task is refused because no assignment exists yet
+// that could have depended on it.
+func (c *Coordinator) settleCreate(ctx context.Context, node, branch, oid string, pushErr error) error {
+	if pushErr == nil {
+		return nil
+	}
+	switch c.mailboxes[node].resolveOwnPush(ctx, branch, oid, pushErr) {
+	case pushLanded:
+		return nil
+	case pushNotLanded:
+		c.forgetOwnedRef(node, branch)
+		return pushErr
+	default:
+		return fmt.Errorf("the push has no known outcome: %w", pushErr)
+	}
 }
 
 // endpointOf is where one node reads its work, as the configuration named it.

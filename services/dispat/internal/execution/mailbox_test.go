@@ -9,9 +9,9 @@ package execution
 // Everything about a coordination branch is what git does with it, so the
 // fixtures are a real bare remote and a real object store: a lease is refused
 // by the remote, a fetched object is resolved by rev-list, and a tree is one
-// git wrote. The fake transport is used for exactly one claim, which is the
-// one a real remote cannot be made to produce on demand: a push that applied
-// and whose answer was lost.
+// git wrote. The fake transport is used for exactly one kind of claim, which
+// is the one a real remote cannot be made to produce on demand: a push that
+// applied, or did not, and whose answer was lost.
 
 import (
 	"context"
@@ -103,7 +103,7 @@ func TestMailboxCarriesOneAttemptEndToEnd(t *testing.T) {
 	worker := orchestrator.second(t)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
 
-	offered, err := orchestrator.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+	offered, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
 	assert.Equal(t, []string{branch}, orchestrator.remoteBranches(t))
 
@@ -152,7 +152,7 @@ func TestMailboxCarriesOneAttemptEndToEnd(t *testing.T) {
 		[]gitx.BranchLease{{Branch: branch, ExpectedOld: reported}})
 	require.NoError(t, err)
 	require.Len(t, outcomes, 1)
-	assert.True(t, outcomes[0].IsDeleted)
+	assert.Equal(t, gitx.BranchDeleted, outcomes[0].Result)
 	assert.Empty(t, orchestrator.remoteBranches(t))
 }
 
@@ -163,7 +163,7 @@ func TestMailboxObservesOnlyWhatMoved(t *testing.T) {
 	orchestrator := newMailboxFixture(t)
 	worker := orchestrator.second(t)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
-	offered, err := orchestrator.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+	offered, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
 
 	first, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
@@ -196,7 +196,7 @@ func TestMailboxFetchesInBatches(t *testing.T) {
 	offered := map[string]bool{}
 	for i := 0; i < gitx.MaxTransportBatch+5; i++ {
 		branch := FormatBranch("build-a", KindProbe, time.Now())
-		_, err := orchestrator.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+		_, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 		require.NoError(t, err)
 		offered[branch] = true
 	}
@@ -224,7 +224,7 @@ func TestMailboxRefusesWhatItCannotAuthenticate(t *testing.T) {
 	orchestrator := newMailboxFixture(t)
 	fixture := orchestrator.second(t)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
-	offered, err := orchestrator.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+	offered, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
 	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
 	require.NoError(t, err)
@@ -264,89 +264,221 @@ func TestMailboxRefusesWhatItCannotAuthenticate(t *testing.T) {
 	})
 }
 
-// TestMailboxResolvesALostPushResponse: a push whose answer was lost is
-// indistinguishable at the caller from a push that was refused, so the branch
-// is re-read once: finding the object this call was about to put there is
-// success, and finding anything else is the rejection it was given.
-func TestMailboxResolvesALostPushResponse(t *testing.T) {
-	fixture := newMailboxFixture(t)
-	branch := FormatBranch("build-a", KindProbe, time.Now())
-	offered, err := fixture.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
-	require.NoError(t, err)
+// TestMailboxSettlesAPushWithNoAnswer: a push that did not report success is
+// settled by reading the remote and never by pushing again. The object this
+// party wrote is on the branch (landed), under what the other party wrote on
+// top of it (landed and answered), provably not there after a refusal, or not
+// found after an unknown outcome, which stays unknown however often it is
+// read. A late landing is seen on a later read. And the settling read never
+// records a tip as observed, so the poll still delivers what it found.
+func TestMailboxSettlesAPushWithNoAnswer(t *testing.T) {
+	ownPushReadPauses = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { ownPushReadPauses = []time.Duration{time.Second, 2 * time.Second} })
 
-	t.Run("the update was already applied", func(t *testing.T) {
-		fake := &lostResponseTransport{real: fixture.git}
+	t.Run("an update that applied and whose answer was lost landed", func(t *testing.T) {
+		fixture, branch, offered := newAssignedFixture(t)
+		fake := &faultyTransport{LocalGitx: fixture.git, apply: true, answer: gitx.ErrPushUnknown}
 		fixture.mailbox.remote = fake
-		defer func() { fixture.mailbox.remote = fixture.git }()
 
 		claimed, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
 			mustMarshal(t, Claim{Assignment: offered}), nil)
 
 		require.NoError(t, err, "a push that applied is a push that worked, however its answer was lost")
-		assert.Equal(t, claimed, fake.applied)
+		assert.Equal(t, claimed, fake.pushed)
+		assert.Equal(t, 1, fake.pushes, "and it is never pushed again")
 	})
 
-	t.Run("somebody else moved the branch", func(t *testing.T) {
-		// The branch is now at the claim, so a second advance leased against
-		// the assignment is refused by the remote itself.
+	t.Run("an update the other party already answered landed", func(t *testing.T) {
+		fixture, branch, offered := newAssignedFixture(t)
+		worker := fixture.second(t)
+		fake := &faultyTransport{LocalGitx: fixture.git, apply: true, answer: gitx.ErrPushUnknown,
+			afterPush: func(claimed string) {
+				_, err := worker.mailbox.Reread(t.Context(), branch)
+				require.NoError(t, err)
+				_, err = worker.mailbox.Advance(t.Context(), branch, claimed, MessageResult,
+					mustMarshal(t, Result{Assignment: offered}), nil)
+				require.NoError(t, err)
+			}}
+		fixture.mailbox.remote = fake
+
 		_, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+			mustMarshal(t, Claim{Assignment: offered}), nil)
+
+		require.NoError(t, err, "a message the other party built on is on the branch")
+		heads, err := fixture.mailbox.Observe(t.Context(), "refs/heads/"+branch)
+		require.NoError(t, err)
+		require.Len(t, heads, 1, "the settling read recorded nothing, so the poll delivers the answer")
+		tip, err := fixture.mailbox.Inspect(t.Context(), heads[0])
+		require.NoError(t, err)
+		assert.Equal(t, MessageResult, tip.Kind)
+	})
+
+	t.Run("a refused update did not land", func(t *testing.T) {
+		fixture, branch, offered := newAssignedFixture(t)
+		worker := fixture.second(t)
+		_, err := worker.mailbox.Reread(t.Context(), branch)
+		require.NoError(t, err)
+		_, err = worker.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+			mustMarshal(t, Claim{Assignment: offered}), nil)
+		require.NoError(t, err)
+
+		_, err = fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
 			mustMarshal(t, Claim{Assignment: offered, Header: Header{Task: "other"}}), nil)
 
-		require.Error(t, err)
-		assert.ErrorIs(t, err, gitx.ErrLeaseRejected)
-		var pushed *messagePushError
-		require.ErrorAs(t, err, &pushed)
-		assert.True(t, pushed.isRejected,
-			"a refusal is the one push failure that proves the message never became the branch")
+		require.ErrorIs(t, err, gitx.ErrLeaseRejected)
+		assert.Equal(t, pushNotLanded, resolvePushError(err),
+			"a refusal whose branch does not descend from the message proves it never became the branch")
 	})
 
-	t.Run("the remote could not be read after the refusal", func(t *testing.T) {
-		fixture.mailbox.remote = &unreadableAfterRefusalTransport{real: fixture.git}
-		defer func() { fixture.mailbox.remote = fixture.git }()
+	t.Run("an unknown outcome stays unknown", func(t *testing.T) {
+		fixture, branch, offered := newAssignedFixture(t)
+		fake := &faultyTransport{LocalGitx: fixture.git, answer: gitx.ErrPushUnknown}
+		fixture.mailbox.remote = fake
 
 		_, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
-			mustMarshal(t, Claim{Assignment: offered, Header: Header{Task: "third"}}), nil)
+			mustMarshal(t, Claim{Assignment: offered}), nil)
 
+		assert.Equal(t, pushUnknown, resolvePushError(err), "a branch still at the old object proves nothing")
+		assert.Equal(t, 3, fake.listings, "an unknown outcome is read three times")
+		assert.Equal(t, 1, fake.pushes)
 		var pushed *messagePushError
 		require.ErrorAs(t, err, &pushed)
-		assert.True(t, pushed.isRejected, "the push was still refused, whatever the re-read found")
+		assert.NotEmpty(t, pushed.oid, "the message is named, so it can be recognised if it surfaces")
+	})
+
+	t.Run("a late landing is seen on a later read", func(t *testing.T) {
+		fixture, branch, offered := newAssignedFixture(t)
+		fake := &faultyTransport{LocalGitx: fixture.git, answer: gitx.ErrPushUnknown, applyOnListing: 2}
+		fixture.mailbox.remote = fake
+
+		_, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+			mustMarshal(t, Claim{Assignment: offered}), nil)
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, fake.listings, "the second read found it")
+	})
+
+	t.Run("a refusal the remote cannot be read after is unknown", func(t *testing.T) {
+		fixture, branch, offered := newAssignedFixture(t)
+		fake := &faultyTransport{LocalGitx: fixture.git, answer: gitx.ErrLeaseRejected, isUnreadable: true}
+		fixture.mailbox.remote = fake
+
+		_, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+			mustMarshal(t, Claim{Assignment: offered}), nil)
+
+		assert.Equal(t, pushUnknown, resolvePushError(err))
+		assert.Equal(t, 1, fake.listings, "a refusal is read once")
+	})
+
+	t.Run("a local failure is no push at all", func(t *testing.T) {
+		fixture, branch, _ := newAssignedFixture(t)
+
+		_, err := fixture.mailbox.Advance(t.Context(), branch, strings.Repeat("0", 40), MessageClaim,
+			mustMarshal(t, Claim{}), nil)
+
+		require.Error(t, err)
+		var pushed *messagePushError
+		assert.False(t, errors.As(err, &pushed), "a message that was never written was never pushed")
+		assert.Equal(t, pushNotLanded, resolvePushError(err))
 	})
 }
 
-// unreadableAfterRefusalTransport refuses the push the real remote refuses and
-// then cannot read the remote back.
-type unreadableAfterRefusalTransport struct {
-	*gitx.LocalGitx
-	real *gitx.LocalGitx
-}
+// TestMailboxSettlesACreateWithNoAnswer: an offer whose push reported nothing
+// is read back like an advance, and one the remote took is recorded as
+// observed only when the push itself said so.
+func TestMailboxSettlesACreateWithNoAnswer(t *testing.T) {
+	ownPushReadPauses = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { ownPushReadPauses = []time.Duration{time.Second, 2 * time.Second} })
+	fixture := newMailboxFixture(t)
+	for name, tc := range map[string]struct {
+		transport *faultyTransport
+		want      pushResolution
+	}{
+		"applied and lost":  {&faultyTransport{LocalGitx: fixture.git, apply: true, answer: gitx.ErrPushUnknown}, pushLanded},
+		"never applied":     {&faultyTransport{LocalGitx: fixture.git, answer: gitx.ErrPushUnknown}, pushUnknown},
+		"refused by a hook": {&faultyTransport{LocalGitx: fixture.git, answer: gitx.ErrRemoteRefused}, pushNotLanded},
+	} {
+		t.Run(name, func(t *testing.T) {
+			branch := FormatBranch("build-a", KindProbe, time.Now())
+			oid, err := fixture.mailbox.PrepareAssignment(t.Context(), probeAssignment("build-a", branch))
+			require.NoError(t, err)
+			fixture.mailbox.remote = tc.transport
+			t.Cleanup(func() { fixture.mailbox.remote = fixture.git })
 
-func (t *unreadableAfterRefusalTransport) PushAdvance(ctx context.Context, remote, oid, branch, expectedOld string) error {
-	return t.real.PushAdvance(ctx, remote, oid, branch, expectedOld)
-}
+			resolution, err := fixture.mailbox.Offer(t.Context(), branch, oid)
 
-func (t *unreadableAfterRefusalTransport) ListRemoteHeads(context.Context, string, string) ([]gitx.RemoteHead, error) {
-	return nil, errors.New("the remote hung up")
-}
-
-// lostResponseTransport applies a leased push and then reports that it was
-// rejected, which is what a network failure after a successful remote write
-// looks like from here.
-type lostResponseTransport struct {
-	*gitx.LocalGitx
-	real    *gitx.LocalGitx
-	applied string
-}
-
-func (t *lostResponseTransport) PushAdvance(ctx context.Context, remote, oid, branch, expectedOld string) error {
-	if err := t.real.PushAdvance(ctx, remote, oid, branch, expectedOld); err != nil {
-		return err
+			require.Error(t, err, "the push's own failure is still reported")
+			assert.Equal(t, tc.want, resolution)
+			assert.Empty(t, fixture.mailbox.observed[branch], "a settled offer is not a handled tip")
+		})
 	}
-	t.applied = oid
-	return fmt.Errorf("the answer never arrived: %w", gitx.ErrLeaseRejected)
 }
 
-func (t *lostResponseTransport) ListRemoteHeads(ctx context.Context, remote, pattern string) ([]gitx.RemoteHead, error) {
-	return t.real.ListRemoteHeads(ctx, remote, pattern)
+// newAssignedFixture is a mailbox with one probe assignment on it.
+func newAssignedFixture(t *testing.T) (*mailboxFixture, string, string) {
+	t.Helper()
+	fixture := newMailboxFixture(t)
+	branch := FormatBranch("build-a", KindProbe, time.Now())
+	offered, err := assign(t.Context(), fixture.mailbox, probeAssignment("build-a", branch))
+	require.NoError(t, err)
+	return fixture, branch, offered
+}
+
+// faultyTransport answers every push with a chosen failure, after applying it
+// or not, which is the one thing a real remote cannot be made to do on
+// demand: apply a write and lose the answer.
+type faultyTransport struct {
+	*gitx.LocalGitx
+	// apply applies the push before failing it; applyOnListing applies it
+	// only when the remote is listed for the nth time, which is a push the
+	// network delivered after its client gave up.
+	apply          bool
+	applyOnListing int
+	answer         error
+	isUnreadable   bool
+	afterPush      func(oid string)
+
+	pushes, listings int
+	pushed           string
+	late             func() error
+}
+
+func (t *faultyTransport) PushCreate(ctx context.Context, remote, oid, branch string) error {
+	return t.push(func() error { return t.LocalGitx.PushCreate(ctx, remote, oid, branch) }, oid)
+}
+
+func (t *faultyTransport) PushAdvance(ctx context.Context, remote, oid, branch, expectedOld string) error {
+	return t.push(func() error { return t.LocalGitx.PushAdvance(ctx, remote, oid, branch, expectedOld) }, oid)
+}
+
+func (t *faultyTransport) push(real func() error, oid string) error {
+	t.pushes++
+	t.pushed = oid
+	if t.apply {
+		if err := real(); err != nil {
+			return err
+		}
+		if t.afterPush != nil {
+			t.afterPush(oid)
+		}
+	}
+	if t.applyOnListing > 0 {
+		t.late = real
+	}
+	return fmt.Errorf("the answer never arrived: %w", t.answer)
+}
+
+func (t *faultyTransport) ListRemoteHeads(ctx context.Context, remote, pattern string) ([]gitx.RemoteHead, error) {
+	t.listings++
+	if t.isUnreadable {
+		return nil, errors.New("the remote hung up")
+	}
+	if t.late != nil && t.listings == t.applyOnListing {
+		if err := t.late(); err != nil {
+			return nil, err
+		}
+	}
+	return t.LocalGitx.ListRemoteHeads(ctx, remote, pattern)
 }
 
 // TestMailboxClosesInBatches: a run closing more branches than one push may
@@ -357,7 +489,7 @@ func TestMailboxClosesInBatches(t *testing.T) {
 	var leases []gitx.BranchLease
 	for i := 0; i < gitx.MaxTransportBatch+3; i++ {
 		branch := FormatBranch("build-a", KindProbe, time.Now())
-		offered, err := fixture.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+		offered, err := assign(t.Context(), fixture.mailbox, probeAssignment("build-a", branch))
 		require.NoError(t, err)
 		leases = append(leases, gitx.BranchLease{Branch: branch, ExpectedOld: offered})
 	}
@@ -371,12 +503,93 @@ func TestMailboxClosesInBatches(t *testing.T) {
 	require.Len(t, outcomes, len(leases))
 	retained := 0
 	for _, outcome := range outcomes {
-		if !outcome.IsDeleted {
+		if outcome.Result != gitx.BranchDeleted {
 			retained++
 		}
 	}
 	assert.Equal(t, 1, retained, "the stale lease fails its own ref and no other")
 	assert.Len(t, fixture.remoteBranches(t), 1)
+}
+
+// TestMailboxCloseSettlesEveryBatch: a close attempts every batch whatever
+// became of the one before it. A lease over a branch that is already gone is
+// a closed branch, although git refuses it as stale; a batch the transport
+// could not push is settled by reading the remote, so its branches that are
+// gone are closed and the ones still there are retained; and the fetched refs
+// are removed either way.
+func TestMailboxCloseSettlesEveryBatch(t *testing.T) {
+	ownPushReadPauses = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { ownPushReadPauses = []time.Duration{time.Second, 2 * time.Second} })
+	fixture := newMailboxFixture(t)
+	var leases []gitx.BranchLease
+	for i := 0; i < gitx.MaxTransportBatch+2; i++ {
+		branch := FormatBranch("build-a", KindProbe, time.Now())
+		offered, err := assign(t.Context(), fixture.mailbox, probeAssignment("build-a", branch))
+		require.NoError(t, err)
+		leases = append(leases, gitx.BranchLease{Branch: branch, ExpectedOld: offered})
+	}
+	gone := gitx.BranchLease{Branch: FormatBranch("build-a", KindProbe, time.Now()), ExpectedOld: leases[0].ExpectedOld}
+	leases = append(leases, gone)
+	fake := &failingDeleteTransport{LocalGitx: fixture.git, failFirst: true}
+	fixture.mailbox.remote = fake
+
+	outcomes, err := fixture.mailbox.Close(t.Context(), leases)
+
+	require.Error(t, err, "the batch that could not be pushed is reported")
+	assert.Equal(t, 2, fake.batches, "and the next batch was still attempted")
+	results := map[string]gitx.BranchResult{}
+	for _, outcome := range outcomes {
+		results[outcome.Branch] = outcome.Result
+	}
+	assert.Equal(t, gitx.BranchDeleted, results[gone.Branch], "a branch already gone is closed")
+	assert.Equal(t, gitx.BranchUnknown, results[leases[0].Branch], "a branch still there is not")
+	assert.Equal(t, gitx.BranchDeleted, results[leases[gitx.MaxTransportBatch].Branch])
+	assert.Len(t, fixture.remoteBranches(t), gitx.MaxTransportBatch, "the failed batch left its branches")
+	assert.Equal(t, 1, fake.localDeletes, "the fetched refs are removed whatever the pushes did")
+}
+
+// failingDeleteTransport refuses to push the first batched delete at all and
+// counts what it is asked.
+type failingDeleteTransport struct {
+	*gitx.LocalGitx
+	failFirst    bool
+	batches      int
+	localDeletes int
+}
+
+func (t *failingDeleteTransport) DeleteRemoteBranchesLease(ctx context.Context, remote string,
+	leases []gitx.BranchLease) ([]gitx.BranchOutcome, error) {
+	t.batches++
+	if t.failFirst && t.batches == 1 {
+		return nil, errors.New("the batch could not be written")
+	}
+	return t.LocalGitx.DeleteRemoteBranchesLease(ctx, remote, leases)
+}
+
+func (t *failingDeleteTransport) DeleteLocalTransportRefs(ctx context.Context, branches []string) error {
+	t.localDeletes++
+	return t.LocalGitx.DeleteLocalTransportRefs(ctx, branches)
+}
+
+// TestMailboxWithdrawSettlesAStaleLease: a revocation of a branch that is
+// already gone is a revocation, and one of a branch that moved is not.
+func TestMailboxWithdrawSettlesAStaleLease(t *testing.T) {
+	fixture, branch, offered := newAssignedFixture(t)
+	absent := FormatBranch("build-a", KindProbe, time.Now())
+
+	isRevoked, err := fixture.mailbox.Withdraw(t.Context(), absent, offered)
+	require.NoError(t, err)
+	assert.True(t, isRevoked, "a branch nobody holds is withdrawn")
+
+	worker := fixture.second(t)
+	_, err = worker.mailbox.Reread(t.Context(), branch)
+	require.NoError(t, err)
+	_, err = worker.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
+		mustMarshal(t, Claim{Assignment: offered}), nil)
+	require.NoError(t, err)
+	isRevoked, err = fixture.mailbox.Withdraw(t.Context(), branch, offered)
+	require.NoError(t, err)
+	assert.False(t, isRevoked, "a branch somebody moved is theirs")
 }
 
 // TestMailboxReadsOnlyWhatWasFetched: a reader resolves the exact object it
@@ -387,7 +600,7 @@ func TestMailboxReadsOnlyWhatWasFetched(t *testing.T) {
 	orchestrator := newMailboxFixture(t)
 	fixture := orchestrator.second(t)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
-	_, err := orchestrator.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+	_, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
 	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
 	require.NoError(t, err)
@@ -399,6 +612,19 @@ func TestMailboxReadsOnlyWhatWasFetched(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, gitx.ErrCommitNotOnRef))
+}
+
+// assign prepares and offers one assignment as the coordinator does, and
+// answers its commit when the offer landed.
+func assign(ctx context.Context, mailbox *GitMailbox, message *Assignment) (string, error) {
+	oid, err := mailbox.PrepareAssignment(ctx, message)
+	if err != nil {
+		return "", err
+	}
+	if _, err := mailbox.Offer(ctx, message.Branch, oid); err != nil {
+		return "", err
+	}
+	return oid, nil
 }
 
 func mustMarshal(t *testing.T, message any) []byte {

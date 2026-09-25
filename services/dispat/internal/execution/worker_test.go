@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,6 +35,10 @@ type fakeMailbox struct {
 	// a message this protocol refuses, but objects this process could not
 	// read at all.
 	unreadable map[string]error
+
+	// failures answer the next pushes of one kind with an error each, in
+	// order, before the fake goes back to accepting them.
+	failures map[MessageKind][]error
 
 	written      []MessageKind
 	carried      []gitx.TreeEntry
@@ -71,6 +76,11 @@ func (m *fakeMailbox) Read(_ context.Context, tip ChainTip, _ int64) ([]byte, er
 
 func (m *fakeMailbox) Advance(_ context.Context, branch, _ string, kind MessageKind,
 	document []byte, carried []gitx.TreeEntry) (string, error) {
+	if failures := m.failures[kind]; len(failures) > 0 {
+		m.failures[kind] = failures[1:]
+		m.documents[branch+"/"+string(kind)+"-refused"] = document
+		return "", failures[0]
+	}
 	m.written = append(m.written, kind)
 	m.carried = append(m.carried, carried...)
 	m.documents[branch+"/"+string(kind)] = document
@@ -177,7 +187,7 @@ func TestWorkerResultLeaseLostToCancellation(t *testing.T) {
 			assignment := probeAssignment("build-a", branch)
 			assignment.Kind, assignment.Task = KindBuild, "app:build"
 			assignment.Limits.MaxManifestBytes = 1 << 20
-			offered, err := orchestrator.mailbox.Assign(t.Context(), assignment)
+			offered, err := assign(t.Context(), orchestrator.mailbox, assignment)
 			require.NoError(t, err)
 			_, err = node.mailbox.Reread(t.Context(), branch)
 			require.NoError(t, err)
@@ -230,6 +240,113 @@ func TestWorkerResultLeaseLostToCancellation(t *testing.T) {
 			assert.Equal(t, cancel, ack.Cancel)
 			assert.Equal(t, "build", ack.Phase)
 			assert.True(t, ack.CommandStarted, "the acknowledgement preserves what actually ran")
+		})
+	}
+}
+
+// TestWorkerAdoptsAClaimWhosePushHadNoAnswer: a claim push with no known
+// outcome frees the slot and is remembered, so the node neither runs work it
+// may not hold nor forgets work the orchestrator is waiting for. The claim
+// surfacing on the branch is adopted and run without claiming again, and a
+// withdrawal written on top of it is acknowledged at once, with nothing run.
+func TestWorkerAdoptsAClaimWhosePushHadNoAnswer(t *testing.T) {
+	branch := "dispat-worker-build-a-20260921-build-abc"
+	assignmentTip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
+	message := validProbe(branch)
+	message.Kind, message.Task = KindBuild, "core:build"
+	lost := &messagePushError{cause: fmt.Errorf("the answer never arrived: %w", gitx.ErrPushUnknown),
+		resolution: pushUnknown, oid: "claim-oid"}
+
+	for name, surfaced := range map[string]ChainTip{
+		"the claim itself": {Branch: branch, OID: "claim-oid", Kind: MessageClaim,
+			Previous: MessageAssignment, PreviousOID: "assignment-oid"},
+		"a withdrawal on top of it": {Branch: branch, OID: "cancel-oid", Kind: MessageCancel,
+			Previous: MessageClaim, PreviousOID: "claim-oid"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			worker, mailbox := newWorkerFixture(t, branch, assignmentTip, message)
+			mailbox.failures = map[MessageKind][]error{MessageClaim: {lost}}
+			worker.slots = make(chan struct{}, 1)
+
+			assert.False(t, worker.tick(t.Context()), "an unknown claim is not work this node holds yet")
+			assert.Empty(t, worker.slots, "and it holds no slot")
+			assert.Contains(t, mailbox.reconsidered, branch, "the next poll looks at the branch again")
+			require.Contains(t, worker.pending, branch)
+
+			mailbox.heads = []gitx.RemoteHead{{Name: branch, OID: surfaced.OID}}
+			mailbox.tips[branch] = surfaced
+			if surfaced.Kind == MessageCancel {
+				withdrawal := Withdrawal{Header: message.Header, Assignment: "assignment-oid", Tip: "claim-oid"}
+				mailbox.documents[branch] = mustMarshal(t, withdrawal)
+			}
+			assert.True(t, worker.tick(t.Context()), "the surfaced claim is this node's own work")
+			worker.running.Wait()
+
+			assert.NotContains(t, mailbox.written, MessageClaim, "nothing is claimed twice")
+			assert.Empty(t, worker.pending)
+			assert.True(t, worker.Seen.IsSeen("run-1", "core:build", 1))
+			if surfaced.Kind == MessageCancel {
+				assert.Equal(t, []MessageKind{MessageAck}, mailbox.written, "the withdrawal is answered at once")
+				var ack Ack
+				require.NoError(t, json.Unmarshal(mailbox.documents[branch+"/ack"], &ack))
+				assert.Equal(t, "cancel-oid", ack.Cancel)
+				assert.False(t, ack.CommandStarted, "nothing ran")
+				return
+			}
+			assert.Equal(t, []MessageKind{MessageResult}, mailbox.written, "the adopted task ran and reported")
+		})
+	}
+
+	t.Run("a claim that did not land is no error", func(t *testing.T) {
+		worker, mailbox := newWorkerFixture(t, branch, assignmentTip, message)
+		mailbox.failures = map[MessageKind][]error{MessageClaim: {&messagePushError{
+			cause: fmt.Errorf("refused: %w", gitx.ErrRemoteRefused), resolution: pushNotLanded, oid: "claim-oid"}}}
+		worker.slots = make(chan struct{}, 1)
+
+		isProgress, err := worker.inspectMailbox(t.Context())
+
+		require.NoError(t, err, "a refused claim is logged, not a failed poll")
+		assert.False(t, isProgress)
+		assert.Empty(t, worker.pending)
+		assert.Empty(t, worker.slots)
+	})
+}
+
+// TestWorkerReportsAResultTheMailboxRefused: a result a server rule refused is
+// reported once more without what the mailbox would not take, so the run
+// hears an answer instead of waiting out its deadline. A build reports a
+// failure with no outputs, naming the stable reason; a publication keeps its
+// status and drops its exports.
+func TestWorkerReportsAResultTheMailboxRefused(t *testing.T) {
+	refused := &messagePushError{cause: fmt.Errorf("refused: %w", gitx.ErrRemoteRefused),
+		resolution: pushNotLanded, oid: "result-oid"}
+	for _, kind := range []string{KindBuild, KindPublish} {
+		t.Run(kind, func(t *testing.T) {
+			branch := "dispat-worker-build-a-20260921-" + kind + "-abc"
+			tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
+			message := validProbe(branch)
+			message.Kind = kind
+			worker, mailbox := newWorkerFixture(t, branch, tip, message)
+			task := &claimedTask{assignment: message, tip: tip, claimed: "claim-oid", expectedTip: "claim-oid"}
+			report := Result{Header: worker.formatReplyHeader(message.Header), Assignment: tip.OID,
+				Status: StatusSucceeded, Exports: []ExportedValue{{Name: "digest", Value: "sha256:1"}},
+				Outputs: &OutputManifest{OutputTree: "tree-oid"}}
+
+			reported, err := worker.reportRefusedResult(t.Context(), task, report, "claim-oid", refused, zerolog.Nop())
+
+			require.NoError(t, err)
+			assert.Equal(t, "result-oid", reported)
+			assert.Empty(t, mailbox.carried, "nothing is carried beside the second result")
+			var sent Result
+			require.NoError(t, json.Unmarshal(mailbox.documents[branch+"/result"], &sent))
+			assert.Nil(t, sent.Outputs)
+			assert.Empty(t, sent.Exports)
+			if kind == KindPublish {
+				assert.Equal(t, StatusSucceeded, sent.Status, "a publication's status is never lost")
+				return
+			}
+			assert.Equal(t, StatusFailed, sent.Status)
+			assert.Equal(t, string(ReasonTransferRefused), sent.Reason)
 		})
 	}
 }

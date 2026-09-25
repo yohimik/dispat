@@ -83,6 +83,11 @@ const (
 	// holds it to, which is what bounds the memory a consumer spends on a
 	// description it has not verified yet.
 	ReasonManifestOversize OutputReason = "manifest-oversize"
+	// ReasonTransferRefused is a result the mailbox would not take with its
+	// outputs: a server rule, a hook or a size limit refused the push. The
+	// node reports the failure without them, and names the server's reason,
+	// redacted, in its own log.
+	ReasonTransferRefused OutputReason = "transfer-refused"
 
 	// The path rules. A manifest path is a relative, slash-separated path
 	// under one of the declared roots and nothing else, because it becomes a

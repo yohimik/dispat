@@ -10,13 +10,16 @@ package execution
 // again. The Git operations themselves are gitx's; what this file owns is the
 // protocol's use of them, which is what neither party should be writing twice.
 //
-// Three properties are worth stating because they are the reason for the
+// Four properties are worth stating because they are the reason for the
 // shape of the code rather than an accident of it. Every write is one
 // compare-and-swap push, so a lost race is answered by re-reading rather than
-// by retrying. Every read resolves an exact object id and then reads from
-// that object, never from a ref whose tip can still move (§28.4). And every
-// document is read with a stated ceiling, because a mailbox is written to by
-// other machines.
+// by retrying. A push whose outcome git could not report is settled by reading
+// the remote, never by pushing again: the chain of one attempt is strictly
+// linear, so the object this party wrote is either the tip, an ancestor of the
+// tip, or not on the branch at all. Every read resolves an exact object id and
+// then reads from that object, never from a ref whose tip can still move
+// (§28.4). And every document is read with a stated ceiling, because a mailbox
+// is written to by other machines.
 
 import (
 	"bytes"
@@ -26,6 +29,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -110,43 +114,59 @@ func NewGitMailbox(endpoint string, git *gitx.LocalGitx, signer *Signer, log zer
 	}
 }
 
-// Assign writes one create-only assignment and answers the commit it created.
+// PrepareAssignment writes one assignment into the local object store and
+// answers the commit it will travel as. Nothing leaves this machine.
 //
-// Create-only is what makes two orchestrators offering the same name produce
-// exactly one winner, and it is also why nothing here retries: a name that is
-// taken is a name this run did not choose, and 128 bits of randomness say
-// that did not happen.
-func (m *GitMailbox) Assign(ctx context.Context, message *Assignment) (string, error) {
+// Preparing and offering are two steps so that the caller can make the
+// commit its own before anybody else can see it: the branch is registered with
+// the poller, bound to this object and recorded for cleanup before the push,
+// so a node quick enough to claim between the push and the next line is still
+// heard, and a push whose outcome is unknown still leaves a ref this run
+// closes.
+func (m *GitMailbox) PrepareAssignment(ctx context.Context, message *Assignment) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	document, err := json.Marshal(message)
 	if err != nil {
 		return "", fmt.Errorf("execution: writing the assignment document: %w", err)
 	}
-	oid, err := m.commitMessage(ctx, MessageAssignment, document, nil, nil)
-	if err != nil {
-		return "", err
+	return m.commitMessage(ctx, MessageAssignment, document, nil, nil)
+}
+
+// Offer creates a branch at a prepared commit, create-only, and answers what
+// became of it once the remote has been asked.
+//
+// Create-only is what makes two orchestrators offering the same name produce
+// exactly one winner, and it is also why nothing here retries: a name that is
+// taken is a name this run did not choose, and 128 bits of randomness say
+// that did not happen. A push that reported no outcome is read back rather
+// than pushed again. The error is the push's own, and nil only for an offer
+// that landed on the first answer.
+func (m *GitMailbox) Offer(ctx context.Context, branch, oid string) (pushResolution, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	err := m.remote.PushCreate(ctx, m.endpoint, oid, branch)
+	if err == nil {
+		// Remembered as observed at the value this run put there, so the next
+		// poll reports the branch only once the other side has moved it.
+		m.observed[branch] = oid
+		m.log.Debug().Str("branch", branch).Str("commit", oid).Msg("assignment created")
+		return pushLanded, nil
 	}
-	if err := m.remote.PushCreate(ctx, m.endpoint, oid, message.Branch); err != nil {
-		return "", fmt.Errorf("execution: offering %s: %w", message.Branch, err)
-	}
-	// Remembered as observed at the value this run put there, so the next poll
-	// reports the branch only once the other side has moved it.
-	m.observed[message.Branch] = oid
-	m.log.Debug().Str("worker", message.Node).Str("branch", message.Branch).
-		Str("commit", oid).Str("kind", message.Kind).Msg("assignment created")
-	return oid, nil
+	resolution := m.resolveOwnPush(ctx, branch, oid, err)
+	m.log.Debug().Err(err).Str("branch", branch).Str("commit", oid).
+		Str("resolution", resolution.String()).Msg("the assignment push did not answer cleanly")
+	return resolution, fmt.Errorf("execution: offering %s: %w", branch, err)
 }
 
 // Advance writes the next message of a branch this party may write, under a
 // lease over the value it believes the branch holds.
 //
-// A rejected lease is read once and never retried: either the branch is
-// already at the object this call was about to put there, which is this
-// caller's own earlier push whose response was lost (the release lock reads
-// its attempt back off the remote for exactly this reason), or somebody else
-// moved it and the caller has to look at where the branch now is before it
-// decides anything.
+// A push that did not report success is settled by reading the remote and
+// never by pushing again: a message this party wrote may already be the tip,
+// or sit under whatever the other party wrote on top of it, and either way it
+// landed. A message that provably did not land, and one whose fate the reads
+// could not establish, come back as a messagePushError saying which.
 func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, kind MessageKind,
 	document []byte, carried []gitx.TreeEntry) (string, error) {
 	m.mu.Lock()
@@ -155,61 +175,168 @@ func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, ki
 	if err != nil {
 		return "", err
 	}
-	err = m.remote.PushAdvance(ctx, m.endpoint, oid, branch, expectedOld)
-	if errors.Is(err, gitx.ErrLeaseRejected) {
-		resolved, resolveErr := m.resolveLostPush(ctx, branch, oid, err)
-		if resolveErr != nil {
-			// The remote answered this push, and answered it with a refusal:
-			// whether the re-read then failed or found another object, the
-			// message this call wrote never became the branch's value.
-			return "", &messagePushError{cause: resolveErr, isRejected: true}
+	if err := m.remote.PushAdvance(ctx, m.endpoint, oid, branch, expectedOld); err != nil {
+		resolution := m.resolveOwnPush(ctx, branch, oid, err)
+		if resolution != pushLanded {
+			return "", &messagePushError{
+				cause:      fmt.Errorf("execution: advancing %s to %s: %w", branch, kind, err),
+				resolution: resolution, oid: oid,
+			}
 		}
-		return resolved, nil
+		m.log.Debug().Err(err).Str("branch", branch).Str("commit", oid).
+			Msg("the update landed although its push did not say so")
 	}
-	if err != nil {
-		return "", &messagePushError{cause: fmt.Errorf("execution: advancing %s to %s: %w", branch, kind, err)}
-	}
+	// The value this party wrote, and never a tip the settling read found: a
+	// message the other party put on top of it is still to be delivered.
 	m.observed[branch] = oid
 	m.log.Debug().Str("branch", branch).Str("commit", oid).Str("message", string(kind)).
 		Msg("coordination branch advanced")
 	return oid, nil
 }
 
-// messagePushError distinguishes an attempted remote write from a local
-// failure preparing a message. After a push starts, a missing response cannot
-// establish what another machine already received, even if the ref is later
-// removed or reset to its previous value.
+// pushResolution is what a push this party made turned out to be once the
+// remote had been asked: on the branch, provably not on it, or unknown.
+type pushResolution int
+
+const (
+	pushLanded pushResolution = iota + 1
+	pushNotLanded
+	pushUnknown
+)
+
+// String names a resolution in a log line.
+func (r pushResolution) String() string {
+	switch r {
+	case pushLanded:
+		return "landed"
+	case pushNotLanded:
+		return "not-landed"
+	default:
+		return "unknown"
+	}
+}
+
+// messagePushError is a message this party wrote whose push did not land, or
+// whose landing could not be established. A local failure preparing the
+// message is a plain error and never this type: no push happened.
 //
-// A refusal is the one answer that does establish it. isRejected marks a push
-// the remote answered with a rejected lease: the ref never took this call's
-// object, so nobody can have read the message from it.
+// The resolution is the whole point. A message that provably never became the
+// branch's value can be answered as if it was never written; one whose fate
+// is unknown may already be what the other party is acting on, and even a
+// branch later removed or reset does not say otherwise. The object id is kept
+// so that a caller can recognise the message if it surfaces later.
 type messagePushError struct {
 	cause      error
-	isRejected bool
+	resolution pushResolution
+	oid        string
 }
 
 func (e *messagePushError) Error() string { return e.cause.Error() }
 func (e *messagePushError) Unwrap() error { return e.cause }
 
-// resolveLostPush asks the remote, once, whether the rejected push had in
-// fact already been applied. Finding the intended object on the branch is
-// success; finding anything else is the rejection the caller was given, with
-// what is actually there named in it.
-func (m *GitMailbox) resolveLostPush(ctx context.Context, branch, oid string, rejected error) (string, error) {
-	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, "refs/heads/"+branch)
-	if err != nil {
-		return "", fmt.Errorf("execution: re-reading %s after a rejected update: %w", branch, err)
+// resolvePushError is the resolution a failed advance reports: the push's own
+// for a messagePushError, and not landed for a message that never left this
+// machine.
+func resolvePushError(err error) pushResolution {
+	var pushed *messagePushError
+	if !errors.As(err, &pushed) {
+		return pushNotLanded
 	}
-	for _, head := range heads {
-		if head.Name != branch || head.OID != oid {
+	return pushed.resolution
+}
+
+// ownPushReadPauses are the waits between the reads that settle a push whose
+// outcome git could not report. A refusal gets one read; an unknown outcome
+// gets three, because a push the network delayed can land after its client
+// gave up, and the second and third reads are what see it.
+var ownPushReadPauses = []time.Duration{time.Second, 2 * time.Second}
+
+// resolveOwnPush settles one push this party made by reading the remote, and
+// never pushes anything.
+//
+// A read finds the branch at the object (landed), with the object on the
+// tip's first-parent chain (landed, and the other party already answered
+// it), or elsewhere. A coordination chain is strictly linear, an assignment a
+// root and every later message a single parent over the lease it was written
+// under, so ancestry is the whole of the question. A definitive refusal whose
+// tip does not descend from the object did not land; everything else, an
+// unreadable remote included, is unknown.
+//
+// It never writes the memo. A tip found here is not a tip this party has
+// handled: the poll has to deliver it, and remembering it here would make the
+// poll skip it.
+func (m *GitMailbox) resolveOwnPush(ctx context.Context, branch, oid string, pushErr error) pushResolution {
+	isRefused := errors.Is(pushErr, gitx.ErrLeaseRejected) || errors.Is(pushErr, gitx.ErrRemoteRefused)
+	reads := 1 + len(ownPushReadPauses)
+	if isRefused {
+		reads = 1
+	}
+	for read := 0; read < reads; read++ {
+		if read > 0 && !pauseContext(ctx, ownPushReadPauses[read-1]) {
+			break
+		}
+		isLanded, err := m.readOwnPush(ctx, branch, oid)
+		if err != nil {
+			m.log.Debug().Err(err).Str("branch", branch).Str("commit", oid).
+				Msg("the remote could not be read to settle a push")
 			continue
 		}
-		m.observed[branch] = oid
-		m.log.Debug().Str("branch", branch).Str("commit", oid).
-			Msg("the rejected update was already on the branch")
-		return oid, nil
+		if isLanded {
+			return pushLanded
+		}
+		if isRefused {
+			return pushNotLanded
+		}
 	}
-	return "", fmt.Errorf("execution: advancing %s: %w", branch, rejected)
+	return pushUnknown
+}
+
+// readOwnPush is one read of the remote on behalf of resolveOwnPush: whether
+// the object is the branch's tip or on its first-parent chain.
+func (m *GitMailbox) readOwnPush(ctx context.Context, branch, oid string) (bool, error) {
+	tip, err := m.readRemoteTip(ctx, branch)
+	if err != nil || tip == "" {
+		return false, err
+	}
+	if tip == oid {
+		return true, nil
+	}
+	if err := m.remote.FetchRefs(ctx, m.endpoint, []string{branch}); err != nil {
+		return false, err
+	}
+	err = m.remote.ResolveFetchedCommit(ctx, gitx.TransportRefPrefix+branch, oid, m.maxDepth)
+	if errors.Is(err, gitx.ErrCommitNotOnRef) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// readRemoteTip is where one branch sits on the remote, and the empty string
+// for a branch the remote does not advertise.
+func (m *GitMailbox) readRemoteTip(ctx context.Context, branch string) (string, error) {
+	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, "refs/heads/"+branch)
+	if err != nil {
+		return "", fmt.Errorf("execution: reading %s: %w", branch, err)
+	}
+	for _, head := range heads {
+		if head.Name == branch {
+			return head.OID, nil
+		}
+	}
+	return "", nil
+}
+
+// pauseContext waits for one pause and reports whether the context let it
+// finish.
+func pauseContext(ctx context.Context, pause time.Duration) bool {
+	timer := time.NewTimer(pause)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // Observe polls the mailbox once and answers the branches whose tip is new or
@@ -575,10 +702,13 @@ const maxSignatureBytes = 128
 // Close removes the coordination branches this party owns, in one push per
 // batch, and takes the fetched refs out of the local store.
 //
-// It answers what became of each branch rather than one error: a lease that
-// no longer matches is a branch somebody else took over, which is reported as
-// retained rather than retried, and the branches this run still owns are
-// closed either way.
+// It answers what became of each branch rather than one error. Every batch is
+// attempted whatever became of the one before it, and the fetched refs are
+// removed whatever became of the pushes. A lease the remote refused because
+// the branch is already gone is a branch that is closed; one refused because
+// the branch moved, or refused by a server rule, is reported as retained
+// rather than retried; and a push that reported nothing is settled by reading
+// the remote.
 func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gitx.BranchOutcome, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -586,23 +716,97 @@ func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gi
 		return nil, nil
 	}
 	outcomes := make([]gitx.BranchOutcome, 0, len(leases))
-	branches := make([]string, 0, len(leases))
+	var failures []error
 	for start := 0; start < len(leases); start += gitx.MaxTransportBatch {
 		end := min(start+gitx.MaxTransportBatch, len(leases))
 		batch, err := m.remote.DeleteRemoteBranchesLease(ctx, m.endpoint, leases[start:end])
 		if err != nil {
-			return outcomes, fmt.Errorf("execution: closing %d coordination branches: %w", end-start, err)
+			failures = append(failures, fmt.Errorf("execution: closing %d coordination branches: %w", end-start, err))
+			batch = formatUnknownOutcomes(leases[start:end])
 		}
 		outcomes = append(outcomes, batch...)
 	}
+	outcomes = m.settleDeletes(ctx, outcomes)
+	branches := make([]string, 0, len(leases))
 	for _, lease := range leases {
 		delete(m.observed, lease.Branch)
 		branches = append(branches, lease.Branch)
 	}
 	if err := m.remote.DeleteLocalTransportRefs(ctx, branches); err != nil {
-		return outcomes, fmt.Errorf("execution: forgetting %d fetched coordination branches: %w", len(branches), err)
+		failures = append(failures, fmt.Errorf("execution: forgetting %d fetched coordination branches: %w",
+			len(branches), err))
 	}
-	return outcomes, nil
+	return outcomes, errors.Join(failures...)
+}
+
+// formatUnknownOutcomes is a batch the transport refused to attempt at all,
+// answered branch by branch as nothing known.
+func formatUnknownOutcomes(leases []gitx.BranchLease) []gitx.BranchOutcome {
+	outcomes := make([]gitx.BranchOutcome, 0, len(leases))
+	for _, lease := range leases {
+		outcomes = append(outcomes, gitx.BranchOutcome{Branch: lease.Branch, Result: gitx.BranchUnknown})
+	}
+	return outcomes
+}
+
+// settleDeletes reads the remote for every delete that did not answer
+// cleanly and turns the ones whose branch is gone into deletions.
+//
+// A stale lease gets one read, because git answers a lease over a ref that is
+// already gone with the same refusal as a lease over a ref that moved. An
+// unknown outcome gets three, as an unknown push does. A branch still there
+// keeps the answer it had, which the caller reports as retained, and a
+// refusal by a server rule is not read at all: the ref is still there by
+// definition.
+func (m *GitMailbox) settleDeletes(ctx context.Context, outcomes []gitx.BranchOutcome) []gitx.BranchOutcome {
+	pending := func(outcome gitx.BranchOutcome, read int) bool {
+		return outcome.Result == gitx.BranchUnknown || (outcome.Result == gitx.BranchStale && read == 0)
+	}
+	for read := 0; read <= len(ownPushReadPauses); read++ {
+		var waiting []string
+		for _, outcome := range outcomes {
+			if pending(outcome, read) {
+				waiting = append(waiting, outcome.Branch)
+			}
+		}
+		if len(waiting) == 0 {
+			break
+		}
+		if read > 0 && !pauseContext(ctx, ownPushReadPauses[read-1]) {
+			break
+		}
+		present, err := m.readPresentBranches(ctx, waiting)
+		if err != nil {
+			m.log.Debug().Err(err).Int("branches", len(waiting)).
+				Msg("the remote could not be read to settle a delete")
+			continue
+		}
+		for index, outcome := range outcomes {
+			if pending(outcome, read) && !present[outcome.Branch] {
+				outcomes[index].Result = gitx.BranchDeleted
+			}
+		}
+	}
+	return outcomes
+}
+
+// readPresentBranches is which of the named branches the remote advertises,
+// in one listing: the branch itself when there is one, and every
+// coordination branch of the endpoint otherwise.
+func (m *GitMailbox) readPresentBranches(ctx context.Context, branches []string) (map[string]bool, error) {
+	pattern := "refs/heads/" + branchPrefix + "*"
+	if len(branches) == 1 {
+		pattern = "refs/heads/" + branches[0]
+	}
+	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("execution: reading %d coordination branches: %w", len(branches), err)
+	}
+	present := make(map[string]bool, len(heads))
+	for _, head := range heads {
+		present[head.Name] = true
+	}
+	return present, nil
 }
 
 // Withdraw deletes one coordination branch under a lease over the object this
@@ -612,7 +816,8 @@ func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gi
 // and not a force: a branch still at the object this run last wrote is a
 // branch nobody has claimed or answered, so deleting it provably ends the
 // attempt; a branch that has moved is one somebody is working on, and the
-// delete must fail rather than take the work away from under them.
+// delete must fail rather than take the work away from under them. A branch
+// that is already gone is withdrawn as surely as one this call removed.
 func (m *GitMailbox) Withdraw(ctx context.Context, branch, expectedOld string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -621,8 +826,8 @@ func (m *GitMailbox) Withdraw(ctx context.Context, branch, expectedOld string) (
 	if err != nil {
 		return false, fmt.Errorf("execution: revoking %s: %w", branch, err)
 	}
-	for _, outcome := range outcomes {
-		if outcome.Branch != branch || !outcome.IsDeleted {
+	for _, outcome := range m.settleDeletes(ctx, outcomes) {
+		if outcome.Branch != branch || outcome.Result != gitx.BranchDeleted {
 			continue
 		}
 		delete(m.observed, branch)

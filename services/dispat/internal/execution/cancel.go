@@ -150,6 +150,13 @@ func (c *Coordinator) writeWithdrawal(ctx context.Context, node, task string, at
 		if err == nil {
 			return withdrawalAdvance{oid: withdrawn, parent: tipOID}, nil
 		}
+		if resolvePushError(err) == pushUnknown {
+			// The withdrawal may be on the branch, and a second one leased on
+			// whatever the reads found would stack a withdrawal on top of it.
+			// The attempt is not acknowledged, which is the answer an
+			// unreachable node gets.
+			return withdrawalAdvance{}, err
+		}
 		lastErr = err
 		head, rereadErr := c.mailboxes[node].Reread(ctx, offer.branch)
 		if rereadErr != nil || head.OID == "" || head.OID == tipOID {

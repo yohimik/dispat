@@ -409,12 +409,15 @@ the publish command had not started is an ordinary publish failure. An acknowled
 started, or no acknowledgement at all, is `E228`: the package failed at its publish stage, no second attempt is made
 in this run, its dependents are blocked, and the run exits non-zero.
 
-A failed response to an authorization push is also `E228`: the worker may already have received permission and
-started publishing. A missing branch, or one reset to its earlier state, cannot prove otherwise. The run retains
-the repository's release lock and any coordination evidence still present. Two failures do prove that no node read
-the authorization: a failure preparing it locally, which happens before any push, and a push the remote refused,
-because a rejected lease means the branch never took it. For either one dispat withdraws the waiting attempt, waits
-for its acknowledgement, fails the package at the authorization and gives the lock back.
+An authorization push that did not report success is settled by reading the branch, never by pushing it again.
+Found on the branch, or under the result the node wrote on top of it, the authorization landed, and the run reads the
+node's result as usual. Two failures prove that no node read it: a failure preparing it locally, which happens before
+any push, and a push the remote refused, a rejected lease or a server rule, whose branch does not carry it. For either
+one dispat withdraws the waiting attempt, waits for its acknowledgement, fails the package at the authorization and
+gives the lock back. Any other outcome is unknown: the worker may already have received permission and started
+publishing, and a missing branch, or one reset to its earlier state, cannot prove otherwise. The run withdraws the
+attempt as it withdraws a publisher that never answered, and unless the node says its command never started it
+reports `E228` and retains the repository's release lock and any coordination evidence still present.
 
 If the publisher never acknowledged, the release lock of the repository it was publishing into is **retained**. The
 uncertain publication's authorization ref is also retained, whether the node acknowledged after starting publish or
@@ -598,6 +601,19 @@ Every transition is one compare-and-swap push by one party:
 | cancel     | the orchestrator | the attempt is withdrawn                                                      |
 | ack        | the node         | the withdrawn attempt has stopped, with the phase it was in                   |
 | closed     | the orchestrator | the ref is deleted at the end of the run                                      |
+
+**A push is never repeated to learn its outcome.** Git reports each ref of a push as applied, as refused because the
+lease no longer held (`[rejected]`), as refused by a server rule or hook (`[remote rejected]`), or not at all; a
+`[remote failure]` and a connection lost in the middle of a push leave the outcome unknown. A party that did not hear
+success reads the branch instead: its message on the tip, or on the tip's first-parent chain, landed; a refused message
+the branch does not carry did not; anything else is unknown, and is read three times over three seconds before it is
+treated as such. The branches a run creates are recorded for cleanup before they are pushed, so a push with no known
+outcome still leaves a branch the run closes. An assignment whose push stays unknown is revoked under a lease on
+itself and offered again when the branch is gone, and goes on when the node has already claimed it. A node's claim
+whose push stays unknown is run if it surfaces on the branch, and a withdrawal on top of it is acknowledged. A result a
+server rule refuses is reported once more without what was refused: a build, a preparation or a sweep task reports a
+failure with the reason `transfer-refused` and no outputs, and a publication keeps its status and drops its exports,
+so the run hears an answer rather than waiting out `timeouts.task`. The node logs the server's reason, redacted.
 
 **What an assignment carries:** the protocol version, the kind, the run id, the plan digest, the task and attempt,
 the ownership generation, the node it is addressed to, the branch it may appear on and the instant it was issued;

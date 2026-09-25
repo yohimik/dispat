@@ -18,7 +18,7 @@ func TestDelayedObservedClaimCannotReplaceAcknowledgedCleanupLease(t *testing.T)
 	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, answeredPreflight)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
 	assignment := probeAssignment("build-a", branch)
-	offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+	offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 	require.NoError(t, err)
 	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
 		node: "build-a", branch: branch, oid: offered,
@@ -74,7 +74,7 @@ func TestForeignObservedTipCannotBecomeCleanupLease(t *testing.T) {
 	fixture := newCoordinatorFixture(t, TransferLimits{MaxManifestBytes: 1 << 20}, answeredPreflight)
 	branch := FormatBranch("build-a", KindProbe, time.Now())
 	assignment := probeAssignment("build-a", branch)
-	offered, err := fixture.orchestrator.mailbox.Assign(t.Context(), assignment)
+	offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 	require.NoError(t, err)
 	fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
 		node: "build-a", branch: branch, oid: offered,

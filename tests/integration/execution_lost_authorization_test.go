@@ -21,14 +21,30 @@ import (
 
 // TestExecutionLostAuthorizationResponseRetainsExclusion proves that a failed
 // push response cannot undo an authorization a worker has already consumed.
-// A vanished or rewound branch cannot prove the command never started.
+//
+// The authorization push applies and its response is lost after the publish
+// command has started. The run settles the push by reading the branch, never
+// by pushing again. Found on the branch, or under the result the node wrote
+// on top of it, the authorization landed: the node's result is read as
+// always, the package is recorded and the lock goes back. A branch that has
+// since vanished or been reset to its previous state proves nothing about a
+// worker that may already have consumed the authorization, so that outcome is
+// unknown: the run asks the node, the node cannot answer a withdrawal of a
+// state it has moved past, and the lock is retained.
 func TestExecutionLostAuthorizationResponseRetainsExclusion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the lost-response fixture uses a POSIX shell")
 	}
 	for _, state := range []string{"visible", "deleted", "rewound"} {
 		t.Run(state, func(t *testing.T) {
-			rig := newExecutionSlowPublishRig(t)
+			rig := newExecutionSlowPublishRig(t, func(cfg *models.File) {
+				cfg.Execution.Timeouts.Cancel = 10
+				if state == "visible" {
+					// The command ends by itself, so the node's result is
+					// there to be read once the authorization has landed.
+					cfg.Scripts["publish"] = models.Script{executionPublishProbe}
+				}
+			})
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 			shim := t.TempDir()
 			realGit, err := exec.LookPath("git")
@@ -54,10 +70,20 @@ func TestExecutionLostAuthorizationResponseRetainsExclusion(t *testing.T) {
 			}
 			require.NoError(t, os.WriteFile(resume, nil, 0600))
 			res := started.Wait()
+			assert.Equal(t, []string{"core"}, executionProbedPackages(rig, "publish"), "the effect starts once")
+			if state == "visible" {
+				require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+				assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
+					"an authorization found on the branch is no unknown outcome\nstdout:\n%s", res.Stdout)
+				assert.True(t, rig.repo.IsTagged("core@0.1.0"), "the publication is recorded: %v", rig.repo.TagList())
+				assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock goes back")
+				assert.Empty(t, rig.branches(), "with no coordination branch left behind")
+				stopAll(t, []*executionWorker{worker})
+				return
+			}
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode), "stdout:\n%s", res.Stdout)
 			assert.True(t, remoteHoldsLock(t, rig.origin), "the publisher already started and has not acknowledged stopping")
-			assert.Equal(t, []string{"core"}, executionProbedPackages(rig, "publish"), "the effect starts once")
 			assert.Empty(t, executionReleaseTags(rig), "an unknown effect has no successful release record")
 			if state != "deleted" {
 				assert.Contains(t, rig.branches(), branches[0], "retain the authorization evidence")

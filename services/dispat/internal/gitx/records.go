@@ -199,8 +199,8 @@ func (c *LocalGitx) PushReleaseRefs(ctx context.Context, remote string, refs []R
 		if !isReported {
 			return nil, transportError(runErr, remote, "pushing %s", name)
 		}
-		if status != pushRejected {
-			outcomes = append(outcomes, RefOutcome{Name: ref.Name, Result: refResultOf(status)})
+		if status.flag != pushRejected {
+			outcomes = append(outcomes, RefOutcome{Name: ref.Name, Result: refResultOf(status.flag)})
 			continue
 		}
 		outcome, err := c.resolveRefusedRef(ctx, remote, ref.Name)

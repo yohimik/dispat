@@ -236,11 +236,21 @@ func (c *Coordinator) probe(ctx context.Context, link Link) (*NodeReport, error)
 		},
 		Limits: c.Limits,
 	}
-	offered, err := mailbox.Assign(ctx, assignment)
+	offered, err := mailbox.PrepareAssignment(ctx, assignment)
 	if err != nil {
 		return nil, err
 	}
+	// Owned before it is pushed, so a probe whose push has no known outcome
+	// still leaves a branch this run closes.
 	c.recordOwnedRef(ctx, ownedRefStep{node: link.Name, branch: branch, oid: offered})
+	resolution, err := mailbox.Offer(ctx, branch, offered)
+	if resolution == pushNotLanded {
+		c.forgetOwnedRef(link.Name, branch)
+		return nil, err
+	}
+	// Landed, or not known to have: a probe that reached the node is answered
+	// within the preflight wait like any other, and one that did not costs
+	// that wait and refuses the node.
 	return c.awaitReport(ctx, link, branch, offered)
 }
 
@@ -591,7 +601,7 @@ func (c *Coordinator) Close(ctx context.Context) error {
 			failures = append(failures, err)
 		}
 		for _, outcome := range outcomes {
-			if !outcome.IsDeleted {
+			if outcome.Result != gitx.BranchDeleted {
 				retained = append(retained, outcome.Branch)
 			}
 		}

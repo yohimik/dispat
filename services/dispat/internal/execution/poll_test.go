@@ -227,7 +227,7 @@ func TestWorkerIdleClockCountsFromTheLastThingItDid(t *testing.T) {
 func TestMailboxInspectsTheChainUnderAForeignTip(t *testing.T) {
 	fixture := newMailboxFixture(t)
 	branch := FormatBranch("build-a", KindBuild, time.Now())
-	offered, err := fixture.mailbox.Assign(t.Context(), probeAssignment("build-a", branch))
+	offered, err := assign(t.Context(), fixture.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
 	claimed, err := fixture.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
 		[]byte(`{"assignment":"`+offered+`"}`), nil)

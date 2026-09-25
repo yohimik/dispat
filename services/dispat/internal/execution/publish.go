@@ -24,7 +24,6 @@ package execution
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"time"
@@ -333,32 +332,29 @@ func (c *Coordinator) authorizePublication(ctx context.Context, lease *Lease, ta
 	return nil
 }
 
-// reportLostAuthorization distinguishes an authorization that provably never
-// reached the branch from a push whose outcome is unknown.
+// reportLostAuthorization settles an authorization whose push did not
+// report success and was not found on the branch afterwards.
 //
-// Two failures prove it never did: a local failure preparing the message,
-// which happens before any push, and a push the remote refused, whose lease
-// was rejected so that the branch never took the message. Both withdraw the
-// waiting publisher exactly as a refused authorization does; the attempt stays
-// marked authorized, so no second authorization can follow either way. Every
-// other push failure is a push with no answer, and the current remote tip is
-// not historical evidence about it: an authorization may have been read before
-// somebody deleted or rewound the branch, so that outcome is unknown.
+// Two failures prove it never reached the branch: a local failure preparing
+// the message, which happens before any push, and a push the remote refused
+// whose branch the settling read did not find built on it. Both withdraw the
+// waiting publisher exactly as a refused authorization does; the attempt
+// stays marked authorized, so no second authorization can follow either way.
+// A push whose outcome the reads could not establish is an authorization a
+// node may have read before anybody could look, so the run asks the node
+// instead, exactly as it asks a publisher that never answered: a withdrawal
+// leased on the ready commit, and an unknown outcome unless the node says
+// its command never started.
 func (c *Coordinator) reportLostAuthorization(ctx context.Context, lease *Lease, task string,
 	attempt int, repository string, offer taskOffer, reply taskReply, err error) error {
-	var pushed *messagePushError
-	if !errors.As(err, &pushed) || pushed.isRejected {
+	if resolvePushError(err) == pushNotLanded {
 		return c.withdrawPublication(ctx, lease, task, attempt, offer, reply, err)
 	}
-	lease.Leak(LeakTransport)
 	c.Log.Debug().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Int("attempt", attempt).Str("code", CodePublicationUnknown).
 		Str("category", CategoryPublicationUnknown).
 		Msg("the publication authorization push returned no usable answer")
-	return c.reportUnknownPublication(unknownPublication{
-		Task: task, Attempt: attempt, Node: lease.Node, Repository: repository,
-		Branch: offer.branch,
-	}, cancellation{})
+	return c.resolveUnansweredPublication(ctx, lease, task, attempt, repository, offer, reply.commit)
 }
 
 // formatGo is the authorization document: the work it belongs to, the exact

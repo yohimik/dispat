@@ -140,15 +140,103 @@ func TestTransportBatchedDeleteReportsEachRef(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []BranchOutcome{
-		{Branch: "dispat-worker-a-1", IsDeleted: true},
-		{Branch: "dispat-worker-a-2", IsDeleted: false},
-		{Branch: "dispat-worker-a-3", IsDeleted: true},
+		{Branch: "dispat-worker-a-1", Result: BranchDeleted},
+		{Branch: "dispat-worker-a-2", Result: BranchStale},
+		{Branch: "dispat-worker-a-3", Result: BranchDeleted},
 	}, outcomes)
 
 	heads, err := f.git.ListRemoteHeads(ctx, f.bare, "refs/heads/dispat-worker-a-*")
 	require.NoError(t, err)
 	require.Len(t, heads, 1)
 	assert.Equal(t, RemoteHead{Name: "dispat-worker-a-2", OID: f.second}, heads[0])
+}
+
+// TestPushStatusTellsTheThreeOutcomesApart: a `!` line is three different
+// answers, and the protocol acts on each differently. A lost lease and a
+// server's refusal never applied the update; a remote failure, a refusal git
+// does not name and a missing line may have. The reason a server gives is
+// redacted, because a hook chooses its text.
+func TestPushStatusTellsTheThreeOutcomesApart(t *testing.T) {
+	const ref = "refs/heads/dispat-worker-a-1"
+	for name, row := range map[string]struct {
+		out        string
+		isReported bool
+		want       pushOutcome
+		delete     BranchResult
+	}{
+		"a new ref":          {"*\tabc:" + ref + "\t[new branch]\n", true, pushApplied, BranchDeleted},
+		"already there":      {"=\tabc:" + ref + "\t[up to date]\n", true, pushApplied, BranchDeleted},
+		"a delete":           {"-\t:" + ref + "\t[deleted]\n", true, pushApplied, BranchDeleted},
+		"a stale lease":      {"!\tabc:" + ref + "\t[rejected] (stale info)\n", true, pushStale, BranchStale},
+		"fetch first":        {"!\tabc:" + ref + "\t[rejected] (fetch first)\n", true, pushStale, BranchStale},
+		"an absent delete":   {"!\t(delete):" + ref + "\t[rejected] (stale info)\n", true, pushStale, BranchStale},
+		"a hook":             {"!\tabc:" + ref + "\t[remote rejected] (hook declined)\n", true, pushRefused, BranchRefused},
+		"a remote failure":   {"!\tabc:" + ref + "\t[remote failure] (remote failed to report status)\n", true, pushUnknown, BranchUnknown},
+		"an unnamed refusal": {"!\tabc:" + ref + "\t[no match]\n", true, pushUnknown, BranchUnknown},
+		"an unknown flag":    {"X\tabc:" + ref + "\t[strange]\n", true, pushUnknown, BranchUnknown},
+		"another ref only":   {"*\tabc:refs/heads/other\t[new branch]\n", false, 0, 0},
+		"no output at all":   {"", false, 0, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, isReported := findPushStatus(row.out, ref)
+			require.Equal(t, row.isReported, isReported)
+			if !isReported {
+				return
+			}
+			assert.Equal(t, row.want, status.resolve())
+			assert.Equal(t, row.delete, status.resolveDelete())
+		})
+	}
+
+	status, isReported := findPushStatus("!\tabc:"+ref+
+		"\t[remote rejected] (denied for https://bot:hunter2@git.example/acme.git)\n", ref)
+	require.True(t, isReported)
+	assert.NotContains(t, status.formatReason(), "hunter2", "a server's reason is redacted")
+	assert.Contains(t, status.formatReason(), "[remote rejected] (denied for https://")
+}
+
+// TestTransportPushOutcomesAgainstARealRemote: what git itself answers for the
+// shapes the protocol relies on. A lease over a ref that is already gone is a
+// stale lease and nothing is sent; re-pushing the object a ref already holds
+// is a success; a pre-receive hook is a refusal distinct from a lost lease; and
+// a push that never reported the ref is an unknown outcome, whether or not git
+// failed on its way out.
+func TestTransportPushOutcomesAgainstARealRemote(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+
+	outcomes, err := f.git.DeleteRemoteBranchesLease(ctx, f.bare, []BranchLease{
+		{Branch: "dispat-worker-a-gone", ExpectedOld: f.first},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []BranchOutcome{{Branch: "dispat-worker-a-gone", Result: BranchStale}}, outcomes,
+		"a lease over an absent ref is refused as stale")
+
+	require.NoError(t, f.git.PushCreate(ctx, f.bare, f.first, "dispat-worker-a-same"))
+	require.NoError(t, f.git.PushAdvance(ctx, f.bare, f.first, "dispat-worker-a-same", f.second),
+		"the object the ref already holds is this caller's own earlier push")
+
+	hook := filepath.Join(f.bare, "hooks", "pre-receive")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	err = f.git.PushCreate(ctx, f.bare, f.second, "dispat-worker-a-hooked")
+	require.ErrorIs(t, err, ErrRemoteRefused)
+	assert.NotErrorIs(t, err, ErrLeaseRejected, "a server's refusal is not a lost lease")
+	assert.Contains(t, err.Error(), "pre-receive hook declined")
+	outcomes, err = f.git.DeleteRemoteBranchesLease(ctx, f.bare, []BranchLease{
+		{Branch: "dispat-worker-a-same", ExpectedOld: f.first},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, BranchRefused, outcomes[0].Result)
+	require.NoError(t, os.Remove(hook))
+
+	missing := filepath.Join(t.TempDir(), "absent.git")
+	err = f.git.PushCreate(ctx, missing, f.first, "dispat-worker-a-lost")
+	require.ErrorIs(t, err, ErrPushUnknown, "a remote that never answered says nothing about the ref")
+	outcomes, err = f.git.DeleteRemoteBranchesLease(ctx, missing, []BranchLease{
+		{Branch: "dispat-worker-a-lost", ExpectedOld: f.first},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, BranchUnknown, outcomes[0].Result)
 }
 
 // TestTransportListsAndBatchesWithinItsCeilings: the mailbox reads are
