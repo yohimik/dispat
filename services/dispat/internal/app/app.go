@@ -96,6 +96,10 @@ type App struct {
 	// closing summary can ask it what every task came to. It is nil for every
 	// run that delegates nothing, and the summary then prints nothing.
 	coordinator *execution.Coordinator
+	// isCoordinatorClosed records that the coordinator's refs were closed, so
+	// the deferred close that guards every early return of a run does nothing
+	// once the closing phase has closed them before the locks went back.
+	isCoordinatorClosed bool
 
 	// runID names this run when it spreads over several machines, and is
 	// empty for every run that does not: it is generated once, before the

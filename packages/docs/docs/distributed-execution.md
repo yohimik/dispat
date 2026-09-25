@@ -440,8 +440,10 @@ may end with a lock retained and no release record at all, so the registry is th
 ordinary run plans what is still owed and publishes it, exactly as it does after an interrupted local publish. Read
 [recovering from a failed run](./reference/releasing/recovery.md) for the general shape of that.
 
-**Leftover coordination branches need classification before deletion.** A completed run deletes its own refs and
-reports `W244` when one survives, with exit code `0`, because a coordination branch carries no release record. An
+**Leftover coordination branches need classification before deletion.** A completed run deletes its own refs before
+it gives its release locks back, within two minutes, and reports `W244` when one survives, with exit code `0`, because
+a coordination branch carries no release record. A mailbox that does not answer within that bound costs the refs, never
+the locks. An
 `E228` run retains the uncertain publication's authorization as evidence; follow the recovery order above before
 deleting it. For other branches of a crashed run, confirm that no process still uses them and that their current tips
 belong to that run's authenticated chain. Investigate a ref whose tip changed unexpectedly or cannot be authenticated

@@ -558,6 +558,12 @@ func (a *App) completeRelease(ctx context.Context, pl *plan.Plan, results map[st
 	start time.Time) (map[string]*release.Result, error) {
 	crit := &criticals{}
 	a.recordCompletedReleases(ctx, closingRecord{plan: pl, results: results, hooks: hooks, gh: gh, fleet: fleet}, crit)
+	// The coordination refs this run created are closed before the locks go
+	// back, as every earlier return closes them through its defer: nothing of
+	// a distributed run may outlive the exclusion it ran under.
+	if a.coordinator != nil {
+		a.closeCoordinator(ctx, a.coordinator)
+	}
 	// Locks cover every publication, durable record and run hook. Their
 	// release is itself the final critical step: perform it before the summary
 	// and closing webhook so neither can call a stranded lock a success.

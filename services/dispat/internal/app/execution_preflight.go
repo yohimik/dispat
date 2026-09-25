@@ -151,16 +151,44 @@ func (a *App) reportPreflightFailure(err error) error {
 	return err
 }
 
+// coordinationCloseTimeout bounds the close of this run's coordination refs.
+//
+// The close stops the pollers and deletes the run's settled branches with one
+// batched push per mailbox, so it is a few round trips to remotes the run was
+// already talking to. Two minutes covers several slow mailboxes with room to
+// spare, and it is a bound that matters: the close runs before the release
+// locks go back, so a push that never answers would otherwise hold every lock
+// of the run for as long as it liked.
+var coordinationCloseTimeout = 2 * time.Minute
+
+// coordinationClosex is the one thing the way out of a run asks of its
+// coordinator: close what it owns. *execution.Coordinator has it.
+type coordinationClosex interface {
+	Close(ctx context.Context) error
+}
+
 // closeCoordinator deletes settled coordination refs this run created and
 // preserves an unknown publisher's branch for reconciliation.
 //
 // It runs on a context detached from cancellation, like every other
 // finalization in the release path: an interrupted run has more reason to
-// clean its mailboxes than a finished one. An unexpected ref that survives is
-// a warning; an unknown publisher's branch is retained on purpose for
-// reconciliation and a possible late result. Neither is a release record.
-func (a *App) closeCoordinator(ctx context.Context, coordinator *execution.Coordinator) {
-	if err := coordinator.Close(context.WithoutCancel(ctx)); err != nil {
+// clean its mailboxes than a finished one. It is bounded by
+// coordinationCloseTimeout, because it runs before the locks go back. An
+// unexpected ref that survives is a warning; an unknown publisher's branch is
+// retained on purpose for reconciliation and a possible late result. Neither
+// is a release record.
+//
+// Only the first call closes anything. The closing phase closes the
+// coordinator explicitly before it gives the locks back, and the deferred
+// call that covers every earlier return then has nothing left to do.
+func (a *App) closeCoordinator(ctx context.Context, coordinator coordinationClosex) {
+	if a.isCoordinatorClosed {
+		return
+	}
+	a.isCoordinatorClosed = true
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationCloseTimeout)
+	defer cancel()
+	if err := coordinator.Close(closeCtx); err != nil {
 		event := a.log.Warn().Err(err).Str("code", execution.CodeTransportRetained).
 			Str("category", execution.CategoryTransportCleanup)
 		execution.AttachIdentity(event, err).Msg("coordination branches were not closed")
