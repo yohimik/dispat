@@ -19,19 +19,70 @@ import "github.com/yohimik/dispat/services/dispat/internal/globx"
 // nothing: the orphan this file exists to prevent.
 //
 // The two halves are ordered by cost, and the order is not an optimisation
-// detail but what keeps the rule affordable. A target whose pending window
-// still holds the commit has been delivered nothing by anybody (delivery
-// happens in a release, and a release leaves the commit behind), so the owed
-// set is every source within the unit's depth of it and one bitset lookup
-// answers the whole question. Only a target that got ahead of the commit is
-// asked the finer one, and getting ahead is rare: it takes a failed or held
-// provider and a consumer with work of its own.
+// detail but what keeps the rule affordable. A target whose fresh window still
+// holds the commit has been delivered nothing by anybody (delivery happens in
+// a release, and a release carries the commit), so the owed set is every
+// source within the unit's depth of it and one bitset lookup answers the whole
+// question. Only a target whose release carries the commit is asked the finer
+// one: one that got ahead of it on its stable line, and one whose prerelease
+// train shipped it. Either takes a failed or held provider and a consumer
+// with work of its own, or a train that already delivered, which the ancestry
+// index answers without Git.
 
-// owedSources is owed(u, d) for a target whose pending window no longer holds
-// the unit's commit: the unit's source packages that no release of theirs has
-// delivered to the target. An empty result means the unit has nothing left to
-// give this target and admission stands exactly where it stood before the
-// delivery test existed.
+// bumpAdmission is one target's answer to one unit's bump (§9.2 phase 3).
+type bumpAdmission struct {
+	// owed are the sources that still owe the target this contribution, in
+	// name order: the providers its release picks a version up from. Empty
+	// when nothing is owed.
+	owed []string
+	// isCarried reports that a prerelease of the target's current train
+	// already published the commit, so the bump counts toward the train's
+	// target (§11.4) whether or not anything is still owed.
+	isCarried bool
+}
+
+// admitBump is §13.4a's admission of one unit's bump for one target, from the
+// sources within the unit's depth of it. false means the unit neither counts
+// toward the target's version nor gives it a reason to release.
+//
+// Three positions of the target against the commit, and one question each:
+//
+//   - The commit is in Wfresh(target): nobody has delivered it, so every source
+//     within reach owes it, unless a cancel of the target discarded the
+//     contribution (§13.5a).
+//   - A prerelease of the target's train published the commit: the bump
+//     counts toward the train whatever else holds, and the target is still
+//     owed by every source whose release it has not reached. The train
+//     published the commit, not the source's version, so reading the pair as
+//     shipped would discharge the debt §13.4a finds outstanding.
+//   - The target released past the commit on its stable line: it is admitted
+//     only for the sources that still owe it.
+//
+// In the last two a cancel of the target discards only the owed part: the
+// target's own release is published and beyond any cancel (§10.3).
+func (cp *computation) admitBump(target, commitKey string, sources []string) (bumpAdmission, bool) {
+	isPending := cp.inWindow(target, commitKey)
+	isCarried := isPending && cp.containedInBaseline(target, commitKey)
+	if isPending && !isCarried {
+		if cp.cancelledFor(commitKey, target) {
+			return bumpAdmission{}, false
+		}
+		return bumpAdmission{owed: sources}, true
+	}
+	owed := cp.owedSources(target, commitKey, sources)
+	if len(owed) > 0 && cp.cancelledForOwed(commitKey, target) {
+		owed = nil
+	}
+	if len(owed) == 0 && !isCarried {
+		return bumpAdmission{}, false
+	}
+	return bumpAdmission{owed: owed, isCarried: isCarried}, true
+}
+
+// owedSources is owed(u, d) for a target whose baseline carries the unit's
+// commit, past its stable tag or on its prerelease train: the unit's source
+// packages that no release of theirs has delivered to the target. An empty
+// result means the unit has nothing left to give this target.
 //
 // sources is the unit's source set after §13.4a suppression, restricted to the
 // sources within the unit's depth of the target (§9.2's from(d)) and in name

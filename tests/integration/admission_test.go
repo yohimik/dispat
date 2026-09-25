@@ -374,6 +374,70 @@ func TestAdmissionRefusesAProviderReleasedAloneAtItsConsumersCommit(t *testing.T
 	})
 }
 
+// TestAdmissionOwesATrainConsumerThatProceededPastItsProvider is vector 80e:
+// the consumer of vector 80d proceeds onto a prerelease train instead of its
+// stable line. The commit stays in the consumer's train window, which runs
+// from its stable tag, but its prerelease published the commit and not the
+// provider's version, so the provider still owes it (SPEC 13.3, 13.4a). Every
+// answer is the stable line's, whose control is
+// TestAdmissionRefusesAProviderReleasedAloneAtItsConsumersCommit: a
+// provider-only retry at the consumer's release commit is refused with E201, a
+// run with both publishes the provider and then the consumer's next
+// prerelease, and a provider that ships alone later leaves a catch-up (W193).
+func TestAdmissionOwesATrainConsumerThatProceededPastItsProvider(t *testing.T) {
+	env := []string{admissionProviderOK + "=1"}
+	proceeded := func(t *testing.T) *harness.Repo {
+		t.Helper()
+		r := admissionRepo(t, admissionShape{})
+		r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli)%beta: own flag")
+		require.NotEqual(t, 0, r.Release().Code, "the provider's publish failed, so the run failed")
+		require.Equal(t, 1, r.TagCount("cli@0.2.0-beta.0"), "the consumer proceeded onto its train; tags: %v",
+			r.TagList())
+		return r
+	}
+
+	t.Run("the provider alone is refused before it publishes", func(t *testing.T) {
+		r := proceeded(t)
+		refused := r.CommandEnv(env, "--package", "core")
+		require.Equal(t, 1, refused.Code, "stdout:\n%s\nstderr:\n%s", refused.Stdout, refused.Stderr)
+		report := admissionEvent(refused.Events, "E201", "cli")
+		require.NotNil(t, report, "E201 names the consumer; stdout:\n%s", refused.Stdout)
+		assert.Equal(t, "core", report.Str("provider"))
+		assert.Equal(t, r.Git("rev-list", "-n1", "cli@0.2.0-beta.0"), report.Str("commit"))
+		assert.Zero(t, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, []string{"0.1.0"}, admissionPublications(t, r), "the provider published nothing")
+	})
+
+	t.Run("the consumer's next prerelease follows the provider", func(t *testing.T) {
+		r := proceeded(t)
+		res := r.CommandEnv(env, "--package", "core,cli")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.False(t, harness.IsCodePresent(res.Events, "E201"))
+		assert.Equal(t, 1, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, 1, r.TagCount("cli@0.2.0-beta.1"), "tags: %v", r.TagList())
+		assert.Contains(t, res.Stdout, `"dueToProviders":["core"]`,
+			"the owed provider is what explains the release; stdout:\n%s", res.Stdout)
+		assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
+		assertAdmissionSettled(t, r)
+	})
+
+	t.Run("a provider that ships alone later leaves a catch-up", func(t *testing.T) {
+		r := proceeded(t)
+		r.CommitEmpty("chore(core): retry the provider")
+		provider := r.CommandEnv(env, "--package", "core")
+		require.Equal(t, 0, provider.Code, "stdout:\n%s\nstderr:\n%s", provider.Stdout, provider.Stderr)
+		require.Equal(t, 1, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+
+		catchUp := r.CommandEnv(env, "release")
+		require.Equal(t, 0, catchUp.Code, "stdout:\n%s\nstderr:\n%s", catchUp.Stdout, catchUp.Stderr)
+		assert.Equal(t, 1, r.TagCount("cli@0.2.0-beta.1"), "tags: %v", r.TagList())
+		assert.True(t, harness.IsCodePresentForPackage(catchUp.Events, "W193", "cli"),
+			"stdout:\n%s", catchUp.Stdout)
+		assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
+		assertAdmissionSettled(t, r)
+	})
+}
+
 // TestAdmissionReportsAConsumerThatFailedAfterItsProviderAtItsCommit is the
 // same state reached by a failure rather than a selection: the retry releases
 // both at the consumer's own commit, the provider publishes and the consumer

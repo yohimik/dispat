@@ -684,66 +684,33 @@ func (cp *computation) propagateBumps() {
 					continue
 				}
 				reached++
-				from := reaching[t.name]
-				// Admission follows DELIVERY, not position (§13.4a).
-				//
-				// The target's own window is the cheap half of that, and the
-				// whole of catch-up: a consumer that missed a run still has
-				// the commit pending, so it is still admitted whatever the
-				// source has since released (§13.7a, G2), and a target that
-				// has released nothing past the commit has been delivered
-				// nothing either. A target that got AHEAD of the commit, by
-				// releasing on a reason of its own while this source's publish
-				// failed or was held, is asked the finer question, and is
-				// admitted for the sources that still owe it a version.
-				isPending := cp.inWindow(t.name, rec.key)
-				owed := from
-				if !isPending {
-					if owed = cp.owedSources(t.name, rec.key, from); len(owed) == 0 {
-						continue
-					}
-				}
-				isCancelled := cp.cancelledFor(rec.key, t.name)
-				if !isPending {
-					// The target's baseline contains the commit and the owed
-					// source has not delivered its version: what the target
-					// published there does not put the contribution beyond a
-					// cancel of the target (§13.5a).
-					isCancelled = cp.cancelledForOwed(rec.key, t.name)
-				}
-				if isCancelled { // §13.5a
+				bump, isAdmitted := cp.admitBump(t.name, rec.key, reaching[t.name])
+				if !isAdmitted {
 					continue
 				}
-				// A contribution the target's baseline prerelease already
-				// published bypasses the §9.3a gate: the resolvability
-				// question was settled when it shipped, its bump must keep
-				// counting toward the train's target, and re-warning W208
-				// about it would report a done deal as a suppression.
-				//
-				// Only ever for a commit the window still holds. A target that
-				// overtook the commit is behind it by definition, and reading
-				// that as "the train already shipped this" would discharge the
-				// obligation the delivery test has just found outstanding.
-				published := isPending && cp.containedInBaseline(t.name, rec.key)
-				if !published && !(anyStable || srcChan[cp.channel[t.name]]) {
+				if len(bump.owed) > 0 && !(anyStable || srcChan[cp.channel[t.name]]) {
 					// §9.3a: a bump is a claim that the dependent has
 					// something new to pick up, and across a channel boundary
-					// that claim is false — the dependent goes on resolving
+					// that claim is false: the dependent goes on resolving
 					// the origin by its stable range exactly as before.
 					cp.relWarn(t.name, CodeBumpSuppressed, rec.key,
 						fmt.Sprintf("propagated bump from %s suppressed: %s releases on %q, which %s (on %q) cannot resolve",
 							t.from, t.from, cp.channel[t.from], t.name, cp.channel[t.name]))
-					continue
+					if !bump.isCarried {
+						continue
+					}
+					bump.owed = nil
 				}
 				rel := cp.rel[t.name]
 				rel.PropagatedBump = ccme.MaxBump(rel.PropagatedBump, prop.Bump)
-				if published {
-					// The bump keeps counting toward the train's target
-					// (§11.4 recomputes it over the whole train), but a
-					// delivered blast is not a reason this package releases
-					// again: out of Sources it stays clear of DueTo, the
-					// catch-up scan and the records, which would otherwise
-					// re-report it on every later plan until graduation.
+				if len(bump.owed) == 0 {
+					// Carried by the target's train and owed by nobody: the
+					// bump keeps counting toward the train's target (§11.4
+					// recomputes it over the whole train), but a delivered
+					// blast is not a reason this package releases again: out
+					// of Sources it stays clear of DueTo, the catch-up scan
+					// and the records, which would otherwise re-report it on
+					// every later plan until graduation.
 					continue
 				}
 				rel.NewWork = true
@@ -758,7 +725,7 @@ func (cp *computation) propagateBumps() {
 				// whose version the target already carries did not put it
 				// here, and one the target does not depend on within the
 				// unit's depth never could.
-				for _, src := range owed {
+				for _, src := range bump.owed {
 					rel.Sources = append(rel.Sources, StaleSource{
 						Provider:  src,
 						Commit:    rawHistoryKey(rec.key),
@@ -768,7 +735,7 @@ func (cp *computation) propagateBumps() {
 					})
 				}
 				if tracing {
-					cp.log.Trace().Str("package", t.name).Str("from", strings.Join(owed, ",")).
+					cp.log.Trace().Str("package", t.name).Str("from", strings.Join(bump.owed, ",")).
 						Int("level", t.level).Str("bump", prop.Bump.String()).
 						Str("commit", rec.key).Msg("plan: bump propagated")
 				}
