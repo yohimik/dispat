@@ -408,7 +408,7 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 
 // readRepositoryUnions reads, once, every repository whose windows start at
 // more than one boundary, and leaves each of those windows in idx.unions for
-// load to pick up. It is loadLegacyWindows' single read (plan.go) per
+// load to pick up. It is loadLegacyWindows' single read (windows.go) per
 // repository: the union in one walk, the windows recovered from it by the
 // marker pass. A repository it does not apply to is simply left to load: a Git
 // implementation without gitx.UnionHistoryx, a single boundary, a boundary
