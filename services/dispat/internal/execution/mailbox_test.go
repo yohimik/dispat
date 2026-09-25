@@ -107,7 +107,7 @@ func TestMailboxCarriesOneAttemptEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{branch}, orchestrator.remoteBranches(t))
 
-	heads, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	heads, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	require.Len(t, heads, 1)
 	assert.Equal(t, offered, heads[0].OID)
@@ -134,7 +134,7 @@ func TestMailboxCarriesOneAttemptEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	// The orchestrator sees the branch move and reads the result off it.
-	heads, err = orchestrator.mailbox.Observe(t.Context(), "refs/heads/"+branch)
+	heads, err = orchestrator.mailbox.Observe(t.Context(), "refs/heads/"+branch, nil)
 	require.NoError(t, err)
 	require.Len(t, heads, 1)
 	assert.Equal(t, reported, heads[0].OID)
@@ -166,23 +166,23 @@ func TestMailboxObservesOnlyWhatMoved(t *testing.T) {
 	offered, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
 
-	first, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	first, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	require.Len(t, first, 1)
 
-	again, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	again, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	assert.Empty(t, again, "an unchanged branch costs nothing after the first look")
 
 	_, err = worker.mailbox.Advance(t.Context(), branch, offered, MessageClaim,
 		mustMarshal(t, Claim{Assignment: offered}), nil)
 	require.NoError(t, err)
-	moved, err := orchestrator.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	moved, err := orchestrator.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	assert.Len(t, moved, 1, "the other party's push is what a poll is looking for")
 
 	worker.mailbox.Forget()
-	rebuilt, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	rebuilt, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	assert.Len(t, rebuilt, 1, "a node whose store was rebuilt looks at everything again")
 }
@@ -203,7 +203,7 @@ func TestMailboxFetchesInBatches(t *testing.T) {
 
 	seen := map[string]bool{}
 	for polls := 0; polls < 3 && len(seen) < len(offered); polls++ {
-		heads, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+		heads, err := worker.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 		require.NoError(t, err)
 		assert.LessOrEqual(t, len(heads), gitx.MaxTransportBatch, "one fetch names at most one batch")
 		for _, head := range heads {
@@ -226,7 +226,7 @@ func TestMailboxRefusesWhatItCannotAuthenticate(t *testing.T) {
 	branch := FormatBranch("build-a", KindProbe, time.Now())
 	offered, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
-	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	require.Len(t, heads, 1)
 	tip, err := fixture.mailbox.Inspect(t.Context(), heads[0])
@@ -305,7 +305,7 @@ func TestMailboxSettlesAPushWithNoAnswer(t *testing.T) {
 			mustMarshal(t, Claim{Assignment: offered}), nil)
 
 		require.NoError(t, err, "a message the other party built on is on the branch")
-		heads, err := fixture.mailbox.Observe(t.Context(), "refs/heads/"+branch)
+		heads, err := fixture.mailbox.Observe(t.Context(), "refs/heads/"+branch, nil)
 		require.NoError(t, err)
 		require.Len(t, heads, 1, "the settling read recorded nothing, so the poll delivers the answer")
 		tip, err := fixture.mailbox.Inspect(t.Context(), heads[0])
@@ -602,7 +602,7 @@ func TestMailboxReadsOnlyWhatWasFetched(t *testing.T) {
 	branch := FormatBranch("build-a", KindProbe, time.Now())
 	_, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
 	require.NoError(t, err)
-	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	require.Len(t, heads, 1)
 
@@ -632,4 +632,117 @@ func mustMarshal(t *testing.T, message any) []byte {
 	document, err := json.Marshal(message)
 	require.NoError(t, err)
 	return document
+}
+
+// TestMailboxFetchesOnlyWantedBranches: a poll that says which branches it
+// wants fetches nothing else and remembers nothing else, so another run's
+// branch in a shared mailbox is never brought into this store and is reported
+// the moment it becomes wanted.
+func TestMailboxFetchesOnlyWantedBranches(t *testing.T) {
+	orchestrator := newMailboxFixture(t)
+	reader := orchestrator.second(t)
+	mine := FormatBranch("build-a", KindProbe, time.Now())
+	theirs := FormatBranch("build-a", KindProbe, time.Now())
+	for _, branch := range []string{mine, theirs} {
+		_, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
+		require.NoError(t, err)
+	}
+	isMine := func(branch string) bool { return branch == mine }
+
+	heads, err := reader.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), isMine)
+
+	require.NoError(t, err)
+	require.Len(t, heads, 1)
+	assert.Equal(t, mine, heads[0].Name)
+	refs := strings.Fields(runGitIn(t, reader.store, "for-each-ref", "--format=%(refname)", gitx.TransportRefPrefix))
+	assert.Equal(t, []string{gitx.TransportRefPrefix + mine}, refs, "the unwanted branch was never fetched")
+
+	heads, err = reader.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
+	require.NoError(t, err)
+	require.Len(t, heads, 1, "the unwanted branch was not remembered, so it is reported once wanted")
+	assert.Equal(t, theirs, heads[0].Name)
+}
+
+// TestMailboxDoesNotHoldItselfAcrossATransfer: a push that takes as long as a
+// large output set does blocks nothing else of the mailbox. A poll, a reread
+// and a withdrawal go on while it is in flight.
+func TestMailboxDoesNotHoldItselfAcrossATransfer(t *testing.T) {
+	fixture, branch, offered := newAssignedFixture(t)
+	other := FormatBranch("build-a", KindProbe, time.Now())
+	otherOffered, err := assign(t.Context(), fixture.mailbox, probeAssignment("build-a", other))
+	require.NoError(t, err)
+	slow := &blockingPushTransport{LocalGitx: fixture.git, entered: make(chan struct{}), release: make(chan struct{})}
+	fixture.mailbox.remote = slow
+	pushed := make(chan error, 1)
+	go func() {
+		_, err := fixture.mailbox.Advance(context.Background(), branch, offered, MessageClaim,
+			mustMarshal(t, Claim{Assignment: offered}), nil)
+		pushed <- err
+	}()
+	<-slow.entered
+
+	head, err := fixture.mailbox.Reread(t.Context(), branch)
+	require.NoError(t, err, "a reread goes on while the push is in flight")
+	assert.Equal(t, offered, head.OID)
+	_, err = fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
+	require.NoError(t, err, "and so does a poll")
+	isRevoked, err := fixture.mailbox.Withdraw(t.Context(), other, otherOffered)
+	require.NoError(t, err)
+	assert.True(t, isRevoked, "and a withdrawal")
+
+	close(slow.release)
+	require.NoError(t, <-pushed)
+}
+
+// TestMailboxCloseRemovesEveryFetchedRef: a close removes the fetched refs of
+// the branches it closes and of every other branch this process fetched, and
+// a poll removes the fetched ref of a branch the remote no longer holds.
+func TestMailboxCloseRemovesEveryFetchedRef(t *testing.T) {
+	orchestrator := newMailboxFixture(t)
+	reader := orchestrator.second(t)
+	var leases []gitx.BranchLease
+	for range 3 {
+		branch := FormatBranch("build-a", KindProbe, time.Now())
+		offered, err := assign(t.Context(), orchestrator.mailbox, probeAssignment("build-a", branch))
+		require.NoError(t, err)
+		leases = append(leases, gitx.BranchLease{Branch: branch, ExpectedOld: offered})
+	}
+	_, err := reader.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
+	require.NoError(t, err)
+	listRefs := func() []string {
+		return strings.Fields(runGitIn(t, reader.store, "for-each-ref", "--format=%(refname)", gitx.TransportRefPrefix))
+	}
+	require.Len(t, listRefs(), 3)
+
+	isRevoked, err := orchestrator.mailbox.Withdraw(t.Context(), leases[0].Branch, leases[0].ExpectedOld)
+	require.NoError(t, err)
+	require.True(t, isRevoked)
+	_, err = reader.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
+	require.NoError(t, err)
+	assert.Len(t, listRefs(), 2, "a branch the remote closed is not kept here")
+
+	_, err = reader.mailbox.Close(t.Context(), leases[1:2])
+	require.NoError(t, err)
+	assert.Empty(t, listRefs(), "a close removes every ref this process fetched")
+}
+
+// blockingPushTransport holds every advance until it is released, which is
+// what a push of a large output set looks like to everything else.
+type blockingPushTransport struct {
+	*gitx.LocalGitx
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (t *blockingPushTransport) PushAdvance(ctx context.Context, remote, oid, branch, expectedOld string) error {
+	close(t.entered)
+	<-t.release
+	return t.LocalGitx.PushAdvance(ctx, remote, oid, branch, expectedOld)
+}
+
+func runGitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
+	return string(out)
 }

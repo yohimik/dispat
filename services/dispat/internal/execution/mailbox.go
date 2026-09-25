@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -71,20 +72,31 @@ type GitMailbox struct {
 	signer   *Signer
 	log      zerolog.Logger
 	maxDepth int
-	// mu makes one mailbox serve several goroutines: a run dispatches its
+	// memo makes one mailbox serve several goroutines: a run dispatches its
 	// tasks concurrently while one poller watches for their replies, and a
-	// serving node answers a task while its own poll goes on. What it guards
-	// is the memo below and the ordering of the git invocations; both are the
-	// mailbox's own state, so the lock is the mailbox's own rather than every
-	// caller's problem.
-	mu       sync.Mutex
+	// serving node answers a task while its own poll goes on. It guards the
+	// three maps below and nothing else, and it is never held across a git
+	// invocation: a push of a task's outputs can take as long as the outputs
+	// are large, and a poll, a withdrawal or the read of an authorization
+	// that expires in two minutes must not wait behind it. Pushes, listings,
+	// object writes and reads are safe to run at once; what is not is two
+	// writers of this store's own transport refs, which refs orders.
+	memo     sync.Mutex
 	observed map[string]string
 	// quarantined are the branches whose objects this party could not fetch,
 	// remembered so that the warning they produce is written once rather than
 	// on every tick. A quarantined branch is still polled: what is refused is
 	// the attempt to read it, and a branch that moves again is tried again.
 	quarantined map[string]bool
-	fetchSize   int
+	// fetched are the branches this process fetched into the transport
+	// namespace, which are the local refs it removes again: on close, and as
+	// soon as a poll finds the branch gone from the remote.
+	fetched map[string]bool
+	// refs serializes the writes this process makes to its own transport
+	// refs, a fetch into them and their deletion. It is a channel rather than
+	// a mutex so that a caller waiting for it leaves when its context ends.
+	refs      chan struct{}
+	fetchSize int
 }
 
 // maxChainDepth bounds how far below a fetched ref's tip an object may sit
@@ -110,6 +122,8 @@ func NewGitMailbox(endpoint string, git *gitx.LocalGitx, signer *Signer, log zer
 		maxDepth:    maxChainDepth,
 		observed:    map[string]string{},
 		quarantined: map[string]bool{},
+		fetched:     map[string]bool{},
+		refs:        make(chan struct{}, 1),
 		fetchSize:   gitx.MaxTransportBatch,
 	}
 }
@@ -124,8 +138,6 @@ func NewGitMailbox(endpoint string, git *gitx.LocalGitx, signer *Signer, log zer
 // heard, and a push whose outcome is unknown still leaves a ref this run
 // closes.
 func (m *GitMailbox) PrepareAssignment(ctx context.Context, message *Assignment) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	document, err := json.Marshal(message)
 	if err != nil {
 		return "", fmt.Errorf("execution: writing the assignment document: %w", err)
@@ -143,13 +155,11 @@ func (m *GitMailbox) PrepareAssignment(ctx context.Context, message *Assignment)
 // than pushed again. The error is the push's own, and nil only for an offer
 // that landed on the first answer.
 func (m *GitMailbox) Offer(ctx context.Context, branch, oid string) (pushResolution, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	err := m.remote.PushCreate(ctx, m.endpoint, oid, branch)
 	if err == nil {
 		// Remembered as observed at the value this run put there, so the next
 		// poll reports the branch only once the other side has moved it.
-		m.observed[branch] = oid
+		m.rememberObserved(branch, oid)
 		m.log.Debug().Str("branch", branch).Str("commit", oid).Msg("assignment created")
 		return pushLanded, nil
 	}
@@ -169,8 +179,6 @@ func (m *GitMailbox) Offer(ctx context.Context, branch, oid string) (pushResolut
 // could not establish, come back as a messagePushError saying which.
 func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, kind MessageKind,
 	document []byte, carried []gitx.TreeEntry) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	oid, err := m.commitMessage(ctx, kind, document, []string{expectedOld}, carried)
 	if err != nil {
 		return "", err
@@ -188,7 +196,7 @@ func (m *GitMailbox) Advance(ctx context.Context, branch, expectedOld string, ki
 	}
 	// The value this party wrote, and never a tip the settling read found: a
 	// message the other party put on top of it is still to be delivered.
-	m.observed[branch] = oid
+	m.rememberObserved(branch, oid)
 	m.log.Debug().Str("branch", branch).Str("commit", oid).Str("message", string(kind)).
 		Msg("coordination branch advanced")
 	return oid, nil
@@ -301,7 +309,7 @@ func (m *GitMailbox) readOwnPush(ctx context.Context, branch, oid string) (bool,
 	if tip == oid {
 		return true, nil
 	}
-	if err := m.remote.FetchRefs(ctx, m.endpoint, []string{branch}); err != nil {
+	if err := m.fetchRefs(ctx, []string{branch}); err != nil {
 		return false, err
 	}
 	err = m.remote.ResolveFetchedCommit(ctx, gitx.TransportRefPrefix+branch, oid, m.maxDepth)
@@ -348,30 +356,21 @@ func pauseContext(ctx context.Context, pause time.Duration) bool {
 // batched because a fetch names its refs on a command line, and a mailbox
 // with more branches than one batch is fetched over several polls rather than
 // in one unbounded invocation.
-func (m *GitMailbox) Observe(ctx context.Context, pattern string) ([]gitx.RemoteHead, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+//
+// isWanted, when it is given, decides before anything is fetched which of the
+// moved branches this caller has any use for. An orchestrator watching a
+// shared mailbox is interested in its own attempts and nothing else: another
+// run's output trees are not fetched into its store, and a branch it does not
+// want is not remembered either, so that it is reported the moment it becomes
+// wanted. A branch the remote no longer advertises is forgotten, and its
+// fetched ref is removed.
+func (m *GitMailbox) Observe(ctx context.Context, pattern string, isWanted func(string) bool) ([]gitx.RemoteHead, error) {
 	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("execution: polling %s: %w", gitx.RedactURL(m.endpoint), err)
 	}
-	present := make(map[string]bool, len(heads))
-	moved := make([]gitx.RemoteHead, 0, len(heads))
-	for _, head := range heads {
-		present[head.Name] = true
-		if m.observed[head.Name] == head.OID {
-			m.log.Trace().Str("branch", head.Name).Msg("coordination branch unchanged")
-			continue
-		}
-		moved = append(moved, head)
-	}
-	// A branch the mailbox no longer advertises is forgotten, so that a name
-	// closed and later reused is not mistaken for one this node already saw.
-	for branch := range m.observed {
-		if !present[branch] {
-			delete(m.observed, branch)
-		}
-	}
+	moved, vanished := m.resolveMoved(pattern, heads, isWanted)
+	m.dropVanished(ctx, vanished)
 	if len(moved) > m.fetchSize {
 		moved = moved[:m.fetchSize]
 	}
@@ -382,14 +381,77 @@ func (m *GitMailbox) Observe(ctx context.Context, pattern string) ([]gitx.Remote
 	for _, head := range moved {
 		names = append(names, head.Name)
 	}
-	if err := m.remote.FetchRefs(ctx, m.endpoint, names); err != nil {
+	if err := m.fetchRefs(ctx, names); err != nil {
 		return m.fetchSeparately(ctx, moved, err)
 	}
+	m.memo.Lock()
+	defer m.memo.Unlock()
 	for _, head := range moved {
 		m.observed[head.Name] = head.OID
 		delete(m.quarantined, head.Name)
 	}
 	return moved, nil
+}
+
+// resolveMoved compares one listing with the memo: the wanted branches whose
+// tip is not the one last seen, and the fetched branches the pattern covers
+// that the remote no longer advertises.
+func (m *GitMailbox) resolveMoved(pattern string, heads []gitx.RemoteHead,
+	isWanted func(string) bool) ([]gitx.RemoteHead, []string) {
+	m.memo.Lock()
+	defer m.memo.Unlock()
+	present := make(map[string]bool, len(heads))
+	moved := make([]gitx.RemoteHead, 0, len(heads))
+	for _, head := range heads {
+		present[head.Name] = true
+		if m.observed[head.Name] == head.OID {
+			m.log.Trace().Str("branch", head.Name).Msg("coordination branch unchanged")
+			continue
+		}
+		if isWanted != nil && !isWanted(head.Name) {
+			continue
+		}
+		moved = append(moved, head)
+	}
+	// A branch the mailbox no longer advertises is forgotten, so that a name
+	// closed and later reused is not mistaken for one this node already saw.
+	// Only the branches this listing could have named are asked about: a poll
+	// of one branch says nothing about any other.
+	for branch := range m.observed {
+		if !present[branch] && isBranchListed(pattern, branch) {
+			delete(m.observed, branch)
+		}
+	}
+	var vanished []string
+	for branch := range m.fetched {
+		if !present[branch] && isBranchListed(pattern, branch) {
+			vanished = append(vanished, branch)
+		}
+	}
+	return moved, vanished
+}
+
+// isBranchListed reports whether a listing made with pattern would have named
+// branch: the pattern is a ref, or a ref prefix ending in one wildcard.
+func isBranchListed(pattern, branch string) bool {
+	ref := "refs/heads/" + branch
+	if prefix, isPrefix := strings.CutSuffix(pattern, "*"); isPrefix {
+		return strings.HasPrefix(ref, prefix)
+	}
+	return ref == pattern
+}
+
+// dropVanished removes the fetched refs of branches the remote no longer
+// holds. A failure is a leftover in a private namespace, retried by the next
+// poll that finds the branch still gone, and never a failed poll.
+func (m *GitMailbox) dropVanished(ctx context.Context, vanished []string) {
+	if len(vanished) == 0 {
+		return
+	}
+	if err := m.deleteLocalRefs(ctx, vanished); err != nil {
+		m.log.Debug().Err(err).Int("branches", len(vanished)).
+			Msg("the fetched refs of closed coordination branches were not removed")
+	}
 }
 
 // fetchSeparately fetches one branch at a time after the batch failed, and
@@ -415,7 +477,7 @@ func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHea
 		Msg("the batched fetch failed, so the branches are fetched one at a time")
 	fetched := make([]gitx.RemoteHead, 0, len(moved))
 	for _, head := range moved {
-		if err := m.remote.FetchRefs(ctx, m.endpoint, []string{head.Name}); err != nil {
+		if err := m.fetchRefs(ctx, []string{head.Name}); err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				// Likewise for one branch: a fetch the stopping poll
 				// interrupted leaves the branch to be read next time.
@@ -424,8 +486,10 @@ func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHea
 			m.quarantineBranch(head, err)
 			continue
 		}
+		m.memo.Lock()
 		m.observed[head.Name] = head.OID
 		delete(m.quarantined, head.Name)
+		m.memo.Unlock()
 		fetched = append(fetched, head)
 	}
 	if len(fetched) == 0 && ctx.Err() == nil && len(moved) == 1 {
@@ -445,6 +509,8 @@ func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHea
 // sender that pushes the missing objects, or moves the branch on, is noticed
 // the next time it does.
 func (m *GitMailbox) quarantineBranch(head gitx.RemoteHead, err error) {
+	m.memo.Lock()
+	defer m.memo.Unlock()
 	m.observed[head.Name] = head.OID
 	if m.quarantined[head.Name] {
 		m.log.Trace().Err(err).Str("branch", head.Name).Str("commit", head.OID).
@@ -466,9 +532,17 @@ func (m *GitMailbox) quarantineBranch(head gitx.RemoteHead, err error) {
 // "already dealt with" for the rest of the process's life, so queued work
 // would wait for a push nobody is going to make.
 func (m *GitMailbox) Reconsider(branch string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.memo.Lock()
+	defer m.memo.Unlock()
 	delete(m.observed, branch)
+}
+
+// rememberObserved records the value this party wrote to a branch, so that
+// the poll reports the branch only once somebody else moves it.
+func (m *GitMailbox) rememberObserved(branch, oid string) {
+	m.memo.Lock()
+	defer m.memo.Unlock()
+	m.observed[branch] = oid
 }
 
 // Fetch brings named coordination branches into this node's store without
@@ -476,27 +550,74 @@ func (m *GitMailbox) Reconsider(branch string) {
 // states its assignment named: they are branches nobody advertises to this
 // node's pattern and they are needed before a single command runs.
 func (m *GitMailbox) Fetch(ctx context.Context, branches []string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	if len(branches) == 0 {
 		return nil
 	}
-	if err := m.remote.FetchRefs(ctx, m.endpoint, branches); err != nil {
+	if err := m.fetchRefs(ctx, branches); err != nil {
 		return fmt.Errorf("execution: fetching %d input states: %w", len(branches), err)
 	}
 	return nil
 }
 
+// fetchRefs fetches branches into the transport namespace, one writer of it at
+// a time, and remembers them as this process's to remove. A fetch that failed
+// may still have written some of them, so they are remembered either way.
+func (m *GitMailbox) fetchRefs(ctx context.Context, branches []string) error {
+	if err := m.holdRefs(ctx); err != nil {
+		return err
+	}
+	defer m.releaseRefs()
+	err := m.remote.FetchRefs(ctx, m.endpoint, branches)
+	m.memo.Lock()
+	for _, branch := range branches {
+		m.fetched[branch] = true
+	}
+	m.memo.Unlock()
+	return err
+}
+
+// deleteLocalRefs removes fetched branches from the transport namespace, one
+// writer of it at a time, and forgets them once they are gone.
+func (m *GitMailbox) deleteLocalRefs(ctx context.Context, branches []string) error {
+	if err := m.holdRefs(ctx); err != nil {
+		return err
+	}
+	defer m.releaseRefs()
+	if err := m.remote.DeleteLocalTransportRefs(ctx, branches); err != nil {
+		return err
+	}
+	m.memo.Lock()
+	for _, branch := range branches {
+		delete(m.fetched, branch)
+	}
+	m.memo.Unlock()
+	return nil
+}
+
+// holdRefs waits for the transport namespace, or for the context to end.
+func (m *GitMailbox) holdRefs(ctx context.Context) error {
+	select {
+	case m.refs <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("execution: waiting for the transport refs: %w", ctx.Err())
+	}
+}
+
+func (m *GitMailbox) releaseRefs() { <-m.refs }
+
 // Forget drops what the memo remembers, which is what a node does when the
 // object store behind it has been rebuilt: the tips are still where they
 // were, but the objects they name are no longer here to be read.
 func (m *GitMailbox) Forget() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.memo.Lock()
+	defer m.memo.Unlock()
 	clear(m.observed)
 	// A branch that could not be fetched into the store that has just been
-	// thrown away is a branch nobody has tried to fetch into this one.
+	// thrown away is a branch nobody has tried to fetch into this one, and a
+	// ref that store held is gone with it.
 	clear(m.quarantined)
+	clear(m.fetched)
 }
 
 // Inspect resolves an observed tip to the message it carries and to the step
@@ -508,8 +629,6 @@ func (m *GitMailbox) Forget() {
 // describes the chain and holds the blobs of the message, which is everything
 // the state machine and the acceptance rules need.
 func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTip, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	localRef := gitx.TransportRefPrefix + head.Name
 	if err := m.remote.ResolveFetchedCommit(ctx, localRef, head.OID, m.maxDepth); err != nil {
 		return ChainTip{}, fmt.Errorf("execution: resolving %s on %s: %w", head.OID, head.Name, err)
@@ -518,8 +637,7 @@ func (m *GitMailbox) Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTi
 }
 
 // readChainTip is one commit read as a step of a chain: what it carries, and
-// what its first parent carried. It runs under the mailbox's own lock, taken
-// by the caller.
+// what its first parent carried.
 func (m *GitMailbox) readChainTip(ctx context.Context, branch, oid string) (ChainTip, error) {
 	tip := ChainTip{Branch: branch, OID: oid}
 	carried, err := m.readTree(ctx, oid)
@@ -560,8 +678,6 @@ func (m *GitMailbox) readChainTip(ctx context.Context, branch, oid string) (Chai
 // it, and the walk is bounded by the same depth a fetched object is resolved
 // within: an attempt is at most assignment, claim, ready, go and result.
 func (m *GitMailbox) InspectChain(ctx context.Context, head gitx.RemoteHead) ([]ChainTip, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	oids := make([]string, 0, m.maxDepth)
 	for oid := head.OID; len(oids) < m.maxDepth; {
 		parent, err := m.remote.ResolveCommit(ctx, oid+"^")
@@ -596,8 +712,6 @@ func (m *GitMailbox) InspectChain(ctx context.Context, head gitx.RemoteHead) ([]
 // fence a publisher re-reads its own tip with immediately before the
 // irreversible command (§28.6).
 func (m *GitMailbox) Reread(ctx context.Context, branch string) (gitx.RemoteHead, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, "refs/heads/"+branch)
 	if err != nil {
 		return gitx.RemoteHead{}, fmt.Errorf("execution: re-reading %s: %w", branch, err)
@@ -606,12 +720,12 @@ func (m *GitMailbox) Reread(ctx context.Context, branch string) (gitx.RemoteHead
 		if head.Name != branch {
 			continue
 		}
-		if err := m.remote.FetchRefs(ctx, m.endpoint, []string{branch}); err != nil {
+		if err := m.fetchRefs(ctx, []string{branch}); err != nil {
 			return gitx.RemoteHead{}, fmt.Errorf("execution: fetching %s: %w", branch, err)
 		}
 		// Remembered at what was just read, so the loop watching the whole
 		// namespace does not report a movement this reader has already taken.
-		m.observed[branch] = head.OID
+		m.rememberObserved(branch, head.OID)
 		return head, nil
 	}
 	// A branch the remote no longer advertises: deleted under this party,
@@ -673,8 +787,6 @@ func (m *GitMailbox) readTree(ctx context.Context, oid string) (transportTree, e
 // comes back is bytes this node's own secret signed, or a Rejection naming
 // why they are not.
 func (m *GitMailbox) Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	if tip.Kind == "" {
 		return nil, &Rejection{Reason: ReasonUnreadable}
 	}
@@ -710,11 +822,6 @@ const maxSignatureBytes = 128
 // rather than retried; and a push that reported nothing is settled by reading
 // the remote.
 func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gitx.BranchOutcome, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(leases) == 0 {
-		return nil, nil
-	}
 	outcomes := make([]gitx.BranchOutcome, 0, len(leases))
 	var failures []error
 	for start := 0; start < len(leases); start += gitx.MaxTransportBatch {
@@ -727,16 +834,49 @@ func (m *GitMailbox) Close(ctx context.Context, leases []gitx.BranchLease) ([]gi
 		outcomes = append(outcomes, batch...)
 	}
 	outcomes = m.settleDeletes(ctx, outcomes)
-	branches := make([]string, 0, len(leases))
-	for _, lease := range leases {
-		delete(m.observed, lease.Branch)
-		branches = append(branches, lease.Branch)
-	}
-	if err := m.remote.DeleteLocalTransportRefs(ctx, branches); err != nil {
-		failures = append(failures, fmt.Errorf("execution: forgetting %d fetched coordination branches: %w",
-			len(branches), err))
+	if err := m.forgetFetched(ctx, leases); err != nil {
+		failures = append(failures, err)
 	}
 	return outcomes, errors.Join(failures...)
+}
+
+// localCleanupTimeout bounds the removal of this process's fetched refs on
+// close. It is a local ref transaction, so the bound only has to outlast a
+// busy disk.
+const localCleanupTimeout = 30 * time.Second
+
+// forgetFetched removes every ref this process fetched, the closed branches'
+// and any other, and forgets what the memo held about the closed ones.
+//
+// It runs on a context of its own, detached from the caller's and bounded,
+// because it is the one part of a close that needs nothing from the network:
+// a close whose pushes ran out of time still leaves no transport ref behind in
+// the repository being released.
+func (m *GitMailbox) forgetFetched(ctx context.Context, leases []gitx.BranchLease) error {
+	local, done := context.WithTimeout(context.WithoutCancel(ctx), localCleanupTimeout)
+	defer done()
+	m.memo.Lock()
+	branches := make([]string, 0, len(leases)+len(m.fetched))
+	named := make(map[string]bool, len(leases)+len(m.fetched))
+	for _, lease := range leases {
+		delete(m.observed, lease.Branch)
+		named[lease.Branch] = true
+		branches = append(branches, lease.Branch)
+	}
+	for branch := range m.fetched {
+		if !named[branch] {
+			branches = append(branches, branch)
+		}
+	}
+	m.memo.Unlock()
+	if len(branches) == 0 {
+		return nil
+	}
+	sort.Strings(branches)
+	if err := m.deleteLocalRefs(local, branches); err != nil {
+		return fmt.Errorf("execution: forgetting %d fetched coordination branches: %w", len(branches), err)
+	}
+	return nil
 }
 
 // formatUnknownOutcomes is a batch the transport refused to attempt at all,
@@ -819,8 +959,6 @@ func (m *GitMailbox) readPresentBranches(ctx context.Context, branches []string)
 // delete must fail rather than take the work away from under them. A branch
 // that is already gone is withdrawn as surely as one this call removed.
 func (m *GitMailbox) Withdraw(ctx context.Context, branch, expectedOld string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	outcomes, err := m.remote.DeleteRemoteBranchesLease(ctx, m.endpoint,
 		[]gitx.BranchLease{{Branch: branch, ExpectedOld: expectedOld}})
 	if err != nil {
@@ -830,9 +968,11 @@ func (m *GitMailbox) Withdraw(ctx context.Context, branch, expectedOld string) (
 		if outcome.Branch != branch || outcome.Result != gitx.BranchDeleted {
 			continue
 		}
+		m.memo.Lock()
 		delete(m.observed, branch)
 		delete(m.quarantined, branch)
-		if err := m.remote.DeleteLocalTransportRefs(ctx, []string{branch}); err != nil {
+		m.memo.Unlock()
+		if err := m.deleteLocalRefs(ctx, []string{branch}); err != nil {
 			// The remote ref is gone, which is the whole of the fence; a
 			// fetched ref left in this store is unreachable garbage.
 			m.log.Debug().Err(err).Str("branch", branch).

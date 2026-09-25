@@ -16,7 +16,7 @@ package execution
 // A claimed task is the one thing that leaves that goroutine. It runs under a
 // WaitGroup, holds one of this node's capacity slots until it has reported,
 // and shares the mailbox rather than owning one, which is why the mailbox
-// carries a lock of its own. What it does with the frame it was given is in
+// guards its own memo and never holds it across a transfer. What it does with the frame it was given is in
 // task.go.
 //
 // A kind this build does not execute is left exactly where the orchestrator
@@ -48,7 +48,7 @@ import (
 // operations a worker actually makes rather than the whole protocol, and so
 // that the loop below can be read without knowing how a branch is fetched.
 type mailboxx interface {
-	Observe(ctx context.Context, pattern string) ([]gitx.RemoteHead, error)
+	Observe(ctx context.Context, pattern string, isWanted func(string) bool) ([]gitx.RemoteHead, error)
 	Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTip, error)
 	Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error)
 	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte,
@@ -356,7 +356,7 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 		w.Mailbox.Forget()
 		w.isStorePrepared = true
 	}
-	heads, err := w.Mailbox.Observe(ctx, FormatBranchPattern(w.Node))
+	heads, err := w.Mailbox.Observe(ctx, FormatBranchPattern(w.Node), nil)
 	if err != nil {
 		return false, err
 	}

@@ -49,7 +49,7 @@ type fakeMailbox struct {
 	polls        int
 }
 
-func (m *fakeMailbox) Observe(context.Context, string) ([]gitx.RemoteHead, error) {
+func (m *fakeMailbox) Observe(context.Context, string, func(string) bool) ([]gitx.RemoteHead, error) {
 	m.polls++
 	heads := m.heads
 	// A poll answers what moved, and nothing moves twice on its own.

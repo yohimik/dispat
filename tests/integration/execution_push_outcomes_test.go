@@ -196,3 +196,97 @@ func TestExecutionLostAssignmentCreateLeavesNoBranch(t *testing.T) {
 		})
 	}
 }
+
+// TestExecutionSlowResultPushDoesNotStarveAnAuthorization: a node of capacity
+// two pushes one task's result slowly, the way a large output set travels,
+// while it waits for another task's publication authorization. The mailbox is
+// not held across the transfer, so the publisher reads its authorization and
+// runs its command while the first push is still in flight.
+//
+// The first push is held until the publication has run, so a node that
+// serialized its mailbox behind the transfer would never get there.
+func TestExecutionSlowResultPushDoesNotStarveAnAuthorization(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the held-push fixture uses a POSIX shell")
+	}
+	repo := harness.New(t)
+	repo.SeedPackage("packages", "api")
+	repo.SeedPackage("packages", "core")
+	mailbox := executionMailbox(t)
+	cfg := libsConfig(executionRecordingScript, 2)
+	cfg.LogLevel = "debug"
+	cfg.Scripts["publish"] = models.Script{executionPublishProbe}
+	cfg.Execution = &models.ExecutionConfig{
+		SecretEnv: executionSecretEnv,
+		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
+		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 300, Cancel: 20},
+	}
+	pinPackages(map[string]*models.RunOnly{
+		"api":  placedOn(models.RunOnlyOrchestrator, models.RunOnlyWorker),
+		"core": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+	})(&cfg)
+	repo.WriteConfigModel(cfg)
+	repo.Commit("feat(api,core): bootstrap")
+	rig := newExecutionRigOver(t, repo, mailbox)
+
+	shim := t.TempDir()
+	realGit, err := exec.LookPath("git")
+	require.NoError(t, err)
+	release := filepath.Join(shim, "release")
+	require.NoError(t, os.Mkdir(filepath.Join(shim, "pushes"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(executionHeldResultScript), 0o755))
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
+		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(2) }), 0,
+		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DISPAT_IT_HELD_GIT="+realGit, "DISPAT_IT_HELD_DIR="+shim)
+	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+
+	executionAwaitProbe(t, rig, "probe-publish")
+	_, err = os.Stat(filepath.Join(shim, "held"))
+	require.NoError(t, err, "the result push was in flight when the publication ran")
+	require.NoError(t, os.WriteFile(release, nil, 0o600))
+	res := started.Wait()
+	stopAll(t, []*executionWorker{worker})
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, executionNode, rig.nodesByPackage()["core"], "core was built on the node: %v", rig.runs())
+	assert.Equal(t, []string{"api"}, executionProbedPackagesOn(rig, executionNode),
+		"api was published on the node while core's result push was held")
+	assert.ElementsMatch(t, []string{"api@0.1.0", "core@0.1.0"}, executionReleaseTags(rig))
+	assert.Empty(t, rig.branches())
+}
+
+// executionProbedPackagesOn is every package whose publish probe fired on one
+// node.
+func executionProbedPackagesOn(rig *executionRig, node string) []string {
+	var names []string
+	for _, run := range rig.runs() {
+		if run.Node == executionProbePrefix+"publish" && run.Dir == node {
+			names = append(names, run.Package)
+		}
+	}
+	return names
+}
+
+// The node's second push onto a build branch is its result, after its claim.
+// This shim holds it until the test says so, marking that it is holding, and
+// then runs it. Only the worker receives this shim.
+const executionHeldResultScript = `#!/bin/sh
+set -eu
+case "$*" in
+*push*[0-9]-build-*)
+ ordinal=1
+ while ! mkdir "$DISPAT_IT_HELD_DIR/pushes/$ordinal" 2>/dev/null; do ordinal=$((ordinal + 1)); done
+ if [ "$ordinal" -eq 2 ]; then
+  : > "$DISPAT_IT_HELD_DIR/held"
+  ticks=0
+  while [ ! -f "$DISPAT_IT_HELD_DIR/release" ] && [ "$ticks" -lt 3000 ]; do
+   ticks=$((ticks + 1))
+   sleep 0.1
+  done
+ fi
+ ;;
+esac
+exec "$DISPAT_IT_HELD_GIT" "$@"
+`

@@ -65,7 +65,7 @@ func TestMailboxPollSurvivesOneUnfetchableBranch(t *testing.T) {
 	mailbox := NewGitMailbox("file:///srv/mailbox.git", nil, nil, zerolog.Nop())
 	mailbox.remote = transport
 
-	moved, err := mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	moved, err := mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 
 	require.NoError(t, err)
 	require.Len(t, moved, 2, "the readable branches are still reported")
@@ -82,7 +82,7 @@ func TestMailboxPollSurvivesOneUnfetchableBranch(t *testing.T) {
 		{Name: "dispat-worker-build-a-20260922-build-cc", OID: "oid-c"},
 	}
 	transport.batches = nil
-	moved, err = mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	moved, err = mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	assert.Empty(t, moved)
 	assert.Empty(t, transport.batches)
@@ -99,7 +99,7 @@ func TestMailboxPollFailsWhenTheOnlyBranchIsUnreadable(t *testing.T) {
 	mailbox := NewGitMailbox("file:///srv/mailbox.git", nil, nil, zerolog.Nop())
 	mailbox.remote = transport
 
-	_, err := mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	_, err := mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 
 	require.Error(t, err)
 }
@@ -138,7 +138,7 @@ func TestMailboxPollInterruptedByAStopQuarantinesNothing(t *testing.T) {
 	mailbox := NewGitMailbox("file:///srv/mailbox.git", nil, nil, zerolog.Nop())
 	mailbox.remote = transport
 
-	_, err := mailbox.Observe(ctx, FormatBranchPattern("build-a"))
+	_, err := mailbox.Observe(ctx, FormatBranchPattern("build-a"), nil)
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, mailbox.quarantined, "a stopping poll quarantines nothing")
@@ -242,7 +242,7 @@ func TestMailboxInspectsTheChainUnderAForeignTip(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, fixture.git.PushAdvance(t.Context(), fixture.endpoint, foreign, branch, reported))
 
-	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+	heads, err := fixture.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
 	require.Len(t, heads, 1)
 	tip, err := fixture.mailbox.Inspect(t.Context(), heads[0])

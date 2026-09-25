@@ -288,7 +288,7 @@ func (c *Coordinator) awaitReport(ctx context.Context, link Link, branch, offere
 // node's report when it is there.
 func (c *Coordinator) readReport(ctx context.Context, link Link, branch, offered string) (*NodeReport, error) {
 	mailbox := c.mailboxes[link.Name]
-	heads, err := mailbox.Observe(ctx, "refs/heads/"+branch)
+	heads, err := mailbox.Observe(ctx, "refs/heads/"+branch, nil)
 	if err != nil {
 		return nil, err
 	}

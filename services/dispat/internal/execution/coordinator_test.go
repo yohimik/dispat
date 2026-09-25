@@ -66,7 +66,7 @@ func (f *coordinatorFixture) answer(t *testing.T, signer *Signer, report func(As
 	go func() {
 		deadline := time.Now().Add(20 * time.Second)
 		for time.Now().Before(deadline) {
-			heads, err := mailbox.Observe(context.Background(), FormatBranchPattern("build-a"))
+			heads, err := mailbox.Observe(context.Background(), FormatBranchPattern("build-a"), nil)
 			if err != nil || len(heads) == 0 {
 				time.Sleep(50 * time.Millisecond)
 				continue
@@ -190,7 +190,7 @@ func TestPreflightClaimWithoutReportKeepsOnlyAuthenticatedCleanupOwnership(t *te
 			fixture.coordinator.recordOwnedRef(t.Context(), ownedRefStep{
 				node: "build-a", branch: branch, oid: offered,
 			})
-			heads, err := fixture.node.mailbox.Observe(t.Context(), "refs/heads/"+branch)
+			heads, err := fixture.node.mailbox.Observe(t.Context(), "refs/heads/"+branch, nil)
 			require.NoError(t, err)
 			require.Len(t, heads, 1)
 

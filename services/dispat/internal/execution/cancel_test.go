@@ -66,7 +66,7 @@ func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
 			assignment := probeAssignment("build-a", branch)
 			offered, err := assign(t.Context(), fixture.orchestrator.mailbox, assignment)
 			require.NoError(t, err)
-			heads, err := fixture.node.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"))
+			heads, err := fixture.node.mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 			require.NoError(t, err)
 			require.Len(t, heads, 1)
 			claimed, err := fixture.node.mailbox.Advance(t.Context(), branch, offered, MessageClaim,

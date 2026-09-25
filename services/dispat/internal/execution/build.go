@@ -900,6 +900,16 @@ func (w *watcher) find(branch string) *attemptState {
 	return waiting
 }
 
+// isWatched reports whether a branch is one this run is waiting on, bound or
+// not: a registration made before its push is wanted from the moment it
+// exists.
+func (w *watcher) isWatched(branch string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, isWatched := w.attempts[branch]
+	return isWatched
+}
+
 // readAuthorizedTip answers the authorization commit this run wrote on one
 // branch, and the empty string for an attempt it has not authorized.
 func (w *watcher) readAuthorizedTip(branch string) string {
@@ -959,7 +969,10 @@ func (w *watcher) tick(ctx context.Context) bool {
 	if w.isIdle() {
 		return false
 	}
-	heads, err := w.mailbox.Observe(ctx, FormatBranchPattern(w.link.Name))
+	// Only the branches of this run's own attempts are fetched: the mailbox
+	// is shared, and another run's output trees are none of this store's
+	// business.
+	heads, err := w.mailbox.Observe(ctx, FormatBranchPattern(w.link.Name), w.isWatched)
 	if err != nil {
 		if ctx.Err() == nil {
 			w.coordinator.Log.Warn().Err(err).Str("worker", w.link.Name).
