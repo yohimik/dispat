@@ -265,6 +265,33 @@ func TestChoreographyRunsTheEntryHooksOnce(t *testing.T) {
 	assert.Equal(t, "x", data, "the entry's beforeAll ran exactly once")
 }
 
+// TestChoreographyNamesAPeersFailingBeforeAll: a peer's own beforeAll gates
+// the fleet's release as the entry's does, and its failure is reported the
+// same way: an error line naming the repository whose hook failed, exit 1,
+// and nothing built or tagged in any repository.
+func TestChoreographyNamesAPeersFailingBeforeAll(t *testing.T) {
+	fleet := crossRepositoryFleet(t)
+	sdk := fleet.peer("sdk")
+	fleet.writeConfig("sdk", func(cfg *models.File) {
+		cfg.Scripts["gate"] = models.Script{"exit 3"}
+		cfg.Run = &models.RunConfig{BeforeAll: []string{"gate"}}
+	})
+	sdk.Commit("chore: add a run gate")
+	fleet.push("sdk")
+	fleet.refresh("api", "sdk")
+	api := fleet.peer("api")
+
+	res := api.Release("--package", "*")
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	failure := findEvent(t, res.Events, "beforeAll hook failed, refusing to release")
+	assert.Equal(t, "error", failure.Str("level"))
+	assert.Equal(t, "sdk", failure.Str("repository"))
+	assert.Contains(t, failure.Str("error"), "repository sdk beforeAll hook failed")
+	assert.NotContains(t, res.Stdout, "building ", "nothing is built")
+	assert.Empty(t, api.TagList())
+	assert.Empty(t, tagsIn(api.Repo, ".links/sdk"))
+}
+
 // TestChoreographyBypassesTheLockPerRepository: an unsafe setting is the
 // repository's own, and one peer cannot unlock another.
 func TestChoreographyBypassesTheLockPerRepository(t *testing.T) {

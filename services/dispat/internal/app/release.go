@@ -506,7 +506,10 @@ func (a *App) runGatingHooks(ctx context.Context, hooks *runHooks, fleet *worksp
 		// operator's gate twice.
 		if owner.repo.Imported && !owner.repo.Entry {
 			if err := owner.hooks.runGating(ctx, "beforeAll", owner.repo.Config.Run.BeforeAll); err != nil {
-				return fmt.Errorf("repository %s beforeAll hook failed: %w", owner.repo.Name, err)
+				err = fmt.Errorf("repository %s beforeAll hook failed: %w", owner.repo.Name, err)
+				a.log.Error().Err(err).Str("repository", owner.repo.Name).
+					Msg("beforeAll hook failed, refusing to release")
+				return err
 			}
 		}
 	}

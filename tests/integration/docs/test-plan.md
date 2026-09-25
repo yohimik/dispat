@@ -2490,6 +2490,7 @@ cannot make the rest of the goal pass.
 | `TestChoreographyRefusesAPackageWhoseRouteCannotRecord` | A route repository that cannot record its hop refuses the package before it publishes. |
 | `TestChoreographyRecordsNothingForATagOnlyConsumer` | A consumer that writes no release commit records no evidence and says so at info rather than failing. |
 | `TestChoreographyRunsTheEntryHooksOnce` | Every peer is an imported configuration, the entry included, and the entry's own run hooks fire exactly once. |
+| `TestChoreographyNamesAPeersFailingBeforeAll` | A peer's failing `beforeAll` refuses the fleet's release the way the entry's does: exit 1 with an error line naming the repository whose hook failed, and nothing built or tagged in any repository. |
 | `TestChoreographyBypassesTheLockPerRepository` | An unsafe lock setting is the repository's own: one peer cannot release another unlocked. |
 | `TestChoreographyConcurrentConsumersSettleInLaneOrder` | Two consumers whose settlements overlap take the same lanes in the same order, proven to overlap by a bounded file handshake and to finish by both publishing. |
 | `TestChoreographyRunsTheSettlingRepositoryHooks` | A settlement is a commit dispat makes, so that repository's commit hooks bracket it. |
