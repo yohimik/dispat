@@ -49,13 +49,16 @@ func (a Author) Username() string {
 
 // key identifies the person for deduplication. The email is the identifier
 // when there is one: one person commits under several spellings of their name
-// far more often than under several addresses. Both sides are lowercased
-// because neither git nor a forge treats the case as significant here.
+// far more often than under several addresses. Both sides are folded with
+// globx.Fold, the equivalence every other name comparison in the tool uses,
+// because neither git nor a forge treats the case as significant here. The
+// fold, unlike lowercasing, keeps a final sigma, a micro sign or a long s in
+// the class of its ordinary letter and leaves a dotted capital I apart from i.
 func (a Author) key() string {
 	if a.Email != "" {
-		return strings.ToLower(a.Email)
+		return globx.Fold(a.Email)
 	}
-	return strings.ToLower(a.Name)
+	return globx.Fold(a.Name)
 }
 
 // empty reports an identity with nothing to render.
@@ -121,7 +124,7 @@ func unitAuthors(c gitx.Commit, u *ccme.Unit) []Author {
 			}
 		}
 	}
-	return dedupeAuthors(out)
+	return DedupeAuthors(out)
 }
 
 // resolveAuthors records who each of a commit's parsed units is by (§13.4).
@@ -312,11 +315,14 @@ func appendUniqueAuthor(out []Author, seen map[string]bool, author Author) []Aut
 	return append(out, author)
 }
 
-// dedupeAuthors keeps the first occurrence of each identity, preserving order.
+// DedupeAuthors keeps the first occurrence of each identity, preserving order.
 // Order is what carries the meaning here — the git author before the people a
 // trailer adds, and the commit sequence across a window — so sorting would
 // throw away the one thing the list says besides who.
-func dedupeAuthors(in []Author) []Author {
+//
+// The changelog's section reads its authors through this function too, so the
+// planner and the renderer cannot disagree about who one person is.
+func DedupeAuthors(in []Author) []Author {
 	if len(in) < 2 {
 		return in
 	}

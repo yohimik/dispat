@@ -4,6 +4,7 @@
 package plan
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,6 +76,24 @@ func TestAuthorKeyPrefersTheEmail(t *testing.T) {
 	assert.Equal(t, Author{Name: "Ada"}.key(), Author{Name: "ADA"}.key())
 	assert.NotEqual(t, Author{Name: "Ada"}.key(), Author{"Ada", "ada@example.com"}.key(),
 		"an identity with an address is not the nameless one")
+}
+
+func TestAuthorKeyFoldsTheWayNamesDo(t *testing.T) {
+	// The key is the tool's fold, not lowercasing: two spellings are one
+	// person exactly when strings.EqualFold calls them equal. Lowercasing
+	// keeps a final sigma, a micro sign and a long s apart from their
+	// ordinary letters, and merges a dotted capital I into a plain i.
+	for _, pair := range [][2]Author{
+		{{Name: "ΟΔΥΣΣΕΥΣ"}, {Name: "Οδυσσευς"}},
+		{{Name: "µ"}, {Name: "μ"}},
+		{{Name: "ſam"}, {Name: "Sam"}},
+		{{"Odysseus", "ΟΔΥΣΣΕΥΣ@example.com"}, {"Odysseus", "οδυσσευς@example.com"}},
+	} {
+		assert.True(t, strings.EqualFold(pair[0].Name+pair[0].Email, pair[1].Name+pair[1].Email))
+		assert.Equal(t, pair[0].key(), pair[1].key(), "%q and %q are one person", pair[0], pair[1])
+	}
+	assert.NotEqual(t, Author{Name: "İnci"}.key(), Author{Name: "inci"}.key(),
+		"strings.EqualFold keeps a dotted capital I apart from i, and so does the key")
 }
 
 // parseUnit parses one message and returns its first valid unit.
@@ -159,10 +178,15 @@ func TestDedupeAuthorsKeepsFirstOccurrenceOrder(t *testing.T) {
 		{"A. Lovelace", "ada@example.com"},
 		{Name: "Nameless"},
 		{Name: "NAMELESS"},
+		{Name: "Οδυσσευς"},
+		{Name: "ΟΔΥΣΣΕΥΣ"},
+		{Name: "µ"},
+		{Name: "Μ"},
 	}
 	assert.Equal(t, []Author{
 		{"Ada", "ada@example.com"}, {"Grace", "grace@example.com"}, {Name: "Nameless"},
-	}, dedupeAuthors(in))
+		{Name: "Οδυσσευς"}, {Name: "µ"},
+	}, DedupeAuthors(in), "a final sigma and a micro sign fold with their ordinary letters")
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +234,7 @@ func TestComputeWindowAuthorsIncludeCommitsWithNoValidUnit(t *testing.T) {
 	for _, u := range rel.Units {
 		fromUnits = append(fromUnits, rel.AuthorsFor(u)...)
 	}
-	assert.Equal(t, []Author{{"Ada", "ada@example.com"}}, dedupeAuthors(fromUnits),
+	assert.Equal(t, []Author{{"Ada", "ada@example.com"}}, DedupeAuthors(fromUnits),
 		"the invalid commit's author reaches the window and not the units")
 }
 
@@ -290,7 +314,7 @@ func sectionAuthorsUnderCCME(rel *Release) []Author {
 	for _, u := range rel.NotesUnits() {
 		out = append(out, rel.AuthorsFor(u)...)
 	}
-	return dedupeAuthors(out)
+	return DedupeAuthors(out)
 }
 
 func TestAllAuthorsIsNilSafeOnAHandBuiltRelease(t *testing.T) {

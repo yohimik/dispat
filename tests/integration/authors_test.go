@@ -138,6 +138,29 @@ func TestAuthorsSectionPlacement(t *testing.T) {
 		"Released by dispat.")
 }
 
+// TestAuthorsFoldedSpellingsAreOnePerson: two Co-authored-by trailers that
+// spell one identity in two cases credit one person, under the same fold every
+// other name comparison uses. The pair differs by a final sigma, which
+// lowercasing keeps apart from the capital sigma's medial form, so only the
+// tool's own fold merges them.
+func TestAuthorsFoldedSpellingsAreOnePerson(t *testing.T) {
+	r := harness.New(t)
+	r.WriteConfigModel(authorsConfig(&models.AuthorsConfig{Placement: "both"}))
+	r.SeedPackage("packages", "core")
+	r.CommitAs(adaName, adaMail, "feat(core): add streaming\n\n"+
+		"Co-authored-by: Οδυσσευς <οδυσσευς@example.com>\n"+
+		"Co-authored-by: ΟΔΥΣΣΕΥΣ <ΟΔΥΣΣΕΥΣ@example.com>\n")
+
+	r.ReleaseOK()
+	entry := changelogOf(t, r, "core")
+
+	assert.Contains(t, entry, "- add streaming (by "+adaName+", Οδυσσευς)",
+		"the line credits the first spelling once")
+	assert.Contains(t, entry, "### Authors\n\n- "+adaName+"\n- Οδυσσευς\n",
+		"the section lists one person for both spellings")
+	assert.NotContains(t, entry, "ΟΔΥΣΣΕΥΣ")
+}
+
 // TestAuthorsAllCommitsIncludeInvalid: `commits: all` reaches the whole
 // window, so a commit whose message is not a release record still credits the
 // person who wrote it. `ccme` counts only the commits behind the entry's own

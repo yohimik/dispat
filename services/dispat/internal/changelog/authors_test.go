@@ -67,6 +67,34 @@ func TestFilterAuthors(t *testing.T) {
 	}
 }
 
+func TestFilterAuthorsFoldsTheWayNamesDo(t *testing.T) {
+	// The filters fold with the tool's own equivalence rather than lowercasing:
+	// a pattern ending in a final sigma reaches a name that ends in a capital
+	// sigma, which lowercases to the medial form.
+	odysseus := plan.Author{Name: "ΟΔΥΣΣΕΥΣ", Email: "odysseus@example.com"}
+	list := []plan.Author{ada, odysseus}
+	assert.Equal(t, []plan.Author{ada}, FilterAuthors(list, nil, []string{"*ς"}))
+	assert.Equal(t, []plan.Author{odysseus}, FilterAuthors(list, []string{"οδυσσευς"}, nil))
+	assert.Equal(t, []plan.Author{ada}, FilterAuthors(list, nil, []string{"*ευσ"}))
+	// A dotted capital I is not an i under strings.EqualFold, so the filter
+	// keeps it apart too, where lowercasing would turn "İ*" into "i*".
+	inci := plan.Author{Name: "Inci", Email: "inci@example.com"}
+	assert.Equal(t, []plan.Author{inci}, FilterAuthors([]plan.Author{inci}, nil, []string{"İ*"}))
+}
+
+func TestAuthorsSectionDedupesFoldedSpellings(t *testing.T) {
+	// The section dedupes through the planner's own function, so one person
+	// spelled in two cases is one bullet here exactly when the planner counts
+	// them once.
+	u := testUnit("feat", ccme.BumpMinor, "add streaming")
+	lower := plan.Author{Name: "Οδυσσευς"}
+	upper := plan.Author{Name: "ΟΔΥΣΣΕΥΣ"}
+	rel := authored([]*ccme.Unit{u}, map[*ccme.Unit][]plan.Author{u: {lower, upper}}, lower, upper)
+
+	out := authorsSection(rel, SpecFormat(model.RecordFormat{AuthorsPlacement: AuthorsSection}).withDefaults())
+	assert.Equal(t, "### Authors\n\n- Οδυσσευς\n", out)
+}
+
 func TestFilterAuthorsMatchesEachIdentityAxis(t *testing.T) {
 	// An operator writing a filter is thinking of a person, not of a field, so
 	// all three spellings of the person answer the same pattern.

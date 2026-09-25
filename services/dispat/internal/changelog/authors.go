@@ -49,10 +49,10 @@ func FilterAuthors(list []plan.Author, include, exclude []string) []plan.Author 
 	}
 	out := make([]plan.Author, 0, len(list))
 	for _, a := range list {
-		if len(include) > 0 && !matchAuthor(a, include) {
+		if len(include) > 0 && !isAuthorMatched(a, include) {
 			continue
 		}
-		if matchAuthor(a, exclude) {
+		if isAuthorMatched(a, exclude) {
 			continue
 		}
 		out = append(out, a)
@@ -60,23 +60,23 @@ func FilterAuthors(list []plan.Author, include, exclude []string) []plan.Author 
 	return out
 }
 
-// matchAuthor reports whether any pattern reaches the author on any of the
+// isAuthorMatched reports whether any pattern reaches the author on any of the
 // three ways of naming them.
 //
 // All three axes are tried against every pattern because an operator writing a
 // filter is thinking of a person, not of a field: "*@acme.com" is obviously an
 // address and "dependabot*" obviously a name, and asking which key a pattern
-// belongs to would be a question with no good answer. Matching is
-// case-insensitive on both sides, the way every other name comparison in the
-// tool is.
-func matchAuthor(a plan.Author, patterns []string) bool {
+// belongs to would be a question with no good answer. Both sides are folded
+// with globx.Fold, the equivalence the changelog's package, space and group
+// filters use, so a pattern ending in ς reaches a name ending in Σ.
+func isAuthorMatched(a plan.Author, patterns []string) bool {
 	subjects := [...]string{
-		strings.ToLower(a.Name),
-		strings.ToLower(a.Username()),
-		strings.ToLower(a.Email),
+		globx.Fold(a.Name),
+		globx.Fold(a.Username()),
+		globx.Fold(a.Email),
 	}
 	for _, p := range patterns {
-		p = strings.ToLower(p)
+		p = globx.Fold(p)
 		for _, s := range subjects {
 			if s != "" && globx.IsMatch(p, s) {
 				return true
@@ -146,32 +146,13 @@ func sectionAuthors(rel *plan.Release, f Format) []plan.Author {
 			list = append(list, rel.AuthorsFor(u)...)
 		}
 	}
-	return FilterAuthors(dedupeAuthors(list), f.AuthorsInclude, f.AuthorsExclude)
-}
-
-// dedupeAuthors keeps first occurrences, so the section follows the order the
-// release collected its units in: newest commit first, which is the order the
-// planner builds Units in and the order the window authors are already in.
-// Deliberately not the rendered order (breaking, then features, then fixes):
-// that would sort people by the size of the change they happened to make.
-func dedupeAuthors(in []plan.Author) []plan.Author {
-	if len(in) < 2 {
-		return in
-	}
-	seen := make(map[string]bool, len(in))
-	out := make([]plan.Author, 0, len(in))
-	for _, a := range in {
-		k := strings.ToLower(a.Email)
-		if k == "" {
-			k = strings.ToLower(a.Name)
-		}
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		out = append(out, a)
-	}
-	return out
+	// The planner's own dedupe keeps first occurrences, so the section follows
+	// the order the release collected its units in: newest commit first, which
+	// is the order the planner builds Units in and the order the window authors
+	// are already in. Deliberately not the rendered order (breaking, then
+	// features, then fixes): that would sort people by the size of the change
+	// they happened to make.
+	return FilterAuthors(plan.DedupeAuthors(list), f.AuthorsInclude, f.AuthorsExclude)
 }
 
 // authorsSection renders the "### Authors" block, or nothing when the
