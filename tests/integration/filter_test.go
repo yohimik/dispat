@@ -218,6 +218,20 @@ func TestFilterUnmatchedTermsAreErrors(t *testing.T) {
 	res = standalone.RunScript("lint", "-s", "solo")
 	assert.Equal(t, 1, res.Code)
 	assert.Contains(t, res.Stdout, "this repository configures none; every package is standalone, so select it with --package")
+
+	// A configured space whose folder holds no package yet is a real space
+	// with nothing in it: a term naming it selects nothing, and says so.
+	empty := harness.New(t)
+	empty.SeedPackage("packages", "core")
+	empty.WriteFile("drafts/README.md", "nothing released here yet\n")
+	cfg = libsConfig(echoBuild, 1)
+	cfg.Scripts["lint"] = models.Script{"echo linting"}
+	cfg.Spaces["drafts"] = models.SpaceConfig{Path: models.PathList{"drafts"}, Flow: buildPublish()}
+	empty.WriteConfigModel(cfg)
+	empty.Commit("feat(core): bootstrap")
+	res = empty.RunScript("lint", "-s", "drafts")
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, `--space \"drafts\" matches no package (space \"drafts\" holds none)`)
 }
 
 // TestFilterSpaceTermStaysInItsSpace: a --space term selects that space's
