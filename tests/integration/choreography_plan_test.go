@@ -136,26 +136,48 @@ func sdkBaseline(revision string) []models.RepositoryBaselineConfig {
 
 // TestChoreographyReadsABaselineDeclaredByThePeerThatKnowsIt: a boundary is a
 // statement about two repositories, and with no control file the run reads it
-// wherever the fleet wrote it down. The declared revision is what the
-// consumer's window in the provider starts from, so a propagating commit after
-// it reaches the consumer.
+// wherever the fleet wrote it down: here the provider's own configuration, not
+// the entry's. The provider has released its work, so the declared revision
+// alone decides the plan. Declared before the work, the consumer has not
+// released past it and is owed the release that carries it, a catch-up with
+// W193. Declared at the work, the consumer released past it after the
+// provider did, so it has been delivered and nothing is pending. With the
+// provider never released, releasing past the work is not delivery (CCME
+// §13.4a): the consumer is still owed it.
 func TestChoreographyReadsABaselineDeclaredByThePeerThatKnowsIt(t *testing.T) {
-	fleet := crossRepositoryFleet(t)
-	api := fleet.peer("api")
-	provider := api.Git("-C", ".links/sdk", "rev-parse", "HEAD")
-	api.Git("tag", "-a", "api-pkg@0.1.0", "-m", "tagged by hand")
-	fleet.workIn(api.Repo, "sdk", "sdk-pkg", "fix(sdk-pkg)^: work after the hand-made tag")
+	for _, row := range []struct {
+		name               string
+		isProviderReleased bool
+		isDeclaredAtWork   bool
+		consumerReason     string
+		isProviderBumped   bool
+	}{
+		{name: "declared before the released work", isProviderReleased: true, consumerReason: "catch-up from sdk-pkg"},
+		{name: "declared at the released work", isProviderReleased: true, isDeclaredAtWork: true},
+		{name: "declared at work never released", isDeclaredAtWork: true,
+			consumerReason: "propagated from sdk-pkg", isProviderBumped: true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			fleet, before, work := handTaggedBoundaryFleet(t, row.isProviderReleased)
+			api := fleet.peer("api")
+			declared := before
+			if row.isDeclaredAtWork {
+				declared = work
+			}
+			fleet.configureIn(api.Repo, "sdk", "chore: state the boundary here", func(cfg *models.File) {
+				cfg.RepositoryBaselines = sdkBaseline(declared)
+			})
 
-	// The tuple lives in the provider's configuration, not the entry's.
-	fleet.configureIn(api.Repo, "sdk", "chore: state the boundary here", func(cfg *models.File) {
-		cfg.RepositoryBaselines = []models.RepositoryBaselineConfig{{
-			Consumer: "api-pkg", ReleaseTag: "api-pkg@0.1.0", Repository: "sdk", Revision: provider}}
-	})
-
-	res := api.StatusOK("--package", "*")
-	requireNoDiagnostic(t, res, "E333")
-	assert.Equal(t, "propagated from sdk-pkg", harness.GraphLine(res.Events, "api-pkg").Str("reason"),
-		"the work after the declared revision is in the consumer's window: %s", res.Stdout)
+			res := api.StatusOK("--package", "*")
+			requireNoDiagnostic(t, res, "E333")
+			consumer, provider := harness.GraphLine(res.Events, "api-pkg"), harness.GraphLine(res.Events, "sdk-pkg")
+			assert.Equal(t, row.consumerReason, consumer.Str("reason"), "stdout:\n%s", res.Stdout)
+			assert.Equal(t, row.consumerReason != "", consumer.Str("bump") != "", "stdout:\n%s", res.Stdout)
+			assert.Equal(t, row.isProviderBumped, provider.Str("bump") != "", "stdout:\n%s", res.Stdout)
+			assert.Equal(t, row.consumerReason == "catch-up from sdk-pkg",
+				harness.IsCodePresentForPackage(res.Events, "W193", "api-pkg"), "stdout:\n%s", res.Stdout)
+		})
+	}
 }
 
 // TestChoreographyDoesNotCountALinkMoveAsAChange: a settlement writes a
