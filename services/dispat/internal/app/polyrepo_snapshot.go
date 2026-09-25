@@ -105,7 +105,8 @@ func (w *workspaceRecorder) captureSnapshot(ctx context.Context, packages []*mod
 
 // setSnapshotPlan fixes each release's exact planner-provided history-input
 // closure. Compact immutable bitsets and interning share equal closures among
-// packages. The owner/provider fallback retains small hand-built Plan callers.
+// packages. The planner states the inputs of every release it emits; a release
+// it states none for is read as an empty set, the same as an empty entry.
 func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 	if w.snapshot == nil {
 		return
@@ -113,7 +114,6 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 	guard := w.snapshot
 	guard.byRelease = make(map[*plan.Release]*repositorySet)
 	wordCount := (len(guard.records) + 63) / 64
-	closures := make(map[string]*repositorySet, len(pl.Releases))
 	interned := make(map[string]*repositorySet)
 	type plannerSetKey struct {
 		first      *uint64
@@ -137,9 +137,9 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 		if rel == nil || rel.Pkg == nil {
 			continue
 		}
-		inputWords, planned := pl.RepositoryInputs[name]
+		inputWords := pl.RepositoryInputs[name]
 		var words []uint64
-		plannerWords := planned && wordCount > 0 && matchingOrder && len(inputWords) == wordCount
+		plannerWords := wordCount > 0 && matchingOrder && len(inputWords) == wordCount
 		addControl := false
 		if rel.IsReleasing() && controlEnabled && rel.Pkg.Repository != config.ControlRepository {
 			controlWord, controlMask := control/64, uint64(1)<<uint(control%64)
@@ -149,7 +149,6 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 		if plannerWords {
 			plannerKey = plannerSetKey{first: &inputWords[0], addControl: addControl}
 			if closure := plannerSets[plannerKey]; closure != nil {
-				closures[name] = closure
 				if rel.IsReleasing() {
 					guard.byRelease[rel] = closure
 				}
@@ -157,21 +156,9 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 			}
 			words = inputWords
 		} else {
+			// The planner's order is not the fleet's: its bits are moved,
+			// one repository at a time, to the fleet's indexes.
 			words = make([]uint64, wordCount)
-		}
-		if !planned {
-			if owner, ok := guard.repoIndex[rel.Pkg.Repository]; ok {
-				words[owner/64] |= uint64(1) << uint(owner%64)
-			}
-			for _, provider := range pl.Providers[name] {
-				if closure := closures[provider]; closure != nil {
-					for i := range words {
-						words[i] |= closure.words[i]
-					}
-				}
-			}
-		}
-		if planned && !plannerWords {
 			for i, repository := range pl.RepositoryInputOrder {
 				if i/64 >= len(inputWords) || inputWords[i/64]&(uint64(1)<<uint(i%64)) == 0 {
 					continue
@@ -194,7 +181,6 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 		if plannerWords {
 			plannerSets[plannerKey] = closure
 		}
-		closures[name] = closure
 		if rel.IsReleasing() {
 			guard.byRelease[rel] = closure
 		}

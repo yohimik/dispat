@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,17 +19,34 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
+// snapshotPlan is the plan the planner makes of releases with no provider in
+// another repository: each release's inputs are its own repository alone.
 func snapshotPlan(t *testing.T, w *workspaceRecorder, releases ...*plan.Release) *plan.Plan {
 	t.Helper()
-	pl := &plan.Plan{Releases: make(map[string]*plan.Release), Providers: make(map[string][]string), RepositoryHeads: make(map[string]string)}
+	pl := &plan.Plan{Releases: make(map[string]*plan.Release), Providers: make(map[string][]string),
+		RepositoryHeads: make(map[string]string), RepositoryInputs: make(map[string][]uint64)}
+	for _, record := range w.ordered {
+		pl.RepositoryInputOrder = append(pl.RepositoryInputOrder, record.repo.Name)
+		pl.RepositoryHeads[record.repo.Name] = recordGit(t, record.repo.Root, "rev-parse", "HEAD")
+	}
 	for _, rel := range releases {
 		pl.Order = append(pl.Order, rel.Pkg.Name)
 		pl.Releases[rel.Pkg.Name] = rel
-	}
-	for _, record := range w.ordered {
-		pl.RepositoryHeads[record.repo.Name] = recordGit(t, record.repo.Root, "rev-parse", "HEAD")
+		pl.RepositoryInputs[rel.Pkg.Name] = repositoryInputs(pl.RepositoryInputOrder, rel.Pkg.Repository)
 	}
 	return pl
+}
+
+// repositoryInputs is a planner input set: the named repositories, as bits of
+// their places in order.
+func repositoryInputs(order []string, repositories ...string) []uint64 {
+	words := make([]uint64, (len(order)+63)/64)
+	for index, name := range order {
+		if slices.Contains(repositories, name) {
+			words[index/64] |= uint64(1) << uint(index%64)
+		}
+	}
+	return words
 }
 
 func TestSnapshotPlanAcceptsEmptyRepositoryInputs(t *testing.T) {
@@ -162,6 +180,8 @@ func TestWorkspaceSnapshotPrepublishChecksOnlyOwnerAndProviderClosure(t *testing
 		"an independent repository may progress while this release publishes")
 
 	pl.Providers[controlRelease.Pkg.Name] = []string{sourceRelease.Pkg.Name}
+	pl.RepositoryInputs[controlRelease.Pkg.Name] = repositoryInputs(pl.RepositoryInputOrder,
+		config.ControlRepository, sourceRelease.Pkg.Repository)
 	w.setSnapshotPlan(pl)
 	err := w.verifySnapshot(t.Context(), controlRelease)
 	require.Error(t, err)
@@ -251,31 +271,6 @@ func closureRelease(name, repository string) *plan.Release {
 		Current: ccme.Version{Major: 1}, Next: ccme.Version{Major: 1, Patch: 1}, Bump: ccme.BumpPatch, NewWork: true}
 }
 
-func TestSnapshotRepositoryClosuresAreTopologicalAndInterned(t *testing.T) {
-	w := snapshotClosureFixture(config.ControlRepository, "source-a", "source-b")
-	base := closureRelease("library", "source-a")
-	middle := closureRelease("service", "source-b")
-	tool := closureRelease("tool", "source-a")
-	pl := &plan.Plan{
-		Order: []string{"library", "service", "tool"},
-		Releases: map[string]*plan.Release{
-			"library": base, "service": middle, "tool": tool,
-		},
-		Providers: map[string][]string{
-			"service": {"library"}, "tool": {"service"},
-		},
-	}
-
-	w.setSnapshotPlan(pl)
-
-	a := w.snapshot.repoIndex["source-a"]
-	b := w.snapshot.repoIndex["source-b"]
-	assert.True(t, w.snapshot.byRelease[middle].contains(a))
-	assert.True(t, w.snapshot.byRelease[middle].contains(b))
-	assert.Same(t, w.snapshot.byRelease[middle], w.snapshot.byRelease[tool],
-		"A/library -> B/service -> A/tool shares the identical immutable closure")
-}
-
 func TestSnapshotRepositoryClosureIncludesPlannerGroupInputs(t *testing.T) {
 	w := snapshotClosureFixture(config.ControlRepository, "source-a", "source-b")
 	a := closureRelease("a", "source-a")
@@ -347,7 +342,10 @@ func TestSnapshotRepositoryClosureTransfersMultipleWords(t *testing.T) {
 
 func TestSnapshotRepositoryClosuresShareLargeConsumerFanout(t *testing.T) {
 	w := snapshotClosureFixture(config.ControlRepository, "source")
-	pl := &plan.Plan{Releases: make(map[string]*plan.Release), Providers: make(map[string][]string)}
+	order := []string{config.ControlRepository, "source"}
+	inputs := repositoryInputs(order, "source") // interned once by the planner
+	pl := &plan.Plan{Releases: make(map[string]*plan.Release), Providers: make(map[string][]string),
+		RepositoryInputOrder: order, RepositoryInputs: map[string][]uint64{"base": inputs}}
 	base := closureRelease("base", "source")
 	pl.Order = append(pl.Order, "base")
 	pl.Releases["base"] = base
@@ -357,6 +355,7 @@ func TestSnapshotRepositoryClosuresShareLargeConsumerFanout(t *testing.T) {
 		pl.Order = append(pl.Order, name)
 		pl.Releases[name] = rel
 		pl.Providers[name] = []string{"base"}
+		pl.RepositoryInputs[name] = inputs
 	}
 
 	w.setSnapshotPlan(pl)
@@ -369,7 +368,10 @@ func TestSnapshotRepositoryClosuresShareLargeConsumerFanout(t *testing.T) {
 
 func BenchmarkSetSnapshotPlanRepositoryClosures(b *testing.B) {
 	w := snapshotClosureFixture(config.ControlRepository, "source-a", "source-b")
-	pl := &plan.Plan{Releases: make(map[string]*plan.Release), Providers: make(map[string][]string)}
+	order := []string{config.ControlRepository, "source-a", "source-b"}
+	first, rest := repositoryInputs(order, "source-a"), repositoryInputs(order, "source-a", "source-b")
+	pl := &plan.Plan{Releases: make(map[string]*plan.Release), Providers: make(map[string][]string),
+		RepositoryInputOrder: order, RepositoryInputs: make(map[string][]uint64)}
 	for i := range 1024 {
 		name := fmt.Sprintf("package-%04d", i)
 		repository := "source-a"
@@ -378,8 +380,10 @@ func BenchmarkSetSnapshotPlanRepositoryClosures(b *testing.B) {
 		}
 		pl.Order = append(pl.Order, name)
 		pl.Releases[name] = closureRelease(name, repository)
+		pl.RepositoryInputs[name] = first
 		if i > 0 {
 			pl.Providers[name] = []string{pl.Order[i-1]}
+			pl.RepositoryInputs[name] = rest
 		}
 	}
 	b.ResetTimer()
