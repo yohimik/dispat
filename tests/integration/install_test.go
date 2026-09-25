@@ -408,6 +408,34 @@ func TestInstallKeepsAndRestoresWhatItReplaced(t *testing.T) {
 	assert.Len(t, entries, 2, "nothing is parked and forgotten between the renames: %v", entries)
 }
 
+// TestInstallRollbackRefusesWhatStandsInTheBackupPlace: a folder where the
+// kept copy belongs is not a binary a rollback could put back, so
+// `--rollback --check` says the backup cannot be restored rather than
+// promising a restore, and `--rollback` names the folder with its remedy and
+// moves nothing.
+func TestInstallRollbackRefusesWhatStandsInTheBackupPlace(t *testing.T) {
+	requireShell(t)
+	r := newToolRepo(t)
+	require.Equal(t, 0, r.install("--release", toolOld).Code)
+	require.Equal(t, 0, r.install().Code)
+	require.NoError(t, os.Remove(backupPath(r.installed())))
+	require.NoError(t, os.Mkdir(backupPath(r.installed()), 0o700))
+	remedy := filepath.Base(backupPath(r.installed())) +
+		" is a folder where the previous binary is kept; move or remove it, then re-run"
+
+	res := r.bare("--rollback", "--check")
+	assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, "the backup cannot be restored")
+	assert.Contains(t, res.Stdout+res.Stderr, remedy)
+	assert.NotContains(t, res.Stdout, "restore it with")
+
+	res = r.bare("--rollback")
+	assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout+res.Stderr, remedy)
+	assert.Equal(t, toolNew, r.version(r.installed()), "nothing moved")
+	assert.DirExists(t, backupPath(r.installed()))
+}
+
 // TestInstallBackupExpiresOnItsOwn: the copy is kept for a week and then
 // removed by the next download of that same tool. Nothing has to be cleaned up
 // by hand, and nothing else in the folder is ever touched.
