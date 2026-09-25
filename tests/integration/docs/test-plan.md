@@ -38,8 +38,9 @@ integration suite itself.
    the channel rules; a window where a provider and its consumer each changed for their own reasons with no propagation
    syntax written, which both auto-versioning strategies, the version scripts and the changelog have to account for
    with no `DueTo` link to follow; a package joining a versioning group with no version, and one joining with a version
-   that outranks the group's; and the boundary where `revertOnFail` stops. Each one fails by producing a *plausible*
-   release rather than an error, which is what makes them worth a file of their own.
+   that outranks the group's; the boundary where `revertOnFail` stops; and a shared `commit.include` lock file that a
+   package which did not publish wrote into. Each one fails by producing a *plausible* release rather than an error,
+   which is what makes them worth a file of their own.
    `TestEdgeDirtyGuardProtectsOnlyPackagesThatCanBeReverted` owns the dirty-tree boundary: existing work is preserved
    for a package whose effective `revertOnFail` is false and refused only where rollback could overwrite it.
 
@@ -730,6 +731,9 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestEdgeRevertOnFailStopsAtThePublish` | If a package fails its build while another publishes, dispat rolls back the failed package directory and keeps build artifacts in the published one. Once published, changes cannot be rolled back by later failures. |
 | `TestEdgeRevertOnFailIsThreeStateAtThePackageLevel` | When the root sets `true`, a package setting `revertOnFail: false` preserves its files while its unspecified sibling rolls back, exercising tri-state boolean inheritance. |
 | `TestEdgeRevertOnFailNeverReachesAFailedCommit` | If a release commit fails after all packages publish, `revertOnFail` leaves the working tree modified. Restoring files would mismatch published artifacts, so dispat logs E223, writes tags, and skips directory rollback. |
+| `TestEdgeReleaseCommitLockOmitsASkippedConsumer` | A root `commit.include` lock file regenerated from every workspace manifest by each package's `syncLock` holds a consumer's planned version when its provider's failure skips it; the closing phase restores the file and runs the published package's `syncLock` again, so the release commit's lock lists only published versions and the published package is committed and tagged. |
+| `TestEdgeReleaseCommitLockOmitsAFailedWriter` | The same lock file after a package fails its build past its version stage: its tracked files return to HEAD before the regeneration, so the release commit's lock lists only published versions, and its untracked build output stays for inspection. |
+| `TestEdgeReleaseCommitLockLeftAtHeadWhenResyncIsInterrupted` | An interrupt while the regeneration runs half-writes the lock file; dispat restores it to HEAD, reports `E223`, leaves it out of the release commit that still records and tags the published package, and the documented `dispat run <script> --since all` remedy regenerates it from what published. |
 
 ### Goal 6: concurrency (`concurrency_test.go`)
 

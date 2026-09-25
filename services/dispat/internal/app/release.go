@@ -607,7 +607,10 @@ type closingRecord struct {
 }
 
 // recordCompletedReleases runs postAll and writes the durable records of every
-// package that published, collecting what fails into crit.
+// package that published, collecting what fails into crit. Before a single
+// history's release commit, the shared include paths are re-synchronized when
+// a package that prepared its release files did not publish (see
+// syncSharedIncludes).
 //
 // The recording context is created first, so that it exists however early the
 // interrupt arrives. The records themselves (finalize, and the owed-consumer
@@ -622,9 +625,10 @@ func (a *App) recordCompletedReleases(ctx context.Context, closing closingRecord
 		a.log.Warn().Msg("interrupted: skipping run hooks, recording completed releases")
 	}
 	if closing.fleet == nil {
+		isIncludeWithheld := a.syncSharedIncludes(ctx, recordCtx, closing, crit)
 		observed, stopObserving := newRecordHooks(recordCtx, ctx)
 		a.finalize(recordCtx, finalizer{gh: closing.gh, remote: a.pushRemote(), hooks: closing.hooks, crit: crit,
-			observed: observed}, closing.plan, closing.results)
+			observed: observed, isIncludeWithheld: isIncludeWithheld}, closing.plan, closing.results)
 		stopObserving()
 	}
 	// Every tag this run wrote exists now, in every repository, so a consumer

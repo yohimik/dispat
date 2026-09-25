@@ -78,6 +78,10 @@ type finalizer struct {
 	// published (the commit, the tags, the push), a hook running when the
 	// interrupt arrives is stopped, and no later one starts.
 	observed recordHooks
+	// isIncludeWithheld keeps the commit.include paths out of the release
+	// commit: their re-synchronization did not finish, so they may name a
+	// version that did not publish (see syncSharedIncludes).
+	isIncludeWithheld bool
 }
 
 // run executes one warn-only bracket hook while the run is still live.
@@ -149,7 +153,9 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 			tags = append(tags, rel.TagName())
 		}
 	}
-	dirs = a.appendIncludeDirs(dirs, a.cfg.Commit.Include)
+	if !fin.isIncludeWithheld {
+		dirs = a.appendIncludeDirs(dirs, a.cfg.Commit.Include)
+	}
 
 	// Every package in this list has published. From here nothing may abort:
 	// a failure is recorded and the phase carries on to the rest of what it

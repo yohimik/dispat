@@ -189,11 +189,49 @@ would reach files another package owns: a package rooted at the repository root,
 another package's folder.
 
 A package that failed keeps the [`revertOnFail`](../../configuration/spaces.md#space-options) rule: its folder is
-restored only when the setting is on, so you can inspect what its stages wrote. Without release commits nothing is
-restored by default, because nothing proved the folders clean before the run.
+restored only when the setting is on, so you can inspect what its stages wrote. The one exception is a release whose
+shared files have to be re-synchronized, described below, which restores the failed package's tracked files and keeps
+its untracked ones. Without release commits nothing is restored by default, because nothing proved the folders clean
+before the run.
 
 In a fleet, the same rule applies to each repository that makes release commits, and the folder is restored inside
 the repository that owns it.
+
+### Shared files of the release commit
+
+A [`commit.include`](../../configuration/records.md#commit) path such as a root lock file is shared by every package.
+A whole-workspace regenerator in a [`syncLock`](../../configuration/autoversion.md#the-options) script writes every
+package's manifest version into it, including the planned version of a package that later fails or is skipped. When a
+package whose version or `syncLock` stage ran does not publish while another package does, dispat therefore
+re-synchronizes the shared paths before the release commit:
+
+1. The tracked files of every such package are restored to HEAD, so that its manifests name the version that exists.
+   Its untracked files stay for inspection.
+2. The `commit.include` paths are restored to HEAD. Every published package's folder and changelog file keep what the
+   run wrote.
+3. The `syncLock` scripts of every published package whose `syncLock` stage ran commands run again, one package at a
+   time in dependency order. Their environment lists each package that did not publish at its previous version with
+   `DISPAT_WORKSPACE_<KEY>_RELEASING=false`, and leaves it out of `DISPAT_UPDATED_*`.
+
+The release commit then records only versions that published. When every package that prepared its release files
+published, none of this happens.
+
+If a script of step 3 fails, or the run is interrupted before step 3 finishes, dispat restores the `commit.include`
+paths to HEAD again, because a regenerator stopped halfway can leave a file half written, and makes the release commit
+without them. The published packages are still committed and tagged. The run reports `E223` with the paths and the
+packages whose scripts regenerate them. Run those scripts yourself and commit the paths, for example with the script
+name the space's `autoVersion.syncLock` lists:
+
+```sh
+dispat run npm-install --package web --since all
+git add pnpm-lock.yaml
+git commit -m "chore(release): regenerate the lock file"
+```
+
+The re-synchronization covers a single repository history. A fleet commits each package's `commit.include` paths into
+that package's own release commit while the run is still going, so no later step can take a package's write back out
+of a sibling's commit. In a fleet, check a shared file that a package which did not publish may have written, and
+regenerate it before the next release.
 
 ## Repair GitHub metadata after the package was recorded
 

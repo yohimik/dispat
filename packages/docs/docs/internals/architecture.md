@@ -126,15 +126,20 @@ read it back as a release tag.
     the durable records run on a context of their own: the run's cancellation does not reach them, and an interrupt
     gives them five minutes from the moment it arrives. An uninterrupted run is not bounded by it. The hooks stay on
     the live run: an interrupt stops the hook that is running, `postAll` included, and no later hook starts.
-13. Run the finalize phase when `commit` is enabled. dispat makes one release commit staging all published packages,
-    then places tags on that commit or on a package's exported `PACKAGE_<KEY>` commit. The push follows when
-    `commit.push` is enabled. It pushes the branch first, then the run's tags, skipping and warning about any tag
-    already on the remote. GitHub releases referencing the pushed tags come last. The warn-only commit and push hooks
-    bracket these operations (`beforeCommit`/`afterCommit`, `postCommit` after tags, `beforePush`/`afterPush`). Every
-    package here has published, so nothing in this phase aborts it either. Each step runs, and each failure is a
+13. Run the finalize phase when `commit` is enabled. When a package whose version or `syncLock` stage ran did not
+    publish while another did, a single history first re-synchronizes the `commit.include` paths: the unpublished
+    packages' tracked files and those paths go back to HEAD, leaving published folders and changelogs alone, and the
+    published packages' `syncLock` scripts run again with an environment naming only what published
+    (`release.SettledEnv`). A re-synchronization that does not finish restores the paths again and leaves them out of
+    the commit, with `E223`. dispat then makes one release commit staging all published packages, then places tags on
+    that commit or on a package's exported `PACKAGE_<KEY>` commit. The push follows when `commit.push` is enabled. It
+    pushes the branch first, then the run's tags, skipping and warning about any tag already on the remote. GitHub
+    releases referencing the pushed tags come last. The warn-only commit and push hooks bracket these operations
+    (`beforeCommit`/`afterCommit`, `postCommit` after tags, `beforePush`/`afterPush`). Every package here has
+    published, so nothing in this phase aborts it either. Each step runs, and each failure is a
     [critical](#after-the-point-of-no-return). Every Git command of this phase runs on the recording context of step
-    12, so an interrupt that arrives during `beforeCommit` or during the push stops the hook and leaves the commit,
-    the tags and the push to finish. Recording that outlasts the grace is a critical (`E223`).
+    12, so an interrupt that arrives during `beforeCommit` or during the push stops the hook and leaves the commit, the
+    tags and the push to finish. Recording that outlasts the grace is a critical (`E223`).
 14. Print a per-package summary and the totals. dispat exits `1` if anything failed or if it recorded any critical.
 
 ## Planning
@@ -570,7 +575,7 @@ release that lost part of its record never looks green in CI.
 | `E220` | A release tag could not be created |
 | `E221` | A release tag already exists at a different commit |
 | `E222` | A release record (changelog entry, GitHub release) could not be written |
-| `E223` | The release commit could not be made |
+| `E223` | The release commit could not be made, or its shared `commit.include` paths could not be re-synchronized and were left out of it |
 | `E224` | The push failed |
 
 None of these fails the package because failing it would be a lie with consequences. The package *is* published, so

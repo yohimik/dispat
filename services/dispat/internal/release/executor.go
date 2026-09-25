@@ -92,6 +92,16 @@ type Result struct {
 	// outcome is attributed to: a receiver asking "where was this version
 	// built" is asking about the release, not about the stage it heard last.
 	Worker string
+	// IsPrepared reports that a task preparing the package's release files
+	// started: its version stage or its syncLock stage (see
+	// isPreparingStage). A prepared package that did not publish may have
+	// left its planned version in files the release commit shares with the
+	// packages that did.
+	IsPrepared bool
+	// IsSyncLockRun reports that the package's syncLock stage ran its
+	// commands. The closing phase runs them again for a published package
+	// when the files they regenerate are re-synchronized.
+	IsSyncLockRun bool
 }
 
 // Taggerx creates release tags; *gitx.LocalGitx satisfies it. A nil Taggerx on the
@@ -610,6 +620,15 @@ func hasVersionTask(rel *plan.Release) bool {
 	return len(rel.Updates) > 0 || rel.Pkg.Space.AutoVersion != nil
 }
 
+// isPreparingStage reports whether a task of this kind writes the files a
+// release prepares ahead of its build, which the release commit may share with
+// other packages: the version stage and the lock-file synchronization. A
+// stage added later that writes release files before the publish, such as a
+// signing stage, belongs here as well.
+func isPreparingStage(kind taskKind) bool {
+	return kind == taskVersion || kind == taskSyncLock
+}
+
 // syncLockBudget resolves the run-wide syncLock concurrency: the smallest
 // value voted by the releasing autoVersion spaces with syncLock scripts (0
 // meaning the default), or 1 — the safe serialisation a shared lock file
@@ -793,6 +812,9 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 	if _, ok := r.started[t.pkg]; !ok {
 		r.started[t.pkg] = time.Now()
 	}
+	if isPreparingStage(t.kind) {
+		res.IsPrepared = true
+	}
 	// Resolve which provider updates are still live at this moment: providers
 	// that failed or were skipped never got their new version out, so
 	// manifests must not be synced to them and scripts must not act on them.
@@ -868,14 +890,15 @@ func (r *run) resolveDeadPickups(pkg string) []string {
 }
 
 // recordReconciliation remembers, under mu, which providers one package's
-// version stage actually reconciled it to, and whether its build ran a command
-// of its own.
+// version stage actually reconciled it to, whether its build ran a command of
+// its own, and whether its syncLock stage ran its commands.
 //
-// Both are recorded from the stage that did the work rather than derived from
-// the plan afterwards, because both questions are about a moment: which
-// providers were still alive when the manifests were written, and whether
-// anything has since been built out of them. A stage with neither a native
-// reconciliation nor a script wrote nothing and is not recorded.
+// Each is recorded from the stage that did the work rather than derived from
+// the plan afterwards, because each question is about a moment: which
+// providers were still alive when the manifests were written, whether
+// anything has since been built out of them, and whether a lock file was
+// regenerated from them. A stage with neither a native reconciliation nor a
+// script wrote nothing and is not recorded.
 func (tc *taskCtx) recordReconciliation(frame stage) {
 	hasWork := frame.native != nil || len(frame.commands) > 0
 	tc.mu.Lock()
@@ -893,6 +916,10 @@ func (tc *taskCtx) recordReconciliation(frame stage) {
 	case taskBuild:
 		if len(frame.commands) > 0 {
 			tc.builtPackages[tc.t.pkg] = true
+		}
+	case taskSyncLock:
+		if len(frame.commands) > 0 {
+			tc.results[tc.t.pkg].IsSyncLockRun = true
 		}
 	}
 }

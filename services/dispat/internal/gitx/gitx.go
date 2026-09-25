@@ -661,7 +661,7 @@ func mutates(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "push", "commit", "add", "checkout", "clean", "merge",
+	case "push", "commit", "add", "checkout", "clean", "merge", "restore",
 		// The plumbing a choreographed settlement writes with: the fleet
 		// links it stages, the commit object it creates, the ref it moves,
 		// and the checkout a link is materialized by. Each is O(few) per run
@@ -1729,6 +1729,43 @@ func (c *LocalGitx) RevertDir(ctx context.Context, dir string) error {
 	}
 	_, err := c.run(ctx, append([]string{"clean", "-fd", "--"}, specs...)...)
 	return err
+}
+
+// RestoreToHead restores the tracked files beneath paths to their content at
+// HEAD, in the index and in the working tree, and leaves every untracked file
+// alone. A file the index holds and HEAD does not is removed from both, and
+// nothing beneath an exclusion is touched. Both lists are absolute paths or
+// paths relative to the repository root; the exclusions are matched
+// literally.
+//
+// It restores exactly the files that differ from HEAD, each named literally,
+// so a path neither HEAD nor the index holds is not an error: a caller may
+// name configured paths that do not exist.
+func (c *LocalGitx) RestoreToHead(ctx context.Context, paths, exclusions []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	specs := make([]string, 0, len(paths)+len(exclusions))
+	for _, path := range paths {
+		specs = append(specs, c.pathspec(path))
+	}
+	for _, exclusion := range exclusions {
+		specs = append(specs, ":(exclude,literal)"+filepath.ToSlash(c.pathspec(exclusion)))
+	}
+	diffArgs := append([]string{"diff", "--name-only", "-z", "--no-renames", "HEAD", "--"}, c.withoutLinks(specs)...)
+	changed, err := c.run(ctx, diffArgs...)
+	if err != nil {
+		return fmt.Errorf("listing the files to restore: %w", err)
+	}
+	if strings.Trim(changed, "\x00") == "" {
+		return nil
+	}
+	stream := gitStream{stdin: strings.NewReader(changed), env: []string{"GIT_LITERAL_PATHSPECS=1"}}
+	if _, err := c.runStream(ctx, stream, "restore", "--source=HEAD", "--staged", "--worktree",
+		"--pathspec-from-file=-", "--pathspec-file-nul"); err != nil {
+		return fmt.Errorf("restoring files to HEAD: %w", err)
+	}
+	return nil
 }
 
 // CommitDirs stages all changes inside the given directories and creates a

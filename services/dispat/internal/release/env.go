@@ -150,7 +150,12 @@ func liveProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) [
 // warning, rather than silently overwriting fields one by one. A workspace
 // hitting this renames one of the pair.
 func WorkspaceEnv(p *plan.Plan, log zerolog.Logger) []string {
-	entries := workspaceVersions(p)
+	return renderWorkspaceEnv(p, workspaceVersions(p), log)
+}
+
+// renderWorkspaceEnv renders one workspace listing as WorkspaceEnv describes,
+// whichever versions it lists.
+func renderWorkspaceEnv(p *plan.Plan, entries []workspaceVersion, log zerolog.Logger) []string {
 	keys := make([]string, 0, len(entries))
 	taken := make(map[string]string, len(entries))
 	out := make([]string, 0, len(entries)*4+1)
@@ -307,6 +312,65 @@ func workspaceVersions(p *plan.Plan) []workspaceVersion {
 		out = append(out, entry)
 	}
 	return out
+}
+
+// SettledEnvRequest names one package script that runs once the task graph
+// has settled, and what the run came to.
+type SettledEnvRequest struct {
+	Plan    *plan.Plan
+	Results map[string]*Result
+	Package string
+	// Stage is what DISPAT_STAGE carries.
+	Stage string
+}
+
+// SettledEnv builds the DISPAT_* environment of a package script that runs
+// after the task graph has settled, such as the closing phase's second run of
+// a published package's syncLock scripts. It carries every variable a stage
+// script receives, and its listings read what the run published rather than
+// what it planned: a package that did not publish is listed at its previous
+// version with _RELEASING=false, and a provider that did not publish is not
+// among the updates. A script regenerating a file shared by the whole
+// workspace from it records only versions that exist.
+func SettledEnv(request SettledEnvRequest) []string {
+	// The listing's key collisions were warned about when the run built it.
+	wsVars := renderWorkspaceEnv(request.Plan, settledWorkspaceVersions(request.Plan, request.Results), zerolog.Nop())
+	updates := settledProviderUpdates(request.Package, request.Plan, request.Results)
+	return packageEnv(request.Plan, request.Package, wsVars, updates, request.Stage)
+}
+
+// settledWorkspaceVersions is the workspace listing once the run has settled:
+// the plan's listing, with every package that was to release and did not
+// publish back at the version it had before the run.
+func settledWorkspaceVersions(p *plan.Plan, results map[string]*Result) []workspaceVersion {
+	entries := workspaceVersions(p)
+	for i, entry := range entries {
+		if !entry.Releasing {
+			continue
+		}
+		if res, ok := results[entry.Package]; ok && res.Status == StatusPublished {
+			continue
+		}
+		rel := p.Releases[entry.Package]
+		entries[i] = workspaceVersion{Package: entry.Package, Version: rel.Previous().String(),
+			Channel: rel.BaselineChannel}
+	}
+	return entries
+}
+
+// settledProviderUpdates is the package's provider updates once the run has
+// settled: the live ones, less every provider this run released that did not
+// publish, the cancelled ones included.
+func settledProviderUpdates(pkg string, p *plan.Plan, results map[string]*Result) []providerUpdate {
+	updates := liveProviderUpdates(pkg, p, results)
+	settled := updates[:0]
+	for _, update := range updates {
+		if res, ok := results[update.Package]; ok && res.Status != StatusPublished {
+			continue
+		}
+		settled = append(settled, update)
+	}
+	return settled
 }
 
 // CommandEnv builds the full per-package DISPAT_* environment outside a
