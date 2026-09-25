@@ -110,12 +110,14 @@ type Coordinator struct {
 	guard sync.RWMutex
 	// local is this node's own capacity, as a slot per frame it keeps.
 	local chan struct{}
-	// snapshots is what this run has already captured, and offered is what it
-	// has already pushed to which node, with the mutex that lets several
-	// dispatches share both.
+	// snapshots is what this run has already captured. offered is what it has
+	// already pushed to which node, and offering the pushes in flight, one
+	// per node and state; offers guards both maps and is never held across a
+	// push, so the first states of two nodes travel at once.
 	snapshots *snapshots
 	offers    sync.Mutex
 	offered   map[string]offeredState
+	offering  map[string]*inputOffer
 	// outputs is what every package of this run produced, as it was admitted,
 	// and what has already been relayed to which endpoint.
 	outputs *outputRegistry
@@ -140,6 +142,14 @@ type Coordinator struct {
 // it: which commit, and the immutable branch it was put on.
 type offeredState struct {
 	commit string
+	branch string
+}
+
+// inputOffer is one push of a prepared state to one node while it is in
+// flight: done closes when it has ended, and branch is where the state landed,
+// empty for a push that failed.
+type inputOffer struct {
+	done   chan struct{}
 	branch string
 }
 

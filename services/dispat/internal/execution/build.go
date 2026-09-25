@@ -98,6 +98,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
 	c.sweepOutputs = newSweepOutputs()
 	c.preparations = map[string]*preparation{}
 	c.offered = map[string]offeredState{}
+	c.offering = map[string]*inputOffer{}
 	c.local = make(chan struct{}, max(dispatch.Concurrency, 1))
 	c.watchers = make(map[string]*watcher, len(c.Links))
 	for _, link := range c.Links {
@@ -629,19 +630,63 @@ func (c *Coordinator) offerInputs(ctx context.Context, node string, sources []So
 	return offered, nil
 }
 
-// offerInput pushes one prepared state to one node, create-only, and answers
+// offerInput answers the immutable branch one prepared state sits on at one
+// node, pushing it there when no dispatch of this run has.
+//
+// Each node and state is pushed once: a dispatch that needs a state already
+// travelling to its node waits for that push rather than starting its own,
+// and takes its branch. Nothing else waits: the first states of two nodes are
+// two pushes, and they travel at once. A push that failed is nobody's answer,
+// so a dispatch that waited for it pushes the state itself.
+func (c *Coordinator) offerInput(ctx context.Context, node string, source Source,
+	commit string) (branch string, err error) {
+	key := node + "\x00" + source.Dir
+	flight := key + "\x00" + commit
+	for {
+		c.offers.Lock()
+		if state, isOffered := c.offered[key]; isOffered && state.commit == commit {
+			c.offers.Unlock()
+			return state.branch, nil
+		}
+		pending, isPending := c.offering[flight]
+		if !isPending {
+			break
+		}
+		c.offers.Unlock()
+		select {
+		case <-pending.done:
+		case <-ctx.Done():
+			return "", fmt.Errorf("waiting for the input state of %s to reach %s: %w", source.Dir, node, ctx.Err())
+		}
+		if pending.branch != "" {
+			return pending.branch, nil
+		}
+	}
+	offer := &inputOffer{done: make(chan struct{})}
+	c.offering[flight] = offer
+	c.offers.Unlock()
+	// Deferred so that whatever ends the push, the dispatches waiting for it
+	// are let go.
+	defer func() {
+		c.offers.Lock()
+		delete(c.offering, flight)
+		if err == nil {
+			c.offered[key] = offeredState{commit: commit, branch: branch}
+			offer.branch = branch
+		}
+		c.offers.Unlock()
+		close(offer.done)
+	}()
+	return c.pushInput(ctx, node, source, commit)
+}
+
+// pushInput pushes one prepared state to one node, create-only, and answers
 // the immutable branch it now sits on.
 //
 // The push comes out of the repository the state was captured in rather than
 // out of the release's own store, because in a composed workspace those are
 // different object stores and only the first one holds the objects.
-func (c *Coordinator) offerInput(ctx context.Context, node string, source Source, commit string) (string, error) {
-	c.offers.Lock()
-	defer c.offers.Unlock()
-	key := node + "\x00" + source.Dir
-	if state, isOffered := c.offered[key]; isOffered && state.commit == commit {
-		return state.branch, nil
-	}
+func (c *Coordinator) pushInput(ctx context.Context, node string, source Source, commit string) (string, error) {
 	branch := FormatBranch(node, KindSnapshot, time.Now())
 	// Owned before it is pushed, so a push with no known outcome still leaves
 	// a ref this run closes.
@@ -650,7 +695,6 @@ func (c *Coordinator) offerInput(ctx context.Context, node string, source Source
 	if err := c.settleCreate(ctx, node, branch, commit, pushErr); err != nil {
 		return "", fmt.Errorf("offering the input state of %s: %w", source.Dir, err)
 	}
-	c.offered[key] = offeredState{commit: commit, branch: branch}
 	c.Log.Debug().Str("worker", node).Str("repository", source.Name).Str("branch", branch).
 		Str("commit", commit).Str("run", c.Run).Msg("input state pushed")
 	return branch, nil

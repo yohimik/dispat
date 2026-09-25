@@ -632,9 +632,10 @@ so the run hears an answer rather than waiting out `timeouts.task`. The node log
 
 **One transfer never holds up another.** A push of a task's outputs takes as long as the outputs are large, and
 nothing else of the mailbox waits for it: on a node serving several tasks, a poll, a withdrawal and the read of a
-publication authorization go on while it is in flight. An orchestrator watching a mailbox other runs share fetches
-only the branches of its own attempts, never another run's output trees, and removes the refs it fetched when their
-branch closes and when the run ends.
+publication authorization go on while it is in flight. The orchestrator pushes an input state to several nodes at
+once, and two dispatches that need one state on one node share a single push of it. An orchestrator watching a
+mailbox other runs share fetches only the branches of its own attempts, never another run's output trees, and removes
+the refs it fetched when their branch closes and when the run ends.
 
 **What an assignment carries:** the protocol version, the kind, the run id, the plan digest, the task and attempt,
 the ownership generation, the node it is addressed to, the branch it may appear on and the instant it was issued;
