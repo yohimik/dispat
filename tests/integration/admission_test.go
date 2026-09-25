@@ -504,6 +504,64 @@ func TestAdmissionCatchesUpAfterTheProviderShipsAlone(t *testing.T) {
 	}
 }
 
+// TestAdmissionCatchesUpAConsumerOwedByTwoProviders: two providers of one
+// consumer, whose last releases sit at different commits, both fail while the
+// consumer proceeds past their pending commits on its own feature. Both then
+// ship in a run the consumer sits out. The consumer is owed two windows at
+// once, one after each provider's release its baseline reaches, and the
+// unfiltered run after that catches it up exactly once for both, without a
+// new commit and without republishing either provider, then converges.
+func TestAdmissionCatchesUpAConsumerOwedByTwoProviders(t *testing.T) {
+	ok := []string{admissionProviderOK + "=1"}
+	r := harness.New(t)
+	cfg := harness.BaseFile(2)
+	cfg.Scripts = map[string]models.Script{
+		"build":       {"echo building $DISPAT_PACKAGE"},
+		"lib-publish": {`if [ -n "$` + admissionProviderOK + `" ]; then echo published; else exit 1; fi`},
+		"app-publish": {"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
+	}
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages/libs"},
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"lib-publish"}}},
+		"apps": {Path: models.PathList{"packages/apps"},
+			Flow: &models.SpaceFlowConfig{Publish: []string{"app-publish"}}},
+	}
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "cli", Provider: "core"}, {Consumer: "cli", Provider: "util"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages/libs", "core")
+	r.SeedPackage("packages/libs", "util")
+	r.SeedPackage("packages/apps", "cli")
+	r.Commit("feat(core,util,cli): bootstrap")
+	require.Equal(t, 0, r.CommandEnv(ok, "release").Code)
+	// util's last release moves past core's, so the two debts below start at
+	// different commits.
+	r.Commit("fix(util): tighten a bound")
+	require.Equal(t, 0, r.CommandEnv(ok, "release").Code)
+	require.Subset(t, r.TagList(), []string{"core@0.1.0", "util@0.1.1", "cli@0.1.0"})
+
+	r.CommitEmpty("feat(core)^: streaming\n\n---\n\nfeat(util)^: pooling\n\n---\n\nfeat(cli): own flag")
+	proceeded := r.Release()
+	require.NotEqual(t, 0, proceeded.Code, "both providers failed, so the run failed")
+	require.Equal(t, 1, r.TagCount("cli@0.2.0"), "the consumer proceeded on its own feature; tags: %v", r.TagList())
+	assert.Zero(t, r.TagCount("core@0.2.0")+r.TagCount("util@0.2.0"))
+
+	r.CommitEmpty("chore(core,util): retry the providers")
+	providers := r.CommandEnv(ok, "--package", "core", "--package", "util")
+	require.Equal(t, 0, providers.Code, "provider-only retry: %s", providers.Stdout)
+	require.Subset(t, r.TagList(), []string{"core@0.2.0", "util@0.2.0"})
+	assert.Zero(t, r.TagCount("cli@0.2.1"), "the consumer was absent from this run")
+
+	catchUp := r.CommandEnv(ok, "release")
+	require.Equal(t, 0, catchUp.Code, "catch-up run: %s", catchUp.Stdout)
+	assert.Equal(t, 1, r.TagCount("cli@0.2.1"), "one catch-up for both debts; tags: %v", r.TagList())
+	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "core is never republished")
+	assert.Equal(t, 1, r.TagCount("util@0.2.0"), "util is never republished")
+	assert.True(t, harness.IsCodePresentForPackage(catchUp.Events, "W193", "cli"),
+		"stdout:\n%s", catchUp.Stdout)
+	assertAdmissionSettled(t, r)
+}
+
 // TestAdmissionCatchesUpAHeldConsumerAfterItsProviderShipped: the consumer is
 // held when its provider finally publishes. The hold commit moved the head
 // past the consumer's release, so the provider may go, the hold withholds the
