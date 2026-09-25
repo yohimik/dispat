@@ -97,23 +97,33 @@ const BEATS: Beat[] = [
 
 const INTRO = 16;
 type Schedule = {start: number; status: number; answer: number; run?: number; build?: number; published?: number; end: number};
-const schedules: Schedule[] = [];
-let cursor = INTRO;
-for (const beat of BEATS) {
-  const start = cursor + 2;
+
+interface ScheduleBeatOptions {
+  beat: (typeof BEATS)[number];
+  /** The frame the previous beat ended at, or the intro's end. */
+  after: number;
+}
+
+/** One beat's frames: its commit, the status answer and, for a release, the run. */
+function scheduleBeat(options: ScheduleBeatOptions): Schedule {
+  const {beat, after} = options;
+  const start = after + 2;
   const status = start + typingFrames(beat.cmd) + 10;
   const answer = status + typingFrames('dispat status') + 8;
   if (beat.release === false) {
-    schedules.push({start, status, answer, end: answer + 36});
-  } else {
-    const run = answer + 18;
-    const build = run + typingFrames('dispat') + 8;
-    const published = build + 32;
-    schedules.push({start, status, answer, run, build, published, end: published + 24});
+    return {start, status, answer, end: answer + 36};
   }
-  cursor = schedules.at(-1)!.end;
+  const run = answer + 18;
+  const build = run + typingFrames('dispat') + 8;
+  const published = build + 32;
+  return {start, status, answer, run, build, published, end: published + 24};
 }
-export const CONTROL_DURATION = cursor + 20;
+
+const schedules: Schedule[] = BEATS.reduce<Schedule[]>(
+  (scheduled, beat) => [...scheduled, scheduleBeat({beat, after: scheduled.at(-1)?.end ?? INTRO})],
+  [],
+);
+export const CONTROL_DURATION = (schedules.at(-1)?.end ?? INTRO) + 20;
 
 // Every directive is typed at the shared terminal pace; the answer gets a
 // short reading beat after the complete commit.
