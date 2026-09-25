@@ -645,14 +645,14 @@ func TestReleaseLockVerifyOffSkipsTheLockRead(t *testing.T) {
 // nothing. The run refuses before any package work, rather than locking one
 // destination while publishing to another, whether the remote is the one
 // repository's own or a source repository's of a fleet, and nothing is tagged
-// or committed. A fleet names the refusal E336.
+// or committed. Both name the refusal E336, as the lock page's first step
+// promises for any lock that cannot be taken.
 func TestReleaseLockRefusesAnAmbiguousPushDestination(t *testing.T) {
 	for _, row := range []struct {
 		name string
 		// setup returns the repository the release runs in and the folder,
 		// relative to it, of the repository whose remote has two destinations.
 		setup func(t *testing.T) (*harness.Repo, string)
-		code  string
 	}{
 		{
 			name: "one repository",
@@ -696,7 +696,6 @@ func TestReleaseLockRefusesAnAmbiguousPushDestination(t *testing.T) {
 				control.Commit("chore: configure a source with two push destinations")
 				return control, "sources/lib"
 			},
-			code: "E336",
 		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -705,9 +704,7 @@ func TestReleaseLockRefusesAnAmbiguousPushDestination(t *testing.T) {
 
 			res := r.CommandEnv(harness.LockEnabled, "release")
 			assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			if row.code != "" {
-				assert.True(t, harness.IsCodePresent(res.Events, row.code), "stdout:\n%s", res.Stdout)
-			}
+			assert.True(t, harness.IsCodePresent(res.Events, "E336"), "stdout:\n%s", res.Stdout)
 			assert.Contains(t, res.Stdout+res.Stderr, "has 2 push destinations")
 			assert.Equal(t, before, r.Git("-C", ambiguous, "rev-parse", "HEAD"), "nothing was committed")
 			assert.Empty(t, polyrepoTags(r, ambiguous), "nothing was tagged")
