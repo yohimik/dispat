@@ -32,12 +32,11 @@ export function validateSnapshot(value: unknown): DownloadSnapshot {
   if (!Number.isFinite(time) || !timestamp || new Date(time).toISOString() !== normalized) throw new Error('invalid collection time');
   if (!Array.isArray(data.repositories) || data.repositories.length !== repositories.size) throw new Error('invalid repositories');
   const names = new Set<string>();
-  let pulls = 0;
   for (const item of data.repositories) {
     if (!item || !repositories.has(item.repository) || names.has(item.repository) || !safe(item.pulls)) throw new Error('invalid repository total');
     names.add(item.repository);
-    pulls += item.pulls;
   }
+  const pulls = data.repositories.reduce((total, item) => total + item.pulls, 0);
   if (!Number.isSafeInteger(pulls) || pulls !== data.dockerHub || data.github + data.dockerHub !== data.total) {
     throw new Error('inconsistent snapshot totals');
   }
@@ -52,7 +51,7 @@ export function formatCounter(total: number | undefined): string {
   return displayDigits(total).join('').replace(/\B(?=(\d{3})+$)/g, '.');
 }
 
-type PollerOptions = {
+interface PollerOptions {
   load(signal: AbortSignal): Promise<unknown>;
   value(snapshot: DownloadSnapshot): void;
   failure(error: unknown): void;
@@ -61,34 +60,72 @@ type PollerOptions = {
   timer(callback: () => void, delay: number): unknown;
   clearTimer(id: unknown): void;
   interval?: number;
-};
+}
+
+/**
+ * One polling loop and the state it owns: whether it stopped, the pending
+ * timer, the request in flight and the revision a late answer is checked
+ * against. A revision only ever moves forward, so an answer to a request the
+ * page has since hidden or stopped is dropped.
+ */
+class DownloadPoller {
+  private readonly options: PollerOptions;
+  private readonly unlisten: () => void;
+  private isStopped = false;
+  private timer: unknown;
+  private request: AbortController | undefined;
+  private revision = 0;
+
+  constructor(options: PollerOptions) {
+    this.options = options;
+    this.unlisten = options.listen(() => this.changeVisibility());
+  }
+
+  run(): void {
+    if (this.isStopped || !this.options.visible() || this.request) return;
+    const current = ++this.revision;
+    const active = new AbortController();
+    this.request = active;
+    this.options.load(active.signal).then(validateSnapshot).then((snapshot) => {
+      if (!this.isStopped && current === this.revision) this.options.value(snapshot);
+    }).catch((error) => {
+      if (!this.isStopped && current === this.revision && !(error instanceof DOMException && error.name === 'AbortError')) this.options.failure(error);
+    }).finally(() => { if (this.request === active) { this.request = undefined; this.schedule(); } });
+  }
+
+  stop(): void {
+    this.isStopped = true;
+    this.revision++;
+    this.clear();
+    this.request?.abort();
+    this.request = undefined;
+    this.unlisten();
+  }
+
+  private clear(): void {
+    if (this.timer !== undefined) this.options.clearTimer(this.timer);
+    this.timer = undefined;
+  }
+
+  private schedule(): void {
+    this.clear();
+    if (!this.isStopped && this.options.visible()) this.timer = this.options.timer(() => this.run(), this.options.interval ?? REFRESH_MS);
+  }
+
+  private changeVisibility(): void {
+    this.clear();
+    if (!this.options.visible()) {
+      this.revision++;
+      this.request?.abort();
+      this.request = undefined;
+      return;
+    }
+    this.run();
+  }
+}
 
 export function startPolling(options: PollerOptions): () => void {
-  let stopped = false;
-  let timer: unknown;
-  let request: AbortController | undefined;
-  let revision = 0;
-  const clear = () => { if (timer !== undefined) options.clearTimer(timer); timer = undefined; };
-  const schedule = () => {
-    clear();
-    if (!stopped && options.visible()) timer = options.timer(run, options.interval ?? REFRESH_MS);
-  };
-  const run = () => {
-    if (stopped || !options.visible() || request) return;
-    const current = ++revision;
-    const active = new AbortController();
-    request = active;
-    options.load(active.signal).then(validateSnapshot).then((snapshot) => {
-      if (!stopped && current === revision) options.value(snapshot);
-    }).catch((error) => {
-      if (!stopped && current === revision && !(error instanceof DOMException && error.name === 'AbortError')) options.failure(error);
-    }).finally(() => { if (request === active) { request = undefined; schedule(); } });
-  };
-  const unlisten = options.listen(() => {
-    clear();
-    if (!options.visible()) { revision++; request?.abort(); request = undefined; }
-    else run();
-  });
-  run();
-  return () => { stopped = true; revision++; clear(); request?.abort(); request = undefined; unlisten(); };
+  const poller = new DownloadPoller(options);
+  poller.run();
+  return () => poller.stop();
 }
