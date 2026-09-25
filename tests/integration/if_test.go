@@ -327,6 +327,9 @@ func TestIfIsReservedAndNeedsNoRepository(t *testing.T) {
 
 	res = r.Command("if", "MY-VAR", "--then", "a")
 	assert.Equal(t, 2, res.Code, "a name no environment could carry is a usage error")
+	res = r.Command("if", "CI", "--then", "a", "--elif", "MY-VAR", "--then", "b")
+	assert.Equal(t, 2, res.Code, "so is one guarding a later branch")
+	assert.Contains(t, res.Stdout+res.Stderr, "invalid condition")
 
 	// One leading condition only: two answers to "what does the first --then
 	// guard" would leave one silently ignored.
