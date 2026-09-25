@@ -324,7 +324,8 @@ func TestAdmissionFailedReconciliationWithholdsConsumerPublication(t *testing.T)
 // consumer's tag already sits, and ancestry could then never tell that the
 // consumer came first. The run is refused before anything publishes, status
 // shows the refusal and still exits 0, and each of the two remedies it names
-// works.
+// works. A run that cannot ask Git the ancestry question refuses rather than
+// guess, and so does a standalone tag.
 func TestAdmissionRefusesAProviderReleasedAloneAtItsConsumersCommit(t *testing.T) {
 	env := []string{admissionProviderOK + "=1"}
 
@@ -371,6 +372,28 @@ func TestAdmissionRefusesAProviderReleasedAloneAtItsConsumersCommit(t *testing.T
 		assert.Equal(t, "0.2.0 -> 0.2.1", harness.GraphLine(status.Events, "cli").Str("version"),
 			"the debt stays visible; stdout:\n%s", status.Stdout)
 		assert.True(t, harness.IsCodePresentForPackage(status.Events, "W193", "cli"))
+	})
+
+	// Whether the head a provider would be tagged at reaches its consumer's
+	// baseline is a question Git answers. A run that cannot ask it cannot
+	// tell E201 from a release that is fine, so it refuses before anything
+	// publishes, and a standalone tag refuses before anything is tagged.
+	t.Run("the question the refusal rests on cannot be asked", func(t *testing.T) {
+		r := admissionProceeded(t, admissionShape{})
+		r.CommitEmpty("chore(core): retry the provider")
+		fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*rev-list --parents HEAD*", Code: 128})
+
+		res := r.CommandEnv(append(fault.Env(), env...), "--package", "core")
+		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "cannot compare the head the plan releases from with a consumer's baseline")
+		assert.Contains(t, res.Stdout+res.Stderr, harness.GitFaultMarker)
+		assert.Zero(t, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
+		assert.Equal(t, []string{"0.1.0"}, admissionPublications(t, r), "the provider published nothing")
+
+		tagged := r.CommandEnv(fault.Env(), "commit", "--tag", "--package", "core")
+		require.NotEqual(t, 0, tagged.Code, "stdout:\n%s\nstderr:\n%s", tagged.Stdout, tagged.Stderr)
+		assert.Contains(t, tagged.Stdout, "cannot compare the head with a consumer's baseline, nothing tagged")
+		assert.Zero(t, r.TagCount("core@0.2.0"), "tags: %v", r.TagList())
 	})
 }
 
